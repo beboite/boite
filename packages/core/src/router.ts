@@ -14,6 +14,8 @@ export interface Connection {
   transport?: TransportOptions;
   /** The app behind the socket, set by hello; null for an agent, the CLI and tests. */
   readonly sentFrom?: SentFrom | null;
+  /** The client reached the core by a name other than this machine's loopback. */
+  readonly remote?: boolean;
   sendEvent<E extends RpcEventName>(name: E, payload: RpcEvents[E]): void;
   close(code: number, reason?: string): void;
   /** Release held requests when this socket leaves, without stopping their work. */

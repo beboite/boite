@@ -52,7 +52,8 @@ ${CONTROL_HELP}
   attach <file>                  publish a file in chat, up to 512 MB
   show <file>[:line]             open a file in the panel, at a line
   diff [file]                    open the changes, or one file's diff
-  browse <url>                   open a url in the panel's browser
+  browse <url>                   open a url in the panel's browser, where boite browser
+                                 drives it (an .html file opens as a preview)
   browser help                   inspect, test and capture the built-in browser
   device help                    open an iOS Simulator or Android emulator in the
                                  user's Device panel, capture and drive it
@@ -272,7 +273,7 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
   };
   const opened = async (surface: PanelSurface): Promise<void> => {
     const { shown } = await client.call('panel.open', { threadId, surface });
-    print([`shown: ${shown ? 'yes' : 'no, nobody is watching this thread; it is queued on its panel'}`], { shown });
+    print([`shown: ${shown ? 'yes' : 'no, nobody is watching this thread, so no panel showed it'}`], { shown });
   };
 
   const commands: Record<string, () => Promise<void>> = {
@@ -438,7 +439,18 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
       if (!/^https?:/i.test(target) && /\.html?$/i.test(target)) {
         const result = await client.call('artifacts.preview', { threadId, path: absolute(io.cwd, target) });
         print([`preview: ${result.url}`, `shown: ${result.shown}`], result);
-      } else await opened({ kind: 'browser', url: target });
+        return;
+      }
+      const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(target)?.[1]?.toLowerCase();
+      if (scheme !== 'http' && scheme !== 'https') throw new Error(`browse takes an http or https url or an HTML file, not ${scheme ?? target}`);
+      // A page the agent shows is one it can drive: the desktop app's own browser
+      // when it runs on this machine, else the agent browser. A machine with
+      // neither still asks the watching clients' panels to show it.
+      const { value } = await client.call('browser.command', { threadId, action: { kind: 'status' } });
+      const status = value as { available?: boolean; desktop?: boolean } | undefined;
+      if (!status?.desktop && !status?.available) { await opened({ kind: 'browser', url: target }); return; }
+      const result = await browserCommand(['open', target, '--desktop'], io, client, threadId);
+      print(result.lines, result.value);
     },
     view: async () => {
       if (rest[0] === 'help' || rest[0] === undefined) { print([VIEW_HELP], { help: VIEW_HELP }); return; }

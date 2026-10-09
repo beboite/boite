@@ -1,9 +1,9 @@
-import { browserActionError, browserCookiesError, browserProfileIdError, browserProfilesOf, DEFAULT_BROWSER_PROFILE, findBrowserProfile, PRIVATE_BROWSER_PROFILE, remoteBrowserInputError, remoteFrameOptionsError, type AgentBrowserTab, type BrowserReply, type RemoteBrowserFrame, type RpcParams, type ThreadId } from '@boite/contracts';
+import { browserActionError, browserCookiesError, NO_DESKTOP_BROWSER_NOTE, browserProfileIdError, browserProfilesOf, DEFAULT_BROWSER_PROFILE, findBrowserProfile, PRIVATE_BROWSER_PROFILE, remoteBrowserInputError, remoteFrameOptionsError, type AgentBrowserTab, type BrowserReply, type RemoteBrowserFrame, type RpcParams, type ThreadId } from '@boite/contracts';
 import { refusal } from './shared';
 import { fakeBrowserScreen, type FakePage } from './browser-screen';
 import type { FakeContext, FakeMethods } from './context';
 
-type Methods = 'browser.command' | 'browser.importCookies' | 'browser.remoteFrame' | 'browser.remoteInput' | 'browser.remoteSelection' | 'browser.remoteStatus';
+type Methods = 'browser.command' | 'browser.desktopReply' | 'browser.desktopTabs' | 'browser.importCookies' | 'browser.remoteFrame' | 'browser.remoteInput' | 'browser.remoteSelection' | 'browser.remoteStatus';
 
 /** `selected`: the typed text is selected, by a double click or select-all, until the next click or key. */
 interface Tab extends FakePage { tabId: string; profile: string; history: string[]; historyIndex: number; at: number; selected?: boolean }
@@ -70,7 +70,8 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
     if (problem) throw refusal(problem);
     if (params.tabId !== undefined && (typeof params.tabId !== 'string' || !TAB_ID.test(params.tabId))) throw refusal('browser tabId must come from browser status or open');
     const browser = browsers.get(threadId);
-    if (action.kind === 'status') return { value: { available: true, tabs: tabsOf(browser) } };
+    // No desktop app lends its browser to the demo: its tabs are all the agent browser's.
+    if (action.kind === 'status') return { value: { available: true, desktop: false, tabs: tabsOf(browser) } };
     if (action.kind === 'profiles') {
       const { profiles, defaultId } = browserProfilesOf(ctx.settings);
       return { value: { default: defaultId, profiles: [{ id: DEFAULT_BROWSER_PROFILE, name: 'Default', kept: true }, ...profiles.map(profile => ({ id: profile.id, name: profile.name, kept: true })), { id: PRIVATE_BROWSER_PROFILE, name: 'Private', kept: false }] } };
@@ -79,7 +80,7 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
     if (action.kind === 'open' && action.reuse && action.profile === undefined && browser && current) {
       // agent-browser's `open` drives the current tab, as the core's does.
       go(browser, current, action.url); changed(threadId);
-      return { tabId: current.tabId, url: current.url, title: current.title, profile: current.profile, value: { ok: true, navigated: true, url: current.url, title: current.title } };
+      return { tabId: current.tabId, url: current.url, title: current.title, profile: current.profile, value: { ok: true, navigated: true, url: current.url, title: current.title, ...(action.desktop ? { note: NO_DESKTOP_BROWSER_NOTE } : {}) } };
     }
     if (action.kind === 'open') {
       // As the core resolves it: the machine's default without a name, else an id or a name in any case.
@@ -90,7 +91,7 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
       const tab: Tab = { tabId: `browser:${++seq}-${crypto.randomUUID().slice(0, 8)}`, profile, url: action.url, title: titleOf(action.url), ...VIEWPORT, taps: 0, text: '', scrollY: 0, history: [action.url], historyIndex: 0, at: Date.now() };
       target.tabs.push(tab); target.active = tab.tabId;
       changed(threadId);
-      return { tabId: tab.tabId, url: tab.url, title: tab.title, profile };
+      return { tabId: tab.tabId, url: tab.url, title: tab.title, profile, ...(action.desktop ? { value: { ok: true, navigated: true, url: tab.url, title: tab.title, note: NO_DESKTOP_BROWSER_NOTE } } : {}) };
     }
     const tab = browser?.tabs.find(one => one.tabId === (params.tabId ?? browser.active));
     if (!browser || !tab) throw refusal('no browser tab in this conversation; use browser open, or pass a tabId from browser status');
@@ -124,6 +125,9 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
 
   return {
     'browser.command': command,
+    // The demo runs in a page, never the desktop app on the core's machine: it has no browser of its own to lend.
+    'browser.desktopTabs': async () => { throw refusal('browser.desktopTabs comes from the desktop app on this machine: the owner\'s shell, connected on loopback'); },
+    'browser.desktopReply': async () => { throw refusal('no browser.desktopRequest with that requestId waits for this connection'); },
     // The profile is made here as the core makes it; the cookies themselves are counted, not kept: fake pages have no sign-in.
     'browser.importCookies': async ({ profile, cookies }) => {
       const problem = browserCookiesError(cookies);

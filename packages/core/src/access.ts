@@ -114,7 +114,7 @@ export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMeth
   ['agent.spawn', 'a new top-level thread in a project the owner added, on its own model, account and permission mode, within its communication settings and an hourly budget; a thread an agent started cannot start another until the user writes in it'],
   ['agent.move', 'its own thread into a project the owner already registered, applied when its turn ends; never another thread, never a folder the owner did not add'],
   ['panel.open', 'showing the user a file, a diff or a page instead of pasting it into the transcript'],
-  ['browser.command', 'the headless browser its own conversation has on this machine, which it could start from its shell anyway; never another conversation\'s tabs'],
+  ['browser.command', 'the headless browser its own conversation has on this machine, which it could start from its shell anyway, and the desktop browser tabs the owner\'s desktop lends to that conversation\'s panel; never another conversation\'s tabs'],
   ['devices.list', 'the simulators and emulators its SDK lists on this machine; adb and xcrun are already within its shell\'s reach'],
   ['devices.open', 'booting one of them and showing it in its own conversation\'s Device panel'],
   ['devices.sessions', 'what its own conversation\'s Device panel has open, to wait for a boot'],

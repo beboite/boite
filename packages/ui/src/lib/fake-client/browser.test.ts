@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import type { RpcEvents } from '@boite/contracts';
+import { NO_DESKTOP_BROWSER_NOTE, type RpcEvents } from '@boite/contracts';
 import { FakeClient } from '../fake-client';
 
 test('the agent opens, drives and closes its tabs; subscribed viewers hear each change and watch any tab', async () => {
@@ -43,6 +43,11 @@ test('the agent opens, drives and closes its tabs; subscribed viewers hear each 
     await expect(client.call('browser.remoteFrame', { threadId, tabId: shop.tabId })).rejects.toThrow('closed');
     // agent-browser's open drives the current tab instead of adding one.
     expect((await client.call('browser.command', { threadId, action: { kind: 'open', url: 'https://example.com/next', reuse: true } })).tabId).toBe(docs.tabId);
+    // No desktop app lends its browser here: --desktop opens in the agent browser and says so, as the core does.
+    expect((await client.call('browser.command', { threadId, action: { kind: 'status' } })).value).toMatchObject({ desktop: false });
+    expect((await client.call('browser.command', { threadId, action: { kind: 'open', url: 'https://example.com/desk', reuse: true, desktop: true } })).value)
+      .toMatchObject({ navigated: true, note: NO_DESKTOP_BROWSER_NOTE });
+    await expect(client.call('browser.desktopTabs', { host: true, tabs: [] })).rejects.toThrow('the owner\'s shell');
     await client.call('browser.command', { threadId, action: { kind: 'close' } });
     expect(changes.at(-1)).toEqual({ threadId, live: false, tabs: [] });
   } finally { client.close(); }

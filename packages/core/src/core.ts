@@ -37,6 +37,7 @@ import { scheduleDoneRetention } from './threads/done-retention.ts';
 import { scheduleArtifactRetention } from './artifact-retention.ts';
 import { ArtifactPreviews } from './artifact-preview.ts';
 import { AgentBrowser, BROWSER_SCOPE } from './browser.ts';
+import { BrowserCommands } from './browser/commands.ts';
 import { MobileDevices } from './devices/control.ts';
 import { QuotaStore } from './quotas.ts';
 import { PluginStore } from './plugins.ts';
@@ -166,6 +167,8 @@ export class Core {
   readonly stopArtifactRetention: () => Promise<void>;
   readonly artifactPreviews = new ArtifactPreviews(this);
   readonly browser = new AgentBrowser(this);
+  /** Routes agents' browser commands between the agent browser and the tabs the desktop lends (browser/commands.ts). */
+  readonly browserCommands = new BrowserCommands(this);
   /** Simulators and emulators open in conversations' Device panels. */
   readonly devices = new MobileDevices(this);
 
@@ -404,6 +407,7 @@ export class Core {
   get stopping(): boolean { return this.#stopping; }
 
   async close(): Promise<void> {
+    this.browserCommands.close();
     await this.browser.close();
     this.devices.stop();
     this.artifactPreviews.stop();

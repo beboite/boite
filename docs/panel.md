@@ -41,7 +41,10 @@ Switching conversations or machines and hiding the panel parks browser pages
 without destroying them. Their forms, navigation history and recordings remain
 in memory. The agent's own tabs are not panel pages: they live in the browser
 of the machine that runs the conversation ([the agent's browser](browser.md))
-and keep working whichever client is open. A page the shell creates in the
+and keep working whichever client is open. The panel's own browser tabs on the
+Windows desktop are lent to the agents of that machine: `boite browse` opens
+in one, and `boite browser` drives them ([the desktop app's browser](browser.md#the-desktop-apps-browser)).
+A page the shell creates in the
 background never takes the keyboard or brings the window forward; it gets the
 focus when the user clicks it. Closing tabs, archiving the
 conversation or quitting the shell releases their pages. Reloading the UI

@@ -169,7 +169,61 @@ These are frames, not a video stream: a few a second while the page moves.
 A video stream (the screencast encoded as H.264 and decoded by WebCodecs in the
 client) would be smoother on a fast link; it is not built.
 
+## The desktop app's browser
+
+A headless browser is not a person's browser: Cloudflare's checks and similar
+ones stop it on every load, and nobody signs in to it at their desk. The
+browser tabs of the desktop app's panel are WebView2 pages on that desktop,
+where the user signs in and passes those checks. When the desktop app runs on
+the machine of the core it started, it lends those tabs to that machine's
+agents, and the page the agent drives is the one the user sees.
+
+- `boite browse <url>` opens the page in a browser tab of the conversation's
+  panel, or loads it in the desktop tab the agent used last, and brings that
+  tab forward. `boite browser open <url> --desktop` and
+  `tab new <url> --desktop` do the same from the browser commands. Without the
+  desktop app on the machine, both open the page in the agent browser and say
+  so in the reply's `note`. A machine with neither browser still asks the
+  watching panels to show the page.
+- `tab list` lists the panel's browser tabs after the agent's own, marked
+  `[desktop]`, including those the user opened. A command without `--tab` acts
+  on the desktop tab the agent used last, else on the agent's own current tab,
+  else on the tab the panel shows or its only browser tab. A panel with several
+  browser tabs and none of these makes the agent choose one.
+- Snapshots, `get`, clicks, typing, scrolling, `wait`, `eval`, history,
+  viewport and color scheme, diagnostics, screenshots and `close` work on those
+  tabs as on the agent's own. Either the user or the agent can take over, and
+  the other goes on from where the page is.
+
+The desktop's tabs have limits the agent browser does not. The user answers
+their dialogs. A screenshot needs the tab on screen, since a hidden WebView2
+paints nothing; a snapshot works on a hidden tab. Recordings and the network
+history are the agent browser's only, and an evaluation ends after 12 s, within
+the shell's 15 s for one DevTools call. Only the Windows shell lends, since only
+WebView2 answers DevTools calls (`browserBridge.protocol`). A phone, a plain
+browser and a desktop connected to another machine lend nothing, and the tabs
+of another machine's conversations stay out, because those agents run elsewhere.
+
+`packages/ui/src/lib/desktop-browser-host.svelte.ts` sends `browser.desktopTabs`
+with the browser tabs of this machine's conversations whenever the panels
+change. It answers each `browser.desktopRequest` by opening a tab, loading an
+address, closing a tab, or making one DevTools call from a fixed list
+(`DESKTOP_BROWSER_METHODS`): evaluation, capture, mouse and keyboard input,
+viewport and color scheme emulation, and the view's diagnostics. A tab kept from
+an earlier session gets its view, off screen, when the agent first reads it.
+`packages/core/src/browser/desktop.ts` keeps the lent tabs and the waiting
+requests. `browser/commands.ts` routes each `browser.command` to one of the two
+browsers and runs agent-browser's commands on a desktop tab through the same
+`browser/automation.ts`. The answer comes back with `browser.desktopReply`, only
+from the connection the request went to. A desktop that disconnects fails at
+once whatever waits on it.
+
 ## Who may do what
+
+`browser.desktopTabs` and `browser.desktopReply` belong to the owner's shell
+connected on this machine's loopback; the core refuses them from any other
+client. A lent tab is reached only through `browser.command`, by its
+conversation's agent and the owner.
 
 `browser.command` is the owner's and the conversation's own agent's, never
 another conversation's: its token names one thread. A paired phone has
@@ -207,6 +261,18 @@ browser. `browser-cli.test.ts` checks the CLI's files with the browser stubbed.
 owner's desktop at 1280 × 900 and a paired phone at 390 × 844 see the cover,
 show the page and tap it, and the tap reaches the page. `browser-remote.test.ts`
 covers the same views on the fake client.
+`browser-desktop.test.ts` lends a fake shell's tabs to a real core: the
+routing, the refusals and a desktop that leaves mid-command run everywhere.
+With a Chromium-based browser on the machine, a real headless page stands in for
+the WebView2 view. The agent opens it, reads it, clicks, captures it and goes on
+after the "user" navigates it. `desktop-browser-host.test.ts` covers the
+shell's side with the bridge stubbed. On the built Windows shell,
+`tests/e2e/browser-desktop.test.ts`, which the desktop job runs through
+`shell.test.ts`, has `boite browse` open a page in the hidden shell's panel,
+drives the WebView2 page with `boite browser`, has the user navigate it and
+reads where they went. A screenshot must answer a PNG, or the refusal that
+names a tab off screen; what a capture of a visible desktop shows is not
+automated.
 The same tests pass on the Linux, Windows and macOS CI jobs. Reading a
 WebView2 profile's cookies in the Windows shell is covered by unit tests of
 the bridge with the shell stubbed, not by a run on Windows.

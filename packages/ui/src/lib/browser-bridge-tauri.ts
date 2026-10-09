@@ -24,6 +24,9 @@ import { fitBrowserViewport } from './browser-viewport';
 /** The one event the shell emits for every surface. `src/browser.rs` sends it. */
 const EVENT = 'browser://event';
 
+/** What \protocol\ and \screencast\ reject with when the surface has no view: never shown, or closed. */
+export const CLOSED_TAB = 'the browser tab is closed';
+
 type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
 
 function reasonOf(error: unknown): string {
@@ -52,7 +55,7 @@ export class TauriBridge implements BrowserBridge {
 
   /** Await native input in the same queue as create, navigation and layout. */
   protocol(id: string, method: string, params: Record<string, unknown>): Promise<unknown> {
-    if (!this.#live.has(id)) return Promise.reject(new Error('the browser tab is closed'));
+    if (!this.#live.has(id)) return Promise.reject(new Error(CLOSED_TAB));
     const result = (this.#queues.get(id) ?? Promise.resolve()).then(async () => {
       const invoke = await this.#ready();
       let answer: unknown;
@@ -83,7 +86,7 @@ export class TauriBridge implements BrowserBridge {
 
   /** Frames cross as raw bytes on a channel: no base64, no JSON, no request per frame. */
   async screencast(id: string, frameRate: number, frame: (jpeg: ArrayBuffer) => void): Promise<() => Promise<void>> {
-    if (!this.#live.has(id)) throw new Error('the browser tab is closed');
+    if (!this.#live.has(id)) throw new Error(CLOSED_TAB);
     const invoke = await this.#ready();
     const { Channel } = await import('@tauri-apps/api/core');
     const channel = new Channel<ArrayBuffer>(frame);

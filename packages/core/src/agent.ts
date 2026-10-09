@@ -207,8 +207,10 @@ export function registerAgentMethods(core: Core): void {
   core.router.register('devices.screenshot', (params, { connection }) => core.devices.screenshot(params, connection));
   core.router.register('devices.close', (params, { connection }) => core.devices.close(params, connection));
   core.router.register('browser.remoteStatus', (params, { connection }) => core.browser.remoteStatus(params, connection));
-  core.router.register('browser.command', params => core.browser.command(params));
+  core.router.register('browser.command', params => core.browserCommands.command(params));
   core.router.register('browser.importCookies', params => core.browser.importCookies(params));
+  core.router.register('browser.desktopTabs', (params, { connection }) => core.browserCommands.relay.lend(connection, params));
+  core.router.register('browser.desktopReply', (params, { connection }) => core.browserCommands.relay.reply(connection, params));
   core.router.register('artifacts.publish', (params) => publishArtifact(core, params));
   core.router.register('artifacts.read', (params) => readArtifact(core, params));
   core.router.register('artifacts.view', (params) => publishView(core, params));
@@ -256,6 +258,7 @@ export function registerAgentMethods(core: Core): void {
   // panels on a thread the user had put away.
   const shut = (threadId: ThreadId): void => {
     core.browser.release(threadId);
+    core.browserCommands.release(threadId);
     core.devices.release(threadId);
     core.agents.forget(threadId);
     core.subscribers.closeAgents(threadId);

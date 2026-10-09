@@ -107,6 +107,8 @@ test('the browser CLI reads agent-browser command lines into actions', () => {
   // A named profile is a tab of its own, as before.
   expect(read(['open', 'https://example.com', '--profile', 'private']).action).toEqual({ kind: 'open', url: 'https://example.com', reuse: true, profile: 'private' });
   expect(read(['tab', 'new', 'https://example.com']).action).toEqual({ kind: 'open', url: 'https://example.com' });
+  expect(read(['open', 'https://example.com', '--desktop']).action).toEqual({ kind: 'open', url: 'https://example.com', reuse: true, desktop: true });
+  expect(read(['tab', 'new', '--desktop', 'https://example.com']).action).toEqual({ kind: 'open', url: 'https://example.com', desktop: true });
   expect(read(['tab', 'browser:abc'])).toEqual({ action: { kind: 'activate' }, tabId: 'browser:abc' });
   expect(read(['snapshot', '-i', '-c', '-d', '3', '-s', '#main', '-u']).action).toEqual({ kind: 'snapshot', interactive: true, compact: true, urls: true, depth: 3, selector: '#main' });
   expect(read(['dblclick', '@e2']).action).toEqual({ kind: 'click', selector: '@e2', count: 2 });
@@ -149,4 +151,9 @@ test('browser output is agent-browser text: a check, the page reached and the di
   expect(lines({ kind: 'get', what: 'text', selector: '@e1' }, 'plain words')).toEqual(['plain words']);
   expect(lines({ kind: 'get', what: 'checked', selector: '@e1' }, false)).toEqual(['false']);
   expect(lines({ kind: 'status' }, { tabs: [{ tabId: 'browser:t', url: 'https://x.test/', title: 'X', profileName: 'Privé', active: true }] })).toEqual(['* browser:t  X  https://x.test/  [Privé]']);
+  // The desktop app's tabs are named as such, and an empty list says where `browse` opens.
+  expect(lines({ kind: 'status' }, { desktop: true, tabs: [{ tabId: 'browser:d', url: 'https://x.test/', title: 'X', profileName: 'Default', active: false, desktop: true }] })).toEqual(['  browser:d  X  https://x.test/  [Default]  [desktop]']);
+  expect(lines({ kind: 'status' }, { desktop: true, tabs: [] })[0]).toContain('boite browse <url> in the desktop app\'s browser');
+  expect(lines({ kind: 'open', url: 'https://x.test', reuse: true, desktop: true }, { ok: true, navigated: true, url: 'https://x.test/', title: 'X' }, { tabId: 'browser:d', desktop: true }))
+    .toEqual(['✓ X', '  https://x.test/', '  browser:d in the desktop app\'s browser, in this conversation\'s panel']);
 });

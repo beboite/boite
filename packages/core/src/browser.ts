@@ -213,6 +213,8 @@ export class AgentBrowser {
     const tabs = this.#list(threadId);
     return { live: tabs.length > 0, tabs, available: found.path !== null, ...(found.path === null ? { reason: found.reason } : {}) };
   }
+  /** The conversation's own tabs and its active one, which the desktop's tabs are routed around (browser/commands.ts). */
+  tabsOf(threadId: ThreadId): { readonly order: readonly string[]; readonly active: string | null } | undefined { return this.#threads.get(threadId); }
 
   // ---------- browser processes ----------
 

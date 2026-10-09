@@ -87,6 +87,12 @@ tab closes. `tab list` names each tab's profile, `tab new <url>` opens another,
 `tab <id>` makes one current and `--tab <id>` aims a single command at it. The
 agent cannot select a tab from another conversation.
 
+When the desktop app runs on the agent's machine, `boite browse <url>` and
+`open <url> --desktop` open the page in the desktop app's own browser, in the
+conversation's panel, where the user signs in and passes human checks. The
+same commands drive it, `tab list` marks those tabs `[desktop]`, and the user
+can take over at any point ([the desktop app's browser](browser.md#the-desktop-apps-browser)).
+
 `snapshot -i` lists the page's interactive elements with refs:
 `- textbox "Email" [ref=e3]`, `- button "Continue" [ref=e5]`. Without `-i` it
 adds headings, text and the containers around them; `-c` drops the containers,
@@ -260,7 +266,7 @@ boite preview <file.html>          open a local HTML artifact and its neighbouri
 boite preview-close <file.html>    stop serving that preview
 boite show <file>[:line]         open the file in the panel, at that line
 boite diff [file]                open the changes surface, or one file's diff
-boite browse <url>               open the url in the panel's browser (http, https)
+boite browse <url>               open the url in a browser the agent drives (http, https)
 boite open trace|tasks|changes|files [dir]
 boite status                     git status: branch, upstream, one row per change
 boite ask <question> [option ...] [--multiple]
@@ -310,10 +316,12 @@ occurrence blocks overlap and missed intervals never create a catch-up burst.
 
 Paths are resolved against the current directory and must stay inside the
 thread's working directory; the core refuses the rest by name. `show src/a.ts:12`
-opens the file at line 12. A `show`, `diff`, `browse` or `open` answers
+opens the file at line 12. A `show`, `diff` or `open` answers
 `shown: yes` when a client subscribed to the thread received the request, and
-`shown: no ...` when nobody was watching: the request still lands on the
-thread's panel and is there when the thread is next opened.
+`shown: no ...` when nobody was watching: no panel showed it, and nothing waits
+for the thread to be opened. `browse` answers as `browser open` does, with the
+tab it opened; only on a machine with neither the desktop app nor a browser for
+the agent does it ask the panels, and answer `shown`.
 
 `thread move` accepts a project ID, unique name or absolute registered folder.
 Ambiguous names are refused with matching IDs. It moves only the authenticated

@@ -490,6 +490,7 @@ export function startServer(options: ServerOptions): RunningServer {
         core.procs.unwatchResources(socket.data.connection.id);
         core.coordination.bridge.disconnect(socket.data.connection.id);
         core.browser.disconnect(socket.data.connection.id);
+        core.browserCommands.disconnect(socket.data.connection.id);
         core.threads.focus.disconnect(socket.data.connection.id);
         incoming.drop(socket.data.connection);
         socket.data.connection.close(1000);

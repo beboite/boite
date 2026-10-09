@@ -3,6 +3,7 @@
   import { MediaQuery } from 'svelte/reactivity';
   import { watchAgentBrowser } from './lib/agent-browser-watch';
   import { watchDevices } from './lib/device-watch';
+  import { lendLocalBrowser } from './lib/desktop-browser-host.svelte';
   import { browserProfiles } from './lib/browser-profiles.svelte';
   import TerminalDrawer from './components/TerminalDrawer.svelte';
   import UndoToast from './components/UndoToast.svelte';
@@ -64,6 +65,7 @@
     void store.connection;
     if (threadId && store.client?.state === 'ready') return watchDevices(store, threadId);
   });
+  $effect(() => lendLocalBrowser(workspace.machines)); // the panel's browser tabs, which this computer's agents drive
   const narrow = new MediaQuery('(max-width: 720px)');
   let appRoot = $state<HTMLDivElement | undefined>(undefined);
   let mobileScreen = $state<'chat' | 'threads' | 'activity'>('chat');

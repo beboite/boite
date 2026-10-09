@@ -10,8 +10,12 @@ export type BrowserAction =
   /**
    * `profile` is a profile's name or id, `default` or `private`; absent opens the default profile.
    * `reuse` navigates the active tab when there is one, as agent-browser's `open` does.
+   * `desktop` opens the page in the desktop app's own browser, in the
+   * conversation's panel, when the owner's desktop on this machine lends it
+   * (see `browser.desktopTabs`); elsewhere the page opens in the agent browser
+   * and the reply says so.
    */
-  | { kind: 'open'; url: string; profile?: string; reuse?: boolean }
+  | { kind: 'open'; url: string; profile?: string; reuse?: boolean; desktop?: boolean }
   | { kind: 'navigate'; url: string }
   /** Makes the command's tab the active one. */
   | { kind: 'activate' }
@@ -67,6 +71,8 @@ export interface BrowserReply {
   tabId?: string;
   /** The profile id the tab opened in, on `open`. */
   profile?: string;
+  /** The tab is one of the desktop app's own browser tabs, in the conversation's panel. */
+  desktop?: boolean;
   url?: string;
   title?: string;
   value?: unknown;
@@ -129,6 +135,52 @@ export interface AgentBrowserTab { tabId: string; url: string; title: string; pr
  * names what is missing when it cannot, such as no Chromium-based browser found.
  */
 export interface AgentBrowserStatus { live: boolean; tabs: AgentBrowserTab[]; available: boolean; reason?: string }
+
+/**
+ * One tab of the desktop app's own browser, in the panel of the conversation
+ * `threadId`: the page the person at the desktop sees, signed in where they
+ * signed in. The owner's desktop on the core's machine lends these tabs to that
+ * conversation's agent, which drives them through `browser.command`. `active`
+ * is the browser tab the conversation's panel shows.
+ */
+export interface DesktopBrowserTab { threadId: string; tabId: string; url: string; title: string; profile: string; active?: boolean }
+/** The DevTools methods the shell lets a desktop tab receive; the core relays these and nothing else. */
+export const DESKTOP_BROWSER_METHODS = ['Runtime.evaluate', 'Page.captureScreenshot', 'Input.dispatchMouseEvent', 'Input.dispatchKeyEvent', 'Input.insertText', 'Emulation.setDeviceMetricsOverride', 'Emulation.clearDeviceMetricsOverride', 'Emulation.setEmulatedMedia', 'Boite.diagnostics'] as const;
+export type DesktopBrowserMethod = typeof DESKTOP_BROWSER_METHODS[number];
+/**
+ * What the core asks of the desktop that lends its tabs, for an agent's command.
+ * `open` adds a tab to the conversation's panel; `show` brings the tab forward
+ * in its panel, as the agent asked for the page to be seen.
+ */
+export type DesktopBrowserRequest =
+  | { kind: 'open'; url: string; profile: string }
+  | { kind: 'navigate'; tabId: string; url: string; show: boolean }
+  | { kind: 'close'; tabId: string }
+  | { kind: 'protocol'; tabId: string; method: DesktopBrowserMethod; params: Record<string, unknown> };
+/** What `open --desktop` adds to its reply when no desktop lends its browser and the page opened in the agent browser. */
+export const NO_DESKTOP_BROWSER_NOTE = 'opened in the agent browser: the desktop app is not running on this machine, so its own browser cannot show the page';
+/** The tabs one desktop lends at once, across every conversation. */
+export const DESKTOP_BROWSER_TABS_MAX = 200;
+const DESKTOP_TAB_ID = /^browser:[a-zA-Z0-9:-]{1,100}$/;
+
+/** Why a desktop's list of lent tabs cannot be taken, or null. Shared by the core, the fake transport and the desktop. */
+export function desktopBrowserTabsError(tabs: unknown): string | null {
+  if (!Array.isArray(tabs) || tabs.length > DESKTOP_BROWSER_TABS_MAX) return `tabs must list at most ${DESKTOP_BROWSER_TABS_MAX} desktop browser tabs`;
+  const text = (value: unknown, max: number, empty = false) => typeof value === 'string' && value.length <= max && (empty || value.length > 0);
+  const seen = new Set<string>();
+  for (const tab of tabs as DesktopBrowserTab[]) {
+    if (!tab || typeof tab !== 'object') return 'each desktop browser tab must be an object';
+    if (!text(tab.threadId, 200)) return 'a desktop browser tab needs the threadId of the conversation whose panel holds it';
+    if (!text(tab.tabId, 120) || !DESKTOP_TAB_ID.test(tab.tabId)) return 'a desktop browser tabId must be its panel surface id, browser: then letters, digits, : or -';
+    if (seen.has(tab.tabId)) return `desktop browser tab ${tab.tabId} is listed twice`;
+    seen.add(tab.tabId);
+    if (!text(tab.url, 16384, true) || !text(tab.title, 2000, true)) return 'a desktop browser tab url and title must be strings of at most 16384 and 2000 characters';
+    if (typeof tab.profile !== 'string' || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(tab.profile)) return 'a desktop browser tab profile must be a profile id, default or private';
+    if (tab.active !== undefined && typeof tab.active !== 'boolean') return 'a desktop browser tab active must be a boolean';
+  }
+  return null;
+}
+
 export interface BrowserRpcMethods {
   /**
    * A frame of one of the conversation's agent tabs, the active one without
@@ -152,10 +204,25 @@ export interface BrowserRpcMethods {
    * holds for that profile; nothing is read from this machine.
    */
   'browser.importCookies': { params: { profile: { id: string; name?: string }; cookies: BrowserCookie[] }; result: { imported: number; profile: string } };
+  /**
+   * Owner only, from the desktop app on the core's own machine: every tab of its
+   * own browser it lends, each to the conversation whose panel holds it. Each
+   * call replaces the last; `host: false` withdraws them all and lists none.
+   * While one desktop lends, its connection receives `browser.desktopRequest`.
+   */
+  'browser.desktopTabs': { params: { host: boolean; tabs: DesktopBrowserTab[] }; result: { ok: true } };
+  /** Owner only: the answer to a `browser.desktopRequest`, from the connection it went to. */
+  'browser.desktopReply': { params: { requestId: string; result?: unknown; error?: string }; result: { ok: true } };
 }
 export interface BrowserRpcEvents {
   /** For the clients subscribed to the conversation: its agent's tabs changed, opened, navigated or closed. */
   'browser.remoteChanged': { threadId: string; live: boolean; tabs: AgentBrowserTab[] };
+  /**
+   * Only to the desktop that lends its browser: an agent's command on one of the
+   * tabs of `threadId`. The desktop answers with `browser.desktopReply`; `open`
+   * answers with the new `DesktopBrowserTab`.
+   */
+  'browser.desktopRequest': { requestId: string; threadId: string; request: DesktopBrowserRequest };
 }
 
 /** A cookie as the DevTools protocol exchanges it. Without `expires` it lasts as long as its browser session. */
@@ -212,6 +279,7 @@ export function browserActionError(action: BrowserAction): string | null {
     case 'open': case 'navigate': {
       if (action.kind === 'open' && action.profile !== undefined && !text(action.profile, BROWSER_PROFILE_NAME_MAX)) return `browser profile must be a profile name or id of 1 to ${BROWSER_PROFILE_NAME_MAX} characters, default or private`;
       if (action.kind === 'open' && action.reuse !== undefined && typeof action.reuse !== 'boolean') return 'browser open reuse must be a boolean';
+      if (action.kind === 'open' && action.desktop !== undefined && typeof action.desktop !== 'boolean') return 'browser open desktop must be a boolean';
       if (text(action.url, 16384) && /^https?:\/\/[^\s/?#]+(?:[/?#][^\s]*)?$/i.test(action.url)) return null;
       return 'browser url must be an absolute HTTP or HTTPS address';
     }
