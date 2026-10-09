@@ -36,6 +36,12 @@
   import CompanionHud from './components/companion/CompanionHud.svelte';
   import { followQuotas, hudGauges } from './lib/companion/hud';
   import { GatewayReader } from './lib/quota-reader.svelte';
+  import { audible, Focus, PomodoroTimer } from './lib/companion/focus.svelte';
+  import type { Directives } from './lib/companion/directives';
+  import CompanionTimer from './components/companion/CompanionTimer.svelte';
+  import CompanionFocusCards from './components/companion/CompanionFocusCards.svelte';
+  import CompanionTools from './components/companion/CompanionTools.svelte';
+  import CompanionHistory from './components/companion/CompanionHistory.svelte';
 
   const CELEBRATE_MS = 6000;
   const REFRESH_EVERY = 15_000;
@@ -80,9 +86,14 @@
   let seen: Set<string> | null = null;
   const tracker = createMoodTracker({ celebrateMs: CELEBRATE_MS });
 
+  // In focus, only an agent that needs the user, a reminder and the pomodoro ring.
   const cue = (name: Cue) => {
-    if (prefs.sounds) playCue(name);
+    if (prefs.sounds && audible(name, focus.active)) playCue(name);
   };
+
+  const timer = new PomodoroTimer({ ended: () => cue('phase') });
+  const focus = new Focus({ auto: () => prefs.focusOnWork && timer.phase === 'work' });
+  let history = $state(false);
 
   const talk = new Talk({
     client: () => client,
@@ -90,8 +101,24 @@
     threads: () => threads,
     hovering: () => hover,
     created: (thread) => (threads = [...threads, thread]),
-    settled: (outcome) => cue(outcome === 'done' ? 'done' : 'error')
+    settled: (outcome, directives) => {
+      cue(outcome === 'done' ? 'done' : 'error');
+      if (directives) obey(directives);
+    }
   });
+
+  /** A work phase starts: an earlier "focus off" gives way to the pomodoro again. */
+  function startTimer(workMs = prefs.workMinutes * 60_000, label = '') {
+    focus.release();
+    timer.start({ workMs, breakMs: prefs.breakMinutes * 60_000, label });
+  }
+
+  /** The timer and the focus a reply asks for ([[timer: …]], [[focus: …]]). */
+  function obey({ timer: asked, focus: on }: Directives) {
+    if (asked === 'stop') timer.stop();
+    else if (asked) startTimer(asked.ms, asked.label);
+    if (on !== null) focus.set(on);
+  }
 
   const notes = new Notes({
     client: () => client,
@@ -101,7 +128,17 @@
     rang: () => {
       senses.wake();
       cue('remind');
+    },
+    setAside: (notice) => {
+      if (!focus.active) return false;
+      focus.keep({ threadId: notice.threadId, title: notice.title, failed: notice.failed });
+      return true;
     }
+  });
+
+  // The focus ended: what it set aside goes to one card.
+  $effect(() => {
+    if (!focus.active) untrack(() => focus.follow());
   });
 
   const senses = new Senses({
@@ -150,6 +187,7 @@
     if (seen !== null && [...blocking].some((id) => !seen!.has(id))) {
       if (!open) autoOpened = true;
       open = true;
+      history = false;
       cue('call');
     }
     if (blocking.size === 0 && autoOpened && draft === '') {
@@ -347,7 +385,7 @@
   }
 
   $effect(() => {
-    void [open, talk.shown, talk.phase, media, notes.notices, notes.alarms, mood.blocking, layout, picking, hudOpen];
+    void [open, talk.shown, talk.phase, media, notes.notices, notes.alarms, mood.blocking, layout, picking, hudOpen, timer.phase, focus.recap, focus.active, history];
     void tick().then(() => requestAnimationFrame(sendRects));
   });
 
@@ -449,16 +487,17 @@
       reachable = false;
       recompute();
     });
-    const timer = setInterval(() => void refresh(), REFRESH_EVERY);
+    const refresher = setInterval(() => void refresh(), REFRESH_EVERY);
     const rects = setInterval(sendRects, 500);
     return () => {
       disposed = true;
-      clearInterval(timer);
+      clearInterval(refresher);
       clearInterval(rects);
       clearTimeout(refreshTimer);
       clearTimeout(celebrateTimer);
       talk.dispose();
       notes.dispose();
+      timer.dispose();
       senses.dispose();
       off.forEach((stop) => stop());
       client?.close();
@@ -505,22 +544,27 @@
           {asleep}
           typing={senses.typing}
           alarm={notes.alarms.length > 0}
+          calm={focus.active}
+          rest={timer.phase === 'break'}
           size={64}
         />
         {#if mood.blocking > 0}<span class="badge" aria-hidden="true">{mood.blocking}</span>{/if}
       </button>
-      <CompanionHud
-        {threads}
-        {projects}
-        own={prefs.threadId}
-        {gauges}
-        {hover}
-        {reachable}
-        {layout}
-        bind:expanded={hudOpen}
-        onopen={(threadId) => void showMain(threadId)}
-        onresize={sendRects}
-      />
+      <div class="hud">
+        <CompanionHud
+          {threads}
+          {projects}
+          own={prefs.threadId}
+          {gauges}
+          {hover}
+          {reachable}
+          {layout}
+          bind:expanded={hudOpen}
+          onopen={(threadId) => void showMain(threadId)}
+          onresize={sendRects}
+        />
+        <CompanionTimer {timer} {hover} onresize={sendRects} />
+      </div>
     </div>
 
     {#if media && (open || hover)}
@@ -528,6 +572,7 @@
     {/if}
 
     <CompanionNotes {talk} {notes} {open} {reachable} threadId={prefs.threadId} />
+    <CompanionFocusCards {timer} {focus} onopen={(threadId) => void showMain(threadId)} />
 
     {#if open}
       <section class="sheet" data-hit>
@@ -543,6 +588,10 @@
           onstop={() => void talk.stop()}
           onsettings={() => void showMain(null)}
         />
+        <CompanionTools {timer} {focus} workMinutes={prefs.workMinutes} breakMinutes={prefs.breakMinutes} bind:history onstart={() => startTimer()} />
+        {#if history}
+          <CompanionHistory client={() => client} threadId={prefs.threadId} onpick={(exchange) => talk.recall(exchange.reply)} />
+        {/if}
         <CompanionPanel {threads} {projects} {permissions} {questions} {mood} own={prefs.threadId} onact={act} />
       </section>
     {/if}
@@ -639,17 +688,38 @@
   .stage[data-edge='bottom'][data-align='right'] .head {
     align-items: flex-end;
   }
+  /* The HUD: the activity pill and the pomodoro side by side under the
+     character, one over the other beside it. */
+  .hud {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    max-width: 100%;
+  }
+  .stage[data-align='left'] .hud,
+  .stage[data-align='right'] .hud {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .stage[data-align='right'] .hud {
+    align-items: flex-end;
+  }
+  .stage[data-edge='bottom'][data-align='left'] .hud,
+  .stage[data-edge='bottom'][data-align='right'] .hud {
+    flex-direction: column-reverse;
+  }
   /* Under the character, the lid it draws above its box needs the air. */
-  .stage[data-edge='bottom'][data-align='center'] .head > :global(.island) {
+  .stage[data-edge='bottom'][data-align='center'] .head > .hud:has(> :global(*)) {
     margin-bottom: 8px;
   }
   /* Beside the character, the pill sits level with its middle. */
-  .stage[data-align='left'] .head > :global(.island),
-  .stage[data-align='right'] .head > :global(.island) {
+  .stage[data-align='left'] .head > .hud,
+  .stage[data-align='right'] .head > .hud {
     margin-top: 11px;
   }
-  .stage[data-edge='bottom'][data-align='left'] .head > :global(.island),
-  .stage[data-edge='bottom'][data-align='right'] .head > :global(.island) {
+  .stage[data-edge='bottom'][data-align='left'] .head > .hud,
+  .stage[data-edge='bottom'][data-align='right'] .head > .hud {
     margin-top: 0;
     margin-bottom: 11px;
   }

@@ -89,7 +89,9 @@ test('the directives of a reply are read, and the bubble never shows them', () =
   expect(parseDirectives(reply, now)).toEqual({
     remember: ['Is called Chris'],
     forget: ['likes jazz'],
-    remind: [{ text: 'Take the pizza out', at: now.getTime() + 20 * MINUTE }]
+    remind: [{ text: 'Take the pizza out', at: now.getTime() + 20 * MINUTE }],
+    timer: null,
+    focus: null
   });
   expect(visibleReply(reply)).toBe('Noted, Chris.');
   expect(visibleReply('Sure.\n[[REMIND: +5m | tea]]\nIt rings at 14:10.')).toBe('Sure.\n\nIt rings at 14:10.');

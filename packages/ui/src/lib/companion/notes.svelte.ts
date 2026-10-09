@@ -28,6 +28,8 @@ export interface NotesHost {
   /** The pointer is on the companion or its panel is open: notices stay. */
   holding(): boolean;
   rang(reminders: Reminder[]): void;
+  /** Focus holds a finished thread back: true when it took the notice. */
+  setAside?(notice: Notice): boolean;
 }
 
 const NOTICE_MS = 15_000;
@@ -71,6 +73,7 @@ export class Notes {
         failed: thread?.status === 'error',
         at: now
       };
+      if (this.host.setAside?.(notice)) continue;
       this.notices = [notice, ...this.notices.filter((entry) => entry.threadId !== threadId)].slice(0, MAX_NOTICES);
       void this.summarize(notice.id, threadId);
     }

@@ -19,9 +19,9 @@ shows the Settings page, which says that the companion runs in the desktop app.
 | Full-screen app in front, last input, screen capture, global shortcut | `apps/shell/src-tauri/src/platform/desktop.rs` |
 | Media session (Spotify first): read and control | `apps/shell/src-tauri/src/platform/media.rs` |
 | Page, mounted for `index.html?view=companion` | `packages/ui/src/CompanionApp.svelte` |
-| Character, ask bar, panel, notices, music pill, HUD, memory card | `packages/ui/src/components/companion/` |
+| Character, ask bar, panel, notices, music pill, HUD, pomodoro and focus, history, memory card | `packages/ui/src/components/companion/` |
 | Settings, Companion | `packages/ui/src/components/CompanionSettings.svelte` |
-| Preferences, mood, brain, conversation, senses, notices, HUD, memory, directives, screen, sounds, shell calls | `packages/ui/src/lib/companion/` |
+| Preferences, mood, brain, conversation, senses, notices, HUD, pomodoro, focus, history, memory, directives, screen, sounds, shell calls | `packages/ui/src/lib/companion/` |
 
 The main window opens the companion's window while the experiment is on and
 closes it when it is switched off (`lib/companion/follow.svelte.ts`).
@@ -101,8 +101,9 @@ notify or quit; `acl.rs` tests this.
 They are this computer's, in `localStorage` under `boite.companion`, like the
 experiments: screen, position and drop spot, hiding for full-screen apps, the
 shortcut (one of `COMPANION_HOTKEYS`, or none), sounds, agent, account,
-model, effort, control mode, music, quotas, closing on an outside click, and the id
-of the conversation. Both webviews share the origin, so the companion follows
+model, effort, control mode, music, quotas, closing on an outside click, the
+pomodoro's work and break minutes, focus during work, and the id of the
+conversation. Both webviews share the origin, so the companion follows
 a change from Settings through the `storage` event.
 
 Changing the agent, account, model, effort or control mode clears the
@@ -157,7 +158,11 @@ The agent adds lines of its own to a reply, which the bubble never shows
 - `[[remember: fact]]` keeps a fact about the user;
 - `[[forget: fact]]` drops the facts it names, by their words;
 - `[[remind: when | text]]` sets a reminder, `when` being a delay (`+20m`,
-  `+1h30m`), a time (`18:30`, tomorrow once past) or a date and time.
+  `+1h30m`), a time (`18:30`, tomorrow once past) or a date and time;
+- `[[timer: duration | label]]` starts the pomodoro with that work time
+  (`25m`, `50m`, `1h30m`, up to 4 h; the label is optional), and
+  `[[timer: stop]]` stops it;
+- `[[focus: on]]` and `[[focus: off]]` turn focus on and off.
 
 The memory (80 facts at most, oldest out first) and the reminders live in
 `localStorage` on this computer (`memory.ts`), never in the core except as the
@@ -182,8 +187,10 @@ while the pointer is on the companion or its panel is open.
 ## Sounds
 
 Short chimes made with Web Audio (sine notes, nothing recorded): the panel
-called by the shortcut, an answer, an agent calling, a reminder, an error.
-"Sounds" turns them off. The webview keeps audio muted until the page is
+called by the shortcut, an answer, an agent calling, a reminder, an error, the
+end of a pomodoro phase (three falling notes). "Sounds" turns them off. In
+focus, only an agent calling, a reminder and the pomodoro's chime ring
+(`audible`). The webview keeps audio muted until the page is
 used, so the first press on the companion unlocks it.
 
 ## Mood
@@ -242,6 +249,55 @@ label for screen readers; the open card spells them out. The page reads
 `subscriptionProxy.quotasUpdated`. With no proxy, or another kind, there is
 no gauge. The key is never read.
 
+## Pomodoro
+
+A timer sits beside the activity pill (`CompanionTimer.svelte`, `pomodoro.ts`,
+with the clock in `focus.svelte.ts`). It shows the phase, the time left and,
+during the work, what it is for. On hover or keyboard focus it unfolds pause or
+resume, skip the break, and stop. It starts from the row under the ask bar
+(`CompanionTools.svelte`) with the minutes set in Settings (25 and 5 by
+default). The agent's `[[timer: …]]` also starts it, and its work time wins.
+
+One pomodoro is a work phase, then a break, then the end. Each phase rings the
+phase chime when it ends. During the break the companion takes it with the
+user: it sits back with a cup of tea, and a card says "Break, 5 min" with Skip
+(`CompanionFocusCards.svelte`). The state is a few numbers in `localStorage`
+under `boite.companion.pomodoro`. A reload finds the timer where it was, and a
+phase that ended while the window was closed rings when it opens.
+
+## Focus
+
+Focus is on in three cases:
+
+- the user turns it on from the row under the ask bar;
+- the agent writes `[[focus: on]]`;
+- a pomodoro is in its work phase and "Focus during work" is on.
+
+Turning it off by hand holds until the next pomodoro starts. While it lasts:
+
+- the character is smaller and paler, eyes half shut, breathing slowly; an
+  agent calling or the core out of reach still shows at full size;
+- a finished thread's card is set aside (`NotesHost.setAside`);
+- only an agent calling, a reminder and the pomodoro ring;
+- permissions, questions and reminders get through as usual, and the panel
+  still opens by itself for them.
+
+When it ends, one card lists what was set aside: "During focus: N threads
+finished". A click on one opens it in Boite. The threads set aside, the recap
+and the user's choice are kept under `boite.companion.focus`.
+
+## History
+
+The row under the ask bar shows the last 20 exchanges (`CompanionHistory.svelte`,
+`history.ts`). They are read from the companion's thread with `threads.get`
+each time the list opens, with tool calls, files and images compacted. Nothing
+is copied locally.
+
+A request reads as the user typed it: the role and memory of a first request,
+the date line and every bracketed line are left out. A reply reads as the
+bubble showed it (`visibleReply`). A click puts the reply back in the bubble.
+The list closes when a new permission or question opens the panel.
+
 ## Checks
 
 - `cargo test --lib` in `apps/shell/src-tauri`: hit test, placement, drop
@@ -256,6 +312,11 @@ no gauge. The key is never read.
 - `packages/ui/src/lib/companion/companion-hud.test.ts`: the HUD's threads,
   steps and order, the gauges and their levels, and following the quotas on
   the fake core's HUD demo.
+- `packages/ui/src/lib/companion/companion-focus.test.ts`: the timer and
+  focus directives and durations, the pomodoro's phases, pause, storage and
+  chimes across a reload, what focus sets aside and lets ring, its
+  preferences, and the history's requests and replies, read back from the
+  fake core.
 - Captures: `?view=companion&fake=1` on the dev UI at 440 × 600 (`&hud=1`
   seeds a Douane and three threads at work for the HUD), and Settings,
-  Companion at desktop width.
+  Companion at desktop and phone widths.

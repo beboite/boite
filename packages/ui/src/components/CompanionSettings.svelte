@@ -120,6 +120,14 @@
   const CONTROLS: CompanionControl[] = ['ask', 'auto'];
   let controlItems = $derived<MenuItem[]>(CONTROLS.map((control) => ({ id: control, label: copy.controls[control], hint: copy.controlsHint[control], active: prefs.control === control })));
 
+  const WORK_MINUTES = [15, 20, 25, 30, 45, 50, 60, 90];
+  const BREAK_MINUTES = [3, 5, 10, 15];
+  const minutesLabel = (count: number) => fill(copy.minutes, { count: String(count) });
+  const minuteItems = (choices: number[], current: number): MenuItem[] =>
+    [...new Set([...choices, current])].sort((a, b) => a - b).map((count) => ({ id: String(count), label: minutesLabel(count), active: count === current }));
+  let workItems = $derived(minuteItems(WORK_MINUTES, prefs.workMinutes));
+  let breakItems = $derived(minuteItems(BREAK_MINUTES, prefs.breakMinutes));
+
   function save(patch: Partial<CompanionPrefs>) {
     prefs = writeCompanionPrefs(patch);
     if (prefs.threadId === null) started = false;
@@ -204,6 +212,16 @@
     <label class="switch-row">
       <span class="text ui-label-box"><span class="ui-label">{copy.sounds}</span><InfoTip topic={copy.sounds} text={copy.soundsHint} /></span>
       <input type="checkbox" role="switch" checked={prefs.sounds} onchange={(event) => save({ sounds: event.currentTarget.checked })} data-testid="companion-sounds" />
+    </label>
+  </section>
+
+  <section class="card">
+    <h2 class="ui-label-box"><span class="ui-label">{copy.pomodoro}</span><InfoTip topic={copy.pomodoro} text={copy.pomodoroHint} /></h2>
+    {@render picker(copy.workMinutes, null, workItems, minutesLabel(prefs.workMinutes), (id) => save({ workMinutes: Number(id) }), 'companion-work-minutes')}
+    {@render picker(copy.breakMinutes, null, breakItems, minutesLabel(prefs.breakMinutes), (id) => save({ breakMinutes: Number(id) }), 'companion-break-minutes')}
+    <label class="switch-row">
+      <span class="text ui-label-box"><span class="ui-label">{copy.focusOnWork}</span><InfoTip topic={copy.focusOnWork} text={copy.focusOnWorkHint} /></span>
+      <input type="checkbox" role="switch" checked={prefs.focusOnWork} onchange={(event) => save({ focusOnWork: event.currentTarget.checked })} data-testid="companion-focus-on-work" />
     </label>
   </section>
 

@@ -47,6 +47,11 @@ export interface CompanionPrefs {
   closeOutside: boolean;
   /** One gauge per subscription of the proxy beside the character. */
   quotas: boolean;
+  /** The pomodoro's phases, in minutes. */
+  workMinutes: number;
+  breakMinutes: number;
+  /** Focus mode during the pomodoro's work phase. */
+  focusOnWork: boolean;
   screenScope: CompanionScreenScope;
   threadId: string | null;
 }
@@ -68,6 +73,9 @@ export const DEFAULT_COMPANION_PREFS: CompanionPrefs = {
   music: true,
   closeOutside: true,
   quotas: true,
+  workMinutes: 25,
+  breakMinutes: 5,
+  focusOnWork: true,
   screenScope: 'all',
   threadId: null
 };
@@ -78,6 +86,10 @@ const BRAIN_KEYS = ['providerId', 'accountId', 'model', 'effort', 'control'] as 
 const text = (value: unknown): string | null => (typeof value === 'string' && value !== '' ? value : null);
 
 const fraction = (value: unknown): number | null => (typeof value === 'number' && Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : null);
+
+/** Whole minutes from 1 to max; anything else takes the default. */
+const minutes = (value: unknown, max: number, fallback: number): number =>
+  typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= max ? value : fallback;
 
 function spotOf(value: unknown): CompanionSpot | null {
   if (!value || typeof value !== 'object') return null;
@@ -106,6 +118,9 @@ export function parseCompanionPrefs(raw: unknown): CompanionPrefs {
     music: value.music !== false,
     closeOutside: value.closeOutside !== false,
     quotas: value.quotas !== false,
+    workMinutes: minutes(value.workMinutes, 180, DEFAULT_COMPANION_PREFS.workMinutes),
+    breakMinutes: minutes(value.breakMinutes, 60, DEFAULT_COMPANION_PREFS.breakMinutes),
+    focusOnWork: value.focusOnWork !== false,
     screenScope: value.screenScope === 'here' || value.screenScope === 'zone' ? value.screenScope : 'all',
     threadId: text(value.threadId)
   };

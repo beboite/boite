@@ -38,9 +38,13 @@
     typing?: boolean;
     /** A reminder is due: it rings. */
     alarm?: boolean;
+    /** Focus mode: it keeps quiet, smaller and paler, eyes half shut. */
+    calm?: boolean;
+    /** The pomodoro's break: it takes it with the user, a cup of tea beside it. */
+    rest?: boolean;
   }
 
-  let { mood, music = false, busy = false, hover = false, boing = 0, size = 56, lively = true, gaze = null, asleep = false, typing = false, alarm = false }: Props = $props();
+  let { mood, music = false, busy = false, hover = false, boing = 0, size = 56, lively = true, gaze = null, asleep = false, typing = false, alarm = false, calm = false, rest = false }: Props = $props();
 
   type Act = 'look' | 'blink' | 'peek' | 'stretch' | 'yawn';
   const ACT_MS: Record<Act, number> = { look: 2400, blink: 700, peek: 1200, stretch: 1400, yawn: 2400 };
@@ -48,7 +52,7 @@
   let bouncing = $state(false);
 
   // A gesture now and then while it rests awake: never while it works, calls or sleeps.
-  const restless = $derived(lively && mood === 'idle' && !alarm && !hover && !asleep && !typing);
+  const restless = $derived(lively && mood === 'idle' && !alarm && !hover && !asleep && !typing && !calm && !rest);
   $effect(() => {
     if (!restless) return;
     const pool: Act[] = music ? ['look', 'blink', 'peek'] : ['look', 'look', 'blink', 'peek', 'stretch', 'yawn'];
@@ -79,12 +83,19 @@
     return () => clearTimeout(timer);
   });
 
-  type Face = 'awake' | 'sleep' | 'yawn' | 'groove' | 'typing' | 'working' | 'calling' | 'happy' | 'worried' | 'alarm';
+  type Face = 'awake' | 'sleep' | 'yawn' | 'groove' | 'typing' | 'working' | 'calling' | 'happy' | 'worried' | 'alarm' | 'calm' | 'rest';
+  // What needs the user wins over the break and the focus; the pointer wakes it from either.
+  const urgent = $derived(alarm || mood === 'calling' || mood === 'worried');
   const face: Face = $derived(
-    alarm ? 'alarm' : mood !== 'idle' ? mood : hover ? 'awake' : asleep ? 'sleep' : act === 'yawn' ? 'yawn' : typing ? 'typing' : music ? 'groove' : 'awake'
+    alarm ? 'alarm'
+    : mood === 'calling' || mood === 'worried' ? mood
+    : rest ? (hover ? 'awake' : 'rest')
+    : calm ? (hover ? 'awake' : 'calm')
+    : mood !== 'idle' ? mood : hover ? 'awake' : asleep ? 'sleep' : act === 'yawn' ? 'yawn' : typing ? 'typing' : music ? 'groove' : 'awake'
   );
-  // The light on the lid: the mood's colour.
-  const tone = $derived(face === 'alarm' ? 'calling' : mood);
+  // The light on the lid: the mood's colour, soft green on a break, grey in focus.
+  const tone = $derived(face === 'alarm' ? 'calling' : rest && !urgent ? 'happy' : calm && !urgent ? 'idle' : mood);
+  const tea = $derived(rest && !urgent);
   const notes = $derived(music && face !== 'sleep' && face !== 'calling' && face !== 'alarm' && face !== 'worried');
   const clamp = (value: number) => Math.max(-1, Math.min(1, value));
   const look = $derived(face === 'typing' ? { x: 0, y: 1 } : face === 'sleep' || face === 'yawn' || !gaze ? { x: 0, y: 0 } : { x: clamp(gaze.x), y: clamp(gaze.y) });
@@ -92,6 +103,7 @@
 
 <svg
   class="char f-{face} t-{tone} {act ? `a-${act}` : ''}"
+  class:quiet={face === 'calm'}
   class:music
   class:busy={busy && mood === 'working'}
   class:hover={hover && face === 'awake'}
@@ -128,7 +140,7 @@
       <rect class="led" x="43" y="30.25" width="14" height="4.5" rx="2.25" />
     </g>
 
-    {#if music}
+    {#if music && !tea}
       <g class="phones">
         <path class="band under" d="M10 60 V50 C10 10 90 10 90 50 V60" />
         <path class="band" d="M10 60 V50 C10 10 90 10 90 50 V60" />
@@ -136,6 +148,18 @@
       </g>
     {/if}
   </g>
+
+  {#if tea}
+    <!-- A mug of tea on the desk at its side, the tag of the bag hanging out, steam rising. -->
+    <g class="mug">
+      <path class="steam" d="M81 60 c-2.5 -2.5 2.5 -4.5 0 -7 c-2.5 -2.5 2.5 -4.5 0 -7" />
+      <path class="steam s2" d="M88 61 c-2.5 -2.5 2.5 -4.5 0 -7" />
+      <path class="handle" d="M93 70 h1.5 a4.5 4.5 0 0 1 0 9 h-1.5" />
+      <path class="cup" d="M75 65 h18 v12 a8 8 0 0 1 -8 8 h-2 a8 8 0 0 1 -8 -8 z" />
+      <path class="string" d="M86 65.5 q-1 4 -5 6.5" />
+      <rect class="tag" x="77" y="71.5" width="6" height="6.5" rx="1.2" />
+    </g>
+  {/if}
 
   {#if face === 'sleep'}
     <text class="mark z" x="80" y="20">z</text>
@@ -181,6 +205,8 @@
   .f-calling, .f-alarm { --open: 1.18; }
   .f-happy { --low: 9px; }
   .f-worried { --top: 6px; --tilt: -16deg; }
+  .f-calm { --shut: 6px; }
+  .f-rest { --shut: 7.5px; --low: 4px; }
   .hover { --open: 1.1; }
 
   .body { fill: var(--color-surface); filter: drop-shadow(0 1.5px 2px rgb(0 0 0 / .35)); }
@@ -199,8 +225,17 @@
   .cup { fill: var(--fg); stroke: var(--color-surface); stroke-width: 3; paint-order: stroke; }
   .note rect { fill: var(--fg); }
   .note path { fill: none; stroke: var(--fg); stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+  .cup { fill: var(--color-surface); stroke: var(--fg); stroke-width: 3.5; stroke-linejoin: round; }
+  .handle, .string, .steam { fill: none; stroke: var(--fg); stroke-linecap: round; }
+  .handle { stroke-width: 3.5; }
+  .string { stroke-width: 1.2; }
+  .steam { stroke-width: 2; opacity: .7; }
+  .tag { fill: var(--tone); stroke: var(--fg); stroke-width: 1.2; }
+  /* In focus it steps back: smaller, paler; the pointer brings it forward. */
+  .char { transition: opacity var(--dur-3) var(--ease-out-quint), scale var(--dur-3) var(--ease-out-quint); }
+  .quiet { opacity: .55; scale: .84; }
   /* What sticks out of the box is drawn over the wallpaper: a rim keeps it readable. */
-  .mark, .notes { filter: drop-shadow(0 0 1.2px var(--color-surface)) drop-shadow(0 0 1.2px var(--color-surface)); }
+  .mark, .notes, .mug { filter: drop-shadow(0 0 1.2px var(--color-surface)) drop-shadow(0 0 1.2px var(--color-surface)); }
 
   /* The eyes morph from face to face: every part slides, nothing swaps. */
   .rig { transform-box: fill-box; transform-origin: 50% 100%; }
@@ -219,7 +254,8 @@
 
   /* Body */
   .f-awake .rig, .f-typing .rig { animation: breathe 4s ease-in-out infinite; }
-  .f-sleep .rig { animation: breathe 6s ease-in-out infinite; }
+  .f-sleep .rig, .f-calm .rig { animation: breathe 6s ease-in-out infinite; }
+  .f-rest .rig { animation: sip 5s ease-in-out infinite; }
   .f-groove .rig { animation: groove .5s ease-in-out infinite alternate; }
   .f-typing .rig { animation: nod 1.6s ease-in-out infinite; }
   .t-working .rig { animation: hum 1.4s ease-in-out infinite; }
@@ -239,7 +275,7 @@
   /* Eyes and light */
   .blink { animation: blink 5s ease-in-out infinite; }
   .a-blink .blink { animation: twice .7s ease-in-out; }
-  .f-sleep .blink, .f-yawn .blink, .f-happy .blink { animation: none; }
+  .f-sleep .blink, .f-yawn .blink, .f-happy .blink, .f-rest .blink { animation: none; }
   .a-look .scan { animation: glance 2.4s ease-in-out; }
   .f-working .scan { animation: scan 1.4s ease-in-out infinite alternate; }
   .busy .scan, .busy .led { animation-duration: .7s; }
@@ -250,9 +286,14 @@
   .spark { animation: spark 1.2s ease-in-out infinite; transform-box: fill-box; transform-origin: 50% 50%; }
   .note { animation: float 2s ease-out infinite; opacity: 0; }
   .note.n2 { animation-delay: 1s; }
-  .phones { animation: fade-in var(--dur-3) var(--ease-out-quint); }
+  .phones, .mug { animation: fade-in var(--dur-3) var(--ease-out-quint); }
+  .steam { animation: steam 2.6s ease-in-out infinite; }
+  .steam.s2 { animation-delay: 1.3s; }
 
   @keyframes fade-in { from { opacity: 0; } }
+  /* Leans towards its tea now and then, and back. */
+  @keyframes sip { 0%, 30%, 70%, 100% { transform: rotate(0) scale(1, 1); } 15% { transform: rotate(0) scale(1.01, 1.025); } 42%, 58% { transform: rotate(4deg) translateX(1px); } }
+  @keyframes steam { 0% { transform: translateY(2px); opacity: 0; } 35% { opacity: .7; } 100% { transform: translateY(-5px); opacity: 0; } }
   @keyframes breathe { 0%, 100% { transform: scale(1, 1); } 50% { transform: scale(1.012, 1.03); } }
   @keyframes groove { from { transform: rotate(-4deg) translateY(0); } to { transform: rotate(4deg) translateY(-1.5px); } }
   @keyframes nod { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(1.2px); } }

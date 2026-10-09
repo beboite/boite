@@ -1,17 +1,27 @@
 /*
  * The lines the companion's agent adds to a reply for the companion itself,
- * as its role asks (`brain.ts`): `[[remember: …]]`, `[[forget: …]]` and
- * `[[remind: when | what]]`. The bubble never shows them; the page acts on
- * them once the reply is complete. Pure, so it is tested without a core.
+ * as its role asks (`brain.ts`): `[[remember: …]]`, `[[forget: …]]`,
+ * `[[remind: when | what]]`, `[[timer: duration | what for]]` and
+ * `[[focus: on]]`. The bubble never shows them; the page acts on them once the
+ * reply is complete. Pure, so it is tested without a core.
  */
+
+/** A pomodoro to start, its work phase lasting `ms`, or the one running to stop. */
+export type TimerDirective = { ms: number; label: string } | 'stop';
 
 export interface Directives {
   remember: string[];
   forget: string[];
   remind: { text: string; at: number }[];
+  /** The last timer line of the reply wins; null when there is none. */
+  timer: TimerDirective | null;
+  /** Focus on or off, the last line winning; null when the reply leaves it. */
+  focus: boolean | null;
 }
 
-const DIRECTIVE = /\[\[\s*(remember|forget|remind)\s*:([\s\S]*?)\]\]/gi;
+const DIRECTIVE = /\[\[\s*(remember|forget|remind|timer|focus)\s*:([\s\S]*?)\]\]/gi;
+/** A timer is a few minutes to a few hours. */
+const TIMER_MAX_MS = 4 * 60 * 60_000;
 /** A directive still being written while the reply streams. */
 const UNFINISHED = /\[\[(?![\s\S]*\]\])[\s\S]*$/;
 
@@ -61,15 +71,44 @@ export function parseWhen(when: string, now: Date): number | null {
   return null;
 }
 
+/**
+ * A timer's length in milliseconds: `25m`, `25 min`, `1h`, `1h30m`, `90s`, a
+ * bare number of minutes (`25`), with or without a leading `+`. Null for
+ * anything else, nothing, or more than four hours.
+ */
+export function parseDuration(text: string): number | null {
+  const value = text.trim().toLowerCase().replace(/^\+\s*/, '');
+  if (/^\d+$/.test(value)) return bounded(Number(value) * 60_000);
+  const parts = /^(?:(\d+)\s*h)?\s*(?:(\d+)\s*m(?:in)?)?\s*(?:(\d+)\s*s)?$/.exec(value);
+  if (!parts || !(parts[1] || parts[2] || parts[3])) return null;
+  const [hours, minutes, seconds] = [parts[1], parts[2], parts[3]].map((part) => Number(part ?? 0));
+  return bounded(((hours! * 60 + minutes!) * 60 + seconds!) * 1000);
+}
+
+const bounded = (ms: number): number | null => (ms > 0 && ms <= TIMER_MAX_MS ? ms : null);
+
+function timerOf(content: string): TimerDirective | null {
+  const bar = content.indexOf('|');
+  const head = (bar < 0 ? content : content.slice(0, bar)).trim();
+  if (/^(stop|off|cancel)$/i.test(head)) return 'stop';
+  const ms = parseDuration(head);
+  return ms === null ? null : { ms, label: bar < 0 ? '' : content.slice(bar + 1).trim() };
+}
+
 /** What a complete reply asks of the companion. A directive it cannot read is left out. */
 export function parseDirectives(text: string, now: Date): Directives {
-  const found: Directives = { remember: [], forget: [], remind: [] };
+  const found: Directives = { remember: [], forget: [], remind: [], timer: null, focus: null };
   for (const [, kind, body] of text.matchAll(DIRECTIVE)) {
     const content = body!.trim();
     if (!content) continue;
-    if (kind!.toLowerCase() === 'remember') found.remember.push(content);
-    else if (kind!.toLowerCase() === 'forget') found.forget.push(content);
-    else {
+    const name = kind!.toLowerCase();
+    if (name === 'remember') found.remember.push(content);
+    else if (name === 'forget') found.forget.push(content);
+    else if (name === 'timer') found.timer = timerOf(content) ?? found.timer;
+    else if (name === 'focus') {
+      if (/^(on|start)$/i.test(content)) found.focus = true;
+      else if (/^(off|stop|end)$/i.test(content)) found.focus = false;
+    } else {
       const bar = content.indexOf('|');
       if (bar < 0) continue;
       const at = parseWhen(content.slice(0, bar), now);

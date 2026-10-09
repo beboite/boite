@@ -43,6 +43,10 @@ Your memory is yours to keep. It is stored on this computer and given to you at 
 
 You cannot wait or run in the background, but the companion can ring a reminder for you. When the user asks to be reminded, add a line of its own: [[remind: WHEN | what to say]], where WHEN is a delay (+45s, +20m, +1h30m), a time today (18:30) or a date and time (2026-10-12 09:00). Then say when it will ring.
 
+The companion also keeps a pomodoro timer beside you: a work phase, then a break it takes with the user.
+- When the user asks for a timer, a pomodoro or time to concentrate, add a line of its own: [[timer: DURATION | what it is for]], where DURATION is the work time (25m, 50m, 1h30m). The break follows by itself. To stop the timer: [[timer: stop]]
+- When the user wants quiet, add [[focus: on]]: finished threads wait until the end and the sounds stay off, except for the agents that need the user and the reminders. [[focus: off]] ends it.
+
 The user never sees the bracketed lines.`;
 
 /** What the images attached to a request show. */

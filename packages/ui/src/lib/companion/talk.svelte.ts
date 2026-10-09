@@ -239,6 +239,16 @@ export class Talk {
     this.shown = false;
   }
 
+  /** An earlier reply, picked from the history, back in the bubble. Not while one streams. */
+  recall(reply: string): void {
+    if (this.thinking || !reply) return;
+    this.problem = '';
+    this.parts = [reply];
+    this.phase = 'done';
+    this.shown = true;
+    this.hold();
+  }
+
   dispose(): void {
     clearTimeout(this.hideTimer);
   }

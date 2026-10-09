@@ -4,7 +4,7 @@
  * switches them off.
  */
 
-export type Cue = 'open' | 'done' | 'call' | 'remind' | 'error';
+export type Cue = 'open' | 'done' | 'call' | 'remind' | 'error' | 'phase';
 
 /** Each note: frequency in hertz, start and length in seconds. */
 const NOTES: Record<Cue, [number, number, number][]> = {
@@ -13,11 +13,13 @@ const NOTES: Record<Cue, [number, number, number][]> = {
   call: [[880, 0, 0.11], [1109, 0.15, 0.11], [880, 0.3, 0.16]],
   // A reminder is asked for, and may ring while the user looks elsewhere: twice over.
   remind: [[1047, 0, 0.2], [1319, 0.2, 0.2], [1568, 0.4, 0.36], [1047, 1.1, 0.2], [1319, 1.3, 0.2], [1568, 1.5, 0.5]],
-  error: [[392, 0, 0.16], [311, 0.13, 0.3]]
+  error: [[392, 0, 0.16], [311, 0.13, 0.3]],
+  // The end of a pomodoro phase: a slow bell-like fall, long notes overlapping, lower than a reminder.
+  phase: [[784, 0, 0.9], [659, 0.32, 0.9], [523, 0.64, 1.4]]
 };
 
 /** Peak gain: soft cues for what the user is watching, a louder one for a reminder. */
-const VOLUME: Record<Cue, number> = { open: 0.05, done: 0.05, call: 0.06, remind: 0.16, error: 0.05 };
+const VOLUME: Record<Cue, number> = { open: 0.05, done: 0.05, call: 0.06, remind: 0.16, error: 0.05, phase: 0.1 };
 
 let context: AudioContext | null = null;
 
