@@ -16,7 +16,7 @@ holds every conversation, agents and groups together, newest first. A row
 reads like a thread row: the agent's picture where the provider logo goes, its
 name, the same state a thread shows on the right (Working with its time, Needs
 you while it waits on the user, or when it last moved) and the last thing said
-under it. On desktop, the foot adds the engine settings; a phone draws no foot.
+under it. On desktop, the foot adds the engine settings for the owner; a phone draws no foot.
 
 A conversation is the whole page, drawn with the thread's bubbles and
 composer: the user asks, the agent answers in its bubble, works (three dots in

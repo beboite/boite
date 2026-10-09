@@ -117,9 +117,12 @@ test('create, converse, configure the resident engine and follow background work
   // Folding from the title bar hides the Agents list as it hides the thread list.
   await page.click('[data-testid="sidebar-toggle"]');
   await page.waitFor(`getComputedStyle(document.querySelector('.agents-rail')).display === 'none'`);
+  // One fold for both lists: the thread list comes back folded too.
+  expect(await page.evaluate(`window.__boiteTest.workspace.active.sidebarCollapsed`)).toBe(true);
   await page.click('[data-testid="sidebar-toggle"]');
   await page.waitFor(`getComputedStyle(document.querySelector('.agents-rail')).display !== 'none'`);
   await settled();
+  expect(await page.evaluate(layout)).toEqual(threads);
   await capture('agents-welcome-desktop.png');
   await page.click('[data-testid="agents-create"]');
   await page.waitFor(`document.querySelector('[data-testid="agents-create-menu"]')`);

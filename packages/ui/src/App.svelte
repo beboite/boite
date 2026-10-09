@@ -745,7 +745,8 @@
 
   /* The frame: the cards keep `--frame-gap` from the window's right and bottom
      edges and from each other. The rails on the left stand on the frame, so
-     only a folded sidebar leaves the chat card a left gap to keep itself. */
+     only a folded column (RailFrame) leaves the chat or Agents card a left gap
+     to keep itself. */
   @media (min-width: 721px) {
     .body {
       gap: var(--frame-gap);
