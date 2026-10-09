@@ -62,9 +62,22 @@ export async function dragCompanion(): Promise<CompanionDrop | null> {
   return (await invoke<CompanionDrop | null>('companion_drag')) ?? null;
 }
 
-/** The screen the companion is on, without it: an 8-byte size header, then BGRA rows. */
-export async function captureScreen(): Promise<ArrayBuffer | null> {
-  return (await invoke<ArrayBuffer>('companion_capture')) ?? null;
+/**
+ * A screen without the companion, as an 8-byte size header then BGRA rows: the
+ * screen named `monitor`, the one the companion is on when none is named, or
+ * `area` of the window while it covers a screen (`coverScreen`).
+ */
+export async function captureScreen(target: { monitor?: string; area?: HitRect } = {}): Promise<ArrayBuffer | null> {
+  return (await invoke<ArrayBuffer>('companion_capture', { monitor: target.monitor ?? null, area: target.area ?? null })) ?? null;
+}
+
+/**
+ * The window covers the screen under the pointer, and follows it to another
+ * one, while the user picks a part of it; `false` ends that, and the window
+ * is placed again.
+ */
+export async function coverScreen(cover: boolean): Promise<void> {
+  await invoke('companion_cover', { cover });
 }
 
 /** The areas that take clicks; the rest of the window lets them through. */

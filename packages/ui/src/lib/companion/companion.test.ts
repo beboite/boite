@@ -2,7 +2,7 @@ import { afterEach, expect, test, vi } from 'vitest';
 import { defaultTitleModel, type Account, type ProviderSummary } from '@boite/contracts';
 import { COMPANION_STORAGE_KEY, DEFAULT_COMPANION_PREFS, parseCompanionPrefs, readCompanionPrefs, subscribeCompanionPrefs, writeCompanionPrefs } from './prefs';
 import { createMoodTracker, BUSY_THRESHOLD } from './mood';
-import { COMPANION_ROLE, localTime, permissionModeOf, pickBrain, promptFor, replyText } from './brain';
+import { COMPANION_ROLE, localTime, permissionModeOf, pickBrain, promptFor, replyText, type PromptContext } from './brain';
 import { count, describePermission, shortPath, threadLabel } from './describe';
 import { appName } from './media';
 import { strings } from '../strings';
@@ -85,11 +85,13 @@ test('the brain: the chosen agent while usable, none when it is not, else the fi
 
 test('the role and the memory go with the first request only, the time with every one, and auto control skips the permission prompts', () => {
   const now = new Date(2026, 9, 9, 14, 5);
-  const context = { first: true, memory: 'Your memory of the user is empty so far.', now, screen: false };
+  const context: PromptContext = { first: true, memory: 'Your memory of the user is empty so far.', now, seen: null };
   expect(localTime(now)).toBe('Friday 2026-10-09 14:05');
   expect(promptFor('play music', context)).toBe(`${COMPANION_ROLE}\n\nYour memory of the user is empty so far.\n\n---\n\n[Friday 2026-10-09 14:05]\nplay music`);
   expect(promptFor('play music', { ...context, first: false })).toBe('[Friday 2026-10-09 14:05]\nplay music');
-  expect(promptFor('what is this?', { ...context, first: false, screen: true })).toBe("[Friday 2026-10-09 14:05]\n[The attached image is the user's screen.]\nwhat is this?");
+  expect(promptFor('what is this?', { ...context, first: false, seen: { kind: 'screen' } })).toBe("[Friday 2026-10-09 14:05]\n[The attached image is the user's screen.]\nwhat is this?");
+  expect(promptFor('which is louder?', { ...context, first: false, seen: { kind: 'screens', count: 2 } })).toContain("[The 2 attached images are the user's screens, one per screen, the main screen first.]\nwhich is louder?");
+  expect(promptFor('fix this', { ...context, first: false, seen: { kind: 'zone' } })).toContain("[The attached image is the part of the user's screen they picked to show you.]\nfix this");
   expect(permissionModeOf('auto')).toBe('bypassPermissions');
   expect(permissionModeOf('ask')).toBe('default');
   expect(replyText({ parts: [{ type: 'text', text: ' Done, ' }, { type: 'reasoning', text: 'hmm' } as never, { type: 'text', text: 'Spotify is on. ' }] })).toBe('Done, Spotify is on.');

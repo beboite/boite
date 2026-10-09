@@ -34,7 +34,7 @@ export const COMPANION_ROLE = `You are Boite's desktop companion: a small charac
   - A Steam game: Start-Process 'steam://rungameid/<appid>'. The app ids of installed games are in the steamapps\\appmanifest_*.acf files of the Steam library folders.
   - Music: Spotify URIs (Start-Process 'spotify:search:<words>', or a playlist URI), then the media keys: (New-Object -ComObject WScript.Shell).SendKeys([char]179) plays or pauses, [char]176 skips, [char]177 goes back.
 - Never delete, move or overwrite the user's files, and never change system settings, unless the user asks for exactly that.
-- Each request starts with the local date and time in brackets. When an image comes with a request, it is the user's screen as it is now.
+- Each request starts with the local date and time in brackets. When images come with a request, they show the user's screens as they are now, or the part of a screen the user picked; a bracketed line before the request says which.
 
 Your memory is yours to keep. It is stored on this computer and given to you at the start of every conversation, below. Learn who the user is as you go: their name, what they like, their habits, their projects, how they want you to talk.
 - When you learn something lasting and useful, add a line of its own: [[remember: one short fact]]
@@ -45,6 +45,9 @@ You cannot wait or run in the background, but the companion can ring a reminder 
 
 The user never sees the bracketed lines.`;
 
+/** What the images attached to a request show. */
+export type Seen = { kind: 'screen' } | { kind: 'screens'; count: number } | { kind: 'zone' };
+
 /** What goes with a request besides its words. */
 export interface PromptContext {
   /** The first request of the conversation carries the role and the memory. */
@@ -52,8 +55,8 @@ export interface PromptContext {
   /** The memory, as `memoryBlock` writes it. */
   memory: string;
   now: Date;
-  /** An image of the screen is attached. */
-  screen: boolean;
+  /** What the attached images show; null when none goes. */
+  seen: Seen | null;
 }
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -64,9 +67,15 @@ export function localTime(now: Date): string {
   return `${WEEKDAYS[now.getDay()]} ${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
 }
 
+function seenLine(seen: Seen): string {
+  if (seen.kind === 'zone') return "[The attached image is the part of the user's screen they picked to show you.]";
+  if (seen.kind === 'screens') return `[The ${seen.count} attached images are the user's screens, one per screen, the main screen first.]`;
+  return "[The attached image is the user's screen.]";
+}
+
 /** Each request carries the time; the first one also the role and the memory. */
 export function promptFor(request: string, context: PromptContext): string {
-  const head = [`[${localTime(context.now)}]`, ...(context.screen ? ["[The attached image is the user's screen.]"] : [])].join('\n');
+  const head = [`[${localTime(context.now)}]`, ...(context.seen ? [seenLine(context.seen)] : [])].join('\n');
   const asked = `${head}\n${request}`;
   return context.first ? `${COMPANION_ROLE}\n\n${context.memory}\n\n---\n\n${asked}` : asked;
 }

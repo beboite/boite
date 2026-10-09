@@ -55,6 +55,8 @@ struct Shared {
     hide_fullscreen: Arc<AtomicBool>,
     /// Hidden now, for such an app.
     hidden: Arc<AtomicBool>,
+    /// The screen the window covers while the user picks a part of it.
+    covering: Arc<Mutex<Option<String>>>,
 }
 
 #[derive(Default)]
@@ -171,6 +173,51 @@ fn work_area(monitor: &Monitor) -> Area {
 
 fn monitor_name(monitor: &Monitor) -> String { monitor.name().cloned().unwrap_or_default() }
 
+/// A whole screen, `(x, y, width, height)` in physical pixels.
+fn bounds(monitor: &Monitor) -> (i32, i32, i32, i32) {
+    (monitor.position().x, monitor.position().y, monitor.size().width as i32, monitor.size().height as i32)
+}
+
+/// `rect`, in CSS pixels from the window's top left, on the screen in physical pixels.
+fn on_screen(rect: HitRect, origin: (i32, i32), scale: f64) -> Result<(i32, i32, i32, i32), String> {
+    let pixels = |value: f64| (value * scale).round() as i32;
+    let (width, height) = (pixels(rect.w), pixels(rect.h));
+    if width < 1 || height < 1 { return Err("the area to capture is empty".into()); }
+    Ok((origin.0 + pixels(rect.x), origin.1 + pixels(rect.y), width, height))
+}
+
+fn monitor_under_pointer<R: Runtime>(window: &WebviewWindow<R>) -> tauri::Result<Option<Monitor>> {
+    let cursor = window.cursor_position()?;
+    let point = (cursor.x.round() as i32, cursor.y.round() as i32);
+    Ok(window.available_monitors()?.into_iter().find(|monitor| holds(monitor, point)).or(window.current_monitor()?))
+}
+
+/// The window over the whole of `monitor`, the taskbar included.
+fn cover_monitor<R: Runtime>(window: &WebviewWindow<R>, monitor: &Monitor) -> tauri::Result<()> {
+    // Onto the screen first: a screen of another scale resizes the window as it arrives.
+    window.set_position(*monitor.position())?;
+    window.set_size(*monitor.size())?;
+    window.set_position(*monitor.position())
+}
+
+/// While the window covers a screen, it moves to the screen the pointer went
+/// to, once no button is down: a part being dragged over stays where it is.
+fn follow_cover<R: Runtime>(window: &WebviewWindow<R>, shared: &Shared) {
+    if crate::platform::mouse_down() { return; }
+    // Held while the window moves: `companion_cover(false)` waits, so the
+    // placement after it is not undone.
+    let mut covering = shared.covering.lock().unwrap_or_else(PoisonError::into_inner);
+    let Some(covered) = covering.as_deref() else { return };
+    let Ok(Some(monitor)) = monitor_under_pointer(window) else { return };
+    let name = monitor_name(&monitor);
+    if name == covered { return; }
+    if let Err(error) = cover_monitor(window, &monitor) {
+        eprintln!("[shell] companion cover: {error}");
+        return;
+    }
+    *covering = Some(name);
+}
+
 /// The screen named `name`, the primary one when it is gone or none is named.
 fn pick_monitor<R: Runtime>(window: &WebviewWindow<R>, name: Option<&str>) -> tauri::Result<Option<Monitor>> {
     if let Some(name) = name {
@@ -269,7 +316,9 @@ impl Senses {
     /// user is typing: input came while the pointer stayed still and no button
     /// is down. Which key never reaches the shell.
     fn pointer<R: Runtime>(&mut self, window: &WebviewWindow<R>, shared: &Shared, point: (f64, f64), tick: u32) {
-        let over = inside(&shared.rects.lock().unwrap_or_else(PoisonError::into_inner), point.0, point.1);
+        // A covering window takes every click: the user is picking a part of the screen.
+        let whole = shared.covering.lock().unwrap_or_else(PoisonError::into_inner).is_some();
+        let over = whole || inside(&shared.rects.lock().unwrap_or_else(PoisonError::into_inner), point.0, point.1);
         let down = crate::platform::mouse_down();
         if down && !self.pressed && !over { let _ = window.emit("companion://outside", ()); }
         let input = desktop::last_input();
@@ -313,6 +362,7 @@ fn watch<R: Runtime>(app: AppHandle<R>, shared: Shared, mine: u64) {
                 crate::platform::keep_on_top(&window);
                 senses.presence(&window);
             }
+            follow_cover(&window, &shared);
             let (Ok(cursor), Ok(origin), Ok(scale)) = (window.cursor_position(), window.inner_position(), window.scale_factor()) else { continue };
             let point = ((cursor.x - f64::from(origin.x)) / scale, (cursor.y - f64::from(origin.y)) / scale);
             senses.pointer(&window, &shared, point, tick);
@@ -335,6 +385,7 @@ fn open<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     if app.get_webview_window(LABEL).is_some() { return Ok(()); }
     let state = app.state::<CompanionState>();
     state.shared.rects.lock().unwrap_or_else(PoisonError::into_inner).clear();
+    *state.shared.covering.lock().unwrap_or_else(PoisonError::into_inner) = None;
     state.shared.hidden.store(false, Ordering::Release);
     let mine = state.shared.generation.fetch_add(1, Ordering::AcqRel) + 1;
     let window = build(app)?;
@@ -441,17 +492,29 @@ pub async fn companion_configure(app: AppHandle, webview: Webview, state: State<
     Ok(())
 }
 
-/// A picture of the screen the companion is on, without the companion: an
-/// 8-byte header (width, height, little-endian u32) then top-down BGRA rows.
+/// A picture of a screen, without the companion: the screen named `monitor`,
+/// the one the companion is on when none is named, or `area` of the window, in
+/// CSS pixels, while the window covers a screen for the user to pick a part
+/// of it. An 8-byte header (width, height, little-endian u32) then top-down
+/// BGRA rows.
 #[tauri::command]
-pub async fn companion_capture(app: AppHandle, webview: Webview) -> Result<tauri::ipc::Response, String> {
+pub async fn companion_capture(app: AppHandle, webview: Webview, monitor: Option<String>, area: Option<HitRect>) -> Result<tauri::ipc::Response, String> {
     only_companion(&webview)?;
     let window = window_of(&app)?;
-    let monitor = match window.current_monitor().map_err(|error| error.to_string())? {
-        Some(monitor) => monitor,
-        None => window.primary_monitor().map_err(|error| error.to_string())?.ok_or("no screen to capture")?,
+    let area = match (area, monitor) {
+        (Some(rect), _) => {
+            let origin = window.inner_position().map_err(|error| error.to_string())?;
+            on_screen(rect, (origin.x, origin.y), window.scale_factor().map_err(|error| error.to_string())?)?
+        }
+        (None, Some(name)) => {
+            let monitors = window.available_monitors().map_err(|error| error.to_string())?;
+            bounds(&monitors.into_iter().find(|monitor| monitor_name(monitor) == name).ok_or_else(|| format!("no screen is named {name:?}"))?)
+        }
+        (None, None) => bounds(&match window.current_monitor().map_err(|error| error.to_string())? {
+            Some(monitor) => monitor,
+            None => window.primary_monitor().map_err(|error| error.to_string())?.ok_or("no screen to capture")?,
+        }),
     };
-    let area = (monitor.position().x, monitor.position().y, monitor.size().width as i32, monitor.size().height as i32);
     let exclude = |excluded: bool| {
         let window = window.clone();
         let _ = app.run_on_main_thread(move || desktop::exclude_from_capture(&window, excluded));
@@ -468,6 +531,27 @@ pub async fn companion_capture(app: AppHandle, webview: Webview) -> Result<tauri
     bytes.extend_from_slice(&height.to_le_bytes());
     bytes.extend_from_slice(&pixels);
     Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// While the user picks a part of a screen to show: the window covers the
+/// screen under the pointer and takes every click, and follows the pointer
+/// to another screen (`follow_cover`). `false` ends it; the page then places
+/// the window again, which gives it back its size.
+#[tauri::command]
+pub async fn companion_cover(app: AppHandle, webview: Webview, state: State<'_, CompanionState>, cover: bool) -> Result<(), String> {
+    only_companion(&webview)?;
+    let mut covering = state.shared.covering.lock().unwrap_or_else(PoisonError::into_inner);
+    if !cover {
+        *covering = None;
+        return Ok(());
+    }
+    let window = window_of(&app)?;
+    let monitor = monitor_under_pointer(&window).map_err(|error| error.to_string())?.ok_or("no screen to cover")?;
+    cover_monitor(&window, &monitor).map_err(|error| error.to_string())?;
+    *covering = Some(monitor_name(&monitor));
+    // The keyboard too, for Escape.
+    let _ = window.set_focus();
+    Ok(())
 }
 
 /// The areas that take clicks, whole, each time the page's layout changes.
@@ -558,5 +642,13 @@ mod tests {
         let area = (-3840, 0, 3840, 2080);
         assert_eq!(spot_at(area, (-1920, 520)), Spot { x: 0.5, y: 0.25 });
         assert_eq!(spot_at(area, (100, -5)), Spot { x: 1.0, y: 0.0 }, "kept inside the area");
+    }
+
+    #[test]
+    fn a_picked_area_is_captured_where_it_is_on_the_screen() {
+        // A window covering a 150% screen left of the primary one.
+        let rect = HitRect { x: 100.0, y: 40.5, w: 200.0, h: 120.0 };
+        assert_eq!(on_screen(rect, (-2560, 0), 1.5), Ok((-2410, 61, 300, 180)));
+        assert!(on_screen(HitRect { x: 10.0, y: 10.0, w: 0.2, h: 50.0 }, (0, 0), 1.0).is_err(), "an empty area");
     }
 }

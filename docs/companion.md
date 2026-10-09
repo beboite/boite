@@ -75,16 +75,24 @@ the window, focuses it and emits `companion://summon`; the page opens its
 panel with the field focused. A shortcut another app holds is refused, and
 the page writes that to `boite.companion.status` for Settings to show.
 
-`companion_capture` takes the screen the companion is on, without it
+`companion_capture` takes a screen, or a part of one, without the companion
 (`SetWindowDisplayAffinity` with `WDA_EXCLUDEFROMCAPTURE` while it copies),
 scaled to 1568 px on the long side, and returns it as raw BGRA bytes behind an
-8-byte size header. The page makes a JPEG of it under the core's attachment
-limit (`screen.ts`).
+8-byte size header. It takes the screen named `monitor`, the window's own
+screen without one, or `area`, a rectangle of the window in CSS pixels. The
+page makes a JPEG of each under the core's attachment limits (`screen.ts`).
+
+`companion_cover` stretches the window over the screen under the pointer,
+taskbar included, while the user picks the part to show; the window then
+takes every click. With no button down, the cover follows the pointer to
+another screen. Uncovering leaves the window where it is: the page places it
+again.
 
 Its capability (`capabilities/companion.json`, `allow-companion-ui`) allows
 reaching the core, placing and dragging itself, its shortcut and full-screen
-option, capturing its screen, reading and controlling media, and bringing the
-main window forward on a thread or on its settings (`companion_show_main`).
+option, capturing and covering the screens, reading and controlling media, and
+bringing the main window forward on a thread or on its settings
+(`companion_show_main`).
 It cannot open or close itself, open browsers, read cookies, save files,
 notify or quit; `acl.rs` tests this.
 
@@ -121,9 +129,15 @@ is added to the core or to the RPC.
   the user's language, gives the Windows recipes (`Start-Process`,
   `Get-StartApps`, Steam's `steam://rungameid/`, Spotify URIs and the media
   keys) and the directives below.
-- Every request starts with the local date and time, and says when the
-  screen is attached. The ask bar attaches it when the eye is on: by itself
+- Every request starts with the local date and time, and says what images
+  come with it. The ask bar sends the screen when the eye is on: by itself
   when the request speaks of the screen (`mentionsScreen`), or by a click.
+  The row under the bar then picks what goes, a choice kept in the
+  preferences: every screen (one image per screen, the primary first), the
+  screen the companion is on, or a part. A part is picked on sending: the
+  window covers the screen under the pointer (`CompanionZone.svelte`), a drag
+  frames the part, a click takes the whole screen, and Escape or a right click
+  cancels with the request kept in the field.
 - How fast an answer starts depends on the core's "Warm process minutes"
   (Advanced): at 0 the agent starts again for every request. The companion
   does not change it; its Settings page says so and links there.
@@ -131,8 +145,9 @@ is added to the core or to the RPC.
 The reply bubble streams the text parts of the agent's messages from
 `message.started`, `message.delta` and `message.part` on the subscribed
 thread; reasoning and tool input are left out. The turn ends when the thread
-leaves `queued`, `running` or `waiting`; the page then reads the turn's
-messages (`messages.list`) for the final text and the directives.
+leaves `queued`, `running` or `waiting`; the page then reads the thread's last
+messages (`threads.get`; `messages.list` needs a cursor) for the final text and
+the directives of every message of the turn.
 
 ## Memory, reminders and directives
 
@@ -153,7 +168,9 @@ secrets are not to be kept, as the role says.
 
 The companion's window checks the reminders every second. One that is due
 shows a card with OK and "In 10 min", the character looks alert and a chime
-rings; a reminder due while the companion was closed rings when it opens.
+rings, twice over; a reminder due while the companion was closed rings when it
+opens. While a card waits, the chime comes back every minute, three times in
+all.
 
 ## Notices
 
@@ -196,10 +213,13 @@ companion. Other systems than Windows report no session.
 ## Checks
 
 - `cargo test --lib` in `apps/shell/src-tauri`: hit test, placement, drop
-  spots, full-screen cover, shortcut parsing and ACL.
+  spots, full-screen cover, picked area on the screen, shortcut parsing and ACL.
 - `packages/ui/src/lib/companion/companion.test.ts`: preferences, mood, brain
   choice, prompt and wording.
 - `packages/ui/src/lib/companion/companion-memory.test.ts`: memory,
   reminders, directives, notices' summary line, layout and screen words.
+- `packages/ui/src/lib/companion/companion-talk.test.ts`, on the fake core: a
+  reply's directives kept, a finished thread's first sentence, a reminder
+  ringing again until answered.
 - Captures: `?view=companion&fake=1` on the dev UI at 440 × 600, and Settings,
   Companion at desktop width.

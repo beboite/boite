@@ -4,7 +4,7 @@
  * is complete, what the reply asks of the companion (`directives.ts`): facts
  * to keep or to forget, reminders to ring.
  */
-import type { ImageAttachment, Message, RpcEvents, ThreadSummary } from '@boite/contracts';
+import type { Message, RpcEvents, ThreadSummary } from '@boite/contracts';
 import type { Client } from '../client';
 import { fill, strings } from '../strings';
 import { COMPANION_THREAD_TITLE, permissionModeOf, pickBrain, promptFor, replyText } from './brain';
@@ -12,6 +12,7 @@ import { parseDirectives, visibleReply, type Directives } from './directives';
 import { addReminder, forget, memoryBlock, readMemory, remember } from './memory';
 import { isWorking } from './mood';
 import { writeCompanionPrefs, type CompanionPrefs } from './prefs';
+import type { ScreenShot } from './screen';
 
 export type Phase = 'none' | 'thinking' | 'streaming' | 'done' | 'error';
 
@@ -129,7 +130,7 @@ export class Talk {
   // -------------------------------------------------------------------------
 
   /** Sends a request, with the screen when given. False when it could not be sent. */
-  async ask(request: string, screen: ImageAttachment | null): Promise<boolean> {
+  async ask(request: string, shot: ScreenShot | null): Promise<boolean> {
     const client = this.host.client();
     if (!request || !client || this.thinking) return false;
     this.problem = '';
@@ -150,8 +151,8 @@ export class Talk {
       await this.subscribe(target.threadId);
       const first = this.isFirst(target);
       this.primed.add(target.threadId);
-      const prompt = promptFor(request, { first, memory: memoryBlock(readMemory()), now: new Date(), screen: screen !== null });
-      await client.call('turns.start', { threadId: target.threadId, prompt, ...(screen ? { attachments: [screen] } : {}) });
+      const prompt = promptFor(request, { first, memory: memoryBlock(readMemory()), now: new Date(), seen: shot?.seen ?? null });
+      await client.call('turns.start', { threadId: target.threadId, prompt, ...(shot ? { attachments: shot.images } : {}) });
       this.sawRunning = true;
       this.follow();
       return true;
@@ -199,7 +200,8 @@ export class Talk {
     this.hold();
     let directives: Directives | null = null;
     try {
-      const { messages } = await this.host.client()!.call('messages.list', { threadId, limit: TAIL, compactTools: true, compactFiles: true, compactImages: true });
+      // `threads.get` hands the thread's last messages; `messages.list` wants a cursor.
+      const { messages } = await this.host.client()!.call('threads.get', { threadId, limit: TAIL, compactTools: true, compactFiles: true, compactImages: true });
       const answer: Message[] = [];
       for (const message of [...messages].reverse()) {
         if (message.role === 'user') break;

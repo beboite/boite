@@ -21,9 +21,9 @@
   import { createMoodTracker, RESTING, type MoodInput, type MoodState } from './lib/companion/mood';
   import { readMedia, pressMedia, type MediaAction, type MediaState } from './lib/companion/media';
   import { writeStatus } from './lib/companion/memory';
-  import { screenAttachment } from './lib/companion/screen';
+  import { captureScreens, captureZone, type ScreenShot } from './lib/companion/screen';
   import { playCue, unlockSounds, type Cue } from './lib/companion/sounds';
-  import { companionHitRects, configureCompanion, dragCompanion, inShell, layoutOf, placeCompanion, showMain, type CompanionLayout, type HitRect } from './lib/companion/shell';
+  import { companionHitRects, companionMonitors, configureCompanion, coverScreen, dragCompanion, inShell, layoutOf, placeCompanion, showMain, type CompanionLayout, type HitRect } from './lib/companion/shell';
   import { Talk } from './lib/companion/talk.svelte';
   import { Notes } from './lib/companion/notes.svelte';
   import { Senses } from './lib/companion/senses.svelte';
@@ -31,6 +31,7 @@
   import CompanionPanel, { type PanelAction } from './components/companion/CompanionPanel.svelte';
   import CompanionAsk from './components/companion/CompanionAsk.svelte';
   import CompanionNotes from './components/companion/CompanionNotes.svelte';
+  import CompanionZone from './components/companion/CompanionZone.svelte';
   import MediaPill from './components/companion/MediaPill.svelte';
 
   const CELEBRATE_MS = 6000;
@@ -59,6 +60,10 @@
   let character = $state<HTMLButtonElement | null>(null);
   let layout = $state<CompanionLayout>(layoutOf(initial.anchor, initial.spot));
   let dragging = $state(false);
+  /** The window covers a screen while the user picks what to show. */
+  let picking = $state(false);
+  let pickDone: ((area: HitRect | null) => void) | null = null;
+  let screens = $state(1);
 
   let client: Client | null = null;
   let reachable = $state(true);
@@ -197,16 +202,40 @@
     if (!request || sending || talk.thinking) return;
     sending = true;
     try {
-      let screen: ImageAttachment | null = null;
+      let shot: ScreenShot | null = null;
       if (withScreen) {
-        screen = await screenAttachment().catch(() => null);
-        if (!screen) return talk.fail(strings.companion.screenFailed);
+        if (prefs.screenScope === 'zone') {
+          const picked = await pickZone().catch(() => null);
+          // Cancelled: the request waits in the field.
+          if (picked === 'cancelled') return void input?.focus();
+          shot = picked;
+        } else shot = await captureScreens(prefs.screenScope).catch(() => null);
+        if (!shot) return talk.fail(strings.companion.screenFailed);
       }
       draft = '';
       // A request that could not go comes back to the field, to try again.
-      if (!(await talk.ask(request, screen)) && draft === '') draft = request;
+      if (!(await talk.ask(request, shot)) && draft === '') draft = request;
     } finally {
       sending = false;
+    }
+  }
+
+  /**
+   * The window covers the screen under the pointer and the user drags over
+   * what to show (`CompanionZone`). Afterwards the placement effect puts the
+   * window back where it was.
+   */
+  async function pickZone(): Promise<ScreenShot | null | 'cancelled'> {
+    picking = true;
+    try {
+      await coverScreen(true);
+      const area = await new Promise<HitRect | null>((resolve) => (pickDone = resolve));
+      return area ? await captureZone(area) : 'cancelled';
+    } finally {
+      pickDone = null;
+      // Uncovered before placed: the shell would carry the cover along otherwise.
+      await coverScreen(false).catch(() => {});
+      picking = false;
     }
   }
 
@@ -310,14 +339,24 @@
   }
 
   $effect(() => {
-    void [open, talk.shown, talk.phase, media, notes.notices, notes.alarms, mood.blocking, layout];
+    void [open, talk.shown, talk.phase, media, notes.notices, notes.alarms, mood.blocking, layout, picking];
     void tick().then(() => requestAnimationFrame(sendRects));
   });
 
+  // Covering a screen, the window stays put; uncovered, it goes back to its place.
   $effect(() => {
     const [monitor, anchor, spot] = [prefs.monitor, prefs.anchor, prefs.spot];
+    if (picking) return;
     void placeCompanion(monitor, anchor, spot)
       .then((next) => (layout = next))
+      .catch(() => {});
+  });
+
+  // How many screens there are, for the choice of what the companion sees.
+  $effect(() => {
+    if (!open || !inShell()) return;
+    void companionMonitors()
+      .then((list) => (screens = list.length))
       .catch(() => {});
   });
 
@@ -413,14 +452,15 @@
 
   function onkeydown(event: KeyboardEvent) {
     if (event.key !== 'Escape') return;
-    if (open) close();
+    if (picking) pickDone?.(null);
+    else if (open) close();
     else talk.hide();
   }
 </script>
 
 <svelte:window {onkeydown} />
 
-<main class="stage" data-align={layout.align} data-edge={layout.edge} data-testid="companion">
+<main class="stage" class:picking data-align={layout.align} data-edge={layout.edge} data-testid="companion">
   <div class="column">
     <button
       bind:this={character}
@@ -467,7 +507,10 @@
           bind:input
           thinking={talk.thinking || sending}
           canSee={inShell()}
+          {screens}
+          scope={prefs.screenScope}
           onask={(screen) => void ask(screen)}
+          onscope={(screenScope) => writeCompanionPrefs({ screenScope })}
           onstop={() => void talk.stop()}
           onsettings={() => void showMain(null)}
         />
@@ -475,6 +518,10 @@
       </section>
     {/if}
   </div>
+
+  {#if picking}
+    <CompanionZone {screens} onpick={(area) => pickDone?.(area)} oncancel={() => pickDone?.(null)} />
+  {/if}
 </main>
 
 <style>
@@ -511,6 +558,10 @@
     justify-content: flex-end;
     padding: 6px 16px 12px;
   }
+  /* The companion steps aside while the user picks what to show it. */
+  .stage.picking .column {
+    visibility: hidden;
+  }
   .stage :global(input) {
     font-size: var(--text-sm);
   }
@@ -541,6 +592,12 @@
     background: none;
     cursor: pointer;
     touch-action: none;
+    /* Air between the character and what it shows, on the side it shows it. */
+    margin-bottom: 10px;
+  }
+  .stage[data-edge='bottom'] .character {
+    margin-top: 10px;
+    margin-bottom: 0;
   }
   .character.dragging {
     cursor: grabbing;

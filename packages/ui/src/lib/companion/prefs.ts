@@ -15,6 +15,8 @@
 export type CompanionAnchor = 'left' | 'center' | 'right' | 'free';
 /** `ask`: every action waits for Allow or Deny. `auto`: the agent acts without asking. */
 export type CompanionControl = 'ask' | 'auto';
+/** What the eye shows: every screen, the one the companion is on, or a part the user picks each time. */
+export type CompanionScreenScope = 'all' | 'here' | 'zone';
 /** The character's centre, in fractions of the screen's work area. */
 export interface CompanionSpot { x: number; y: number }
 
@@ -43,6 +45,7 @@ export interface CompanionPrefs {
   music: boolean;
   /** A click anywhere but on the companion closes its panel. */
   closeOutside: boolean;
+  screenScope: CompanionScreenScope;
   threadId: string | null;
 }
 
@@ -62,6 +65,7 @@ export const DEFAULT_COMPANION_PREFS: CompanionPrefs = {
   control: 'ask',
   music: true,
   closeOutside: true,
+  screenScope: 'all',
   threadId: null
 };
 
@@ -98,6 +102,7 @@ export function parseCompanionPrefs(raw: unknown): CompanionPrefs {
     control: value.control === 'auto' ? 'auto' : 'ask',
     music: value.music !== false,
     closeOutside: value.closeOutside !== false,
+    screenScope: value.screenScope === 'here' || value.screenScope === 'zone' ? value.screenScope : 'all',
     threadId: text(value.threadId)
   };
 }

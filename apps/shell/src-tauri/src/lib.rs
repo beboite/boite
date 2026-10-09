@@ -178,6 +178,7 @@ pub fn run() {
             companion_window::companion_configure,
             companion_window::companion_drag,
             companion_window::companion_capture,
+            companion_window::companion_cover,
             material::window_material,
             material::window_material_supported,
             tray::tray_labels,

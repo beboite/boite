@@ -35,6 +35,11 @@ const SNOOZE_MS = 10 * 60_000;
 const MAX_NOTICES = 3;
 /** The mood tracker reports a finished thread for a few seconds: one notice for it. */
 const SAME_FINISH_MS = 30_000;
+/** Enough messages to reach back past a few tool calls to the answer's text. */
+const TAIL = 12;
+/** An alarm nobody answers rings again, a few times. */
+const RING_AGAIN_MS = 60_000;
+const RINGS = 3;
 
 export class Notes {
   notices = $state<Notice[]>([]);
@@ -42,6 +47,9 @@ export class Notes {
   private readonly noticed = new Map<string, number>();
   /** The last time the notices were held in view. */
   private heldAt = 0;
+  /** When the alarms last rang, and how many times. */
+  private rungAt = 0;
+  private rings = 0;
   private readonly timer: ReturnType<typeof setInterval>;
 
   constructor(private readonly host: NotesHost) {
@@ -72,9 +80,15 @@ export class Notes {
     const client = this.host.client();
     if (!client) return;
     try {
-      const { messages } = await client.call('messages.list', { threadId, limit: 4, compactTools: true, compactFiles: true, compactImages: true });
-      const last = [...messages].reverse().find((message) => message.role === 'assistant');
-      const line = last ? summaryLine(replyText(last)) : '';
+      // `threads.get` hands the thread's last messages; `messages.list` wants a cursor.
+      const { messages } = await client.call('threads.get', { threadId, limit: TAIL, compactTools: true, compactFiles: true, compactImages: true });
+      // The answer's last words, back to the request: its final message may be only tool calls.
+      let line = '';
+      for (const message of [...messages].reverse()) {
+        if (message.role === 'user') break;
+        if (message.role === 'assistant') line = summaryLine(replyText(message));
+        if (line) break;
+      }
       if (line) this.notices = this.notices.map((notice) => (notice.id === id ? { ...notice, line } : notice));
     } catch {
       /* the title alone says it */
@@ -101,9 +115,17 @@ export class Notes {
     const gone = (notice: Notice) => now - Math.max(notice.at, this.heldAt) > NOTICE_MS;
     if (this.notices.some(gone)) this.notices = this.notices.filter((notice) => !gone(notice));
     const due = takeDueReminders(now);
-    if (due.length === 0) return;
-    this.alarms = [...this.alarms, ...due];
-    this.host.rang(due);
+    if (due.length > 0) {
+      this.alarms = [...this.alarms, ...due];
+      this.rungAt = now;
+      this.rings = 1;
+      this.host.rang(due);
+    } else if (this.alarms.length > 0 && this.rings < RINGS && now - this.rungAt >= RING_AGAIN_MS) {
+      // Nobody answered: the user may have been away from the screen.
+      this.rungAt = now;
+      this.rings++;
+      this.host.rang([]);
+    }
   }
 
   dispose(): void {

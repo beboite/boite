@@ -1,28 +1,42 @@
 <!--
   The companion's ask bar: the request, whether the screen goes with it, send
   or stop, and the way to its settings. The screen is offered when the request
-  speaks of it (`mentionsScreen`); a click on the eye decides instead.
+  speaks of it (`mentionsScreen`); a click on the eye decides instead. While it
+  goes, a row under the bar says what it shows: every screen, the one the
+  companion is on, or a part the user picks on sending.
 -->
 <script lang="ts">
   import { ArrowUp, ScanEye, Settings, Square } from '@lucide/svelte';
   import { strings } from '../../lib/strings';
-  import { mentionsScreen } from '../../lib/companion/screen';
+  import { mentionsScreen, type ScreenScope } from '../../lib/companion/screen';
 
   interface Props {
     draft: string;
     thinking: boolean;
     /** The screen can go with a request: in the desktop shell only. */
     canSee: boolean;
+    /** How many screens there are: with one, it is every screen. */
+    screens: number;
+    scope: ScreenScope;
     input?: HTMLInputElement | null;
     onask: (screen: boolean) => void;
+    onscope: (scope: ScreenScope) => void;
     onstop: () => void;
     onsettings: () => void;
   }
 
-  let { draft = $bindable(), thinking, canSee, input = $bindable(null), onask, onstop, onsettings }: Props = $props();
+  let { draft = $bindable(), thinking, canSee, screens, scope, input = $bindable(null), onask, onscope, onstop, onsettings }: Props = $props();
 
   let choice = $state<boolean | null>(null);
   const screen = $derived(canSee && (choice ?? mentionsScreen(draft)));
+
+  const scopes = $derived([
+    ...(screens > 1 ? [{ id: 'all' as const, label: strings.companion.screenAll, title: strings.companion.screenAll }] : []),
+    { id: 'here' as const, label: strings.companion.screenHere, title: strings.companion.screenHere },
+    { id: 'zone' as const, label: strings.companion.screenZone, title: strings.companion.screenZoneTitle }
+  ]);
+  /** With one screen, every screen is this one. */
+  const shown = $derived(scope === 'all' && screens <= 1 ? 'here' : scope);
 
   function submit(event: SubmitEvent) {
     event.preventDefault();
@@ -54,6 +68,16 @@
   <button type="button" class="ghost icon" aria-label={strings.companion.openSettings} title={strings.companion.openSettings} onclick={onsettings}><Settings size={15} /></button>
 </form>
 
+{#if screen}
+  <div class="scopes" role="radiogroup" aria-label={strings.companion.screenScope} data-testid="companion-screen-scope">
+    {#each scopes as option (option.id)}
+      <button type="button" class="chip" class:on={shown === option.id} role="radio" aria-checked={shown === option.id} title={option.title} onclick={() => onscope(option.id)}>
+        {option.label}
+      </button>
+    {/each}
+  </div>
+{/if}
+
 <style>
   .askbar {
     display: flex;
@@ -72,5 +96,31 @@
   .eye.on {
     color: var(--color-accent);
     background: var(--color-accent-soft);
+  }
+  .scopes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px;
+    border-bottom: 1px solid var(--color-border);
+    animation: unfold var(--dur-2) var(--ease-out-quint);
+  }
+  .scopes .chip {
+    cursor: pointer;
+  }
+  .scopes .chip.on {
+    border-color: var(--color-accent);
+    background: var(--color-accent-soft);
+    color: var(--color-accent);
+  }
+  .scopes .chip:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 1px;
+  }
+
+  @keyframes unfold {
+    from {
+      opacity: 0;
+    }
   }
 </style>

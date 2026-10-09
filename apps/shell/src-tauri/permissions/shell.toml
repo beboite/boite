@@ -30,6 +30,7 @@ commands.allow = [
   "companion_configure",
   "companion_drag",
   "companion_capture",
+  "companion_cover",
   "window_material",
   "window_material_supported",
   "tray_labels",
@@ -69,4 +70,5 @@ commands.allow = [
   "companion_configure",
   "companion_drag",
   "companion_capture",
+  "companion_cover",
 ]

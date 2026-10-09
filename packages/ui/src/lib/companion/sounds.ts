@@ -11,9 +11,13 @@ const NOTES: Record<Cue, [number, number, number][]> = {
   open: [[660, 0, 0.09], [990, 0.06, 0.14]],
   done: [[784, 0, 0.14], [1175, 0.11, 0.26]],
   call: [[880, 0, 0.11], [1109, 0.15, 0.11], [880, 0.3, 0.16]],
-  remind: [[1047, 0, 0.2], [1319, 0.2, 0.2], [1568, 0.4, 0.36]],
+  // A reminder is asked for, and may ring while the user looks elsewhere: twice over.
+  remind: [[1047, 0, 0.2], [1319, 0.2, 0.2], [1568, 0.4, 0.36], [1047, 1.1, 0.2], [1319, 1.3, 0.2], [1568, 1.5, 0.5]],
   error: [[392, 0, 0.16], [311, 0.13, 0.3]]
 };
+
+/** Peak gain: soft cues for what the user is watching, a louder one for a reminder. */
+const VOLUME: Record<Cue, number> = { open: 0.05, done: 0.05, call: 0.06, remind: 0.16, error: 0.05 };
 
 let context: AudioContext | null = null;
 
@@ -30,7 +34,7 @@ export function unlockSounds(): void {
   }
 }
 
-export function playCue(cue: Cue, volume = 0.05): void {
+export function playCue(cue: Cue, volume = VOLUME[cue]): void {
   try {
     context ??= new AudioContext();
     if (context.state === 'suspended') void context.resume();
