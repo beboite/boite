@@ -90,10 +90,10 @@ test('thread metadata, message identity and expandable trace fit a narrow panel'
   await page.click(id('panel-toggle'));
 });
 
-test('paragraphs arrive whole, keep previous nodes and flush when stopped; reasoning steps keep their place and duration', async () => {
+test('live paragraphs stay visible and preserve completed nodes; reasoning steps keep their place and duration', async () => {
   await update(`const turn = thread.turns[0]; turn.status = 'running'; turn.usage = null; turn.finishedAt = null; turn.startedAt = Date.now(); thread.status = 'running'; thread.memoryEvents = []; const m = thread.messages.at(-1); m.state = 'streaming'; m.parts = [{type:'thinking',text:'**Inspecting files**',startedAt:Date.now()-7000,finishedAt:Date.now()-3000}, {type:'text',text:'First complete paragraph.\\n\\nAn unfinished'}];`);
   await page.waitFor(`document.querySelector('${id('paragraph')}')?.textContent.includes('First complete paragraph.')`);
-  expect(await page.evaluate(`document.querySelector('${id('timeline')}').textContent.includes('An unfinished')`)).toBe(false);
+  expect(await page.text(id('paragraph-pending'))).toBe('An unfinished');
   await page.evaluate(`window.__firstParagraph = document.querySelector('${id('paragraph')}')`);
   await update(`thread.messages.at(-1).parts[1].text += ' paragraph.\\n\\n'; thread.messages.at(-1).parts.push({type:'thinking',text:'**Checking results**',startedAt:Date.now()-2000,finishedAt:null});`);
   await page.waitFor(`document.querySelectorAll('${id('paragraph')}').length === 2`);
@@ -111,9 +111,10 @@ test('paragraphs arrive whole, keep previous nodes and flush when stopped; reaso
   await page.send('Emulation.setDeviceMetricsOverride',{width:1300,height:850,deviceScaleFactor:1,mobile:false});
   await update(`thread.messages.at(-1).parts.push({type:'text',text:'Last partial paragraph'});`);
   await page.waitFor(`document.querySelector('${id('turn-summary')}').dataset.status === 'running'`);
-  expect(await page.evaluate(`document.querySelector('${id('timeline')}').textContent.includes('Last partial paragraph')`)).toBe(false);
+  expect(await page.text(id('paragraph-pending'))).toBe('Last partial paragraph');
   await update(`thread.turns[0].status = 'stopped'; thread.turns[0].finishedAt = Date.now(); thread.messages.at(-1).state = 'complete'; thread.status = 'idle';`);
-  await page.waitFor(`document.querySelector('${id('timeline')}').textContent.includes('Last partial paragraph')`);
+  await page.waitFor(`!document.querySelector('${id('paragraph-pending')}') && document.querySelectorAll('${id('paragraph')}').length === 3`);
+  expect(await page.evaluate(`document.querySelectorAll('${id('paragraph')}')[2].textContent`)).toBe('Last partial paragraph');
   expect(await page.evaluate(`document.querySelector('${id('turn-summary')}').getAttribute('aria-label')`)).toBe('Stopped');
 });
 

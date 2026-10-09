@@ -22,7 +22,7 @@ beforeAll(async () => {
 }, 90000);
 afterAll(async () => { await page?.close(); await server?.close(); }, 15000);
 
-test('commands stay folded and parallel activity cannot reveal an unfinished paragraph', async () => {
+test('commands stay folded while live text remains visible during parallel activity', async () => {
   await update(`
     thread.memoryEvents = []; thread.status = 'running';
     thread.turns[0].status = 'running'; thread.turns[0].finishedAt = null;
@@ -35,20 +35,24 @@ test('commands stay folded and parallel activity cannot reveal an unfinished par
   `);
   // The call and the reasoning after it are one folded line that names the running call.
   await page.waitFor(`document.querySelector('${id('tool-group')}[data-live=true]')`);
+  await page.evaluate(`window.__deliveryParagraph = document.querySelector('${id('paragraph')}')`);
   for (const width of [1300, 390]) {
     await page.send('Emulation.setDeviceMetricsOverride', { width, height: 850, deviceScaleFactor: 1, mobile: width < 720 });
     expect(await page.evaluate(`document.querySelector('${id('tool-group-toggle')}').getAttribute('aria-expanded')`)).toBe('false');
     expect(await page.evaluate(`document.querySelector('${id('tool-input')}') === null`)).toBe(true);
     expect(await page.text(id('tool-group-label'))).toBe('Running a command');
-    expect(await page.evaluate(`document.querySelector('${id('timeline')}').textContent.includes('unfinished')`)).toBe(false);
+    expect(await page.text(id('paragraph-pending'))).toBe('This paragraph is unfinished');
+    expect(await page.evaluate(`document.querySelector('${id('typing-indicator')}') === null`)).toBe(true);
     await capture(`chat-delivery-stream-${width < 720 ? 'phone' : 'desktop'}`);
     expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
   }
   await update(`thread.messages.at(-1).parts[1].inputText += 't status --short'; thread.messages.at(-1).parts[0].text += ' and still growing';`);
   expect(await page.text(id('tool-group-label'))).toBe('Running a command');
-  expect(await page.evaluate(`document.querySelector('${id('timeline')}').textContent.includes('unfinished')`)).toBe(false);
+  expect(await page.text(id('paragraph-pending'))).toBe('This paragraph is unfinished and still growing');
+  expect(await page.evaluate(`document.querySelector('${id('paragraph')}') === window.__deliveryParagraph`)).toBe(true);
   await update(`const message = thread.messages.at(-1); message.parts[0].text += '.\\n\\n'; message.parts[1].inputText = null; message.parts[1].input = {command:'git status --short'}; message.parts[1].status = 'done'; message.state = 'complete'; thread.status = 'idle'; thread.turns[0].status = 'done';`);
   await page.waitFor(`document.querySelectorAll('${id('paragraph')}').length === 2`);
+  expect(await page.evaluate(`document.querySelector('${id('paragraph-pending')}') === null`)).toBe(true);
   expect(await page.text(id('tool-group-label'))).toBe('Ran 1 command');
 });
 
