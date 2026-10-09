@@ -137,12 +137,12 @@
 
 <style>
   /* The frame's padding leaves room for the glow without moving the scene off the text column. */
-  figure { position: relative; margin: 12px -10px 4px; padding: 10px; border-radius: calc(var(--radius-lg) + 6px); container-type: inline-size; }
+  figure { position: relative; margin: 8px -10px 0; padding: 8px 10px 4px; border-radius: calc(var(--radius-lg) + 6px); container-type: inline-size; }
   /* An inner accent glow while the scene plays, so it reads as an animation and not a picture. */
   figure::after { content: ''; position: absolute; inset: 0; z-index: 3; border-radius: inherit; pointer-events: none; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 55%, transparent), inset 0 0 22px color-mix(in srgb, var(--color-accent) 30%, transparent); opacity: 0; transition: opacity var(--dur-3) var(--ease-out-quint); }
   figure.playing::after { opacity: 1; animation: glow calc(var(--dur-3) * 8) ease-in-out infinite alternate; }
   /* Reserve a small row for playback so controls never cover the illustration. */
-  .controls { position: relative; z-index: 2; display: flex; align-items: center; justify-content: flex-end; gap: 2px; height: 28px; margin-top: 4px; opacity: 0; transform: translateY(-3px); transition: opacity var(--dur-2) var(--ease-out-quint), transform var(--dur-2) var(--ease-out-quint); }
+  .controls { position: relative; z-index: 2; display: flex; align-items: center; justify-content: flex-end; gap: 2px; height: 28px; margin-top: 2px; opacity: 0; transform: translateY(-3px); transition: opacity var(--dur-2) var(--ease-out-quint), transform var(--dur-2) var(--ease-out-quint); }
   .controls button { width: 28px; height: 28px; color: var(--color-muted-foreground); }
   .controls button:hover { color: var(--color-foreground); }
   figure:hover .controls, figure:focus-within .controls, figure.paused .controls { opacity: 1; transform: none; }
@@ -154,21 +154,21 @@
   .stage :global(svg) { flex: none; }
   .stage p { margin: 0; }
   .mini-app { background: var(--color-surface-2); border: 1px solid var(--color-edge); border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-e1); }
-  .chrome { display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 8px 14px; border-bottom: 1px solid var(--color-border); color: var(--color-muted-foreground); }
+  .chrome { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 5px 12px; border-bottom: 1px solid var(--color-border); color: var(--color-muted-foreground); }
   .chrome-end { margin-left: auto; display: flex; }
   .author { display: inline-flex; align-items: center; gap: 7px; font-weight: 500; }
-  .conversation { display: grid; gap: 14px; padding: 16px 18px 10px; }
-  .message p { margin-top: 5px; }
-  .user { justify-self: end; background: var(--color-active); border-radius: var(--radius-lg) var(--radius-lg) var(--radius-sm) var(--radius-lg); padding: 9px 12px; max-width: 88%; }
+  .conversation { display: grid; gap: 6px; padding: 8px 14px 0; }
+  .message p { margin-top: 2px; }
+  .user { justify-self: end; background: var(--color-active); border-radius: var(--radius-lg) var(--radius-lg) var(--radius-sm) var(--radius-lg); padding: 5px 10px; max-width: 88%; }
   .assistant { padding-left: 3px; }
   .sent-prompt { animation: second var(--demo-duration) both; }
   .handoff-result { animation: later var(--demo-duration) both; }
   .agent-draft { position: relative; }
   .agent-draft > span:first-child { animation: first var(--demo-duration) both; }
   .agent-draft > span:last-child { position: absolute; inset: 0; color: var(--color-muted-foreground); animation: second var(--demo-duration) both; }
-  .composer { margin: 12px; padding: 12px; background: var(--color-surface-3); border: 1px solid var(--color-edge); border-radius: var(--radius-lg); box-shadow: var(--shadow-e1); }
-  .composer-tools { margin-top: 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-  .agent-chip { position: relative; display: flex; align-items: center; gap: 7px; padding: 5px 8px; border: 1px solid var(--color-edge); border-radius: var(--radius-md); }
+  .composer { margin: 8px; padding: 8px 10px; background: var(--color-surface-3); border: 1px solid var(--color-edge); border-radius: var(--radius-lg); box-shadow: var(--shadow-e1); }
+  .composer-tools { margin-top: 8px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .agent-chip { position: relative; display: flex; align-items: center; gap: 7px; padding: 3px 8px; border: 1px solid var(--color-edge); border-radius: var(--radius-md); }
   .agent-old, .agent-new { display: flex; }
   .agent-old { animation: first var(--demo-duration) both; }
   .agent-new { position: absolute; left: 8px; animation: second var(--demo-duration) both; }
@@ -179,24 +179,24 @@
   .pointer { position: absolute; width: 23px; height: 27px; z-index: 2; overflow: visible; pointer-events: none; }
   .pointer path { fill: var(--color-foreground); stroke: var(--color-background); stroke-width: 1.5; }
   .agent-pointer { left: 80%; top: 70%; animation: agent-point var(--demo-duration) both; }
-  .scene-outcome { display: flex; justify-content: center; align-items: center; gap: 7px; position: relative; margin-top: 12px; min-height: 24px; font-weight: 500; }
+  .scene-outcome { display: flex; justify-content: center; align-items: center; gap: 7px; position: relative; margin-top: 4px; min-height: 22px; font-weight: 500; }
   .scene-outcome :global(svg) { color: var(--color-accent); }
   .before-handoff, .after-handoff { display: flex; align-items: center; gap: 7px; }
   .before-handoff { animation: first var(--demo-duration) both; }
   .after-handoff { position: absolute; animation: second var(--demo-duration) both; }
-  .voice-sequence { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
+  .voice-sequence { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 8px; }
   .voice-sequence > span { display: flex; align-items: center; gap: 7px; line-height: 1.35; }
   .voice-sequence b { flex: none; display: grid; place-items: center; width: 22px; height: 22px; border: 1px solid var(--color-edge); border-radius: 50%; font-size: var(--text-xs); color: var(--color-accent); }
-  .recording-area { position: relative; padding: 18px 24px 4px; }
+  .recording-area { position: relative; padding: 8px 24px 0; }
   .recording-live, .recording-done { display: flex; gap: 7px; align-items: center; justify-content: center; }
   .recording-live { animation: first var(--demo-duration) both; color: var(--color-accent); }
-  .recording-done { position: absolute; inset: 18px 0 auto; animation: second var(--demo-duration) both; color: var(--color-success); }
+  .recording-done { position: absolute; inset: 8px 0 auto; animation: second var(--demo-duration) both; color: var(--color-success); }
   .record-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
-  .waveform { width: 100%; height: 68px; margin-top: 10px; overflow: visible; }
+  .waveform { width: 100%; height: 44px; margin-top: 4px; overflow: visible; }
   .waveform rect { fill: var(--color-accent); transform-box: fill-box; transform-origin: center; animation: waveform calc(var(--dur-3) * 3) 5 alternate both; animation-delay: var(--beat); }
   .wave-axis { stroke: var(--color-edge); stroke-width: 1; }
   .draft-label { font-size: var(--text-xs); color: var(--color-muted-foreground); }
-  .transcript { min-height: 44px; padding-top: 8px; font-size: var(--text-base); }
+  .transcript { min-height: 24px; padding-top: 2px; font-size: var(--text-base); }
   .transcript > span:not(.caret) { animation: word var(--demo-duration) both; animation-delay: calc(var(--word) * var(--dur-2)); }
   .caret { display: inline-block; vertical-align: middle; margin-left: 3px; height: 1.1em; border-left: 2px solid var(--color-accent); }
   .local { display: inline-flex; align-items: center; gap: 5px; color: var(--color-muted-foreground); }
@@ -204,23 +204,23 @@
   .mic-target { position: relative; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; color: var(--color-accent); background: var(--color-accent-soft); animation: mic-active var(--demo-duration) both; }
   .mic-pointer { left: 20px; top: 22px; animation: tap var(--demo-duration) both; }
   .voice-send { animation: later var(--demo-duration) both; }
-  .split-view { display: grid; grid-template-columns: .85fr 1.15fr; min-height: 270px; }
-  .chat-side { padding: 14px 12px; display: flex; flex-direction: column; gap: 22px; }
-  .file-chip { display: flex; align-items: center; gap: 5px; margin-top: 16px; color: var(--color-muted-foreground); font-size: var(--text-xs); word-break: break-all; }
+  .split-view { display: grid; grid-template-columns: .85fr 1.15fr; }
+  .chat-side { padding: 10px 12px; display: flex; flex-direction: column; gap: 12px; }
+  .file-chip { display: flex; align-items: center; gap: 5px; margin-top: 10px; color: var(--color-muted-foreground); font-size: var(--text-xs); word-break: break-all; }
   .diff-side { border-left: 1px solid var(--color-edge); background: var(--color-surface); animation: early var(--demo-duration) both; }
-  .diff-title { display: flex; align-items: center; gap: 5px; padding: 12px; border-bottom: 1px solid var(--color-border); }
+  .diff-title { display: flex; align-items: center; gap: 5px; padding: 8px 12px; border-bottom: 1px solid var(--color-border); }
   .diff-title > span { margin-left: auto; color: var(--color-success); font-size: var(--text-xs); white-space: nowrap; }
-  .file-name { padding: 8px 12px; color: var(--color-muted-foreground); font-size: var(--text-xs); }
+  .file-name { padding: 4px 12px; color: var(--color-muted-foreground); font-size: var(--text-xs); }
   .code-diff { font-family: var(--font-mono); font-size: var(--text-xs); }
   .removed { background: color-mix(in srgb, var(--color-danger) 12%, transparent); color: var(--color-danger); padding: 4px 12px; }
   .added { background: color-mix(in srgb, var(--color-success) 12%, transparent); color: var(--color-success); padding: 4px 12px; }
-  .preview { padding: 10px 12px 14px; display: grid; gap: 5px; }
+  .preview { padding: 8px 12px 10px; display: grid; gap: 4px; }
   .preview > span { color: var(--color-muted-foreground); font-size: var(--text-xs); }
   .old-button { justify-self: start; font-size: var(--text-xs); border: 1px solid var(--color-edge); padding: 3px 9px; border-radius: var(--radius-sm); color: var(--color-muted-foreground); }
-  .new-button { display: flex; justify-content: center; align-items: center; gap: 7px; background: var(--color-foreground); color: var(--color-surface); border-radius: var(--radius-md); padding: 8px; font-weight: 500; }
-  .desktop-space { position: relative; min-height: 288px; padding: 16px 0 52px; border: 1px solid var(--color-edge); border-radius: var(--radius-lg); background: var(--color-surface-2); overflow: hidden; }
-  .quota-popup { width: min(290px, calc(100% - 32px)); margin: 0 18px 0 auto; padding: 18px; border: 1px solid var(--color-edge); border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: var(--shadow-e2); animation: pop var(--demo-duration) both; }
-  .quota-title { display: flex; align-items: center; gap: 9px; margin-bottom: 18px; }
+  .new-button { display: flex; justify-content: center; align-items: center; gap: 7px; background: var(--color-foreground); color: var(--color-surface); border-radius: var(--radius-md); padding: 5px 8px; font-weight: 500; }
+  .desktop-space { position: relative; padding: 14px 0 52px; border: 1px solid var(--color-edge); border-radius: var(--radius-lg); background: var(--color-surface-2); overflow: hidden; }
+  .quota-popup { width: min(290px, calc(100% - 32px)); margin: 0 18px 0 auto; padding: 14px 16px; border: 1px solid var(--color-edge); border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: var(--shadow-e2); animation: pop var(--demo-duration) both; }
+  .quota-title { display: flex; align-items: center; gap: 9px; margin-bottom: 12px; }
   .quota-value { display: flex; justify-content: space-between; gap: 8px; }
   .quota-track { height: 8px; background: var(--color-surface-3); border-radius: 8px; margin: 10px 0; overflow: hidden; }
   .quota-track span { display: block; width: 24%; height: 100%; background: var(--color-success); border-radius: inherit; animation: meter var(--demo-duration) both; }
@@ -232,9 +232,9 @@
   .tray-target { position: relative; display: flex; padding: 6px; border-radius: var(--radius-sm); background: var(--color-accent-soft); color: var(--color-accent); }
   .tray-pointer { top: 17px; left: 16px; animation: hover var(--demo-duration) both; }
   .clock { font-variant-numeric: tabular-nums; }
-  .tray-instruction { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin: 14px 85px 0 12px; color: var(--color-muted-foreground); }
+  .tray-instruction { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin: 10px 85px 0 12px; color: var(--color-muted-foreground); }
   .tasks { margin: 0; padding: 0; list-style: none; border: 1px solid var(--color-edge); border-radius: var(--radius-lg); background: var(--color-surface-2); }
-  .task { --delay: calc(var(--order) * var(--dur-3) * 2); display: flex; align-items: center; gap: 11px; padding: 11px 14px; }
+  .task { --delay: calc(var(--order) * var(--dur-3) * 2); display: flex; align-items: center; gap: 11px; padding: 9px 14px; }
   .task + .task { border-top: 1px solid var(--color-border); }
   .task strong { flex: 1; min-width: 0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .task-state { display: grid; justify-items: end; color: var(--color-muted-foreground); }
@@ -245,8 +245,8 @@
   .computer, .phone-side { display: grid; justify-items: center; gap: 0; }
   .device-label { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: var(--text-xs); color: var(--color-muted-foreground); }
   .monitor, .phone { display: flex; flex-direction: column; gap: 9px; padding: 14px; border: 2px solid var(--color-edge); background: var(--color-surface-2); }
-  .monitor { width: 216px; height: 136px; border-radius: var(--radius-md); }
-  .phone { width: 92px; height: 164px; padding: 22px 10px 10px; border-radius: 18px; }
+  .monitor { width: 200px; height: 120px; border-radius: var(--radius-md); }
+  .phone { width: 84px; height: 146px; padding: 18px 10px 10px; border-radius: 18px; }
   .stand { width: 48px; height: 12px; border-bottom: 3px solid var(--color-edge); background: linear-gradient(90deg, transparent 42%, var(--color-edge) 42%, var(--color-edge) 58%, transparent 58%); }
   .line { display: block; height: 9px; border-radius: 9px; background: var(--color-edge); }
   .user-line { align-self: flex-end; width: 58%; background: var(--color-active); }
@@ -258,13 +258,13 @@
   .phone > * { animation-name: mirror; } .phone > .reply { animation-name: mirror-2; } .phone > .done { animation-name: mirror-3; }
   .sync-link { position: relative; align-self: center; width: 44px; height: 2px; margin-bottom: 40px; background: repeating-linear-gradient(90deg, var(--color-edge) 0 5px, transparent 5px 9px); }
   .sync-link span { position: absolute; top: -3px; left: 0; width: 8px; height: 8px; border-radius: 50%; background: var(--color-accent); animation: sync var(--demo-duration) both; }
-  .quiet-desktop { position: relative; padding: 0 0 42px; }
-  .background-agent { display: flex; align-items: center; gap: 8px; margin: 0 16px -9px; padding: 9px 12px 16px; background: var(--color-surface-3); border: 1px solid var(--color-border); border-radius: var(--radius-lg) var(--radius-lg) 0 0; color: var(--color-muted-foreground); }
-  .notes { position: relative; border: 1px solid var(--color-edge); background: var(--color-surface-2); border-radius: var(--radius-lg); overflow: hidden; padding-bottom: 18px; box-shadow: var(--shadow-e1); }
-  .notes > strong { display: block; padding: 14px 16px 8px; }
-  .notes > p { display: flex; align-items: center; gap: 8px; padding: 4px 16px; }
+  .quiet-desktop { position: relative; padding: 0 0 34px; }
+  .background-agent { display: flex; align-items: center; gap: 8px; margin: 0 16px -9px; padding: 6px 12px 14px; background: var(--color-surface-3); border: 1px solid var(--color-border); border-radius: var(--radius-lg) var(--radius-lg) 0 0; color: var(--color-muted-foreground); }
+  .notes { position: relative; border: 1px solid var(--color-edge); background: var(--color-surface-2); border-radius: var(--radius-lg); overflow: hidden; padding-bottom: 10px; box-shadow: var(--shadow-e1); }
+  .notes > strong { display: block; padding: 8px 16px 4px; }
+  .notes > p { display: flex; align-items: center; gap: 8px; padding: 2px 16px; }
   .empty-check { width: 12px; height: 12px; border: 1px solid var(--color-edge); border-radius: 3px; flex: none; }
-  .notification { position: absolute; bottom: 0; right: 8px; display: flex; align-items: center; gap: 10px; padding: 12px; background: var(--color-surface-3); border: 1px solid var(--color-edge); border-radius: var(--radius-lg); box-shadow: var(--shadow-e2); animation: second var(--demo-duration) both; }
+  .notification { position: absolute; bottom: 0; right: 8px; display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: var(--color-surface-3); border: 1px solid var(--color-edge); border-radius: var(--radius-lg); box-shadow: var(--shadow-e2); animation: second var(--demo-duration) both; }
   .notification div { display: grid; gap: 2px; }
   .notification strong { font-size: var(--text-xs); }
   .notification > :global(svg:last-child) { color: var(--color-success); }

@@ -1979,7 +1979,6 @@ export const strings = {
       desktop: 'Your computer', phone: 'Your phone', synced: 'The same conversation', reachHint: 'After pairing by QR code, follow your agents from your phone. Your computer keeps running them.',
       notification: 'Contact form finished', quietBody: 'Let your agents work without taking over your screen or your speakers.',
       installVoice: 'Install local dictation', downloadVoice: 'About 200 MB. Audio stays on this computer.', installingVoice: 'Downloading voice engine', cancelVoice: 'Cancel download', readyVoice: 'Dictation is ready. Use the microphone in the composer.', retryVoice: 'Retry voice setup',
-      workspaceBody: 'Click a demo to see how it works.',
     },
     label: 'Getting started',
     skip: 'Skip',

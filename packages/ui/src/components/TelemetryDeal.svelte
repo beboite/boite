@@ -91,11 +91,13 @@
 </script>
 
 <div class="deal" data-testid="telemetry-deal">
-  {#key refusing}
-    <video class="clip" bind:this={clip} src={refusing ? noThanks : tradeOffer} aria-label={strings.onboarding.privacy.video}
-      autoplay={!reduced} loop muted playsinline disablepictureinpicture preload="auto" style={clipSize || undefined}></video>
-  {/key}
-  <p class="intro">{strings.onboarding.privacy.intro}</p>
+  <div class="pitch">
+    {#key refusing}
+      <video class="clip" bind:this={clip} src={refusing ? noThanks : tradeOffer} aria-label={strings.onboarding.privacy.video}
+        autoplay={!reduced} loop muted playsinline disablepictureinpicture preload="auto" style={clipSize || undefined}></video>
+    {/key}
+    <p class="intro">{strings.onboarding.privacy.intro}</p>
+  </div>
   <p class="question">{strings.onboarding.privacy.question}</p>
   <div class="rows">
     <button class="row no" class:refused={refusing} disabled={busy || refusing || !consent} data-testid="onboarding-telemetry-basic" onclick={() => void enough()}>
@@ -114,13 +116,14 @@
 </div>
 
 <style>
-  .deal { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+  .deal { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; container-type: inline-size; }
+  .pitch { display: flex; flex-direction: column; gap: 8px; }
   p { margin: 0; }
   .clip { display: block; max-width: 100%; max-height: min(26vh, 200px); margin: 0 auto; border-radius: var(--radius-lg); animation: swap var(--dur-3) var(--ease-out-quint); }
   .intro { max-width: 52ch; margin: 0 auto; color: var(--color-muted-foreground); font-size: var(--text-sm); line-height: 1.6; text-align: center; }
   .question { margin: 2px 0 0; font-size: var(--text-lg); font-weight: 800; text-align: center; }
   .rows { display: grid; gap: 8px; }
-  .row { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; height: auto; padding: 11px 16px; white-space: normal; text-align: left; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: color-mix(in srgb, var(--color-surface-2) 88%, var(--color-foreground) 12%); color: var(--color-foreground); cursor: pointer; transition: transform var(--dur-1) ease-out, border-color var(--dur-2) ease-out, background var(--dur-2) ease-out, color var(--dur-2) ease-out, box-shadow var(--dur-2) ease-out; }
+  .row { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; height: auto; padding: 8px 14px; white-space: normal; text-align: left; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: color-mix(in srgb, var(--color-surface-2) 88%, var(--color-foreground) 12%); color: var(--color-foreground); cursor: pointer; transition: transform var(--dur-1) ease-out, border-color var(--dur-2) ease-out, background var(--dur-2) ease-out, color var(--dur-2) ease-out, box-shadow var(--dur-2) ease-out; }
   .row:hover:not(:disabled) { transform: translateY(-1px); border-color: color-mix(in srgb, var(--color-foreground) 45%, var(--color-border)); }
   .row:disabled { opacity: .5; cursor: not-allowed; }
   .label { display: inline-flex; align-items: baseline; flex-wrap: wrap; gap: 6px; font-size: var(--text-base); font-weight: 700; }
@@ -137,6 +140,12 @@
   .link { align-self: center; height: auto; padding: 0; border: 0; background: transparent; color: var(--color-muted-foreground); font-size: var(--text-sm); text-decoration: underline; cursor: pointer; }
   .link:hover:not(:disabled) { color: var(--color-foreground); }
   [role=alert] { color: var(--color-danger); overflow-wrap: anywhere; }
+  /* On a computer the clip sits beside what is counted, so the two rows stay in view without scrolling. */
+  @container (min-width: 480px) {
+    .pitch { flex-direction: row; align-items: center; gap: 16px; }
+    .clip { flex: none; max-height: min(18vh, 120px); margin: 0; }
+    .intro { max-width: none; margin: 0; text-align: left; }
+  }
   @keyframes swap { from { opacity: 0; transform: scale(.96); } }
   /* A short window shrinks the clip, never the line that says what is counted. */
   @media (max-height: 640px) { .clip { max-height: 16vh; } .row { padding: 8px 14px; } }

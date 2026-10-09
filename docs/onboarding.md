@@ -50,13 +50,19 @@ minimized or closed during the tour.
 
 ## The window it opens in
 
-The shell opens its main window at 1280 x 890, centred in the primary monitor's
-work area, and at 92% of that area on a smaller screen (`centred` in
-`apps/shell/src-tauri/src/window.rs`). 890 is the tallest tour screen, the French
-consent screen at 808 px, plus the scrim's margin and the title bar. A screen
-that grows past it scrolls inside the panel; raise the constant with it. Every
-screen takes that same panel height, or the window's height when it is shorter,
-so Next stays in one place from screen to screen.
+The tour is a 600 x 600 panel. Every screen fits it in English and French,
+the conversation demonstrations included, and the end-to-end suite fails a
+screen that scrolls on a computer. A window shorter than the panel shrinks it,
+and the screen then scrolls inside it. Every screen takes that same height, so
+Next stays in one place from screen to screen. On a computer the privacy clip
+sits beside the text saying what is counted; on a phone it sits above it.
+
+The shell opens its main window at 70% of the primary monitor's work area in
+width and 80% in height, kept between 1200 x 720 and 1600 x 1000 and centred
+(`centred` in `apps/shell/src-tauri/src/window.rs`). A 1920 x 1080 screen gets
+1344 x 826 and a 2560 x 1440 one 1600 x 1000. On a screen too small for the
+floor the window takes 92% of the work area. The 720 floor holds the panel, the
+scrim's margins and the 44 px title bar.
 
 The scrim behind the panel is a flat tint, with no backdrop blur. The scenes
 animate for as long as the tour is open, and a blur the size of the window is
