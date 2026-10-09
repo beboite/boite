@@ -118,10 +118,10 @@ real('a viewer watching while the agent changes the page size never puts the old
   const { tabId } = await agent.call('browser.command', { threadId, action: { kind: 'open', url: url() } });
   await owner.call('threads.subscribe', { threadId });
   // The panel on the browser's own machine pulls shrunken frames the whole time.
-  let watching = true;
+  let watching = true, frames = 0;
   const watch = (async () => {
     while (watching) {
-      await owner.call('browser.remoteFrame', { threadId, tabId, maxWidth: 300, quality: 40 }).catch(() => {});
+      await owner.call('browser.remoteFrame', { threadId, tabId, maxWidth: 300, quality: 40 }).then(() => { frames++; }, () => {});
       await Bun.sleep(125);
     }
   })();
@@ -133,6 +133,8 @@ real('a viewer watching while the agent changes the page size never puts the old
       expect(await evaluate('[innerWidth, innerHeight]', tabId)).toEqual([852, 393]);
     }
   } finally { watching = false; await watch; }
+  // The race needs frames actually taken while the sizes changed.
+  expect(frames).toBeGreaterThan(5);
 }, 150_000);
 
 real('a viewer on another device watches and drives the tab, and hears it come and go', async () => {

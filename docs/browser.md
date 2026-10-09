@@ -125,19 +125,21 @@ stopped and thrown away.
 The panel's **Agent browser** surface looks like a browser: a strip of the
 conversation's tabs, then a toolbar with back, forward, reload, the address
 and two buttons, **Display** and pause, then the page. In the desktop app on
-its own core, the one it started, the page shows at once: nothing leaves the
-machine, so there is no cover. Any other client first gets a card that names
+its own core, the one it started, the page shows at once: the app trusts the
+core it started and the frames stay on that machine, so there is no cover. A
+plain browser on the same machine is not told it is local and keeps the cover. Any other client first gets a card that names
 the machine, "This agent controls a browser on m2", with the page's title, and
 a **Show** button; nothing is captured or sent before that. Show starts the
-live view and the eye in the tab strip covers it again. When the agent opens a
+live view and, while a page shows, the eye in the tab strip covers it again. When the agent opens a
 tab in the conversation on screen, the panel opens on that surface. The
 launcher's **W** opens it by hand. On a client with a cover, it holds for the
 conversation while the app stays open, and a reload covers it again.
 
 The owner opens and closes tabs as in any browser. **+** adds a new tab page
 with an address field, and Enter opens the page in the conversation's browser
-(`browser.command` `open`, the machine's default profile), live at once since
-the owner asked for it. A tab's **×** closes it (`close`), the agent's tabs
+(`browser.command` `open`, the machine's default profile), live at once when
+it opens since the owner asked for it; a refused address stays in the field
+with the reason. A tab's **×** closes it (`close`), the agent's tabs
 included. With no tab open the owner lands on that new tab page, which is where
 to sign in to a site the agent then uses. A paired phone watches and drives the pages
 but neither opens nor closes a tab: `browser.command` is not one of its methods.

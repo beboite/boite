@@ -634,7 +634,7 @@ export class AgentBrowser {
         await this.#send(tab, 'Emulation.setEmulatedMedia', { features: action.colorScheme === 'system' ? [] : [{ name: 'prefers-color-scheme', value: action.colorScheme }] });
         tab.colorScheme = action.colorScheme; tab.frame = null; return done();
       case 'screenshot': {
-        const shot = await this.#send(tab, 'Page.captureScreenshot', { format: 'png', captureBeyondViewport: false }) as { data?: string };
+        const shot = await this.#screen(tab, () => this.#send(tab, 'Page.captureScreenshot', { format: 'png', captureBeyondViewport: false })) as { data?: string };
         if (typeof shot.data !== 'string') throw refused('the browser did not return a PNG screenshot');
         return { tabId: tab.id, screenshot: { mime: 'image/png', base64: shot.data } };
       }
@@ -645,7 +645,7 @@ export class AgentBrowser {
         tab.discarded = false;
         const recorder = new TabRecorder(tab.engine.cdp, tab.sessionId, this.#machine);
         tab.recorder = recorder;
-        try { await recorder.start(action.frameRate ?? DEFAULT_BROWSER_RECORDING_FRAME_RATE, action.codec ?? DEFAULT_BROWSER_RECORDING_CODEC); }
+        try { await this.#screen(tab, () => recorder.start(action.frameRate ?? DEFAULT_BROWSER_RECORDING_FRAME_RATE, action.codec ?? DEFAULT_BROWSER_RECORDING_CODEC)); }
         catch (error) { if (tab.recorder === recorder) tab.recorder = null; throw refused(error instanceof Error ? error.message : String(error)); }
         return done();
       }
@@ -757,7 +757,7 @@ export class AgentBrowser {
     return this.status({ threadId });
   }
 
-  /** Captures and size changes of a tab take turns: see `browser/frames.ts`. */
+  /** Captures, size changes and reads of the page's size take turns: see `browser/frames.ts`. */
   #screen<T>(tab: Tab, run: () => Promise<T>): Promise<T> {
     const next = tab.screen.then(run);
     tab.screen = next.catch(() => {});
@@ -784,7 +784,8 @@ export class AgentBrowser {
     if (!tab.frame || tab.frame.key !== wanted || Date.now() - tab.frame.at > FRAME_REUSE_MS) {
       const promise = this.#capture(tab, maxWidth, quality ?? 55);
       tab.frame = { at: Date.now(), key: wanted, promise };
-      promise.catch(() => { if (tab.frame?.promise === promise) tab.frame = null; });
+      // A capture queued behind another is as fresh as the moment it ends, not when it was asked.
+      promise.then(() => { if (tab.frame?.promise === promise) tab.frame.at = Date.now(); }, () => { if (tab.frame?.promise === promise) tab.frame = null; });
     }
     const captured = await tab.frame.promise;
     // Each viewer gets its own frame id: input names the frame it was aimed at.
@@ -819,7 +820,8 @@ export class AgentBrowser {
       case 'reset-viewport': retire(); await this.#screen(tab, () => this.#send(tab, 'Emulation.clearDeviceMetricsOverride')); tab.preset = null; return { ok: true };
       default: break;
     }
-    const page = await this.#evaluate(tab, PAGE_INFO_SCRIPT, 5000) as PageInfo;
+    // Read in turn with captures: a scaled one in flight resizes the page for its shot.
+    const page = await this.#screen(tab, () => this.#evaluate(tab, PAGE_INFO_SCRIPT, 5000)) as PageInfo;
     const same = page.width === saved.page.width && page.height === saved.page.height && page.href === saved.page.href && page.origin === saved.page.origin;
     if (!same) throw changed();
     if ((input.kind === 'tap' || input.kind === 'drag') && (input.width !== saved.frame.width || input.height !== saved.frame.height)) throw refused('the browser viewport changed; refresh before tapping');

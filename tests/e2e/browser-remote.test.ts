@@ -74,7 +74,7 @@ test('a page the agent opens shows the Agent browser covered, naming the machine
   await page.waitFor(`document.querySelectorAll('${id('agent-browser-tab')}').length === 2 && document.querySelector('${id('remote-browser-address')}')?.value === 'https://shop.example/cart'`);
   await page.waitFor(loaded);
   // Its × closes it; the agent's page comes back.
-  await page.evaluate(`document.querySelectorAll('${id('agent-browser-close')}')[1].click()`);
+  await page.evaluate(`document.querySelector('.tab.selected ${id('agent-browser-close')}').click()`);
   await page.waitFor(`document.querySelectorAll('${id('agent-browser-tab')}').length === 1 && document.querySelector('${id('remote-browser-address')}')?.value === 'https://example.com/docs'`);
   await page.waitFor(loaded);
 

@@ -36,6 +36,7 @@
   let displaySettings = $state(false), viewportWidth = $state<number | undefined>(393), viewportHeight = $state<number | undefined>(700);
   let areaWidth = $state(0), areaHeight = $state(0), zoom = $state(0);
   let address = $state(''), editingAddress = false, fresh = $state(true);
+  const addressId = `remote-address-${crypto.randomUUID()}`, hintId = `${addressId}-hint`;
   const secure = $derived(/^https:\/\//i.test(frame?.url ?? ''));
   const previewScale = $derived(frame ? (zoom || Math.min(areaWidth / frame.width, areaHeight / frame.height)) : 1);
   const validSize = $derived([viewportWidth, viewportHeight].every(n => typeof n === 'number' && Number.isInteger(n) && n >= 240 && n <= 3840));
@@ -288,8 +289,8 @@
     <button type="button" class="ghost small icon" disabled={!usable} title={strings.remoteBrowser.forward} aria-label={strings.remoteBrowser.forward} onclick={() => void input({ kind: 'history', direction: 'forward' })}><ArrowRight size={15} strokeWidth={1.75} /></button>
     <button type="button" class="ghost small icon" disabled={!usable} title={strings.remoteBrowser.reload} aria-label={strings.remoteBrowser.reload} onclick={() => void input({ kind: 'reload' })}><RotateCw size={14} strokeWidth={1.75} class={frame && !fresh ? 'spin' : ''} /></button>
     <div class="omnibox" class:secure={secure}>
-      <span class="site" aria-hidden="true">{#if secure}<Lock size={12} strokeWidth={2} />{:else}<Globe size={12} strokeWidth={2} />{/if}</span>
-      <input bind:value={address} data-testid="remote-browser-address" type="text" inputmode="url" enterkeyhint="go" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="4096" aria-label={strings.remoteBrowser.address} placeholder={strings.remoteBrowser.addressPlaceholder} onfocus={e => { editingAddress = true; e.currentTarget.select(); }} onblur={() => { editingAddress = false; }} />
+      <label class="site" for={addressId}><span aria-hidden="true">{#if secure}<Lock size={12} strokeWidth={2} />{:else}<Globe size={12} strokeWidth={2} />{/if}</span></label>
+      <input id={addressId} bind:value={address} data-testid="remote-browser-address" type="text" inputmode="url" enterkeyhint="go" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="4096" aria-label={strings.remoteBrowser.address} placeholder={strings.remoteBrowser.addressPlaceholder} onfocus={e => { editingAddress = true; e.currentTarget.select(); }} onblur={() => { editingAddress = false; }} />
       {#if paused || error || !frame}<span class="state ui-label" data-testid="remote-browser-state">{paused ? strings.remoteBrowser.paused : error ? strings.remoteBrowser.reconnecting : strings.remoteBrowser.waiting}</span>{/if}
     </div>
     <button type="button" class="ghost small icon" data-testid="remote-browser-display" aria-expanded={displaySettings} title={strings.remoteBrowser.display} aria-label={strings.remoteBrowser.display} onclick={() => { displaySettings = !displaySettings; if (frame) { viewportWidth = frame.width; viewportHeight = frame.height; } }}><MonitorSmartphone size={15} strokeWidth={1.75} /></button>
@@ -322,12 +323,13 @@
       </div>
     </section>
   {/if}
-  <div class="screen-area" class:zoomed={zoom > 0} title={desk ? strings.remoteBrowser.deskHint : undefined} bind:this={area} bind:clientWidth={areaWidth} bind:clientHeight={areaHeight}>
+  <div class="screen-area" class:zoomed={zoom > 0} title={desk && frame ? strings.remoteBrowser.deskHint : undefined} bind:this={area} bind:clientWidth={areaWidth} bind:clientHeight={areaHeight}>
     {#if frame}
-      <button bind:this={screen} type="button" class="screen" style:width={`${frame.width * previewScale}px`} style:height={`${frame.height * previewScale}px`} class:stale={paused || error} class:desk aria-label={desk ? strings.remoteBrowser.interactDesk : strings.remoteBrowser.interact} disabled={!usable} onpointerdown={down} onpointermove={move} onpointerup={up} onpointercancel={() => { pointer = undefined; }} oncontextmenu={e => e.preventDefault()}>
+      <button bind:this={screen} type="button" class="screen" style:width={`${frame.width * previewScale}px`} style:height={`${frame.height * previewScale}px`} class:stale={paused || error} class:desk aria-label={desk ? strings.remoteBrowser.interactDesk : strings.remoteBrowser.interact} aria-describedby={desk ? hintId : undefined} disabled={!usable} onpointerdown={down} onpointermove={move} onpointerup={up} onpointercancel={() => { pointer = undefined; }} oncontextmenu={e => e.preventDefault()}>
         <img bind:this={picture} src={`data:image/jpeg;base64,${frame.base64}`} alt={strings.remoteBrowser.image} draggable="false" data-testid="remote-browser-frame" />
       </button>
     {:else}<p class="empty">{strings.remoteBrowser.waiting}</p>{/if}
+    {#if desk}<span id={hintId} class="visually-hidden">{strings.remoteBrowser.deskHint}</span>{/if}
   </div>
   {#if desk && note}<small class="toast" role="status" data-testid="remote-browser-note">{note}</small>{/if}
   </div>
@@ -349,11 +351,13 @@
   small, .empty { color: var(--color-muted-foreground); font-size: var(--text-sm); }
   .nav { display: flex; align-items: center; gap: 2px; height: 40px; padding: 0 6px; margin: 0; flex: none; border-bottom: 1px solid var(--color-border); background: var(--color-surface); }
   .nav > button { flex: none; }
-  .omnibox { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; height: var(--control-sm); margin: 0 4px; padding: 0 10px; border: 1px solid transparent; border-radius: var(--radius-full); background: var(--color-surface-2); color: var(--color-muted-foreground); cursor: text; transition: border-color var(--dur-2) var(--ease-out-quint); }
+  .omnibox { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; height: var(--control-sm); margin: 0 4px; padding: 0 10px 0 0; border: 1px solid transparent; border-radius: var(--radius-full); background: var(--color-surface-2); color: var(--color-muted-foreground); cursor: text; transition: border-color var(--dur-2) var(--ease-out-quint); }
   .omnibox:hover { border-color: var(--color-border); }
   .omnibox:focus-within { border-color: color-mix(in srgb, var(--color-accent) 60%, var(--color-edge)); box-shadow: 0 0 0 3px var(--color-accent-soft); }
   .omnibox input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; color: var(--color-foreground); font-size: var(--text-sm); text-overflow: ellipsis; outline: none; }
-  .site { display: flex; flex: none; line-height: 0; }
+  /* The icon is the field's label: a click beside the text still lands in it. */
+  .site { display: flex; align-items: center; flex: none; align-self: stretch; padding: 0 6px 0 10px; line-height: 0; cursor: text; }
+  .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .omnibox.secure .site { color: var(--color-foreground); opacity: .7; }
   .state { flex: none; font-size: var(--text-xs); color: var(--color-muted-foreground); }
   .nav button[aria-pressed=true] { color: var(--color-accent); background: var(--color-accent-soft); }
@@ -387,6 +391,6 @@
   footer input { min-width: 0; flex: 1; height: var(--control); border-radius: var(--radius-full); padding: 0 12px; font-size: var(--text-md); }
   .error { padding: 6px 12px; border-bottom: 1px solid var(--color-border); } .error p { margin: 0; font-size: var(--text-sm); color: var(--color-danger); max-height: 90px; overflow: auto; overflow-wrap: anywhere; }
   .empty { margin: auto; padding: 24px; }
-  @media (max-width: 720px), (pointer: coarse) { .omnibox input { font-size: var(--text-md); } }
+  @media (max-width: 720px), (pointer: coarse) { .omnibox input, .display-settings input { font-size: var(--text-md); } }
   @media (max-width: 720px) { .nav { height: auto; min-height: 48px; padding-block: 2px; } .loading { top: auto; } footer .hint { display: none; } }
 </style>

@@ -92,6 +92,12 @@ test('the owner opens a page from a new tab, watches it without a cover and clos
   document.querySelectorAll<HTMLButtonElement>('[data-testid=agent-browser-close]')[1]!.click(); await settle();
   expect(calls).toHaveBeenCalledWith('browser.command', { threadId: thread, tabId: opened.tabId, action: { kind: 'close' } });
   expect(tabs()).toHaveLength(1);
+  // The double submit left nothing stuck: the next new tab opens again.
+  query('agent-browser-new')!.click(); await settle();
+  const again = query('agent-browser-start-address') as HTMLInputElement;
+  again.value = 'example.org'; again.dispatchEvent(new Event('input', { bubbles: true })); await settle();
+  submit(); await settle();
+  expect(opens()).toHaveLength(before + 2);
 });
 
 test('the desktop of the machine that runs the browser shows the page at once, without a cover', async () => {

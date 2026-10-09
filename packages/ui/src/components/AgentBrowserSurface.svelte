@@ -51,11 +51,13 @@
     const url = normalizeUrl(address), client = store.client;
     if (!url) { failure = strings.remoteBrowser.badAddress; return; }
     if (!client) return;
-    opening = true;
+    opening = true; failure = '';
+    // A tab picked while the page opens wins over the new one.
+    const before = picked;
     try {
       const reply = await client.call('browser.command', { threadId, action: { kind: 'open', url } });
       drafting = false; address = ''; failure = '';
-      if (reply.tabId) picked = reply.tabId;
+      if (reply.tabId && picked === before) picked = reply.tabId;
       // The user opened it himself: no cover over his own page.
       liveViews.show('agent-browser', key);
     } catch (cause) { failure = cause instanceof Error ? cause.message : String(cause); }
@@ -207,7 +209,7 @@
   .start .primary { border-radius: var(--radius-full); padding: 0 14px; }
   .failure { color: var(--color-danger); font-size: var(--text-sm); }
   .failure.banner { margin: 0; padding: 6px 12px; background: var(--color-surface); border-bottom: 1px solid var(--color-border); }
-  @media (hover: none) { .close { opacity: 1; } }
+  @media (hover: none), (pointer: coarse) { .close { opacity: 1; } }
   @media (max-width: 720px), (pointer: coarse) {
     .strip { height: auto; min-height: var(--touch-target); }
     .tab { height: var(--touch-target); }

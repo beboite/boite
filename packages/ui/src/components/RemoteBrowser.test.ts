@@ -150,9 +150,9 @@ test('the watched tab reaches every frame request; a refused frame says why, bac
 test('the address bar, Return and erase on an empty field reach the page', async () => {
   client = new FakeClient({ delayMs: 0, principal: 'session' }); store = new Store(); store.attach(client); await store.connect();
   const original = client.call.bind(client), inputs: unknown[] = [];
-  let n = 0;
+  let n = 0, url = 'https://example.test/';
   vi.spyOn(client, 'call').mockImplementation(((method: string, params: any) => {
-    if (method === 'browser.remoteFrame') return Promise.resolve(frameAt(`f${++n}`));
+    if (method === 'browser.remoteFrame') return Promise.resolve(frameAt(`f${++n}`, { url }));
     if (method === 'browser.remoteInput') { inputs.push(params.input); return Promise.resolve({ ok: true }); }
     return original(method as never, params as never);
   }) as typeof client.call);
@@ -169,6 +169,12 @@ test('the address bar, Return and erase on an empty field reach the page', async
   expect(document.querySelector('.loading')).not.toBeNull();
   await vi.advanceTimersByTimeAsync(400); await settle();
   expect(document.querySelector('.loading')).toBeNull();
+  // Plain http, or an https without its slashes, has no lock.
+  for (const next of ['http://example.test/', 'https:example.test']) {
+    url = next; await vi.advanceTimersByTimeAsync(400); await settle();
+    expect(document.querySelector('.omnibox.secure')).toBeNull();
+  }
+  url = 'https://example.test/'; await vi.advanceTimersByTimeAsync(400); await settle();
   for (const label of ['Back', 'Forward', 'Reload']) {
     document.querySelector<HTMLButtonElement>(`[data-testid=remote-browser-nav] button[aria-label=${label}]`)!.click(); await settle();
     await vi.advanceTimersByTimeAsync(400); await settle();
