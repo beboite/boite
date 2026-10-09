@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import type { CoreClient } from '../src/client.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import { CodeCheckpoints } from '../src/threads/code-checkpoints.ts';
+import { restoreFiles } from '../src/threads/checkpoint-files.ts';
 import { git } from '../src/git/read.ts';
 import { startTestCore, waitFor, type TestCore } from './harness.ts';
 
@@ -144,11 +145,39 @@ test('legacy turns and oversized files report unavailable backups while preservi
   await rm(join(h.dataDir, 'checkpoints', threadId, `${turnId}.json`));
   expect((await client.call('threads.rewind', { threadId, messageId })).files?.status).toBe('unavailable');
   expect(await readFile(join(cwd, 'app.ts'), 'utf8')).toBe('agent');
-  await writeFile(join(cwd, 'large.bin'), Buffer.alloc(16 * 1024 * 1024 + 1));
-  const oversized = await run('large');
-  const rewind = await client.call('threads.rewind', { threadId, messageId: oversized });
-  expect(rewind.files?.status).toBe('unavailable');
-  expect(rewind.files?.reason).toContain('16 MiB');
+});
+
+test('an oversized file blocks the restore only when the removed turns changed it', async () => {
+  const large = join(cwd, 'large.bin');
+  await writeFile(large, Buffer.alloc(16 * 1024 * 1024 + 1));
+  await writeFile(join(cwd, 'app.ts'), 'initial');
+  change = async () => { await writeFile(join(cwd, 'app.ts'), 'agent'); };
+  const beside = await run('beside');
+  expect((await client.call('threads.rewind', { threadId, messageId: beside })).files).toEqual({ status: 'restored', count: 1 });
+  expect(await readFile(join(cwd, 'app.ts'), 'utf8')).toBe('initial');
+  expect((await stat(large)).size).toBe(16 * 1024 * 1024 + 1);
+
+  // Grown, deleted, created and shrunk: an unbacked side on either end makes the
+  // whole restore unavailable, and the small file changed beside it stays as the turn left it.
+  const edits: [string, () => Promise<unknown>][] = [
+    ['grown', () => writeFile(large, Buffer.alloc(16 * 1024 * 1024 + 2))],
+    ['deleted', () => rm(large)],
+    ['created', () => writeFile(large, Buffer.alloc(16 * 1024 * 1024 + 3))],
+    ['shrunk', () => writeFile(large, 'small')],
+  ];
+  for (const [label, edit] of edits) {
+    change = async () => { await edit(); await writeFile(join(cwd, 'app.ts'), label); };
+    const messageId = await run(label);
+    const rewind = await client.call('threads.rewind', { threadId, messageId });
+    expect(rewind.files?.status).toBe('unavailable');
+    expect(rewind.files?.reason).toContain('large.bin had a version over the 16 MiB checkpoint limit');
+    expect(await readFile(join(cwd, 'app.ts'), 'utf8')).toBe(label);
+  }
+  expect(await readFile(large, 'utf8')).toBe('small');
+  // restoreFiles refuses an unbacked entry itself, before touching any file.
+  await expect(restoreFiles(cwd, join(h.dataDir, 'objects'), [{ name: 'large.bin', before: { hash: 'h', mode: 0o644, unbacked: true } }]))
+    .rejects.toThrow('large.bin had a version over the 16 MiB checkpoint limit');
+  expect(await readFile(large, 'utf8')).toBe('small');
 });
 
 test('symlinks are restored as links without reading or writing their targets', async () => {

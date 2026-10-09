@@ -138,14 +138,16 @@ and the threshold only; it has no background work and no cache to wait on.
 
 ## Pending prompts, goals and loops
 
-Enter during a running turn queues the message and its attachments. Each pending
+Enter during a running turn queues the message and its attachments; where the
+primary pointer is coarse, Enter writes a new line instead and the send button
+takes its place ([phone](phone.md)). Each pending
 message shows above the composer as a user bubble with a dashed outline. Arrow Up in
 an empty composer takes the newest pending message out of the queue for editing;
 clicking a pending message does the same. When the core reports a completed
 tool boundary, the queue tries the driver's native steering operation, even
 when another conversation is open. A driver that declines it retains input
-for the next turn. Enter again in the emptied composer, or Send now under the bubbles,
-submits it immediately without stopping the agent when the driver accepts it.
+for the next turn. Enter again in the emptied composer (not where the primary
+pointer is coarse), or Send now under the bubbles, submits it immediately without stopping the agent when the driver accepts it.
 Permissions and blocking questions hold it until answered.
 Messages already queued go together in their original order, with their
 attachments and preview references. Messages added during that send wait for
@@ -274,9 +276,12 @@ Backups include binary content, deletions, creations, permissions and symlinks,
 stored under the core data directory with content deduplicated per thread.
 They survive restarts and leave with a permanently removed project or thread.
 
-Each snapshot is limited to 20000 files, 16 MiB per file and 128 MiB total.
-Old turns without backups, overlapping turns in the same workspace, a cut
-inside a running turn and incomplete snapshots cannot restore code. The rewind
+Each snapshot is limited to 20000 files and 128 MiB of saved content. A file
+above 16 MiB is not copied: the snapshot keeps only its metadata, so a change
+by the removed turns makes the whole restore unavailable and nothing is
+restored; an unchanged one does not get in the way. Old turns without backups,
+overlapping turns in the same workspace, a cut inside a running turn and
+incomplete snapshots cannot restore code. The rewind
 answers `files: { status, count, reason? }`; `status` is `restored`, `unchanged`
 or `unavailable`. The client shows a warning for unavailable backups rather
 than claiming that the code was restored.

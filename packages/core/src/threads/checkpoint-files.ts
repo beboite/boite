@@ -11,7 +11,11 @@ const BYTE_LIMIT = 128 * 1024 * 1024;
 const FILE_BYTE_LIMIT = 16 * 1024 * 1024;
 const SKIP = new Set(['.git', '.boite', '.agents', 'node_modules']);
 
-export interface FileEntry { hash: string; mode: number; link?: string }
+/**
+ * `unbacked`: a file over the per-file limit, known by its metadata only. It
+ * blocks a rewind only when the removed turns changed it.
+ */
+export interface FileEntry { hash: string; mode: number; link?: string; unbacked?: true }
 export type FileSnapshot = Record<string, FileEntry>;
 interface CachedFile { entry: FileEntry; metadata: string; size: number }
 export type SnapshotCache = Map<string, CachedFile>;
@@ -26,7 +30,7 @@ export function contains(root: string, path: string): boolean {
 }
 
 export function same(a: FileEntry | undefined, b: FileEntry | undefined): boolean {
-  return a?.hash === b?.hash && a?.mode === b?.mode && a?.link === b?.link;
+  return a?.hash === b?.hash && a?.mode === b?.mode && a?.link === b?.link && a?.unbacked === b?.unbacked;
 }
 
 /** Resolve parents without following a symlink out of the checkpoint's workspace. */
@@ -60,7 +64,10 @@ export async function readEntry(path: string, cached?: CachedFile): Promise<(Cac
     return { entry: { hash: createHash('sha256').update(link).digest('hex'), mode: Number(info.mode) & 0o777, link }, metadata, size: Buffer.byteLength(link) };
   }
   if (!info.isFile()) throw new Error(`${path}: expected a regular file or symlink`);
-  if (info.size > BigInt(FILE_BYTE_LIMIT)) throw new Error(`${path}: file exceeds the 16 MiB checkpoint limit`);
+  if (info.size > BigInt(FILE_BYTE_LIMIT)) {
+    // Nothing is read or stored: the hash stands for this exact metadata, so any write shows as a change.
+    return { entry: { hash: createHash('sha256').update(`unbacked:${metadata}`).digest('hex'), mode: Number(info.mode) & 0o777, unbacked: true }, metadata, size: 0 };
+  }
   const handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
   try {
     const bytes = Buffer.alloc(Number(info.size) + 1);
@@ -179,6 +186,9 @@ async function writeEntry(root: string, objects: string, name: string, entry: Fi
 /** Check all conflicts before writing; put the original files back if a write fails. */
 export async function restoreFiles(root: string, objects: string, changes: FileChange[]): Promise<void> {
   for (const change of changes) {
+    if (change.before?.unbacked || change.after?.unbacked) {
+      throw refused(`cannot rewind: ${change.name} had a version over the 16 MiB checkpoint limit, which has no backup`, { field: 'path', path: change.name, reason: 'file-unbacked' });
+    }
     const current = await readEntry(await checkedPath(root, change.name));
     if (!same(current?.entry, change.after)) {
       throw refused(`cannot rewind: ${change.name} changed outside the removed turns`, { field: 'path', path: change.name, reason: 'file-conflict', expected: 'the file state at the end of the removed turns' });
