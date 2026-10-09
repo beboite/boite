@@ -4,10 +4,10 @@
  * icon badge both show this count; the core counts the same way when a push
  * sets the badge with no window open (push.ts `badge`).
  */
-interface AttentionThread { archived?: boolean; unread?: boolean; status?: string }
+interface AttentionThread { archived?: boolean; unread?: boolean; status?: string; openQuestions?: number }
 
 export function attentionCount(stores: readonly { threads: readonly AttentionThread[] }[]): number {
-  return stores.reduce((sum, owner) => sum + owner.threads.filter((t) => !t.archived && (t.unread || t.status === 'waiting')).length, 0);
+  return stores.reduce((sum, owner) => sum + owner.threads.filter((t) => !t.archived && (t.unread || t.status === 'waiting' || (t.openQuestions ?? 0) > 0)).length, 0);
 }
 
 type BadgeNavigator = { setAppBadge?: (count?: number) => Promise<void>; clearAppBadge?: () => Promise<void> };

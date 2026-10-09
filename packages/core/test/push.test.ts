@@ -244,6 +244,11 @@ test('a notification carries the icon badge: the threads waiting on the user, th
   harness.core.push.send = async (_target, payload) => { sent.push(JSON.parse(payload)); };
   await harness.core.push.test(paired.id);
   expect(sent[0]).not.toHaveProperty('badge');
+
+  // A question asked without stopping leaves the row idle; its thread still counts.
+  harness.core.threads.cards.askQuestion(harness.core.journal.getThread(threadId)!, { id: 'turn_badge' } as Turn, { text: 'Which file?', options: [], allowText: true, multiple: false, async: true });
+  expect(harness.core.journal.getThread(threadId)!.status).toBe('idle');
+  expect(harness.core.push.badge()).toBe(3);
 });
 test('public HTTPS origin is validated, used for QR links and accepted by the socket', async () => {
   const owner = await harness.connect();
