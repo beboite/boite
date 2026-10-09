@@ -31,6 +31,7 @@ commands.allow = [
   "companion_drag",
   "companion_capture",
   "companion_cover",
+  "companion_focus",
   "window_material",
   "window_material_supported",
   "tray_labels",
@@ -58,7 +59,7 @@ commands.allow = ["core_endpoint", "quota_window"]
 
 [[permission]]
 identifier = "allow-companion-ui"
-description = "Allows the desktop companion to connect to the core, place its window, take clicks where it draws, read the music playing, register its shortcut and see the screen when asked."
+description = "Allows the desktop companion to connect to the core, place its window, take clicks where it draws, read the music playing, register its shortcut, see the screen when asked and take the keyboard when files are dropped on it."
 commands.allow = [
   "core_endpoint",
   "companion_monitors",
@@ -71,4 +72,5 @@ commands.allow = [
   "companion_drag",
   "companion_capture",
   "companion_cover",
+  "companion_focus",
 ]

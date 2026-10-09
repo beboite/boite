@@ -85,6 +85,11 @@ export async function companionHitRects(rects: HitRect[]): Promise<void> {
   await invoke('companion_hit_rects', { rects });
 }
 
+/** The keyboard for the companion: files dropped on it leave the focus where the drag began. */
+export async function focusCompanion(): Promise<void> {
+  await invoke('companion_focus');
+}
+
 /** Brings the main window forward, on a thread or on the companion's settings. */
 export async function showMain(threadId: string | null): Promise<void> {
   await invoke('companion_show_main', { threadId });

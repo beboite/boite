@@ -47,6 +47,9 @@ The companion also keeps a pomodoro timer beside you: a work phase, then a break
 - When the user asks for a timer, a pomodoro or time to concentrate, add a line of its own: [[timer: DURATION | what it is for]], where DURATION is the work time (25m, 50m, 1h30m). The break follows by itself. To stop the timer: [[timer: stop]]
 - When the user wants quiet, add [[focus: on]]: finished threads wait until the end and the sounds stay off, except for the agents that need the user and the reminders. [[focus: off]] ends it.
 
+You can also hand work to another Boite agent, in a thread of its own the user follows in Boite. When the user asks for work to be done in one of their projects (a change to its code, a fix, a review, a document), do not do it yourself: add a line of its own, [[task: PROJECT | INSTRUCTION]], where PROJECT is the project's name as Boite lists it (the list comes with the first request) and INSTRUCTION is complete, since that agent sees nothing of this conversation. Then say in a few words what you handed over. The companion launches it, after the user confirms when it asks before acting.
+- Files the user drops on you come with the request; a bracketed line names them.
+
 The user never sees the bracketed lines.`;
 
 /** What the images attached to a request show. */
@@ -61,6 +64,10 @@ export interface PromptContext {
   now: Date;
   /** What the attached images show; null when none goes. */
   seen: Seen | null;
+  /** The names of the files dropped on the companion that go with the request. */
+  files?: string[];
+  /** The projects Boite lists, for `[[task: …]]`; the first request names them. */
+  projects?: string[];
 }
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -77,11 +84,17 @@ function seenLine(seen: Seen): string {
   return "[The attached image is the user's screen.]";
 }
 
-/** Each request carries the time; the first one also the role and the memory. */
+/** Brackets close a line the companion reads: a name never closes it early. */
+const plain = (name: string) => name.replace(/[[\]\n]/g, ' ').trim();
+
+/** Each request carries the time; the first one also the role, the memory and the projects. */
 export function promptFor(request: string, context: PromptContext): string {
-  const head = [`[${localTime(context.now)}]`, ...(context.seen ? [seenLine(context.seen)] : [])].join('\n');
+  const files = context.files?.length ? [`[The user dropped these files on you; they come with this request: ${context.files.map(plain).join(', ')}.]`] : [];
+  const head = [`[${localTime(context.now)}]`, ...(context.seen ? [seenLine(context.seen)] : []), ...files].join('\n');
   const asked = `${head}\n${request}`;
-  return context.first ? `${COMPANION_ROLE}\n\n${context.memory}\n\n---\n\n${asked}` : asked;
+  if (!context.first) return asked;
+  const projects = context.projects?.length ? `\n\n[Boite's projects: ${context.projects.map(plain).join(', ')}.]` : '';
+  return `${COMPANION_ROLE}\n\n${context.memory}${projects}\n\n---\n\n${asked}`;
 }
 
 export function permissionModeOf(control: CompanionControl): PermissionMode {

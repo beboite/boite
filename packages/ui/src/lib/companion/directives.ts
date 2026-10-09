@@ -1,13 +1,20 @@
 /*
  * The lines the companion's agent adds to a reply for the companion itself,
  * as its role asks (`brain.ts`): `[[remember: …]]`, `[[forget: …]]`,
- * `[[remind: when | what]]`, `[[timer: duration | what for]]` and
- * `[[focus: on]]`. The bubble never shows them; the page acts on them once the
- * reply is complete. Pure, so it is tested without a core.
+ * `[[remind: when | what]]`, `[[timer: duration | what for]]`,
+ * `[[focus: on]]` and `[[task: project | instruction]]`. The bubble never
+ * shows them; the page acts on them once the reply is complete. Pure, so it
+ * is tested without a core.
  */
 
 /** A pomodoro to start, its work phase lasting `ms`, or the one running to stop. */
 export type TimerDirective = { ms: number; label: string } | 'stop';
+
+/** Work handed to another agent: a new thread in the project named, started with the instruction. */
+export interface TaskDirective {
+  project: string;
+  prompt: string;
+}
 
 export interface Directives {
   remember: string[];
@@ -17,11 +24,15 @@ export interface Directives {
   timer: TimerDirective | null;
   /** Focus on or off, the last line winning; null when the reply leaves it. */
   focus: boolean | null;
+  /** In the order written, `TASKS_MAX` at most. */
+  task: TaskDirective[];
 }
 
-const DIRECTIVE = /\[\[\s*(remember|forget|remind|timer|focus)\s*:([\s\S]*?)\]\]/gi;
+const DIRECTIVE = /\[\[\s*(remember|forget|remind|timer|focus|task)\s*:([\s\S]*?)\]\]/gi;
 /** A timer is a few minutes to a few hours. */
 const TIMER_MAX_MS = 4 * 60 * 60_000;
+/** A reply launches a few threads at most: more is a reply gone wrong. */
+const TASKS_MAX = 3;
 /** A directive still being written while the reply streams. */
 const UNFINISHED = /\[\[(?![\s\S]*\]\])[\s\S]*$/;
 
@@ -95,9 +106,17 @@ function timerOf(content: string): TimerDirective | null {
   return ms === null ? null : { ms, label: bar < 0 ? '' : content.slice(bar + 1).trim() };
 }
 
+/** `project | instruction`, both needed; the instruction may hold bars of its own. */
+function taskOf(content: string): TaskDirective | null {
+  const bar = content.indexOf('|');
+  if (bar < 0) return null;
+  const [project, prompt] = [content.slice(0, bar).trim(), content.slice(bar + 1).trim()];
+  return project && prompt ? { project, prompt } : null;
+}
+
 /** What a complete reply asks of the companion. A directive it cannot read is left out. */
 export function parseDirectives(text: string, now: Date): Directives {
-  const found: Directives = { remember: [], forget: [], remind: [], timer: null, focus: null };
+  const found: Directives = { remember: [], forget: [], remind: [], timer: null, focus: null, task: [] };
   for (const [, kind, body] of text.matchAll(DIRECTIVE)) {
     const content = body!.trim();
     if (!content) continue;
@@ -105,6 +124,10 @@ export function parseDirectives(text: string, now: Date): Directives {
     if (name === 'remember') found.remember.push(content);
     else if (name === 'forget') found.forget.push(content);
     else if (name === 'timer') found.timer = timerOf(content) ?? found.timer;
+    else if (name === 'task') {
+      const task = taskOf(content);
+      if (task && found.task.length < TASKS_MAX) found.task.push(task);
+    }
     else if (name === 'focus') {
       if (/^(on|start)$/i.test(content)) found.focus = true;
       else if (/^(off|stop|end)$/i.test(content)) found.focus = false;

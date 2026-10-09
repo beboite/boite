@@ -23,7 +23,7 @@
   import { writeStatus } from './lib/companion/memory';
   import { captureScreens, captureZone, type ScreenShot } from './lib/companion/screen';
   import { playCue, unlockSounds, type Cue } from './lib/companion/sounds';
-  import { companionHitRects, companionMonitors, configureCompanion, coverScreen, dragCompanion, inShell, layoutOf, placeCompanion, showMain, type CompanionLayout, type HitRect } from './lib/companion/shell';
+  import { companionHitRects, companionMonitors, configureCompanion, coverScreen, dragCompanion, focusCompanion, inShell, layoutOf, placeCompanion, showMain, type CompanionLayout, type HitRect } from './lib/companion/shell';
   import { Talk } from './lib/companion/talk.svelte';
   import { Notes } from './lib/companion/notes.svelte';
   import { Senses } from './lib/companion/senses.svelte';
@@ -44,6 +44,10 @@
   import CompanionHistory from './components/companion/CompanionHistory.svelte';
   import CompanionConfetti from './components/companion/CompanionConfetti.svelte';
   import { Reactions } from './lib/companion/reactions.svelte';
+  import { Dropped, joinScreen } from './lib/companion/drop.svelte';
+  import { Tasks } from './lib/companion/tasks.svelte';
+  import CompanionAttachments from './components/companion/CompanionAttachments.svelte';
+  import CompanionTaskCards from './components/companion/CompanionTaskCards.svelte';
 
   const CELEBRATE_MS = 6000;
   const REFRESH_EVERY = 15_000;
@@ -109,14 +113,23 @@
     }
   });
 
+  const attached = new Dropped();
+  const tasks = new Tasks({
+    client: () => client,
+    control: () => prefs.control,
+    created: (thread) => acceptThread(thread),
+    say: (text) => talk.aside(text)
+  });
+
   /** A work phase starts: an earlier "focus off" gives way to the pomodoro again. */
   function startTimer(workMs = prefs.workMinutes * 60_000, label = '') {
     focus.release();
     timer.start({ workMs, breakMs: prefs.breakMinutes * 60_000, label });
   }
 
-  /** The timer and the focus a reply asks for ([[timer: …]], [[focus: …]]). */
-  function obey({ timer: asked, focus: on }: Directives) {
+  /** The timer, the focus and the threads a reply asks for ([[timer: …]], [[focus: …]], [[task: …]]). */
+  function obey({ timer: asked, focus: on, task }: Directives) {
+    if (task.length > 0) void tasks.request(task);
     if (asked === 'stop') timer.stop();
     else if (asked) startTimer(asked.ms, asked.label);
     if (on !== null) focus.set(on);
@@ -182,7 +195,10 @@
   $effect(() => {
     const finished = mood.justFinished;
     if (finished.length === 0) return;
-    untrack(() => notes.finished(finished));
+    untrack(() => {
+      notes.finished(finished);
+      tasks.finished(finished);
+    });
     clearTimeout(celebrateTimer);
     celebrateTimer = setTimeout(recompute, CELEBRATE_MS + 100);
   });
@@ -264,9 +280,16 @@
         } else shot = await captureScreens(prefs.screenScope).catch(() => null);
         if (!shot) return talk.fail(strings.companion.screenFailed);
       }
+      const files = attached.held;
+      const together = joinScreen(files, shot);
+      if (typeof together === 'string') return talk.fail(together);
       draft = '';
-      // A request that could not go comes back to the field, to try again.
-      if (!(await talk.ask(request, shot)) && draft === '') draft = request;
+      attached.clear();
+      // A request that could not go comes back to the field with its files, to try again.
+      if (!(await talk.ask(request, shot, files)) && draft === '') {
+        draft = request;
+        if (attached.held.length === 0) attached.held = files;
+      }
     } finally {
       sending = false;
     }
@@ -323,6 +346,18 @@
     open = !open;
     autoOpened = false;
     if (open) await focusInput();
+  }
+
+  /** Files dropped on the character or the panel: the panel opens on them, ready to type the question. */
+  function dropFiles(event: DragEvent) {
+    const reading = attached.drop(event);
+    if (!reading) return;
+    boing++;
+    open = true;
+    autoOpened = false;
+    history = false;
+    if (inShell()) void focusCompanion().catch(() => {});
+    void focusInput();
   }
 
   /** The shortcut: the companion comes forward, ready to type. */
@@ -391,7 +426,7 @@
   }
 
   $effect(() => {
-    void [open, talk.shown, talk.phase, media, notes.notices, notes.alarms, mood.blocking, layout, picking, hudOpen, timer.phase, focus.recap, focus.active, history];
+    void [open, talk.shown, talk.phase, media, notes.notices, notes.alarms, mood.blocking, layout, picking, hudOpen, timer.phase, focus.recap, focus.active, history, attached.held, attached.over, attached.reading, attached.problem, tasks.pending, tasks.launched];
     void tick().then(() => requestAnimationFrame(sendRects));
   });
 
@@ -506,6 +541,7 @@
       timer.dispose();
       senses.dispose();
       reactions.dispose();
+      attached.dispose();
       off.forEach((stop) => stop());
       client?.close();
     };
@@ -521,7 +557,16 @@
 
 <svelte:window {onkeydown} />
 
-<main class="stage" class:picking data-align={layout.align} data-edge={layout.edge} data-testid="companion">
+<main
+  class="stage"
+  class:picking
+  data-align={layout.align}
+  data-edge={layout.edge}
+  data-testid="companion"
+  ondragenter={(event) => attached.dragover(event)}
+  ondragover={(event) => attached.dragover(event)}
+  ondrop={dropFiles}
+>
   <div class="column">
     <div class="head">
       <button
@@ -556,6 +601,7 @@
           game={reactions.game}
           coffee={reactions.coffee}
           cheer={reactions.cheering}
+          startled={attached.over}
           size={64}
         />
         {#if reactions.cheering}<CompanionConfetti burst={reactions.cheer} />{/if}
@@ -584,6 +630,7 @@
 
     <CompanionNotes {talk} {notes} {open} {reachable} threadId={prefs.threadId} />
     <CompanionFocusCards {timer} {focus} onopen={(threadId) => void showMain(threadId)} />
+    <CompanionTaskCards {tasks} onopen={(threadId) => void showMain(threadId)} />
 
     {#if open}
       <section class="sheet" data-hit>
@@ -599,6 +646,7 @@
           onstop={() => void talk.stop()}
           onsettings={() => void showMain(null)}
         />
+        <CompanionAttachments dropped={attached} />
         <CompanionTools {timer} {focus} workMinutes={prefs.workMinutes} breakMinutes={prefs.breakMinutes} bind:history onstart={() => startTimer()} />
         {#if history}
           <CompanionHistory client={() => client} threadId={prefs.threadId} onpick={(exchange) => talk.recall(exchange.reply)} />

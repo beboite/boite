@@ -2281,6 +2281,26 @@ export const strings = {
       noReply: 'No reply',
       pick: 'Show this reply in the bubble'
     },
+    drop: {
+      label: 'Files for your next question',
+      hint: 'Drop to attach to your next question',
+      remove: 'Remove {name}',
+      reading: 'Reading the files…'
+    },
+    task: {
+      label: 'Threads launched for you',
+      confirmTitle: 'Launch a thread in {project}?',
+      launch: 'Launch',
+      cancel: 'Cancel',
+      launched: 'Thread launched in {project}',
+      openHint: 'Open it in Boite',
+      unknown: 'I do not know a project called "{name}".',
+      near: 'Did you mean {names}?',
+      known: 'Your projects: {names}.',
+      noProject: 'Boite has no project to launch a thread in yet.',
+      noAgent: 'No agent can take the thread. Sign in to one in Boite.',
+      failed: 'The thread could not be launched: {reason}'
+    },
     seeScreen: 'Show my screen with this request',
     seeingScreen: 'Your screen goes with this request. Click to leave it out.',
     screenFailed: 'The screen could not be captured. Click the eye to send without it.',

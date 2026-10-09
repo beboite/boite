@@ -48,9 +48,11 @@
     coffee?: boolean;
     /** Another thread's tests pass: it jumps for joy. */
     cheer?: boolean;
+    /** Files are dragged over it: it opens its eyes wide. */
+    startled?: boolean;
   }
 
-  let { mood, music = false, busy = false, hover = false, boing = 0, size = 56, lively = true, gaze = null, asleep = false, typing = false, alarm = false, calm = false, rest = false, game = false, coffee = false, cheer = false }: Props = $props();
+  let { mood, music = false, busy = false, hover = false, boing = 0, size = 56, lively = true, gaze = null, asleep = false, typing = false, alarm = false, calm = false, rest = false, game = false, coffee = false, cheer = false, startled = false }: Props = $props();
 
   type Act = 'look' | 'blink' | 'peek' | 'stretch' | 'yawn';
   const ACT_MS: Record<Act, number> = { look: 2400, blink: 700, peek: 1200, stretch: 1400, yawn: 2400 };
@@ -58,7 +60,7 @@
   let bouncing = $state(false);
 
   // A gesture now and then while it rests awake: never while it works, calls or sleeps.
-  const restless = $derived(lively && mood === 'idle' && !alarm && !hover && !asleep && !typing && !calm && !rest);
+  const restless = $derived(lively && mood === 'idle' && !alarm && !hover && !asleep && !typing && !calm && !rest && !startled);
   $effect(() => {
     if (!restless) return;
     const pool: Act[] = music || game ? ['look', 'blink', 'peek'] : ['look', 'look', 'blink', 'peek', 'stretch', 'yawn'];
@@ -89,11 +91,13 @@
     return () => clearTimeout(timer);
   });
 
-  type Face = 'awake' | 'sleep' | 'yawn' | 'groove' | 'typing' | 'working' | 'calling' | 'happy' | 'worried' | 'alarm' | 'calm' | 'rest' | 'cheer' | 'game';
+  type Face = 'awake' | 'sleep' | 'yawn' | 'groove' | 'typing' | 'working' | 'calling' | 'happy' | 'worried' | 'alarm' | 'calm' | 'rest' | 'cheer' | 'game' | 'startled';
   // What needs the user wins over the break and the focus; the pointer wakes it from either.
+  // Files dragged over it win over a call: the user is right there, holding them.
   const urgent = $derived(alarm || mood === 'calling' || mood === 'worried');
   const face: Face = $derived(
     alarm ? 'alarm'
+    : startled ? 'startled'
     : mood === 'calling' || mood === 'worried' ? mood
     : cheer ? 'cheer'
     : rest ? (hover ? 'awake' : 'rest')
@@ -101,7 +105,7 @@
     : mood !== 'idle' ? mood : hover ? 'awake' : asleep ? 'sleep' : act === 'yawn' ? 'yawn' : game ? 'game' : typing ? 'typing' : music ? 'groove' : 'awake'
   );
   // The light on the lid: the mood's colour, soft green on a break or a cheer, grey in focus.
-  const tone = $derived(face === 'alarm' ? 'calling' : (rest || cheer) && !urgent ? 'happy' : calm && !urgent ? 'idle' : mood);
+  const tone = $derived(face === 'alarm' || face === 'startled' ? 'calling' : (rest || cheer) && !urgent ? 'happy' : calm && !urgent ? 'idle' : mood);
   const tea = $derived(rest && !urgent);
   // The gaming headset wins over the music's; the coffee waits while it sleeps or calls.
   const headset = $derived(game && !tea);
@@ -203,6 +207,8 @@
     <path class="mark stroke shout" d="M95 26 v11 M95 43 v0.5" />
   {:else if face === 'happy' || face === 'cheer'}
     <path class="mark stroke spark" d="M9 22 l-5 -4 M50 9 v-6 M91 22 l5 -4" />
+  {:else if face === 'startled'}
+    <path class="mark stroke" d="M10 26 l-5 -5 M90 26 l5 -5 M50 12 v-6" />
   {:else if face === 'worried'}
     <path class="mark stroke" d="M95 30 v8 M95 44 v0.5" />
   {/if}
@@ -239,6 +245,7 @@
   .f-typing { --shut: 3.5px; }
   .f-working { --top: 6.5px; --tilt: 12deg; }
   .f-calling, .f-alarm { --open: 1.18; }
+  .f-startled { --open: 1.34; }
   .f-happy { --low: 9px; }
   .f-worried { --top: 6px; --tilt: -16deg; }
   .f-calm { --shut: 6px; }
@@ -330,7 +337,7 @@
   /* Eyes and light */
   .blink { animation: blink 5s ease-in-out infinite; }
   .a-blink .blink { animation: twice .7s ease-in-out; }
-  .f-sleep .blink, .f-yawn .blink, .f-happy .blink, .f-rest .blink, .f-cheer .blink { animation: none; }
+  .f-sleep .blink, .f-yawn .blink, .f-happy .blink, .f-rest .blink, .f-cheer .blink, .f-startled .blink { animation: none; }
   .a-look .scan { animation: glance 2.4s ease-in-out; }
   .f-working .scan { animation: scan 1.4s ease-in-out infinite alternate; }
   .f-game .scan { animation: dart 2.6s ease-in-out infinite; }

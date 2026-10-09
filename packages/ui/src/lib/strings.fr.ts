@@ -2183,6 +2183,26 @@ export const fr: Translation = {
       noReply: 'Pas de réponse',
       pick: 'Remettre cette réponse dans la bulle'
     },
+    drop: {
+      label: 'Fichiers pour votre prochaine question',
+      hint: 'Déposez pour joindre à votre prochaine question',
+      remove: 'Retirer {name}',
+      reading: 'Lecture des fichiers…'
+    },
+    task: {
+      label: 'Fils lancés pour vous',
+      confirmTitle: 'Lancer un fil dans {project} ?',
+      launch: 'Lancer',
+      cancel: 'Annuler',
+      launched: 'Fil lancé dans {project}',
+      openHint: 'L’ouvrir dans Boite',
+      unknown: 'Je ne connais pas de projet nommé « {name} ».',
+      near: 'Vouliez-vous dire {names} ?',
+      known: 'Vos projets : {names}.',
+      noProject: 'Boite n’a encore aucun projet où lancer un fil.',
+      noAgent: 'Aucun agent ne peut prendre ce fil. Connectez-en un dans Boite.',
+      failed: 'Le fil n’a pas pu être lancé : {reason}'
+    },
     seeScreen: 'Joindre mon écran à cette demande',
     seeingScreen: 'Votre écran part avec cette demande. Cliquez pour le retirer.',
     screenFailed: 'L’écran n’a pas pu être capturé. Cliquez sur l’œil pour envoyer sans lui.',

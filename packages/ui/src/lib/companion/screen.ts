@@ -2,9 +2,11 @@
  * What is on the user's screens, for a request that needs it: the shell
  * captures a screen without the companion (`companion_capture`), every screen
  * one after the other, or the part the user picked, and the page makes JPEGs
- * of them to attach to the turn.
+ * of them to attach to the turn. An image dropped on the companion becomes a
+ * JPEG the same way (`imageOfFile`).
  */
 import { ATTACHMENTS_PER_TURN, ATTACHMENTS_TOTAL_MAX_BYTES, type ImageAttachment } from '@boite/contracts';
+import { fitWithin, renamed } from '../image-prepare';
 import type { Seen } from './brain';
 import { captureScreen, companionMonitors, type HitRect } from './shell';
 
@@ -51,11 +53,49 @@ function toImage(buffer: ArrayBuffer | null, name: string, budget: number): Imag
   const context = canvas.getContext('2d');
   if (!context) return null;
   context.putImageData(new ImageData(pixels, width, height), 0, 0);
+  return jpegOf(canvas, name, budget);
+}
+
+/** A canvas as a JPEG under `budget` decoded bytes, lowering the quality until it fits; null when it never does. */
+function jpegOf(canvas: HTMLCanvasElement, name: string, budget: number): ImageAttachment | null {
   for (const quality of [0.82, 0.6, 0.4]) {
     const data = canvas.toDataURL('image/jpeg', quality).replace(/^data:image\/jpeg;base64,/, '');
     if ((data.length * 3) / 4 <= budget) return { kind: 'image', mimeType: 'image/jpeg', data, name };
   }
   return null;
+}
+
+/** The long side a dropped image is brought to, the size the shell scales a capture to. */
+const DROPPED_LONG_SIDE = 1568;
+
+/**
+ * An image dropped on the companion, as a JPEG the way a capture is made:
+ * scaled to the captures' long side, drawn on white (a transparent PNG reads
+ * as it did on the page) and encoded under `budget`. Null when this webview
+ * cannot decode it or it stays too heavy: it then goes as the file it is.
+ */
+export async function imageOfFile(file: File, budget = MAX_BYTES): Promise<ImageAttachment | null> {
+  if (typeof createImageBitmap !== 'function' || typeof document === 'undefined') return null;
+  let bitmap: ImageBitmap;
+  try {
+    bitmap = await createImageBitmap(file);
+  } catch {
+    return null;
+  }
+  try {
+    const { width, height } = fitWithin(bitmap.width, bitmap.height, DROPPED_LONG_SIDE);
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d');
+    if (!context) return null;
+    context.fillStyle = 'white';
+    context.fillRect(0, 0, width, height);
+    context.drawImage(bitmap, 0, 0, width, height);
+    return jpegOf(canvas, renamed(file.name || 'image', 'image/jpeg'), Math.min(budget, MAX_BYTES));
+  } finally {
+    bitmap.close();
+  }
 }
 
 /**

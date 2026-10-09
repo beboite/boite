@@ -257,6 +257,10 @@ fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<WebviewWindow<R>> {
         .title("Boite companion").inner_size(WIDTH, HEIGHT).resizable(false)
         .decorations(false).shadow(false).skip_taskbar(true).always_on_top(true)
         .visible(false).focused(false)
+        // Files dropped on the companion reach the page as HTML drops, with
+        // their contents (`drop.svelte.ts`); Tauri's own handler would take
+        // them first and hand over bare paths.
+        .disable_drag_drop_handler()
         .initialization_script(crate::platform::region::script())
         .on_navigation(|url| matches!(url.scheme(), "tauri" | "http" | "https") && matches!(url.host_str(), Some("tauri.localhost") | Some("localhost")));
     // A transparent window needs Tauri's private API on macOS, which the shell
@@ -273,6 +277,8 @@ fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<WebviewWindow<R>> {
 struct Senses {
     ignoring: Option<bool>,
     pressed: bool,
+    /// The press held now, if any: true while it began away from the areas and never crossed them.
+    press_away: Option<bool>,
     point: Option<(f64, f64)>,
     sent: Option<(f64, f64)>,
     input: Option<u32>,
@@ -284,6 +290,20 @@ struct Senses {
 }
 
 fn distance(a: (f64, f64), b: (f64, f64)) -> f64 { (a.0 - b.0).hypot(a.1 - b.1) }
+
+/// One tick of the button for `companion://outside`: the press held next, and
+/// whether a click went to another application. Heard on release, of a press
+/// that began away from the areas and never crossed them: a file dragged from
+/// the Explorer onto the companion starts with a press elsewhere, and the
+/// panel it is dropped on stays open.
+fn outside_click(away: Option<bool>, down: bool, over: bool) -> (Option<bool>, bool) {
+    match (away, down) {
+        (None, true) => (Some(!over), false),
+        (Some(away), true) => (Some(away && !over), false),
+        (Some(away), false) => (None, away),
+        (None, false) => (None, false),
+    }
+}
 
 impl Senses {
     /// An app filling the screen came in front or left it: the window hides
@@ -324,7 +344,8 @@ impl Senses {
     /// Clicks go through unless the pointer is over one of the page's areas;
     /// the page hears `companion://hover` when that changes, since it cannot
     /// see the pointer leave a window that has just stopped taking it. A press
-    /// elsewhere goes to another application, heard as `companion://outside`.
+    /// elsewhere goes to another application, heard as `companion://outside`
+    /// once released (`outside_click`).
     /// The page also hears where the pointer is, for the eyes, and whether the
     /// user is typing: input came while the pointer stayed still and no button
     /// is down. Which key never reaches the shell.
@@ -333,7 +354,9 @@ impl Senses {
         let whole = shared.covering.lock().unwrap_or_else(PoisonError::into_inner).is_some();
         let over = whole || inside(&shared.rects.lock().unwrap_or_else(PoisonError::into_inner), point.0, point.1);
         let down = crate::platform::mouse_down();
-        if down && !self.pressed && !over { let _ = window.emit("companion://outside", ()); }
+        let (press_away, outside) = outside_click(self.press_away, down, over);
+        self.press_away = press_away;
+        if outside { let _ = window.emit("companion://outside", ()); }
         let input = desktop::last_input();
         if input != self.input {
             let still = self.point.is_some_and(|last| distance(last, point) < 0.5);
@@ -571,6 +594,14 @@ pub async fn companion_cover(app: AppHandle, webview: Webview, state: State<'_, 
     Ok(())
 }
 
+/// Files were dropped on the companion: Windows leaves the keyboard where the
+/// drag began, and the page wants it for the question that goes with them.
+#[tauri::command]
+pub fn companion_focus(app: AppHandle, webview: Webview) -> Result<(), String> {
+    only_companion(&webview)?;
+    window_of(&app)?.set_focus().map_err(|error| error.to_string())
+}
+
 /// The areas that take clicks, whole, each time the page's layout changes.
 #[tauri::command]
 pub fn companion_hit_rects(webview: Webview, state: State<'_, CompanionState>, rects: Vec<HitRect>) -> Result<(), String> {
@@ -667,5 +698,35 @@ mod tests {
         let rect = HitRect { x: 100.0, y: 40.5, w: 200.0, h: 120.0 };
         assert_eq!(on_screen(rect, (-2560, 0), 1.5), Ok((-2410, 61, 300, 180)));
         assert!(on_screen(HitRect { x: 10.0, y: 10.0, w: 0.2, h: 50.0 }, (0, 0), 1.0).is_err(), "an empty area");
+    }
+
+    /// The button's samples, (down, over), through `outside_click`: the ticks a click outside was heard on.
+    fn outside_ticks(samples: &[(bool, bool)]) -> Vec<usize> {
+        let mut away = None;
+        samples.iter().enumerate().filter_map(|(tick, &(down, over))| {
+            let (next, outside) = outside_click(away, down, over);
+            away = next;
+            outside.then_some(tick)
+        }).collect()
+    }
+
+    #[test]
+    fn a_click_elsewhere_is_heard_once_released() {
+        assert_eq!(outside_ticks(&[(false, false), (true, false), (true, false), (false, false)]), vec![3]);
+        assert_eq!(outside_ticks(&[(true, false), (false, false), (true, false), (false, false)]), vec![1, 3], "each click once");
+    }
+
+    #[test]
+    fn a_drag_onto_the_companion_is_no_click_elsewhere() {
+        // Pressed on a file in the Explorer, carried over the panel, let go there.
+        assert!(outside_ticks(&[(true, false), (true, false), (true, true), (false, true)]).is_empty());
+        // Carried over the panel and back out before letting go: still not a click elsewhere.
+        assert!(outside_ticks(&[(true, false), (true, true), (true, false), (false, false)]).is_empty());
+    }
+
+    #[test]
+    fn a_press_on_the_companion_is_no_click_elsewhere() {
+        assert!(outside_ticks(&[(true, true), (true, false), (false, false)]).is_empty(), "dragging the character away");
+        assert!(outside_ticks(&[(false, true), (false, false)]).is_empty(), "no press at all");
     }
 }

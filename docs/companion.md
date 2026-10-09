@@ -20,9 +20,9 @@ shows the Settings page, which says that the companion runs in the desktop app.
 | Media session (Spotify first): read, cover and control | `apps/shell/src-tauri/src/platform/media.rs` |
 | App in front, and whether it is a game | `apps/shell/src-tauri/src/platform/games.rs` |
 | Page, mounted for `index.html?view=companion` | `packages/ui/src/CompanionApp.svelte` |
-| Character, ask bar, panel, notices, music pill, HUD, pomodoro and focus, history, memory card, confetti | `packages/ui/src/components/companion/` |
+| Character, ask bar, panel, notices, music pill, HUD, pomodoro and focus, history, memory card, dropped files, task cards, confetti | `packages/ui/src/components/companion/` |
 | Settings, Companion | `packages/ui/src/components/CompanionSettings.svelte` |
-| Preferences, mood, brain, conversation, senses, notices, HUD, pomodoro, focus, history, reactions, memory, directives, screen, sounds, shell calls | `packages/ui/src/lib/companion/` |
+| Preferences, mood, brain, conversation, senses, notices, HUD, pomodoro, focus, history, reactions, memory, directives, screen, dropped files, tasks, sounds, shell calls | `packages/ui/src/lib/companion/` |
 
 The main window opens the companion's window while the experiment is on and
 closes it when it is switched off (`lib/companion/follow.svelte.ts`).
@@ -50,9 +50,11 @@ The window ignores the mouse except over the areas the page reports
 the cursor every 40 ms and switches `set_ignore_cursor_events`; it emits
 `companion://hover` when the pointer enters or leaves those areas, since a
 click-through window cannot see the pointer leave. A mouse button pressed
-outside them goes to another application; the thread emits
+outside them goes to another application; when it comes up, and only if the
+press never crossed those areas (`outside_click`), the thread emits
 `companion://outside`, and the page closes its panel unless "Close when
-clicking elsewhere" is off. Once a second the thread lifts the window back to
+clicking elsewhere" is off. A file dragged from elsewhere onto the companion
+is therefore not a click elsewhere. Once a second the thread lifts the window back to
 the top of the topmost band (`platform::keep_on_top`): Tao applies
 `always_on_top` only when its own flag changes, so a window opened later would
 otherwise stay over it.
@@ -93,11 +95,17 @@ takes every click. With no button down, the cover follows the pointer to
 another screen. Uncovering leaves the window where it is: the page places it
 again.
 
+The webview is built with `disable_drag_drop_handler`, so files dragged from
+Explorer reach the page as HTML5 `dragover` and `drop` events instead of
+Tauri's own. Windows does not focus a window a file is dropped on, so the page
+calls `companion_focus` after a drop to take the keyboard.
+
 Its capability (`capabilities/companion.json`, `allow-companion-ui`) allows
 reaching the core, placing and dragging itself, its shortcut and full-screen
 option, capturing and covering the screens, reading and controlling media, and
 bringing the main window forward on a thread or on its settings
-(`companion_show_main`).
+(`companion_show_main`), and taking the keyboard after a drop
+(`companion_focus`).
 It cannot open or close itself, open browsers, read cookies, save files,
 notify or quit; `acl.rs` tests this.
 
@@ -167,7 +175,9 @@ The agent adds lines of its own to a reply, which the bubble never shows
 - `[[timer: duration | label]]` starts the pomodoro with that work time
   (`25m`, `50m`, `1h30m`, up to 4 h; the label is optional), and
   `[[timer: stop]]` stops it;
-- `[[focus: on]]` and `[[focus: off]]` turn focus on and off.
+- `[[focus: on]]` and `[[focus: off]]` turn focus on and off;
+- `[[task: project | instruction]]` launches a Boite thread in that project
+  (three per reply at most; see "Launching threads").
 
 The memory (80 facts at most, oldest out first) and the reminders live in
 `localStorage` on this computer (`memory.ts`), never in the core except as the
@@ -333,11 +343,56 @@ the date line and every bracketed line are left out. A reply reads as the
 bubble showed it (`visibleReply`). A click puts the reply back in the bubble.
 The list closes when a new permission or question opens the panel.
 
+## Dropping files
+
+Files and images dropped on the character or the panel go with the next
+request (`drop.svelte.ts`, `CompanionAttachments.svelte`). The page takes a
+drop only over the areas marked `data-hit`, the ones the window does not let
+through; elsewhere the drag is refused, so a file never replaces the page.
+While files hover over those areas the character opens its eyes wide (the
+`startled` face) and a dashed row says where to let go.
+
+A drop opens the panel with the field focused. Each file shows as a chip
+under the ask bar, with a thumbnail for images and a button to take it back.
+An image becomes a JPEG the way a capture does (`imageOfFile` in `screen.ts`:
+1568 px on the long side, under the room left); any other file follows the
+composer's contract (`readAttachmentFile`). The core's caps are checked as
+each file comes (`ATTACHMENT_MAX_BYTES`, `ATTACHMENTS_PER_TURN`,
+`ATTACHMENTS_TOTAL_MAX_BYTES`, with the screen's images on sending), and a
+refusal names the file and the cap in the composer's words; the other files
+stay. The request names the files it carries for the agent. A request that
+does not go puts the text and the files back.
+
+## Launching threads
+
+The first request of a conversation lists Boite's projects, drafts and
+archived ones left out (`taskProjects`). The agent launches a thread with
+`[[task: project | instruction]]` (`tasks.ts`, `tasks.svelte.ts`):
+
+- The project is found by its name, accents, case and punctuation aside:
+  exactly, then by a unique start or part, then by a unique close spelling.
+  An unknown project makes the bubble say so, with the close names or, when
+  none is close, the known ones.
+- The thread gets what the main window would give a new one
+  (`newThreadChoice`, mirroring `Models.defaultChoice`): the composer's agent
+  and account when they are usable, otherwise the first agent that is on and
+  signed in, its default model, effort and speed, and the composer's
+  permission mode. A project whose new threads use a worktree gets one.
+  Then `threads.create` and `turns.start` with the instruction.
+- In "Ask before acting", a card shows the project and the instruction with
+  Launch and Cancel; in "Act without asking" the thread starts at once.
+- A "Thread launched in project" card (three at most) opens the thread in the
+  main window on a click. The end of the thread comes as any other through
+  the notices.
+
+Nothing is added to the core or the RPC.
+
 ## Checks
 
 - `cargo test --lib` in `apps/shell/src-tauri`: hit test, placement, drop
   spots, full-screen cover, picked area on the screen, shortcut parsing and ACL,
-  the cover's size and per-track cache, and which apps are games.
+  the cover's size and per-track cache, which apps are games, and when a press
+  is a click elsewhere.
 - `packages/ui/src/lib/companion/companion.test.ts`: preferences, mood, brain
   choice, prompt and wording.
 - `packages/ui/src/lib/companion/companion-memory.test.ts`: memory,
@@ -357,6 +412,10 @@ The list closes when a new permission or question opens the panel.
   that say the tests pass or not, in English and French, the day's first sign
   and the coffee's hours, the confetti's timing, and a finished thread's
   answer handed over by the notes on the fake core.
+- `packages/ui/src/lib/companion/companion-drop.test.ts`: dropped files under
+  the caps and with the screen, the request naming files and projects, the
+  task directive, finding a project, the new thread's agent and model, and
+  launching in both control modes on the fake core.
 - Captures: `?view=companion&fake=1` on the dev UI at 440 × 600 (`&hud=1`
   seeds a Douane and three threads at work for the HUD), and Settings,
   Companion at desktop and phone widths.

@@ -4,7 +4,7 @@
  * is complete, what the reply asks of the companion (`directives.ts`): facts
  * to keep or to forget, reminders to ring.
  */
-import type { Message, RpcEvents, ThreadSummary } from '@boite/contracts';
+import type { Attachment, Message, RpcEvents, ThreadSummary } from '@boite/contracts';
 import type { Client } from '../client';
 import { fill, strings } from '../strings';
 import { COMPANION_THREAD_TITLE, permissionModeOf, pickBrain, promptFor, replyText } from './brain';
@@ -13,6 +13,7 @@ import { addReminder, forget, memoryBlock, readMemory, remember } from './memory
 import { isWorking } from './mood';
 import { writeCompanionPrefs, type CompanionPrefs } from './prefs';
 import type { ScreenShot } from './screen';
+import { taskProjects } from './tasks';
 
 export type Phase = 'none' | 'thinking' | 'streaming' | 'done' | 'error';
 
@@ -35,6 +36,15 @@ interface Target {
 
 /** Enough messages to reach back to the request across a few tool calls. */
 const TAIL = 12;
+
+/** The projects a task may go to, named in the conversation's first request; none when they cannot be read. */
+async function projectNames(client: Client): Promise<string[]> {
+  try {
+    return taskProjects(await client.call('projects.list', {})).map((project) => project.name);
+  } catch {
+    return [];
+  }
+}
 
 export class Talk {
   phase = $state<Phase>('none');
@@ -129,8 +139,11 @@ export class Talk {
   // Asking
   // -------------------------------------------------------------------------
 
-  /** Sends a request, with the screen when given. False when it could not be sent. */
-  async ask(request: string, shot: ScreenShot | null): Promise<boolean> {
+  /**
+   * Sends a request, with the files dropped on the companion and the screen
+   * when given. False when it could not be sent.
+   */
+  async ask(request: string, shot: ScreenShot | null, files: Attachment[] = []): Promise<boolean> {
     const client = this.host.client();
     if (!request || !client || this.thinking) return false;
     this.problem = '';
@@ -151,8 +164,10 @@ export class Talk {
       await this.subscribe(target.threadId);
       const first = this.isFirst(target);
       this.primed.add(target.threadId);
-      const prompt = promptFor(request, { first, memory: memoryBlock(readMemory()), now: new Date(), seen: shot?.seen ?? null });
-      await client.call('turns.start', { threadId: target.threadId, prompt, ...(shot ? { attachments: shot.images } : {}) });
+      const projects = first ? await projectNames(client) : [];
+      const prompt = promptFor(request, { first, memory: memoryBlock(readMemory()), now: new Date(), seen: shot?.seen ?? null, files: files.map((file) => file.name ?? strings.composer.attachUnnamed), projects });
+      const attachments = [...files, ...(shot?.images ?? [])];
+      await client.call('turns.start', { threadId: target.threadId, prompt, ...(attachments.length > 0 ? { attachments } : {}) });
       this.sawRunning = true;
       this.follow();
       return true;
@@ -244,6 +259,16 @@ export class Talk {
     if (this.thinking || !reply) return;
     this.problem = '';
     this.parts = [reply];
+    this.phase = 'done';
+    this.shown = true;
+    this.hold();
+  }
+
+  /** A line of the companion's own after a finished reply: a project it does not know, a launch that failed. */
+  aside(text: string): void {
+    if (this.thinking || !text) return;
+    this.problem = '';
+    this.parts = [[this.reply, text].filter(Boolean).join('\n\n')];
     this.phase = 'done';
     this.shown = true;
     this.hold();
