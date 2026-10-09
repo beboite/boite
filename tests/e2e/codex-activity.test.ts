@@ -34,10 +34,15 @@ test('silent Codex reasoning and completed stored tools remain visible after rec
     await page.waitFor(`globalThis.__boiteTest.workspace.active.openThread?.id === ${JSON.stringify(thread.id)} && globalThis.__boiteTest.workspace.active.loadingThreadId === null`);
     await client.call('turns.start', { threadId: thread.id, prompt: '[silent-reasoning]' });
     await page.waitFor('globalThis.__boiteTest.workspace.active.openThread?.progress?.phase === "thinking"');
-    expect(await page.evaluate('document.querySelector("[data-testid=turn-progress], [data-testid=turn-last-activity]") === null')).toBe(true);
+    await page.waitFor('document.querySelector("[data-testid=turn-progress]")?.textContent === "Thinking"');
+    expect(await page.evaluate('document.querySelector("[data-testid=turn-last-activity], [data-testid=typing-indicator], .reply-pending") === null')).toBe(true);
+    expect(await page.evaluate('document.querySelector(".answer-bubble")?.textContent')).toBe('Message already stored.');
     expect(await page.evaluate('globalThis.__boiteTest.workspace.active.openThread.messages.filter(message => message.role === "assistant").flatMap(message => message.parts).filter(part => part.type === "thinking").length')).toBe(0);
     await capture(page, 'codex-silent-thinking-desktop.png');
     await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+    expect(await page.evaluate('document.querySelector("[data-testid=turn-progress]")?.textContent')).toBe('Thinking');
+    expect(await page.evaluate('document.querySelector("[data-testid=typing-indicator], .reply-pending") === null')).toBe(true);
+    expect(await page.evaluate('document.querySelector(".answer-bubble")?.textContent')).toBe('Message already stored.');
     await capture(page, 'codex-silent-thinking-phone.png');
     await page.waitFor('globalThis.__boiteTest.workspace.active.openThread?.progress?.phase === "waiting"');
     const before = await client.call('threads.get', { threadId: thread.id });
