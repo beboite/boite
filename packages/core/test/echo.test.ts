@@ -708,16 +708,25 @@ describe('echo driver', () => {
     expect((await client.call('threads.get', { threadId })).status).toBe('error');
   });
 
-  test('turns.start on a claude account with no login fails with Unavailable', async () => {
+  test('a claude account whose login may live outside its files reads unknown and still starts a turn', async () => {
+    scriptedClaude(harness);
+    // What the shipped macOS and Windows profiles say: the Keychain or Credential Manager may hold the login.
+    const os = process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'macos' : 'linux';
+    harness.core.providers.require('claude').profiles[os]!.session = [];
+    const client = await harness.connect();
+    const project = await client.call('projects.add', { path: harness.dataDir, name: 'claude project' });
+    const account = await client.call('accounts.add', { providerId: 'claude', label: 'system store' });
+    expect(account.status).toBe('unknown');
+    const thread = await client.call('threads.create', { projectId: project.id, providerId: 'claude', accountId: account.id });
+    await client.call('turns.start', { threadId: thread.id, prompt: 'hello' });
+    await waitFor(() => harness.core.threads.require(thread.id).status !== 'running');
+  });
+
+  test.skipIf(process.platform === 'darwin' || process.platform === 'win32')('turns.start on a claude account with no login fails with Unavailable', async () => {
     scriptedClaude(harness);
     const client = await harness.connect();
     const project = await client.call('projects.add', { path: harness.dataDir, name: 'claude project' });
     const account = await client.call('accounts.add', { providerId: 'claude', label: 'no login' });
-    if (process.platform === 'darwin') {
-      // The login may be in the Keychain there: the account reads unknown and a turn still starts.
-      expect(account.status).toBe('unknown');
-      return;
-    }
     expect(account.status).toBe('unauthenticated');
 
     const thread = await client.call('threads.create', {

@@ -23,6 +23,7 @@
         "files": [{ "path": "claude.exe", "bytes": 220051616 }]
       },
       "isolation": { "CLAUDE_CONFIG_DIR": "{isolationDir}" },
+      "session": [],
       "close": { "processes": ["claude.exe"] }
     },
     "linux": {
