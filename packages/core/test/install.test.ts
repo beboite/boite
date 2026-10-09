@@ -189,7 +189,20 @@ beforeEach(async () => {
       if (path === '/release.zip') return new Response(RELEASE);
       if (path === '/agent.exe') return new Response(EXE);
       const published = /^\/agent-(.+)\.exe$/.exec(path)?.[1];
-      if (published !== undefined && PUBLISHED[published] !== undefined) return new Response(PUBLISHED[published]);
+      if (published !== undefined && Object.hasOwn(PUBLISHED, published)) {
+        const bytes = PUBLISHED[published]!;
+        if (!SLOW_PUBLISHED.has(published)) return new Response(bytes);
+        let offset = 0;
+        const body = new ReadableStream<Uint8Array>({
+          async pull(controller) {
+            await Bun.sleep(25);
+            controller.enqueue(bytes.slice(offset, offset + 256));
+            offset += 256;
+            if (offset >= bytes.byteLength) controller.close();
+          },
+        });
+        return new Response(body);
+      }
       if (path === '/release-2.zip') return new Response(RELEASE_V2);
       if (path === '/escaping.zip') return new Response(ESCAPING);
       if (path === '/tampered.zip') return new Response(tampered());
@@ -799,7 +812,9 @@ describe('managed updates', () => {
 });
 
 /** The binaries a publisher has released, by version. */
-const PUBLISHED: Record<string, Uint8Array> = { '1.1.0': EXE_V2, '1.2.0': EXE };
+const PUBLISHED: Record<string, Uint8Array> = { '1.1.0': EXE_V2, '1.2.0': EXE, '1.3.0': EXE_V2 };
+/** Versions served a chunk at a time, so an update can join their download. */
+const SLOW_PUBLISHED = new Set<string>();
 
 describe('managed releases that follow their publisher', () => {
   /** What the publisher names as newest; null when it cannot be reached. */
@@ -830,7 +845,8 @@ describe('managed releases that follow their publisher', () => {
     const resolved = await resolveLatestInstall(install, async (asked) => {
       if (newest === null) throw new Error('publisher.example is unreachable');
       const bytes = PUBLISHED[newest]!;
-      if (asked.endsWith('/latest')) return newest;
+      if (asked === 'https://publisher.example/latest') return newest;
+      if (asked !== `https://publisher.example/${newest}/manifest.json`) throw new Error(`unexpected ${asked}`);
       return JSON.stringify({ version: newest, platforms: { 'test-x64': { binary: EXE_PATH, checksum: sha256(bytes), size: bytes.byteLength } } });
     });
     return { ...resolved, url: url(`/agent-${resolved.version}.exe`) };
@@ -838,6 +854,7 @@ describe('managed releases that follow their publisher', () => {
 
   beforeEach(() => {
     newest = '1.1.0';
+    SLOW_PUBLISHED.clear();
   });
 
   test('the first install fetches the newest release, and an update moves to the next one without running the agent', async () => {
@@ -871,9 +888,36 @@ describe('managed releases that follow their publisher', () => {
       second.updates.start();
       const [entry] = await second.updates.list(true);
       expect(entry).toMatchObject({ current: '1.2.0', latest: '1.2.0', pending: false, state: 'idle' });
+      // Nor does an install: the pin is older than what is on disk.
+      expect(() => second.providers.installs.start('managed', second.providers.installBlock('managed')!)).toThrow('up to date on 1.2.0');
     } finally {
       await second.close();
     }
+  });
+
+  test('an update that joins the card\'s download of an older release then fetches the newest', async () => {
+    const client = await following();
+    const states: ProviderInstallState[] = [];
+    client.on('providers.installProgress', (event) => states.push(event));
+    await client.call('providers.install', { providerId: 'managed' });
+    await waitFor(() => states.some((state) => state.state === 'installed'));
+    harness.core.updates.only = new Set(['managed']);
+    await client.call('providers.updates', { refresh: true });
+
+    // A check reads 1.2.0 and the card starts it; the next check, during that download, reads 1.3.0.
+    newest = '1.2.0';
+    SLOW_PUBLISHED.add('1.2.0');
+    await client.call('providers.updates', { refresh: true });
+    await client.call('providers.install', { providerId: 'managed' });
+    newest = '1.3.0';
+    const [offered] = await client.call('providers.updates', { refresh: true });
+    expect(offered).toMatchObject({ current: '1.1.0', latest: '1.3.0', pending: true });
+    const updates: HarnessUpdate[][] = [];
+    client.on('providers.updatesChanged', (list) => updates.push(list));
+    await client.call('providers.update', { providerId: 'managed' });
+    await waitFor(() => updates.at(-1)?.[0]?.state === 'idle' || updates.at(-1)?.[0]?.state === 'failed');
+    expect(updates.at(-1)?.[0]).toMatchObject({ current: '1.3.0', latest: '1.3.0', pending: false, state: 'idle' });
+    expect(states.filter((state) => state.state === 'installed').map((state) => state.version)).toEqual(['1.1.0', '1.2.0', '1.3.0']);
   });
 
   test('a publisher that cannot be reached installs the pinned release', async () => {

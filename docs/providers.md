@@ -408,9 +408,12 @@ Claude's release bucket has this shape, and its manifest gives each platform's
 `binary`, `checksum` (SHA-256) and `size`. Install reads the publisher first,
 unless it was read in the last minute, and downloads the release it names,
 checked against the manifest's digest and size like a pinned one. The manifest's
-binary name has to be the file the descriptor installs. A publisher that cannot
-be reached, or a manifest that does not describe that binary, leaves the pinned
-release, and the core log says why. The install card reads the publisher when a
+binary name has to be the file the descriptor installs, `versionUrl` carries no
+`{version}`, and a redirect off https is refused. A publisher that cannot be
+reached, or a manifest that does not describe that binary, leaves the last
+release read, or the pin when none was, and the core log says why. A release
+that follows its publisher never goes back: an install or update naming an
+older version than the one on disk is refused as up to date. The install card reads the publisher when a
 client lists the providers and the last read is an hour old, never at startup.
 Without this, a first install would land the release the Boite build pinned,
 and an update could only reach the next pin.
@@ -470,7 +473,10 @@ An update installs the new release beside the old one and repoints `current`.
 The old release is deleted as soon as no lease is held: right after the update,
 or when the last process of that provider ends. A core that starts also deletes
 every release `current` does not point at, and every download except the `.part`
-of the version the descriptor pins. A file Windows still holds is logged and
+of the version the descriptor pins. A provider that follows its publisher keeps
+its downloads at startup, since the release it was fetching may be newer than
+the pin; each successful read of the publisher then deletes every download but
+the one of the release it names. A file Windows still holds is logged and
 left for the next of those moments.
 
 ## What ships

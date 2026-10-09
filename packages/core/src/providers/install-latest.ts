@@ -2,10 +2,15 @@ import type { ProviderInstall } from '@boite/contracts';
 
 /** How long reading the publisher's version and manifest may take together. */
 export const LATEST_TIMEOUT_MS = 15_000;
+/** How old a publisher's answer may be before a provider list reads it again. */
+export const LATEST_MAX_AGE_MS = 60 * 60 * 1000;
+/** And before an install or a managed update does. */
+export const INSTALL_LATEST_MAX_AGE_MS = 60 * 1000;
 /** A manifest is a few kilobytes; anything far larger is not one. */
 const MANIFEST_MAX_BYTES = 1024 * 1024;
-/** Same rule as a descriptor's pinned version: it names a directory the installer deletes. */
-const PLAIN_VERSION = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/;
+/** A release version names a directory the installer deletes, so it is one plain path segment. */
+export const PLAIN_VERSION = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/;
+export const SHA256_HEX = /^[a-fA-F0-9]{64}$/;
 
 /** Newer, older or the same, reading the numbers first and a pre-release tag as older than none. */
 export function compareVersions(a: string, b: string): number {
@@ -25,14 +30,37 @@ export function compareVersions(a: string, b: string): number {
   return left.tag.localeCompare(right.tag, 'en', { numeric: true }) < 0 ? -1 : 1;
 }
 
+/**
+ * True when installing this block would fetch nothing new: it names what is
+ * on disk, or, for a release that follows its publisher, an older one, the
+ * pin it falls back to included. Such a release never goes back.
+ */
+export function upToDate(current: string | null, install: ProviderInstall): boolean {
+  if (current === null) return false;
+  return current === install.version || (install.latest !== undefined && compareVersions(current, install.version) > 0);
+}
+
 export type FetchText = (url: string, signal: AbortSignal) => Promise<string>;
 
 async function fetchText(url: string, signal: AbortSignal): Promise<string> {
   const response = await fetch(url, { signal, redirect: 'follow' });
+  // The manifest names the digest the download is checked against: a redirect off https would let anyone on the path name it.
+  if (!response.url.startsWith('https://')) throw new Error(`${url} redirected to ${response.url}; a publisher stays on https`);
   if (!response.ok) throw new Error(`${url} answered ${response.status}`);
-  const text = await response.text();
-  if (text.length > MANIFEST_MAX_BYTES) throw new Error(`${url} is ${text.length} bytes, more than a release manifest`);
-  return text;
+  const tooBig = new Error(`${url} is more than ${MANIFEST_MAX_BYTES} bytes, larger than a release manifest`);
+  if (Number(response.headers.get('content-length') ?? 0) > MANIFEST_MAX_BYTES) throw tooBig;
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
+  const reader = response.body?.getReader();
+  for (let read = await reader?.read(); read !== undefined && !read.done; read = await reader?.read()) {
+    bytes += read.value.byteLength;
+    if (bytes > MANIFEST_MAX_BYTES) {
+      void reader?.cancel().catch(() => {});
+      throw tooBig;
+    }
+    chunks.push(read.value);
+  }
+  return Buffer.concat(chunks).toString('utf8');
 }
 
 /**
@@ -65,13 +93,14 @@ export async function resolveLatestInstall(
   if (record.version !== undefined && record.version !== version) {
     throw new Error(`${manifestUrl} describes ${String(record.version)}, not ${version}`);
   }
+  const binary = install.files[0];
+  if (binary === undefined) throw new Error(`the install block of ${latest.versionUrl} names no file to install`);
   const entry = record.platforms?.[latest.platform] as { binary?: unknown; checksum?: unknown; size?: unknown } | undefined;
   if (typeof entry !== 'object' || entry === null) throw new Error(`${manifestUrl} has no ${latest.platform} entry`);
-  const expectedName = install.files[0]?.path;
-  if (entry.binary !== expectedName) {
-    throw new Error(`${manifestUrl} names ${String(entry.binary)} for ${latest.platform}, expected ${expectedName}`);
+  if (entry.binary !== binary.path) {
+    throw new Error(`${manifestUrl} names ${String(entry.binary)} for ${latest.platform}, expected ${binary.path}`);
   }
-  if (typeof entry.checksum !== 'string' || !/^[a-fA-F0-9]{64}$/.test(entry.checksum)) {
+  if (typeof entry.checksum !== 'string' || !SHA256_HEX.test(entry.checksum)) {
     throw new Error(`${manifestUrl} carries no sha256 checksum for ${latest.platform}`);
   }
   if (typeof entry.size !== 'number' || !Number.isSafeInteger(entry.size) || entry.size <= 0) {
@@ -83,6 +112,6 @@ export async function resolveLatestInstall(
     url: latest.url.split('{version}').join(version),
     sha256: entry.checksum.toLowerCase(),
     archiveBytes: entry.size,
-    files: [{ ...install.files[0]!, bytes: entry.size }],
+    files: [{ ...binary, bytes: entry.size }],
   };
 }

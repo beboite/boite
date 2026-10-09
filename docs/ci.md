@@ -135,7 +135,7 @@ The tested installer becomes the release artifact.
 | UI entry chunk | 588,000 |
 | UI files, excluding `.br` and `.gz` copies | 4,405,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 3,690,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 3,715,000 |
 
 The total JavaScript measure excludes native binaries and source maps. On
 2026-10-03, fresh builds of `e1f00a3` measured 2,695,204 core bytes and 3,932,309
@@ -178,6 +178,13 @@ gains the frame, the order of views in the timeline, and the kit and
 bootstrap, which the client chunk keeps because the fake client stores pages
 with them. The UI limit rises to 4,405,000 and the core JavaScript limit to
 3,690,000, leaving about 20 KB and 18 KB.
+
+Managed releases that follow their publisher, Claude's on Windows, measured
+3,696,543 emitted core JavaScript bytes on Linux on 2026-10-09, 7,130 above the
+3,689,413 that `main` at `24ef2968` measured built the same way: reading the
+version file and the manifest, the forward-only rule and the update joining an
+older download. The core JavaScript limit rises to 3,715,000, leaving about
+18 KB of headroom.
 
 Recent's Done and Working groups measured 3,949,936 UI bytes on 2026-10-03
 before integrating these orchestration additions. The combined build measured

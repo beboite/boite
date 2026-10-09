@@ -16,7 +16,7 @@ import {
 } from './install-download.ts';
 import { pointCurrent, readReleaseRecord, removeCurrent, writeReleaseRecord, type ReleaseRecord } from './install-release.ts';
 import { checkSizes, extractRelease, markExecutable, reachesThroughLink } from './install-unpack.ts';
-import { compareVersions } from './install-latest.ts';
+import { upToDate } from './install-latest.ts';
 
 /** Room left on the volume after the archive and the unpacked files, so nothing fills the disk. */
 export const FREE_SPACE_MARGIN = 256 * 1024 * 1024;
@@ -138,12 +138,11 @@ export class InstallManager {
       // is an update waiting, not an absent provider whose files are missing.
       // A release that follows its publisher only moves forward: the pin it
       // falls back to before the publisher is read is no update.
-      const behind = install.latest !== undefined && compareVersions(record.version, install.version) > 0;
       return {
         state: 'installed',
         version: record.version,
         installedAt: record.installedAt,
-        available: behind ? record.version : install.version,
+        available: upToDate(record.version, install) ? record.version : install.version,
       };
     }
     return { state: 'absent', version: install.version, archiveBytes: install.archiveBytes };
@@ -284,10 +283,10 @@ export class InstallManager {
     this.releaseDir(providerId, install.version);
     this.partFile(providerId, install.version);
     const record = this.#readRecord(providerId);
-    if (record !== null && record.version === install.version) {
-      throw refused(`${providerId} is up to date on ${install.version}`, {
+    if (record !== null && upToDate(record.version, install)) {
+      throw refused(`${providerId} is up to date on ${record.version}`, {
         providerId,
-        version: install.version,
+        version: record.version,
       });
     }
     this.#failed.delete(providerId);

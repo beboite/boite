@@ -84,11 +84,16 @@ describe('a descriptor that follows its publisher', () => {
     expect(loaded.profiles.windows?.install?.latest?.platform).toBe('win32-x64');
   });
 
-  test('is refused for a zip, a plain http url or a url with no {version}', () => {
+  test('is refused for a zip, a plain http url or a misplaced {version}', () => {
     const latest = shipped['latest'] as Record<string, string>;
     const cases: [Record<string, unknown>, string][] = [
       [{ ...shipped, format: 'zip' }, 'profiles.windows.install.latest'],
+      [{ ...shipped, format: undefined }, 'profiles.windows.install.latest'],
+      [{ ...shipped, latest: { ...latest, versionUrl: 'http://downloads.claude.ai/latest' } }, 'profiles.windows.install.latest.versionUrl'],
+      [{ ...shipped, latest: { ...latest, versionUrl: 'https://downloads.claude.ai/{version}/latest' } }, 'profiles.windows.install.latest.versionUrl'],
       [{ ...shipped, latest: { ...latest, manifest: 'http://downloads.claude.ai/{version}/manifest.json' } }, 'profiles.windows.install.latest.manifest'],
+      [{ ...shipped, latest: { ...latest, manifest: 'https://downloads.claude.ai/manifest.json' } }, 'profiles.windows.install.latest.manifest'],
+      [{ ...shipped, latest: { ...latest, url: 'http://downloads.claude.ai/{version}/claude.exe' } }, 'profiles.windows.install.latest.url'],
       [{ ...shipped, latest: { ...latest, url: 'https://downloads.claude.ai/claude.exe' } }, 'profiles.windows.install.latest.url'],
       [{ ...shipped, latest: { ...latest, platform: 'win32/x64' } }, 'profiles.windows.install.latest.platform'],
     ];

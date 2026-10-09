@@ -2,7 +2,7 @@ import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { userInfo } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
-import type { HarnessUpdate, OsProfile, ProviderDescriptor, ProviderId, ProviderSelfUpdate, ThreadId } from '@boite/contracts';
+import type { HarnessUpdate, OsProfile, ProviderDescriptor, ProviderId, ProviderInstall, ProviderSelfUpdate, ThreadId } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { forgetProbes } from '../drivers/index.ts';
 import { notFound, refused } from '../errors.ts';
@@ -12,7 +12,7 @@ import { profileFor, resolveCommand } from './resolve.ts';
 import { resumeAfterUpdate, resumePostponed, resumeUnwaited, type Resume } from './update-resume.ts';
 import { readVersion, recheckVersions } from './versions.ts';
 import { forgetWhich } from './which.ts';
-import { compareVersions } from './install-latest.ts';
+import { compareVersions, INSTALL_LATEST_MAX_AGE_MS, upToDate } from './install-latest.ts';
 
 export { readVersion };
 
@@ -503,10 +503,11 @@ export class HarnessUpdates {
     return this.snapshot();
   }
 
-  private async read(target: Target): Promise<{ current: string | null; latest: string | null }> {
+  /** `maxAgeMs` is how old a publisher's answer may be: a check asks again, a read right after an install need not. */
+  private async read(target: Target, maxAgeMs = 0): Promise<{ current: string | null; latest: string | null }> {
     if (target.route === 'managed') {
-      // A release that follows its publisher reads it again, and nothing runs.
-      await this.core.providers.freshInstallBlock(target.descriptor.id, (level, message) => this.core.log(level, message), 0);
+      // A release that follows its publisher reads it, and nothing runs.
+      await this.freshInstall(target, maxAgeMs);
       return this.readManaged(target);
     }
     const spec = target.profile.update as ProviderSelfUpdate;
@@ -540,8 +541,7 @@ export class HarnessUpdates {
     const current = this.core.providers.installs.installedVersion(id);
     const install = this.core.providers.installBlock(id);
     const latest = install?.version ?? null;
-    if (install?.latest !== undefined && current !== null && latest !== null && compareVersions(current, latest) > 0) return { current, latest: current };
-    return { current, latest };
+    return { current, latest: install !== undefined && upToDate(current, install) ? current : latest };
   }
 
   /** One short run of the agent's own program, traced like every process of an agent. */
@@ -600,7 +600,7 @@ export class HarnessUpdates {
       // An updater may have moved the program on PATH.
       forgetWhich();
       recheckVersions();
-      const read = await this.read(target);
+      const read = await this.read(target, INSTALL_LATEST_MAX_AGE_MS);
       if (this.closed || this.core.stopping) return;
       const stuck = target.route === 'self' && before.current !== null && read.current === before.current && this.newer({ ...before, ...read });
       const reason = stuck ? stuckReason(said) : undefined;
@@ -651,22 +651,29 @@ export class HarnessUpdates {
    * The install block's own download, waited on for as long as it takes: its
    * card shows the progress meanwhile, and the download fails by itself once
    * the connection stays dead. A download the install card already started is
-   * joined rather than refused as already running.
+   * joined rather than refused as already running; when it lands an older
+   * release than the publisher now names, that one is fetched after it.
    */
   private async runManaged(target: Target): Promise<void> {
     const id = target.descriptor.id;
     const installs = this.core.providers.installs;
-    let done = installs.whenDone(id);
-    if (done === null) {
-      const install = await this.core.providers.freshInstallBlock(id, (level, message) => this.core.log(level, message), 60_000);
-      if (install === undefined) throw new Error(`${target.descriptor.name} has nothing for Boite to install on this platform`);
-      done = installs.whenDone(id);
-      if (done === null) installs.start(id, install);
-      done = installs.whenDone(id);
-    }
-    const result = await done;
-    if (result === null || result.outcome === 'cancelled') throw new Error('the download was cancelled');
-    if (result.state.state === 'failed') throw new Error(result.state.message);
+    const settled = async (done: ReturnType<typeof installs.whenDone>): Promise<void> => {
+      const result = await done;
+      if (result === null || result.outcome === 'cancelled') throw new Error('the download was cancelled');
+      if (result.state.state === 'failed') throw new Error(result.state.message);
+    };
+    const joined = installs.whenDone(id);
+    if (joined !== null) await settled(joined);
+    const install = await this.freshInstall(target, INSTALL_LATEST_MAX_AGE_MS);
+    if (install === undefined) throw new Error(`${target.descriptor.name} has nothing for Boite to install on this platform`);
+    // Nothing to fetch: the joined download landed it, or the publisher names what is on disk.
+    if (upToDate(installs.installedVersion(id), install)) return;
+    if (installs.whenDone(id) === null) installs.start(id, install);
+    await settled(installs.whenDone(id));
+  }
+
+  private freshInstall(target: Target, maxAgeMs: number): Promise<ProviderInstall | undefined> {
+    return this.core.providers.freshInstallBlock(target.descriptor.id, (level, message) => this.core.log(level, message), maxAgeMs);
   }
 
   /**
@@ -679,7 +686,7 @@ export class HarnessUpdates {
     if (this.closed || outcome.outcome !== 'installed' || entry?.route !== 'managed' || entry.state === 'updating') return;
     const target = this.targetOf(outcome.providerId);
     if (target?.route !== 'managed') return;
-    void this.read(target).then((read) => {
+    void this.read(target, INSTALL_LATEST_MAX_AGE_MS).then((read) => {
       if (this.entries.get(outcome.providerId)?.state === 'updating') return;
       this.put(outcome.providerId, { ...entry, ...read, state: 'idle', message: null, checkedAt: Date.now() });
       this.writeReadings();

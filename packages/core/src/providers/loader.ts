@@ -14,7 +14,7 @@ import {
 import type { Core } from '../core.ts';
 import { writesTitles } from '../drivers/index.ts';
 import { InstallManager } from './install.ts';
-import { compareVersions, resolveLatestInstall } from './install-latest.ts';
+import { compareVersions, INSTALL_LATEST_MAX_AGE_MS, LATEST_MAX_AGE_MS, resolveLatestInstall } from './install-latest.ts';
 import { detectResolves, HOST_CANDIDATES, hostAgentsEnabled, launcherScriptOnly, profileFor, resolveCommand } from './resolve.ts';
 import { Rejection, validateDescriptor } from './validate.ts';
 import { attachVersions, loadVersions, versionsSettled } from './versions.ts';
@@ -58,11 +58,6 @@ export interface LoadedProvider {
   source: 'shipped' | 'user';
   file: string;
 }
-
-/** How old a publisher's answer may be before a list reads it again. */
-const LATEST_MAX_AGE_MS = 60 * 60 * 1000;
-/** And before an install does. */
-const INSTALL_LATEST_MAX_AGE_MS = 60 * 1000;
 
 export interface ProviderLoadResult {
   loaded: ProviderSummary[];
@@ -176,7 +171,8 @@ export class ProviderRegistry {
   readonly installs: InstallManager;
   /** The newest release each `latest` block's publisher named, and when it was read. Memory only: a restart reads it again. */
   private latest = new Map<ProviderId, { pinned: ProviderInstall; resolved: ProviderInstall; at: number }>();
-  private latestReads = new Map<ProviderId, Promise<ProviderInstall>>();
+  /** A read in flight, joined only by a call for the same install block: a reload may have changed the publisher. */
+  private latestReads = new Map<ProviderId, { pinned: ProviderInstall; reading: Promise<ProviderInstall> }>();
   /** Test seam: the publisher read. */
   resolveLatest: (install: ProviderInstall) => Promise<ProviderInstall> = (install) => resolveLatestInstall(install);
 
@@ -230,15 +226,23 @@ export class ProviderRegistry {
     if (pinned?.latest === undefined) return this.installBlock(id);
     const known = this.latest.get(id);
     if (known !== undefined && known.pinned === pinned && Date.now() - known.at < maxAgeMs) return this.installBlock(id);
-    let reading = this.latestReads.get(id);
-    if (reading === undefined) {
-      reading = this.resolveLatest(pinned).finally(() => this.latestReads.delete(id));
-      this.latestReads.set(id, reading);
+    let inFlight = this.latestReads.get(id);
+    if (inFlight?.pinned !== pinned) {
+      const reading: Promise<ProviderInstall> = this.resolveLatest(pinned).finally(() => {
+        if (this.latestReads.get(id)?.reading === reading) this.latestReads.delete(id);
+      });
+      inFlight = { pinned, reading };
+      this.latestReads.set(id, inFlight);
     }
     try {
-      const resolved = await reading;
-      // A reload while the read ran may have replaced the descriptor.
-      if (profileFor(this.get(id) ?? descriptor!)?.install === pinned) this.latest.set(id, { pinned, resolved, at: Date.now() });
+      const resolved = await inFlight.reading;
+      // A reload while the read ran may have replaced or removed the descriptor.
+      const now = this.get(id);
+      if (now !== undefined && profileFor(now)?.install === pinned) {
+        this.latest.set(id, { pinned, resolved, at: Date.now() });
+        // Downloads of a release the publisher no longer names go; the one it names may resume.
+        this.installs.prune(id, resolved.version);
+      }
     } catch (error) {
       log('warn', `${id}: the newest release could not be read (${error instanceof Error ? error.message : String(error)}); keeping ${this.installBlock(id)?.version ?? pinned.version}`);
     }
@@ -484,10 +488,9 @@ export function registerProviderMethods(core: Core): void {
     // The shipped agents are hidden from a test core (BOITE_HOST_AGENTS=0), which reaches no publisher either.
     const stale = hostAgentsEnabled() ? core.providers.latestStale() : [];
     if (stale.length > 0) {
-      const before = stale.map((id) => core.providers.installBlock(id)?.version);
-      void Promise.all(stale.map((id) => core.providers.freshInstallBlock(id, (level, message) => core.log(level, message)))).then((after) => {
-        if (after.some((install, index) => install?.version !== before[index])) core.bus.emit('providers.updated', core.providers.list());
-      });
+      void Promise.all(stale.map((id) => core.providers.freshInstallBlock(id, (level, message) => core.log(level, message))))
+        .then(() => announce('a publisher read'))
+        .catch((error: unknown) => core.log('warn', `reading the newest releases: ${error instanceof Error ? error.message : String(error)}`));
     }
     await core.providers.settle();
     return core.providers.list();
@@ -501,18 +504,19 @@ export function registerProviderMethods(core: Core): void {
   // waiting for: it is listed as installed from now on, and a login it already
   // has is adopted before the clients hear of it.
   let listed = fingerprint(core.providers.list());
+  // One fingerprint for every change found behind a list, so the next one is not announced twice.
+  const announce = (after: string): void => {
+    if (core.stopping || core.journal.isClosed()) return;
+    const now = fingerprint(core.providers.list());
+    if (now === listed) return;
+    listed = now;
+    try { core.accounts.ensureDefaults(); }
+    catch (error) { core.log('error', `default accounts after ${after}: ${error instanceof Error ? error.message : String(error)}`); }
+    core.bus.emit('providers.updated', core.providers.list());
+  };
   core.providers.attachVersions(
     (program, args) => programOutput(core, program, args),
-    () => {
-      if (core.stopping || core.journal.isClosed()) return;
-      const result = core.providers.list();
-      const now = fingerprint(result);
-      if (now === listed) return;
-      listed = now;
-      try { core.accounts.ensureDefaults(); }
-      catch (error) { core.log('error', `default accounts after a version read: ${error instanceof Error ? error.message : String(error)}`); }
-      core.bus.emit('providers.updated', core.providers.list());
-    },
+    () => announce('a version read'),
   );
   core.router.register('providers.reload', async () => {
     const before = fingerprint(core.providers.list());

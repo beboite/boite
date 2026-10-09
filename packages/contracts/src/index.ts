@@ -99,9 +99,10 @@ export interface ProviderInstall {
   files: { path: string; bytes: number; executable?: boolean }[];
   /**
    * Where the newest release is published, for a `binary` install. The core
-   * reads it before an install and at each update check, and installs that
-   * release instead of the pinned one, which stays the fallback when the
-   * publisher cannot be reached.
+   * reads it before an install, at each update check, and behind a provider
+   * list when the last read is an hour old so the install card names it. It
+   * installs that release instead of the pinned one, which stays the fallback
+   * when the publisher was never reached.
    */
   latest?: ProviderInstallLatest;
 }
