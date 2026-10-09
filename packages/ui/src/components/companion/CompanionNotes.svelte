@@ -1,15 +1,16 @@
 <!--
   What the companion shows under itself besides its panel: the reminders that
   rang, each agent's reply, named when several stand, the other conversations
-  that finished, and a word when Boite is out of reach. Each block takes
-  clicks (`data-hit`).
+  that finished, which the user may answer from here, and a word when Boite is
+  out of reach. Each block takes clicks (`data-hit`).
 -->
 <script lang="ts">
-  import { BellRing, CircleAlert, ExternalLink, Square, X } from '@lucide/svelte';
+  import { BellRing, CircleAlert, CornerDownLeft, ExternalLink, Square, X } from '@lucide/svelte';
   import { fill, strings } from '../../lib/strings';
   import { showAgent, showMain } from '../../lib/companion/shell';
   import type { Notes } from '../../lib/companion/notes.svelte';
   import type { CrewMember } from './CompanionCrew.svelte';
+  import CompanionReply from './CompanionReply.svelte';
 
   interface Props {
     members: CrewMember[];
@@ -69,15 +70,27 @@
 
 {#if !open}
   {#each notes.notices as notice (notice.id)}
-    <div class="card notice" class:failed={notice.failed} data-hit role="status" data-testid="companion-notice">
-      <button class="ghost open" title={copy.openNotice} onclick={() => openNotice(notice.id, notice.threadId)}>
-        {#if notice.failed}<span class="mark"><CircleAlert size={13} /></span>{/if}
-        <span class="lines">
-          <span class="title">{fill(notice.failed ? copy.failedThread : copy.finished, { title: notice.title })}</span>
-          {#if notice.line}<span class="line">{notice.line}</span>{/if}
-        </span>
-      </button>
-      <button class="ghost icon" aria-label={copy.dismiss} title={copy.dismiss} onclick={() => notes.dismiss(notice.id)}><X size={13} /></button>
+    {@const replying = notes.replying === notice.id}
+    <div class="card notice" class:failed={notice.failed} class:replying data-hit role="status" data-testid="companion-notice">
+      <div class="head">
+        <button class="ghost open" title={copy.openNotice} onclick={() => openNotice(notice.id, notice.threadId)}>
+          {#if notice.failed}<span class="mark"><CircleAlert size={13} /></span>{/if}
+          <span class="lines">
+            <span class="title">{fill(notice.failed ? copy.failedThread : copy.finished, { title: notice.title })}</span>
+            {#if notice.line && !replying}<span class="line">{notice.line}</span>{/if}
+          </span>
+        </button>
+        {#if !replying}
+          <button class="ghost icon" aria-label={copy.reply.action} title={copy.reply.action} onclick={() => notes.answer(notice.id)} data-testid="companion-notice-reply"><CornerDownLeft size={13} /></button>
+        {/if}
+        <button class="ghost icon" aria-label={copy.dismiss} title={copy.dismiss} onclick={() => notes.dismiss(notice.id)}><X size={13} /></button>
+      </div>
+      {#if replying}
+        <div class="answering">
+          {#if notice.text}<p class="answer">{notice.text}</p>{/if}
+          <CompanionReply title={notice.title} problem={notes.replyProblem} onsend={(text) => notes.reply(notice.id, text)} oncancel={() => notes.answer(null)} />
+        </div>
+      {/if}
     </div>
   {/each}
 {/if}
@@ -170,13 +183,21 @@
 
   .notice {
     display: flex;
-    align-items: flex-start;
-    gap: 2px;
+    flex-direction: column;
     width: max-content;
     padding: 3px;
     border-radius: var(--radius-lg);
   }
+  .notice.replying {
+    width: 380px;
+  }
+  .head {
+    display: flex;
+    align-items: flex-start;
+    gap: 2px;
+  }
   .notice .open {
+    flex: 1;
     display: flex;
     align-items: flex-start;
     gap: 6px;
@@ -213,6 +234,21 @@
     flex: none;
     width: 24px;
     height: 24px;
+  }
+  .answering {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 2px 6px 6px 9px;
+  }
+  .answer {
+    max-height: 160px;
+    overflow-y: auto;
+    font-size: var(--text-sm);
+    line-height: 1.45;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    scrollbar-width: thin;
   }
 
   .toast {

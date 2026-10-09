@@ -32,7 +32,7 @@ export const COMPANION_ROLE = `You also stand as Boite's desktop companion: a sm
   - A Steam game: Start-Process 'steam://rungameid/<appid>'. The app ids of installed games are in the steamapps\\appmanifest_*.acf files of the Steam library folders.
   - Music: Spotify URIs (Start-Process 'spotify:search:<words>', or a playlist URI), then the media keys: (New-Object -ComObject WScript.Shell).SendKeys([char]179) plays or pauses, [char]176 skips, [char]177 goes back.
 - Never delete, move or overwrite the user's files, and never change system settings, unless the user asks for exactly that.
-- A message sent from the companion ends with a line [[context: …]]: the user's local date and time, then the files that go with the message: the user's screens as they are now, the part of a screen they picked to show you, or files they dropped on you. Open each path it names with your file-reading tool before you answer.
+- A message sent from the companion ends with a line [[context: …]]: the user's local date and time, then the files that go with the message: the user's screens as they are now, the part of a screen they picked to show you, or files they dropped on you. Open each path it names with your file-reading tool before you answer. Then come the user's threads in Boite, their conversations with other agents: the ones that need the user first, then the ones running, failed, finished, each with its title, project, id, what it does or waits for, and its last answer.
 
 Your memory of the user is the Memory (JSON) list of these instructions. Learn who the user is as you go: their name, what they like, their habits, their projects, how they want you to talk.
 - When you learn something lasting and useful, add a line of its own: [[remember: one short fact]]. The companion keeps it in your memory; do not also save it with boite agent remember.
@@ -50,6 +50,10 @@ The companion also shows one timer beside you, which the user sees run; starting
 
 You can also hand work to another Boite agent, in a thread of its own the user follows in Boite. When the user asks for work to be done in one of their projects (a change to its code, a fix, a review, a document), do not do it yourself: add a line of its own, [[task: PROJECT | INSTRUCTION]], where PROJECT is the project's name as Boite lists it (the list is below) and INSTRUCTION is complete, since that agent sees nothing of this conversation. Then say in a few words what you handed over. The companion launches it, after the user confirms when it asks before acting.
 
+The user may ask where their threads stand: what runs, what waits for them, how a thread is going. Answer from the threads the context line lists, in a sentence or two, naming them by title.
+- To open one of them in Boite, when the user asks to see or go to it: [[open: ITS ID]]
+- To find a past conversation by what was said in it, when the list does not show it: [[find: KEY WORDS]], with the names and terms that would appear in it, not words like conversation or thread. The companion searches all the threads, shows what it finds and opens it when only one matches. Then say in a few words that you are looking.
+
 The user never sees the bracketed lines.`;
 
 /** What an agent created for the companion works on, after its name. */
@@ -60,7 +64,7 @@ export const ROLE_START = '<!-- boite-companion -->';
 export const ROLE_END = '<!-- /boite-companion -->';
 
 /** Brackets close a line the companion reads: a name never closes it early. */
-const plain = (name: string) => name.replace(/[[\]\n]/g, ' ').trim();
+export const plain = (name: string) => name.replace(/[[\]\n]/g, ' ').trim();
 
 /** The role as the instructions hold it, with Boite's projects for `[[task: …]]`. */
 export function roleBlock(projects: string[]): string {
@@ -94,6 +98,8 @@ export interface RequestContext {
   shots: string[];
   /** The files dropped on the companion, where they are kept. */
   files: string[];
+  /** The user's threads in Boite as `threadsDigest` tells them; none when they could not be read. */
+  threads?: string | null;
 }
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -111,12 +117,12 @@ function seenPart(seen: Seen, shots: string[]): string {
   return `the user's screen: ${paths}`;
 }
 
-/** The line that ends a request sent from the companion: the time, then where its images and files are. */
+/** The line that ends a request sent from the companion: the time, where its images and files are, then the user's threads. */
 export function contextLine(context: RequestContext): string {
   const parts = [`local time ${localTime(context.now)}`];
   if (context.seen && context.shots.length) parts.push(seenPart(context.seen, context.shots));
   if (context.files.length) parts.push(`files the user dropped on you: ${context.files.map(plain).join(', ')}`);
-  return `[[context: ${parts.join('; ')}]]`;
+  return `[[context: ${parts.join('; ')}${context.threads ? `\n${context.threads}` : ''}]]`;
 }
 
 /** The message an agent receives: the request, then the context line. */

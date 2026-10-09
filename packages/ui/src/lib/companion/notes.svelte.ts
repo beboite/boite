@@ -1,14 +1,16 @@
 /*
  * What the companion says without being asked: another conversation that
- * finished, with the first sentence of its answer, and the reminders it was
- * asked for, which ring here since only this window runs all day.
+ * finished, with the first sentence of its answer, which the user may answer
+ * from here, and the reminders it was asked for, which ring here since only
+ * this window runs all day.
  */
 import type { ThreadSummary } from '@boite/contracts';
 import type { Client } from '../client';
-import { strings } from '../strings';
-import { replyText } from './brain';
+import { fill, strings } from '../strings';
 import { summaryLine } from './describe';
 import { addReminder, takeDueReminders, type Reminder } from './memory';
+import { threadText } from './watch';
+import { replyInThread } from './watch.svelte';
 
 export interface Notice {
   id: string;
@@ -16,6 +18,8 @@ export interface Notice {
   title: string;
   /** The answer's first sentence; empty while it is read, or when there is none. */
   line: string;
+  /** The answer whole, shown when the user answers it. */
+  text: string;
   failed: boolean;
   /** When it came, epoch milliseconds: it goes a while after, unless held in view. */
   at: number;
@@ -48,6 +52,10 @@ const RINGS = 3;
 export class Notes {
   notices = $state<Notice[]>([]);
   alarms = $state<Reminder[]>([]);
+  /** The notice the user answers: it stays until the answer goes. */
+  replying = $state<string | null>(null);
+  /** Why the answer did not go. */
+  replyProblem = $state('');
   private readonly noticed = new Map<string, number>();
   /** The last time the notices were held in view. */
   private heldAt = 0;
@@ -72,11 +80,14 @@ export class Notes {
         threadId,
         title: thread?.title || strings.companion.untitled,
         line: '',
+        text: '',
         failed: thread?.status === 'error',
         at: now
       };
       if (this.host.setAside?.(notice)) continue;
-      this.notices = [notice, ...this.notices.filter((entry) => entry.threadId !== threadId)].slice(0, MAX_NOTICES);
+      // The notice the user answers stays, past the others.
+      const others = this.notices.filter((entry) => entry.threadId !== threadId || entry.id === this.replying);
+      this.notices = [notice, ...others].filter((entry, index) => index < MAX_NOTICES || entry.id === this.replying);
       void this.summarize(notice.id, threadId, notice.failed);
     }
   }
@@ -88,17 +99,9 @@ export class Notes {
       // `threads.get` hands the thread's last messages; `messages.list` wants a cursor.
       const { messages } = await client.call('threads.get', { threadId, limit: TAIL, compactTools: true, compactFiles: true, compactImages: true });
       // The answer's last words, back to the request: its final message may be only tool calls.
-      let line = '';
-      let text = '';
-      for (const message of [...messages].reverse()) {
-        if (message.role === 'user') break;
-        if (message.role === 'assistant') {
-          text = replyText(message);
-          line = summaryLine(text);
-        }
-        if (line) break;
-      }
-      if (line) this.notices = this.notices.map((notice) => (notice.id === id ? { ...notice, line } : notice));
+      const text = threadText(messages).answer;
+      const line = summaryLine(text);
+      if (text) this.notices = this.notices.map((notice) => (notice.id === id ? { ...notice, line, text } : notice));
       if (text && !failed) this.host.answered?.(text);
     } catch {
       /* the title alone says it */
@@ -107,6 +110,28 @@ export class Notes {
 
   dismiss(id: string): void {
     this.notices = this.notices.filter((notice) => notice.id !== id);
+    if (this.replying === id) this.replying = null;
+  }
+
+  /** The answer field opens under the notice, or closes. */
+  answer(id: string | null): void {
+    this.replying = id;
+    this.replyProblem = '';
+  }
+
+  /** The user's words go to the thread as its next prompt. False when they did not go: the field keeps them. */
+  async reply(id: string, text: string): Promise<boolean> {
+    const client = this.host.client();
+    const notice = this.notices.find((entry) => entry.id === id);
+    if (!client || !notice || !text.trim()) return false;
+    try {
+      await replyInThread(client, notice.threadId, text.trim());
+      this.dismiss(id);
+      return true;
+    } catch (error) {
+      this.replyProblem = fill(strings.companion.failed, { reason: error instanceof Error ? error.message : String(error) });
+      return false;
+    }
   }
 
   done(id: string): void {
@@ -122,7 +147,7 @@ export class Notes {
   private tick() {
     const now = Date.now();
     if (this.host.holding()) this.heldAt = now;
-    const gone = (notice: Notice) => now - Math.max(notice.at, this.heldAt) > NOTICE_MS;
+    const gone = (notice: Notice) => notice.id !== this.replying && now - Math.max(notice.at, this.heldAt) > NOTICE_MS;
     if (this.notices.some(gone)) this.notices = this.notices.filter((notice) => !gone(notice));
     const due = takeDueReminders(now);
     if (due.length > 0) {

@@ -2315,6 +2315,36 @@ export const strings = {
       noAgent: 'No agent can take the thread. Sign in to one in Boite.',
       failed: 'The thread could not be launched: {reason}'
     },
+    reply: {
+      action: 'Reply from here',
+      label: 'Your reply to {title}',
+      placeholder: 'Your reply… Enter sends, Shift+Enter adds a line',
+      send: 'Send'
+    },
+    radar: {
+      one: 'A thread is waiting for you',
+      many: '{count} threads are waiting for you',
+      openFirst: 'Open the first',
+      openHint: 'Open it in Boite',
+      later: 'Later',
+      laterHint: 'Hide for 30 minutes, unless another thread starts waiting',
+      more: 'And {count} more',
+      kinds: {
+        permission: 'Permission requested',
+        question: 'Question asked',
+        answer: 'Answer to read',
+        failed: 'Stopped on an error'
+      }
+    },
+    find: {
+      searching: 'Looking for "{query}"…',
+      found: 'Threads about "{query}"',
+      closest: 'Closest to "{query}"',
+      none: 'No thread about "{query}"',
+      archived: 'Archived',
+      openHint: 'Open it in Boite'
+    },
+    openMissing: 'I cannot find that thread in Boite.',
     seeScreen: 'Show my screen with this request',
     seeingScreen: 'Your screen goes with this request. Click to leave it out.',
     screenFailed: 'The screen could not be captured. Click the eye to send without it.',
@@ -2378,6 +2408,9 @@ export const strings = {
       hideFullscreenHint: 'The companion steps aside while a game or a video fills its screen, and comes back after. The shortcut still calls it.',
       sounds: 'Sounds',
       soundsHint: 'Short chimes when an answer comes, an agent needs you or a reminder rings.',
+      radar: 'Waiting threads',
+      radarHint: 'When threads have waited for you this long (a permission, a question, an answer you have not read), the companion says so and opens the first on a click.',
+      radarOff: 'Off',
       hotkey: 'Shortcut',
       hotkeyHint: 'Calls the companion from any app, ready to type.',
       hotkeyOff: 'None',

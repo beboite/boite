@@ -131,6 +131,13 @@
     [...new Set([...choices, current])].sort((a, b) => a - b).map((count) => ({ id: String(count), label: minutesLabel(count), active: count === current }));
   let workItems = $derived(minuteItems(WORK_MINUTES, prefs.workMinutes));
   let breakItems = $derived(minuteItems(BREAK_MINUTES, prefs.breakMinutes));
+  const RADAR_MINUTES = [5, 10, 15, 30, 60];
+  const radarLabel = (count: number) => (count === 0 ? copy.radarOff : minutesLabel(count));
+  let radarItems = $derived(
+    [...new Set([0, ...RADAR_MINUTES, prefs.radarMinutes])]
+      .sort((a, b) => a - b)
+      .map((count) => ({ id: String(count), label: radarLabel(count), active: count === prefs.radarMinutes }))
+  );
 
   function save(patch: Partial<CompanionPrefs>) {
     prefs = writeCompanionPrefs(patch);
@@ -241,6 +248,7 @@
       <span class="text ui-label-box"><span class="ui-label">{copy.sounds}</span><InfoTip topic={copy.sounds} text={copy.soundsHint} /></span>
       <input type="checkbox" role="switch" checked={prefs.sounds} onchange={(event) => save({ sounds: event.currentTarget.checked })} data-testid="companion-sounds" />
     </label>
+    {@render picker(copy.radar, copy.radarHint, radarItems, radarLabel(prefs.radarMinutes), (id) => save({ radarMinutes: Number(id) }), 'companion-radar-minutes')}
   </section>
 
   <section class="card">

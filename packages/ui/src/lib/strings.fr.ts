@@ -2217,6 +2217,36 @@ export const fr: Translation = {
       noAgent: 'Aucun agent ne peut prendre ce fil. Connectez-en un dans Boite.',
       failed: 'Le fil n’a pas pu être lancé : {reason}'
     },
+    reply: {
+      action: 'Répondre d’ici',
+      label: 'Votre réponse à {title}',
+      placeholder: 'Votre réponse… Entrée envoie, Maj+Entrée ajoute une ligne',
+      send: 'Envoyer'
+    },
+    radar: {
+      one: 'Un fil vous attend',
+      many: '{count} fils vous attendent',
+      openFirst: 'Ouvrir le premier',
+      openHint: 'L’ouvrir dans Boite',
+      later: 'Plus tard',
+      laterHint: 'Masquer 30 minutes, sauf si un autre fil se met à attendre',
+      more: 'Et {count} de plus',
+      kinds: {
+        permission: 'Autorisation demandée',
+        question: 'Question posée',
+        answer: 'Réponse à lire',
+        failed: 'Arrêté sur une erreur'
+      }
+    },
+    find: {
+      searching: 'Recherche de « {query} »…',
+      found: 'Fils sur « {query} »',
+      closest: 'Les plus proches de « {query} »',
+      none: 'Aucun fil sur « {query} »',
+      archived: 'Archivé',
+      openHint: 'L’ouvrir dans Boite'
+    },
+    openMissing: 'Je ne trouve pas ce fil dans Boite.',
     seeScreen: 'Joindre mon écran à cette demande',
     seeingScreen: 'Votre écran part avec cette demande. Cliquez pour le retirer.',
     screenFailed: 'L’écran n’a pas pu être capturé. Cliquez sur l’œil pour envoyer sans lui.',
@@ -2280,6 +2310,9 @@ export const fr: Translation = {
       hideFullscreenHint: 'Le compagnon s’efface quand un jeu ou une vidéo occupe tout son écran, puis revient. Le raccourci l’appelle quand même.',
       sounds: 'Sons',
       soundsHint: 'De petits carillons quand une réponse arrive, qu’un agent a besoin de vous ou qu’un rappel sonne.',
+      radar: 'Fils en attente',
+      radarHint: 'Quand des fils vous attendent depuis ce temps (une autorisation, une question, une réponse non lue), le compagnon vous le dit et ouvre le premier d’un clic.',
+      radarOff: 'Désactivé',
       hotkey: 'Raccourci',
       hotkeyHint: 'Appelle le compagnon depuis n’importe quelle application, prêt à écrire.',
       hotkeyOff: 'Aucun',

@@ -52,6 +52,10 @@
   import { Tasks } from './lib/companion/tasks.svelte';
   import CompanionAttachments from './components/companion/CompanionAttachments.svelte';
   import CompanionTaskCards from './components/companion/CompanionTaskCards.svelte';
+  import CompanionRadar from './components/companion/CompanionRadar.svelte';
+  import CompanionFound from './components/companion/CompanionFound.svelte';
+  import { digestFor, Finder, Radar, replyInThread, ThreadReader } from './lib/companion/watch.svelte';
+  import { fold, type WatchInput } from './lib/companion/watch';
 
   const CELEBRATE_MS = 6000;
   const REFRESH_EVERY = 15_000;
@@ -93,7 +97,12 @@
   let disposed = false;
   let autoOpened = false;
   let seen: Set<string> | null = null;
+  /** The threads were read once: the radar waits for it. */
+  let loaded = false;
   const tracker = createMoodTracker({ celebrateMs: CELEBRATE_MS });
+  /** What the other threads last said, for the digest each request carries and for the search. */
+  const reader = new ThreadReader(() => client);
+  const watchInput = (): WatchInput => ({ threads, permissions, questions, projects, own: ownThreads });
 
   // In focus, only an agent that needs the user, a reminder and the pomodoro ring.
   const cue = (name: Cue) => {
@@ -135,6 +144,7 @@
         client: () => client,
         snapshot: () => crew.snapshot,
         hovering: () => hover,
+        digest: () => digestFor(reader, watchInput()),
         missing: () => {
           crew.retry();
           return crew.problem ?? strings.companion.noAgent;
@@ -176,14 +186,44 @@
     timer.start({ workMs, breakMs: prefs.breakMinutes * 60_000, label });
   }
 
-  /** The timer, the focus and the threads a reply asks for ([[timer: …]], [[pomodoro: …]], [[focus: …]], [[task: …]]). */
-  function obey({ timer: asked, focus: on, task }: Directives) {
+  /** The timer, the focus and the threads a reply asks for ([[timer: …]], [[pomodoro: …]], [[focus: …]], [[task: …]], [[find: …]], [[open: …]]). */
+  function obey({ timer: asked, focus: on, task, find, open: wanted }: Directives) {
     if (task.length > 0) void tasks.request(task);
+    if (find) void finder.find(find);
+    if (wanted) openThread(wanted);
     if (asked === 'stop') timer.stop();
     else if (asked?.kind === 'pomodoro') startTimer(asked.ms ?? undefined, asked.label);
     else if (asked?.kind === 'countdown' && asked.ms !== null) timer.countdown(asked.ms, asked.label);
     else if (asked?.kind === 'stopwatch') timer.stopwatch(asked.label);
     if (on !== null) focus.set(on);
+  }
+
+  /** `[[open: …]]`: a thread the agent knows of, by its id or else by its title. */
+  function openThread(target: string) {
+    const known = [...threads, ...(finder.found ?? []).map((match) => match.thread)];
+    const thread = known.find((entry) => entry.id === target) ?? known.find((entry) => entry.title !== '' && fold(entry.title) === fold(target));
+    if (thread) void showMain(thread.id);
+    else (talkCache.get(answerer ?? '') ?? active.talk).aside(strings.companion.openMissing);
+  }
+
+  const finder = new Finder({ client: () => client, reader, own: () => ownThreads, projects: () => projects, opened: (threadId) => void showMain(threadId) });
+
+  // The threads that have waited on the user a while; in focus, only those that stop an agent.
+  const radar = new Radar({
+    input: () => (loaded && reachable ? watchInput() : null),
+    minutes: () => prefs.radarMinutes,
+    quiet: () => focus.active,
+    rang: () => {
+      senses.wake();
+      cue('call');
+    }
+  });
+
+  async function replyFromRadar(threadId: string, text: string): Promise<boolean> {
+    if (!client) return false;
+    await replyInThread(client, threadId, text);
+    soon(0);
+    return true;
   }
 
   const reactions = new Reactions({ quiet: () => focus.active });
@@ -222,7 +262,7 @@
   // In the shell the pointer is heard from its watch, since the window stops
   // taking it outside the areas; in a browser the page sees it.
   const hover = $derived(inShell() ? senses.hover : pointerOn);
-  const asleep = $derived(senses.asleep && !open && !thinking && !dragging && mood.mood === 'idle' && notes.alarms.length === 0 && !media?.playing);
+  const asleep = $derived(senses.asleep && !open && !thinking && !dragging && mood.mood === 'idle' && notes.alarms.length === 0 && !radar.shown && !media?.playing);
 
   // The music pill outlives the pointer a little: crossing the gap between the
   // character, the quotas and the pill must not take it away.
@@ -244,6 +284,7 @@
   function recompute() {
     const state: MoodInput | null = reachable ? { threads, permissions, questions } : null;
     mood = tracker.update(state);
+    radar.update();
   }
 
   let celebrateTimer: ReturnType<typeof setTimeout> | undefined;
@@ -294,6 +335,7 @@
       permissions = permissionList;
       questions = questionList;
       reachable = true;
+      loaded = true;
       if (threadList.some((thread) => thread.projectId && !projects.has(thread.projectId))) await readProjects();
       followRequests();
     } catch {
@@ -614,6 +656,8 @@
       crew.dispose();
       talkCache.forEach((talk) => talk.dispose());
       notes.dispose();
+      radar.dispose();
+      finder.clear();
       timer.dispose();
       senses.dispose();
       reactions.dispose();
@@ -699,6 +743,12 @@
     {/if}
 
     <CompanionNotes {members} {notes} {open} {reachable} />
+    {#if finder.searching || finder.found !== null}
+      <CompanionFound {finder} onopen={(threadId) => void showMain(threadId)} />
+    {/if}
+    {#if radar.shown && !open}
+      <CompanionRadar {radar} onopen={(threadId) => void showMain(threadId)} onreply={replyFromRadar} />
+    {/if}
     <CompanionFocusCards {timer} {focus} onopen={(threadId) => void showMain(threadId)} />
     <CompanionTaskCards {tasks} onopen={(threadId) => void showMain(threadId)} />
 

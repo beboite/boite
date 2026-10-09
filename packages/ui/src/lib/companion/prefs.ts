@@ -54,6 +54,8 @@ export interface CompanionPrefs {
   breakMinutes: number;
   /** Focus mode during the pomodoro's work phase. */
   focusOnWork: boolean;
+  /** Minutes a thread waits on the user before the radar tells of it; 0 turns the radar off. */
+  radarMinutes: number;
   screenScope: CompanionScreenScope;
   /** The agents that stand as the companion, by id, the leader first; `CREW_MAX` at most. */
   agents: string[];
@@ -82,6 +84,7 @@ export const DEFAULT_COMPANION_PREFS: CompanionPrefs = {
   workMinutes: 25,
   breakMinutes: 5,
   focusOnWork: true,
+  radarMinutes: 10,
   screenScope: 'all',
   agents: [],
   crewMade: false
@@ -129,6 +132,7 @@ export function parseCompanionPrefs(raw: unknown): CompanionPrefs {
     workMinutes: minutes(value.workMinutes, 180, DEFAULT_COMPANION_PREFS.workMinutes),
     breakMinutes: minutes(value.breakMinutes, 60, DEFAULT_COMPANION_PREFS.breakMinutes),
     focusOnWork: value.focusOnWork !== false,
+    radarMinutes: value.radarMinutes === 0 ? 0 : minutes(value.radarMinutes, 240, DEFAULT_COMPANION_PREFS.radarMinutes),
     screenScope: value.screenScope === 'here' || value.screenScope === 'zone' ? value.screenScope : 'all',
     agents: Array.isArray(value.agents) ? [...new Set(value.agents.filter((id): id is string => typeof id === 'string' && id !== ''))].slice(0, CREW_MAX) : [],
     crewMade: value.crewMade === true

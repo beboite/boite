@@ -22,9 +22,9 @@ shows the Settings page, which says that the companion runs in the desktop app.
 | Media session (Spotify first): read, cover and control | `apps/shell/src-tauri/src/platform/media.rs` |
 | App in front, and whether it is a game | `apps/shell/src-tauri/src/platform/games.rs` |
 | Page, mounted for `index.html?view=companion` | `packages/ui/src/CompanionApp.svelte` |
-| Character and its accessories, agents row, ask bar, panel, notices, music pill, HUD, pomodoro and focus, history, Settings' agents and reminders cards, dropped files, task cards, confetti | `packages/ui/src/components/companion/` |
+| Character and its accessories, agents row, ask bar, panel, notices, music pill, HUD, pomodoro and focus, history, Settings' agents and reminders cards, dropped files, task cards, radar, search results, reply field, confetti | `packages/ui/src/components/companion/` |
 | Settings, Companion | `packages/ui/src/components/CompanionSettings.svelte` |
-| Preferences, mood, brain and role, agents (`crew.ts`, `crew.svelte.ts`), each agent's conversation (`talk.svelte.ts`), looks (`skin.ts`), senses, notices, HUD, pomodoro, focus, history, reactions, reminders, directives, screen, dropped files, tasks, sounds, shell calls | `packages/ui/src/lib/companion/` |
+| Preferences, mood, brain and role, agents (`crew.ts`, `crew.svelte.ts`), each agent's conversation (`talk.svelte.ts`), looks (`skin.ts`), senses, notices, HUD, pomodoro, focus, history, reactions, reminders, directives, screen, dropped files, tasks, the other threads (`watch.ts`, `watch.svelte.ts`), sounds, shell calls | `packages/ui/src/lib/companion/` |
 
 The main window opens the companion's window while the experiment is on and
 closes it when it is switched off (`lib/companion/follow.svelte.ts`).
@@ -117,7 +117,8 @@ They are this computer's, in `localStorage` under `boite.companion`, like the
 experiments: screen, position and drop spot, hiding for full-screen apps, the
 shortcut (one of `COMPANION_HOTKEYS`, or none), sounds, agent, account,
 model, effort, control mode, music, quotas and the ones hidden, closing on an
-outside click, the pomodoro's work and break minutes, focus during work, and
+outside click, the pomodoro's work and break minutes, focus during work, the
+radar's wait (`radarMinutes`, 0 for off), and
 the agents of the row (`agents`, four at most, the leader first). Both
 webviews share the origin, so the companion follows a change from Settings
 through the `storage` event.
@@ -211,7 +212,9 @@ The agent adds lines of its own to a reply, which the bubble never shows
   is optional), and `[[timer: stop]]` stops whichever runs;
 - `[[focus: on]]` and `[[focus: off]]` turn focus on and off;
 - `[[task: project | instruction]]` launches a Boite thread in that project
-  (three per reply at most; see "Launching threads").
+  (three per reply at most; see "Launching threads");
+- `[[open: thread id]]` opens a thread in the main window, and
+  `[[find: key words]]` searches the threads (see "The other threads").
 
 The facts go to the memory of the agent that answered (`agents.memory.save`;
 a forget expires the memories it names, the way the Agents page deletes one),
@@ -239,6 +242,12 @@ says so with the
 first sentence of its last answer, without Markdown (`summaryLine`). A click
 opens the thread in the main window. Notices go after 15 seconds, and stay
 while the pointer is on the companion or its panel is open.
+
+"Reply from here" opens a field under the notice, with the whole last answer
+above it: Enter sends the words as the thread's next prompt (`turns.start`,
+then `threads.markRead`), Shift+Enter adds a line, Escape gives up. The notice
+being answered stays until the words go, past the 15 seconds and the other
+notices; words that could not go stay in the field with the reason.
 
 ## Sounds
 
@@ -436,6 +445,44 @@ archived ones left out (`taskProjects`). The agent launches a thread with
 
 Nothing is added to the core or the RPC.
 
+## The other threads
+
+What the companion knows of the user's other threads (`watch.ts`, pure, and
+`watch.svelte.ts`). The companion's own conversations are always left out.
+
+- **The digest.** Each request's context line ends with the threads, one line
+  each, at most 12: the ones that wait for the user (a permission with its
+  tool and target, a question with its options), then the running ones (for
+  how long, at which step), the failed ones, the finished ones not read yet,
+  then the latest; archived, incognito and older than three days left out.
+  A finished or failed one carries the first words of its last answer, read
+  with `threads.get` once per change of the thread; a request waits 1.5 s at
+  most for them. The role tells the agent to answer "where does it stand"
+  from these lines, and `[[open: ID]]` opens one: by its id, or else by its
+  exact title; an unknown one makes the bubble say so.
+- **The radar** (`Radar`, `CompanionRadar.svelte`). A card lists the threads
+  that have waited for the user longer than the "Waiting threads" setting
+  (10 minutes by default; off turns it off): a permission since it was asked,
+  a question since its thread stopped (an async one since the companion first
+  saw it), an answer or a failure left unread for up to 12 hours, except for
+  delegated threads and agent sessions, which report to whoever runs them.
+  The longest first, four shown and the rest counted; a row opens its thread,
+  "Open the first" the longest, and an answer can be answered from the card
+  as from a notice. A thread joining wakes the character and rings the call
+  chime; what already waited at startup shows without a chime. "Later" hides
+  the card 30 minutes, until another thread joins. In focus only permissions
+  and blocking questions count. The card hides while the panel is open, which
+  lists the requests itself.
+- **The search** (`Finder`, `CompanionFound.svelte`). `[[find: key words]]`
+  looks through every thread, archived included, incognito left out: titles,
+  projects and branches, and the last 40 messages of the 60 latest threads.
+  The threads holding the most words come first, a word in the title
+  weighing most, then in the project, then each time the messages say it;
+  accents and case aside. A card lists five with the words around the match;
+  when exactly one holds every word, it opens at once.
+
+Nothing is added to the core or the RPC.
+
 ## Checks
 
 - `cargo test --lib` in `apps/shell/src-tauri`: hit test, placement, drop
@@ -450,6 +497,10 @@ Nothing is added to the core or the RPC.
   wears and the fresh ones, the row, replies, memory kept and forgotten, the
   agent the companion makes, and the notes (an agent's own thread left out, a
   reminder ringing again until answered).
+- `packages/ui/src/lib/companion/companion-watch.test.ts`: the digest's order
+  and words, its last answers read once, the radar's entries, chime and Later,
+  the search's words, excerpt and order, the finder opening the only match,
+  `[[find: …]]` and `[[open: …]]`, and a notice answered from the companion.
 - `packages/ui/src/lib/companion/skin.test.ts` and `packages/ui/src/lib/robots.test.ts`:
   the box's colours, lid, eyes and accessories, and boxes in the robot codes.
 - `packages/ui/src/lib/companion/companion-hud.test.ts`: the HUD's threads,

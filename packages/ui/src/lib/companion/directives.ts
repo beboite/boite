@@ -3,9 +3,9 @@
  * as its role asks (`brain.ts`): `[[remember: …]]`, `[[forget: …]]`,
  * `[[remind: when | what]]`, `[[timer: duration | what for]]`,
  * `[[pomodoro: duration | what for]]`, `[[stopwatch: what for]]`,
- * `[[focus: on]]` and `[[task: project | instruction]]`. The bubble never
- * shows them; the page acts on them once the reply is complete. Pure, so it
- * is tested without a core.
+ * `[[focus: on]]`, `[[task: project | instruction]]`, `[[find: words]]` and
+ * `[[open: thread id]]`. The bubble never shows them; the page acts on them
+ * once the reply is complete. Pure, so it is tested without a core.
  */
 import type { TimerKind } from './pomodoro';
 
@@ -31,9 +31,13 @@ export interface Directives {
   focus: boolean | null;
   /** In the order written, `TASKS_MAX` at most. */
   task: TaskDirective[];
+  /** Words to look for in the user's threads, the last line winning; null when there is none. */
+  find: string | null;
+  /** A thread to open in Boite, by its id, the last line winning. */
+  open: string | null;
 }
 
-const DIRECTIVE = /\[\[\s*(remember|forget|remind|timer|pomodoro|stopwatch|focus|task|context)\s*:([\s\S]*?)\]\]/gi;
+const DIRECTIVE = /\[\[\s*(remember|forget|remind|timer|pomodoro|stopwatch|focus|task|find|open|context)\s*:([\s\S]*?)\]\]/gi;
 /** A timer is a few minutes to a few hours. */
 const TIMER_MAX_MS = 4 * 60 * 60_000;
 /** A reply launches a few threads at most: more is a reply gone wrong. */
@@ -135,7 +139,7 @@ const TIMER_KINDS = new Map<string, TimerKind>([['timer', 'countdown'], ['pomodo
 
 /** What a complete reply asks of the companion. A directive it cannot read is left out. */
 export function parseDirectives(text: string, now: Date): Directives {
-  const found: Directives = { remember: [], forget: [], remind: [], timer: null, focus: null, task: [] };
+  const found: Directives = { remember: [], forget: [], remind: [], timer: null, focus: null, task: [], find: null, open: null };
   for (const [, kind, body] of text.matchAll(DIRECTIVE)) {
     const content = body!.trim();
     const name = kind!.toLowerCase();
@@ -146,6 +150,8 @@ export function parseDirectives(text: string, now: Date): Directives {
     else if (!content || name === 'context') continue;
     else if (name === 'remember') found.remember.push(content);
     else if (name === 'forget') found.forget.push(content);
+    else if (name === 'find') found.find = content;
+    else if (name === 'open') found.open = content;
     else if (name === 'task') {
       const task = taskOf(content);
       if (task && found.task.length < TASKS_MAX) found.task.push(task);
