@@ -333,6 +333,22 @@ test('Ctrl+Enter sends and leaves a fresh draft open on the same picker values',
   expect(store.draft?.projectId).toBe(thread.projectId);
 });
 
+test('on a touch keyboard Enter writes a new line and only the button sends', async ({ app: _app }) => {
+  vi.spyOn(window, 'matchMedia').mockImplementation(media => Object.assign(new EventTarget(), {
+    media, matches: media === '(pointer: coarse) and (hover: none)', onchange: null, addListener() {}, removeListener() {},
+  }) as unknown as MediaQueryList);
+  await store.open('t-trace');
+  await waitFor(() => !store.busy);
+  const send = vi.spyOn(store, 'send');
+  await type('first line');
+  input().focus();
+  // Not prevented: the keyboard's own newline goes into the box.
+  expect(press('Enter')).toBe(true);
+  await new Promise(resolve => setTimeout(resolve, 10));
+  expect(send).not.toHaveBeenCalled();
+  expect(input().value).toBe('first line');
+});
+
 test('ArrowUp recalls the sent prompts of this thread and ArrowDown comes back', async ({ app: _app }) => {
   await store.open('t-trace');
   await waitFor(() => store.openThread?.id === 't-trace' && !store.busy);

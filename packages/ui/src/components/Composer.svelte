@@ -6,7 +6,7 @@
   import { agentSlashItems, boiteSlashItems, listKey, mentionQueryOf, mentionRows, slashQueryOf, type ChipCommand } from '../lib/composer-menus';
   import { attachFiles } from '../lib/composer-attachments';
   import { rewindComposerEdit } from '../lib/composer-edit';
-  import { fitHeight, selfSizing } from '../lib/composer-size';
+  import { fitHeight, selfSizing, touchKeyboard } from '../lib/composer-size';
   import { editComposerInput, insertImageReference, removeImageReferences, trackImageSend } from '../lib/composer-images';
   import { unresolvedAssetId } from '../lib/draft-attachments';
   import { focusWithin } from '../lib/focus';
@@ -689,7 +689,7 @@
       event.preventDefault();
       return;
     }
-    if (event.key === 'Enter' && !event.shiftKey) {
+    if (event.key === 'Enter' && !event.shiftKey && !touchKeyboard()) {
       event.preventDefault();
       if (boxEmpty && sendNow && !reply) sendQueuedNow();
       else void submit();

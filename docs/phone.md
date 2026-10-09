@@ -8,7 +8,9 @@ WebSocket. Agents and the journal remain on the core machine.
 The top-right menu opens Conversations, Activity and Settings. There is no
 bottom navigation bar. A conversation uses one compact header; Back returns
 to the thread list, which includes a search field. The composer stays at the
-bottom of the available viewport, above the keyboard when it is open.
+bottom of the available viewport, above the keyboard when it is open. A touch
+keyboard has no Shift+Enter, so on a touch-only device (`pointer: coarse` and
+`hover: none`) Enter writes a new line and only the send button sends.
 
 At phone widths, Settings opens a vertical list with separate screens for
 App & notifications, Appearance, and Machines. The back button or browser Back
