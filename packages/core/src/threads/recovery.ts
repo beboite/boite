@@ -5,6 +5,7 @@ import { notFound, refused } from '../errors.ts';
 import { newId } from '../ids.ts';
 import { saveThread } from './records.ts';
 import { checkStoredEffort, checkStoredSpeed } from './selection.ts';
+import { closeTools } from './turn-settlement.ts';
 
 /** What a turn a dead core left behind says, once the next core has closed it. */
 export const CRASH_WHILE_RUNNING = 'The core stopped while this turn was running; send the prompt again.';
@@ -126,6 +127,7 @@ export class ThreadRecovery {
   private failStuckTurn(turn: Turn, reason: string): void {
     const threadId = turn.threadId;
     const thread = this.core.journal.getThread(threadId);
+    closeTools(this.core, threadId, turn.id);
     if (thread !== null) {
       // The turn's own messages, and only the ones still open: a caret left
       // blinking on a message nobody will ever write to again is the visible half
