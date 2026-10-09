@@ -342,11 +342,13 @@ test('on a touch keyboard Enter writes a new line and only the button sends', as
   const send = vi.spyOn(store, 'send');
   await type('first line');
   input().focus();
-  // Not prevented: the keyboard's own newline goes into the box.
+  // Not prevented, so the browser writes its newline; jsdom has no such default to check.
   expect(press('Enter')).toBe(true);
   await new Promise(resolve => setTimeout(resolve, 10));
   expect(send).not.toHaveBeenCalled();
-  expect(input().value).toBe('first line');
+  query<HTMLButtonElement>('[data-testid=composer-send]').click();
+  await waitFor(() => send.mock.calls.length === 1);
+  expect(send.mock.calls[0]![0]).toBe('first line');
 });
 
 test('ArrowUp recalls the sent prompts of this thread and ArrowDown comes back', async ({ app: _app }) => {

@@ -30,7 +30,7 @@ export function contains(root: string, path: string): boolean {
 }
 
 export function same(a: FileEntry | undefined, b: FileEntry | undefined): boolean {
-  return a?.hash === b?.hash && a?.mode === b?.mode && a?.link === b?.link;
+  return a?.hash === b?.hash && a?.mode === b?.mode && a?.link === b?.link && a?.unbacked === b?.unbacked;
 }
 
 /** Resolve parents without following a symlink out of the checkpoint's workspace. */
@@ -186,6 +186,9 @@ async function writeEntry(root: string, objects: string, name: string, entry: Fi
 /** Check all conflicts before writing; put the original files back if a write fails. */
 export async function restoreFiles(root: string, objects: string, changes: FileChange[]): Promise<void> {
   for (const change of changes) {
+    if (change.before?.unbacked || change.after?.unbacked) {
+      throw refused(`cannot rewind: ${change.name} is over the 16 MiB checkpoint limit and has no backup`, { field: 'path', path: change.name, reason: 'file-unbacked' });
+    }
     const current = await readEntry(await checkedPath(root, change.name));
     if (!same(current?.entry, change.after)) {
       throw refused(`cannot rewind: ${change.name} changed outside the removed turns`, { field: 'path', path: change.name, reason: 'file-conflict', expected: 'the file state at the end of the removed turns' });

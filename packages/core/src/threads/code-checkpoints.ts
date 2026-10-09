@@ -130,7 +130,7 @@ export class CodeCheckpoints {
     }
     const modified = [...changes.values()].filter(change => !same(change.before, change.after));
     const unbacked = modified.find(change => change.before?.unbacked || change.after?.unbacked);
-    if (unbacked) return unavailable(`${unbacked.name}: file exceeds the 16 MiB checkpoint limit`);
+    if (unbacked) return unavailable(`${unbacked.name}: cannot restore a file over the 16 MiB checkpoint limit`);
     await restoreFiles(root, this.objects(thread.id), modified);
     return { files: { status: modified.length ? 'restored' : 'unchanged', count: modified.length }, changes: modified };
   }

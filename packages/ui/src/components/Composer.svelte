@@ -10,7 +10,7 @@
   import { editComposerInput, insertImageReference, removeImageReferences, trackImageSend } from '../lib/composer-images';
   import { unresolvedAssetId } from '../lib/draft-attachments';
   import { focusWithin } from '../lib/focus';
-  import { touchScreen } from '../lib/live-input';
+  import { touchScreen } from '../lib/device';
   import { ignoreQuestions, repliesOf, replyTarget, sendAnswer } from '../lib/question-reply.svelte';
   import { emptyBox, returnPrompt, sentPrompts, type SentPrompt } from '../lib/composer-queue';
   import { rankItems, type PaletteItem } from '../lib/palette';
@@ -867,7 +867,7 @@
 
   textarea, .input-paint {
     /* A textarea's own text-rendering: auto drops kerning on Android, and the caret drifted from the painted letters. */
-    text-rendering: optimizeLegibility; font-kerning: normal; font-variant-ligatures: normal; text-size-adjust: 100%; width: 100%;
+    text-rendering: optimizeLegibility; font-kerning: normal; font-variant-ligatures: normal; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; width: 100%;
     min-height: var(--composer-input-height, 44px);
     max-height: 200px;
     padding: var(--composer-input-padding, 12px 14px 6px);

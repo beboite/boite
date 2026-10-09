@@ -138,16 +138,16 @@ and the threshold only; it has no background work and no cache to wait on.
 
 ## Pending prompts, goals and loops
 
-Enter during a running turn queues the message and its attachments; on a
-touch screen the send button does, since Enter writes a new line there
-([phone](phone.md)). Each pending
+Enter during a running turn queues the message and its attachments; where the
+primary pointer is coarse, the send button or Ctrl/Cmd+Enter does, since Enter
+writes a new line there ([phone](phone.md)). Each pending
 message shows above the composer as a user bubble with a dashed outline. Arrow Up in
 an empty composer takes the newest pending message out of the queue for editing;
 clicking a pending message does the same. When the core reports a completed
 tool boundary, the queue tries the driver's native steering operation, even
 when another conversation is open. A driver that declines it retains input
-for the next turn. Enter again in the emptied composer, or Send now under the bubbles,
-submits it immediately without stopping the agent when the driver accepts it.
+for the next turn. Enter again in the emptied composer (not where the primary
+pointer is coarse), or Send now under the bubbles, submits it immediately without stopping the agent when the driver accepts it.
 Permissions and blocking questions hold it until answered.
 Messages already queued go together in their original order, with their
 attachments and preview references. Messages added during that send wait for

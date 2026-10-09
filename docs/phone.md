@@ -9,12 +9,14 @@ The top-right menu opens Conversations, Activity and Settings. There is no
 bottom navigation bar. A conversation uses one compact header; Back returns
 to the thread list, which includes a search field. The composer stays at the
 bottom of the available viewport, above the keyboard when it is open. A touch
-keyboard has no Shift+Enter, so on a touch screen (`pointer: coarse`, the
-question the app's other touch rules ask) plain Enter writes a new line and the
-send button sends. Ctrl/Cmd+Enter still sends and opens a draft, and Enter
-still picks a slash or mention row. A browser does not report a physical
-keyboard connected to a touch screen, so that keyboard's Enter writes a new
-line too.
+keyboard has no Shift+Enter, so where the primary pointer is coarse
+(`pointer: coarse`, the question the app's other touch rules ask) plain Enter
+writes a new line and the send button sends; Send now under the queue sends
+what is queued. Ctrl/Cmd+Enter still sends and, at rest, opens a draft, and
+Enter still picks a slash or mention row. A browser does not report a physical
+keyboard connected to such a device, so that keyboard's Enter writes a new
+line too. A touchscreen laptop whose primary pointer is a mouse keeps Enter's
+send.
 
 At phone widths, Settings opens a vertical list with separate screens for
 App & notifications, Appearance, and Machines. The back button or browser Back

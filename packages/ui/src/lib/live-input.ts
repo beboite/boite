@@ -29,15 +29,6 @@ export function hasKeyboard(): boolean {
 }
 
 /**
- * The same touch question asked the other way: true only when the engine says
- * the pointer is coarse. Its keyboard has no Shift+Enter, so the composer's
- * Enter writes a new line there. An engine with no answer keeps Enter's send.
- */
-export function touchScreen(): boolean {
-  return typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
-}
-
-/**
  * Writes text that is still on its way. Safari only lets a page write the
  * clipboard inside the gesture, so the promise itself is handed over where the
  * browser takes one. Resolves false when there was nothing to write.

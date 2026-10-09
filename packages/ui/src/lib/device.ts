@@ -12,8 +12,18 @@ export function noteThisComputer(hostname: string | undefined): void {
   if (hostname) computer = hostname;
 }
 
+/**
+ * The primary pointer is coarse: the question the app's touch rules ask.
+ * Its keyboard has no Shift+Enter, so the composer's Enter writes a new line
+ * there. An engine with no `matchMedia` is not one, so the composer keeps
+ * Enter's send; `hasKeyboard` in `live-input.ts` says false there too, which
+ * keeps the live view's on-screen controls.
+ */
+export function touchScreen(): boolean {
+  return typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+}
+
 export function deviceLabel(): string | null {
   if (window.__TAURI_INTERNALS__ !== undefined) return computer;
-  const touch = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
-  return touch || /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ? 'phone' : 'browser';
+  return touchScreen() || /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ? 'phone' : 'browser';
 }
