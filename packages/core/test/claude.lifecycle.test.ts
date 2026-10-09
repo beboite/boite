@@ -13,6 +13,7 @@ import {
   runTurn,
   scripted,
   sdk,
+  streamEvent,
   success,
   useClaudeHarness,
 } from './fixtures/claude-query.ts';
@@ -103,6 +104,27 @@ describe('claude driver', () => {
     const thread = await client.call('threads.get', { threadId });
     expect(thread.messages.flatMap((message) => message.parts).some((part) => part.type === 'error')).toBe(false);
     expect(thread.status).toBe('idle');
+  });
+
+  test('a stop while a tool call is still being typed closes its card', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    scripted((fake) => {
+      fake.emit(init('sess-stop-tool'));
+      fake.emit(streamEvent('sess-stop-tool', { type: 'message_start', message: { id: 'msg_api' } }));
+      fake.emit(streamEvent('sess-stop-tool', { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'tool_cut', name: 'Bash', input: {} } }));
+      fake.emit(streamEvent('sess-stop-tool', { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"command": "c' } }));
+    });
+    const opened = client.next('message.delta', ({ threadId: id, text }) => id === threadId && text === '{"command": "c', 5000);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('turns.start', { threadId, prompt: 'look around' });
+    await opened;
+    await client.call('turns.stop', { threadId });
+    expect((await finished).status).toBe('stopped');
+    const thread = await client.call('threads.get', { threadId });
+    const tools = thread.messages.flatMap((message) => message.parts).filter((part) => part.type === 'tool');
+    expect(tools.map((part) => part.status)).toEqual(['error']);
+    expect(tools[0]?.finishedAt).toBeNumber();
   });
 
   test('the CLI exiting on its interrupt result after a stop is not reported as an error', async () => {

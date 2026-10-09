@@ -1,4 +1,4 @@
-import type { ThreadId, ThreadSummary, Turn, TurnId } from '@boite/contracts';
+import type { MessagePart, ThreadId, ThreadSummary, Turn, TurnId } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import type { TurnResult } from '../drivers/types.ts';
 import { logMessageOf } from '../log-errors.ts';
@@ -28,6 +28,28 @@ export function markQueuedStopped(core: Core, turnId: TurnId): void {
     setThreadStatus(core, turn.threadId, 'idle');
   })());
   if (turn.execution?.operation === 'coordination') core.coordination.queuedCancelled(turn.threadId);
+}
+
+/**
+ * A turn that ended without its tools ending: a stop that cut a call while the
+ * agent was still typing it or running it, a crashed agent, a core killed
+ * mid-call. Nothing will ever answer those calls, so each card still marked
+ * running is closed as failed. Left open, it keeps its spinner and its clock
+ * ticking on a turn that is over, and reads as an agent still at work.
+ */
+export function closeOpenTools(core: Core, threadId: ThreadId, turnId: TurnId): void {
+  const finishedAt = Date.now();
+  for (const message of core.journal.walkTurnMessages(threadId, turnId)) {
+    message.parts.forEach((part, partIndex) => {
+      if (part.type !== 'tool' || part.status !== 'running') return;
+      const closed: MessagePart = { ...part, status: 'error', finishedAt: part.finishedAt ?? finishedAt };
+      core.journal.append(
+        { type: 'message.part', threadId, version: 1, payload: { messageId: message.id, partIndex, part: closed } },
+        () => core.journal.setMessagePart(message.id, partIndex, closed),
+      );
+      core.bus.emit('message.part', { threadId, messageId: message.id, partIndex, part: closed });
+    });
+  }
 }
 
 /** Compare the durable execution identity before writing a late provider result. */
