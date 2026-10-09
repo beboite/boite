@@ -391,7 +391,7 @@ export class AccountStore {
    */
   recheckSignedOut(): void {
     for (const account of this.list()) {
-      if (account.status === 'unauthenticated' && this.core.providers.get(account.providerId) !== undefined) this.check(account.id);
+      if (account.status === 'unauthenticated') this.check(account.id);
     }
   }
 
