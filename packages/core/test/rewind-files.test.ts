@@ -170,7 +170,7 @@ test('an oversized file blocks the restore only when the removed turns changed i
     const messageId = await run(label);
     const rewind = await client.call('threads.rewind', { threadId, messageId });
     expect(rewind.files?.status).toBe('unavailable');
-    expect(rewind.files?.reason).toContain('large.bin: cannot restore a file over the 16 MiB checkpoint limit');
+    expect(rewind.files?.reason).toContain('large.bin had a version over the 16 MiB checkpoint limit');
     expect(await readFile(join(cwd, 'app.ts'), 'utf8')).toBe(label);
   }
   expect(await readFile(large, 'utf8')).toBe('small');
