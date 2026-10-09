@@ -18,7 +18,8 @@ const bridge = vi.hoisted(() => ({
 }));
 vi.mock('./browser-bridge', () => ({ browserBridge: bridge, normalizeUrl: (url: string) => url }));
 vi.mock('./browser-bridge-tauri', () => ({ CLOSED_TAB: 'the browser tab is closed' }));
-const { desktopTabsOf, lendDesktopBrowser, lendsBrowser } = await import('./desktop-browser-host.svelte');
+const { desktopTabsOf, lendDesktopBrowser } = await import('./desktop-browser-host.svelte');
+const { lendsBrowser } = await import('./desktop-browser-loan');
 
 const keys: string[] = [];
 afterEach(() => { for (const key of keys.splice(0)) rightPanel.forget(key); vi.restoreAllMocks(); bridge.live.clear(); });

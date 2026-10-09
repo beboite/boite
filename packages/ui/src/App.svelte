@@ -3,7 +3,7 @@
   import { MediaQuery } from 'svelte/reactivity';
   import { watchAgentBrowser } from './lib/agent-browser-watch';
   import { watchDevices } from './lib/device-watch';
-  import { lendLocalBrowser } from './lib/desktop-browser-host.svelte';
+  import { lendLocalBrowser } from './lib/desktop-browser-loan';
   import { browserProfiles } from './lib/browser-profiles.svelte';
   import TerminalDrawer from './components/TerminalDrawer.svelte';
   import UndoToast from './components/UndoToast.svelte';

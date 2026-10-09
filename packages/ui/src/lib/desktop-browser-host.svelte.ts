@@ -22,6 +22,7 @@ import { rightPanel, type PanelState, type Surface } from './right-panel.svelte'
 import { browserBridge } from './browser-bridge';
 import { CLOSED_TAB } from './browser-bridge-tauri';
 import { browserProfiles } from './browser-profiles.svelte';
+import { lendsBrowser } from './desktop-browser-loan';
 
 /** A burst of panel changes (a page's url, then its title) is one snapshot. */
 const SEND_DELAY_MS = 150;
@@ -29,15 +30,6 @@ const SEND_DELAY_MS = 150;
 const REVIVE_MS = 10_000;
 const ERROR_MAX = 2000;
 const METHODS: ReadonlySet<string> = new Set(DESKTOP_BROWSER_METHODS);
-
-/**
- * Whether this window lends its browser: the owner's Windows shell on the core
- * it started. Only WebView2 answers DevTools calls, and a core on another
- * machine has agents that could never see this screen.
- */
-export function lendsBrowser(store: Pick<Store, 'owner' | 'localCore'>): boolean {
-  return store.owner && store.localCore && !!browserBridge.protocol && /Windows/.test(navigator.userAgent);
-}
 
 /** The thread a panel key names on the machine `machineId`, or null for a key that is not one of its conversations. */
 export function threadOfPanelKey(key: string, machineId: string | null): string | null {
@@ -74,17 +66,6 @@ function lent(threadId: string, surface: Surface, active = false): DesktopBrowse
 }
 
 const message = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause)).slice(0, ERROR_MAX);
-
-/**
- * Lends the panel's browser to the core this window started, while it is
- * connected; for an `$effect`, which reruns on a reconnection and ends the
- * previous loan through the returned function.
- */
-export function lendLocalBrowser(machines: readonly { store: Store }[]): (() => void) | undefined {
-  const local = machines.find((machine) => machine.store.localCore)?.store;
-  void local?.connection;
-  if (local?.client?.state === 'ready' && lendsBrowser(local)) return lendDesktopBrowser(local);
-}
 
 /**
  * Lends the panel's browser to the core `store` is connected to, until the
