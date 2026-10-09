@@ -105,6 +105,7 @@ test('create, converse, configure the resident engine and follow background work
   // card beside it, and the title bar's fold button stays.
   const layout = `(() => { const r = s => { const b = document.querySelector(s)?.getBoundingClientRect(); return b && [b.left, b.top, b.width, b.height].map(Math.round); };
     return { rail: r('[data-testid="sidebar"]') ?? r('.agents-rail'), card: r('.body main'), fold: !!document.querySelector('[data-testid="sidebar-toggle"]') }; })()`;
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   await page.waitFor(`document.querySelector('[data-testid="sidebar"]') && document.querySelector('.body main')`);
   await settled();
   const threads = await page.evaluate<{ rail?: number[]; card?: number[]; fold: boolean }>(layout);
@@ -113,6 +114,12 @@ test('create, converse, configure the resident engine and follow background work
   await page.waitFor(`document.querySelector('[data-testid="agents-page"]')`);
   await settled();
   expect(await page.evaluate(layout)).toEqual(threads);
+  // Folding from the title bar hides the Agents list as it hides the thread list.
+  await page.click('[data-testid="sidebar-toggle"]');
+  await page.waitFor(`getComputedStyle(document.querySelector('.agents-rail')).display === 'none'`);
+  await page.click('[data-testid="sidebar-toggle"]');
+  await page.waitFor(`getComputedStyle(document.querySelector('.agents-rail')).display !== 'none'`);
+  await settled();
   await capture('agents-welcome-desktop.png');
   await page.click('[data-testid="agents-create"]');
   await page.waitFor(`document.querySelector('[data-testid="agents-create-menu"]')`);

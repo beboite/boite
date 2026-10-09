@@ -14,7 +14,7 @@
 .agents-search { display: flex; align-items: center; gap: 8px; margin: 8px 10px 0; padding: 0 4px 0 10px; height: var(--control); border-radius: var(--radius-md); background: var(--color-surface-2); color: var(--color-muted-foreground); }
 .agents-search input { flex: 1; min-width: 0; height: 100%; background: none; border: 0; padding: 0; font-size: var(--text-sm); box-shadow: none; }
 .agents-search input:focus { outline: none; }
-.agents-rail .agents-search { margin: 0 4px 8px; }
+.agents-rail .agents-search { margin: 8px 10px 0; }
 .agents-card { margin-bottom: 10px; padding: 4px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: color-mix(in srgb, var(--color-surface-2) 55%, transparent); }
 
 /* The page beside it: who, how it stands, and its views as words. */

@@ -28,6 +28,7 @@
     scroller = $bindable(),
     onscroll,
     head,
+    subhead,
     children,
     lead,
     foot
@@ -40,6 +41,8 @@
     scroller?: HTMLDivElement;
     onscroll?: () => void;
     head: Snippet;
+    /** What stays put between the head and the rows, like the Agents search. */
+    subhead?: Snippet;
     children: Snippet;
     /** The foot's left end, before the gap. */
     lead?: Snippet;
@@ -77,6 +80,7 @@
   data-testid={testid}
 >
   <div class="views">{@render head()}</div>
+  {@render subhead?.()}
   <div class="scroll" data-project-list={kind === 'sidebar' ? '' : undefined} bind:this={scroller} {onscroll}>
     {@render children()}
   </div>
@@ -101,7 +105,7 @@
     class="resize"
     aria-label={strings.sidebar.resize}
     title={strings.sidebar.resize}
-    data-testid="sidebar-resize"
+    data-testid={kind === 'sidebar' ? 'sidebar-resize' : 'agents-resize'}
     onpointerdown={startResize}
     ondblclick={() => store.setSidebarWidth(SIDEBAR_DEFAULT)}
     onkeydown={(e) => {
@@ -115,6 +119,7 @@
 </aside>
 
 <style>
+  /* The container name `sidebar` is also read by Sidebar.svelte's narrow-column layout. */
   .rail {
     container: sidebar / inline-size;
     position: relative;

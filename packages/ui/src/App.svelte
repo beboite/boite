@@ -455,8 +455,8 @@
    * and half of them would be dead against a connection that is not there.
    */
   /**
-   * A folded sidebar standing in the body, the one case where the chat card
-   * keeps a left gap. A class rather than `.body:has(> .sidebar.collapsed)`:
+   * A folded column standing in the body, the one case where the chat card or
+   * the Agents card keeps a left gap: both lists fold together (RailFrame). A class rather than `.body:has(> .sidebar.collapsed)`:
    * that selector made every node a streaming answer or a scroll mounted
    * anywhere below restyle the body, right before the list read its layout.
    */

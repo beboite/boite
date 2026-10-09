@@ -194,6 +194,6 @@ test('phone exposes project filtering and custom-order controls without overflow
   await page.evaluate(`globalThis.__boiteTest.workspace.active.setSidebarWidth(208)`);
   await page.waitFor(`document.querySelector('${id('sidebar')}')?.getBoundingClientRect().width === 208`);
   await capture('project-order-narrow-fr.png');
-  expect(await page.evaluate(`(() => { const tools = document.querySelector('${id('sidebar')} .rail-head .tools'); return !!tools && tools.scrollWidth <= tools.clientWidth; })()`)).toBe(true);
+  expect(await page.evaluate(`(() => { const tools = document.querySelector('${id('grouping-options')}')?.closest('.tools'); return !!tools && tools.scrollWidth <= tools.clientWidth; })()`)).toBe(true);
   expect(page.errors()).toEqual([]);
 }, 20_000);

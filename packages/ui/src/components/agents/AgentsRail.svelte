@@ -90,13 +90,15 @@
     </RailHead>
   {/snippet}
 
-  {#if searching}
-    <label class="agents-search"><Search size={14} strokeWidth={1.75} />
-      <!-- svelte-ignore a11y_autofocus -->
-      <input type="search" bind:value={query} aria-label={labels.search} placeholder={labels.search} autofocus onkeydown={e => { if (e.key === 'Escape') closeSearch(); }} />
-      <button type="button" class="ghost icon small" aria-label={labels.close} onclick={closeSearch}><X size={13} /></button>
-    </label>
-  {/if}
+  {#snippet subhead()}
+    {#if searching}
+      <label class="agents-search"><Search size={14} strokeWidth={1.75} />
+        <!-- svelte-ignore a11y_autofocus -->
+        <input type="search" bind:value={query} aria-label={labels.search} placeholder={labels.search} autofocus onkeydown={e => { if (e.key === 'Escape') closeSearch(); }} />
+        <button type="button" class="ghost icon small" aria-label={labels.close} onclick={closeSearch}><X size={13} /></button>
+      </label>
+    {/if}
+  {/snippet}
 
   {#if shown.length}
     <section class="agents-card" aria-label={labels.heading}>

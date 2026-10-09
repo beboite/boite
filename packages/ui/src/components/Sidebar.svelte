@@ -144,7 +144,7 @@
   }
 </script>
 
-<RailFrame {store} kind="sidebar" testid="sidebar" drawer bind:scroller={scrollRoot} onscroll={() => { if (showRows && scrollRoot) savedScroll = scrollRoot.scrollTop; }}>
+<RailFrame {store} kind="sidebar" label={strings.sidebar.threads} testid="sidebar" drawer bind:scroller={scrollRoot} onscroll={() => { if (showRows && scrollRoot) savedScroll = scrollRoot.scrollTop; }}>
   {#snippet head()}<ProjectViews entries={groups} {store} />{/snippet}
     {#if showRows}
     {#each visible as machine (machine.id)}<AgentsAtWork {machine} {now} showMachine={multi} />{/each}
@@ -294,6 +294,7 @@
 </RailFrame>
 
 <style>
+  /* `sidebar` is the container RailFrame.svelte declares on the column. */
   @container sidebar (max-width: 240px) {
     .project .head { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
     .head .toggle { grid-column: 1; grid-row: 1; }
