@@ -137,6 +137,19 @@ export class Crew {
     if (!this.disposed) this.host.loaded();
   }
 
+  /**
+   * The first agent tried again now, while none stands: the user asked, or an
+   * account or a provider changed. At startup the core may still be checking
+   * the account the brain settings pick, and a checked account reads as
+   * signed in only once it is done.
+   */
+  retry(): void {
+    const prefs = this.host.prefs();
+    if (prefs.agents.length > 0 || prefs.crewMade || this.disposed) return;
+    this.failedAt = 0;
+    this.schedule(SOON_MS);
+  }
+
   /** After a reconnection: the core forgot the subscriptions. */
   resubscribe(): void {
     this.subscribed.clear();
@@ -249,8 +262,7 @@ export class Crew {
         const [providers, accounts] = await Promise.all([client.call('providers.list', {}), client.call('accounts.list', {})]);
         const brain = pickBrain(prefs, providers.loaded, accounts);
         if (!brain) {
-          this.problem = prefs.providerId === null ? strings.companion.noBrain : strings.companion.brainOff;
-          this.failedAt = Date.now();
+          this.failed(prefs.providerId === null ? strings.companion.noBrain : strings.companion.brainOff);
           return;
         }
         const agent = companionAgent(FIRST_AGENT_NAME, COMPANION_DOMAIN, roleBlock(projects), CLASSIC_SKIN, brain, permissionModeOf(prefs.control));
@@ -261,11 +273,17 @@ export class Crew {
       writeCompanionPrefs({ agents: [id], crewMade: true });
       void this.load();
     } catch (error) {
-      this.problem = fill(strings.companion.failed, { reason: reasonOf(error) });
-      this.failedAt = Date.now();
+      this.failed(fill(strings.companion.failed, { reason: reasonOf(error) }));
     } finally {
       this.making = false;
     }
+  }
+
+  /** Why the first agent could not be made, told when the user asks; tried again later on its own. */
+  private failed(problem: string): void {
+    this.problem = problem;
+    this.failedAt = Date.now();
+    this.schedule(RETRY_MS + SOON_MS);
   }
 
   /** The facts the companion kept on this computer, moved to the agent's memory; kept here when one could not go. */

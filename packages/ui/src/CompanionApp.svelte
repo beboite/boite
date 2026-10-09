@@ -135,7 +135,10 @@
         client: () => client,
         snapshot: () => crew.snapshot,
         hovering: () => hover,
-        missing: () => crew.problem ?? strings.companion.noAgent,
+        missing: () => {
+          crew.retry();
+          return crew.problem ?? strings.companion.noAgent;
+        },
         settled: (outcome) => cue(outcome === 'done' ? 'done' : 'error')
       });
       talkCache.set(key, talk);
@@ -589,6 +592,8 @@
       off.push(client.on('message.delta', (delta) => talks.forEach((talk) => talk.delta(delta))));
       off.push(client.on('message.part', (part) => talks.forEach((talk) => talk.part(part))));
       off.push(client.on('agents.changed', () => crew.changed()));
+      off.push(client.on('accounts.updated', () => crew.retry()));
+      off.push(client.on('providers.updated', () => crew.retry()));
       connected = true;
       await readProjects().catch(() => {});
       await refresh();

@@ -140,7 +140,10 @@ and the usual permissions apply. Nothing is added to the core or to the RPC.
   click on another switches to it. Each keeps its own bubble, request
   in flight and history. The first time the companion runs without agents it
   makes one, Bots, in the classic look, and moves the facts it kept on this
-  computer into Bots's memory. Settings, Companion, Agents makes another one
+  computer into Bots's memory. When it cannot (at startup the core may still
+  be checking the account), it tries again a minute later, at once when an
+  account or a provider changes, and when the user asks it something; until
+  then it answers with the reason. Settings, Companion, Agents makes another one
   (on the provider below), adds an existing agent, draws a new look for one,
   opens its page, or takes it off the row, except the last one. An agent taken
   off stays an ordinary agent, and its instructions lose the role.

@@ -4,12 +4,16 @@
  * and saves back, the agent it makes, and the notes it shows besides.
  */
 import { afterEach, expect, test, vi } from 'vitest';
-import type { AgentConversationMessage, AgentMemory, AgentProfile, AgentScope, AgentsSnapshot } from '@boite/contracts';
+import type { Account, AgentConversationMessage, AgentMemory, AgentProfile, AgentScope, AgentsSnapshot, ProviderSummary } from '@boite/contracts';
+import type { Client } from '../client';
 import { BOX_COLORS, encodeRobot, ROBOT_PARTS, robotOf, seededRobot } from '../robots';
+import { strings } from '../strings';
 import type { Brain } from './brain';
 import { AGENT_TOOLS, CLASSIC_SKIN, companionAgent, freshSkin, membersOf, memoriesToForget, memoryToKeep, profileWith, repliesAfter, replyTo, skinOf } from './crew';
+import { Crew } from './crew.svelte';
 import { addReminder, readReminders } from './memory';
 import { Notes } from './notes.svelte';
+import { readCompanionPrefs, writeCompanionPrefs } from './prefs';
 import { toBox } from './skin';
 
 afterEach(() => {
@@ -137,6 +141,52 @@ test('the companion makes an active agent with its tools, and saves another look
   const saved = profileWith(agent, { avatar: 'robot:b.1.2.3.4' });
   expect(saved).toMatchObject({ id: 'bots', expectedRevision: 3, value: { name: 'Bots', instructions: 'Mine', avatar: 'robot:b.1.2.3.4', tools: ['memory'] } });
   expect(saved.value).not.toHaveProperty('revision');
+});
+
+test('a first agent that could not be made is tried again, later on its own and at once when asked', async () => {
+  vi.useFakeTimers();
+  writeCompanionPrefs({ providerId: 'claude', accountId: 'acc' });
+  // At startup the core is still checking the account.
+  let status = 'checking';
+  const saves: unknown[] = [];
+  const call = vi.fn(async (method: string, params?: unknown) => {
+    if (method === 'agents.snapshot') return snapshotOf({});
+    if (method === 'providers.list') return { loaded: [{ id: 'claude', name: 'Claude', shortName: 'Claude', protocol: 'acp', available: true, models: [] } as unknown as ProviderSummary], rejected: [] };
+    if (method === 'accounts.list') return [{ id: 'acc', providerId: 'claude', label: 'acc', status } as Account];
+    if (method === 'agents.profile.save') {
+      saves.push(params);
+      return profile('bots');
+    }
+    return {};
+  });
+  const client = { call } as unknown as Client;
+  const crew = new Crew({ client: () => client, prefs: readCompanionPrefs, projects: () => ['boite'], waiting: () => false, answered: () => {}, loaded: () => {} });
+  const settle = async () => {
+    for (let tick = 0; tick < 30; tick += 1) await Promise.resolve();
+  };
+  const asked = () => call.mock.calls.filter(([method]) => method === 'providers.list').length;
+
+  await crew.load();
+  await settle();
+  expect(crew.problem).toBe(strings.companion.brainOff);
+  expect(asked()).toBe(1);
+  await vi.advanceTimersByTimeAsync(61_000);
+  await settle();
+  expect(asked()).toBe(2);
+  expect(saves).toEqual([]);
+
+  status = 'ok';
+  crew.retry();
+  await vi.advanceTimersByTimeAsync(200);
+  await settle();
+  expect(saves).toHaveLength(1);
+  expect(crew.problem).toBeNull();
+  expect(readCompanionPrefs()).toMatchObject({ agents: ['bots'], crewMade: true });
+  crew.retry();
+  await vi.advanceTimersByTimeAsync(200);
+  await settle();
+  expect(saves).toHaveLength(1);
+  crew.dispose();
 });
 
 // ---------------------------------------------------------------------------
