@@ -241,7 +241,8 @@ real('a recording is an MP4 made in the browser itself, and one left running whe
   await agent.call('browser.command', { threadId, action: { kind: 'open', url: url('/moving') } });
   await agent.call('browser.command', { threadId, action: { kind: 'recording-start' } });
   await expect(agent.call('browser.command', { threadId, action: { kind: 'recording-start' } })).rejects.toThrow('already running');
-  await Bun.sleep(1500);
+  // A slow encoder drops frames by design: an Intel macOS runner keeps 3 to 5 a second, so 4 s still clears 10.
+  await Bun.sleep(4000);
   const { recording, tabId } = await agent.call('browser.command', { threadId, action: { kind: 'recording-stop' } });
   expect(recording).toMatchObject({ mime: 'video/mp4', codec: 'h264', reason: 'stopped', frameRate: 30 });
   expect(recording!.bytes).toBeGreaterThan(1000);

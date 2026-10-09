@@ -142,6 +142,7 @@ export function askAsync(ctx: FakeContext, thread: Thread, turn: Turn, running: 
     request,
     resolve: (answer) => {
       settleQuestion(ctx, thread, host, partIndex, request, answer);
+      countOpenQuestions(ctx, thread);
       if (answer === null) return;
       const picked = answer.optionIds.map((id) => asked.options.find((option) => option.id === id)?.label ?? id).join(', ');
       const files = (answer.attachments ?? []).map((file) => `[file ${file.mimeType}, ${file.bytes} bytes, ${file.name ?? 'attachment'}]`).join('\n');
@@ -149,7 +150,14 @@ export function askAsync(ctx: FakeContext, thread: Thread, turn: Turn, running: 
       holdAnswer(ctx, thread, `> ${text}\n\n${reply}`);
     }
   });
+  countOpenQuestions(ctx, thread);
   return questionId;
+}
+
+/** As the core's `openQuestions`: the cards asked without stopping still open, sent with the row. */
+function countOpenQuestions(ctx: FakeContext, thread: Thread): void {
+  thread.openQuestions = [...ctx.pendingQuestions.values()].filter(pending => pending.request.threadId === thread.id && pending.request.async === true).length;
+  ctx.touch(thread);
 }
 
 /** As the core's deferred answers: the ones given while a turn runs start one turn together after it. */

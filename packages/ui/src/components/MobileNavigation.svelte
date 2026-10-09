@@ -34,6 +34,7 @@
   import { activeProject, archiveCount, projectThreadView } from '../lib/project-threads.svelte';
   import { workingThread } from '../lib/recent.svelte';
   import { compareThreads } from '../lib/thread-order';
+  import { needsUser } from '../lib/thread-state';
 
   let { store, recover = false, screen = $bindable('chat') }: { store: Store; recover?: boolean; screen: 'chat' | 'threads' | 'activity' } = $props();
   const narrow = new MediaQuery('(max-width: 720px)');
@@ -72,13 +73,13 @@
     const byId = new Map(machine.store.projects.map(p => [p.id, p]));
     return machine.store.threads.filter(t => !t.archived && !t.incognito).map(thread => ({ machine, thread, project: thread.projectId === null ? undefined : byId.get(thread.projectId) }));
   }));
-  let waiting = $derived(entries.filter(e => e.thread.status === 'waiting'));
-  let active = $derived(entries.filter(e => ['waiting', 'running', 'queued'].includes(e.thread.status)));
+  let waiting = $derived(entries.filter(e => needsUser(e.thread)));
+  let active = $derived(entries.filter(e => needsUser(e.thread) || ['running', 'queued'].includes(e.thread.status)));
   let rows = $derived((screen === 'activity' ? active : entries)
     .filter(e => !query || [e.thread.title, projectName(e.project), e.thread.branch, e.machine.label].some(value => value?.toLocaleLowerCase().includes(query)))
     .filter(e => screen === 'activity' || (!e.thread.parentThreadId && !e.project?.archived && (workspace.view !== 'recent' || !selected || (e.machine.id === selected.machine.id && e.thread.projectId === selected.project.id))))
     .sort((a, b) => screen === 'activity'
-      ? (Number(b.thread.status === 'waiting') - Number(a.thread.status === 'waiting')) || b.thread.updatedAt - a.thread.updatedAt
+      ? (Number(needsUser(b.thread)) - Number(needsUser(a.thread))) || b.thread.updatedAt - a.thread.updatedAt
       : compareThreads(a.thread, b.thread)));
   let projects = $derived([...machines.flatMap(m => m.store.projects.filter(p => p.archived !== true).map(p => ({
     id: JSON.stringify([m.id, p.id]), label: projectName(p), hint: several ? m.label : '', projectTile: { project: p, store: m.store },

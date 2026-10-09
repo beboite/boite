@@ -46,8 +46,13 @@ disable provider-native subagents.
 
 Boite subagents replace the providers' own. Claude starts with its `Agent`,
 `Task` and `Workflow` tools disallowed, Codex with `features.multi_agent` and
-`features.multi_agent_v2` off, and the shipped OpenCode descriptor denies its
-`task` permission. Other harnesses keep whatever native agents they have.
+`features.multi_agent_v2` off, the shipped OpenCode descriptor denies its
+`task` permission, and Grok starts with `GROK_SUBAGENTS=0` and
+`GROK_WORKFLOWS=0`, which its CLI honours in `grok agent stdio` as in its TUI.
+Muse Code turns its own off only through `run.subagent_delegation_mode` in the
+user's `settings.json`, which Boite does not rewrite, so a Muse conversation
+keeps its native subagents. Other harnesses keep whatever native agents they
+have.
 
 Subagents shows native agents' reported names, tasks, models, status and bounded
 results. Active agents contribute to the count above the composer. Ask the main agent to steer

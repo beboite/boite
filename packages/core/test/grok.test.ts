@@ -156,7 +156,9 @@ describe('grok', () => {
       // `session/set_model`, and the permission mode is spliced in at spawn.
       expect(profile?.launch?.args).toEqual(LAUNCH_ARGS);
       expect(profile?.isolation).toEqual({ GROK_HOME: '{isolationDir}' });
-      expect(profile?.env).toEqual({ NO_COLOR: '1', GROK_FEEDBACK_ENABLED: '0' });
+      // Subagents in Boite are Boite conversations: Grok's own `spawn_subagent`
+      // and background workflows stay off, in `grok agent stdio` as in its TUI.
+      expect(profile?.env).toEqual({ NO_COLOR: '1', GROK_FEEDBACK_ENABLED: '0', GROK_SUBAGENTS: '0', GROK_WORKFLOWS: '0' });
       // The eleven variables that could send the agent somewhere else.
       expect(profile?.unsetEnv).toEqual([
         'XAI_API_KEY',

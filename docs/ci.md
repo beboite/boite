@@ -179,11 +179,15 @@ bootstrap, which the client chunk keeps because the fake client stores pages
 with them. The UI limit rises to 4,405,000 and the core JavaScript limit to
 3,690,000, leaving about 20 KB and 18 KB.
 
-A conversation following its agent to another account measured 3,690,646
-emitted core JavaScript bytes on Linux on 2026-10-09, 1,233 above `main` at
-`a5646a7e` built the same way (3,689,413), which left 587 bytes under the
-limit: the account fallback and the title model chosen by family. The core
+On 2026-10-09 on Linux, `main` at `4f5a3f66` measured 3,689,568 emitted
+core JavaScript bytes, 432 below the 3,690,000 limit. Counting a thread's open
+asynchronous questions on its row adds 812 bytes: 3,690,380 with it. The core
 JavaScript limit rises to 3,710,000, leaving about 19 KB.
+
+A conversation following its agent to another account adds 1,233 core bytes,
+measured on Linux on 2026-10-09 against `main` at `a5646a7e` built the same
+way (3,690,646 against 3,689,413): the account fallback and the title model
+chosen by family. It fits under the same 3,710,000 limit.
 
 Recent's Done and Working groups measured 3,949,936 UI bytes on 2026-10-03
 before integrating these orchestration additions. The combined build measured
