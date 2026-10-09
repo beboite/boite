@@ -25,7 +25,7 @@ import type { Workbench } from './store/workbench.svelte';
 import type { Workflows } from './store/workflows.svelte';
 
 export type Page = 'chat' | 'settings' | 'agents';
-export type SettingsTab = 'home' | 'advanced' | 'brain' | 'voice' | 'general' | 'machines' | 'appearance' | 'keyboard' | 'accounts' | 'plugins' | 'usage' | 'limits' | 'resources' | 'task-manager' | 'experiments';
+export type SettingsTab = 'home' | 'advanced' | 'brain' | 'voice' | 'general' | 'machines' | 'appearance' | 'keyboard' | 'accounts' | 'plugins' | 'usage' | 'limits' | 'resources' | 'task-manager' | 'experiments' | 'companion';
 
 /** A login process the core runs for one account, as `account.login` reports it. */
 export interface LoginState {

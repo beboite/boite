@@ -29,4 +29,17 @@ mod tests {
             assert!(authority.resolve_access(command, "quotas", "quotas", &Origin::Local).is_none(), "quota popup can invoke {command}");
         }
     }
+
+    #[test]
+    fn companion_can_connect_and_place_itself_without_browser_control() {
+        let mut context: tauri::Context<tauri::test::MockRuntime> = crate::shell_context();
+        let authority = context.runtime_authority_mut();
+        for command in ["core_endpoint", "companion_place", "companion_hit_rects", "companion_media", "companion_media_control",
+            "companion_show_main", "companion_monitors", "plugin:event|listen", "plugin:event|unlisten"] {
+            assert!(authority.resolve_access(command, "companion", "companion", &Origin::Local).is_some(), "companion cannot invoke {command}");
+        }
+        for command in ["companion_window", "quota_window", "browser_create", "browser_cookies", "quit_shell", "save_attachment", "notify"] {
+            assert!(authority.resolve_access(command, "companion", "companion", &Origin::Local).is_none(), "companion can invoke {command}");
+        }
+    }
 }

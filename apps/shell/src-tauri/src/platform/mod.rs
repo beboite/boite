@@ -33,6 +33,7 @@ mod posix;
 pub(crate) use posix::{alert, before_webview, foreground, idle_ms, notify, prepare_command};
 
 pub(crate) mod appbars;
+pub(crate) mod media;
 #[cfg(windows)]
 pub(crate) mod browser_control;
 #[cfg(windows)]

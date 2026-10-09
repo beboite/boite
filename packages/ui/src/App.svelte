@@ -29,6 +29,7 @@
   import { strings } from './lib/strings';
   import { experimentOn } from './lib/experiments.svelte';
   import { installWhipEscape } from './lib/whip.svelte';
+  import { followCompanionExperiment } from './lib/companion/follow.svelte';
   import { rightPanel } from './lib/right-panel.svelte';
   import { workspace } from './lib/workspace.svelte';
   import type { Store } from './lib/store.svelte';
@@ -132,6 +133,7 @@
   $effect(() => {
     browserProfiles.source = workspace.machines.find((machine) => machine.store.localCore)?.store ?? store;
   });
+  followCompanionExperiment((error) => { store.error = String(error); });
   let SettingsShell = $state<typeof import('./components/SettingsShell.svelte').default>();
   let AgentsPage = $state<typeof import('./components/agents/AgentsPage.svelte').default>();
   let agentsLoadError = $state('');
@@ -397,7 +399,7 @@
     let unlisten: (() => void) | undefined;
     let disposed = false;
     let stopTray: (() => void) | undefined;
-    const traySettings = async (tab: 'accounts' | 'limits') => {
+    const traySettings = async (tab: 'accounts' | 'limits' | 'companion') => {
       const local = workspace.machines.find((machine) => machine.store.localCore)?.store;
       if (!local) return;
       await workspace.select(local);
@@ -407,6 +409,7 @@
       const stops = await Promise.all([
         listen('tray://providers', () => void traySettings('accounts')),
         listen('tray://limits', () => void traySettings('limits')),
+        listen('companion://settings', () => void traySettings('companion')),
       ]);
       const stop = () => stops.forEach((off) => off());
       if (disposed) stop(); else stopTray = stop;

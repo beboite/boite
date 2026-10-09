@@ -3,12 +3,14 @@
   import { tick } from 'svelte';
   import MobileSettings from './MobileSettings.svelte';
   import BrainPage from './BrainPage.svelte';
-  import { Activity, ArrowLeft, Brain, ChevronRight, Coins, FlaskConical, Gauge, House, Keyboard, Mic, Monitor, Palette, Puzzle, Settings2, ShieldCheck, SlidersHorizontal, Users } from '@lucide/svelte';
+  import { Activity, ArrowLeft, Brain, ChevronRight, Coins, FlaskConical, Gauge, House, Keyboard, Mic, Monitor, Palette, Puzzle, Settings2, ShieldCheck, SlidersHorizontal, Smile, Users } from '@lucide/svelte';
   import KeyboardPage from './KeyboardPage.svelte';
   import LimitsPage from './LimitsPage.svelte';
   import PluginsPage from './PluginsPage.svelte';
   import { COMMAND_GROUPS } from '../lib/keybindings';
   import { EXPERIMENT_IDS } from '../lib/experiments';
+  import { experimentOn } from '../lib/experiments.svelte';
+  import CompanionSettings from './CompanionSettings.svelte';
   import { experimentCopy } from '../lib/experiment-copy';
   import { strings } from '../lib/strings';
   import type { SettingsTab, Store } from '../lib/store.svelte';
@@ -45,6 +47,8 @@ import { workspace } from '../lib/workspace.svelte';
     { id: 'appearance', label: strings.settings.tabs.appearance, icon: Palette, group: 0 },
     { id: 'keyboard', label: strings.settings.tabs.keyboard, icon: Keyboard, group: 0 },
     { id: 'voice', label: strings.speech.heading, icon: Mic, group: 0 },
+    // The desktop companion's page while its experiment is on; a browser shows it to say the app runs it.
+    ...(experimentOn('companion') ? [{ id: 'companion', label: strings.companion.heading, icon: Smile, group: 0 } as Tab] : []),
     { id: 'accounts', label: strings.settings.tabs.accounts, icon: Users, group: 1 },
     { id: 'plugins', label: strings.settings.tabs.plugins, icon: Puzzle, group: 1 },
     { id: 'brain', label: strings.brain.heading, icon: Brain, group: 1 },
@@ -297,6 +301,8 @@ import { workspace } from '../lib/workspace.svelte';
         <SettingsHome {store} tiles={tabs} {entries} onopen={open} />
       {:else if tab === 'brain'}
         <BrainPage {store} />
+      {:else if tab === 'companion'}
+        <CompanionSettings {store} />
       {:else if tab === 'voice'}
         <VoiceSettings {store} />
       {:else if tab === 'general'}

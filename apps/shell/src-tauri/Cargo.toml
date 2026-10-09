@@ -55,7 +55,8 @@ harness = false
 # `src/platform/` are asked for.
 [target.'cfg(windows)'.dependencies]
 webview2-com = "0.38"
-windows = "0.61"
+# `Media_Control`: what the desktop companion reads of the music playing (platform/media.rs).
+windows = { version = "0.61", features = ["Foundation", "Foundation_Collections", "Media_Control"] }
 # `implement`, for the environment wrapper that opens a named browser profile.
 windows-core = "0.61"
 # Screencast frames arrive as base64 JPEG; the recorder receives raw bytes.

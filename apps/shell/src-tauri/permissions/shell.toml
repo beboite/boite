@@ -20,6 +20,13 @@ commands.allow = [
   "app_update_install",
   "app_update_cancel_install",
   "quota_window",
+  "companion_window",
+  "companion_monitors",
+  "companion_place",
+  "companion_hit_rects",
+  "companion_media",
+  "companion_media_control",
+  "companion_show_main",
   "window_material",
   "window_material_supported",
   "tray_labels",
@@ -44,3 +51,16 @@ commands.allow = [
 identifier = "allow-quota-ui"
 description = "Allows the local quota popup to connect to the core and use its tray controls."
 commands.allow = ["core_endpoint", "quota_window"]
+
+[[permission]]
+identifier = "allow-companion-ui"
+description = "Allows the desktop companion to connect to the core, place its window, take clicks where it draws and read the music playing."
+commands.allow = [
+  "core_endpoint",
+  "companion_monitors",
+  "companion_place",
+  "companion_hit_rects",
+  "companion_media",
+  "companion_media_control",
+  "companion_show_main",
+]
