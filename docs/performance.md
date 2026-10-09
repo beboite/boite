@@ -185,10 +185,11 @@ contexts rather than with history. Main measured 10.8 MB at 500 steps.
 
 ## Local and remote connections
 
-The core decides per connection. A WebSocket whose `Host` header is
-`127.0.0.1`, `localhost` or `::1` is the shell or a browser on the same
-machine: frames are uncompressed and deltas leave immediately. Other `Host`
-values enable compression and delta batching.
+The core decides per connection. A WebSocket from a loopback address whose
+`Host` header is `127.0.0.1`, `localhost` or `::1` is the shell or a browser on
+the same machine: frames are uncompressed and deltas leave immediately. Any
+other peer or `Host` enables compression and delta batching, and a LAN client
+that sends a loopback `Host` stays remote.
 
 - Every frame is deflated. Bun runs permessage-deflate without context
   takeover, which takes a 30 KB JSON answer to 1.6 KB. The mode with a shared

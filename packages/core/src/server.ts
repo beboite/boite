@@ -431,7 +431,8 @@ export function startServer(options: ServerOptions): RunningServer {
           core.log('warn', `refused a websocket: ${refusal}`);
           return new Response('too many connections waiting for hello', { status: 503 });
         }
-        const connection = new ServerConnection(core, !isLoopbackHost(request.headers.get('host')));
+        // Local takes both a loopback peer and a loopback name: a LAN client can send any `Host`.
+        const connection = new ServerConnection(core, peer !== null);
         if (self.upgrade(request, { data: { connection, peer } })) return undefined;
         return new Response('expected a websocket upgrade', { status: 400 });
       }
