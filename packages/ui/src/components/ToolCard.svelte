@@ -136,9 +136,9 @@
   let headless = $derived(new Set(diffs.map((doc) => doc.path)).size <= 1 && line.text.includes(fileName(diffs[0]?.path ?? '')));
 
   // Input stays behind the disclosure while it arrives. Change previews follow
-  // the device preference; a deferred standalone diff waits for a click.
+  // the device preference, including deferred diffs fetched when shown.
   let toggled = $state<boolean | null>(null);
-  let shown = $derived(toggled ?? (chatPrefs.expandDiffs && diffs.length > 0 && !failed && !documentsDeferred));
+  let shown = $derived(toggled ?? (chatPrefs.expandDiffs && diffs.length > 0 && !failed));
   let chip = $derived(shown ? '' : documentsDeferred ? chipFor(documents) : others.length > 0 ? chipFor(others) : '');
   let deferred = $derived(outputDeferred || inputDeferred || documentsDeferred);
 

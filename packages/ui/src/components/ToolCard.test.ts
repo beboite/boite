@@ -1,6 +1,7 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import ToolCard from './ToolCard.svelte';
+import { chatPrefs } from '../lib/chat-prefs.svelte';
 
 let running: Record<string, unknown> | null = null;
 
@@ -8,6 +9,20 @@ afterEach(() => {
   if (running) unmount(running, { outro: false });
   running = null;
   document.body.innerHTML = '';
+  chatPrefs.expandDiffs = false;
+});
+
+test('automatic change previews also request deferred standalone diffs', () => {
+  chatPrefs.expandDiffs = true;
+  const loadOutput = vi.fn().mockReturnValue(new Promise(() => {}));
+  running = mount(ToolCard, { target: document.body, props: {
+    name: 'Edit', input: { file_path: 'a.ts' }, output: null, status: 'done',
+    documents: [{ kind: 'diff', path: 'a.ts', oldText: '', newText: '' }], documentsDeferred: true, loadOutput,
+  } });
+  flushSync();
+  expect(document.querySelector('[data-testid=tool-toggle]')?.getAttribute('aria-expanded')).toBe('true');
+  expect(loadOutput).toHaveBeenCalledTimes(1);
+  expect(document.querySelector('[data-testid=diff-view]')).toBeNull();
 });
 
 function query<T extends Element>(selector: string): T {
