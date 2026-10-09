@@ -723,7 +723,7 @@
     {#if composer && composer.queued.length > 0}
       <ComposerQueue queued={composer.queued}
         disabled={composer.sending || text.length > 0 || attachments.length > 0 || previewReferences.length > 0}
-        paused={composer.paused} sending={composer.sending} connected={store.connection === 'ready'} machine={machineLabel}
+        paused={composer.paused} sending={composer.sending} outgoing={composer.sending ? composer.outgoing ?? 1 : 0} connected={store.connection === 'ready'} machine={machineLabel}
         {sendNow}
         onrestore={restoreQueued} onremove={(at) => store.removeQueued(key, at)} onretry={(at) => store.retryQueued(key, at)}
         onsendnow={sendQueuedNow} />

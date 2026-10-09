@@ -13,12 +13,18 @@ const state = (): ComposerState => ({ text: '', attachments: [], sending: false,
 
 test('one batch carries every attachment and mention, while new arrivals wait for the next turn', async () => {
   const draft = state();
+  const original = [...draft.queued];
   let finish!: (accepted: boolean) => void;
   const send = vi.fn(() => new Promise<boolean>(resolve => { finish = resolve; }));
   const store = { send } as unknown as Store;
   const sending = drainQueue(store, 'thread', draft);
   draft.queued.push({ text: 'arrived during send', attachments: [] });
   await drainQueue(store, 'thread', draft);
+  // The batch stays drawn while it goes out: emptied, the queue would unmount
+  // and replay its arrival animation at every refused tool boundary.
+  expect(draft.queued.slice(0, 3)).toEqual(original);
+  draft.queued.slice(0, 3).forEach((entry, at) => expect(entry).toBe(original[at]));
+  expect(draft.outgoing).toBe(3);
   expect(send).toHaveBeenCalledTimes(1);
   const args = send.mock.calls[0] as unknown as [string, string, unknown[], typeof reference[]];
   expect(args.slice(0, 3)).toEqual(['@Save first\n\n@Save second\n\nthird', 'thread', [attachment]]);

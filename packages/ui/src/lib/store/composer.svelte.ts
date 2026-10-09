@@ -54,6 +54,8 @@ export class Composer {
     mentionInsertion?: number;
     queued: QueuedPrompt[];
     sending: boolean;
+    /** How many entries at the head of `queued` are going out now: they cannot be removed. */
+    outgoing?: number;
     paused: boolean;
     /** The sent message this text replaces: sending rewinds the thread to before it first. */
     editing?: MessageId | null;
@@ -470,7 +472,7 @@ export class Composer {
   /** Takes a pending prompt out of the queue, unless it is the one going out right now. */
   removeQueued(threadId: string, at: number): void {
     const state = this.composerStates[threadId];
-    if (!state || (state.sending && at === 0)) return;
+    if (!state || (state.sending && at < (state.outgoing ?? 1))) return;
     state.queued.splice(at, 1);
   }
 

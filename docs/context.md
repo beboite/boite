@@ -150,7 +150,9 @@ for the next turn. Enter again in the emptied composer (not where the primary
 pointer is coarse), or Send now under the bubbles, submits it immediately without stopping the agent when the driver accepts it.
 Permissions and blocking questions hold it until answered.
 Messages already queued go together in their original order, with their
-attachments and preview references. Messages added during that send wait for
+attachments and preview references. Their bubbles stay drawn, and cannot be
+removed, until the driver takes them, so a declined attempt at each boundary
+leaves them in place. Messages added during that send wait for
 the next delivery. A changed model or account keeps input for its next turn.
 Escape stops the current turn. An Escape that closes something first (a popover, a menu, a
 confirmation, the command palette, a rename field) only closes it, and the focus

@@ -16,6 +16,7 @@
     disabled,
     paused,
     sending = false,
+    outgoing = 0,
     connected = true,
     machine = '',
     sendNow,
@@ -31,6 +32,8 @@
     paused: boolean;
     /** The first prompt is going out now. */
     sending?: boolean;
+    /** How many entries at the head are in that send: they cannot be removed. */
+    outgoing?: number;
     /** The machine answers: an outbox prompt waits for the thread, not for it. */
     connected?: boolean;
     machine?: string;
@@ -46,13 +49,15 @@
 </script>
 
 <div class="queued" data-testid="composer-queued">
-  {#each queued as entry, at (entry)}
+  <!-- Unkeyed: a bubble stays the same element while the list around it
+       changes, so its arrival animation plays once, when it first appears. -->
+  {#each queued as entry, at}
     <div class="queued-item" class:failed={entry.request?.failed !== undefined} data-testid="composer-queued-item">
       <button type="button" class="queued-bubble"
         title={strings.composer.editQueued}
         {disabled}
         onclick={() => onrestore(at)}>
-        <span class="queued-text ui-label">{entry.text || strings.composer.attachAlt}</span>
+        <span class="queued-text">{entry.text || strings.composer.attachAlt}</span>
         {#if entry.attachments.length || entry.previewReferences?.length}
           <span class="queued-extras">
             {#if entry.attachments.length}<span><span class="ui-label">{entry.attachments.length}</span> <Paperclip size={12} /></span>{/if}
@@ -74,7 +79,7 @@
           {#if onremove}
             <button type="button" class="ghost small icon" data-testid="composer-queued-remove"
               title={strings.composer.removeQueued} aria-label={strings.composer.removeQueued}
-              disabled={sending && at === 0} onclick={() => onremove(at)}><X size={14} /></button>
+              disabled={at < outgoing} onclick={() => onremove(at)}><X size={14} /></button>
           {/if}
         </div>
       {/if}
@@ -181,11 +186,15 @@
   .queued-extras { display: flex; gap: 8px; color: var(--color-muted-foreground); font-size: var(--text-sm); }
   .queued-extras > span { display: inline-flex; align-items: center; gap: 4px; }
 
+  /* As tall as the Send now button, present or not: the row does not jump when
+     it comes, and its label's ink room stays inside the scrolling list instead
+     of overflowing it into a scrollbar. */
   .queued-foot {
     display: flex;
     align-items: center;
     gap: 4px;
     flex: none;
+    min-height: var(--control-sm);
     color: var(--color-muted-foreground);
     font-size: var(--text-xs);
   }
