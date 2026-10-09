@@ -134,6 +134,16 @@ async function deliverQueued(store: Store, threadId: string, state: ComposerStat
   }
 }
 
+/**
+ * Turns texts into queue entries that keep their identity while their text
+ * does. The bubbles are keyed by entry: a fresh object on every thread update
+ * would remount them and replay their arrival animation.
+ */
+export function textEntries(): (texts: readonly string[]) => { text: string; attachments: Attachment[] }[] {
+  let previous: { text: string; attachments: Attachment[] }[] = [];
+  return (texts) => (previous = texts.map((text, at) => previous[at]?.text === text ? previous[at]! : { text, attachments: [] }));
+}
+
 /** What a sent prompt held, as the composer takes it back: its words, its pictures and files, its page references. */
 export interface SentPrompt {
   id: MessageId;

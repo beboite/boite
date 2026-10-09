@@ -12,7 +12,7 @@
   import { focusWithin } from '../lib/focus';
   import { touchScreen } from '../lib/device';
   import { ignoreQuestions, repliesOf, replyTarget, sendAnswer } from '../lib/question-reply.svelte';
-  import { emptyBox, returnPrompt, sentPrompts, type SentPrompt } from '../lib/composer-queue';
+  import { emptyBox, returnPrompt, sentPrompts, textEntries, type SentPrompt } from '../lib/composer-queue';
   import { rankItems, type PaletteItem } from '../lib/palette';
   import { clearStash, DRAFT_STASH_KEY, readStash, writeStash } from '../lib/prefs';
   import { claudeKeywords, promptSegments } from '../lib/message-display';
@@ -41,6 +41,7 @@
   let composer = $derived(store.composerStates[key]);
   let hasQueue = $derived(!!(composer?.queued.length || store.openThread?.pendingAnswers?.length));
   let activityRoom = $state(0);
+  const answerEntries = textEntries();
   let text = $derived(composer?.text ?? '');
   /** The attachments this prompt carries, the same array the strip above the box draws. */
   let attachments = $derived<Attachment[]>(composer?.attachments ?? []);
@@ -716,14 +717,13 @@
   <div class="queue-region" style:padding-bottom={hasQueue ? `${activityRoom}px` : undefined}>
     {#if store.openThread?.pendingAnswers?.length}
       <div data-testid="question-queued">
-        <ComposerQueue queued={store.openThread.pendingAnswers.map(text => ({ text, attachments: [] }))}
-          disabled={true} paused={false} sendNow={null} onrestore={() => {}} onsendnow={() => {}} />
+        <ComposerQueue queued={answerEntries(store.openThread.pendingAnswers)} disabled={true} paused={false} sendNow={null} onrestore={() => {}} onsendnow={() => {}} />
       </div>
     {/if}
     {#if composer && composer.queued.length > 0}
       <ComposerQueue queued={composer.queued}
         disabled={composer.sending || text.length > 0 || attachments.length > 0 || previewReferences.length > 0}
-        paused={composer.paused} sending={composer.sending} outgoing={composer.sending ? composer.outgoing ?? 1 : 0} connected={store.connection === 'ready'} machine={machineLabel}
+        paused={composer.paused} sending={composer.sending} outgoing={composer.outgoing ?? 0} connected={store.connection === 'ready'} machine={machineLabel}
         {sendNow}
         onrestore={restoreQueued} onremove={(at) => store.removeQueued(key, at)} onretry={(at) => store.retryQueued(key, at)}
         onsendnow={sendQueuedNow} />

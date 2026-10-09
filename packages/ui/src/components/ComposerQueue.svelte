@@ -32,7 +32,7 @@
     paused: boolean;
     /** The first prompt is going out now. */
     sending?: boolean;
-    /** How many entries at the head are in that send: they cannot be removed. */
+    /** How many entries at the head are going out from the queue: they cannot be removed. */
     outgoing?: number;
     /** The machine answers: an outbox prompt waits for the thread, not for it. */
     connected?: boolean;
@@ -49,9 +49,7 @@
 </script>
 
 <div class="queued" data-testid="composer-queued">
-  <!-- Unkeyed: a bubble stays the same element while the list around it
-       changes, so its arrival animation plays once, when it first appears. -->
-  {#each queued as entry, at}
+  {#each queued as entry, at (entry)}
     <div class="queued-item" class:failed={entry.request?.failed !== undefined} data-testid="composer-queued-item">
       <button type="button" class="queued-bubble"
         title={strings.composer.editQueued}
@@ -73,7 +71,7 @@
               <button type="button" class="ghost small" data-testid="composer-outbox-retry" disabled={sending} onclick={() => onretry(at)}><span class="ui-label">{strings.composer.outboxRetry}</span></button>
             {/if}
           {:else if entry.request}
-            <span class="queued-pending" data-testid="composer-outbox-pending"><Clock size={12} />{sending && at === 0 ? strings.composer.outboxSending
+            <span class="queued-pending" data-testid="composer-outbox-pending"><Clock size={12} />{at < outgoing ? strings.composer.outboxSending
               : connected ? strings.composer.outboxNext : fill(strings.composer.outboxWaiting, { machine })}</span>
           {/if}
           {#if onremove}
