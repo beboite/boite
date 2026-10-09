@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { AgentBrowser } from '../src/browser.ts';
-import { chromiumArgs, findChromium } from '../src/browser/chromium.ts';
+import { chromiumArgs, findChromium, waitForEndpoint } from '../src/browser/chromium.ts';
 import { echoThread, startTestCore, type TestCore } from './harness.ts';
 
 /*
@@ -135,6 +135,58 @@ real('a viewer watching while the agent changes the page size never puts the old
   } finally { watching = false; await watch; }
   // The race needs frames actually taken while the sizes changed.
   expect(frames).toBeGreaterThan(5);
+}, 150_000);
+
+/**
+ * A stand-in for the desktop app hosting the agent's tabs: it relays every
+ * DevTools message verbatim to a Chromium of its own over a WebSocket, which
+ * answers as the app's webviews would. The app's own translation (one webview
+ * per target) is tested in the UI; this is the core's side of the relay.
+ */
+async function fakeHost(name = 'shell') {
+  const dir = mkdtempSync(join(tmpdir(), 'boite-host-'));
+  const args = chromiumArgs(dir, 'linux').filter(arg => arg !== '--remote-debugging-pipe');
+  const browser = Bun.spawn([findChromium().path!, ...args, '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1'], { stdout: 'ignore', stderr: 'ignore' });
+  const socket = new WebSocket(await waitForEndpoint(dir, browser.exited));
+  await new Promise(resolve => socket.addEventListener('open', resolve, { once: true }));
+  const app = await connect(harness.url, harness.token, { client: { name, version: 'test' } });
+  const relayed: string[] = [];
+  app.on('browser.hostMessage', ({ profile, message }) => { relayed.push(profile); socket.send(message); });
+  socket.addEventListener('message', event => void app.call('browser.hostReply', { profile: 'default', messages: [String(event.data)] }).catch(() => {}));
+  return {
+    app, relayed,
+    async close() { app.close(); socket.close(); browser.kill(); await browser.exited; rmSync(dir, { recursive: true, force: true }); },
+  };
+}
+
+real('the desktop app on this machine hosts the agent tabs: the core drives them through it, and they close with it', async () => {
+  // Only the owner's desktop app may host: not a script, not another client.
+  await expect(owner.call('browser.hostAttach', {})).rejects.toThrow('only the desktop app on this machine');
+  await expect(agent.call('browser.hostAttach', {})).rejects.toThrow();
+  const host = await fakeHost();
+  try {
+    await host.app.call('browser.hostAttach', {});
+    const open = await agent.call('browser.command', { threadId, action: { kind: 'open', url: url() } });
+    expect(open.title).toBe('Fixture');
+    expect(host.relayed.length).toBeGreaterThan(0);
+    expect(new Set(host.relayed)).toEqual(new Set(['default']));
+    // The tab names the host's view, so the app shows that page itself.
+    await owner.call('threads.subscribe', { threadId });
+    const [tab] = (await owner.call('browser.remoteStatus', { threadId })).tabs;
+    expect(tab).toMatchObject({ tabId: open.tabId, view: expect.any(String) });
+    await agent.call('browser.command', { threadId, action: { kind: 'click', selector: '#go' } });
+    expect(await evaluate('document.title')).toBe('clicked');
+    // A viewer elsewhere still gets frames, taken through the host.
+    const frame = await owner.call('browser.remoteFrame', { threadId });
+    expect(jpegSize(frame.base64)).toEqual({ width: frame.width, height: frame.height });
+    // A reply from a connection that does not host is refused.
+    await expect(owner.call('browser.hostReply', { profile: 'default', messages: ['{}'] })).rejects.toThrow('does not host');
+  } finally { await host.close(); }
+  // The app is gone: its tabs went with it, and the next one opens in the core's own browser.
+  for (let i = 0; i < 50 && (await owner.call('browser.remoteStatus', { threadId })).tabs.length; i++) await Bun.sleep(50);
+  expect((await owner.call('browser.remoteStatus', { threadId })).tabs).toEqual([]);
+  await agent.call('browser.command', { threadId, action: { kind: 'open', url: url() } });
+  expect((await owner.call('browser.remoteStatus', { threadId })).tabs[0]!.view).toBeUndefined();
 }, 150_000);
 
 real('a viewer on another device watches and drives the tab, and hears it come and go', async () => {

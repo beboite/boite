@@ -40,6 +40,8 @@ export interface BrowserBridge {
   /** Whether this bridge paints anything at all. False keeps the slot's muted line. */
   readonly paints: boolean;
   protocol?(id: string, method: string, params: Record<string, unknown>): Promise<unknown>;
+  /** A webview's own DevTools events, for the agent browser this app hosts. Only the Windows shell has any. */
+  events?(id: string, names: readonly string[], listener: (method: string, params: Record<string, unknown>) => void): Promise<() => void>;
   /** Streams the page's frames as JPEG bytes, at most `frameRate` a second, until the returned stop runs. */
   screencast?(id: string, frameRate: number, frame: (jpeg: ArrayBuffer) => void): Promise<() => Promise<void>>;
   viewport?(id: string): { width: number; height: number } | null;

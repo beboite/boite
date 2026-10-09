@@ -52,6 +52,8 @@ test('a page the agent opens shows the Agent browser covered, naming the machine
   await page.click(id('agent-browser-show'));
   await page.waitFor(`document.querySelector('${id('remote-browser-frame')}')?.complete && document.querySelector('${id('remote-browser-frame')}').naturalWidth > 100`);
   expect(await page.evaluate<string>(`document.querySelector('${id('remote-browser-address')}').value`)).toBe('https://example.com/docs');
+  // The page takes the size of the view by default: the frame fills it with no band around it.
+  await page.waitFor(`(() => { const area = document.querySelector('.screen-area'), shown = document.querySelector('.screen'); return !!shown && Math.abs(shown.offsetWidth - area.clientWidth) <= 2 && Math.abs(shown.offsetHeight - area.clientHeight) <= 2; })()`);
   await tapFrame();
   await page.waitFor(`${store}.client.call('browser.command', { threadId: 't-trace', action: { kind: 'snapshot' } }).then(reply => reply.value.text.includes('Taps: 1'))`);
   // The next frame draws the tap the page took.

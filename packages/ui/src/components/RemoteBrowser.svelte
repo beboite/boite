@@ -195,7 +195,25 @@
     scrollX -= event.deltaX * unit; scrollY -= event.deltaY * unit;
     flushScroll();
   }
-  function resize(width: number, height: number) {
+  /**
+   * The page takes the size of this view by default, as a browser's page takes
+   * its window's: on Show and whenever the view changes size, once it settles.
+   * A size picked by hand in Display stops that until Fit this screen.
+   */
+  let fitted = $state(true), fitTimer: ReturnType<typeof setTimeout> | undefined;
+  const ready = $derived(usable);
+  $effect(() => {
+    const width = Math.round(areaWidth), height = Math.round(areaHeight);
+    if (!fitted || !ready || zoom || width < 240 || height < 240) return;
+    clearTimeout(fitTimer);
+    fitTimer = setTimeout(() => untrack(() => {
+      if (!fitted || !frame || (Math.abs(frame.width - width) <= 2 && Math.abs(frame.height - height) <= 2)) return;
+      void input({ kind: 'viewport', width: Math.min(3840, width), height: Math.min(3840, height) });
+    }), 350);
+    return () => clearTimeout(fitTimer);
+  });
+  function resize(width: number, height: number, fit = false) {
+    fitted = fit;
     viewportWidth = Math.max(240, Math.min(3840, Math.round(width)));
     viewportHeight = Math.max(240, Math.min(3840, Math.round(height)));
     zoom = 0;
@@ -303,7 +321,7 @@
     <section class="display-settings" aria-label={strings.remoteBrowser.display}>
       <strong>{strings.remoteBrowser.resolution} {frame ? `${frame.width} × ${frame.height}` : ''}</strong>
       <div class="options">
-        <button class="small" disabled={!usable} onclick={() => resize(areaWidth, areaHeight)}><span class="ui-label">{strings.remoteBrowser.fitPhone}</span></button>
+        <button class="small" disabled={!usable} aria-pressed={fitted} onclick={() => resize(areaWidth, areaHeight, true)}><span class="ui-label">{strings.remoteBrowser.fitPhone}</span></button>
         <button class="small" disabled={!usable} onclick={() => resize(393, 700)}><span class="ui-label">{strings.remoteBrowser.phone}</span></button>
         <button class="small" disabled={!usable} onclick={() => resize(768, 1024)}><span class="ui-label">{strings.remoteBrowser.tablet}</span></button>
         <button class="small" disabled={!usable} onclick={() => resize(1366, 768)}><span class="ui-label">PC</span></button>
@@ -315,7 +333,7 @@
         <button class="small" type="submit" disabled={!usable || !validSize}><span class="ui-label">{strings.remoteBrowser.apply}</span></button>
       </form>
       <small>{strings.remoteBrowser.sharedSize}</small>
-      <button class="small ghost restore" disabled={!usable} onclick={() => void input({ kind: 'reset-viewport' })}><span class="ui-label">{strings.remoteBrowser.restoreSize}</span></button>
+      <button class="small ghost restore" disabled={!usable} onclick={() => { fitted = false; void input({ kind: 'reset-viewport' }); }}><span class="ui-label">{strings.remoteBrowser.restoreSize}</span></button>
       <strong>{strings.remoteBrowser.previewZoom}</strong>
       <div class="options">
         <button class="small" aria-pressed={zoom === 0} onclick={() => { zoom = 0; displaySettings = false; }}><span class="ui-label">{strings.remoteBrowser.fit}</span></button>

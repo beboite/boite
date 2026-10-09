@@ -94,6 +94,28 @@ export class TauriBridge implements BrowserBridge {
     };
   }
 
+  /**
+   * A webview's DevTools events, for the agent browser this app hosts
+   * (`lib/browser-host.ts`): each arrives as one JSON text on a channel.
+   * Registered after the webview's creation, in the same queue.
+   */
+  async events(id: string, names: readonly string[], listener: (method: string, params: Record<string, unknown>) => void): Promise<() => void> {
+    if (!this.#live.has(id)) throw new Error('the browser tab is closed');
+    const { Channel } = await import('@tauri-apps/api/core');
+    const channel = new Channel<string>(text => {
+      let event: { method?: unknown; params?: unknown };
+      try { event = JSON.parse(text) as typeof event; } catch { return; }
+      if (typeof event.method === 'string') listener(event.method, (event.params ?? {}) as Record<string, unknown>);
+    });
+    const registered = (this.#queues.get(id) ?? Promise.resolve()).then(async () => {
+      const invoke = await this.#ready();
+      await invoke('browser_protocol_events', { id, events: [...names], channel });
+    });
+    this.#queues.set(id, registered.then(() => {}, () => {}));
+    await registered;
+    return () => { channel.onmessage = () => {}; };
+  }
+
   #handlers = new Set<(event: BrowserEvent) => void>();
   #queues = new Map<string, Promise<void>>();
   #bounds = new Map<string, string>();
