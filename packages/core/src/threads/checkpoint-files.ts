@@ -11,7 +11,11 @@ const BYTE_LIMIT = 128 * 1024 * 1024;
 const FILE_BYTE_LIMIT = 16 * 1024 * 1024;
 const SKIP = new Set(['.git', '.boite', '.agents', 'node_modules']);
 
-export interface FileEntry { hash: string; mode: number; link?: string }
+/**
+ * `unbacked`: a file over the per-file limit, known by its metadata only. It
+ * blocks a rewind only when the removed turns changed it.
+ */
+export interface FileEntry { hash: string; mode: number; link?: string; unbacked?: true }
 export type FileSnapshot = Record<string, FileEntry>;
 interface CachedFile { entry: FileEntry; metadata: string; size: number }
 export type SnapshotCache = Map<string, CachedFile>;
@@ -60,7 +64,10 @@ export async function readEntry(path: string, cached?: CachedFile): Promise<(Cac
     return { entry: { hash: createHash('sha256').update(link).digest('hex'), mode: Number(info.mode) & 0o777, link }, metadata, size: Buffer.byteLength(link) };
   }
   if (!info.isFile()) throw new Error(`${path}: expected a regular file or symlink`);
-  if (info.size > BigInt(FILE_BYTE_LIMIT)) throw new Error(`${path}: file exceeds the 16 MiB checkpoint limit`);
+  if (info.size > BigInt(FILE_BYTE_LIMIT)) {
+    // Nothing is read or stored: the hash stands for this exact metadata, so any write shows as a change.
+    return { entry: { hash: createHash('sha256').update(`unbacked:${metadata}`).digest('hex'), mode: Number(info.mode) & 0o777, unbacked: true }, metadata, size: 0 };
+  }
   const handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
   try {
     const bytes = Buffer.alloc(Number(info.size) + 1);

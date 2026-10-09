@@ -144,11 +144,24 @@ test('legacy turns and oversized files report unavailable backups while preservi
   await rm(join(h.dataDir, 'checkpoints', threadId, `${turnId}.json`));
   expect((await client.call('threads.rewind', { threadId, messageId })).files?.status).toBe('unavailable');
   expect(await readFile(join(cwd, 'app.ts'), 'utf8')).toBe('agent');
-  await writeFile(join(cwd, 'large.bin'), Buffer.alloc(16 * 1024 * 1024 + 1));
+});
+
+test('an oversized file blocks the restore only when the removed turns changed it', async () => {
+  const large = join(cwd, 'large.bin');
+  await writeFile(large, Buffer.alloc(16 * 1024 * 1024 + 1));
+  await writeFile(join(cwd, 'app.ts'), 'initial');
+  change = async () => { await writeFile(join(cwd, 'app.ts'), 'agent'); };
+  const beside = await run('beside');
+  expect((await client.call('threads.rewind', { threadId, messageId: beside })).files).toEqual({ status: 'restored', count: 1 });
+  expect(await readFile(join(cwd, 'app.ts'), 'utf8')).toBe('initial');
+  expect((await stat(large)).size).toBe(16 * 1024 * 1024 + 1);
+
+  change = async () => { await writeFile(large, Buffer.alloc(16 * 1024 * 1024 + 2)); };
   const oversized = await run('large');
   const rewind = await client.call('threads.rewind', { threadId, messageId: oversized });
   expect(rewind.files?.status).toBe('unavailable');
-  expect(rewind.files?.reason).toContain('16 MiB');
+  expect(rewind.files?.reason).toContain('large.bin');
+  expect((await stat(large)).size).toBe(16 * 1024 * 1024 + 2);
 });
 
 test('symlinks are restored as links without reading or writing their targets', async () => {

@@ -274,9 +274,11 @@ Backups include binary content, deletions, creations, permissions and symlinks,
 stored under the core data directory with content deduplicated per thread.
 They survive restarts and leave with a permanently removed project or thread.
 
-Each snapshot is limited to 20000 files, 16 MiB per file and 128 MiB total.
-Old turns without backups, overlapping turns in the same workspace, a cut
-inside a running turn and incomplete snapshots cannot restore code. The rewind
+Each snapshot is limited to 20000 files and 128 MiB of saved content. A file
+above 16 MiB is not copied: the snapshot keeps only its metadata, so it blocks
+a restore only when the removed turns changed it. Old turns without backups,
+overlapping turns in the same workspace, a cut inside a running turn and
+incomplete snapshots cannot restore code. The rewind
 answers `files: { status, count, reason? }`; `status` is `restored`, `unchanged`
 or `unavailable`. The client shows a warning for unavailable backups rather
 than claiming that the code was restored.
