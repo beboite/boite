@@ -266,6 +266,7 @@
     outline-offset: -2px;
   }
   .count {
+    position: relative;
     flex: none;
     display: grid;
     place-items: center;
@@ -276,6 +277,16 @@
     background: var(--color-accent);
     color: var(--color-accent-ink);
     font-weight: 600;
+  }
+  /* The glow breathes by its opacity: an endless box-shadow would repaint every frame. */
+  .count::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 30%, transparent);
+    opacity: 0;
+    pointer-events: none;
     animation: breathe 2.4s ease-in-out infinite;
   }
   .icon {
@@ -435,13 +446,13 @@
   }
   @keyframes breathe {
     50% {
-      box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 30%, transparent);
+      opacity: 1;
     }
   }
   @media (prefers-reduced-motion: reduce) {
     .island,
     .expanded .content,
-    .count {
+    .count::after {
       transition: none;
       animation: none;
     }
