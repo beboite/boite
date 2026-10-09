@@ -10,6 +10,7 @@
   import { diffCounts, diffRows } from '../lib/diff';
   import DiffView from './DiffView.svelte';
   import DocumentView from './DocumentView.svelte';
+  import { chatPrefs } from '../lib/chat-prefs.svelte';
 
   /*
    * One tool call as a plain line of the timeline: what it did
@@ -134,10 +135,10 @@
    */
   let headless = $derived(new Set(diffs.map((doc) => doc.path)).size <= 1 && line.text.includes(fileName(diffs[0]?.path ?? '')));
 
-  // Input stays behind the disclosure while it arrives. A successful edit opens
-  // on its diff, unless the diff stayed on the core: a heavy one waits for a click.
+  // Input stays behind the disclosure while it arrives. Change previews follow
+  // the device preference; a deferred standalone diff waits for a click.
   let toggled = $state<boolean | null>(null);
-  let shown = $derived(toggled ?? (diffs.length > 0 && !failed && !documentsDeferred));
+  let shown = $derived(toggled ?? (chatPrefs.expandDiffs && diffs.length > 0 && !failed && !documentsDeferred));
   let chip = $derived(shown ? '' : documentsDeferred ? chipFor(documents) : others.length > 0 ? chipFor(others) : '');
   let deferred = $derived(outputDeferred || inputDeferred || documentsDeferred);
 

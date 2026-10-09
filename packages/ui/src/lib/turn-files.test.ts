@@ -1,12 +1,37 @@
 import { describe, expect, it, test } from 'vitest';
-import type { MessagePart } from '@boite/contracts';
-import { countsOf, relativeTo, turnDiffs, turnFiles, turnFileTree, turnLineCounts, type TurnDiff } from './turn-files';
+import type { Message, MessagePart, Turn } from '@boite/contracts';
+import { countsOf, relativeTo, turnDiffs, turnFiles, turnFileTree, turnLineCounts, TurnFileCache, visibleTurnFiles, type TurnDiff } from './turn-files';
 
 function tool(name: string, input: unknown, extra: Partial<Extract<MessagePart, { type: 'tool' }>> = {}): MessagePart {
   return { type: 'tool', toolId: `${name}-${Math.random()}`, name, input, output: null, status: 'done', ...extra };
 }
 
 const CWD = 'C:\\Users\\you\\Documents\\Boite\\2026-09-23 Letter';
+
+test('active file summaries ignore unfinished calls, reuse diffs across text deltas and refresh deferred changes', () => {
+  const edit = tool('Edit', { file_path: 'a.ts', old_string: 'old', new_string: 'new' }) as Extract<MessagePart, { type: 'tool' }>;
+  const text = { type: 'text' as const, text: 'Checking' };
+  const messages = [{ id: 'answer', role: 'assistant', turnId: 'turn', parts: [edit, text,
+    tool('Write', { file_path: 'pending.ts', content: 'x' }, { status: 'running' })] }] as Message[];
+  const turns = [{ id: 'turn', status: 'running' }] as Turn[];
+  const cache = new TurnFileCache();
+  const read = () => visibleTurnFiles(messages, turns, new Set(['turn']), '/repo', true, cache).get('turn')!;
+  expect(visibleTurnFiles(messages, turns, new Set(['turn']), '/repo').size).toBe(0);
+  const first = read();
+  expect(first.files.map(file => file.path)).toEqual(['a.ts']);
+  expect(first.diffs).toEqual([{ kind: 'diff', path: 'a.ts', oldText: 'old', newText: 'new' }]);
+  text.text += ' the layout';
+  expect(read()).toBe(first);
+  edit.documents = [{ kind: 'diff', path: 'a.ts', oldText: '', newText: '' }];
+  edit.documentsDeferred = true;
+  expect(read().deferred).toEqual([{ messageId: 'answer', toolId: edit.toolId }]);
+  expect(read().files[0]?.change).toBe('changed');
+  expect(read().diffs).toEqual([]);
+  edit.documents = [{ kind: 'diff', path: 'a.ts', oldText: 'old', newText: 'whole' }];
+  delete edit.documentsDeferred;
+  expect(read().deferred).toEqual([]);
+  expect(read().diffs[0]?.newText).toBe('whole');
+});
 
 describe('turnFiles', () => {
   it('reads Claude diff documents, a new file and an edit', () => {
@@ -51,6 +76,7 @@ describe('turnFiles', () => {
     expect(turnFiles([
       tool('Write', { file_path: 'x.md', content: '' }, { status: 'error' }),
       tool('Write', { file_path: 'y.md', content: '' }, { status: 'denied' }),
+      tool('Write', { file_path: 'pending.md', content: 'not finished' }, { status: 'running' }),
       tool('Read', { file_path: 'z.md' }),
       tool('Bash', { command: 'touch w.md' }),
       tool('ApplyPatch', { grantRoot: '/repo' })

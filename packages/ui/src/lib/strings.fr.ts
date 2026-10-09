@@ -1867,6 +1867,8 @@ export const fr: Translation = {
     materialMica: 'Mica',
     materialSolid: 'Opaque',
     chatWidth: 'Largeur du chat',
+    groupChanges: 'Regrouper les fichiers modifiés dans la conversation',
+    expandDiffs: 'Ouvrir les aperçus des changements par défaut',
     chatWidthComfortable: 'Confortable',
     chatWidthWide: 'Large',
     chatWidthFull: 'Pleine',

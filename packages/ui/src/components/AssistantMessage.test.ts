@@ -7,7 +7,7 @@ import AssistantMessage from './AssistantMessage.svelte';
 let mounted: ReturnType<typeof mount> | undefined;
 afterEach(async () => { if (mounted) await unmount(mounted); mounted = undefined; document.body.innerHTML = ''; });
 
-test('tools and reasoning arriving beside a text delta keep its unfinished paragraph hidden', async () => {
+test('live paragraphs update without rebuilding completed prose when tools and reasoning arrive', async () => {
   const client = new FakeClient({ delayMs: 0 });
   const store = new Store(); store.attach(client);
   try {
@@ -22,12 +22,12 @@ test('tools and reasoning arriving beside a text delta keep its unfinished parag
     mounted = mount(AssistantMessage, { target: document.body, props: { store, threadId: message.threadId, message, signedOut: null, showModel: false } });
     flushSync();
     expect(document.querySelectorAll('[data-testid=paragraph]')).toHaveLength(1);
-    expect(document.body.textContent).not.toContain('Still writing');
+    expect(document.querySelector('[data-testid=paragraph-pending]')?.textContent).toBe('Still writing');
     const first = document.querySelector('[data-testid=paragraph]');
     if (message.parts[0]?.type !== 'text') throw new Error('missing text');
     message.parts[0].text += ' this paragraph';
     flushSync();
-    expect(document.body.textContent).not.toContain('Still writing');
+    expect(document.querySelector('[data-testid=paragraph-pending]')?.textContent).toBe('Still writing this paragraph');
     message.parts[0].text += '.\n\n';
     flushSync();
     expect(document.querySelectorAll('[data-testid=paragraph]')).toHaveLength(2);
@@ -65,6 +65,28 @@ test('reasoning folds with the calls into one line and empty reasoning under a s
     flushSync();
     expect(document.querySelector('[data-testid=thinking-elapsed]')?.textContent).toBe('3s');
     expect(document.querySelector('[data-testid=thinking-toggle] .caret')).toBeNull();
+  } finally { store.detach(); client.close(); }
+});
+
+test('a running tool in an earlier message suppresses typing on the latest text', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  const store = new Store(); store.attach(client);
+  try {
+    await store.connect(); await store.open('t-trace');
+    const thread = store.openThread!;
+    const previous = thread.messages.at(-1)!;
+    previous.parts = [{ type: 'tool', toolId: 'read', name: 'Read', input: {}, output: null, status: 'running' }];
+    thread.status = 'running';
+    thread.messages.push({ ...previous, id: 'latest-text', state: 'streaming', parts: [{ type: 'text', text: 'Checking the result' }] });
+    mounted = mount(AssistantMessage, { target: document.body, props: { store, threadId: thread.id,
+      message: thread.messages.at(-1)!, signedOut: null, showModel: false, latestInTurn: true } });
+    flushSync();
+    expect(document.querySelector('[data-testid=paragraph-pending]')?.textContent).toBe('Checking the result');
+    expect(document.querySelector('[data-testid=typing-indicator]')).toBeNull();
+    if (previous.parts[0]?.type !== 'tool') throw new Error('missing tool');
+    previous.parts[0].status = 'done';
+    flushSync();
+    expect(document.querySelector('[data-testid=typing-indicator]')).not.toBeNull();
   } finally { store.detach(); client.close(); }
 });
 

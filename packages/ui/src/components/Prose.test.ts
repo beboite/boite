@@ -200,6 +200,12 @@ test('a block that is still being written carries no button yet', async () => {
   expect(document.querySelector('[data-testid=code-copy]')).toBeNull();
 });
 
+test('live text shows the unfinished paragraph instead of only typing dots', () => {
+  running = mount(Prose, { target: document.body, props: { text: 'First paragraph.\n\nWriting the next', live: true, typing: true, bubble: true } });
+  flushSync();
+  expect(query('[data-testid=text-part]').textContent).toContain('Writing the next');
+});
+
 test('plain text preserves its rendered content and gets no copy button', async () => {
   running = mount(Prose, { target: document.body, props: { text: 'Plain `inline` text only.' } });
   flushSync();

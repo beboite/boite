@@ -17,11 +17,11 @@
 
   const active = $derived(turn.status === 'running' ? messages.filter(current => current.turnId === turn.id && current.role === 'assistant') : []);
   // A steering prompt moves the summary, but the preceding reasoning and tools keep working.
-  // Only the last message owns text dots, even before its first paragraph is shown.
+  // Only the last assistant message can be writing visible answer text.
   const activeContent = $derived(active.some(current => {
     const tail = current.parts.at(-1);
     return current.state === 'streaming' && (tail?.type === 'thinking' && tail.finishedAt == null ||
-      current.id === message.id && tail?.type === 'text' && tail.complete !== true);
+      current.id === message.id && tail?.type === 'text' && tail.complete !== true && tail.text.trim().length > 0);
   }));
   const requestStartedAt = $derived(requestStarts(turns).get(turn.id) ?? null);
 </script>
@@ -32,7 +32,6 @@
   progress={store.openThread?.id === threadId ? store.openThread.progress : undefined}
   activeTool={active.some(current => current.parts.some(part => part.type === 'tool' && part.status === 'running'))}
   {activeContent}
-  typing={store.connection === 'ready' && !activeContent}
   waiting={store.openThread?.status === 'waiting' && turn.status === 'running'}
   background={store.openThread?.turns.at(-1)?.id === turn.id ? store.openThread?.background ?? [] : []}
   stop={() => void store.stop()}

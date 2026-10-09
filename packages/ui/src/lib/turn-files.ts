@@ -22,24 +22,55 @@ export interface TurnFile {
   change: 'created' | 'changed' | 'deleted';
 }
 
-/** Aggregate full turns only for the messages being drawn, without repeatedly copying their parts. */
-export function visibleTurnFiles(messages: readonly Message[], turns: readonly Turn[], visible: ReadonlySet<string>, cwd: string): Map<string, { files: TurnFile[]; diffs: TurnDiff[]; cwd: string }> {
-  const result = new Map<string, { files: TurnFile[]; diffs: TurnDiff[]; cwd: string }>();
-  // A turn still running shows no card: its parts are not read at all, so a part arriving reads nothing again.
-  const finished = turns.filter(turn => visible.has(turn.id) && turn.status !== 'running' && turn.status !== 'queued');
-  if (finished.length === 0) return result;
-  const wanted = new Set(finished.map(turn => turn.id));
-  const parts = new Map<string, MessagePart[]>();
+type ToolPart = Extract<MessagePart, { type: 'tool' }>;
+type FileSource = { messageId: string; part: ToolPart };
+export interface TurnFilesData {
+  files: TurnFile[];
+  diffs: TurnDiff[];
+  cwd: string;
+  deferred: { messageId: string; toolId: string }[];
+}
+
+/** Keep diff arrays stable across text deltas so line counts and trees do not rebuild. */
+export class TurnFileCache {
+  #entries = new Map<string, { sources: unknown[][]; data: TurnFilesData }>();
+
+  retain(ids: ReadonlySet<string>): void {
+    for (const id of this.#entries.keys()) if (!ids.has(id)) this.#entries.delete(id);
+  }
+
+  read(id: string, sources: FileSource[], cwd: string): TurnFilesData {
+    const snapshots = sources.map(({ messageId, part }) => [messageId, part.toolId, part.name, part.input,
+      part.inputText, part.inputDeferred, part.documents, part.documentsDeferred]);
+    const before = this.#entries.get(id);
+    if (before?.data.cwd === cwd && before.sources.length === snapshots.length &&
+      snapshots.every((row, at) => row.every((value, field) => value === before.sources[at]?.[field]))) return before.data;
+    const parts = sources.map(source => source.part);
+    const deferred = sources.filter(({ part }) => (part.inputDeferred || part.documentsDeferred) && touched(part).length > 0)
+      .map(({ messageId, part }) => ({ messageId, toolId: part.toolId }));
+    const data = { files: turnFiles(parts, cwd), diffs: turnDiffs(parts), cwd, deferred };
+    this.#entries.set(id, { sources: snapshots, data });
+    return data;
+  }
+}
+
+/** Aggregate successful changes once at each visible turn's end, including active work when grouped. */
+export function visibleTurnFiles(messages: readonly Message[], turns: readonly Turn[], visible: ReadonlySet<string>, cwd: string,
+  includeRunning = false, cache = new TurnFileCache()): Map<string, TurnFilesData> {
+  const result = new Map<string, TurnFilesData>();
+  const wanted = new Set(turns.filter(turn => visible.has(turn.id) && (includeRunning || turn.status !== 'running') && turn.status !== 'queued').map(turn => turn.id));
+  cache.retain(wanted);
+  if (wanted.size === 0) return result;
+  const sources = new Map<string, FileSource[]>();
   for (const message of messages) {
     if (message.role !== 'assistant' || !wanted.has(message.turnId)) continue;
-    const own = parts.get(message.turnId) ?? [];
-    for (const part of message.parts) own.push(part);
-    parts.set(message.turnId, own);
+    const own = sources.get(message.turnId) ?? [];
+    for (const part of message.parts) if (part.type === 'tool' && part.status === 'done') own.push({ messageId: message.id, part });
+    sources.set(message.turnId, own);
   }
-  for (const turn of finished) {
-    const own = parts.get(turn.id) ?? [];
-    const files = turnFiles(own, cwd);
-    if (files.length) result.set(turn.id, { files, diffs: turnDiffs(own), cwd });
+  for (const id of wanted) {
+    const data = cache.read(id, sources.get(id) ?? [], cwd);
+    if (data.files.length) result.set(id, data);
   }
   return result;
 }
@@ -117,7 +148,7 @@ function record(value: unknown): Record<string, unknown> | null {
 /** Every `(path, change)` one tool call reports, in the order it reports them. */
 function touched(part: Extract<MessagePart, { type: 'tool' }>): { path: string; change: TurnFile['change'] }[] {
   const diffs = (part.documents ?? []).flatMap((document) =>
-    document.kind === 'diff' ? [{ path: document.path, change: document.oldText === '' ? ('created' as const) : ('changed' as const) }] : []
+    document.kind === 'diff' ? [{ path: document.path, change: !part.documentsDeferred && document.oldText === '' ? ('created' as const) : ('changed' as const) }] : []
   );
   if (diffs.length > 0) return diffs;
   const fields = record(part.input);
@@ -176,11 +207,13 @@ export type TurnDiff = Extract<ToolDocument, { kind: 'diff' }>;
  * ran: an edit made twice to one file shows both, which is what happened.
  */
 export function turnDiffs(parts: readonly MessagePart[]): TurnDiff[] {
-  return parts.flatMap((part) =>
-    part.type === 'tool' && part.status === 'done'
-      ? (part.documents ?? []).filter((document): document is TurnDiff => document.kind === 'diff')
-      : []
-  );
+  return parts.flatMap(part => {
+    if (part.type !== 'tool' || part.status !== 'done' || part.documentsDeferred) return [];
+    const attached = (part.documents ?? []).filter((document): document is TurnDiff => document.kind === 'diff');
+    if (attached.length || part.inputDeferred || typeof part.inputText === 'string') return attached;
+    const change = describeTool(part.name, part.input).change;
+    return change ? [{ kind: 'diff' as const, ...change }] : [];
+  });
 }
 
 export interface LineCounts {

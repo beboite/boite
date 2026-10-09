@@ -1757,14 +1757,15 @@ test('a tool card shows the diff, the markdown and the image it produced', async
   await waitFor(() => !query<HTMLButtonElement>('[data-testid=composer-send]').disabled);
   query<HTMLButtonElement>('[data-testid=composer-send]').click();
 
-  // The edit comes open on its diff and counts its lines on its own line; the
-  // other two are folded and say what they carry.
+  // Changes and produced documents keep their previews behind a disclosure.
   await waitFor(() => document.querySelectorAll('[data-testid=tool-document-chip]').length === 2);
   expect(
     Array.from(document.querySelectorAll('[data-testid=tool-document-chip]')).map((el) => el.textContent)
   ).toEqual(['1 doc', '1 doc']);
   expect(query('[data-testid=tool-diff-counts]').textContent?.replace(/\s+/g, ' ').trim()).toBe('+2 -1');
-  expect(query('[data-testid=tool-card][data-family=edit] [data-testid=tool-toggle]').getAttribute('aria-expanded')).toBe('true');
+  expect(query('[data-testid=tool-card][data-family=edit] [data-testid=tool-toggle]').getAttribute('aria-expanded')).toBe('false');
+  query<HTMLButtonElement>('[data-testid=tool-card][data-family=edit] [data-testid=tool-toggle]').click();
+  flushSync();
   // A diff says it all: no raw input under it.
   expect(document.querySelector('[data-testid=tool-card][data-family=edit] [data-testid=tool-input]')).toBeNull();
 

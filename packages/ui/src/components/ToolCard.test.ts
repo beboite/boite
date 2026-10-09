@@ -188,6 +188,9 @@ test('a command\'s one diff keeps its heading, since the command does not name t
     props: { name: 'Bash', input: { command: 'git apply fix.patch' }, output: '', status: 'done' as const, documents: [diff] }
   });
   flushSync();
+  expect(query('[data-testid=tool-toggle]').getAttribute('aria-expanded')).toBe('false');
+  expect(document.querySelector('[data-testid=diff-view]')).toBeNull();
+  query<HTMLButtonElement>('[data-testid=tool-toggle]').click(); flushSync();
   expect(query('[data-testid=diff-view] .path').textContent).toBe('src/a.ts');
   unmount(running, { outro: false });
   running = mount(ToolCard, {
@@ -195,5 +198,6 @@ test('a command\'s one diff keeps its heading, since the command does not name t
     props: { name: 'Edit', input: { file_path: 'src/a.ts' }, output: '', status: 'done' as const, documents: [diff] }
   });
   flushSync();
+  query<HTMLButtonElement>('[data-testid=tool-toggle]').click(); flushSync();
   expect(document.querySelector('[data-testid=diff-view] .path')).toBeNull();
 });

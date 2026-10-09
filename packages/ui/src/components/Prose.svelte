@@ -45,6 +45,9 @@
   // The scan resumes where the last delta stopped instead of reading the answer again.
   const scan = new ParagraphScan();
   let blocks = $derived(scan.blocks(answerText(text, live), live));
+  // Completed blocks keep their DOM; only the unfinished paragraph changes on a delta.
+  // It stays plain text until complete, so partial Markdown cannot rebuild earlier blocks.
+  let pending = $derived.by(() => { void blocks; return live ? scan.pending(answerText(text, live)) : ''; });
 
   let host = $state<HTMLDivElement>();
 
@@ -98,11 +101,11 @@
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-<div class="prose" class:live class:answer-bubble={bubble && (blocks.length > 0 || typing)} data-testid="text-part" bind:this={host} use:selectionClicks onclick={follow}>
+<div class="prose" class:live class:answer-bubble={bubble && (blocks.length > 0 || pending.length > 0)} data-testid="text-part" bind:this={host} use:selectionClicks onclick={follow}>
   {#each blocks as block, index (index)}
-    <!-- A streaming answer shows finished paragraphs only (`ParagraphScan`): every block here is final and kept. -->
+    <!-- Completed Markdown blocks stay mounted while the pending paragraph changes. -->
     <div class="paragraph" data-testid="paragraph">{@html renderBlock(block, rich)}</div>
-  {/each}{#if typing}<TypingIndicator />{/if}
+  {/each}{#if pending}<p class="pending" data-testid="paragraph-pending">{pending}</p>{/if}{#if typing && text.trim().length > 0}<TypingIndicator />{/if}
 </div>
 {#if selected && rich}
   {#key `${threadId}:${selected.path}:${selected.line}`}
