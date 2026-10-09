@@ -35,9 +35,12 @@ const SHOP = `<!doctype html><title>Shop</title>
 <p id="note">Free delivery</p>`;
 
 let site: ReturnType<typeof Bun.serve>;
+/** The user agent of the last request for each path: what a site sees. */
+const agents = new Map<string, string | null>();
 beforeAll(() => {
   site = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: request => {
     const path = new URL(request.url).pathname;
+    agents.set(path, request.headers.get('user-agent'));
     if (path === '/') return new Response(PAGE, { headers: { 'content-type': 'text/html' } });
     if (path === '/shop') return new Response(SHOP, { headers: { 'content-type': 'text/html' } });
     if (path === '/sent') return new Response(`<title>Sent</title><h1>Thanks ${new URL(request.url).searchParams.get('name')}</h1>`, { headers: { 'content-type': 'text/html' } });
@@ -235,6 +238,29 @@ real('a window a page opens joins the conversation as a tab of its own', async (
     tabs = ((await agent.call('browser.command', { threadId, action: { kind: 'status' } })).value as { tabs: typeof tabs }).tabs;
   }
   expect(tabs.map(tab => tab.url)).toEqual([url(), url('/popup')]);
+  // Its first request leaves before the core attaches to it: the browser's own flag names it.
+  expect(agents.get('/popup')).toMatch(/ Chrome\/\d+/);
+}, 150_000);
+
+real('a site sees the browser a person runs with a window, not headless Chrome', async () => {
+  await agent.call('browser.command', { threadId, action: { kind: 'open', url: url() } });
+  const seen = JSON.parse(String(await evaluate(`(async () => JSON.stringify({
+    page: navigator.userAgent,
+    webdriver: navigator.webdriver,
+    versions: (await navigator.userAgentData.getHighEntropyValues(['fullVersionList'])).fullVersionList.length,
+    screen: [screen.width, screen.height],
+    window: [outerWidth, outerHeight],
+    worker: await new Promise(resolve => { new Worker(URL.createObjectURL(new Blob(['postMessage(navigator.userAgent)']))).onmessage = event => resolve(event.data); }),
+    request: await fetch('/missing').then(() => 'sent'),
+  }))()`)));
+  expect(seen.page).toMatch(/ Chrome\/\d+/);
+  expect(seen.page).not.toContain('Headless');
+  expect([seen.worker, agents.get('/'), agents.get('/missing')]).toEqual([seen.page, seen.page, seen.page]);
+  expect(seen.webdriver).toBe(false);
+  // `--user-agent` alone leaves the high-entropy client hints empty; the tab's override restores them.
+  expect(seen.versions).toBeGreaterThan(1);
+  expect(seen.screen[0]).toBeGreaterThanOrEqual(seen.window[0]);
+  expect(seen.screen[1]).toBeGreaterThanOrEqual(seen.window[1]);
 }, 150_000);
 
 real('a recording is an MP4 made in the browser itself, and one left running when the turn ends is thrown away', async () => {
@@ -284,6 +310,8 @@ test('the browser is found where each OS installs it, and BOITE_BROWSER alone wh
     expect(findChromium({}, 'linux', none)).toMatchObject({ path: null, reason: expect.stringContaining('BOITE_BROWSER') });
     expect(chromiumArgs('/profile', 'linux')).toEqual(expect.arrayContaining(['--headless=new', '--disable-software-rasterizer', '--use-angle=gl-egl', '--user-data-dir=/profile']));
     expect(chromiumArgs('/profile', 'win32')).not.toContain('--use-angle=gl-egl');
+    expect(chromiumArgs('/profile', 'linux', 'Agent/1')).toEqual(expect.arrayContaining(['--disable-blink-features=AutomationControlled', '--user-agent=Agent/1']));
+    expect(chromiumArgs('/profile', 'linux').some(arg => arg.startsWith('--user-agent'))).toBe(false);
     // The DevTools protocol goes over the browser's own pipes: no port for another process to reach.
     for (const platform of ['linux', 'darwin'] as const) {
       expect(chromiumArgs('/profile', platform)).toContain('--remote-debugging-pipe');
