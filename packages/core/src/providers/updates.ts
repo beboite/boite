@@ -12,6 +12,7 @@ import { profileFor, resolveCommand } from './resolve.ts';
 import { resumeAfterUpdate, resumePostponed, resumeUnwaited, type Resume } from './update-resume.ts';
 import { readVersion, recheckVersions } from './versions.ts';
 import { forgetWhich } from './which.ts';
+import { compareVersions } from './install-latest.ts';
 
 export { readVersion };
 
@@ -49,23 +50,7 @@ export function updateThreadId(providerId: ProviderId): string {
   return `update:${providerId}`;
 }
 
-/** Newer, older or the same, reading the numbers first and a pre-release tag as older than none. */
-export function compareVersions(a: string, b: string): number {
-  const split = (value: string): { numbers: number[]; tag: string } => {
-    const [core = '', ...rest] = value.split('-');
-    return { numbers: core.split('.').map((part) => Number.parseInt(part, 10) || 0), tag: rest.join('-') };
-  };
-  const left = split(a), right = split(b);
-  for (let index = 0; index < Math.max(left.numbers.length, right.numbers.length); index += 1) {
-    const delta = (left.numbers[index] ?? 0) - (right.numbers[index] ?? 0);
-    if (delta !== 0) return delta < 0 ? -1 : 1;
-  }
-  if (left.tag === right.tag) return 0;
-  if (left.tag === '') return 1;
-  if (right.tag === '') return -1;
-  // beta.10 is after beta.2: a numeric part compares as a number.
-  return left.tag.localeCompare(right.tag, 'en', { numeric: true }) < 0 ? -1 : 1;
-}
+export { compareVersions } from './install-latest.ts';
 
 /** True when the path sits under that directory, a sibling sharing its first letters left out. */
 export function inside(dir: string, path: string): boolean {
@@ -519,7 +504,11 @@ export class HarnessUpdates {
   }
 
   private async read(target: Target): Promise<{ current: string | null; latest: string | null }> {
-    if (target.route === 'managed') return this.readManaged(target);
+    if (target.route === 'managed') {
+      // A release that follows its publisher reads it again, and nothing runs.
+      await this.core.providers.freshInstallBlock(target.descriptor.id, (level, message) => this.core.log(level, message), 0);
+      return this.readManaged(target);
+    }
     const spec = target.profile.update as ProviderSelfUpdate;
     const current = readVersion(await this.run(target, spec.versionArgs ?? ['--version'], this.versionTimeoutMs));
     if (current === null) throw new Error(`${target.descriptor.name} printed no version`);
@@ -540,9 +529,19 @@ export class HarnessUpdates {
     return { current, latest };
   }
 
-  /** A managed release is read off disk and the descriptor's pin: nothing runs. */
+  /**
+   * A managed release is read off disk and the install block: the pin, or the
+   * newest release its publisher named. Nothing runs. A release that follows
+   * its publisher never offers an older one than it has, which the pin is
+   * after a restart until the publisher is read again.
+   */
   private readManaged(target: Target): { current: string | null; latest: string | null } {
-    return { current: this.core.providers.installs.installedVersion(target.descriptor.id), latest: target.profile.install?.version ?? null };
+    const id = target.descriptor.id;
+    const current = this.core.providers.installs.installedVersion(id);
+    const install = this.core.providers.installBlock(id);
+    const latest = install?.version ?? null;
+    if (install?.latest !== undefined && current !== null && latest !== null && compareVersions(current, latest) > 0) return { current, latest: current };
+    return { current, latest };
   }
 
   /** One short run of the agent's own program, traced like every process of an agent. */
@@ -659,7 +658,10 @@ export class HarnessUpdates {
     const installs = this.core.providers.installs;
     let done = installs.whenDone(id);
     if (done === null) {
-      installs.start(id, target.profile.install!);
+      const install = await this.core.providers.freshInstallBlock(id, (level, message) => this.core.log(level, message), 60_000);
+      if (install === undefined) throw new Error(`${target.descriptor.name} has nothing for Boite to install on this platform`);
+      done = installs.whenDone(id);
+      if (done === null) installs.start(id, install);
       done = installs.whenDone(id);
     }
     const result = await done;

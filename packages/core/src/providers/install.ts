@@ -16,6 +16,7 @@ import {
 } from './install-download.ts';
 import { pointCurrent, readReleaseRecord, removeCurrent, writeReleaseRecord, type ReleaseRecord } from './install-release.ts';
 import { checkSizes, extractRelease, markExecutable, reachesThroughLink } from './install-unpack.ts';
+import { compareVersions } from './install-latest.ts';
 
 /** Room left on the volume after the archive and the unpacked files, so nothing fills the disk. */
 export const FREE_SPACE_MARGIN = 256 * 1024 * 1024;
@@ -135,11 +136,14 @@ export class InstallManager {
     if (record !== null) {
       // What is on disk, and what the descriptor offers today: an older record
       // is an update waiting, not an absent provider whose files are missing.
+      // A release that follows its publisher only moves forward: the pin it
+      // falls back to before the publisher is read is no update.
+      const behind = install.latest !== undefined && compareVersions(record.version, install.version) > 0;
       return {
         state: 'installed',
         version: record.version,
         installedAt: record.installedAt,
-        available: install.version,
+        available: behind ? record.version : install.version,
       };
     }
     return { state: 'absent', version: install.version, archiveBytes: install.archiveBytes };

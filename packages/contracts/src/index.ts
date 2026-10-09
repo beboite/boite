@@ -97,6 +97,30 @@ export interface ProviderInstall {
   arch?: 'x64' | 'arm64';
   /** Files expected inside the archive, relative paths inside it, with their sizes; the first one is the executable. */
   files: { path: string; bytes: number; executable?: boolean }[];
+  /**
+   * Where the newest release is published, for a `binary` install. The core
+   * reads it before an install and at each update check, and installs that
+   * release instead of the pinned one, which stays the fallback when the
+   * publisher cannot be reached.
+   */
+  latest?: ProviderInstallLatest;
+}
+
+/**
+ * A publisher that names its newest release in a plain-text file and describes
+ * each release in a JSON manifest carrying, per platform, the binary's name,
+ * SHA-256 and size. Claude's release bucket has this shape. `manifest` and
+ * `url` contain `{version}`.
+ */
+export interface ProviderInstallLatest {
+  /** A plain-text file holding the newest version. */
+  versionUrl: string;
+  /** That version's manifest. */
+  manifest: string;
+  /** The key under the manifest's `platforms`, such as `win32-x64`. */
+  platform: string;
+  /** That version's binary. */
+  url: string;
 }
 
 /**
