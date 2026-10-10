@@ -472,10 +472,9 @@ export interface QuotaWindow {
   label: string;
   usedPercent: number;
   resetsAt: Timestamp | null;
+  /** Douane's choice of the window shown first and largest. Missing means the weekly window leads. */
+  primary?: true;
 }
-
-export { QUOTA_WINDOW_KINDS, quotaWindowKind, type QuotaWindowKind } from './quota-windows.ts';
-import type { QuotaWindowKind } from './quota-windows.ts';
 
 /** No redeemable identifiers reach the client. The core selects the next credit. */
 export interface QuotaResetCredits {
@@ -1766,13 +1765,6 @@ export interface Settings {
   subscriptionProxy?: SubscriptionProxy | null;
   /** Subscription priority shared by this core's clients and tray. Account ids stay on their owning machine. */
   quotaOrder?: AccountId[];
-  /** Kinds of limit window the limit views leave out. Missing shows every kind. */
-  quotaHiddenWindows?: QuotaWindowKind[];
-  /**
-   * Per account, the id of the window its limit views show first and largest,
-   * with its reset. Missing means the weekly window, else the first shown.
-   */
-  quotaPrimary?: Record<AccountId, string>;
   /** Days after deletion before history is purged. 0 keeps it indefinitely. Missing means 30. */
   threadDeletionRetentionDays?: number;
   /** Days after marking done before deletion. 0 disables it. Missing means 3. */

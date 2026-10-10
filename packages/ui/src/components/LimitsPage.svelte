@@ -1,7 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { ExternalLink, RefreshCw, SlidersHorizontal } from '@lucide/svelte';
-  import { QUOTA_WINDOW_KINDS, subscriptionProxyName, type AccountQuota, type QuotaWindowKind } from '@boite/contracts';
+  import { ExternalLink, RefreshCw } from '@lucide/svelte';
+  import { subscriptionProxyName, type AccountQuota } from '@boite/contracts';
   import InfoTip from './InfoTip.svelte';
   import ProviderLogo from './ProviderLogo.svelte';
   import UsageLimits from './UsageLimits.svelte';
@@ -22,9 +22,6 @@
    */
   let { store, showTitle = true }: { store: Store; showTitle?: boolean } = $props();
   let native = $state(false);
-  let displayOpen = $state(false);
-  let displaySaving = $state(false);
-  const hidden = $derived(new Set(store.settings?.quotaHiddenWindows ?? []));
   const proxy = $derived(store.settings?.subscriptionProxy);
   const proxyEnabled = $derived(proxy?.enabled === true);
   const proxyName = $derived(proxy ? subscriptionProxyName(proxy.kind) : '');
@@ -79,14 +76,6 @@
     if (store.client) void reader.read(store.client, true).catch(() => {});
   }
 
-  /** Shows or hides one kind of window in every limit view. */
-  async function showKind(kind: QuotaWindowKind, shown: boolean) {
-    const next = QUOTA_WINDOW_KINDS.filter((entry) => entry === kind ? !shown : hidden.has(entry));
-    displaySaving = true;
-    try { await store.saveSettings({ quotaHiddenWindows: next }); }
-    finally { displaySaving = false; }
-  }
-
   async function monitor(accountId: string, enabled: boolean) {
     if (!store.client) return;
     try { await reader.configure(store.client, accountId, enabled); }
@@ -101,29 +90,11 @@
   <header class="top">
     {#if showTitle}<h1><QuotaMachineScope {store} fallback={strings.usage.limits} /></h1>{/if}
     {#if store.owner}
-      <button type="button" class="ghost small display-toggle" aria-label={strings.quotas.display} title={strings.quotas.display} aria-expanded={displayOpen} aria-controls="limits-display" data-testid="limits-display-toggle" onclick={() => displayOpen = !displayOpen}>
-        <SlidersHorizontal size={15} strokeWidth={1.75} /><span class="ui-label">{strings.quotas.display}</span>
-      </button>
       <button type="button" class="quiet icon refresh" aria-label={strings.usage.refresh} title={strings.usage.refresh} data-testid="limits-refresh" aria-busy={reader.busy} onclick={refresh}>
         <RefreshCw size={15} strokeWidth={1.75} class={reader.busy ? 'spinning' : ''} />
       </button>
     {/if}
   </header>
-  {#if store.owner && displayOpen}
-    <section class="card display" id="limits-display" data-testid="limits-display">
-      <h2 class="ui-label-box"><span class="ui-label">{strings.quotas.displayTitle}</span></h2>
-      <p class="muted">{strings.quotas.displayHint}</p>
-      <div class="kinds">
-        {#each QUOTA_WINDOW_KINDS as kind (kind)}
-          <label class="track-row">
-            <span class="who">{strings.quotas.kinds[kind]}</span>
-            <input type="checkbox" role="switch" data-testid="limits-display-kind" data-kind={kind} checked={!hidden.has(kind)} disabled={displaySaving}
-              onchange={(event) => void showKind(kind, event.currentTarget.checked)} />
-          </label>
-        {/each}
-      </div>
-    </section>
-  {/if}
   {#if proxyEnabled && !gatewayNative}<div class="actions proxy-switch"><button type="button" class="ghost small" onclick={() => native = false} data-testid="subscription-proxy-show-dashboard"><span class="ui-label">{strings.subscriptionProxy.showDashboard}</span></button></div>
   {:else if gatewayNative && proxy}<div class="actions proxy-switch"><button type="button" class="ghost small" onclick={() => void openExternal(proxy!.dashboardUrl)} data-testid="subscription-proxy-open"><ExternalLink size={15} /><span class="ui-label">{strings.subscriptionProxy.openDashboard}</span></button></div>{/if}
 
@@ -193,12 +164,7 @@
   .group-head { display: flex; align-items: center; gap: 8px; margin: 0; font-size: var(--text-base); font-weight: 600; }
   .group-head small { color: var(--color-muted-foreground); font-size: var(--text-xs); font-weight: 400; }
   .gateway-empty { max-width: var(--settings-width); margin-bottom: 12px; }
-  .display-toggle { flex: none; margin-left: auto; }
-  .display-toggle[aria-expanded='true'] { background: var(--color-surface-3); }
-  .display { display: grid; gap: 8px; max-width: var(--settings-width); margin-bottom: 12px; padding: var(--settings-padding); }
-  .display h2 { display: flex; align-items: center; margin: 0; font-size: var(--text-base); font-weight: 600; }
-  .kinds { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); column-gap: 24px; }
-  .refresh { flex: none; width: var(--control); height: var(--control); padding: 0; }
+  .refresh { flex: none; margin-left: auto; width: var(--control); height: var(--control); padding: 0; }
   .refresh :global(.spinning) { animation: spin 900ms linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .muted { margin: 0; color: var(--color-muted-foreground); font-size: var(--text-sm); }

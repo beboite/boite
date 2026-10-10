@@ -155,7 +155,7 @@ test('rows that break the contract are dropped and strings are bounded', () => {
     { provider: 'codex', display: 'sideways', entries: [
       { id: 'no-label' },
       { id: 'x', label: `Codex\u0000 ${'n'.repeat(400)}`, accounts: -3, status: 'exploded', error: 'e'.repeat(900),
-        windows: [{ id: 'primary', label: 'Weekly', used_percent: 180, reset_at: 'not a date' }, { id: 'missing' }, { id: 'left', remaining_percent: 25 }],
+        windows: [{ id: 'primary', label: 'Weekly', used_percent: 180, reset_at: 'not a date', primary: 'yes' }, { id: 'missing' }, { id: 'left', remaining_percent: 25, primary: true }],
         credits: [{ id: 'c', remaining: '12' }] },
       { id: 'x', label: 'duplicate' },
     ] },
@@ -170,9 +170,10 @@ test('rows that break the contract are dropped and strings are bounded', () => {
   expect(entry.label).not.toContain('\u0000');
   expect(entry.error!.length).toBe(300);
   expect(entry).toMatchObject({ accounts: 1, status: 'ready' });
+  // Only a literal `true` marks Douane's primary window.
   expect(entry.windows).toEqual([
     { id: 'primary', label: 'Weekly', usedPercent: 100, resetsAt: null },
-    { id: 'left', label: 'left', usedPercent: 75, resetsAt: null },
+    { id: 'left', label: 'left', usedPercent: 75, resetsAt: null, primary: true },
   ]);
   expect(entry.credits).toEqual([{ id: 'c', label: 'c', unit: null, remaining: null, limit: null, used: null }]);
 });

@@ -2262,14 +2262,6 @@ export const strings = {
     readFailed: "Couldn't read the limits: {error}",
     retry: 'Try again',
     quit: 'Quit Boite',
-    /** The Limits page's button and card choosing which windows every limit view shows. */
-    display: 'Display',
-    displayTitle: 'Windows shown',
-    displayHint: 'Applies to the Limits page, the sidebar glance and the tray. On an account, pin a window to show it first with its reset.',
-    kinds: { hours: 'Few hours (5-hour session)', daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly', model: 'Per model (Opus, Sonnet)', other: 'Other' },
-    makePrimary: 'Show {window} first',
-    unpin: 'Back to the automatic choice',
-    allHidden: 'Every window of this account is hidden. Change it under Display.',
   },
   harnessUpdates: {
     heading: 'Agent updates',

@@ -1,7 +1,6 @@
-import { afterEach, expect, test, vi } from 'vitest';
+import { afterEach, expect, test } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import type { AccountQuota, Settings } from '@boite/contracts';
-import type { Store } from '../lib/store.svelte';
+import type { AccountQuota } from '@boite/contracts';
 import { setLocaleSetting } from '../lib/i18n.svelte';
 import EffortSlider from './EffortSlider.svelte';
 import UsageLimits from './UsageLimits.svelte';
@@ -124,33 +123,12 @@ test('subscriptions from the same provider get separate cards with their chosen 
   expect(cards[1]!.querySelector('header small')).toBeNull();
 });
 
-test('the weekly window leads the card with its reset, and pinning another one saves it as the primary', async () => {
-  const saveSettings = vi.fn(async () => true);
-  const store = (quotaPrimary: Record<string, string>) => ({ owner: true, settings: { quotaPrimary }, saveSettings }) as unknown as Store;
-  component = mount(UsageLimits, { target: document.body, props: { rows: [quota], store: store({ other: 'week' }) } });
+test('the weekly window leads the card large with its reset, the others follow compact', () => {
+  component = mount(UsageLimits, { target: document.body, props: { rows: [quota] } });
   flushSync();
-  const primary = () => document.querySelector<HTMLElement>('[data-testid="usage-limit-primary"]')!;
-  expect(primary().dataset.windowId).toBe('seven_day');
-  expect(primary().querySelector('.primary-left')!.textContent).toBe('60%');
-  expect(primary().querySelector('.primary-reset')!.textContent).toContain('Resets');
-  expect(document.querySelector('[data-testid="usage-limit-unpin"]')).toBeNull();
-  document.querySelector<HTMLButtonElement>('[data-testid="usage-limit-pin"]')!.click();
-  await vi.waitFor(() => expect(saveSettings).toHaveBeenCalledWith({ quotaPrimary: { other: 'week', 'claude-default': 'five_hour' } }));
-  await unmount(component);
-
-  document.body.innerHTML = '';
-  component = mount(UsageLimits, { target: document.body, props: { rows: [quota], store: store({ other: 'week', 'claude-default': 'five_hour' }) } });
-  flushSync();
-  expect(primary().dataset.windowId).toBe('five_hour');
-  expect(primary().querySelector('.primary-left')!.textContent).toBe('86.5%');
-  document.querySelector<HTMLButtonElement>('[data-testid="usage-limit-unpin"]')!.click();
-  await vi.waitFor(() => expect(saveSettings).toHaveBeenLastCalledWith({ quotaPrimary: { other: 'week' } }));
-});
-
-test('a card whose windows are all hidden says so instead of looking empty', () => {
-  const store = { owner: false, settings: { quotaHiddenWindows: ['hours', 'weekly'] } };
-  component = mount(UsageLimits, { target: document.body, props: { rows: [quota], store: store as unknown as Store } });
-  flushSync();
-  expect(document.querySelector('[data-testid="usage-limit-all-hidden"]')).not.toBeNull();
-  expect(document.querySelector('[data-testid="usage-limit-pin"]')).toBeNull();
+  const primary = document.querySelector<HTMLElement>('[data-testid="usage-limit-primary"]')!;
+  expect(primary.dataset.windowId).toBe('seven_day');
+  expect(primary.querySelector('.primary-left')!.textContent).toBe('60%');
+  expect(primary.querySelector('.primary-reset')!.textContent).toContain('Resets');
+  expect([...document.querySelectorAll<HTMLElement>('.others .window')].map((window) => window.dataset.windowId)).toEqual(['five_hour']);
 });

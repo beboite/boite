@@ -7,13 +7,11 @@
   import { fill, strings } from '../lib/strings';
   import { creditBalance, exactTime, quotaResetTime, quotaWindowName, tenth } from '../lib/format';
   import { quotaAccountName, quotaCredits } from '../lib/quota-reader.svelte';
-  import { shownWindows, type QuotaDisplay } from '../lib/quota-display';
+  import { shownWindows } from '../lib/quota-display';
 
-  let { rows, loading = false, completed = [], connect, order = [], onreorder, display = null }: {
+  let { rows, loading = false, completed = [], connect, order = [], onreorder }: {
     rows: AccountQuota[]; loading?: boolean; completed?: string[]; connect: () => void;
     order?: string[]; onreorder?: (order: string[]) => Promise<boolean>;
-    /** Which windows show and which one leads each account; missing shows them all, weekly first. */
-    display?: QuotaDisplay | null;
   } = $props();
 
   let expanded = $state<string | null>(null);
@@ -152,7 +150,7 @@
   <!-- The headline is the primary window, never the lowest one; credits still take over once any window runs dry. -->
   {#each ordered as row (row.accountId)}
     {@const name = quotaAccountName(row)}
-    {@const shown = shownWindows(row, display)}
+    {@const shown = shownWindows(row)}
     {@const windows = shown.primary ? [shown.primary, ...shown.others] : []}
     {@const used = shown.primary?.usedPercent ?? null}
     {@const drained = row.windows.some((limit) => limit.usedPercent >= 100)}

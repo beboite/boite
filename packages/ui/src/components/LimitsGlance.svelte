@@ -118,7 +118,7 @@
   <div class="glance" class:closing={popover.closing} bind:this={content} role="dialog" tabindex="-1" aria-label={strings.quotas.glance} data-testid="limits-glance" {onkeydown}
     use:popover.attach onanimationend={popover.end} use:floating={{ anchor: () => trigger ?? null, dismiss: close, cap: 460 }}>
     <QuotaPopup {rows} loading={reader.busy} completed={reader.landed} error={failed} owner={store.owner}
-      order={store.settings?.quotaOrder ?? []} reorder={(quotaOrder) => store.saveSettings({ quotaOrder })} display={store.settings}
+      order={store.settings?.quotaOrder ?? []} reorder={(quotaOrder) => store.saveSettings({ quotaOrder })}
       refresh={() => read(true)} connect={() => page('accounts')} settings={() => page('limits')} {close} testPrefix="limits-glance">
       {#snippet title()}<QuotaMachineScope {store} />{/snippet}
     </QuotaPopup>
