@@ -6,9 +6,6 @@ import { BrowserPage, freePort } from './lib/cdp';
 import { removeDirectory } from './lib/cleanup';
 import { startUi } from './lib/ui';
 
-async function settle(page: BrowserPage) {
-  await page.evaluate('Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])');
-}
 async function escape(page: BrowserPage) {
   await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
 }
@@ -24,7 +21,7 @@ test('height-capped desktop popovers can scroll to their last action', async () 
     for (const [trigger, popup] of [['composer-mode', 'composer-mode-menu'], ['context-trigger', 'context-popup']]) {
       await page.click(`[data-testid="${trigger}"]`);
       await page.waitFor(`document.querySelector('[data-testid="${popup}"]')`);
-      await settle(page);
+      await page.settleAnimations();
       const result = await page.evaluate<{ overflow: string; scroll: number; visible: boolean }>(`(() => { const el = document.querySelector('[data-testid="${popup}"]'); el.scrollTop = el.scrollHeight; const action = el.querySelector('button:last-of-type'); const r = action.getBoundingClientRect(); return { overflow: getComputedStyle(el).overflowY, scroll: el.scrollTop, visible: r.top >= 0 && r.bottom <= innerHeight }; })()`);
       expect(result.overflow).toBe('auto');
       expect(result.scroll).toBeGreaterThan(0);
@@ -40,7 +37,7 @@ test('height-capped desktop popovers can scroll to their last action', async () 
     await page.send('Emulation.setDeviceMetricsOverride', { width: 1100, height: 330, deviceScaleFactor: 1, mobile: false });
     await page.click('[data-testid=draft-project]');
     await page.waitFor('document.querySelector("[data-testid=draft-project-menu]")');
-    await settle(page);
+    await page.settleAnimations();
     const list = await page.evaluate<{ client: number; scroll: number; squashed: number }>(`(() => { const el = document.querySelector('[data-testid=draft-project-menu]'); return { client: el.clientHeight, scroll: el.scrollHeight, squashed: Array.from(el.querySelectorAll('[data-row]')).filter(row => row.scrollHeight > row.clientHeight + 4).length }; })()`);
     expect(list.scroll).toBeGreaterThan(list.client);
     expect(list.squashed).toBe(0);
@@ -65,10 +62,10 @@ test('unread attachments survive text edits and explicit removals during storage
     expect(await page.evaluate('document.querySelector("[data-testid=composer-send]").disabled')).toBe(true);
     await page.click('[data-testid=composer-attachment-remove]');
     await page.type('[data-testid=composer-input]', 'Edited while storage was unavailable');
-    await settle(page);
+    await page.settleAnimations();
     await page.screenshot(join(import.meta.dir, '.artifacts', 'draft-unavailable-attachment.png'));
     await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
-    await settle(page);
+    await page.settleAnimations();
     await page.screenshot(join(import.meta.dir, '.artifacts', 'draft-unavailable-attachment-phone.png'));
     await page.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: script.identifier });
     await page.reload();
@@ -112,7 +109,7 @@ test('drafts survive reload and composer menus stay above the chrome', async () 
     page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1`, windowSize: { width: 1100, height: 760 } });
     await page.waitFor('document.querySelector("[data-testid=composer-input]")');
     await page.type('[data-testid=composer-input]', 'A draft worth keeping');
-    await settle(page);
+    await page.settleAnimations();
     await page.screenshot(join(import.meta.dir, '.artifacts', 'drafts-desktop.png'));
     const heights = await page.evaluate<{ draft: number; row: number }>(`({ draft: document.querySelector('[data-testid=draft-row]').getBoundingClientRect().height, row: document.querySelector('[data-testid=thread-row]').getBoundingClientRect().height })`);
     expect(heights.draft).toBeLessThanOrEqual(heights.row + 1);
@@ -129,7 +126,7 @@ test('drafts survive reload and composer menus stay above the chrome', async () 
     await page.click('[data-testid=composer-effort]');
     await page.waitFor('document.querySelector("[data-testid=composer-effort-menu]")');
     expect(await page.evaluate('document.querySelector("[data-testid=composer-effort-menu]").matches(":popover-open")')).toBe(true);
-    await settle(page);
+    await page.settleAnimations();
     expect(await page.evaluate(`(() => { const el = document.querySelector('[data-testid=composer-effort-menu]'); const r = el.getBoundingClientRect(); return el.contains(document.elementFromPoint(r.x + 20, r.y + 20)) && r.left >= 0 && r.right <= innerWidth; })()`)).toBe(true);
     await page.screenshot(join(import.meta.dir, '.artifacts', 'overlays-desktop.png'));
     await escape(page);
@@ -140,22 +137,22 @@ test('drafts survive reload and composer menus stay above the chrome', async () 
     await page.waitFor('!document.querySelector("[data-testid=composer-mode-menu]")');
     await page.type('[data-testid=composer-input]', '/');
     await page.waitFor('document.querySelector("[data-testid=slash-menu]")?.matches(":popover-open")');
-    await settle(page);
+    await page.settleAnimations();
     expect(await page.evaluate(`(() => { const r = document.querySelector('[data-testid=slash-menu]').getBoundingClientRect(); return r.top >= 44 && r.bottom <= innerHeight; })()`)).toBe(true);
     await escape(page);
     await page.type('[data-testid=composer-input]', 'Unsent reply');
 
     await page.click('[data-testid=panel-toggle]');
     await page.waitFor('document.querySelector("[data-testid=right-panel]")');
-    expect(await page.evaluate('getComputedStyle(document.querySelector("[data-testid=right-panel]")).animationName')).toBe('rise');
-    await settle(page);
+    expect(await page.evaluate('getComputedStyle(document.querySelector("[data-testid=right-panel]")).animationName')).toBe('slide-left');
+    await page.settleAnimations();
     await page.screenshot(join(import.meta.dir, '.artifacts', 'panels-desktop.png'));
     await page.click('[data-testid=panel-close]');
-    expect(await page.evaluate('getComputedStyle(document.querySelector("[data-testid=right-panel]")).animationName')).toBe('rise-out');
+    expect(await page.evaluate('getComputedStyle(document.querySelector("[data-testid=right-panel]")).animationName')).toBe('slide-right-out');
     await page.waitFor('!document.querySelector("[data-testid=right-panel]")');
     await page.click('[data-testid=terminal-toggle]');
     await page.waitFor('document.querySelector("[data-testid=terminal-drawer]")');
-    await settle(page);
+    await page.settleAnimations();
     expect(await page.evaluate('getComputedStyle(document.querySelector("[data-testid=terminal-drawer]")).transitionProperty')).toBe('height');
     await page.click('[data-testid=terminal-hide]');
     await page.waitFor('!document.querySelector("[data-testid=terminal-drawer]")');
@@ -167,10 +164,10 @@ test('drafts survive reload and composer menus stay above the chrome', async () 
     await page.waitFor('!document.querySelector("[data-testid=right-panel]")');
     await page.evaluate('delete document.documentElement.dataset.motion');
     await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
-    await settle(page);
+    await page.settleAnimations();
     await page.click('[data-testid=composer-options]');
     await page.waitFor('document.querySelector("[data-testid=composer-options-sheet]")?.dataset.mobileSheet === "true"');
-    await settle(page);
+    await page.settleAnimations();
     await page.screenshot(join(import.meta.dir, '.artifacts', 'overlays-phone.png'));
     expect(page.errors()).toEqual([]);
   } finally { await page?.close(); await server.close(); }

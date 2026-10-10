@@ -35,7 +35,7 @@ test("Ctrl+J opens a shell under the thread, typing reaches it, and OpenCode sig
     await page.waitFor('document.querySelector("[data-testid=terminal-toggle]")');
     await settled(page);
     await page.evaluate(`(() => {
-      document.documentElement.style.setProperty('--dur-3', '1s');
+      document.documentElement.style.setProperty('--dur-slide', '1s');
       const store = globalThis.__boiteTest.workspace.active;
       const call = store.client.call.bind(store.client);
       globalThis.__terminalStarts = 0;
@@ -84,7 +84,7 @@ test("Ctrl+J opens a shell under the thread, typing reaches it, and OpenCode sig
     await page.screenshot('tests/e2e/.artifacts/terminal-unfolding.png');
     await page.evaluate(`(() => {
       document.querySelector('[data-testid=terminal-drawer]').getAnimations().forEach(animation => animation.finish());
-      document.documentElement.style.removeProperty('--dur-3');
+      document.documentElement.style.removeProperty('--dur-slide');
       globalThis.__releaseTerminal();
     })()`);
     await page.waitFor('document.querySelector("[data-testid=terminal-drawer] .xterm-rows")?.textContent.includes("PS ")');
@@ -127,8 +127,8 @@ test("Ctrl+J opens a shell under the thread, typing reaches it, and OpenCode sig
 
     // Hiding preserves the shell and its command, and reversing the fold remains continuous.
     await page.evaluate(`(() => {
-      document.documentElement.style.setProperty('--dur-2', '1s');
-      document.documentElement.style.setProperty('--dur-3', '1s');
+      document.documentElement.style.setProperty('--dur-slide-out', '1s');
+      document.documentElement.style.setProperty('--dur-slide', '1s');
       globalThis.__boiteTest.workspace.active.toggleTerminal();
     })()`);
     await page.waitFor(`document.querySelector('[data-testid=terminal-drawer]')?.getAnimations().some(a => a.transitionProperty === 'height')`);
@@ -144,8 +144,8 @@ test("Ctrl+J opens a shell under the thread, typing reaches it, and OpenCode sig
       reopening.pause(); reopening.currentTime = 0;
       const after = drawer.getBoundingClientRect().height;
       reopening.play();
-      document.documentElement.style.removeProperty('--dur-2');
-      document.documentElement.style.removeProperty('--dur-3');
+      document.documentElement.style.removeProperty('--dur-slide-out');
+      document.documentElement.style.removeProperty('--dur-slide');
       return { before, after };
     })()`);
     expect(reversal.before).toBeGreaterThan(0);
