@@ -172,11 +172,14 @@ Its `hello` names its key for the relaying machine in `relay`, beside the
 ticket or key for the member at the end. The relaying machine checks that key
 (a key it issued, or its owner's token; never an agent's), takes it out, opens
 a socket on the other member at one of its addresses and passes the rest of
-the hello on. From then on it forwards every frame unread, both ways. The member at the end
-authenticates the hello as it would any other. `/file/<ticket>` and
-`/view/<ticket>` under the same route are fetched from that member and
-streamed back with their headers and ranges, their tickets being what opens
-them. Nothing else of the other member is carried.
+the hello on. A client that holds no key for the relaying machine any more
+sends nothing on that route: the hello would hand that machine its key for the
+member. Once the hello is passed on, the relaying machine forwards every frame
+both ways without acting on it, though it can read it (see below). The member
+at the end authenticates the hello as it would any other. `/file/<ticket>` and `/view/<ticket>` under the
+same route are fetched from that member and streamed back with their headers
+and ranges, their tickets being what opens them. Nothing else of the other
+member is carried.
 
 The ticket for a member reached that way comes from the relaying machine,
 which picks the address it names among the member's own: the member checks
@@ -187,10 +190,12 @@ group issued.
 The hop between the two members carries client traffic, so it follows the
 client's rule: the member's HTTPS address when it has one, otherwise one
 written as numbers. A member that gives neither, a MagicDNS name alone, is
-carried by nobody and shown as giving no usable address. When the machines a
-client was paired with by hand list different addresses for the member (their
-order does not count), nobody carries the client there until they agree, as
-for a direct ticket: one of them may hold an older roster and dial an address the
+carried by nobody and shown as giving no usable address. A direct ticket goes
+to an address every machine the client was paired with by hand allows, so a
+common one is enough. A carrier dials whichever of its own addresses for the
+member answers, which the client does not choose: nobody carries the client
+there until those machines list the same addresses (their order does not
+count), since one of them may hold an older roster and dial an address the
 member gave up. One of them that no longer lists the member stops every route
 to it, as it stops a direct ticket.
 
@@ -225,13 +230,14 @@ through the group and has no subscription of its own there; such a key cannot
 subscribe there, the refusal naming its home. That machine pushes it to the
 device with its own key, once per device, as a sealed `group.push` request
 between members. The request carries an id the home remembers for two
-minutes: tried on two addresses that both reach it, it pushes once. Title, body and tag are cut to 300, 2,000 and 200
-characters on the way. The push carries the id of the machine the thread is
-on: the notification's tag is that machine's, and a tap opens the thread there
-once the group has connected it. The receiving machine pushes only to a device
-the roster lists as its own, and the badge counts the threads waiting on both.
-A machine holds a push back while the device watches the thread through any
-route, the relay included, as it does for its own.
+minutes: tried on two addresses that both reach it, it pushes once. Title,
+body and tag are cut to 300, 2,000 and 200 characters on the way. The push
+carries the id of the machine the thread is on: the notification's tag is that
+machine's, and a tap opens the thread there once the group has connected it.
+The receiving machine pushes only to a device the roster lists as its own, and
+the badge adds the threads waiting on it to those waiting on the machine that
+sent the push. A machine holds a push back while the device watches the thread
+through any route, the relay included, as it does for its own.
 
 ## How it works
 

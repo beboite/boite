@@ -25,7 +25,10 @@
   let message = $state('');
   let error = $state('');
   // A machine reached through this page's core shares its origin and is not it: its notifications come through that core.
-  let relayed = $derived(store.endpointUrl !== null && parseGroupRelayUrl(store.endpointUrl) !== null);
+  let relayed = $derived.by(() => {
+    const relay = store.endpointUrl === null ? null : parseGroupRelayUrl(store.endpointUrl);
+    return relay !== null && servesThisPage(relay.member);
+  });
   let ownOrigin = $derived(!store.endpointUrl || servesThisPage(store.endpointUrl));
   let paired = $derived(store.sessions.some(session => session.current));
 

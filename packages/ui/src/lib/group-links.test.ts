@@ -450,7 +450,7 @@ describe('group links', () => {
     const relayUrl = 'http://10.0.0.1:1/group/relay/b';
     localStorage.setItem(ENVIRONMENTS_STORAGE_KEY, JSON.stringify([{ url: relayUrl, label: 'B', token: 'key', paired: true, coreId: 'b', groupId: 'grp' }]));
     const carried = machine(relayUrl, { group: group('b', members) }, { coreId: 'b' });
-    const { workspace: ws, added, removed } = workspace([a, carried]);
+    const { stub, workspace: ws, added, removed } = workspace([a, carried]);
     let now = 1_000_000;
     let direct: string | null = null;
     const reach = vi.fn(async (addresses: string[]) => (addresses[0]?.includes('/group/relay/') ? addresses[0] : direct));
@@ -471,7 +471,8 @@ describe('group links', () => {
     await links.reconcile();
     await settle();
     expect(storeOf(a).client!.call).toHaveBeenCalledWith('group.ticket', { coreId: 'b', url: 'http://100.64.0.2:1' });
-    expect(removed).toEqual([relayUrl]);
+    // It moved: the member and the route stay usable should it need carrying again.
+    expect(stub.remove).toHaveBeenCalledExactlyOnceWith(relayUrl, false);
     expect(added.map((entry) => entry.endpoint.url)).toEqual(['http://100.64.0.2:1']);
   });
 

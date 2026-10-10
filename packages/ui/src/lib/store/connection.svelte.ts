@@ -1,4 +1,4 @@
-import { RpcErrorCode, type CoreInfo, type Principal, type ThreadId } from '@boite/contracts';
+import { parseGroupRelayUrl, RpcErrorCode, type CoreInfo, type Principal, type ThreadId } from '@boite/contracts';
 import { RpcFailure, WsClient, type Client, type ClientState, type ObservableClient } from '../client';
 import { confirm } from '../confirm.svelte';
 import { deviceLabel, noteThisComputer } from '../device';
@@ -249,7 +249,7 @@ export class Connection {
       ...(endpoint.grant === undefined ? {} : { grant: endpoint.grant }),
       ...(endpoint.ticket === undefined ? {} : { ticket: endpoint.ticket }),
       // Reached through another member: the key for that member, as it stands at each connection.
-      relay: () => relayKeyFor(url),
+      ...(parseGroupRelayUrl(url) === null ? {} : { relay: () => relayKeyFor(url) }),
       paired,
       // The session a grant became is this device's own credential: kept
       // where the next load reads it, so the link is opened once, ever.

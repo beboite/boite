@@ -158,6 +158,7 @@ test('a socket carried to a machine that leaves the group is closed', async () =
   a.core.relays.sweep();
   await waitFor(() => a.core.relays.size === 0);
   await expect(onB.call('group.get', {})).rejects.toThrow();
+  onB.close();
   phone.close();
 });
 
@@ -260,5 +261,6 @@ test('a relayed socket is held to the bounds of one waiting for its hello, and g
   a.core.sessions.revoke(phone.session!.id);
   await waitFor(() => a.core.relays.size === 0);
   await expect(onB.call('group.get', {})).rejects.toThrow();
+  onB.close();
   phone.close();
 });

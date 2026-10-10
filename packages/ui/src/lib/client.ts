@@ -103,7 +103,9 @@ export interface WsClientOptions {
   /**
    * When `url` is another member's relay route (`groupRelayUrl`), this
    * client's key for that member, read at every connection: the member checks
-   * it and passes the rest of the hello on. Null when no key is held for it.
+   * it and passes the rest of the hello on. Null when no key is held for it:
+   * nothing is sent then, since the hello carries this client's key for the
+   * machine at the end and would hand it to a member it is no longer paired with.
    */
   relay?: () => string | null;
   /** Returning false refuses the key: the client closes instead of using it. */
@@ -551,6 +553,12 @@ export class WsClient implements ObservableClient {
         // The relay's key goes on the hello that opens the socket only: the member takes it out there,
         // and a liveness hello later would carry it to the machine at the end.
         const relay = this.#relay?.() ?? null;
+        if (this.#relay !== null && relay === null) {
+          this.#manuallyClosed = true;
+          fail('this device is no longer paired with the machine that carried it there');
+          socket.close();
+          return;
+        }
         this.#send(socket, 'hello', { ...this.#helloParams(), ...(relay === null ? {} : { relay }) }).then(
           (result) => {
             if (result.core.protocolVersion !== PROTOCOL_VERSION) {

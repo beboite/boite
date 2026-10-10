@@ -65,6 +65,10 @@ test('a push another machine sent through this one opens its thread on that mach
   expect(sw.notification).toHaveBeenLastCalledWith('x', expect.objectContaining({ tag: 'thread-t2', data: { threadId: 't2' } }));
   await sw.emit('notificationclick', { notification: { close, data: { threadId: 't3', core: 'https://evil.test' } } });
   expect(sw.openWindow).toHaveBeenLastCalledWith('https://boite.test/?thread=t3');
+  // Nor is it handed to a window that is open.
+  sw.matchAll.mockResolvedValue([{ url: 'https://boite.test/', navigate: sw.navigate, postMessage: sw.postMessage, focus: sw.focus }]);
+  await sw.emit('notificationclick', { notification: { close, data: { threadId: 't4', core: 'https://evil.test' } } });
+  expect(sw.postMessage).toHaveBeenLastCalledWith({ type: 'boite.open-thread', threadId: 't4' });
 });
 
 test('a push sets the icon badge to the count it carries, clears it at zero and leaves it without one', async () => {

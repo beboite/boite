@@ -608,6 +608,18 @@ describe('WsClient', () => {
     const second = take(sockets, 1);
     second.open();
     expect(second.frame(0).params).toMatchObject({ relay: 'renewed' });
+    second.receive({ id: second.frame(0).id, result: { core: CORE, principal: 'session' } });
+    // No longer paired with m2: the hello, which carries the key for the machine at the end, goes nowhere, and no socket follows.
+    relayKey = null;
+    second.close(1006);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const third = take(sockets, 2);
+    third.open();
+    expect(third.sent).toEqual([]);
+    expect(third.closed).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(sockets).toHaveLength(3);
+    expect(client.state).toBe('closed');
     client.close();
   });
 
