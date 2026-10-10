@@ -663,7 +663,7 @@ export interface PluginAppState {
   startedAt: Timestamp | null;
 }
 
-/** What `ui.reveal` shows in the owner's desktop window. */
+/** What `ui.reveal` shows in the owner's desktop window. `agentId` is 1 to 200 characters. */
 export type UiRevealTarget = { kind: 'thread'; threadId: ThreadId } | { kind: 'agent'; agentId: string };
 
 export interface PluginManifest {
@@ -3369,7 +3369,8 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'plugins.app': { params: { id: string; action: 'start' | 'stop' | 'restart' }; result: PluginState };
   /**
    * Asks the owner's desktop windows to show a thread or an agent's page.
-   * Emits `ui.reveal` to owner connections only; `delivered` counts them.
+   * Emits `ui.reveal` to owner connections only, desktop-app plugins left
+   * out; `delivered` counts them.
    */
   'ui.reveal': { params: { target: UiRevealTarget }; result: { delivered: number } };
   /**

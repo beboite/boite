@@ -103,8 +103,13 @@ export interface ProcessPlatform {
    * such group, it has no throttling limit or its files cannot be read. Linux only.
    */
   cgroupMemory?(pid: number): CgroupMemory | null;
-  pidAdded(threadId: string, pid: number): void;
-  pidRemoved(threadId: string, pid: number): void;
+  /**
+   * A traced process started or ended. `guarded` is false for a process whose
+   * windows the user is meant to see, a desktop-app plugin's: the focus guard
+   * leaves its windows in place and the audio guard leaves its sound on.
+   */
+  pidAdded(threadId: string, pid: number, guarded: boolean): void;
+  pidRemoved(threadId: string, pid: number, guarded: boolean): void;
   /** A turn is starting: have the process drain and the protections ready before its first process. */
   warm(): void;
   /** The registry forgot an idle thread: drop what the platform keeps for it. */

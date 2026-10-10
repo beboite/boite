@@ -216,8 +216,9 @@ announced by `plugins.updated`. The state is `PluginState.app`:
 
 An app that wants the owner to look at something calls
 `ui.reveal {target}`, where `target` is `{ "kind": "thread", "threadId": "…" }`
-or `{ "kind": "agent", "agentId": "…" }`. A thread must exist on the core. The
-core sends the `ui.reveal` event to every owner connection and answers
+or `{ "kind": "agent", "agentId": "…" }`. A thread must exist on the core; an
+agent id is 1 to 200 characters. The core sends the `ui.reveal` event to every
+owner connection except desktop-app plugins, the caller included, and answers
 `{delivered}`, the number of connections it reached.
 
 The desktop shell connected to the core it started on the same computer

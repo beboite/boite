@@ -33,6 +33,8 @@ export class ServerConnection implements Connection {
   identity: Identity = { principal: 'owner', sessionId: null, threadId: null };
   transport: TransportOptions = {};
   sentFrom: SentFrom | null = null;
+  /** The `client.name` of its hello, `unknown` when it gave none. */
+  clientName = 'unknown';
 
   private socket: ServerWebSocket<SocketData> | null = null;
   private congested = false;

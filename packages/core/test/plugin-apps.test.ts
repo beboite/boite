@@ -102,7 +102,7 @@ const app = () => harness!.core.plugins.state('bots').app!;
 test('the environment drops every agent variable and carries the owner token', () => {
   const env = appEnv({ PATH: '/bin', BOITE_THREAD_ID: 'thr', BOITE_AGENT_TOKEN: 'agent', BOITE_AGENT_SOMETHING: 'x', BOITE_CORE_URL: 'http://old' },
     { coreUrl: 'http://127.0.0.1:1', token: 'owner', pluginId: 'bots' });
-  expect(env).toEqual({ BOITE_THREAD_ID: undefined, BOITE_AGENT_TOKEN: undefined, BOITE_AGENT_SOMETHING: undefined, BOITE_CORE_URL: 'http://127.0.0.1:1', BOITE_TOKEN: 'owner', BOITE_PLUGIN_ID: 'bots' });
+  expect(env).toStrictEqual({ BOITE_THREAD_ID: undefined, BOITE_AGENT_TOKEN: undefined, BOITE_AGENT_SOMETHING: undefined, BOITE_CORE_URL: 'http://127.0.0.1:1', BOITE_TOKEN: 'owner', BOITE_PLUGIN_ID: 'bots' });
   expect(desktopProblem({}, 'linux')).toContain('DISPLAY');
   expect(desktopProblem({ WAYLAND_DISPLAY: 'wayland-0' }, 'linux')).toBeNull();
   expect(desktopProblem({}, 'win32')).toBeNull();
@@ -125,7 +125,7 @@ describe('a desktop app', () => {
     const started = await client.call('plugins.app', { id: 'bots', action: 'start' });
     expect(started.app?.status).toBe('running');
     await waitFor(() => app().status === 'stopped');
-    expect(app()).toMatchObject({ enabled: true, status: 'stopped', exitCode: 0, error: null });
+    expect(app()).toMatchObject({ enabled: true, status: 'stopped', exitCode: 0, error: null, startedAt: null });
     const seen = JSON.parse(readFileSync(join(fake.home, 'seen.json'), 'utf8')) as { args: string[]; cwd: string; env: Record<string, string | null> };
     expect(seen.args).toEqual([]);
     // macOS reaches the temporary directory through /private/var, which /var links to.
@@ -164,6 +164,32 @@ describe('a desktop app', () => {
     expect(app().status).toBe('running');
   }, 20_000);
 
+  test('a relaunch that finds the binary gone leaves it stopped, not starting for good', async () => {
+    harness = await startTestCore();
+    const dir = installBots(harness.dataDir);
+    const fake = fakeApp(harness); fake.mode('crash');
+    const clock = manualClock(); harness.core.plugins.apps.clock = clock;
+    await harness.core.plugins.app({ id: 'bots', action: 'start' });
+    await waitFor(() => clock.pending.length === 1);
+    rmSync(join(dir, `bots${EXE}`));
+    clock.fire();
+    expect(harness.core.plugins.apps.state('bots', dir)).toMatchObject({ status: 'stopped', error: null, pid: null, startedAt: null });
+    expect(clock.pending).toHaveLength(0);
+    expect(fake.pids).toHaveLength(1);
+  });
+
+  test('quick start, stop and restart calls run one after the other', async () => {
+    harness = await startTestCore(); const client = await harness.connect();
+    const dir = installBots(harness.dataDir);
+    const fake = fakeApp(harness); fake.mode('stay');
+    const actions = ['start', 'stop', 'restart', 'stop', 'start', 'stop'] as const;
+    await Promise.all(actions.map((action) => client.call('plugins.app', { id: 'bots', action })));
+    expect(app()).toMatchObject({ enabled: false, status: 'stopped', pid: null, startedAt: null });
+    expect(fake.pids).toHaveLength(3);
+    expect(fake.pids.filter(alive)).toEqual([]);
+    expect(JSON.parse(readFileSync(join(dir, 'app.json'), 'utf8'))).toEqual({ enabled: false });
+  });
+
   test('stop disables it for good, start and restart bring it back, and the choice survives a new store', async () => {
     harness = await startTestCore(); const client = await harness.connect();
     const dir = installBots(harness.dataDir);
@@ -171,7 +197,7 @@ describe('a desktop app', () => {
     await client.call('plugins.app', { id: 'bots', action: 'start' });
     const first = fake.pids[0]!;
     const stopped = await client.call('plugins.app', { id: 'bots', action: 'stop' });
-    expect(stopped.app).toMatchObject({ enabled: false, status: 'stopped', pid: null });
+    expect(stopped.app).toMatchObject({ enabled: false, status: 'stopped', pid: null, startedAt: null });
     expect(alive(first)).toBe(false);
     expect(JSON.parse(readFileSync(join(dir, 'app.json'), 'utf8'))).toEqual({ enabled: false });
 
@@ -261,7 +287,7 @@ describe('a desktop app', () => {
 });
 
 describe('ui.reveal', () => {
-  test('reaches owner connections only, and a device or an agent may not call it', async () => {
+  test('reaches owner windows only, and a device or an agent may not call it', async () => {
     harness = await startTestCore();
     const owner = await harness.connect();
     const second = await harness.connect();
@@ -269,15 +295,18 @@ describe('ui.reveal', () => {
     const { grant } = await owner.call('pairing.grant', {});
     const device = await connect(harness.url, '', { grant, client: { name: 'pwa', version: 'test' } });
     const agent = await connect(harness.url, harness.core.agents.tokenFor(threadId));
+    // A desktop-app plugin signs in with the owner token but shows none of Boite's windows.
+    const plugin = await connect(harness.url, harness.core.token, { client: { name: 'plugin', version: 'test' } });
     try {
       const heard: string[] = [];
       owner.on('ui.reveal', (event) => heard.push(`owner:${event.target.kind}`));
       second.on('ui.reveal', (event) => heard.push(`second:${event.target.kind}`));
       device.onAny((name) => { if (name === 'ui.reveal') heard.push('device'); });
       agent.onAny((name) => { if (name === 'ui.reveal') heard.push('agent'); });
+      plugin.onAny((name) => { if (name === 'ui.reveal') heard.push('plugin'); });
 
       expect(await owner.call('ui.reveal', { target: { kind: 'thread', threadId } })).toEqual({ delivered: 2 });
-      expect(await owner.call('ui.reveal', { target: { kind: 'agent', agentId: 'agent-1' } })).toEqual({ delivered: 2 });
+      expect(await plugin.call('ui.reveal', { target: { kind: 'agent', agentId: 'agent-1' } })).toEqual({ delivered: 2 });
       await waitFor(() => heard.length === 4);
       await Bun.sleep(50);
       expect(heard.sort()).toEqual(['owner:agent', 'owner:thread', 'second:agent', 'second:thread']);
@@ -287,6 +316,7 @@ describe('ui.reveal', () => {
       await expect(device.call('ui.reveal', { target: { kind: 'thread', threadId } })).rejects.toThrow('ui.reveal is for the owner only');
       await expect(agent.call('ui.reveal', { target: { kind: 'thread', threadId } })).rejects.toThrow('not one of the agent\'s methods');
       await expect(device.call('plugins.app', { id: 'bots', action: 'start' })).rejects.toThrow('plugins.app is for the owner only');
-    } finally { device.close(); agent.close(); second.close(); }
+      await expect(agent.call('plugins.app', { id: 'bots', action: 'start' })).rejects.toThrow('not one of the agent\'s methods');
+    } finally { device.close(); agent.close(); plugin.close(); second.close(); }
   });
 });

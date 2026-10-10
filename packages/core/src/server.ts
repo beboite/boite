@@ -569,10 +569,11 @@ export function startServer(options: ServerOptions): RunningServer {
       }
     },
     reveal(target): number {
-      // Owner windows only: a paired phone or an agent has no window of the owner's to raise.
+      // Owner windows only: a paired phone or an agent has no window of the owner's
+      // to raise, and a desktop-app plugin, often the caller itself, draws none of Boite's.
       let delivered = 0;
       for (const connection of connections) {
-        if (!connection.authenticated || connection.identity.principal !== 'owner') continue;
+        if (!connection.authenticated || connection.identity.principal !== 'owner' || connection.clientName === 'plugin') continue;
         try { connection.sendEvent('ui.reveal', { target }); delivered += 1; } catch { /* closing */ }
       }
       return delivered;

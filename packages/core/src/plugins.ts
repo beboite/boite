@@ -284,6 +284,11 @@ export class PluginStore {
 
   /** The recommended plugins in their list order, then the URL ones by id. */
   list(): PluginState[] {
+    return this.ids().map((id) => this.state(id));
+  }
+
+  /** Every plugin id the store knows: recommended, being installed or with an install on disk. */
+  private ids(): string[] {
     const ids = new Set<string>([...this.pending.keys(), ...this.jobs.keys()]);
     const root = this.root();
     if (existsSync(root)) {
@@ -294,7 +299,7 @@ export class PluginStore {
       }
     }
     for (const manifest of this.recommended) ids.delete(manifest.id);
-    return [...this.recommended.map((manifest) => manifest.id), ...[...ids].sort()].map((id) => this.state(id));
+    return [...this.recommended.map((manifest) => manifest.id), ...[...ids].sort()];
   }
 
   private emit(id: string): void {
@@ -657,9 +662,20 @@ export class PluginStore {
     }
   }
 
-  /** At core start: every installed desktop app the owner left enabled. */
+  /**
+   * At core start: every installed desktop app the owner left enabled. One
+   * plugin the store cannot read is logged by `resumeApp` and skipped; the
+   * others still start.
+   */
   startApps(): void {
-    for (const plugin of this.list()) if (plugin.app !== null && plugin.status === 'installed') this.resumeApp(plugin.id);
+    let ids: string[];
+    try {
+      ids = this.ids();
+    } catch (error) {
+      this.core.log('warn', `desktop apps did not start: ${messageOf(error)}`);
+      return;
+    }
+    for (const id of ids) if (!this.jobs.has(id)) this.resumeApp(id);
   }
 
   /** `plugins.app`: start, stop or restart a desktop-app plugin. */

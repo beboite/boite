@@ -59,7 +59,9 @@ export class FakePlugins {
       if (plugin.status === 'installing') throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Wait for the current plugin operation before uninstalling.' });
       this.#pluginRuns.set(plugin.id, (this.#pluginRuns.get(plugin.id) ?? 0) + 1);
       if (plugin.origin === 'url') return this.#dropPlugin(plugin);
-      Object.assign(plugin, { status: 'not-installed', version: null, progress: 0, error: null, rejected: null });
+      // The core kills the app and deletes its directory, `app.json` with it: what is left is a fresh, enabled app.
+      const app: PluginAppState | null = plugin.app === null ? null : { enabled: true, status: 'stopped', pid: null, exitCode: null, error: null, startedAt: null };
+      Object.assign(plugin, { status: 'not-installed', version: null, progress: 0, error: null, rejected: null, app });
       this.host.emit('plugins.updated', structuredClone(plugin));
       return structuredClone(plugin);
     },
@@ -171,7 +173,7 @@ export class FakePlugins {
       artifacts: { 'win32-x64': { url: `${source.url}/releases/download/v1.5.0/${slug}-win32-x64.exe`, sha256: '5a7c9e1b3d5f7a9c2e4b6d8f0a1c3e5b7d9f2a4c6e8b0d1f3a5c7e9b2d4f6a8c' } },
       provides: desktop ? { desktopApp: {} } : { accountPools: { providers: ['pi'] } }
     };
-    const read: PluginPreview = { ...base, manifest, artifact: manifest.artifacts['win32-x64'] ?? null, commands: desktop ? appCommands(slug) : poolCommands(slug) };
+    const read: PluginPreview = { ...base, manifest, artifact: manifest.artifacts['win32-x64'] ?? null, commands: desktop ? appCommands(manifest.executable, manifest.id) : poolCommands(slug) };
     const existing = this.#plugins.find((entry) => entry.id === slug);
     if (existing?.origin === 'recommended') {
       const expected = 'an id no recommended plugin uses (kebacc-switcher)';

@@ -18,8 +18,8 @@ export function poolCommands(executable: string): string[] {
 }
 
 /** The lines the core shows for a desktop app: the launch, and what it is handed. */
-export function appCommands(executable: string): string[] {
-  return [executable, `environment: BOITE_CORE_URL=<this core> BOITE_TOKEN=<the owner token> BOITE_PLUGIN_ID=${executable}`];
+export function appCommands(executable: string, pluginId: string): string[] {
+  return [executable, `environment: BOITE_CORE_URL=<this core> BOITE_TOKEN=<the owner token> BOITE_PLUGIN_ID=${pluginId}`];
 }
 
 /**
@@ -44,7 +44,7 @@ export function fakePlugins(): PluginState[] {
       homepage: 'https://github.com/beboite/bots', version: '0.1.0', availableVersion: '0.1.0', status: 'installed',
       source: { url: 'https://github.com/beboite/bots', ref: 'HEAD', commit: '5b7d9f1a3c5e7a9b1d3f5a7c9e1b3d5f7a9c1e3b' },
       artifact: { url: 'https://github.com/beboite/bots/releases/download/v0.1.0/bots-win32-x64.exe', sha256: '7e9a1c3e5b7d9f2a4c6e8b0d1f3a5c7e9b2d4f6a8c0e1b3d5f7a9c2e4b6d8f0a' },
-      commands: appCommands('bots'), pools: [],
+      commands: appCommands('bots', 'bots'), pools: [],
       app: { enabled: true, status: 'running', pid: 4242, exitCode: null, error: null, startedAt: Date.parse('2026-10-10T08:00:00Z') }
     },
     {

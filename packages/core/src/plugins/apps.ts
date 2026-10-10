@@ -95,6 +95,8 @@ export class PluginApps {
   /** Test seam: why the app cannot be shown here, or null. */
   desktop: () => string | null = () => desktopProblem();
   private entries = new Map<string, Entry>();
+  /** Per app, the last `control` or `forget` queued: the next one waits for it. */
+  private queues = new Map<string, Promise<void>>();
   private closing = false;
 
   constructor(private host: AppHost) {}
@@ -145,7 +147,12 @@ export class PluginApps {
     this.clock.clearTimeout(entry.relaunch);
     entry.relaunch = null;
     const installed = this.host.installed(id);
-    if (installed === null) return;
+    if (installed === null) {
+      // The binary went while a relaunch waited: nothing will start, so say so.
+      Object.assign(entry, { status: 'stopped', error: null });
+      this.host.changed(id);
+      return;
+    }
     const problem = this.desktop();
     if (problem !== null) {
       entry.status = 'unavailable';
@@ -180,7 +187,7 @@ export class PluginApps {
     const entry = this.entries.get(id);
     // A stop already said what happened; a process from before it is not this one.
     if (entry === undefined || entry.running !== running) return;
-    Object.assign(entry, { running: null, pid: null, exitCode: code });
+    Object.assign(entry, { running: null, pid: null, startedAt: null, exitCode: code });
     if (this.closing) return;
     if (code === 0) {
       // The user quit from the app: it stays closed until the next core start or an explicit start.
@@ -211,7 +218,7 @@ export class PluginApps {
     this.clock.clearTimeout(entry.relaunch);
     entry.relaunch = null;
     const running = entry.running;
-    Object.assign(entry, { running: null, pid: null, status: 'stopped', error: null });
+    Object.assign(entry, { running: null, pid: null, startedAt: null, status: 'stopped', error: null });
     if (running !== null) {
       this.host.procs.killTree(running.threadId);
       entry.exitCode = await running.exited;
@@ -219,17 +226,32 @@ export class PluginApps {
     this.host.changed(id);
   }
 
-  /** `plugins.app`: start enables and launches, stop disables and kills, restart does both. */
-  async control(id: string, dir: string, action: 'start' | 'stop' | 'restart'): Promise<void> {
-    if (action === 'stop') {
-      await this.setEnabled(dir, false);
-      await this.kill(id);
-      return;
-    }
-    await this.setEnabled(dir, true);
-    if (action === 'restart') await this.kill(id);
-    this.entry(id).crashes = [];
-    this.launch(id);
+  /**
+   * `plugins.app`: start enables and launches, stop disables and kills, restart
+   * does both. One call finishes before the next for the same app begins, so
+   * two quick clicks cannot leave `enabled` from one and the process from the other.
+   */
+  control(id: string, dir: string, action: 'start' | 'stop' | 'restart'): Promise<void> {
+    return this.serial(id, async () => {
+      if (action === 'stop') {
+        await this.setEnabled(dir, false);
+        await this.kill(id);
+        return;
+      }
+      await this.setEnabled(dir, true);
+      if (action === 'restart') await this.kill(id);
+      this.entry(id).crashes = [];
+      this.launch(id);
+    });
+  }
+
+  /** Runs `work` once every earlier `control` or `forget` of the app has settled. */
+  private serial(id: string, work: () => Promise<void>): Promise<void> {
+    const run = (this.queues.get(id) ?? Promise.resolve()).then(work);
+    const settled = run.catch(() => undefined);
+    this.queues.set(id, settled);
+    void settled.then(() => { if (this.queues.get(id) === settled) this.queues.delete(id); });
+    return run;
   }
 
   /**
@@ -246,9 +268,11 @@ export class PluginApps {
   }
 
   /** Before an update replaces the binary (Windows locks a running exe) or an uninstall deletes it. */
-  async forget(id: string): Promise<void> {
-    await this.kill(id);
-    this.entries.delete(id);
+  forget(id: string): Promise<void> {
+    return this.serial(id, async () => {
+      await this.kill(id);
+      this.entries.delete(id);
+    });
   }
 
   async close(): Promise<void> {
