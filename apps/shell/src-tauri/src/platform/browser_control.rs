@@ -4,9 +4,19 @@ use std::{sync::mpsc, time::Duration};
 use webview2_com::CallDevToolsProtocolMethodCompletedHandler;
 use windows::core::HSTRING;
 
+/// How long the shell's own commands (screencast, diagnostics, cookies) wait for an answer.
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// `call_within` with the shell's own wait, for the shell's own commands.
 pub async fn call(view: tauri::Webview, method: String, params: Value) -> Result<Value, String> {
+    call_within(view, method, params, DEFAULT_TIMEOUT).await
+}
+
+/// Sends one DevTools method to the page and waits up to `timeout` for its answer.
+pub async fn call_within(view: tauri::Webview, method: String, params: Value, timeout: Duration) -> Result<Value, String> {
     let (sender, receiver) = mpsc::channel();
     let args = serde_json::to_string(&params).map_err(|e| e.to_string())?;
+    let name = method.clone();
     view.with_webview(move |platform| {
         let failed = sender.clone();
         let callback = CallDevToolsProtocolMethodCompletedHandler::create(Box::new(move |result, json| {
@@ -24,7 +34,7 @@ pub async fn call(view: tauri::Webview, method: String, params: Value) -> Result
         };
         if let Err(error) = result { let _ = failed.send(Err(error.to_string())); }
     }).map_err(|e| e.to_string())?;
-    tauri::async_runtime::spawn_blocking(move || receiver.recv_timeout(Duration::from_secs(15))
-        .map_err(|_| "browser command timed out after 15 seconds".to_owned())?)
+    tauri::async_runtime::spawn_blocking(move || receiver.recv_timeout(timeout)
+        .map_err(|_| format!("browser command {name} timed out after {} seconds", timeout.as_secs()))?)
         .await.map_err(|e| e.to_string())?
 }

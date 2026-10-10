@@ -61,13 +61,8 @@ export class TauriBridge implements BrowserBridge {
         answer = await this.#place(invoke, id, size);
         this.#viewports.set(id, size); this.#emit({ type: 'viewport', id, size });
       } else {
-        const slot = this.#slots.get(id), size = this.viewport(id);
-        const scale = slot && size ? fitBrowserViewport(slot, size).scale : 1;
-        // DevTools input uses the displayed viewport; DOM selectors report the
-        // requested CSS viewport. Match the presentation-only fit scale.
-        const input = method === 'Input.dispatchMouseEvent' && scale !== 1
-          ? { ...params, x: Number(params.x) * scale, y: Number(params.y) * scale } : params;
-        answer = await invoke('browser_protocol', { id, method, params: input });
+        // DOM selectors report the requested CSS viewport: input follows the presentation-only fit scale.
+        answer = await invoke('browser_protocol', { id, method, params: this.#scaled(id, method, params) });
       }
       if (method === 'Emulation.clearDeviceMetricsOverride') {
         this.#viewports.delete(id); this.#emit({ type: 'viewport', id, size: null });
@@ -81,6 +76,28 @@ export class TauriBridge implements BrowserBridge {
     return result;
   }
 
+  /**
+   * The agent browser's own calls (`lib/browser-host.ts`), which the core makes
+   * concurrently as a browser takes them: a recorder's evaluation can wait for
+   * the whole recording while frames keep arriving. Only what changes the
+   * view's place, its creation and the emulated size, goes through the queue;
+   * anything else waits for the queue as it stands, never joins it.
+   */
+  async relay(id: string, method: string, params: Record<string, unknown>): Promise<unknown> {
+    if (method.startsWith('Emulation.') && method.endsWith('DeviceMetricsOverride')) return this.protocol(id, method, params);
+    if (!this.#live.has(id)) throw new Error('the browser tab is closed');
+    await (this.#queues.get(id) ?? Promise.resolve());
+    const invoke = await this.#ready();
+    return invoke('browser_protocol', { id, method, params: this.#scaled(id, method, params) });
+  }
+
+  /** DevTools input uses the displayed viewport; the core aims at the emulated one. */
+  #scaled(id: string, method: string, params: Record<string, unknown>): Record<string, unknown> {
+    const slot = this.#slots.get(id), size = this.viewport(id);
+    const scale = slot && size ? fitBrowserViewport(slot, size).scale : 1;
+    return method === 'Input.dispatchMouseEvent' && scale !== 1 ? { ...params, x: Number(params.x) * scale, y: Number(params.y) * scale } : params;
+  }
+
   /** Frames cross as raw bytes on a channel: no base64, no JSON, no request per frame. */
   async screencast(id: string, frameRate: number, frame: (jpeg: ArrayBuffer) => void): Promise<() => Promise<void>> {
     if (!this.#live.has(id)) throw new Error('the browser tab is closed');
@@ -92,6 +109,28 @@ export class TauriBridge implements BrowserBridge {
       channel.onmessage = () => {};
       await invoke('browser_screencast_stop', { id });
     };
+  }
+
+  /**
+   * A webview's DevTools events, for the agent browser this app hosts
+   * (`lib/browser-host.ts`): each arrives as one JSON text on a channel.
+   * Registered after the webview's creation, in the same queue.
+   */
+  async events(id: string, names: readonly string[], listener: (method: string, params: Record<string, unknown>) => void): Promise<() => void> {
+    if (!this.#live.has(id)) throw new Error('the browser tab is closed');
+    const { Channel } = await import('@tauri-apps/api/core');
+    const channel = new Channel<string>(text => {
+      let event: { method?: unknown; params?: unknown };
+      try { event = JSON.parse(text) as typeof event; } catch { return; }
+      if (typeof event.method === 'string') listener(event.method, (event.params ?? {}) as Record<string, unknown>);
+    });
+    const registered = (this.#queues.get(id) ?? Promise.resolve()).then(async () => {
+      const invoke = await this.#ready();
+      await invoke('browser_protocol_events', { id, events: [...names], channel });
+    });
+    this.#queues.set(id, registered.then(() => {}, () => {}));
+    await registered;
+    return () => { channel.onmessage = () => {}; };
   }
 
   #handlers = new Set<(event: BrowserEvent) => void>();
@@ -115,15 +154,29 @@ export class TauriBridge implements BrowserBridge {
   }
 
   /**
-   * Read through a view of that profile made for the purpose, blank and never
+   * Read through `view` when it is a live view of that profile (an agent tab
+   * the app hosts), else through one made for the purpose, blank and never
    * placed, then destroyed: no tab of the user's is touched.
    */
-  async cookies(profile: string): Promise<unknown[]> {
+  async cookies(profile: string, view?: string): Promise<unknown[]> {
+    const reply = await this.#throughProfile(profile, view, (invoke, id) => invoke<{ cookies?: unknown }>('browser_cookies', { id }));
+    return Array.isArray(reply?.cookies) ? reply.cookies : [];
+  }
+
+  /** Writes cookies into the profile, the way `cookies` reads them. */
+  async setCookies(profile: string, cookies: unknown[], view?: string): Promise<void> {
+    await this.#throughProfile(profile, view, (invoke, id) => invoke<null>('browser_set_cookies', { id, cookies }));
+  }
+
+  async #throughProfile<T>(profile: string, view: string | undefined, run: (invoke: Invoke, id: string) => Promise<T>): Promise<T> {
+    if (view !== undefined && this.#live.has(view)) {
+      await (this.#queues.get(view) ?? Promise.resolve());
+      return run(await this.#ready(), view);
+    }
     const id = `browser:cookies-${crypto.randomUUID()}`;
     this.create(id, '', profile === DEFAULT_BROWSER_PROFILE ? undefined : profile);
     try {
-      const reply = await (this.#queues.get(id) ?? Promise.resolve()).then(async () => (await this.#ready())<{ cookies?: unknown }>('browser_cookies', { id }));
-      return Array.isArray(reply?.cookies) ? reply.cookies : [];
+      return await (this.#queues.get(id) ?? Promise.resolve()).then(async () => run(await this.#ready(), id));
     } finally { this.destroy(id); }
   }
 

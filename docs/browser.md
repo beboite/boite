@@ -136,6 +136,53 @@ reports where the page went. Clicks, keys and text are native input; an element
 something covers is clicked through the DOM, and the agent hears what covered
 it.
 
+## The desktop app hosts the tabs
+
+On Windows, the desktop app connected to the core it started hosts that core's
+agent browser: each new agent tab is a webview of the app (WebView2), in the
+same profiles as the user's own Browser tabs, so a site signed in there is
+signed in for the agent too. The panel shows that webview itself, parked over
+its slot: it scrolls, types and paints natively, and nothing is captured or
+streamed. The app attaches with `browser.hostAttach` as soon as it is
+connected; only the owner's desktop app on this machine's loopback may.
+
+The core still drives the tab over the DevTools protocol, exactly as it drives
+a browser it started (`browser/host.ts`). It sends each message to the app
+(`browser.hostMessage`, one connection per profile) and the app answers as a
+browser would (`packages/ui/src/lib/browser-host.ts`): a page command goes to
+that webview's own DevTools channel, which WebView2 hands to the app without
+any port; `Target.createTarget`, `attachToTarget` and `closeTarget` create,
+name and close webviews; a page's events, its address and title, and the
+windows it opens come back with `browser.hostReply`. The shell lets an agent
+webview (an id starting with `agent-`) take the Page, Runtime, Input,
+Emulation, Network, Log and DOM domains, never the profile's cookies
+(`apps/shell/src-tauri/src/browser_control.rs`). An agent webview out of sight
+is moved outside the window rather than hidden, since a hidden WebView2 stops
+painting and the agent screenshots and records pages nobody looks at.
+
+The core keeps a copy of a hosted profile's cookies in the same
+`boite-cookies.json` as for its own browser, with the same saves. The app
+answers `Storage.getCookies` and `Storage.setCookies` through two commands of
+their own, `browser_cookies` and `browser_set_cookies`, only from the main UI,
+through a live agent webview of the profile or a blank one made for the call.
+When the first hosted tab of a profile opens, the core hands the app the saved
+cookies its profile lacks, compared by name, domain and path: a sign-in made
+in the core's own browser while the app was closed, from the phone for
+instance, or a session cookie WebView2 dropped when the app quit. A cookie the
+app already holds stays as it is. The other way, a sign-in made in a hosted
+tab is on the core's disk within a second of its page changing, so the core's
+own browser still has it once the app is closed. A cookie deleted in the app
+while no agent tab was open is still in the saved copy and comes back with
+the next hosted tab.
+
+The agent's `browser status` says `hosted: true` while an app hosts. Tabs
+opened before the app attached stay in the core's own browser, and a tab
+the app hosts closes with the app: quitting it, reloading its page or losing
+the connection ends the relay, and the next tab opens in the core's own
+browser again. Other clients of the conversation, a phone or another machine,
+still watch a hosted tab as frames, taken through the app. The Linux and
+macOS apps do not host; their webviews have no DevTools channel to relay.
+
 ## Recording
 
 `recording-start` records the tab as a silent MP4 without any encoder on the
@@ -171,6 +218,11 @@ with the reason. A tab's **×** closes it (`close`), the agent's tabs
 included. With no tab open the owner lands on that new tab page, which is where
 to sign in to a site the agent then uses. A paired phone watches and drives the pages
 but neither opens nor closes a tab: `browser.command` is not one of its methods.
+
+The page takes the size of the view showing it by default, as a page takes
+its window's: on Show, and again once the view stops changing size, the viewer
+sends that size (`viewport`). That size is the agent's too. **Display** picks
+another by hand, which holds until **Fit this screen**.
 
 The live view asks for one JPEG at a time (`browser.remoteFrame`), the next as
 soon as the last has arrived, sized to what the view shows and lighter on a

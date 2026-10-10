@@ -333,3 +333,31 @@ test('a phone keeps the text field and gets a copy button for the page selection
     expect(document.querySelector('[data-testid=remote-browser-note]')!.textContent).toContain('Copied');
   } finally { vi.unstubAllGlobals(); }
 });
+
+test('the page takes the size of the view once per size: a tap or key afterwards leaves the agent its own size', async () => {
+  for (const [name, value] of [['clientWidth', 700], ['clientHeight', 500]] as const) {
+    vi.spyOn(HTMLElement.prototype, name, 'get').mockImplementation(function (this: HTMLElement) { return this.classList.contains('screen-area') ? value : 0; });
+  }
+  client = new FakeClient({ delayMs: 0, principal: 'session' }); store = new Store(); store.attach(client); await store.connect();
+  // The agent's own size: a phone preset it applied.
+  const width = 393, height = 852;
+  const original = client.call.bind(client);
+  const calls = vi.spyOn(client, 'call').mockImplementation(((method: string, params: any) => {
+    if (method === 'browser.remoteFrame') return Promise.resolve({ id: `f${Date.now()}`, tabId: 'browser:test', title: 'Phone', width, height, at: Date.now(), base64: '' });
+    if (method === 'browser.remoteInput') return Promise.resolve({ ok: true });
+    return original(method as never, params as never);
+  }) as typeof client.call);
+  vi.useFakeTimers();
+  app = mount(RemoteBrowser, { target: document.body, props: { store, threadId: 't-trace' } }); await settle();
+  await vi.advanceTimersByTimeAsync(400); await settle();
+  const viewports = () => calls.mock.calls.filter(([method, params]) => method === 'browser.remoteInput' && (params as any).input.kind === 'viewport');
+  // Shown: the page takes the view's size once.
+  expect(viewports().map(([, params]) => (params as any).input)).toEqual([{ kind: 'viewport', width: 700, height: 500 }]);
+  // The agent sets its phone size again; keys in this view do not undo it.
+  const enter = [...document.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === 'Enter');
+  for (let i = 0; i < 3; i++) {
+    if (enter) enter.click(); else document.querySelector<HTMLButtonElement>('[data-testid=remote-browser-reload]')?.click();
+    await settle(); await vi.advanceTimersByTimeAsync(400); await settle();
+  }
+  expect(viewports()).toHaveLength(1);
+});
