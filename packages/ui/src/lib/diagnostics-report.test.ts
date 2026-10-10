@@ -80,6 +80,20 @@ test('a failed call is reported by method and code, never its parameters; a time
   expect(Object.prototype.hasOwnProperty.call(client, 'call')).toBe(false);
 });
 
+test('a method the class gets later still runs while the reporter watches calls', async () => {
+  // E2E fixtures replace FakeClient.prototype.call after the store attached its client.
+  class Later extends StubClient {}
+  const client = new Later();
+  const stop = new DiagnosticsReporter(client as never, timers()).start();
+  const replaced = vi.fn(async () => 'replaced' as never);
+  const before = Later.prototype.call;
+  Later.prototype.call = replaced;
+  try {
+    expect(await client.call('threads.list', {})).toBe('replaced');
+    expect(replaced).toHaveBeenCalledWith('threads.list', {}, undefined);
+  } finally { Later.prototype.call = before; stop(); }
+});
+
 test('a reconnection reports the time offline, and a core without the method turns reporting off', async () => {
   const client = new StubClient();
   const reporter = new DiagnosticsReporter(client as never, timers());

@@ -178,11 +178,15 @@ export class DiagnosticsReporter {
    */
   #watchCalls(): void {
     const client = this.#client as Client & { call: Client['call'] };
+    // A method the class provides is looked up at each call, not kept: code that
+    // replaces the class's method later (a test fixture, a hot reload) still runs.
+    const own = Object.prototype.hasOwnProperty.call(client, 'call') ? client.call : null;
     const original = client.call;
     const reporter = this;
     const watched: Client['call'] = function (this: unknown, method, params, options) {
       const began = reporter.#timers.now();
-      const result = original.call(client, method, params, options);
+      const target = own ?? (Object.getPrototypeOf(client) as { call: Client['call'] }).call;
+      const result = target.call(client, method, params, options);
       if (method === 'diagnostics.report') return result;
       result.catch((error: unknown) => {
         if (!worthReporting(error)) return;
