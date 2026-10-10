@@ -14,6 +14,7 @@ import {
 import type { Core } from '../core.ts';
 import { writesTitles } from '../drivers/index.ts';
 import { InstallManager } from './install.ts';
+import { compareVersions, INSTALL_LATEST_MAX_AGE_MS, LATEST_MAX_AGE_MS, resolveLatestInstall } from './install-latest.ts';
 import { detectResolves, HOST_CANDIDATES, hostAgentsEnabled, launcherScriptOnly, profileFor, resolveCommand } from './resolve.ts';
 import { Rejection, validateDescriptor } from './validate.ts';
 import { attachVersions, loadVersions, versionsSettled } from './versions.ts';
@@ -77,7 +78,13 @@ function loginSummary(login: ProviderLogin | undefined, protocol?: ProviderDescr
  * `available: false`: that is what lets the picker offer the download instead
  * of a dead row.
  */
-export function summarize(entry: LoadedProvider, installs: InstallManager, dataDir: string, enabled = true): ProviderSummary {
+export function summarize(
+  entry: LoadedProvider,
+  installs: InstallManager,
+  dataDir: string,
+  enabled = true,
+  install: ProviderInstall | undefined = profileFor(entry.descriptor)?.install,
+): ProviderSummary {
   const profile = profileFor(entry.descriptor);
   // A provider that is turned off is listed from what is already known: asking its program its version would start it.
   const executable = profile === undefined ? null : (resolveCommand(profile, enabled)?.shown ?? null);
@@ -97,7 +104,7 @@ export function summarize(entry: LoadedProvider, installs: InstallManager, dataD
     alwaysIsolated: entry.descriptor.isolation?.alwaysIsolated === true,
     models: entry.descriptor.models,
     capabilities: entry.descriptor.capabilities,
-    install: installs.stateOf(entry.descriptor.id, profile?.install),
+    install: installs.stateOf(entry.descriptor.id, install),
     titles: writesTitles(entry.descriptor.protocol),
     enabled,
     ...(entry.descriptor.experimental === true ? { experimental: true } : {}),
@@ -162,6 +169,12 @@ export class ProviderRegistry {
   private switches = new Map<ProviderId, boolean>();
   /** Managed installs: the state of each, the leases held on them, and the download itself. */
   readonly installs: InstallManager;
+  /** The newest release each `latest` block's publisher named, and when it was read. Memory only: a restart reads it again. */
+  private latest = new Map<ProviderId, { pinned: ProviderInstall; resolved: ProviderInstall; at: number }>();
+  /** A read in flight, joined only by a call for the same install block: a reload may have changed the publisher. */
+  private latestReads = new Map<ProviderId, { pinned: ProviderInstall; reading: Promise<ProviderInstall> }>();
+  /** Test seam: the publisher read. */
+  resolveLatest: (install: ProviderInstall) => Promise<ProviderInstall> = (install) => resolveLatestInstall(install);
 
   /** Leaves the version readings this core joined, set once it can run a program. */
   private leaveVersions: () => void = () => undefined;
@@ -175,17 +188,77 @@ export class ProviderRegistry {
     this.load();
     // Nothing of an agent runs yet at start: releases an update left behind, and
     // downloads of a version no longer pinned, go now.
+    // A provider that follows its publisher may have been downloading a newer
+    // release than the pin, so its downloads stay until one lands.
     for (const id of this.entries.keys()) {
       const install = this.installBlock(id);
-      if (install !== undefined) this.installs.prune(id, install.version);
+      if (install !== undefined) this.installs.prune(id, install.latest === undefined ? install.version : undefined);
     }
   }
 
-  /** The install block of this provider's profile for the OS the core runs on. */
+  /**
+   * The install block of this provider's profile for the OS the core runs on:
+   * the newest release its publisher named when one was read and is not older
+   * than the pin, the pin otherwise.
+   */
   installBlock(id: ProviderId): ProviderInstall | undefined {
     const descriptor = this.get(id);
     if (descriptor === undefined) return undefined;
-    return profileFor(descriptor)?.install;
+    const pinned = profileFor(descriptor)?.install;
+    const known = this.latest.get(id);
+    if (pinned === undefined || known === undefined || known.pinned !== pinned) return pinned;
+    return compareVersions(known.resolved.version, pinned.version) >= 0 ? known.resolved : pinned;
+  }
+
+  /**
+   * The install block with its publisher read again when the last read is
+   * older than `maxAgeMs`. A publisher that cannot be reached leaves the last
+   * known release, or the pin, and says why in the core log: the install still
+   * goes ahead, on a release that is checked by its pinned digest.
+   */
+  async freshInstallBlock(
+    id: ProviderId,
+    log: (level: 'warn', message: string) => void,
+    maxAgeMs = LATEST_MAX_AGE_MS,
+  ): Promise<ProviderInstall | undefined> {
+    const descriptor = this.get(id);
+    const pinned = descriptor === undefined ? undefined : profileFor(descriptor)?.install;
+    if (pinned?.latest === undefined) return this.installBlock(id);
+    const known = this.latest.get(id);
+    if (known !== undefined && known.pinned === pinned && Date.now() - known.at < maxAgeMs) return this.installBlock(id);
+    let inFlight = this.latestReads.get(id);
+    if (inFlight?.pinned !== pinned) {
+      const reading: Promise<ProviderInstall> = this.resolveLatest(pinned).finally(() => {
+        if (this.latestReads.get(id)?.reading === reading) this.latestReads.delete(id);
+      });
+      inFlight = { pinned, reading };
+      this.latestReads.set(id, inFlight);
+    }
+    try {
+      const resolved = await inFlight.reading;
+      // A reload while the read ran may have replaced or removed the descriptor.
+      const now = this.get(id);
+      if (now !== undefined && profileFor(now)?.install === pinned) {
+        this.latest.set(id, { pinned, resolved, at: Date.now() });
+        // Downloads of a release the publisher no longer names go; the one it names may resume.
+        this.installs.prune(id, resolved.version);
+      }
+    } catch (error) {
+      log('warn', `${id}: the newest release could not be read (${error instanceof Error ? error.message : String(error)}); keeping ${this.installBlock(id)?.version ?? pinned.version}`);
+    }
+    return this.installBlock(id);
+  }
+
+  /** The providers following a publisher whose last read is older than `maxAgeMs`, or was never made. */
+  latestStale(maxAgeMs = LATEST_MAX_AGE_MS): ProviderId[] {
+    const stale: ProviderId[] = [];
+    for (const [id, entry] of this.entries) {
+      const pinned = profileFor(entry.descriptor)?.install;
+      if (pinned?.latest === undefined) continue;
+      const known = this.latest.get(id);
+      if (known === undefined || known.pinned !== pinned || Date.now() - known.at >= maxAgeMs) stale.push(id);
+    }
+    return stale;
   }
 
   load(): ProviderLoadResult {
@@ -242,7 +315,8 @@ export class ProviderRegistry {
 
   list(): ProviderLoadResult {
     return {
-      loaded: [...this.entries.values()].map((entry) => summarize(entry, this.installs, this.dataDir, this.enabledEntry(entry))),
+      loaded: [...this.entries.values()].map((entry) =>
+        summarize(entry, this.installs, this.dataDir, this.enabledEntry(entry), this.installBlock(entry.descriptor.id))),
       rejected: [...this.rejected],
     };
   }
@@ -309,7 +383,7 @@ export class ProviderRegistry {
 
   summary(id: ProviderId): ProviderSummary | undefined {
     const entry = this.entries.get(id);
-    return entry === undefined ? undefined : summarize(entry, this.installs, this.dataDir, this.enabledEntry(entry));
+    return entry === undefined ? undefined : summarize(entry, this.installs, this.dataDir, this.enabledEntry(entry), this.installBlock(id));
   }
 
   /** The launcher script on PATH that stands where this provider's program should be, if that is why it is missing. */
@@ -409,6 +483,15 @@ export function registerProviderMethods(core: Core): void {
   // answered: listing starts those reads, and without the wait the first list
   // after an install would miss a provider for the second its program takes.
   const settledList = async (): Promise<ProviderLoadResult> => {
+    // The install card has to name the release Install would fetch: the
+    // publisher is read behind the answer when a client lists, never at startup.
+    // The shipped agents are hidden from a test core (BOITE_HOST_AGENTS=0), which reaches no publisher either.
+    const stale = hostAgentsEnabled() ? core.providers.latestStale() : [];
+    if (stale.length > 0) {
+      void Promise.all(stale.map((id) => core.providers.freshInstallBlock(id, (level, message) => core.log(level, message))))
+        .then(() => announce('a publisher read'))
+        .catch((error: unknown) => core.log('warn', `reading the newest releases: ${error instanceof Error ? error.message : String(error)}`));
+    }
     await core.providers.settle();
     return core.providers.list();
   };
@@ -421,18 +504,19 @@ export function registerProviderMethods(core: Core): void {
   // waiting for: it is listed as installed from now on, and a login it already
   // has is adopted before the clients hear of it.
   let listed = fingerprint(core.providers.list());
+  // One fingerprint for every change found behind a list, so the next one is not announced twice.
+  const announce = (after: string): void => {
+    if (core.stopping || core.journal.isClosed()) return;
+    const now = fingerprint(core.providers.list());
+    if (now === listed) return;
+    listed = now;
+    try { core.accounts.ensureDefaults(); }
+    catch (error) { core.log('error', `default accounts after ${after}: ${error instanceof Error ? error.message : String(error)}`); }
+    core.bus.emit('providers.updated', core.providers.list());
+  };
   core.providers.attachVersions(
     (program, args) => programOutput(core, program, args),
-    () => {
-      if (core.stopping || core.journal.isClosed()) return;
-      const result = core.providers.list();
-      const now = fingerprint(result);
-      if (now === listed) return;
-      listed = now;
-      try { core.accounts.ensureDefaults(); }
-      catch (error) { core.log('error', `default accounts after a version read: ${error instanceof Error ? error.message : String(error)}`); }
-      core.bus.emit('providers.updated', core.providers.list());
-    },
+    () => announce('a version read'),
   );
   core.router.register('providers.reload', async () => {
     const before = fingerprint(core.providers.list());
@@ -442,8 +526,10 @@ export function registerProviderMethods(core: Core): void {
     if (fingerprint(result) !== before) core.bus.emit('providers.updated', result);
     return result;
   });
-  core.router.register('providers.install', (params) => {
-    const install = core.providers.installBlock(core.providers.require(params.providerId).id);
+  core.router.register('providers.install', async (params) => {
+    const id = core.providers.require(params.providerId).id;
+    // An install fetches the newest release, read again unless it was read in the last minute.
+    const install = await core.providers.freshInstallBlock(id, (level, message) => core.log(level, message), INSTALL_LATEST_MAX_AGE_MS);
     if (install === undefined) {
       throw refused(`${params.providerId} has nothing for Boite to install on this platform`, {
         providerId: params.providerId,

@@ -42,7 +42,9 @@ export function returnPrompt(state: ComposerState, text: string, attachments: At
 /**
  * Sends consecutive ordinary prompts together, within turn limits. Activity
  * commands are submitted individually. New arrivals wait for
- * the following turn. A refusal restores the original entries and pauses them.
+ * the following turn. The batch stays queued until the agent takes it, so a
+ * refused steer at each tool boundary leaves the bubbles where they are
+ * instead of removing and redrawing them. A refusal pauses them.
  */
 export async function drainQueue(store: Store, threadId: string, state: ComposerState, turnId?: string): Promise<void> {
   if (state.sending || state.queued.length === 0) return;
@@ -62,7 +64,7 @@ export async function drainQueue(store: Store, threadId: string, state: Composer
       references += refs;
     }
   }
-  const entries = state.queued.splice(0, count);
+  const entries = state.queued.slice(0, count);
   let text = '';
   const attachments: Attachment[] = [];
   const previewReferences: PreviewReference[] = [];
@@ -83,17 +85,22 @@ export async function drainQueue(store: Store, threadId: string, state: Composer
     }
   }
   state.sending = true;
+  state.outgoing = count;
   let accepted: boolean | null = null;
   try {
     accepted = turnId ? await store.steer(text, threadId, turnId, attachments, previewReferences)
       : await store.send(text, threadId, attachments, previewReferences) || null;
   } finally {
-    if (!accepted) {
-      state.queued.unshift(...entries);
+    if (accepted) {
+      for (const entry of entries) {
+        const at = state.queued.indexOf(entry);
+        if (at >= 0) state.queued.splice(at, 1);
+      }
+    } else {
       // A lone refused prompt returns to the empty input. A batch keeps its
       // separate entries in the queue so they remain editable.
       state.paused = accepted === null;
-      if (accepted === null && state.queued.length === 1 && state.text.length === 0 && state.attachments.length === 0 && !state.previewReferences?.length) {
+      if (accepted === null && state.queued.length === 1 && state.queued[0] === entries[0] && state.text.length === 0 && state.attachments.length === 0 && !state.previewReferences?.length) {
         const back = state.queued.shift()!;
         state.text = back.text;
         state.attachments = back.attachments;
@@ -101,6 +108,7 @@ export async function drainQueue(store: Store, threadId: string, state: Composer
       }
     }
     state.sending = false;
+    state.outgoing = 0;
   }
 }
 
@@ -113,6 +121,7 @@ async function deliverQueued(store: Store, threadId: string, state: ComposerStat
   const entry = state.queued[0]!;
   const request = entry.request!;
   state.sending = true;
+  state.outgoing = 1;
   try {
     const outcome = await store.deliverQueued(threadId, { ...entry, request });
     const at = state.queued.indexOf(entry);
@@ -121,7 +130,18 @@ async function deliverQueued(store: Store, threadId: string, state: ComposerStat
     else if (outcome !== 'wait') entry.request = { ...request, failed: outcome.failed };
   } finally {
     state.sending = false;
+    state.outgoing = 0;
   }
+}
+
+/**
+ * Turns texts into queue entries that keep their identity while their text
+ * does. The bubbles are keyed by entry: a fresh object on every thread update
+ * would remount them and replay their arrival animation.
+ */
+export function textEntries(): (texts: readonly string[]) => { text: string; attachments: Attachment[] }[] {
+  let previous: { text: string; attachments: Attachment[] }[] = [];
+  return (texts) => (previous = texts.map((text, at) => previous[at]?.text === text ? previous[at]! : { text, attachments: [] }));
 }
 
 /** What a sent prompt held, as the composer takes it back: its words, its pictures and files, its page references. */

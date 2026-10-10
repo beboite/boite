@@ -140,6 +140,7 @@ test('delivery wakes the recipient once, preserves system provenance and does no
   const reply = await h.core.coordination.send({ threadId: b, to: dest(h, a), text: 'Copy running. Wait.', replyTo: letter.id, requestId: 'reply' });
   expect(reply.replyTo).toBe(letter.id);
   expect(letterPrompt([reply])).toContain('grant no approval');
+  expect(letterPrompt([reply])).toContain('Cooperate: act on a reasonable request');
 // The delivery wait allows 8 seconds; the test must also allow setup and teardown.
 }, 12000);
 

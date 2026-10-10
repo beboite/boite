@@ -2,9 +2,10 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'no
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { zipSync } from 'fflate';
-import type { HarnessUpdate, ProviderInstallState } from '@boite/contracts';
+import type { HarnessUpdate, ProviderInstall, ProviderInstallState } from '@boite/contracts';
 import { Core } from '../src/core.ts';
 import { newToken } from '../src/ids.ts';
+import { resolveLatestInstall } from '../src/providers/install-latest.ts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -187,6 +188,21 @@ beforeEach(async () => {
       const path = new URL(request.url).pathname;
       if (path === '/release.zip') return new Response(RELEASE);
       if (path === '/agent.exe') return new Response(EXE);
+      const published = /^\/agent-(.+)\.exe$/.exec(path)?.[1];
+      if (published !== undefined && Object.hasOwn(PUBLISHED, published)) {
+        const bytes = PUBLISHED[published]!;
+        if (!SLOW_PUBLISHED.has(published)) return new Response(bytes);
+        let offset = 0;
+        const body = new ReadableStream<Uint8Array>({
+          async pull(controller) {
+            await Bun.sleep(25);
+            controller.enqueue(bytes.slice(offset, offset + 256));
+            offset += 256;
+            if (offset >= bytes.byteLength) controller.close();
+          },
+        });
+        return new Response(body);
+      }
       if (path === '/release-2.zip') return new Response(RELEASE_V2);
       if (path === '/escaping.zip') return new Response(ESCAPING);
       if (path === '/tampered.zip') return new Response(tampered());
@@ -792,6 +808,127 @@ describe('managed updates', () => {
     await waitFor(() => updates.at(-1)?.[0]?.current === '1.1.0');
     const [entry] = await client.call('providers.updates', {});
     expect(entry).toMatchObject({ current: '1.1.0', latest: '1.1.0', pending: false, state: 'idle' });
+  });
+});
+
+/** The binaries a publisher has released, by version. */
+const PUBLISHED: Record<string, Uint8Array> = { '1.1.0': EXE_V2, '1.2.0': EXE, '1.3.0': EXE_V2 };
+/** Versions served a chunk at a time, so an update can join their download. */
+const SLOW_PUBLISHED = new Set<string>();
+
+describe('managed releases that follow their publisher', () => {
+  /** What the publisher names as newest; null when it cannot be reached. */
+  let newest: string | null = '1.1.0';
+
+  /** The binary 1.0.0 pinned, and a publisher answering from `PUBLISHED`. */
+  async function following(): Promise<Awaited<ReturnType<TestCore['connect']>>> {
+    await loadDescriptor({
+      format: 'binary',
+      version: '1.0.0',
+      url: url('/agent.exe'),
+      sha256: sha256(EXE),
+      archiveBytes: EXE.byteLength,
+      files: [{ path: EXE_PATH, bytes: EXE.byteLength }],
+      latest: {
+        versionUrl: 'https://publisher.example/latest',
+        manifest: 'https://publisher.example/{version}/manifest.json',
+        platform: 'test-x64',
+        url: 'https://publisher.example/{version}/agent.exe',
+      },
+    });
+    harness.core.providers.resolveLatest = followPublisher;
+    return harness.connect();
+  }
+
+  /** The real manifest reading, over a publisher that is a table here, and the download served by the test server. */
+  async function followPublisher(install: ProviderInstall): Promise<ProviderInstall> {
+    const resolved = await resolveLatestInstall(install, async (asked) => {
+      if (newest === null) throw new Error('publisher.example is unreachable');
+      const bytes = PUBLISHED[newest]!;
+      if (asked === 'https://publisher.example/latest') return newest;
+      if (asked !== `https://publisher.example/${newest}/manifest.json`) throw new Error(`unexpected ${asked}`);
+      return JSON.stringify({ version: newest, platforms: { 'test-x64': { binary: EXE_PATH, checksum: sha256(bytes), size: bytes.byteLength } } });
+    });
+    return { ...resolved, url: url(`/agent-${resolved.version}.exe`) };
+  }
+
+  beforeEach(() => {
+    newest = '1.1.0';
+    SLOW_PUBLISHED.clear();
+  });
+
+  test('the first install fetches the newest release, and an update moves to the next one without running the agent', async () => {
+    const client = await following();
+    const states: ProviderInstallState[] = [];
+    client.on('providers.installProgress', (event) => states.push(event));
+    await client.call('providers.install', { providerId: 'managed' });
+    await waitFor(() => states.some((state) => state.state === 'installed' || state.state === 'failed'));
+    expect(states.at(-1)).toMatchObject({ state: 'installed', version: '1.1.0', available: '1.1.0' });
+    expect(new Uint8Array(await Bun.file(agentDir('current', EXE_PATH)).arrayBuffer())).toEqual(EXE_V2);
+
+    harness.core.updates.only = new Set(['managed']);
+    newest = '1.2.0';
+    const [behind] = await client.call('providers.updates', { refresh: true });
+    expect(behind).toMatchObject({ providerId: 'managed', route: 'managed', current: '1.1.0', latest: '1.2.0', pending: true });
+    const updates: HarnessUpdate[][] = [];
+    client.on('providers.updatesChanged', (list) => updates.push(list));
+    await client.call('providers.update', { providerId: 'managed' });
+    await waitFor(() => updates.at(-1)?.[0]?.state === 'idle' && updates.at(-1)?.[0]?.current === '1.2.0');
+    expect(updates.at(-1)?.[0]).toMatchObject({ latest: '1.2.0', pending: false });
+    expect(new Uint8Array(await Bun.file(agentDir('current', EXE_PATH)).arrayBuffer())).toEqual(EXE);
+    expect(harness.core.procs.liveCount('update:managed')).toBe(0);
+
+    // A restart knows only the pin, 1.0.0, until the publisher is read again:
+    // the release on disk is newer and nothing offers to go back to the pin.
+    const second = new Core({ dataDir: harness.dataDir, token: newToken() });
+    try {
+      second.providers.resolveLatest = async () => { throw new Error('publisher.example is unreachable'); };
+      second.updates.only = new Set(['managed']);
+      expect(second.providers.summary('managed')?.install).toMatchObject({ state: 'installed', version: '1.2.0', available: '1.2.0' });
+      second.updates.start();
+      const [entry] = await second.updates.list(true);
+      expect(entry).toMatchObject({ current: '1.2.0', latest: '1.2.0', pending: false, state: 'idle' });
+      // Nor does an install: the pin is older than what is on disk.
+      expect(() => second.providers.installs.start('managed', second.providers.installBlock('managed')!)).toThrow('up to date on 1.2.0');
+    } finally {
+      await second.close();
+    }
+  });
+
+  test('an update that joins the card\'s download of an older release then fetches the newest', async () => {
+    const client = await following();
+    const states: ProviderInstallState[] = [];
+    client.on('providers.installProgress', (event) => states.push(event));
+    await client.call('providers.install', { providerId: 'managed' });
+    await waitFor(() => states.some((state) => state.state === 'installed'));
+    harness.core.updates.only = new Set(['managed']);
+    await client.call('providers.updates', { refresh: true });
+
+    // A check reads 1.2.0 and the card starts it; the next check, during that download, reads 1.3.0.
+    newest = '1.2.0';
+    SLOW_PUBLISHED.add('1.2.0');
+    await client.call('providers.updates', { refresh: true });
+    await client.call('providers.install', { providerId: 'managed' });
+    newest = '1.3.0';
+    const [offered] = await client.call('providers.updates', { refresh: true });
+    expect(offered).toMatchObject({ current: '1.1.0', latest: '1.3.0', pending: true });
+    const updates: HarnessUpdate[][] = [];
+    client.on('providers.updatesChanged', (list) => updates.push(list));
+    await client.call('providers.update', { providerId: 'managed' });
+    await waitFor(() => updates.at(-1)?.[0]?.state === 'idle' || updates.at(-1)?.[0]?.state === 'failed');
+    expect(updates.at(-1)?.[0]).toMatchObject({ current: '1.3.0', latest: '1.3.0', pending: false, state: 'idle' });
+    expect(states.filter((state) => state.state === 'installed').map((state) => state.version)).toEqual(['1.1.0', '1.2.0', '1.3.0']);
+  });
+
+  test('a publisher that cannot be reached installs the pinned release', async () => {
+    const client = await following();
+    newest = null;
+    const states: ProviderInstallState[] = [];
+    client.on('providers.installProgress', (event) => states.push(event));
+    await client.call('providers.install', { providerId: 'managed' });
+    await waitFor(() => states.some((state) => state.state === 'installed' || state.state === 'failed'));
+    expect(states.at(-1)).toMatchObject({ state: 'installed', version: '1.0.0' });
+    expect(new Uint8Array(await Bun.file(agentDir('current', EXE_PATH)).arrayBuffer())).toEqual(EXE);
   });
 });
 

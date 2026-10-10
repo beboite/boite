@@ -307,15 +307,17 @@ test(
 );
 
 test(
-  'a diff document is drawn under the tool card that produced it',
+  'a diff document stays folded until its preview is requested',
   async () => {
     await page.type(testid('composer-input'), 'now [diff] please');
     await clickWhenEnabled(testid('composer-send'));
     await page.waitFor(`document.querySelector('${testid('tool-diff-counts')}')`, 30_000);
     await page.waitFor(`document.querySelector('${testid('thread-header')}[data-status]').dataset.status === 'idle'`, 30_000);
 
-    // The edit's line counts what it changed, and its diff is drawn open under it.
+    // The edit's line counts what it changed without expanding its preview.
     expect((await page.text(testid('tool-diff-counts'))).replace(/\s+/g, ' ').trim()).toBe('+2 -1');
+    expect(await page.evaluate(`document.querySelector('${testid('diff-view')}') === null`)).toBe(true);
+    await page.click(`${testid('tool-card')}[data-family=edit] ${testid('tool-toggle')}`);
     await page.waitFor(`document.querySelector('${testid('tool-document')}[data-kind=diff]')`);
 
     const gutters = await page.evaluate<string[]>(

@@ -1962,6 +1962,8 @@ export const strings = {
     materialMica: 'Mica',
     materialSolid: 'Solid',
     chatWidth: 'Chat width',
+    groupChanges: 'Group modified files in the conversation',
+    expandDiffs: 'Expand change previews by default',
     chatWidthComfortable: 'Comfortable',
     chatWidthWide: 'Wide',
     chatWidthFull: 'Full',

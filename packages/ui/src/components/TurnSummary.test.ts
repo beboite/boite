@@ -1,7 +1,9 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import type { BackgroundTask, Turn } from '@boite/contracts';
+import type { BackgroundTask, Message, Turn } from '@boite/contracts';
 import TurnSummary from './TurnSummary.svelte';
+import MessageTurnSummary from './MessageTurnSummary.svelte';
+import type { Store } from '../lib/store.svelte';
 import { clockTime } from '../lib/format';
 
 let running: Record<string, unknown> | null = null;
@@ -38,6 +40,18 @@ const compactExecution: NonNullable<Turn['execution']> = {
 function text(testid: string): string | null {
   return document.querySelector(`[data-testid=${testid}]`)?.textContent ?? null;
 }
+
+test('a silent running turn reports work without implying an answer is being written', () => {
+  const message = { id: 'prompt', role: 'user', turnId: 'turn-1', parts: [{ type: 'text', text: 'Check the files' }] } as Message;
+  running = mount(MessageTurnSummary, { target: document.body, props: {
+    store: { connection: 'ready', openThread: { id: 't-1', status: 'running', turns: [] } } as unknown as Store,
+    threadId: 't-1', turn: turn({ status: 'running', finishedAt: null, usage: null }), message, messages: [message],
+  } });
+  flushSync();
+  expect(document.querySelector('[data-testid=typing-indicator]')).toBeNull();
+  expect(text('turn-elapsed')).toMatch(/^Working for /);
+  expect(document.querySelector('[data-testid=turn-summary] .spinner')).not.toBeNull();
+});
 
 test('a finished turn reads how long it worked, when it was done and what it spent', () => {
   running = mount(TurnSummary, { target: document.body, props: { turn: turn() } });
@@ -159,7 +173,7 @@ test('provider signals do not imply new execution progress or text', () => {
 test('a compaction turn identifies maintenance even before provider progress arrives', () => {
   vi.useFakeTimers({ now: STARTED + 9_000 });
   running = mount(TurnSummary, { target: document.body, props: {
-    turn: turn({ status: 'running', finishedAt: null, usage: null, execution: compactExecution }), typing: true, activeTool: true,
+    turn: turn({ status: 'running', finishedAt: null, usage: null, execution: compactExecution }), activeTool: true,
   } });
   flushSync();
   const summary = document.querySelector('[data-testid=turn-summary]');
@@ -175,7 +189,7 @@ test('a compaction turn identifies maintenance even before provider progress arr
 
 test('mid-turn compaction hides reply activity without labelling the whole turn as compaction time', () => {
   running = mount(TurnSummary, { target: document.body, props: {
-    turn: turn({ status: 'running', finishedAt: null }), typing: true,
+    turn: turn({ status: 'running', finishedAt: null }),
     progress: { turnId: 'turn-1', phase: 'compacting', detail: null, at: Date.now(), providerAt: Date.now() + 1 },
   } });
   flushSync();

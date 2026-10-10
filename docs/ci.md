@@ -189,6 +189,11 @@ measured on Linux on 2026-10-09 against `main` at `a5646a7e` built the same
 way (3,690,646 against 3,689,413): the account fallback and the title model
 chosen by family. It fits under the same 3,710,000 limit.
 
+Managed releases that follow their publisher, Claude's on Windows, add about
+7 KB: reading the version file and the manifest, the forward-only rule and the
+update joining an older download. Merged with `main` at `2ffd95e0`, they measured
+3,703,464 bytes on Linux on 2026-10-10, under the same 3,710,000 limit.
+
 Recent's Done and Working groups measured 3,949,936 UI bytes on 2026-10-03
 before integrating these orchestration additions. The combined build measured
 3,961,330 UI bytes and 3,239,585 emitted core JavaScript bytes on the same day.

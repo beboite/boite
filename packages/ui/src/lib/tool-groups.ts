@@ -26,7 +26,8 @@ export type PartRun = { kind: 'part'; index: number } | { kind: 'activity'; indi
  * the point. So does an edit whose input spells out its change, the diff
  * `ToolCard` draws when the driver attaches none. Failed attempts stay in the run.
  */
-function standsAlone(part: ToolPart): boolean {
+function standsAlone(part: ToolPart, groupChanges: boolean): boolean {
+  if (groupChanges && !(part.documents ?? []).some(doc => doc.kind !== 'diff')) return false;
   if ((part.documents?.length ?? 0) > 0) return true;
   if (typeof part.inputText === 'string' || part.status === 'error' || part.status === 'denied') return false;
   return describeTool(part.name, part.input).change !== null;
@@ -54,7 +55,7 @@ export function activityShown(parts: readonly ActivityPart[], thinkingLive: bool
  * the message only, its runs indexed as in the whole message: what one row of
  * a long message draws, and what a memory notice cuts a message into.
  */
-export function partRuns(parts: readonly MessagePart[], from = 0, to = parts.length): PartRun[] {
+export function partRuns(parts: readonly MessagePart[], from = 0, to = parts.length, groupChanges = false): PartRun[] {
   const runs: PartRun[] = [];
   let open: { kind: 'activity'; indices: number[] } | null = null;
   for (let index = from; index < to; index += 1) {
@@ -66,7 +67,7 @@ export function partRuns(parts: readonly MessagePart[], from = 0, to = parts.len
     if (!folds) {
       open = null;
       runs.push({ kind: 'part', index });
-    } else if (part.type === 'tool' && standsAlone(part)) {
+    } else if (part.type === 'tool' && standsAlone(part, groupChanges)) {
       open = null;
       runs.push({ kind: 'activity', indices: [index] });
     } else if (open) {

@@ -660,8 +660,12 @@ both. `tests/e2e/chat-scroll.test.ts` checks desktop and phone.
 Tool cards retain full input/output on expansion. Consecutive calls fold into a
 count-based summary in first-seen kind order, including failures and denials with
 a muted count. Failed edits do not count as successful changes. Expanding a
-failed call shows its diagnostic above the full input and output. A diff-producing
-call stands alone and opens its diff. Codex exit codes determine command status;
+failed call shows its diagnostic above the full input and output. File changes
+fold into the activity by default. One collapsed file summary collects successful
+changes while the turn runs, deduplicates paths and opens their diffs on demand.
+Appearance independently controls grouping and automatic change previews, per
+device. Deferred inputs and diffs load only when a preview is opened; file summaries
+reuse their arrays across text deltas. Codex exit codes determine command status;
 output text and stderr do not. Answered questions expand read-only. Turn receipts
 mean core acceptance and first assistant activity, not a protocol read receipt.
 A prompt is drawn the moment it is sent, with both receipts off, and its box
@@ -679,9 +683,10 @@ Replies use a neutral bubble, with sent prompts aligned to the right. Timestamps
 stay visible; message actions appear on hover or keyboard focus and stay
 available on touch screens. Phone bubbles use more of the conversation width.
 
-Three animated dots cover the wait before the first assistant part and text
-whose unfinished paragraph is still buffered. Streaming text owns its dots;
-active reasoning and tools show their own activity. Queued turns, disconnected
+Silent running phases show the work status without an empty reply bubble.
+Streaming answers show completed Markdown blocks and the unfinished paragraph as
+plain text, preserving completed blocks across deltas. Dots accompany actual
+answer text; active reasoning and tools show their own activity. Queued turns, disconnected
 clients, blocking questions and finished turns do not show typing. The dots
 pause on hidden pages and become static under reduced motion.
 `tests/e2e/chat-context.test.ts` checks these transitions and phone layout.

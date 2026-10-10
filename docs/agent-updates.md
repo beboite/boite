@@ -43,12 +43,19 @@ agent's version is on its machine's card and nowhere else.
 
 | Route | Applies to | Installed version | Newest version | Update |
 | --- | --- | --- | --- | --- |
-| `managed` | a release Boite downloaded into its agents directory | the release record | the version the shipped descriptor pins | `providers.install`, checksum included |
+| `managed` | a release Boite downloaded into its agents directory | the release record | the version the shipped descriptor pins, or the one its publisher names | `providers.install`, checksum included |
 | `self` | the user's own install, found on PATH or at a known path | the agent's `--version` | the npm `latest` tag, or the agent's own check | the agent's own updater |
 
 A managed release only moves with a Boite release, because its URL and SHA-256
-are pinned in the descriptor. The self route invokes the installed program with
-its descriptor's updater arguments; the program owns the download.
+are pinned in the descriptor, unless its install block names a publisher
+(`latest`, [providers](providers.md#managed-installs)). Claude on Windows does:
+each check reads Anthropic's release bucket, and the update downloads the
+release it names with the digest from its manifest. The old binary is never
+run to update itself, so a crash of an old release's own updater cannot stop
+it. Such a release only moves forward: after a restart, before the publisher is
+read again, the pin may be older than what is on disk, and it is not offered.
+The self route invokes the installed program with its descriptor's updater
+arguments; the program owns the download.
 
 A profile opts in with an `update` block:
 
@@ -173,7 +180,8 @@ on the next core like any turn it cut.
   update asked for during a version check starts once that check has landed.
 - Versions compare by their numbers; a pre-release is older than its release.
   The self route offers only a newer version. The managed route offers whatever
-  the descriptor pins, since a Boite release may pin an older, working one.
+  the descriptor pins, since a Boite release may pin an older, working one; a
+  release that follows its publisher offers only a newer one.
 - An updater that exits with zero and leaves the version unchanged while a
   newer release is known is reported as failed, with the version it still
   reports and the last line of its output that names a failure or a skip.

@@ -32,19 +32,19 @@ type MemoryRun = { kind: 'memory'; key: string; events: MemoryEvent[] };
  * its runs keep the indices they have in the whole message, and a notice shows in
  * the row that holds its part, the last row for one anchored at the message's end.
  */
-export function memoryPartRuns(parts: MessagePart[], events: MemoryEvent[], from = 0, to = parts.length): (PartRun | MemoryRun)[] {
-  if (!events.length) return partRuns(parts, from, to);
+export function memoryPartRuns(parts: MessagePart[], events: MemoryEvent[], from = 0, to = parts.length, groupChanges = false): (PartRun | MemoryRun)[] {
+  if (!events.length) return partRuns(parts, from, to, groupChanges);
   const boundaries = new Map<number, MemoryEvent[]>();
   for (const event of events) {
     const index = Math.max(0, Math.min(event.anchor?.partIndex ?? parts.length, parts.length));
     if (index < from || (index >= to && to < parts.length)) continue;
     boundaries.set(index, [...(boundaries.get(index) ?? []), event]);
   }
-  if (boundaries.size === 0) return partRuns(parts, from, to);
+  if (boundaries.size === 0) return partRuns(parts, from, to, groupChanges);
   const runs: (PartRun | MemoryRun)[] = [];
   let start = from;
   for (const [end, notices] of [...boundaries].sort((a, b) => a[0] - b[0])) {
-    runs.push(...partRuns(parts, start, end));
+    runs.push(...partRuns(parts, start, end, groupChanges));
     // Group consecutive stops only when their reason and threshold match.
     for (const [index, event] of notices.entries()) {
       const previous = runs.at(-1);
@@ -55,7 +55,7 @@ export function memoryPartRuns(parts: MessagePart[], events: MemoryEvent[], from
     }
     start = end;
   }
-  runs.push(...partRuns(parts, start, to));
+  runs.push(...partRuns(parts, start, to, groupChanges));
   return runs;
 }
 
