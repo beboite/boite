@@ -449,6 +449,11 @@ test('a draft names its project in the heading and the dropdown moves it to anot
   search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
   await waitFor(() => store.draft?.projectId === 'p-boite');
   await waitFor(() => document.querySelector('[data-testid=draft-project-menu]') === null);
+  await waitFor(() => (query('[data-testid=draft-empty]').textContent ?? '').includes('boite'));
+  // The draft row moved with it, and the composer took the keyboard back.
+  await waitFor(() => query('[data-testid=project][data-project-id=p-boite]').querySelector('[data-testid=draft-row]') !== null);
+  expect(query('[data-testid=project][data-project-id=p-notes]').querySelector('[data-testid=draft-row]')).toBeNull();
+  await waitFor(() => document.activeElement === document.querySelector('[data-testid=composer-input]'));
 
   // Focus back on the trigger, Escape still closes the list.
   const trigger = query<HTMLButtonElement>('[data-testid=draft-project]');
@@ -456,11 +461,6 @@ test('a draft names its project in the heading and the dropdown moves it to anot
   await waitFor(() => document.querySelector('[data-testid=draft-project-menu]') !== null);
   trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   await waitFor(() => document.querySelector('[data-testid=draft-project-menu]') === null);
-  await waitFor(() => (query('[data-testid=draft-empty]').textContent ?? '').includes('boite'));
-  // The draft row moved with it, and the composer took the keyboard back.
-  await waitFor(() => query('[data-testid=project][data-project-id=p-boite]').querySelector('[data-testid=draft-row]') !== null);
-  expect(query('[data-testid=project][data-project-id=p-notes]').querySelector('[data-testid=draft-row]')).toBeNull();
-  await waitFor(() => document.activeElement === document.querySelector('[data-testid=composer-input]'));
 
   // The store is the singleton every test shares: the draft goes back out.
   store.editComposerText('draft', '');
