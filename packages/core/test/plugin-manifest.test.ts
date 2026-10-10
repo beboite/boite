@@ -119,9 +119,26 @@ describe('the plugin manifest', () => {
 });
 
 describe('the recommended list', () => {
-  test('kebacc-switcher is its one entry, with the release assets and digests it always had', () => {
-    expect(RECOMMENDED.map((manifest) => manifest.id)).toEqual(['kebacc-switcher']);
-    const kebacc = RECOMMENDED[0]!;
+  test('Bots comes first, then kebacc-switcher', () => {
+    expect(RECOMMENDED.map((manifest) => manifest.id)).toEqual(['bots', 'kebacc-switcher']);
+  });
+
+  test('Bots is a desktop app, from its v0.1.4 release assets and digests', () => {
+    const bots = RECOMMENDED.find((manifest) => manifest.id === 'bots')!;
+    expect(bots.version).toBe('0.1.4');
+    expect(bots.executable).toBe('bots');
+    expect(bots.provides).toEqual({ desktopApp: {} });
+    expect(bots.artifacts['win32-x64']).toEqual({
+      url: 'https://github.com/beboite/bots/releases/download/v0.1.4/bots-x86_64-pc-windows-msvc.exe',
+      sha256: 'd39d6aa1883f45d6a96d89e6032fd75e466001313a5da336b1764c6254cb0553',
+    });
+    expect(bots.artifacts['linux-arm64']?.sha256).toBe('f7416340b2e700c5be1a2be0d8e660dd85eae3ed24ad9f83dbc2428f5690f054');
+    expect(Object.keys(bots.artifacts)).toHaveLength(6);
+    for (const artifact of Object.values(bots.artifacts)) expect(artifact?.url).toMatch(/^https:\/\/github\.com\/beboite\/bots\/releases\/download\/v0\.1\.4\/bots-/);
+  });
+
+  test('kebacc-switcher keeps the release assets and digests it always had', () => {
+    const kebacc = RECOMMENDED.find((manifest) => manifest.id === 'kebacc-switcher')!;
     expect(kebacc.version).toBe('2.0.1');
     expect(kebacc.executable).toBe('kebacc');
     expect(kebacc.provides.accountPools?.providers).toEqual(['claude', 'codex', 'antigravity']);

@@ -1,6 +1,44 @@
 [
   {
     "schema": 1,
+    "id": "bots",
+    "name": "B.O.T.S",
+    "version": "0.1.4",
+    "description": "Little robots on your desktop that follow your Boite agents, answer your questions and keep you company while you work.",
+    "homepage": "https://github.com/beboite/bots",
+    "executable": "bots",
+    "artifacts": {
+      "win32-x64": {
+        "url": "https://github.com/beboite/bots/releases/download/v0.1.4/bots-x86_64-pc-windows-msvc.exe",
+        "sha256": "d39d6aa1883f45d6a96d89e6032fd75e466001313a5da336b1764c6254cb0553"
+      },
+      "win32-arm64": {
+        "url": "https://github.com/beboite/bots/releases/download/v0.1.4/bots-aarch64-pc-windows-msvc.exe",
+        "sha256": "0dbbf835c85559e3d4c16a24e4e7acf63cd4f5dcfba3f558b0b555f4d10a9272"
+      },
+      "darwin-x64": {
+        "url": "https://github.com/beboite/bots/releases/download/v0.1.4/bots-x86_64-apple-darwin",
+        "sha256": "45d056ba52d9342ff03241f6adeef561cf6496451d233505dad5c2909a32fe37"
+      },
+      "darwin-arm64": {
+        "url": "https://github.com/beboite/bots/releases/download/v0.1.4/bots-aarch64-apple-darwin",
+        "sha256": "f2f9c1cf77009e008dc63b0d9981910d180b1ffc77aba9d25be9d9c24c878302"
+      },
+      "linux-x64": {
+        "url": "https://github.com/beboite/bots/releases/download/v0.1.4/bots-x86_64-unknown-linux-gnu",
+        "sha256": "98d43e9729736af212d362502ae8b3dfadf8d140b6a8d715fb7107136e7baba7"
+      },
+      "linux-arm64": {
+        "url": "https://github.com/beboite/bots/releases/download/v0.1.4/bots-aarch64-unknown-linux-gnu",
+        "sha256": "f7416340b2e700c5be1a2be0d8e660dd85eae3ed24ad9f83dbc2428f5690f054"
+      }
+    },
+    "provides": {
+      "desktopApp": {}
+    }
+  },
+  {
+    "schema": 1,
     "id": "kebacc-switcher",
     "name": "kebacc-switcher",
     "version": "2.0.1",

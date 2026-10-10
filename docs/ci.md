@@ -133,9 +133,9 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 591,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,450,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,460,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 3,736,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 3,740,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
@@ -147,8 +147,11 @@ UI about 4,400 for relay routes, the member's notification target and the
 English/French sentences. Merged with `bbffc85a`, the UI measured about
 4,445,700 bytes and the core about 3,731,800. `budgets.json` then held 4,442,000
 and 3,722,000, raised by `27aa04a8` and `bbffc85a` without this table, which
-still said 4,435,000 and 3,714,000. The limits rise to 4,450,000 and 3,736,000,
-about 4 KB each to spare.
+still said 4,435,000 and 3,714,000. The limits rose to 4,450,000 and
+3,736,000. Merged with `b1faab5e`, whose project search had raised the UI limit
+to 4,460,000, the UI measured 4,455,331 bytes, within it, and the core
+3,733,915, 2,085 bytes under its limit after the plugin changes merged
+meanwhile. The core limit rises to 3,740,000.
 
 On 2026-10-10, `bun run build:ui` with Bun 1.4.2 measured 4,420,649 UI bytes at
 `feeb393b` and 4,425,557 with close confirmation and typed agent archival.
@@ -293,6 +296,13 @@ the group card, its sentences in two languages and the group links, within its
 unchanged limit; the core gains 50,145 bytes for the roster, sealing, tickets
 and the join route. The core total limit becomes 3,420,000 bytes, 28,512 above
 this measurement; the entry and `main.js` limits are unchanged.
+
+On 2026-10-10 on Linux, `origin/main` at `bbffc85a` measured about 4,441,400 UI
+bytes, under 1 KB below its limit. The draft's searchable project dropdown
+measured 4,450,765 bytes, and Windows desktop CI 4,450,386 on its first head:
+about 9,400 bytes for the search, the keyboard walk, the machine groups and two
+sentences in each language. The UI limit rises to 4,460,000, 9,235 bytes above
+the Linux build; the entry and core limits are unchanged.
 Explain measured growth when changing a limit. Shared-runner timings are not gated. Earlier sizes and
 runner observations remain in the [dated report](../bench/results/2026-09-29-resources.md#historical-ci-measurements).
 

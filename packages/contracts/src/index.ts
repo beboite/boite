@@ -665,8 +665,11 @@ export interface PluginAppState {
   startedAt: Timestamp | null;
 }
 
-/** What `ui.reveal` shows in the owner's desktop window. `agentId` is 1 to 200 characters. */
-export type UiRevealTarget = { kind: 'thread'; threadId: ThreadId } | { kind: 'agent'; agentId: string };
+/**
+ * What `ui.reveal` shows in the owner's desktop window: a thread, an agent's
+ * page, or the app updates in Settings. `agentId` is 1 to 200 characters.
+ */
+export type UiRevealTarget = { kind: 'thread'; threadId: ThreadId } | { kind: 'agent'; agentId: string } | { kind: 'update' };
 
 export interface PluginManifest {
   schema: 1;

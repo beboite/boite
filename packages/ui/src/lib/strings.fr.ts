@@ -961,6 +961,8 @@ export const fr: Translation = {
       dontAsk: 'avec refus automatique des demandes d\'autorisation'
     },
     changeProject: 'Changer de projet',
+    searchProjects: 'Rechercher un projet',
+    noProjectMatch: 'Aucun projet ne correspond à « {query} »',
     branchHint: 'Travaille dans un worktree sur cette branche',
   },
 
