@@ -8,6 +8,12 @@ import type { Machine, Workspace } from './workspace.svelte';
 /** A machine that did not answer is asked again no sooner than this. */
 const RETRY_MS = 60_000;
 const PROBE_MS = 4000;
+/**
+ * How long a member the group brought may stay unreachable at its address
+ * before its other addresses are tried: a laptop whose Tailscale is off at home
+ * still reaches the member on the LAN, and used to dial the tailnet forever.
+ */
+const STRANDED_MS = 15_000;
 /** At start, how long the machines paired by hand are given to answer before a held key is used as it was left. */
 const VOUCH_WAIT_MS = 3000;
 
@@ -101,6 +107,9 @@ export class GroupLinks {
   #attempts = new Map<string, number>();
   #movedAt = new Map<string, number>();
   #running = new Set<string>();
+  /** Per machine address, since when a member the group brought has not been connected there. */
+  #downSince = new Map<string, number>();
+  #rehoming = new Set<string>();
   #reach: (addresses: string[]) => Promise<string | null>;
   #secure: () => boolean;
   #now: () => number;
@@ -188,6 +197,9 @@ export class GroupLinks {
     }
     // Remembered machines are still being added: one of them may be the member that looks missing.
     if (!this.workspace.settled) return;
+    // Moved first, so the pass below finds the member where it now answers.
+    const stranded = this.workspace.machines.filter((machine) => this.#stranded(machine));
+    const moved = new Set((await Promise.all(stranded.map(async (machine) => (await this.#rehome(machine)) ? machine.coreId : undefined))).filter((id) => id !== undefined));
     // Only a machine that has answered about its group speaks here; one still loading neither vouches nor denies.
     const informed = this.workspace.machines.filter((machine) => machine.store.connection === 'ready' && machine.store.client !== null && machine.store.groupKnown);
     if (informed.length === 0) return;
@@ -217,6 +229,8 @@ export class GroupLinks {
     const starting: { core: GroupCore; via: Machine; addresses: string[] }[] = [];
     for (const [coreId, state] of Object.entries(this.states)) if (wanted.has(coreId)) states[coreId] = state;
     for (const [coreId, { core, via, addresses }] of wanted) {
+      // Just moved to another address: it connects there with its own key.
+      if (moved.has(coreId)) continue;
       let existing = this.workspace.machines.find((machine) => GroupLinks.coreOf(machine) === coreId);
       // A key the group handed out for an address the machine no longer gives, or no longer
       // allows now that it has HTTPS, is not sent there again: the machine is reached anew.
@@ -235,6 +249,62 @@ export class GroupLinks {
     // Written before any attempt starts: one that ends at once writes its own state after this.
     this.states = states;
     for (const { core, via, addresses } of starting) void this.#connect(core, via, addresses);
+  }
+
+  /**
+   * Whether a member the group brought has been away from its address for
+   * `STRANDED_MS`. The first time it is seen away, another pass is planned for
+   * when that time is up: nothing else may happen to wake one.
+   */
+  #stranded(machine: Machine): boolean {
+    if (machine.coreId === undefined || machine.store.connection === 'ready') {
+      this.#downSince.delete(machine.id);
+      return false;
+    }
+    const since = this.#downSince.get(machine.id);
+    if (since === undefined) {
+      this.#downSince.set(machine.id, this.#now());
+      setTimeout(() => void this.reconcile(), STRANDED_MS + 100);
+      return false;
+    }
+    return this.#now() - since >= STRANDED_MS && !this.#rehoming.has(machine.id);
+  }
+
+  /**
+   * A member silent at its address is tried at the others it gives, and moves,
+   * key and all, to the first that answers. The addresses are those the
+   * machines paired by hand agree on, or with none of them connected, the
+   * member's own: it gave them over its signed roster, and only those written
+   * as numbers, or HTTPS, may carry the key (`usableAddresses`). The key is the
+   * member's own session and is good at any of its addresses.
+   */
+  async #rehome(machine: Machine): Promise<boolean> {
+    const coreId = machine.coreId!;
+    const saved = readEnvironments().find((entry) => entry.url === machine.id);
+    if (saved === undefined || saved.token === '' || machine.groupId === undefined) return false;
+    const anchors = this.workspace.machines.filter((other) => other.coreId === undefined && other.store.connection === 'ready' && other.store.group?.id === machine.groupId);
+    const own = machine.store.group?.id === machine.groupId ? machine.store.group.cores.find((core) => core.coreId === coreId) : undefined;
+    const listed = anchors.length > 0 ? this.#agreed(coreId, machine.groupId, anchors) : usableAddresses(own?.addresses ?? [], this.#secure());
+    const others = listed.filter((address) => address !== machine.id && !this.workspace.machines.some((other) => other.id === address) && !isDropped(address, machine.epoch));
+    if (others.length === 0) return false;
+    this.#rehoming.add(machine.id);
+    try {
+      const url = await this.#reach(others);
+      // Back at its own address meanwhile, or gone: nothing to move.
+      if (url === null || machine.store.connection === 'ready' || !this.workspace.machines.includes(machine)) return false;
+      // The name it was saved under: the one on screen may carry the old address to tell twins apart.
+      if (!(await this.workspace.readdress(machine, url, saved.token, saved.label || machine.label))) return false;
+      this.#downSince.delete(machine.id);
+      return true;
+    } catch {
+      // The next pass tries again.
+      return false;
+    } finally {
+      this.#rehoming.delete(machine.id);
+      // Still here: the next try waits its turn again.
+      if (this.workspace.machines.includes(machine)) this.#downSince.set(machine.id, this.#now());
+      else this.#downSince.delete(machine.id);
+    }
   }
 
   /**

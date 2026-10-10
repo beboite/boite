@@ -130,6 +130,48 @@ try {
     }
     await page!.screenshot(join(outDir, `${label}-after-reload.png`));
   });
+  if (desktop && process.env.BENCH_SWITCH === '1') {
+    await step('network-switch', async () => {
+      // The laptop leaves the network the server answered on first: Wi-Fi off away from
+      // home, or Tailscale off at home. The server stays reachable on the other one.
+      const machines = `[...document.querySelectorAll('[data-testid=machine-card]')].map(c => c.dataset.machineId + ':' + (c.querySelector('.status')?.textContent ?? '')).join(' ')`;
+      await page!.click('[data-testid=nav-settings]');
+      await page!.click('[data-testid=settings-tab-machines]');
+      await page!.waitFor(`document.querySelectorAll('[data-testid=machine-card] .status.ready').length >= 2`, 30_000);
+      const before = await page!.evaluate<string>(machines);
+      const viaTailnet = before.includes('100.80.1.10');
+      const dropped = viaTailnet ? 'tailscale0' : 'eth0';
+      const other = viaTailnet ? '192.168.50.10' : '100.80.1.10';
+      await page!.click('[data-testid=settings-back]');
+      await page!.waitFor(threadVisible, 30_000);
+      await page!.click(`[data-testid=thread-row][data-thread-id="${title}"]`);
+      await page!.waitFor(`document.querySelector('[data-testid=composer-input]')`, 15_000);
+      // Reading the thread when the network goes; the next prompt is typed a few seconds later.
+      Bun.spawnSync(['ip', 'link', 'set', dropped, 'down']);
+      const started = Date.now();
+      await Bun.sleep(5_000);
+      const again = `${prompt} after leaving ${dropped}`;
+      await tap('[data-testid=composer-input]');
+      await page!.waitFor(`document.activeElement?.dataset.testid === 'composer-input'`, 5_000);
+      await page!.send('Input.insertText', { text: again });
+      await page!.waitFor(`!document.querySelector('[data-testid=composer-send]').disabled`, 15_000);
+      await page!.click('[data-testid=composer-send]');
+      try {
+        await page!.waitFor(`[...document.querySelectorAll('[data-testid=message][data-role=assistant]')].some(m => m.textContent.includes(${JSON.stringify(again)}))`, 180_000);
+      } finally {
+        await page!.screenshot(join(outDir, `${label}-switched.png`));
+      }
+      const answered = Date.now() - started;
+      await page!.click('[data-testid=nav-settings]');
+      await page!.click('[data-testid=settings-tab-machines]');
+      const after = await page!.evaluate<string>(machines);
+      await page!.click('[data-testid=settings-back]');
+      Bun.spawnSync(['ip', 'link', 'set', dropped, 'up']);
+      if (dropped === 'tailscale0') Bun.spawnSync(['ip', 'route', 'replace', '100.64.0.0/10', 'dev', dropped]);
+      if (!after.includes(other)) throw new Error(`answered, but not through ${other}: ${after}`);
+      return `${dropped} down, answered through ${other} ${answered} ms later`;
+    });
+  }
   const dev = process.env.BENCH_DEV;
   if (dev) {
     if (!desktop) await step('outage-on-list', async () => {

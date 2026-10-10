@@ -672,6 +672,33 @@ export class Workspace {
    * key is forgotten and the window goes back to its own core. The entry
    * follows the store, and a machine already listed at that address gives way.
    */
+  /**
+   * A machine the group brought, reached again at another address it gives,
+   * with the key it already holds. The window's main machine switches in
+   * place, keeping its place at the top; any other is listed anew. The old
+   * address is forgotten without marking it dropped: the machine only moved.
+   */
+  async readdress(machine: Machine, url: string, token: string, label: string): Promise<boolean> {
+    if (machine.coreId === undefined || machine.groupId === undefined) return false;
+    const brought = { coreId: machine.coreId, groupId: machine.groupId };
+    const endpoint = { url, token, paired: true, ...brought, ...(machine.epoch === undefined ? {} : { epoch: machine.epoch }) };
+    if (machine.store !== store) {
+      await this.remove(machine.id, false);
+      return this.add(endpoint, label, true);
+    }
+    ++this.#generation;
+    upsertEnvironment({ ...endpoint, label });
+    const old = machine.id;
+    // Prompts written while it was silent wait in the outbox: the switch would empty it, and the
+    // core is the same one, so they go out from the new address. Drafts in progress stay too.
+    const kept = Object.entries(store.composerStates).filter(([, state]) => state.queued.length > 0 || state.text !== '');
+    await store.switchEnvironment(url);
+    if (kept.length > 0) store.composerStates = { ...store.composerStates, ...Object.fromEntries(kept) };
+    store.environments = removeBrought(old, brought);
+    this.machines = [this.#primaryMachine(readStoredEndpoint(), readEnvironments()), ...this.machines.filter((m) => m.store !== store)];
+    return store.connection === 'ready';
+  }
+
   async dropPrimary(id: string, dropped = false): Promise<void> {
     ++this.#generation;
     // A machine paired by hand first, never the address being dropped: a page that address

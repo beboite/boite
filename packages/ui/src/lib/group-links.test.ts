@@ -41,7 +41,11 @@ function workspace(machines: Machine[]) {
       removed.push(id);
       stub.machines = stub.machines.filter((entry) => entry.id !== id);
     }),
-    dropPrimary: vi.fn(async (_id: string, _dropped?: boolean) => undefined)
+    dropPrimary: vi.fn(async (_id: string, _dropped?: boolean) => undefined),
+    readdress: vi.fn(async (entry: Machine, url: string, token: string, label: string) => {
+      await stub.remove(entry.id, false);
+      return stub.add({ url, token, paired: true, coreId: entry.coreId, groupId: entry.groupId, ...(entry.epoch === undefined ? {} : { epoch: entry.epoch }) }, label, true);
+    })
   };
   return { stub, added, removed, workspace: stub as unknown as Workspace };
 }
@@ -129,6 +133,67 @@ describe('group links', () => {
     await links.reconcile();
     await settle();
     expect(added.map((entry) => entry.endpoint.coreId)).toEqual(['b']);
+  });
+
+  it('moves a member that went silent at its tailnet address to the LAN address that answers, with its own key', async () => {
+    localStorage.setItem(ENVIRONMENTS_STORAGE_KEY, JSON.stringify([{ url: 'http://100.64.0.2:1', label: 'B', token: 'key', paired: true, coreId: 'b', groupId: 'grp' }]));
+    const a = machine('http://10.0.0.1:1', { group: group('a', members) });
+    // Tailscale is off on this laptop: the socket keeps dialling the tailnet address.
+    const b = machine('http://100.64.0.2:1', { connection: 'connecting', client: null }, { coreId: 'b' });
+    const { workspace: ws, added, removed } = workspace([a, b]);
+    let now = 1_000_000;
+    const reach = vi.fn(async (addresses: string[]) => addresses.find((address) => address.includes('192.168.')) ?? null);
+    const links = new GroupLinks(ws, { reach, secure: () => false, now: () => now });
+    await links.reconcile();
+    await settle();
+    // Fifteen seconds of grace: a socket that is only reconnecting is left alone.
+    expect(reach).not.toHaveBeenCalled();
+    now += 15_000;
+    await links.reconcile();
+    await settle();
+    // The addresses the machine paired by hand gives for it, the name left out.
+    expect(reach).toHaveBeenCalledWith(['http://192.168.1.20:1']);
+    expect(removed).toEqual(['http://100.64.0.2:1']);
+    expect(added).toEqual([{ endpoint: { url: 'http://192.168.1.20:1', token: 'key', paired: true, coreId: 'b', groupId: 'grp', epoch: 1 }, label: 'B', quiet: true }]);
+  });
+
+  it('moves a silent member on its own roster when no machine paired by hand is connected', async () => {
+    localStorage.setItem(ENVIRONMENTS_STORAGE_KEY, JSON.stringify([{ url: 'http://100.64.0.2:1', label: 'B', token: 'key', paired: true, coreId: 'b', groupId: 'grp' }]));
+    // The window opened on this member, so the group marked every machine it lists.
+    const a = machine('http://10.0.0.1:1', { group: group('a', members) }, { coreId: 'a' });
+    const b = machine('http://100.64.0.2:1', { connection: 'closed', client: null, group: group('b', members) }, { coreId: 'b' });
+    const { workspace: ws, added, removed } = workspace([a, b]);
+    let now = 1_000_000;
+    const reach = vi.fn(async (addresses: string[]) => addresses[0] ?? null);
+    const links = new GroupLinks(ws, { reach, secure: () => false, now: () => now });
+    await links.reconcile();
+    now += 15_000;
+    await links.reconcile();
+    await settle();
+    expect(reach).toHaveBeenCalledWith(['http://192.168.1.20:1']);
+    expect(removed).toEqual(['http://100.64.0.2:1']);
+    expect(added.map((entry) => entry.endpoint.url)).toEqual(['http://192.168.1.20:1']);
+  });
+
+  it('leaves a silent member where it is when no other address answers', async () => {
+    localStorage.setItem(ENVIRONMENTS_STORAGE_KEY, JSON.stringify([{ url: 'http://100.64.0.2:1', label: 'B', token: 'key', paired: true, coreId: 'b', groupId: 'grp' }]));
+    const a = machine('http://10.0.0.1:1', { group: group('a', members) });
+    const b = machine('http://100.64.0.2:1', { connection: 'closed', client: null }, { coreId: 'b' });
+    const { workspace: ws, added, removed } = workspace([a, b]);
+    let now = 1_000_000;
+    const reach = vi.fn(async () => null);
+    const links = new GroupLinks(ws, { reach, secure: () => false, now: () => now });
+    await links.reconcile();
+    now += 15_000;
+    await links.reconcile();
+    await settle();
+    expect(reach).toHaveBeenCalledTimes(1);
+    expect(removed).toEqual([]);
+    expect(added).toEqual([]);
+    // Tried again only after another fifteen seconds.
+    await links.reconcile();
+    await settle();
+    expect(reach).toHaveBeenCalledTimes(1);
   });
 
   it('never claims a machine paired by hand that sits at a member\'s address', async () => {

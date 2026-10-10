@@ -115,6 +115,19 @@ written as numbers. A name over plain HTTP is whatever the client's resolver
 says it is, so a client never sends a ticket or a key to one. A pairing link
 follows the same rule.
 
+A member a client reached through the group stays at the address that answered
+first. When that address goes silent for 15 seconds, a laptop leaving home or
+turning Tailscale off, the client tries the member's other usable addresses and
+moves to the first that answers, with the key it already holds: the key is the
+member's own session and is good at any of its addresses. The addresses are the
+ones the machines paired by hand agree on, or with none of them connected, the
+ones the member gave in its own roster. The window's main machine switches in
+place and keeps its outbox, so prompts written while it was silent go out from
+the new address (`group-links.svelte.ts`, `workspace.readdress`). Before this,
+the client dialled the silent address until the network came back.
+`tests/network/` checks it with a desktop that loses its LAN while the tailnet
+stays up.
+
 The core reads its tailnet address off Tailscale's own network interface
 (`tailscale0`, `Tailscale`, or on macOS a `utun` that also carries a Tailscale
 IPv6 address) and its MagicDNS name from the PTR record Tailscale's resolver

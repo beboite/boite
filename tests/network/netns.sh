@@ -4,7 +4,7 @@
 set -euo pipefail
 mount -t tmpfs none /run
 mkdir -p /run/netns
-for ns in srv lan-phone lan-desk ts-phone ts-desk; do ip netns add "$ns"; done
+for ns in srv lan-phone lan-desk ts-phone ts-desk both-desk; do ip netns add "$ns"; done
 ip link set lo up
 ip link add br-lan type bridge forward_delay 0; ip link set br-lan up
 ip link add br-ts mtu 1280 type bridge forward_delay 0; ip link set br-ts up
@@ -39,10 +39,13 @@ attach_lan lan-phone 192.168.50.20
 attach_lan lan-desk 192.168.50.30
 attach_ts ts-phone 100.80.1.20
 attach_ts ts-desk 100.80.1.30
+# A laptop on the home LAN that also runs Tailscale.
+attach_lan both-desk 192.168.50.40
+attach_ts both-desk 100.80.1.40
 
 # The home router: every LAN host routes the internet through it.
 ip addr add 192.168.50.1/24 dev br-lan
-for ns in srv lan-phone lan-desk; do ip -n "$ns" route add default via 192.168.50.1; done
+for ns in srv lan-phone lan-desk both-desk; do ip -n "$ns" route add default via 192.168.50.1; done
 
 # MagicDNS: the tailnet name of the server.
 cp /etc/hosts /run/hosts
@@ -50,11 +53,11 @@ printf '100.80.1.10 boite-srv.tail-fake.ts.net boite-srv\n' >> /run/hosts
 mount --bind /run/hosts /etc/hosts
 # A tailnet through a DERP relay: BENCH_TS_NETEM="delay 150ms 50ms loss 3%" say.
 if [ -n "${BENCH_TS_NETEM:-}" ]; then
-  for dev in t-srv t-ts-phone t-ts-desk; do "${TC:-tc}" qdisc add dev "$dev" root netem $BENCH_TS_NETEM; done
+  for dev in t-srv t-ts-phone t-ts-desk t-both-desk; do "${TC:-tc}" qdisc add dev "$dev" root netem $BENCH_TS_NETEM; done
 fi
 
 # Wait for every veth to carry: an address on a link still coming up is not listed.
-for ns in srv lan-phone lan-desk ts-phone ts-desk; do
+for ns in srv lan-phone lan-desk ts-phone ts-desk both-desk; do
   for _ in $(seq 50); do
     ip -n "$ns" -br link | awk '$2 == "DOWN" { down = 1 } END { exit down }' && break
     sleep 0.1

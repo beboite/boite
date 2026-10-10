@@ -56,10 +56,10 @@ async function phone(ns: string, label: string, url: string) {
   results.push({ url, ...JSON.parse(line) });
   console.error(`[bench] ${label}: ${JSON.parse(line).ok ? 'OK' : 'FAIL'}`);
 }
-async function desktop(ns: string, label: string, localPort: number) {
+async function desktop(ns: string, label: string, localPort: number, extra: Record<string, string> = {}) {
   if (!wanted(label)) return;
   const local = await startCore(ns, [], localPort);
-  const env = { ...devOf(ns), BENCH_RESOLVER_RULES: `MAP tauri.localhost 127.0.0.1:${localPort}` };
+  const env = { ...devOf(ns), ...extra, BENCH_RESOLVER_RULES: `MAP tauri.localhost 127.0.0.1:${localPort}` };
   const marker = `/run/bench-watching-${label}`;
   const watcher = (async () => {
     for (let i = 0; i < 600 && !(await Bun.file(marker).exists()); i++) await Bun.sleep(100);
@@ -106,6 +106,7 @@ try {
   await rpc('srv', srv.dataDir, 'group.create', { name: 'Maison' });
   await desktop('lan-desk', 'desktop-lan', 7400);
   await desktop('ts-desk', 'desktop-ts', 7402);
+  await desktop('both-desk', 'desktop-both', 7404, { BENCH_SWITCH: '1' });
 } finally {
   for (const p of procs) p.kill();
   await Promise.all(procs.map((p) => p.exited));
