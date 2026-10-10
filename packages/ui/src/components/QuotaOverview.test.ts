@@ -100,4 +100,11 @@ test('the headline and reset come from the primary window, weekly first unless D
   expect(article().querySelector('.amount')!.textContent).toBe('49%');
   expect(article().querySelectorAll('.mini-window')).toHaveLength(2);
   expect(article().querySelector('.caption.reset')!.textContent).toBe(quotaResetTime(soon));
+  unmount(component);
+  document.body.innerHTML = '';
+  // A primary without a reset shows none rather than another window's.
+  const unknown: AccountQuota = { ...row, windows: [{ ...windows[0]!, resetsAt: null, primary: true }, windows[1]!] };
+  component = mount(QuotaOverview, { target: document.body, props: { rows: [unknown], connect: () => {} } });
+  flushSync();
+  expect(article().querySelector('.caption.reset')).toBeNull();
 });

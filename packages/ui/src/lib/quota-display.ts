@@ -15,7 +15,7 @@ export interface ShownWindows {
 function weekly(window: QuotaWindow): boolean {
   const id = window.id.toLowerCase();
   if (id.startsWith('model:') || /^seven[-_]day[-_]./.test(id)) return false;
-  return /week|seven|\b7 ?d\b/.test(`${id} ${window.label.toLowerCase()}`);
+  return /week|seven|\b7\s*-?d/.test(`${id} ${window.label.toLowerCase()}`);
 }
 
 /**

@@ -26,7 +26,7 @@ test("the window Douane flags primary leads instead", () => {
 });
 
 test('native ids and labels count as weekly', () => {
-  for (const window of [{ id: 'seven_day', label: 'Weekly' }, { id: 'secondary', label: 'Weekly' }, { id: '3p-weekly', label: 'Third-party' }, { id: 'w', label: '7d' }]) {
+  for (const window of [{ id: 'seven_day', label: 'Weekly' }, { id: 'secondary', label: 'Weekly' }, { id: '3p-weekly', label: 'Third-party' }, { id: 'w', label: '7d' }, { id: 'w', label: '7-day' }, { id: 'w', label: '7 days' }]) {
     const windows = [{ id: 'five_hour', label: '5 hours', usedPercent: 0, resetsAt: null }, { ...window, usedPercent: 0, resetsAt: null }];
     expect(shownWindows({ ...row, windows }).primary?.id).toBe(window.id);
   }

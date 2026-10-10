@@ -155,8 +155,7 @@
     {@const used = shown.primary?.usedPercent ?? null}
     {@const drained = row.windows.some((limit) => limit.usedPercent >= 100)}
     {@const stale = row.status === 'unavailable'}
-    {@const resets = windows.flatMap((limit) => limit.resetsAt === null ? [] : [limit.resetsAt])}
-    {@const reset = shown.primary?.resetsAt ?? (resets.length ? Math.min(...resets) : null)}
+    {@const reset = shown.primary?.resetsAt ?? null}
     {@const credits = quotaCredits(row)}
     {@const paid = credits !== null && drained}
     {@const percent = credits?.kind === 'budget' ? Math.max(0, Math.min(100, credits.remaining! / credits.limit! * 100)) : null}
@@ -171,7 +170,7 @@
           <span class="summary-content">
             <span class="headline">
               <span class="name ui-label" title={name}>{name}</span>
-              {#if !paid && (used !== null || row.windows.length === 0)}<span class="amount ui-label" class:low={used !== null && used >= 80} title={shown.primary ? quotaWindowName(shown.primary.label) : undefined} data-testid="quota-headline">{used === null ? strings.quotas.noReading : `${Math.round(remaining(used))}%`}</span>{/if}
+              {#if !paid}<span class="amount ui-label" class:low={used !== null && used >= 80} title={shown.primary ? quotaWindowName(shown.primary.label) : undefined} data-testid="quota-headline">{used === null ? strings.quotas.noReading : `${Math.round(remaining(used))}%`}</span>{/if}
               {#if windows.length}<ChevronDown size={12} />{/if}
             </span>
             {#if paid && credits}
