@@ -186,6 +186,8 @@ test('a notification of another member reaches a phone through the machine it in
 
   const { ticket } = await phone.call('group.ticket', { coreId: id(b) });
   const onBSocket = await connect(groupRelayUrl(a.url, id(b)), '', { ticket, relay: phone.session!.token, client: { name: 'pwa', version: '1' } });
+  // A subscription of its own on b would send b's news without the machine its thread is on.
+  await expect(onBSocket.call('push.subscribe', subscription())).rejects.toThrow('come through');
   onBSocket.close();
   await waitFor(() => a.core.relays.size === 0);
   b.core.bus.emit('question.asked', { id: 'after', threadId, text: 'Which branch?' } as RpcEvents['question.asked']);

@@ -192,10 +192,11 @@ different addresses for the member, nobody carries the client there until
 they agree, as for a direct ticket: one of them may hold an older roster and
 dial an address the member gave up.
 
-On the socket, a refusal by the relaying machine (no key for it, or a wrong
-one) is answered `Refused`, and a member it cannot reach `Unavailable`: never
-`Unauthorized`, which the client would take for its key on the member being
-revoked. A file or a view answers 404 for a machine that is not another member
+On the socket, a refusal of the relay key (no key for the relaying machine, or
+a wrong one) is answered `Refused`, and a member it cannot reach `Unavailable`:
+never `Unauthorized`, which the client would take for its key on the member
+being revoked. A first frame that is not a hello is answered `Unauthorized`, as
+on a direct socket. A file or a view answers 404 for a machine that is not another member
 and 502 when that member does not answer. Until its key is checked, a relayed
 socket counts against the same bounds as a direct one: five seconds and 64 KB
 for its hello, and the places for sockets waiting on one. Revoking the key it

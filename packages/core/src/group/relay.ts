@@ -250,7 +250,12 @@ export class RelayPipe {
       return;
     }
     if (this.upstream !== null && this.upstream.readyState === WebSocket.OPEN) {
-      this.upstream.send(text);
+      // A throw here would leave the server's handler and this pipe would stay in the hub: both sides close instead.
+      try {
+        this.upstream.send(text);
+      } catch {
+        this.close(1011, 'the other machine dropped the connection');
+      }
       return;
     }
     this.queued += Buffer.byteLength(text);
@@ -308,7 +313,11 @@ export class RelayPipe {
     upstream.onmessage = (event) => {
       if (this.closed || this.socket === null) return;
       const data = event.data;
-      this.socket.send(typeof data === 'string' ? data : Buffer.from(data as ArrayBuffer));
+      try {
+        this.socket.send(typeof data === 'string' ? data : Buffer.from(data as ArrayBuffer));
+      } catch {
+        this.close(1011, 'the connection dropped');
+      }
     };
     upstream.onclose = (event) => this.close(SENDABLE(event.code) ? event.code : 1011, event.reason || 'the other machine closed the connection');
     upstream.onerror = () => this.close(1011, 'the other machine dropped the connection');

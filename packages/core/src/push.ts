@@ -144,6 +144,9 @@ export class PushStore {
 
   subscribe(sessionId: string | null, input: Subscription) {
     const id = this.requireSession(sessionId);
+    // Its pushes go through the machine whose page it installed (`deliverAll`): one here would come without the machine the thread is on.
+    const home = deviceElsewhere(this.core, id)?.home;
+    if (home !== undefined) throw refused(`notifications of this device come through ${home.name}, the machine it was paired with: enable them there`);
     const subscription = validateSubscription(input);
     const all = this.subscriptions();
     // A new pairing of the same browser replaces its old delivery destination.

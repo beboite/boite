@@ -767,7 +767,7 @@ test('a paired phone can follow an agent link without owner-only identity RPC ac
 test('a notification another machine sent opens its thread there once connected, unless a newer tap or the user moved on', async () => {
   const { w, a, b } = await setup();
   const remote = w.machines.find((machine) => machine.store === b)!;
-  const [pc, other] = ['c'.repeat(64), 'd'.repeat(64)];
+  const pc = 'c'.repeat(64);
   await w.select(a, 't-scheduler');
   // The machine is not connected as that member yet: the tap waits for it.
   const waiting = w.openMemberThread(pc, 't-descriptors', 3000);
@@ -786,9 +786,9 @@ test('a notification another machine sent opens its thread there once connected,
   expect(await stale).toBe(false);
   expect(w.active).toBe(a);
 
-  // A newer tap takes over from an older one still waiting.
+  // A newer tap takes over from an older one still waiting for the same machine: only the newer opens it.
   remote.coreId = undefined;
-  const older = w.openMemberThread(other, 't-descriptors', 3000);
+  const older = w.openMemberThread(pc, 't-descriptors', 3000);
   const newer = w.openMemberThread(pc, 't-descriptors', 3000);
   remote.coreId = pc;
   expect(await older).toBe(false);
