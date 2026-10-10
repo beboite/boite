@@ -4,7 +4,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { PROTOCOL_VERSION } from '@boite/contracts';
-import type { Channel, CoreInfo, CoreLogContext, ThreadId } from '@boite/contracts';
+import type { Channel, CoreInfo, CoreLogContext, ThreadId, UiRevealTarget } from '@boite/contracts';
 import { CORE_VERSION } from './version.ts';
 import { AccountStore } from './accounts.ts';
 import { AgentStore } from './agents/store.ts';
@@ -67,6 +67,8 @@ export interface SubscriptionSink {
   closeSession(sessionId: string): void;
   /** Every socket an agent of this thread holds goes: the thread was archived or removed under it. */
   closeAgents(threadId: ThreadId): void;
+  /** Sends `ui.reveal` to every owner connection; returns how many it reached. */
+  reveal(target: UiRevealTarget): number;
 }
 
 export interface CoreOptions {
@@ -183,6 +185,7 @@ export class Core {
     hasSubscribers: () => false,
     closeSession: () => undefined,
     closeAgents: () => undefined,
+    reveal: () => 0,
   };
 
   /** The server answers on one more address when a group asks; a core with no server answers on none. */

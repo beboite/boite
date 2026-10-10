@@ -68,4 +68,5 @@ test('a device name the client says is cleaned or dropped, and agents never carr
   expect(sentFromOf(owner, 'pwa', 42, false)).toEqual({ client: 'pwa', device: null });
   expect(sentFromOf({ principal: 'agent', sessionId: null, threadId: 'thr_x' }, 'shell', 'pc', false)).toBeNull();
   expect(sentFromOf(owner, 'test', 'pc', false)).toBeNull();
+  expect(sentFromOf(owner, 'plugin', 'pc', false)).toBeNull();
 });

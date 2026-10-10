@@ -7,6 +7,7 @@ import type { Journal } from './journal.ts';
 import { MemoryGuard } from './memory-guard.ts';
 import type { MemoryProcess } from './memory-guard-logic.ts';
 import { processPlatform } from './platform/index.ts';
+import { type KnownProcess, type ProcessIdentity, unseenIdentity } from './process-identity.ts';
 import { stopGroup } from './platform/posix-kill.ts';
 import type { GuardStatus, NativeProcessExit, NativeProcessInfo, ProcessPlatform } from './platform/types.ts';
 import { ResourceCollection } from './resource-usage.ts';
@@ -24,6 +25,12 @@ export interface SpawnOptions {
    * DevTools protocol over two of them instead of a port anyone could reach.
    */
   extraPipes?: number;
+  /**
+   * `spawn` only: let the child show its windows; Windows applies `windowsHide`
+   * to a GUI program's first window too. The focus and audio guards then leave
+   * the thread's processes, its job's included, alone: they are the user's app.
+   */
+  showWindow?: boolean;
 }
 
 export type ChildProcess = Bun.Subprocess<'ignore', 'pipe', 'pipe'>;
@@ -70,17 +77,6 @@ interface Entry {
   /** Off Windows, the group stop that follows: resolved once the group is gone or SIGKILLed. */
   kill(): void | Promise<void>;
   usage(): { cpuMs: number; peakMemoryBytes: number } | null;
-}
-
-interface ProcessIdentity {
-  startedAt: number | null;
-  incarnation: string | null;
-}
-
-interface KnownProcess {
-  identity: ProcessIdentity;
-  incarnations: Set<string>;
-  recordedAt: number;
 }
 
 /** How far a value moves before the load is worth another `thread.updated`. */
@@ -130,6 +126,7 @@ export class ProcRegistry {
   private readonly live = new Map<ThreadId, Map<number, Entry>>();
   /** Captured incarnations of each pid, retained to reject delayed native events. */
   private readonly known = new Map<ThreadId, Map<number, KnownProcess>>();
+  private readonly shown = new Set<ThreadId>(); // spawned with `showWindow`: no guard
   /** Forgetting a thread whose last process exited, once a late job event can no longer arrive. */
   private readonly forgetTimers = new Map<ThreadId, ReturnType<typeof setTimeout>>();
   private readonly lastLoad = new Map<ThreadId, ThreadLoad>();
@@ -280,10 +277,11 @@ export class ProcRegistry {
       ...(extra
         ? { stdio: ['ignore', 'pipe', 'pipe', ...Array.from({ length: extra }, () => 'pipe' as const)] as ['ignore', 'pipe', 'pipe'] }
         : { stdin: 'ignore' as const, stdout: 'pipe' as const, stderr: 'pipe' as const }),
-      windowsHide: true,
+      windowsHide: opts.showWindow !== true,
       detached: OWN_GROUP,
     }) as ChildProcess;
     const fds = extra ? (proc.stdio as unknown[]).slice(3).map(Number) : undefined;
+    if (opts.showWindow === true) this.shown.add(threadId);
 
     const record = this.register(threadId, proc.pid, cmd, args, {
       root: opts.agentRoot !== false,
@@ -493,7 +491,7 @@ export class ProcRegistry {
     byPid.set(record.pid, { record, identity, ...control });
     // Both spawn paths and the job's own grandchild events land here, so this is
     // the one place the guard learns a pid whose windows it has to push back.
-    this.platform.pidAdded(threadId, record.pid);
+    this.platform.pidAdded(threadId, record.pid, !this.shown.has(threadId));
 
     let seen = this.known.get(threadId);
     if (seen === undefined) {
@@ -645,9 +643,8 @@ export class ProcRegistry {
    * process, with everything under it. A parent missing from the registry is
    * looked up in the system first, and one found running there keeps its child.
    * That is what an interrupted or refused command leaves, since stopping a
-   * shell does not stop what it started. The
-   * agent itself and anything the core spawned have the core as their parent
-   * and are never taken. Returns the pids stopped.
+   * shell does not stop what it started. The agent and whatever the core spawned
+   * have the core as their parent and are never taken. Returns the pids stopped.
    */
   sweepOrphans(threadId: ThreadId, now: number = Date.now()): number[] {
     const byPid = this.live.get(threadId);
@@ -763,7 +760,7 @@ export class ProcRegistry {
       this.resources.forget(threadId);
     }
     this.forgetWhenIdle(threadId);
-    this.platform.pidRemoved(threadId, pid);
+    this.platform.pidRemoved(threadId, pid, !this.shown.has(threadId));
     if (this.journal.isClosed()) return;
     const record = entry.record;
     const usage = entry.usage();
@@ -785,11 +782,10 @@ export class ProcRegistry {
 
   /**
    * A thread whose last process exited is forgotten, entry and pid history
-   * alike. Kept for a moment first, because a job event for one of those pids
-   * can still be in flight and `known` is what tells it from a grandchild.
-   * Without this, every thread the core ever ran stays in three maps the load
-   * tick walks, and a caller minting an id per call (the plugin store) grows
-   * them without bound.
+   * alike, after a moment: a job event for one of those pids can still be in
+   * flight, and `known` tells it from a grandchild. Otherwise every thread the
+   * core ran stays in the maps the load tick walks, and a caller minting an id
+   * per call (the plugin store) grows them without bound.
    */
   private forgetWhenIdle(threadId: ThreadId): void {
     if ((this.live.get(threadId)?.size ?? 0) > 0) return;
@@ -798,7 +794,7 @@ export class ProcRegistry {
       this.forgetTimers.delete(threadId);
       if ((this.live.get(threadId)?.size ?? 0) > 0) return;
       this.live.delete(threadId);
-      this.known.delete(threadId);
+      this.known.delete(threadId); this.shown.delete(threadId);
       this.lastLoad.delete(threadId);
       this.memory.forgetThrottle(threadId);
       this.resources.forget(threadId);
@@ -880,15 +876,6 @@ function bornAfter(parent: Entry, child: Entry): boolean {
     catch { /* A platform without numeric native identities uses its birth clock. */ }
   }
   return nativeBirth(parent) > nativeBirth(child);
-}
-
-function unseenIdentity(next: ProcessIdentity, previous: KnownProcess): boolean {
-  if (next.incarnation !== null && previous.identity.incarnation !== null) {
-    return !previous.incarnations.has(next.incarnation);
-  }
-  // An unknown event is kept conservative: today's occupant cannot identify
-  // an earlier event for a short-lived process that has already exited.
-  return next.startedAt !== null && previous.identity.startedAt !== null && next.startedAt > previous.identity.startedAt;
 }
 
 function worthPushing(previous: ThreadLoad | undefined, next: ThreadLoad): boolean {

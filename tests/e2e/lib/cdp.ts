@@ -444,6 +444,30 @@ export class BrowserPage {
     );
   }
 
+  /**
+   * Waits for the fonts and every finite animation that is drawn. Chrome
+   * settles an animation's `finished` promise on a rendering frame, so frames
+   * are requested until everything has settled. An element that is not
+   * rendered, such as one inside a folded `content-visibility` section, never
+   * gets that update: a theme change left its colour transitions finished
+   * with their promises pending, and the wait hung until the call timed out.
+   */
+  async settleAnimations(): Promise<void> {
+    // The page gives up first, so the frame pump never outlives the call.
+    const settled = await this.evaluate<boolean>(`new Promise((resolve) => {
+      let live = true;
+      const done = (ok) => { if (!live) return; live = false; resolve(ok); };
+      const frame = () => { if (live) requestAnimationFrame(frame); };
+      requestAnimationFrame(frame);
+      setTimeout(() => done(false), ${CALL_TIMEOUT_MS - 5_000});
+      Promise.all([document.fonts.ready, ...document.getAnimations()
+        .filter((a) => a.effect?.getTiming().iterations !== Infinity)
+        .filter((a) => !(a.effect instanceof KeyframeEffect) || a.effect.target?.checkVisibility?.({ contentVisibilityAuto: true }) !== false)
+        .map((a) => a.finished.catch(() => {}))]).then(() => done(true));
+    })`);
+    if (!settled) throw new Error(`animations still running ${(CALL_TIMEOUT_MS - 5_000) / 1000} s after settleAnimations()`);
+  }
+
   async screenshot(path: string): Promise<void> {
     const raw = (await this.send('Page.captureScreenshot', { format: 'png' })) as { data?: string };
     if (typeof raw.data !== 'string') throw new Error('the screenshot came back empty');

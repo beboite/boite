@@ -31,8 +31,10 @@ import {
   parseManifestText,
   platformKey,
   poolsOf,
+  providesApp,
   refusal,
 } from './plugins/manifest.ts';
+import { PluginApps } from './plugins/apps.ts';
 import { checkRef, fetchManifest, normalizeSourceUrl } from './plugins/source.ts';
 import recommendedList from './plugins/recommended.json';
 
@@ -98,6 +100,8 @@ interface Job {
   controller: AbortController;
   progress: number;
   promise: Promise<void>;
+  /** The install finished, or stopped the desktop app to replace its binary: start the app again after. */
+  relaunch: boolean;
 }
 
 interface Pending {
@@ -165,7 +169,23 @@ export class PluginStore {
   /** Test seam: how long a download may receive nothing. */
   downloadIdleMs = DOWNLOAD_IDLE_MS;
 
-  constructor(private core: Core) {}
+  /** The desktop apps plugins provide: started, stopped and relaunched here. */
+  readonly apps: PluginApps;
+
+  constructor(private core: Core) {
+    this.apps = new PluginApps({
+      procs: core.procs,
+      coreUrl: () => core.baseUrl(),
+      ownerToken: () => core.token,
+      log: (level, message) => core.log(level, message),
+      installed: (id) => {
+        const disk = this.onDisk(id);
+        if (disk.kind !== 'installed' || !providesApp(disk.installed.manifest)) return null;
+        return { binary: disk.installed.binary, dir: this.directory(id) };
+      },
+      changed: (id) => this.emit(id),
+    });
+  }
 
   private root(): string {
     return resolve(this.core.dataDir, 'plugins');
@@ -258,11 +278,17 @@ export class PluginStore {
       commands: running ? commandsOf(running) : [],
       pools: running ? poolsOf(running) : [],
       rejected: disk.kind === 'rejected' ? disk.rejected : null,
+      app: running !== null && providesApp(running) ? this.apps.state(id, this.directory(id)) : null,
     };
   }
 
   /** The recommended plugins in their list order, then the URL ones by id. */
   list(): PluginState[] {
+    return this.ids().map((id) => this.state(id));
+  }
+
+  /** Every plugin id the store knows: recommended, being installed or with an install on disk. */
+  private ids(): string[] {
     const ids = new Set<string>([...this.pending.keys(), ...this.jobs.keys()]);
     const root = this.root();
     if (existsSync(root)) {
@@ -273,7 +299,7 @@ export class PluginStore {
       }
     }
     for (const manifest of this.recommended) ids.delete(manifest.id);
-    return [...this.recommended.map((manifest) => manifest.id), ...[...ids].sort()].map((id) => this.state(id));
+    return [...this.recommended.map((manifest) => manifest.id), ...[...ids].sort()];
   }
 
   private emit(id: string): void {
@@ -311,10 +337,10 @@ export class PluginStore {
     // A first install that fails leaves nothing behind; an update that fails keeps the version that worked.
     const fresh = this.onDisk(id).kind !== 'installed';
     const controller = new AbortController();
-    const job: Job = { controller, progress: 0, promise: Promise.resolve() };
+    const job: Job = { controller, progress: 0, promise: Promise.resolve(), relaunch: false };
     this.jobs.set(id, job);
     job.promise = this.download(id, manifest, source, origin, artifact, job)
-      .then(() => { this.pending.delete(id); })
+      .then(() => { this.pending.delete(id); job.relaunch = true; })
       .catch(async (error: unknown) => {
         if (!controller.signal.aborted) this.failures.set(id, messageOf(error));
         if (fresh) await removeTree(this.directory(id)).catch(() => undefined);
@@ -324,6 +350,7 @@ export class PluginStore {
         this.jobs.delete(id);
         this.cache.delete(id);
         this.emit(id);
+        if (job.relaunch) this.resumeApp(id);
       });
     this.emit(id);
     return this.state(id);
@@ -381,6 +408,11 @@ export class PluginStore {
       signal.throwIfAborted();
       const previous = this.onDisk(id);
       const binary = this.binaryPath(dir, manifest);
+      // Windows locks a running executable: the app stops before its binary is replaced.
+      if (previous.kind === 'installed' && providesApp(previous.installed.manifest)) {
+        job.relaunch = true;
+        await this.apps.kill(id);
+      }
       await rename(temporary, binary);
       if (previous.kind === 'installed' && previous.installed.binary !== binary) await rm(previous.installed.binary, { force: true });
       await writeFile(record, JSON.stringify({ schema: 1, origin, source, installedAt: Date.now(), manifest }, null, 2), 'utf8');
@@ -507,6 +539,7 @@ export class PluginStore {
   async uninstall(id: string): Promise<PluginState> {
     this.known(id);
     if (this.busy(id)) throw refused('Wait for the current plugin operation before uninstalling.');
+    await this.apps.forget(id);
     await removeTree(this.directory(id));
     this.pending.delete(id);
     this.failures.delete(id);
@@ -618,8 +651,48 @@ export class PluginStore {
     }
   }
 
+  /** Starts the plugin's desktop app if it provides one, is installed and enabled. */
+  private resumeApp(id: string): void {
+    if (this.closing) return;
+    try {
+      const disk = this.onDisk(id);
+      if (disk.kind === 'installed' && providesApp(disk.installed.manifest)) this.apps.resume(id, this.directory(id));
+    } catch (error) {
+      this.core.log('warn', `plugin ${id} app did not start: ${messageOf(error)}`);
+    }
+  }
+
+  /**
+   * At core start: every installed desktop app the owner left enabled. One
+   * plugin the store cannot read is logged by `resumeApp` and skipped; the
+   * others still start.
+   */
+  startApps(): void {
+    let ids: string[];
+    try {
+      ids = this.ids();
+    } catch (error) {
+      this.core.log('warn', `desktop apps did not start: ${messageOf(error)}`);
+      return;
+    }
+    for (const id of ids) if (!this.jobs.has(id)) this.resumeApp(id);
+  }
+
+  /** `plugins.app`: start, stop or restart a desktop-app plugin. */
+  async app(params: RpcParams<'plugins.app'>): Promise<PluginState> {
+    const id = this.known(params.id);
+    if (!['start', 'stop', 'restart'].includes(params.action)) {
+      throw invalidParams('plugin app action must be start, stop or restart', { field: 'action', expected: 'start, stop or restart' });
+    }
+    const installed = this.usable(id);
+    if (!providesApp(installed.manifest)) throw refused(`${id} provides no desktop app.`);
+    await this.apps.control(id, this.directory(id), params.action);
+    return this.state(id);
+  }
+
   async close(): Promise<void> {
     this.closing = true;
+    const apps = this.apps.close();
     this.shutdown.abort();
     const jobs = [...this.jobs.values()];
     for (const job of jobs) job.controller.abort();
@@ -627,5 +700,6 @@ export class PluginStore {
     for (const threadId of this.running.keys()) this.core.procs.killTree(threadId);
     await Promise.all(this.exits);
     await Promise.all([...this.listings.values(), ...this.inspecting].map((pending) => pending.catch(() => undefined)));
+    await apps;
   }
 }

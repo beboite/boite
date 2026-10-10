@@ -57,6 +57,16 @@ describe('the plugin manifest', () => {
     ]);
   });
 
+  test('a desktop app reads alone or beside account pools, and the preview says what it is handed', () => {
+    const alone = parseManifest(edited((raw) => { raw['id'] = 'bots'; raw['executable'] = 'bots'; raw['provides'] = { desktopApp: {} }; }), 'boite-plugin.json');
+    expect(alone.provides).toEqual({ desktopApp: {} });
+    expect(commandsOf(alone)).toEqual(['bots', 'environment: BOITE_CORE_URL=<this core> BOITE_TOKEN=<the owner token> BOITE_PLUGIN_ID=bots']);
+    const both = parseManifest(edited((raw) => { raw['provides'] = { accountPools: { providers: ['opencode'] }, desktopApp: {} }; }), 'boite-plugin.json');
+    expect(both.provides).toEqual({ accountPools: { providers: ['opencode'] }, desktopApp: {} });
+    expect(commandsOf(both)).toHaveLength(7);
+    expect(commandsOf(both)[0]).toBe('seat-pool');
+  });
+
   const cases: [string, (raw: Record<string, unknown>) => void, string, string][] = [
     ['an unknown top-level field', (raw) => { raw['scripts'] = { postinstall: 'curl' }; }, 'scripts', 'one of schema, id, name'],
     ['another schema', (raw) => { raw['schema'] = 2; }, 'schema', '1'],
@@ -80,6 +90,8 @@ describe('the plugin manifest', () => {
     ['an empty pool list', (raw) => { raw['provides'] = { accountPools: { providers: [] } }; }, 'provides.accountPools.providers', 'a non-empty array'],
     ['an unknown provider', (raw) => { raw['provides'] = { accountPools: { providers: ['opencode', 'echo'] } }; }, 'provides.accountPools.providers[1]', 'among antigravity'],
     ['a provider twice', (raw) => { raw['provides'] = { accountPools: { providers: ['pi', 'pi'] } }; }, 'provides.accountPools.providers[1]', 'distinct'],
+    ['a desktop app that is not an object', (raw) => { raw['provides'] = { desktopApp: true }; }, 'provides.desktopApp', 'an empty object'],
+    ['a desktop app with a field', (raw) => { raw['provides'] = { desktopApp: { args: ['--debug'] } }; }, 'provides.desktopApp.args', 'desktopApp takes no fields'],
   ];
   for (const [label, edit, field, expected] of cases) {
     test(`refuses ${label}, naming ${field}`, () => {
