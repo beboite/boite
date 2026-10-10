@@ -260,3 +260,44 @@ test('a thread entrusted from its menu carries on, and its agent reports in its 
   await page.click('[data-testid="agent-thread-event"][data-event="done"] [data-testid="agent-thread-event-open"]');
   await page.waitFor(`window.__boiteTest.workspace.active.page === 'chat' && window.__boiteTest.workspace.active.openThread?.id === window.__entrustThreadId`);
 }, 60000);
+
+test('archiving an experimental agent requires its exact name on desktop and phone', async () => {
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  await page.evaluate(`(async () => {
+    const store = window.__boiteTest.workspace.active;
+    const first = (await store.client.call('agents.snapshot', {})).profiles[0];
+    window.__archiveAgent = await store.client.call('agents.profile.save', { value: { ...first, name: 'Pixel', domain: 'Review prototypes', status: 'active' } });
+    store.showAgents(window.__archiveAgent.id);
+  })()`);
+  await page.waitFor(`document.querySelector('.agents-identity')?.textContent.includes('Pixel')`);
+  await openPane('settings');
+  await page.waitFor(`document.querySelector('[data-testid="agent-editor"]')`);
+  await capture('agent-archive-before-desktop.png');
+  await page.click('[data-testid="agent-editor"] button[aria-label="Status"]');
+  await page.click('[data-value="archived"]');
+  await page.click('[data-testid="agent-save"]');
+  await page.waitFor(`document.activeElement?.matches('[data-testid="confirm-name"]')`);
+  expect(await page.evaluate(`document.querySelector('[data-testid="confirm-ok"]').disabled`)).toBe(true);
+  await page.type('[data-testid="confirm-name"]', 'pixel');
+  expect(await page.evaluate(`document.querySelector('[data-testid="confirm-ok"]').disabled`)).toBe(true);
+  const status = `(async () => (await window.__boiteTest.workspace.active.client.call('agents.snapshot', {})).profiles.find(a => a.id === window.__archiveAgent.id).status)()`;
+  expect(await page.evaluate(status)).toBe('active');
+  await capture('agent-archive-desktop.png');
+  await page.click('[data-testid="confirm-cancel"]');
+  await page.waitFor(`!document.querySelector('[data-testid="confirm-name"]')`);
+  expect(await page.evaluate(status)).toBe('active');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await page.click('[data-testid="agent-save"]');
+  await page.waitFor(`document.querySelector('[data-testid="confirm-name"]')`);
+  expect(await page.evaluate(`document.querySelector('[data-testid="confirm-name"]').value`)).toBe('');
+  await capture('agent-archive-phone.png');
+  expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+  await page.type('[data-testid="confirm-name"]', 'Pixel');
+  await page.click('[data-testid="confirm-ok"]');
+  await page.waitFor(`(async () => (await window.__boiteTest.workspace.active.client.call('agents.snapshot', {})).profiles.find(a => a.id === window.__archiveAgent.id).status === 'archived')()`);
+  expect(await page.evaluate(`!!document.querySelector('[data-testid="agent-entry-' + window.__archiveAgent.id + '"]')`)).toBe(false);
+  await page.click('.agents-main .agent-mobile-back');
+  await page.click('[data-testid="agents-search-toggle"]');
+  await page.type('.agents-search input', 'Pixel');
+  await page.waitFor(`document.querySelector('[data-testid="agent-entry-' + window.__archiveAgent.id + '"]')?.textContent.includes('Archived')`);
+}, 60000);

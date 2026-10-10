@@ -23,7 +23,8 @@
   import { startGlass } from './lib/glass';
   import { installExternalLinks } from './lib/links';
   import { installDropNavigationGuard } from './lib/drop-navigation';
-  import { isQuitChord, QUIT_HOLD_MS, QuitHold } from './lib/quit-hold';
+  import { isQuitChord, QUIT_HOLD_MS } from './lib/quit-hold';
+  import { confirmedQuitHold, desktopQuit, installQuitGuard } from './lib/shell-quit';
   import { notificationWords, onNotificationOpen, storeNotificationWords } from './lib/notify';
   import { closeTabs } from './lib/panel-close';
   import { strings } from './lib/strings';
@@ -261,16 +262,16 @@
   // process to quit; a browser tab keeps its own Ctrl+Q.
   const quitHint = new Closing();
   let quitting = $state(false);
+  const requestQuit = desktopQuit(() => [workspace.primary, ...workspace.machines.map(m => m.store)], () => { quitting = true; });
+  onMount(() => { if (inShell) return installQuitGuard(requestQuit, error => { store.error = String(error); }); });
   const quitHold = inShell
-    ? new QuitHold({
+    ? confirmedQuitHold(requestQuit, {
         onHolding: (holding) => {
           if (holding) quitHint.show();
           else quitHint.hide();
         },
-        onQuit: () => {
-          quitting = true;
-          void import('@tauri-apps/api/core').then(({ invoke }) => invoke('quit_shell'));
-        }
+        hasQuit: () => quitting,
+        failed: error => { store.error = String(error); }
       })
     : null;
 

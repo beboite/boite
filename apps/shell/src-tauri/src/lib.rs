@@ -40,7 +40,7 @@ use channel::Channel;
 use closing::{close_to_tray_or_default, hides_on_close, CloseBehavior};
 use failure::{record_failure, FAILURE_LOG};
 use local_core::{resolve_data_dir, start_core, CoreState, Launch};
-use tray::{build_tray, quit};
+use tray::{build_tray, request_quit};
 use window::{build_main_window, hidden, hide_main, show_main, Reveal};
 
 // A concurrent POSIX spawn can briefly inherit a flock until exec closes its
@@ -156,6 +156,7 @@ pub fn run() {
             window::shell_ready,
             whip::whip_window,
             tray::quit_shell,
+            tray::quit_guard,
             notify,
             presence::user_presence,
             closing::close_behavior,
@@ -200,6 +201,7 @@ pub fn run() {
             let launch = Launch::new(channel, directory.clone(), handle.path().resource_dir().ok(),
                 handle.package_info().version.to_string());
             app.manage(CoreState::new(launch));
+            app.manage(tray::QuitGuard::default());
             if owns_directory {
                 let waking = handle.clone();
                 if let Err(error) = instance::listen(&directory, move || show_main(&waking)) {
@@ -233,7 +235,7 @@ pub fn run() {
                     api.prevent_close();
                     let enabled = closing.state::<CloseBehavior>().enabled.load(Ordering::Acquire);
                     if hides_on_close(enabled, closing.tray_by_id("boite").is_some(), hidden()) { hide_main(&closing); }
-                    else { quit(&closing); }
+                    else { request_quit(&closing); }
                 }
                 // Minimizing hides nothing from WebView2: the page is parked
                 // here, and unparked by the resize that restores the window.
@@ -263,6 +265,10 @@ pub fn run() {
         }
     };
     app.run(|app, event| match event {
+            tauri::RunEvent::ExitRequested { api, code, .. } if code.is_none() => {
+                api.prevent_exit();
+                request_quit(app);
+            }
             tauri::RunEvent::Exit => {
                 if let Some(state) = app.try_state::<CoreState>() {
                     state.kill_child();

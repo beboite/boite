@@ -263,6 +263,17 @@ The default retention is 30 days; 0 disables purge. Restart and disconnection do
 not erase the markers. Files, branches, worktrees and native transcripts stay
 on disk; project removal purges that project's pending deletions.
 
+Archiving an experimental agent in its Settings requires typing its existing
+name exactly. Cancel, Escape and Back keep it active. Archiving stops its work
+and removes it from the active list; its profile and history remain searchable.
+
+Closing the desktop window, the native Quit menu and Ctrl+Q share a confirmation
+when any connected machine has queued, running or waiting turns. The check reads
+fresh thread lists, including agent sessions and delegated children. Unreachable
+machines also require confirmation. Close to tray still hides the window without
+quitting. The warning distinguishes resident engines, which keep working, from
+engines configured to stop with the shell.
+
 ### Merged pull request archives
 
 Projects default to `autoArchiveMergedPr: true`; the owner changes it through
