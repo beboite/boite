@@ -31,6 +31,10 @@ test('an agent process that crashes leaves one warning with its exit code and th
   const { core, records } = recordingCore();
   const child = spawn(process.execPath, ['-e', 'process.exit(3)'], { stdio: ['pipe', 'pipe', 'pipe'] }) as unknown as SpawnedChild;
   watchProviderProcess(core, child, '/home/someone/.local/bin/claude', { threadId, turnId: 'trn_1', providerId: 'claude', resume: true });
+  // A driver reads both streams and ends stdin; left unread, `close` once never came on macOS CI.
+  child.stdin?.end();
+  child.stdout?.resume();
+  child.stderr?.resume();
   await new Promise<void>(resolve => child.once('close', () => resolve()));
   const crashed = records.find(record => record.context.event === 'driver.process.crashed');
   expect(crashed?.level).toBe('warn');
