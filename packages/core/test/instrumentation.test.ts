@@ -54,6 +54,15 @@ test('a stop the core asked for is no crash, and old stderr does not describe a 
   noteStderr('thr_old', 'from an hour ago', Date.now() - 60 * 60_000);
   expect(stderrTail('thr_old')).toBeNull();
   forgetStderr('thr_old');
+  // The thread that keeps printing outlives quieter ones once 256 threads are kept.
+  const crowd = Array.from({ length: 255 }, (_, index) => `thr_crowd_${index}`);
+  noteStderr('thr_busy', 'first');
+  for (const thread of crowd) noteStderr(thread, 'idle');
+  noteStderr('thr_busy', 'still printing');
+  noteStderr('thr_newcomer', 'new');
+  expect(stderrTail('thr_busy')).toBe('first | still printing');
+  expect(stderrTail(crowd[0]!)).toBeNull();
+  for (const thread of [...crowd, 'thr_busy', 'thr_newcomer']) forgetStderr(thread);
   expect(programName('C:\\Users\\Someone\\AppData\\codex.exe')).toBe('codex');
   expect(gitSubcommand(['-c', 'core.fsmonitor=', 'worktree', 'add', '-b', 'branch', '/path'])).toBe('worktree add');
   expect(gitSubcommand(['status', '--porcelain=v1'])).toBe('status');

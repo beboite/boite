@@ -18,12 +18,11 @@ const tails = new Map<string, { at: number; text: string }[]>();
 export function noteStderr(threadId: string, line: string, at = Date.now()): void {
   const text = line.trim();
   if (text.length === 0) return;
-  let lines = tails.get(threadId);
-  if (lines === undefined) {
-    lines = [];
-    tails.set(threadId, lines);
-    if (tails.size > THREADS_KEPT) tails.delete(tails.keys().next().value!);
-  }
+  // Delete and set again so the Map's order is least recently written first.
+  const lines = tails.get(threadId) ?? [];
+  tails.delete(threadId);
+  tails.set(threadId, lines);
+  if (tails.size > THREADS_KEPT) tails.delete(tails.keys().next().value!);
   lines.push({ at, text: text.slice(0, STDERR_TAIL_CHARS) });
   if (lines.length > LINES_KEPT) lines.splice(0, lines.length - LINES_KEPT);
 }

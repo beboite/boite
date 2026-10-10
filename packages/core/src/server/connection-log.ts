@@ -63,11 +63,13 @@ export function logConnectionClosed(core: Core, connection: ServerConnection, co
   const who = describeConnection(connection);
   const lifetime = Date.now() - connection.openedAt;
   const by = connection.closedBy;
-  const level = closeLevel(by?.code ?? code, by?.reason ?? reason ?? '', connection.authenticated, who.principal);
-  const cause = by !== null ? `the core closed it with ${by.code}${by.reason ? ` (${by.reason})` : ''}` : `the client closed it with ${code}${reason ? ` (${reason})` : ''}`;
+  // The peer picks its close reason, before hello too: never raw in a line.
+  const clientReason = reason ? clientField(reason, 120, '') : '';
+  const level = closeLevel(by?.code ?? code, by !== null ? by.reason : clientReason, connection.authenticated, who.principal);
+  const cause = by !== null ? `the core closed it with ${by.code}${by.reason ? ` (${by.reason})` : ''}` : `the client closed it with ${code}${clientReason ? ` (${clientReason})` : ''}`;
   core.logs.record(level, `Connection ${connection.id} of ${who.principal} from ${who.client} closed after ${formatSeconds(lifetime)}: ${cause}`, {
     source: 'connections', event: 'connection.closed', durationMs: lifetime, threadId: connection.identity.threadId ?? undefined,
-    data: { connectionId: connection.id, ...who, code: by?.code ?? code, reason: (by?.reason ?? reason) || null, closedBy: by !== null ? 'core' : 'client', subscriptions: connection.subscriptions.size },
+    data: { connectionId: connection.id, ...who, code: by?.code ?? code, reason: (by !== null ? by.reason : clientReason) || null, closedBy: by !== null ? 'core' : 'client', subscriptions: connection.subscriptions.size },
   });
 }
 

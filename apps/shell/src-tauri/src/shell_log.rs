@@ -231,7 +231,8 @@ impl Writer {
 
     pub(crate) fn write_line(&mut self, line: &str) {
         let length = line.len() as u64;
-        if self.file.is_none() { self.reopen(); }
+        // After a failed write the file may end in part of a line: close it off first.
+        if self.file.is_none() { self.reopen(); self.isolate_partial_line(); }
         if self.size > 0 && self.size + length > self.limit { self.rotate(); }
         let Some(file) = self.file.as_mut() else { return };
         if file.write_all(line.as_bytes()).is_ok() { self.size += length; }
@@ -279,19 +280,27 @@ fn serve(receiver: Receiver<Message>, mut writer: Writer, shared: Arc<Shared>) {
         match message {
             Message::Record(pending) => {
                 if let Some(line) = render(&shared.run_id, pending) { writer.write_line(&line); }
+                write_dropped(&shared, &mut writer);
             }
-            Message::Flush(reply) => { let _ = reply.try_send(()); }
-        }
-        let dropped = shared.dropped.swap(0, Ordering::Relaxed);
-        if dropped > 0 {
-            let pending = Pending {
-                seq: shared.next(), at: unix_ms(), level: Level::Warn, source: "log", event: "shell.log.dropped",
-                message: format!("{dropped} shell log records were dropped because the writer queue of {QUEUE} was full"),
-                duration_ms: None, data: serde_json::json!({ "count": dropped }),
-            };
-            if let Some(line) = render(&shared.run_id, pending) { writer.write_line(&line); }
+            // The dropped count goes out before the answer: a flush on exit
+            // or in the panic hook must not lose the line explaining the gap.
+            Message::Flush(reply) => {
+                write_dropped(&shared, &mut writer);
+                let _ = reply.try_send(());
+            }
         }
     }
+}
+
+fn write_dropped(shared: &Shared, writer: &mut Writer) {
+    let dropped = shared.dropped.swap(0, Ordering::Relaxed);
+    if dropped == 0 { return; }
+    let pending = Pending {
+        seq: shared.next(), at: unix_ms(), level: Level::Warn, source: "log", event: "shell.log.dropped",
+        message: format!("{dropped} shell log records were dropped because the writer queue of {QUEUE} was full"),
+        duration_ms: None, data: serde_json::json!({ "count": dropped }),
+    };
+    if let Some(line) = render(&shared.run_id, pending) { writer.write_line(&line); }
 }
 
 static LOGGER: OnceLock<Logger> = OnceLock::new();
@@ -453,6 +462,22 @@ mod tests {
         assert_eq!(record["message"].as_str().unwrap().len(), MAX_MESSAGE_CHARS);
     }
 
+    #[test]
+    fn a_write_after_a_failed_one_starts_on_its_own_line() {
+        let directory = temp("failed-write");
+        let mut writer = Writer::open(directory.clone(), MAX_FILE_BYTES);
+        writer.write_line("{\"a\":1}\n");
+        // What a failed write_all can leave: part of a line, then the handle dropped.
+        let mut file = OpenOptions::new().append(true).open(directory.join("shell.0.ndjson")).unwrap();
+        file.write_all(b"{\"partial").unwrap();
+        drop(file);
+        writer.file = None;
+        writer.write_line("{\"b\":2}\n");
+        let text = std::fs::read_to_string(directory.join("shell.0.ndjson")).unwrap();
+        assert_eq!(text.lines().collect::<Vec<_>>(), ["{\"a\":1}", "{\"partial", "{\"b\":2}"]);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
     #[cfg(unix)]
     #[test]
     fn the_directory_and_files_are_private() {
@@ -470,11 +495,16 @@ mod tests {
     fn a_flush_answers_once_the_queue_is_written() {
         let directory = temp("flush");
         let (logger, receiver, shared) = channel(4);
+        let counter = shared.clone();
         let target = directory.clone();
         let worker = std::thread::spawn(move || serve(receiver, Writer::open(target, MAX_FILE_BYTES), shared));
+        // Records dropped with nothing else queued: the flush answers only once their count is on disk.
+        counter.dropped.store(2, Ordering::Relaxed);
+        assert!(logger.flush(Duration::from_secs(5)));
+        assert_eq!(lines(&directory.join("shell.0.ndjson")).iter().map(|record| record["event"].clone()).collect::<Vec<_>>(), [json!("shell.log.dropped")]);
         logger.record(Level::Info, "shell", "shell.exit", "exiting".into(), None, json!({}));
         assert!(logger.flush(Duration::from_secs(5)));
-        assert_eq!(lines(&directory.join("shell.0.ndjson")).len(), 1);
+        assert_eq!(lines(&directory.join("shell.0.ndjson")).len(), 2);
         drop(logger);
         worker.join().unwrap();
         std::fs::remove_dir_all(directory).unwrap();

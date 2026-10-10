@@ -126,6 +126,7 @@ pub fn run() {
         "arch": std::env::consts::ARCH, "pid": std::process::id(), "hidden": hidden(),
     }));
     phase("context", launched);
+    let instance_started = std::time::Instant::now();
     // Linux and macOS restart through `app.restart()`, which sets the
     // variable; on Windows the installer starts the new shell and says so in
     // its arguments.
@@ -174,7 +175,7 @@ pub fn run() {
         record_failure(&failures, &format!("the shell panicked: {info}"));
         previous_hook(info);
     }));
-    phase("instance", launched);
+    phase("instance", instance_started);
     let failures = directory.clone();
     let preferences_path = directory.join("shell-settings.json");
     let close_to_tray = close_to_tray_or_default(&preferences_path);

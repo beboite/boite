@@ -16,15 +16,30 @@ use crate::resident;
 /// The ready flag of a core this shell started earlier and that is still
 /// running, so a new resolution waits on it rather than starting a second
 /// core the data directory's lock would refuse. A core that has exited is
-/// dropped here.
+/// dropped here, after its exit status and last lines are logged.
 fn running_child(state: &CoreState) -> Option<Arc<AtomicBool>> {
     let mut guard = state.child.lock().ok()?;
-    let running = guard.as_mut().is_some_and(|spawned| matches!(spawned.child.try_wait(), Ok(None)));
-    if running {
-        return guard.as_ref().map(|spawned| spawned.ready.clone());
-    }
-    guard.take();
+    let polled = guard.as_mut()?.child.try_wait();
+    let status = match polled {
+        Ok(None) => return guard.as_ref().map(|spawned| spawned.ready.clone()),
+        Ok(Some(status)) => Some(status),
+        Err(_) => None,
+    };
+    let spawned = guard.take()?;
+    drop(guard);
+    if let Some(status) = status { log_exit(&spawned, status, "after it started serving"); }
     None
+}
+
+/// The `shell.core.exited` record: exit status, and the core's last lines
+/// under `stderrTail`, which stays on this machine and is withheld from every
+/// anonymized view.
+fn log_exit(spawned: &super::spawn::Spawned, status: std::process::ExitStatus, when: &str) {
+    spawned.settle();
+    let tail = spawned.output.tail().join(" | ");
+    let cut = tail.char_indices().rev().nth(299).map_or(tail.as_str(), |(index, _)| &tail[index..]);
+    shell_log::error("core", "shell.core.exited", format!("the core pid {} exited ({status}) {when}", spawned.child.id()),
+        json!({ "pid": spawned.child.id(), "exitCode": status.code(), "stderrTail": if cut.is_empty() { None } else { Some(cut) } }));
 }
 
 /// Why the core this shell started is gone, if it exited: its exit status
@@ -38,9 +53,7 @@ fn exited_early(state: &CoreState) -> Option<String> {
     };
     if let Ok(mut job) = state.job.lock() { job.take(); }
     let (spawned, status) = spawned;
-    spawned.settle();
-    shell_log::error("core", "shell.core.exited", format!("the core pid {} exited ({status}) before it was ready", spawned.child.id()),
-        json!({ "pid": spawned.child.id(), "exitCode": status.code() }));
+    log_exit(&spawned, status, "before it was ready");
     Some(format!("the core exited ({status}) before it was ready{}", spawned.output.quoted()))
 }
 

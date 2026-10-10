@@ -12,7 +12,7 @@ import { JOIN_ROUTE } from './group.ts';
 import type { Connection } from './router.ts';
 import type { SocketData } from './server/connection.ts';
 import { ServerConnection } from './server/connection.ts';
-import { logConnectionClosed } from './server/connection-log.ts';
+import { clientField, logConnectionClosed } from './server/connection-log.ts';
 import { handleFrame } from './server/frame.ts';
 import { FrameQueue } from './server/frame-queue.ts';
 import { Refusals } from './server/refusals.ts';
@@ -423,7 +423,7 @@ export function startServer(options: ServerOptions): RunningServer {
         const origin = request.headers.get('origin');
         // A page served by one machine of the group opens its socket on the others.
         if (!isAllowedOrigin(origin, self.port ?? 0, hostname) && !(origin !== null && (core.settings.get().browserOrigins?.includes(origin) || origin === core.settings.get().publicUrl || core.group.allowsOrigin(origin)))) {
-          core.log('warn', `refused a websocket from origin ${origin ?? '(none)'}`, { source: 'connections', event: 'connection.origin-refused' });
+          core.log('warn', `refused a websocket from origin ${origin === null ? '(none)' : clientField(origin, 100)}`, { source: 'connections', event: 'connection.origin-refused' });
           return new Response('forbidden origin', { status: 403 });
         }
         const peer = preauthPeer(self.requestIP(request)?.address ?? null, request.headers.get('host'));
