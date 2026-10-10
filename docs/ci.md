@@ -133,7 +133,7 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 591,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,435,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,460,000 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 3,714,000 |
 
@@ -281,6 +281,13 @@ the group card, its sentences in two languages and the group links, within its
 unchanged limit; the core gains 50,145 bytes for the roster, sealing, tickets
 and the join route. The core total limit becomes 3,420,000 bytes, 28,512 above
 this measurement; the entry and `main.js` limits are unchanged.
+
+On 2026-10-10 on Linux, `origin/main` at `bbffc85a` measured about 4,441,400 UI
+bytes, under 1 KB below its limit. The draft's searchable project dropdown
+measured 4,450,765 bytes, and Windows desktop CI 4,450,386 on its first head:
+about 9,400 bytes for the search, the keyboard walk, the machine groups and two
+sentences in each language. The UI limit rises to 4,460,000, 9,235 bytes above
+the Linux build; the entry and core limits are unchanged.
 Explain measured growth when changing a limit. Shared-runner timings are not gated. Earlier sizes and
 runner observations remain in the [dated report](../bench/results/2026-09-29-resources.md#historical-ci-measurements).
 
