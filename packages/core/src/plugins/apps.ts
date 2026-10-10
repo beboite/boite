@@ -232,10 +232,16 @@ export class PluginApps {
     this.launch(id);
   }
 
-  /** At core start and after an install: launches the app if the owner left it enabled. */
+  /**
+   * At core start and after an install: launches the app if the owner left it
+   * enabled. One the core already runs, or is waiting to start again after a
+   * crash, is left as it is: its crash count stands.
+   */
   resume(id: string, dir: string): void {
     if (!this.enabled(dir)) return;
-    this.entry(id).crashes = [];
+    const entry = this.entry(id);
+    if (entry.running !== null || entry.relaunch !== null) return;
+    entry.crashes = [];
     this.launch(id);
   }
 

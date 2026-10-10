@@ -143,6 +143,12 @@ describe('a desktop app', () => {
     for (let crash = 1; crash <= 3; crash += 1) {
       await waitFor(() => clock.pending.length === 1);
       expect(app()).toMatchObject({ status: 'starting', exitCode: 3 });
+      if (crash === 1) {
+        // The core start's own pass, late: it leaves the wait and the count alone.
+        harness.core.plugins.startApps();
+        expect(clock.pending).toHaveLength(1);
+        expect(fake.pids).toHaveLength(1);
+      }
       waits.push(clock.fire());
     }
     await waitFor(() => app().status === 'crashed');
