@@ -1472,6 +1472,11 @@ export interface PushPayload {
   label?: NotificationLabel;
   /** The app icon's count after this notification. */
   badge?: number;
+  /**
+   * Set when another member of the group sent it through the device's own
+   * machine: the id of the machine the thread is on.
+   */
+  core?: string;
 }
 /** The most `messages.list` will ever hand back in one call, whatever `limit` says. */
 export const MESSAGE_PAGE_MAX = 200;
@@ -2851,6 +2856,30 @@ export const GROUP_INVITE_PREFIX = 'boite-group:';
 export const GROUP_TICKET_TTL_MS = 60 * 1000;
 /** A group is one person's machines; the roster travels whole in every exchange. */
 export const GROUP_MAX_CORES = 32;
+/**
+ * Where a member carries a client to another member it cannot reach itself:
+ * `<member>/group/relay/<core id>`, under which the other member's `/rpc`,
+ * `/file/` and `/view/` answer as they would at its own address.
+ */
+export const GROUP_RELAY_ROUTE = '/group/relay';
+
+/** `url` without its trailing slashes; a loop, since `/\/+$/` backtracks quadratically on a long run of them. */
+export function withoutTrailingSlashes(url: string): string {
+  let end = url.length;
+  while (end > 0 && url.charCodeAt(end - 1) === 47) end -= 1;
+  return url.slice(0, end);
+}
+
+/** The address a client reaches `coreId` at through the member at `memberUrl`. */
+export function groupRelayUrl(memberUrl: string, coreId: string): string {
+  return `${withoutTrailingSlashes(memberUrl)}${GROUP_RELAY_ROUTE}/${coreId}`;
+}
+
+/** The member and the machine a relay address names, or null for an address that is no relay. */
+export function parseGroupRelayUrl(url: string): { member: string; coreId: string } | null {
+  const match = /^(https?:\/\/[^/?#]+)\/group\/relay\/([0-9a-f]{64})\/?$/.exec(url);
+  return match === null ? null : { member: match[1]!, coreId: match[2]! };
+}
 export interface CoordinationView {
   self: AgentAddress;
   config: CoordinationConfig;
@@ -3432,6 +3461,13 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
       grant?: string;
       ticket?: string;
       nonce?: string;
+      /**
+       * On a socket opened at another member's relay route
+       * (`groupRelayUrl`), this client's key for that member. The member checks
+       * it, takes it out and passes the rest of the hello on: the core at the
+       * end never sees it.
+       */
+      relay?: string;
       protocolVersion: number;
       client: { name: string; version: string; device?: string };
     };

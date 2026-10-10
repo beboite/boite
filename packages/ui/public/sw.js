@@ -120,12 +120,14 @@ self.addEventListener('push', (event) => {
     let payload = {};
     try { payload = event.data?.json() ?? {}; } catch { /* Show a generic notification for an empty push. */ }
     const threadId = typeof payload.threadId === 'string' ? payload.threadId : null;
+    // Sent by another machine of the group through this one: the thread is on that machine.
+    const core = typeof payload.core === 'string' && /^[0-9a-f]{64}$/.test(payload.core) ? payload.core : null;
     const body = (typeof payload.label === 'string' && await notificationWord(payload.label)) || (typeof payload.body === 'string' ? payload.body : '');
     await self.registration.showNotification(typeof payload.title === 'string' ? payload.title : 'Boite', {
       body,
       icon: '/icons/icon-192.png', badge: '/icons/icon-192.png',
-      tag: threadId ? `thread-${threadId}` : typeof payload.tag === 'string' ? payload.tag : 'boite-update',
-      data: { threadId }
+      tag: threadId ? (core ? `thread-${core}-${threadId}` : `thread-${threadId}`) : typeof payload.tag === 'string' ? payload.tag : 'boite-update',
+      data: core ? { threadId, core } : { threadId }
     });
     // The icon's count of threads waiting for the user, as the core counted it when it sent this.
     await setBadge(payload.badge);
@@ -160,13 +162,16 @@ async function setBadge(count) {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const threadId = event.notification.data?.threadId;
+  // Read as the push handler wrote it: a machine id, or nothing.
+  const core = /^[0-9a-f]{64}$/.test(String(event.notification.data?.core ?? '')) ? event.notification.data.core : null;
   const url = new URL('/', self.location.origin);
   if (typeof threadId === 'string') url.searchParams.set('thread', threadId);
+  if (typeof threadId === 'string' && typeof core === 'string') url.searchParams.set('member', core);
   event.waitUntil((async () => {
     const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     const existing = windows.find(client => new URL(client.url).origin === url.origin);
     if (existing) {
-      existing.postMessage({ type: 'boite.open-thread', threadId: typeof threadId === 'string' ? threadId : null });
+      existing.postMessage({ type: 'boite.open-thread', threadId: typeof threadId === 'string' ? threadId : null, ...(typeof core === 'string' ? { core } : {}) });
       // iOS can refuse to focus a suspended home-screen app; opening the URL then reaches the thread.
       try { await existing.focus(); } catch { await self.clients.openWindow(url.href); }
     } else await self.clients.openWindow(url.href);
