@@ -395,6 +395,8 @@ export class FakeClient implements ObservableClient {
       ...devicesMethods(ctx),
       ...pullRequestMethods(ctx),
       ...worktreeMethods(ctx),
+      // The one owner connection is this client: the event comes back to it, as the core's reaches each owner.
+      'ui.reveal': async (params) => { ctx.emit('ui.reveal', { target: params.target }); return { delivered: 1 }; },
     };
     return methods;
   }

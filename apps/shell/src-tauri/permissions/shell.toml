@@ -8,6 +8,7 @@ commands.allow = [
   "save_attachment",
   "save_attachment_url",
   "shell_ready",
+  "show_window",
   "whip_window",
   "quit_shell",
   "notify",

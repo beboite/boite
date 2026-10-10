@@ -1,5 +1,6 @@
 import {
   RpcErrorCode,
+  type PluginAppState,
   type PluginManifest,
   type PluginPool,
   type PluginPreview,
@@ -10,7 +11,7 @@ import {
   type RpcResult,
 } from '@boite/contracts';
 import { RpcFailure } from '../client';
-import { fakePluginPools, fakePlugins, PLUGIN_STEPS, poolCommands } from './plugins-seed';
+import { appCommands, fakePluginPools, fakePlugins, PLUGIN_STEPS, poolCommands } from './plugins-seed';
 import { INSTALL_STEP_MS } from './providers';
 
 type PluginMethod = Extract<RpcMethodName, `plugins.${string}`>;
@@ -74,7 +75,25 @@ export class FakePlugins {
       if (pool && params.action === 'remove') pool.accounts = pool.accounts.filter((a) => a.email !== params.email);
       return structuredClone(pools);
     },
+    'plugins.app': (params) => {
+      const plugin = this.#requirePlugin(params.id);
+      if (!['start', 'stop', 'restart'].includes(params.action)) {
+        throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'plugin app action must be start, stop or restart' });
+      }
+      if (plugin.status !== 'installed') throw new RpcFailure({ code: RpcErrorCode.Refused, message: `Install ${plugin.id} first.` });
+      if (plugin.app === null) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${plugin.id} provides no desktop app.` });
+      plugin.app = params.action === 'stop'
+        ? { ...plugin.app, enabled: false, status: 'stopped', pid: null, startedAt: null, error: null }
+        : this.#running(plugin.app);
+      this.host.emit('plugins.updated', structuredClone(plugin));
+      return structuredClone(plugin);
+    },
   };
+
+  /** A desktop app the fake has just started, as the core reports it. */
+  #running(app: PluginAppState | null): PluginAppState {
+    return { enabled: true, status: 'running', pid: 4000 + this.host.nextId(), exitCode: app?.exitCode ?? null, error: null, startedAt: this.host.now() };
+  }
 
   #plugins: PluginState[] = fakePlugins();
 
@@ -98,7 +117,7 @@ export class FakePlugins {
   /** A URL plugin leaves the list; the event carries it back `not-installed`, as the core's does. */
   #dropPlugin(plugin: PluginState): PluginState {
     this.#plugins = this.#plugins.filter((entry) => entry.id !== plugin.id);
-    const gone: PluginState = { ...structuredClone(plugin), status: 'not-installed', version: null, progress: 0, error: null, rejected: null };
+    const gone: PluginState = { ...structuredClone(plugin), status: 'not-installed', version: null, progress: 0, error: null, rejected: null, app: null };
     this.host.emit('plugins.updated', structuredClone(gone));
     return gone;
   }
@@ -111,15 +130,19 @@ export class FakePlugins {
       const plugin = this.#plugins.find((entry) => entry.id === id);
       if (this.#pluginRuns.get(id) !== run || plugin === undefined) return;
       if (step < PLUGIN_STEPS) plugin.progress = Math.round((step / PLUGIN_STEPS) * 95);
-      else Object.assign(plugin, { status: 'installed', version: plugin.availableVersion, progress: 0, error: null, rejected: null });
+      else {
+        // An enabled desktop app starts once its install or update is in place.
+        Object.assign(plugin, { status: 'installed', version: plugin.availableVersion, progress: 0, error: null, rejected: null });
+        if (plugin.app?.enabled) plugin.app = this.#running(plugin.app);
+      }
       this.host.emit('plugins.updated', structuredClone(plugin));
     }
   }
 
   /**
    * What the core's `plugins.inspect` answers, without git: https only, a URL
-   * holding `broken` comes back refused, anything else reads as a Pi pool
-   * plugin named after the repository.
+   * holding `broken` comes back refused, one holding `desktop` reads as a
+   * desktop app, anything else as a Pi pool plugin named after the repository.
    */
   async #inspectPlugin(params: RpcParams<'plugins.inspect'>): Promise<PluginPreview> {
     const text = params.url.trim().replace(/\/+$/, '');
@@ -141,13 +164,14 @@ export class FakePlugins {
       };
     }
     const slug = (url.pathname.split('/').filter(Boolean).pop() ?? '').toLowerCase().replace(/\.git$/, '').replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'plugin';
+    const desktop = text.includes('desktop');
     const manifest: PluginManifest = {
       schema: 1, id: slug, name: slug.charAt(0).toUpperCase() + slug.slice(1).replace(/-/g, ' '), version: '1.5.0',
-      description: 'Saves Pi logins and switches the active one.', homepage: source.url, executable: slug,
+      description: desktop ? 'Opens a window of its own beside Boite.' : 'Saves Pi logins and switches the active one.', homepage: source.url, executable: slug,
       artifacts: { 'win32-x64': { url: `${source.url}/releases/download/v1.5.0/${slug}-win32-x64.exe`, sha256: '5a7c9e1b3d5f7a9c2e4b6d8f0a1c3e5b7d9f2a4c6e8b0d1f3a5c7e9b2d4f6a8c' } },
-      provides: { accountPools: { providers: ['pi'] } }
+      provides: desktop ? { desktopApp: {} } : { accountPools: { providers: ['pi'] } }
     };
-    const read: PluginPreview = { ...base, manifest, artifact: manifest.artifacts['win32-x64'] ?? null, commands: poolCommands(slug) };
+    const read: PluginPreview = { ...base, manifest, artifact: manifest.artifacts['win32-x64'] ?? null, commands: desktop ? appCommands(slug) : poolCommands(slug) };
     const existing = this.#plugins.find((entry) => entry.id === slug);
     if (existing?.origin === 'recommended') {
       const expected = 'an id no recommended plugin uses (kebacc-switcher)';
@@ -173,10 +197,12 @@ export class FakePlugins {
     this.#pluginPreviews.delete(previewId);
     const existing = this.#plugins.find((entry) => entry.id === manifest.id);
     const pools = manifest.provides.accountPools?.providers ?? [];
+    const app: PluginAppState | null = manifest.provides.desktopApp === undefined ? null
+      : existing?.app ?? { enabled: true, status: 'stopped', pid: null, exitCode: null, error: null, startedAt: null };
     const plugin: PluginState = {
       id: manifest.id, name: manifest.name, origin: 'url', description: manifest.description, homepage: manifest.homepage,
       version: existing?.version ?? null, availableVersion: manifest.version, status: 'installing', progress: 0, error: null,
-      source: preview.source, artifact: preview.artifact, platform: preview.platform, commands: preview.commands, pools, rejected: null
+      source: preview.source, artifact: preview.artifact, platform: preview.platform, commands: preview.commands, pools, rejected: null, app
     };
     if (existing !== undefined) Object.assign(existing, plugin);
     else this.#plugins.push(plugin);

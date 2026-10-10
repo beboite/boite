@@ -1,8 +1,8 @@
 <script lang="ts">
   import InfoTip from './InfoTip.svelte';
   import { onMount } from 'svelte';
-  import { Download, Puzzle, RefreshCw, ShieldAlert, TriangleAlert } from '@lucide/svelte';
-  import type { PluginPool, PluginPreview, PluginRejected, PluginState, RpcParams } from '@boite/contracts';
+  import { Download, Play, Puzzle, RefreshCw, RotateCw, ShieldAlert, Square, TriangleAlert } from '@lucide/svelte';
+  import type { PluginAppState, PluginPool, PluginPreview, PluginRejected, PluginState, RpcParams } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
   import { confirm } from '../lib/confirm.svelte';
@@ -133,6 +133,31 @@
     }
   }
 
+  /** Start, stop or restart a desktop app; the core answers with the plugin's new state. */
+  async function appAction(plugin: PluginState, action: RpcParams<'plugins.app'>['action']) {
+    const client = store.client;
+    if (!client) return;
+    busy[plugin.id] = true;
+    try {
+      put(await client.call('plugins.app', { id: plugin.id, action }));
+      delete errors[plugin.id];
+    } catch (cause) {
+      errors[plugin.id] = messageOf(cause);
+    } finally {
+      busy[plugin.id] = false;
+    }
+  }
+
+  function appLine(app: PluginAppState): string {
+    switch (app.status) {
+      case 'running': return t.appRunning;
+      case 'starting': return t.appStarting;
+      case 'crashed': return app.exitCode === null ? t.appCrashedSignal : fill(t.appCrashed, { code: String(app.exitCode) });
+      case 'unavailable': return t.appUnavailable;
+      default: return app.enabled ? t.appStopped : t.appOff;
+    }
+  }
+
   function stateLine(plugin: PluginState): string {
     switch (plugin.status) {
       case 'installed':
@@ -225,6 +250,30 @@
     {#if plugin.error}<p class="bad" role="alert">{plugin.error}</p>{/if}
     {#if errors[plugin.id]}<p class="bad" role="alert">{errors[plugin.id]}</p>{/if}
     {#if plugin.rejected}{@render refusal(plugin.rejected)}{/if}
+    {#if plugin.status === 'installed' && plugin.app}
+      {@const app = plugin.app}
+      {@const live = app.status === 'running' || app.status === 'starting'}
+      <div class="app" data-testid="plugin-app" data-plugin={plugin.id} data-app-status={app.status}>
+        <div class="app-head">
+          <div class="who">
+            <h4 class="section-label"><span class="ui-label">{t.app}</span></h4>
+            <p class="state" data-testid="plugin-app-state">
+              <span class="dot" class:ok={app.status === 'running'} class:live={app.status === 'starting'}
+                class:bad={app.status === 'crashed' || app.status === 'unavailable'}></span><span class="ui-label">{appLine(app)}</span>
+            </p>
+          </div>
+          <div class="act">
+            {#if live}
+              <button class="small" data-testid="plugin-app-restart" data-plugin={plugin.id} disabled={working} onclick={() => void appAction(plugin, 'restart')}><RotateCw size={14} /><span class="ui-label">{t.appRestart}</span></button>
+              <button class="ghost small" data-testid="plugin-app-stop" data-plugin={plugin.id} disabled={working} onclick={() => void appAction(plugin, 'stop')}><Square size={14} /><span class="ui-label">{t.appStop}</span></button>
+            {:else}
+              <button class="small" data-testid="plugin-app-start" data-plugin={plugin.id} disabled={working || app.status === 'unavailable'} onclick={() => void appAction(plugin, 'start')}><Play size={14} /><span class="ui-label">{t.appStart}</span></button>
+            {/if}
+          </div>
+        </div>
+        {#if app.error}<p class={app.status === 'crashed' ? 'bad' : 'hint'} data-testid="plugin-app-error">{app.error}</p>{/if}
+      </div>
+    {/if}
     {#if plugin.status === 'installed' && plugin.pools.length > 0}
       <div class="pools">
         <div class="pools-head">
@@ -327,8 +376,14 @@
               <dt>{t.previewDigest}</dt><dd class="mono wrap">{preview.artifact.sha256}</dd>
               <dt>{t.previewRuns}</dt>
               <dd><ul class="commands mono">{#each preview.commands as command (command)}<li>{command}</li>{/each}</ul></dd>
-              <dt>{t.previewPools}</dt>
-              <dd>{(preview.manifest?.provides.accountPools?.providers ?? []).map(providerName).join(', ')}</dd>
+              {#if preview.manifest?.provides.accountPools}
+                <dt>{t.previewPools}</dt>
+                <dd>{preview.manifest.provides.accountPools.providers.map(providerName).join(', ')}</dd>
+              {/if}
+              {#if preview.manifest?.provides.desktopApp}
+                <dt>{t.previewApp}</dt>
+                <dd data-testid="plugin-preview-app">{t.previewAppBody}</dd>
+              {/if}
             {/if}
           </dl>
           {#if preview.rejected === null}
@@ -374,7 +429,7 @@
 
   .act { display: flex; align-items: center; gap: 6px; flex: none; flex-wrap: wrap; justify-content: flex-end; }
   .act.end { justify-content: flex-end; }
-  .act button, .pools button, .account-actions button { gap: 6px; }
+  .act button, .pools button, .account-actions button, .app button { gap: 6px; }
 
   .track { height: 2px; border-radius: 999px; background: var(--color-surface-3); overflow: hidden; }
   .bar { display: block; height: 100%; background: var(--color-foreground); transition: width var(--dur-2) var(--ease-out-quint); }
@@ -397,6 +452,9 @@
   .commands li { padding-left: 2ch; text-indent: -2ch; }
 
   .pools { display: grid; gap: 10px; margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--color-border); }
+  /* The desktop app's own strip: what it is doing, and the buttons that change it. */
+  .app { display: grid; gap: 6px; margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--color-border); }
+  .app-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .pools-head .section-label { display: flex; align-items: center; gap: 6px; }
   .pools-head, .pool-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   h4 { margin: 0; }
