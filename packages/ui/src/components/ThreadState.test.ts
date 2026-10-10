@@ -57,6 +57,13 @@ test('each status reads as one state, and a thread at rest the user saw has none
   expect(threadState({ status: 'idle', unread: false })).toBeNull();
 });
 
+test('a question asked without stopping reads as needing the user, whether the turn still runs or ended', () => {
+  expect(threadState({ status: 'running', unread: false, openQuestions: 1 })).toBe('waiting');
+  expect(threadState({ status: 'idle', unread: false, openQuestions: 2, backgroundWork: { kinds: ['shell'], since: NOW } })).toBe('waiting');
+  expect(threadState({ status: 'running', unread: false, openQuestions: 0 })).toBe('working');
+  expect(projectRollup([{ status: 'running', unread: false }, { status: 'running', unread: false, openQuestions: 1 }])).toEqual({ kind: 'waiting', count: 1 });
+});
+
 test('a finished turn whose agent still runs something is not at rest, read or not', () => {
   const monitor = { kinds: ['monitor' as const], since: NOW };
   expect(threadState({ status: 'idle', unread: false, backgroundWork: monitor })).toBe('monitoring');

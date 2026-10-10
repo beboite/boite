@@ -16,13 +16,20 @@
       ],
       "install": {
         "format": "binary",
-        "version": "2.1.267",
-        "url": "https://downloads.claude.ai/claude-code-releases/2.1.267/win32-x64/claude.exe",
-        "sha256": "23dde2a47cf1d7d9c4a2d96d21fa80ea9bfc872dfde0ee06e9982d2908603350",
-        "archiveBytes": 220051616,
-        "files": [{ "path": "claude.exe", "bytes": 220051616 }]
+        "version": "2.1.295",
+        "url": "https://downloads.claude.ai/claude-code-releases/2.1.295/win32-x64/claude.exe",
+        "sha256": "a30012741c3d0b55e2a6c252dab3781134b75be95896ae89d40a93e10f83bcd6",
+        "archiveBytes": 259509920,
+        "files": [{ "path": "claude.exe", "bytes": 259509920 }],
+        "latest": {
+          "versionUrl": "https://downloads.claude.ai/claude-code-releases/latest",
+          "manifest": "https://downloads.claude.ai/claude-code-releases/{version}/manifest.json",
+          "platform": "win32-x64",
+          "url": "https://downloads.claude.ai/claude-code-releases/{version}/win32-x64/claude.exe"
+        }
       },
       "isolation": { "CLAUDE_CONFIG_DIR": "{isolationDir}" },
+      "session": [],
       "close": { "processes": ["claude.exe"] }
     },
     "linux": {

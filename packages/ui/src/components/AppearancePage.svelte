@@ -17,6 +17,7 @@
   import { controlGroups } from '../lib/control-groups';
   import type { Store } from '../lib/store.svelte';
   import SurfaceIcon from './SurfaceIcon.svelte';
+  import { chatPrefs, setChatPref } from '../lib/chat-prefs.svelte';
 
   let { store }: { store: Store } = $props();
   const uid = $props.id();
@@ -222,6 +223,14 @@
         {/each}
       </div>
     </div>
+    <label class="switch-row">
+      <span class="text ui-label">{strings.settings.groupChanges}</span>
+      <input type="checkbox" role="switch" checked={chatPrefs.groupChanges} data-testid="chat-group-changes" onchange={event => setChatPref('groupChanges', event.currentTarget.checked)} />
+    </label>
+    <label class="switch-row">
+      <span class="text ui-label">{strings.settings.expandDiffs}</span>
+      <input type="checkbox" role="switch" checked={chatPrefs.expandDiffs} data-testid="chat-expand-diffs" onchange={event => setChatPref('expandDiffs', event.currentTarget.checked)} />
+    </label>
     {#if hasMaterial}
       <div class="switch-row">
         <span class="text ui-label">

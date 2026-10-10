@@ -1928,7 +1928,7 @@ test('account lifecycle reload preserves the running login snapshot', async ({ s
   expect(store.logins['a-claude-side']).toEqual(before);
 });
 
-test('an account referenced by an archived thread is counted, removed, and its thread asks for another one', async ({ client }) => {
+test('an account referenced by an archived thread is counted, removed, and its thread moves to another account of its agent', async ({ client }) => {
   const account = await client.call('accounts.add', { providerId: 'echo', label: 'Spare' });
   const thread = await client.call('threads.create', { projectId: 'p-boite', providerId: 'echo', accountId: account.id, title: 'Orphan' });
   await client.call('threads.archive', { threadId: thread.id, archived: true });
@@ -1936,9 +1936,18 @@ test('an account referenced by an archived thread is counted, removed, and its t
   await client.call('accounts.remove', { accountId: account.id });
   expect((await client.call('accounts.list', {})).some((a) => a.id === account.id)).toBe(false);
   await client.call('threads.archive', { threadId: thread.id, archived: false });
-  await expect(client.call('turns.start', { threadId: thread.id, prompt: 'hello' })).rejects.toThrow(/was removed/);
+  const turn = await client.call('turns.start', { threadId: thread.id, prompt: 'hello' });
+  expect(turn.execution?.accountId).toBe('a-echo');
+  expect((await client.call('threads.get', { threadId: thread.id })).accountId).toBe('a-echo');
   // A turn in flight is the one thing that still keeps an account.
   await expect(client.call('accounts.remove', { accountId: 'a-echo' })).rejects.toThrow(/running a turn/);
+});
+
+test('a thread whose account signed out runs its next turn on another signed-in account of its agent', async ({ client }) => {
+  const thread = await client.call('threads.create', { projectId: 'p-notes', providerId: 'claude', accountId: 'a-claude-side', title: 'Signed out' });
+  const turn = await client.call('turns.start', { threadId: thread.id, prompt: 'hello' });
+  expect(turn.execution?.accountId).toBe('a-claude-main');
+  expect((await client.call('threads.get', { threadId: thread.id })).accountId).toBe('a-claude-main');
 });
 
 test('account lifecycle cancellation removes the login and permits retry', async ({ store, client }) => {

@@ -138,6 +138,8 @@ import { workspace } from '../lib/workspace.svelte';
     ['appearance', 'theme', strings.settings.accent],
     ['appearance', 'theme', strings.settings.material],
     ['appearance', 'theme', strings.settings.language],
+    ['appearance', 'theme', strings.settings.groupChanges],
+    ['appearance', 'theme', strings.settings.expandDiffs],
     ['appearance', 'reading', strings.settings.font],
     ['appearance', 'reading', strings.settings.monoFont],
     ...(inShell ? [['appearance', 'reading', strings.settings.zoom] as [SettingsTab, string, string]] : []),

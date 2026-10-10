@@ -8,9 +8,9 @@ of the conversation watches the same tabs and can act in them: the desktop on
 that machine, the desktop of another machine connected to it, a plain browser,
 a phone. Nothing depends on which client is open, and no setting turns it on.
 
-`packages/core/src/browser.ts` owns the tabs, `browser/chromium.ts` finds and
-starts the browser, `browser/cdp.ts` is the protocol connection,
-`browser/recorder.ts` records and `browser/scripts.ts` holds what is evaluated
+`packages/core/src/browser.ts` owns the tabs, `browser/chromium.ts` finds the
+browser and holds its flags, `browser/launch.ts` starts it, `browser/cdp.ts` is the protocol connection,
+`browser/recorder.ts` records, `browser/frames.ts` takes a viewer's frames and `browser/scripts.ts` holds what is evaluated
 in a page for viewers. `browser/automation.ts` runs agent-browser's commands
 with `browser/page-kit.ts`, the script that reads a page into a snapshot with
 refs and finds `@eN`, CSS and `text=` targets.
@@ -39,6 +39,34 @@ a process with no display reaches. A page that needs WebGL on a machine
 without a usable GPU gets none rather than SwiftShader on every core. On the
 M2 container on 2026-10-05, WebGL reported `ANGLE (AMD, AMD Radeon Graphics
 (radeonsi renoir ACO), OpenGL ES 3.2)`.
+
+### What sites see
+
+Headless Chrome names itself `HeadlessChrome` in its user agent, sets
+`navigator.webdriver` and reports an 800 × 600 screen smaller than its own
+window. Sites turn that away as a robot: on 2026-10-09 Google answered with
+its "unusual traffic" page, leboncoin and Zillow with a captcha, ChatGPT with
+Cloudflare's wait page and Indeed with "Blocked". The agent browser says what
+the same browser says with a window instead, and all five opened.
+
+`browser/launch.ts` reads that once per build of the executable, in a
+throwaway browser started for it: the user agent without `Headless`, and the
+client hints (`navigator.userAgentData`, the `Sec-CH-UA-*` headers) from a
+`file:` page, the secure context they need. It took about 2 seconds on M2 and
+is read again when the executable changes. Every browser then starts with
+`--user-agent`, which covers its pages, workers, popups and every request, and
+each tab gets the same user agent and the high-entropy client hints through
+`Emulation.setUserAgentOverride`: the flag alone empties those. The browser
+also runs with `--disable-blink-features=AutomationControlled`, which leaves
+`navigator.webdriver` false, `--test-type`, which hides the warning bar that
+flag adds and that took 56 pixels of the page, and `--screen-info={1920x1080}`.
+A browser whose identity cannot be read starts as it is, with a warning in the
+log. A page check of `boite view` skips the read.
+
+This brings it level with the same Chrome running with a window on the same
+network, not past it. Etsy, SeLoger and Reddit still asked for a captcha on
+2026-10-09, and so did Chrome with a window under Xvfb on that address. The
+user solves a captcha in the panel, which takes clicks and drags.
 
 ## Processes and profiles
 
@@ -122,15 +150,27 @@ stopped and thrown away.
 
 ## Watching it
 
-The panel's **Agent browser** surface shows the conversation's tabs. Until the
-user asks, it shows a card that names the machine, "This agent controls a
-browser on m2", with the page's title, and a **Show** button; nothing is
-captured or sent before that. Show starts the live view: an address bar with
-back, forward and reload, the agent's tabs to pick from, and the page, which
-takes taps, drags, text and keys. Hide stops it. When the agent opens a tab in
-the conversation on screen, the panel opens on that surface, still covered.
-The launcher's **W** opens it by hand. The cover holds for the conversation
-while the app stays open; a reload covers it again.
+The panel's **Agent browser** surface looks like a browser: a strip of the
+conversation's tabs, then a toolbar with back, forward, reload, the address
+and two buttons, **Display** and pause, then the page. In the desktop app on
+its own core, the one it started, the page shows at once: the app trusts the
+core it started and the frames stay on that machine, so there is no cover. A
+plain browser on the same machine is not told it is local and keeps the cover. Any other client first gets a card that names
+the machine, "This agent controls a browser on m2", with the page's title, and
+a **Show** button; nothing is captured or sent before that. Show starts the
+live view and, while a page shows, the eye in the tab strip covers it again. When the agent opens a
+tab in the conversation on screen, the panel opens on that surface. The
+launcher's **W** opens it by hand. On a client with a cover, it holds for the
+conversation while the app stays open, and a reload covers it again.
+
+The owner opens and closes tabs as in any browser. **+** adds a new tab page
+with an address field, and Enter opens the page in the conversation's browser
+(`browser.command` `open`, the machine's default profile), live at once when
+it opens since the owner asked for it; a refused address stays in the field
+with the reason. A tab's **×** closes it (`close`), the agent's tabs
+included. With no tab open the owner lands on that new tab page, which is where
+to sign in to a site the agent then uses. A paired phone watches and drives the pages
+but neither opens nor closes a tab: `browser.command` is not one of its methods.
 
 The live view asks for one JPEG at a time (`browser.remoteFrame`), the next as
 soon as the last has arrived, sized to what the view shows and lighter on a
@@ -140,8 +180,8 @@ phone watching one tab cost one. Input names the frame it was aimed at; a tap
 on a frame of another page or another viewport size is refused, and the
 address bar accepts only http and https.
 
-A computer drives the page itself, with nothing under it but one line of
-help. A click on the page gives it the keyboard until a click or a focus lands
+A computer drives the page itself, with nothing under it; the page's tooltip
+says how, and a copy shows a short note over the page. A click on the page gives it the keyboard until a click or a focus lands
 elsewhere: characters, Enter, Tab, Escape, the arrows, Home, End, Page Up and
 Down, Delete and Backspace leave as native key events (`press`), and the keys
 typed while a request is in flight leave together in the next one, in order.
@@ -199,7 +239,9 @@ agent browser of a Windows machine other people have an account on.
 machine has one: opening, reading, clicking and typing, agent-browser's
 refs, fill, select, check, a form submitted with Enter, dialogs inside and
 outside a command and a covered element, presets and color scheme, diagnostics without query strings, a token kept to its conversation,
-a paired viewer's frames and taps, a popup becoming a tab, cookies kept per
+a paired viewer's frames and taps, a popup becoming a tab, the user agent a
+page, a worker, a request and a popup send without `Headless`, with
+`navigator.webdriver` false and full client hints, cookies kept per
 profile across a restart, a profile copied in by the owner, an MP4 recording
 read back, a recording discarded at the end of a turn, and a machine without a
 browser. `browser-cli.test.ts` checks the CLI's files with the browser stubbed.

@@ -400,6 +400,24 @@ verify the download's length and SHA-256 before making it available. Claude on
 Windows uses the official x64 binary this way. Its managed copy lives under
 Boite's data directory, without replacing a CLI installation elsewhere.
 
+A `binary` install can also name its publisher in `latest`: `versionUrl`, a
+plain-text file holding the newest version; `manifest`, that version's JSON
+manifest; `platform`, the key under the manifest's `platforms`; and `url`, the
+binary. `manifest` and `url` contain `{version}`, and all three URLs are https.
+Claude's release bucket has this shape, and its manifest gives each platform's
+`binary`, `checksum` (SHA-256) and `size`. Install reads the publisher first,
+unless it was read in the last minute, and downloads the release it names,
+checked against the manifest's digest and size like a pinned one. The manifest's
+binary name has to be the file the descriptor installs, `versionUrl` carries no
+`{version}`, and a redirect off https is refused. A publisher that cannot be
+reached, or a manifest that does not describe that binary, leaves the last
+release read, or the pin when none was, and the core log says why. A release
+that follows its publisher never goes back: an install or update naming an
+older version than the one on disk is refused as up to date. The install card reads the publisher when a
+client lists the providers and the last read is an hour old, never at startup.
+Without this, a first install would land the release the Boite build pinned,
+and an update could only reach the next pin.
+
 Codex and OpenCode ship a Windows x64 release the same way, from their GitHub
 releases; the Codex archive also carries `codex-command-runner.exe` and
 `codex-windows-sandbox-setup.exe`, unpacked beside the agent as upstream ships them. The
@@ -455,7 +473,10 @@ An update installs the new release beside the old one and repoints `current`.
 The old release is deleted as soon as no lease is held: right after the update,
 or when the last process of that provider ends. A core that starts also deletes
 every release `current` does not point at, and every download except the `.part`
-of the version the descriptor pins. A file Windows still holds is logged and
+of the version the descriptor pins. A provider that follows its publisher keeps
+its downloads at startup, since the release it was fetching may be newer than
+the pin; each successful read of the publisher then deletes every download but
+the one of the release it names. A file Windows still holds is logged and
 left for the next of those moments.
 
 ## What ships
@@ -498,9 +519,16 @@ descriptor uses additional fields available to other providers:
 - `session`, on an OS profile, replaces `auth.session` on that OS. An empty list
   says the login can live outside any file there: the `auth.session` files still
   read `ok` when present, and without them its accounts read `unknown` and turns
-  still start. Claude's macOS profile sets it: Claude Code keeps its login in the
-  Keychain there, and writes `.credentials.json` only when the Keychain is out
-  of reach.
+  still start. A CLI that is signed out reads `unknown` as well, so its default
+  account is adopted instead of leaving room for the guided sign-in. Claude's
+  macOS and Windows profiles set it. Claude Code keeps its login in the macOS
+  Keychain, and writes `.credentials.json` only when the Keychain is out of
+  reach. On Windows, Claude Code moves the login from `.credentials.json` into
+  Credential Manager once the `tengu_windows_credman` flag, cached in Claude
+  Code's config, turns that storage on; the move happens at the CLI's next
+  start. Without the empty list, an account that read `ok` would read
+  `unauthenticated` after that move and every turn would be refused, though the
+  CLI stayed signed in.
 - `seedFiles`, on the descriptor, maps a relative path to content written under
   the isolation directory before anything starts. Antigravity needs
   `antigravity-acp/settings.json` holding `{"auth":{"type":"oauth-personal"}}`.

@@ -51,7 +51,10 @@ still require the user's answer.
 A compatible model change on the same account follows the driver's existing
 model-switch path. Changing accounts clears the native session. The next turn
 starts a fresh session with context from the journal. Returning to an earlier
-account also starts fresh, so it receives the intervening work.
+account also starts fresh, so it receives the intervening work. The core
+makes the same switch by itself when the thread's account signed out and
+another account of the agent is signed in
+([accounts.md](accounts.md#a-conversation-follows-its-agent)).
 
 ## Provider defaults
 

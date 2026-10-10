@@ -458,12 +458,12 @@
    * and half of them would be dead against a connection that is not there.
    */
   /**
-   * A folded sidebar standing in the body, the one case where the chat card
-   * keeps a left gap. A class rather than `.body:has(> .sidebar.collapsed)`:
+   * A folded column standing in the body, the one case where the chat card or
+   * the Agents card keeps a left gap: both lists fold together (RailFrame). A class rather than `.body:has(> .sidebar.collapsed)`:
    * that selector made every node a streaming answer or a scroll mounted
    * anywhere below restyle the body, right before the list read its layout.
    */
-  let sidebarFolded = $derived(store.sidebarCollapsed && store.booted && ((store.connection === 'closed' && !store.core) || !(store.page === 'settings' || (store.page === 'agents' && experimentOn('resident-agents')))));
+  let sidebarFolded = $derived(store.sidebarCollapsed && store.booted && ((store.connection === 'closed' && !store.core) || store.page !== 'settings'));
   let tour = $derived(store.booted && store.connection === 'ready' && (tourRequested() || !tourSeen()));
 
   /**
@@ -748,7 +748,8 @@
 
   /* The frame: the cards keep `--frame-gap` from the window's right and bottom
      edges and from each other. The rails on the left stand on the frame, so
-     only a folded sidebar leaves the chat card a left gap to keep itself. */
+     only a folded column (RailFrame) leaves the chat or Agents card a left gap
+     to keep itself. */
   @media (min-width: 721px) {
     .body {
       gap: var(--frame-gap);

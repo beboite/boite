@@ -36,8 +36,8 @@ export const fr: Translation = {
   },
   remoteBrowser: {
     display: 'Affichage', resolution: 'Résolution de la page', fitPhone: 'Adapter à cet écran', phone: 'Téléphone', tablet: 'Tablette', rotate: 'Pivoter', width: 'Largeur', height: 'Hauteur', apply: 'Appliquer', sharedSize: 'La résolution change aussi la page que voit l’agent.', restoreSize: 'Revenir à la taille par défaut', previewZoom: 'Zoom de l’aperçu (cet appareil seulement)', fit: 'Ajuster', panHint: 'Glissez pour déplacer l’aperçu. Utilisez les flèches pour défiler dans la page.',
-    address: 'Adresse', go: 'Aller', back: 'Précédent', forward: 'Suivant', reload: 'Recharger', badAddress: 'Saisissez une adresse web (http ou https).',
-    title: 'Navigateur de l’agent', waiting: 'En attente de la page', live: 'En direct', paused: 'En pause', reconnecting: 'Reconnexion', pause: 'Pause', resume: 'Reprendre',
+    address: 'Adresse', addressPlaceholder: 'Saisir une adresse', back: 'Précédent', forward: 'Suivant', reload: 'Recharger', badAddress: 'Saisissez une adresse web (http ou https).',
+    title: 'Navigateur de l’agent', waiting: 'En attente de la page', paused: 'En pause', reconnecting: 'Reconnexion', pause: 'Pause', resume: 'Reprendre',
     interact: 'Toucher ou faire défiler la page partagée', interactDesk: 'La page partagée : cliquez dessus, puis écrivez',
     deskHint: 'Cliquez dans la page, puis écrivez. Glissez pour sélectionner, double-cliquez un mot, défilez à la molette. Copier, couper et coller passent par le clavier.',
     copy: 'Copier le texte sélectionné', copied: 'Copié.', nothingSelected: 'Rien n’est sélectionné dans la page. Touchez deux fois un mot d’abord.', copyCut: 'La sélection était trop longue : son début a été copié.', image: 'Vue en direct du navigateur de l’agent', scrollUp: 'Défiler vers le haut', scrollDown: 'Défiler vers le bas',
@@ -47,7 +47,8 @@ export const fr: Translation = {
     cover: 'Cet agent contrôle un navigateur sur {machine}', coverHint: 'Rien n’est diffusé vers cet appareil avant que vous l’affichiez.',
     show: 'Afficher', hide: 'Masquer', hideHint: 'Arrêter de regarder et recouvrir la vue',
     none: 'L’agent n’a pas de navigateur ouvert', noneHint: 'Il apparaît ici quand l’agent ouvre une page.',
-    unavailable: 'Pas de navigateur d’agent sur {machine}', tabs: 'Onglets de l’agent', untitled: 'Page sans titre'
+    unavailable: 'Pas de navigateur d’agent sur {machine}', tabs: 'Onglets de l’agent', untitled: 'Page sans titre',
+    newTab: 'Nouvel onglet', closeTab: 'Fermer {name}', newTabHint: 'Ouvrez une page dans le navigateur de cette conversation sur {machine}. L’agent la voit et peut s’en servir.', open: 'Ouvrir'
   },
   devicePanel: {
     cover: 'Cet agent contrôle un appareil sur {machine}', coverHint: 'Rien n’est diffusé vers cet appareil avant que vous l’affichiez.',
@@ -1658,8 +1659,8 @@ export const fr: Translation = {
     removeTitle: 'Supprimer {account} ?',
     removeBody: "Cela déconnecte le compte de Boite et supprime ses fichiers.",
     removeDefaultBody: "Boite cesse d'utiliser ce login. Il reste connecté sur votre ordinateur.",
-    removeThread: "1 conversation utilise encore ce compte. Pour la reprendre, il faudra y choisir un autre compte, ce qui recharge tout son contexte.",
-    removeThreads: "{count} conversations utilisent encore ce compte. Pour en reprendre une, il faudra y choisir un autre compte, ce qui recharge tout son contexte.",
+    removeThread: "1 conversation utilise encore ce compte. Son prochain message la fait passer sur un autre compte connecté du même agent, ce qui recharge tout son contexte.",
+    removeThreads: "{count} conversations utilisent encore ce compte. Le prochain message de chacune la fait passer sur un autre compte connecté du même agent, ce qui recharge tout son contexte.",
     removed: 'Compte supprimé',
     removedHint: "Le compte de cette conversation a été supprimé. Choisissez un modèle sur un autre compte pour continuer.",
     status: {
@@ -1868,6 +1869,8 @@ export const fr: Translation = {
     materialMica: 'Mica',
     materialSolid: 'Opaque',
     chatWidth: 'Largeur du chat',
+    groupChanges: 'Regrouper les fichiers modifiés dans la conversation',
+    expandDiffs: 'Ouvrir les aperçus des changements par défaut',
     chatWidthComfortable: 'Confortable',
     chatWidthWide: 'Large',
     chatWidthFull: 'Pleine',
@@ -2627,7 +2630,6 @@ export const fr: Translation = {
       desktop: 'Votre ordinateur', phone: 'Votre téléphone', synced: 'La même conversation', reachHint: "Après un appairage par QR code, suivez vos agents sur votre téléphone. Votre ordinateur continue de les faire tourner.",
       notification: 'Formulaire de contact terminé', quietBody: "Vos agents travaillent sans prendre votre écran ni vos haut-parleurs.",
       installVoice: 'Installer la dictée locale', downloadVoice: 'Environ 200 Mo. Le son reste sur cet ordinateur.', installingVoice: 'Téléchargement du moteur vocal', cancelVoice: 'Annuler le téléchargement', readyVoice: 'La dictée est prête. Utilisez le micro du champ de message.', retryVoice: 'Réessayer la configuration vocale',
-      workspaceBody: 'Cliquez sur une démo pour la voir en action.',
     },
     label: 'Prise en main',
     skip: 'Passer',

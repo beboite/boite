@@ -12,7 +12,7 @@
    * `countSubagents`: the row says how many beside the radar, where no hover
    * shows the title (a phone).
    */
-  let { thread, now, subagents = null, countSubagents = false }: { thread: Pick<ThreadSummary, 'status' | 'unread' | 'runningSince' | 'requestSince' | 'backgroundWork' | 'lastUserMessageAt' | 'createdAt'>; now: number; subagents?: WorkingChildren | null; countSubagents?: boolean } = $props();
+  let { thread, now, subagents = null, countSubagents = false }: { thread: Pick<ThreadSummary, 'status' | 'unread' | 'runningSince' | 'requestSince' | 'backgroundWork' | 'openQuestions' | 'lastUserMessageAt' | 'createdAt'>; now: number; subagents?: WorkingChildren | null; countSubagents?: boolean } = $props();
 
   function earliest(a: number | null | undefined, b: number | null | undefined): number | null {
     return a == null ? b ?? null : b == null ? a : Math.min(a, b);

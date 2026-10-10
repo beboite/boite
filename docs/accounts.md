@@ -127,11 +127,16 @@ when the provider can store its login elsewhere, or `error` when the check fails
 A provider that names `auth.sqlite` is read the same way from its database:
 `ok` once a listed table holds a row
 ([providers.md](providers.md#opencode-2)).
+Claude on macOS and Windows reads `unknown` without its file, because its CLI
+can keep the login in the Keychain or in Credential Manager. A signed-out CLI
+reads `unknown` there too. Startup reads every account stored as
+`unauthenticated` again: one written under an older rule recovers when it now
+reads otherwise, and one the agent itself refused stays signed out.
 
 The Check connection button requests a fresh login check, without listing
 models or sending a prompt. Codex reads its account through the app-server with
 `refreshToken: true`; Claude asks its CLI for `auth status --json`, including
-Keychain accounts. Both return the signed-in email. Other providers retain their
+Keychain and Credential Manager accounts. Both return the signed-in email. Other providers retain their
 session-file check. A failed check displays its reason instead of reporting a
 model count. Passive checks do not launch an agent process.
 
@@ -221,7 +226,8 @@ keyboard user goes from `Install` to `Cancel`, to the sign-in link, then to
 sheet at the bottom of the screen, and its last button stays above the home
 indicator.
 
-An account that answered `unauthenticated` gets a `Sign in again` chip beside
+An account that answered `unauthenticated`, with no other account of its agent
+signed in, gets a `Sign in again` chip beside
 the model chip, and an error in its thread carries the same button. Both open
 the dialog on that account, so the login lands on it instead of creating a
 second one; a default-location account, which Boite never logs in, is told to
@@ -291,11 +297,37 @@ never walks into the user's own `skills` or `plugins`.
 
 Conversations that name the account stay, archived ones included. `accounts.threads`
 counts them, and the confirmation says how many before anything is deleted. Such a
-conversation keeps its history and its title, and its mode can still change, but
-`turns.start` and a model change are refused with `field: accountId` until
-`threads.update` gives it another account. That switch starts a new native session,
-so the agent reads the conversation again from Boite's journal. The composer shows
-an Account removed chip that opens the model picker.
+conversation keeps its history and its title, and its mode can still change. Its
+next turn moves it to another account of the agent
+([below](#a-conversation-follows-its-agent)). A model change, and a turn when the
+agent has no other account to run on, are refused with `field: accountId` until
+`threads.update` gives it one; the composer then shows an Account removed chip
+that opens the model picker.
+
+## A conversation follows its agent
+
+A thread records the account its last turn used, yet that account does not hold
+it hostage. `packages/core/src/threads/account-fallback.ts` holds the rule, and
+the in-memory client mirrors it:
+
+- When a turn starts on a thread whose account was removed or reads
+  `unauthenticated`, the core moves it to another account of the same provider:
+  signed in (`ok`) first, then `unknown`, then `error`. The move is the
+  `threads.update` switch the model picker makes, so the native session of the
+  old login goes and the turn starts a fresh one with the journal's context.
+  The model, effort and speed stay when the new account lists them, else the
+  model alone, else the provider's default model.
+- With no other account able to run, a removed account is refused as above and
+  a signed-out one names itself in the turn's check, as before.
+- A title for such a thread is written on the account its next turn would use.
+- A persistent agent keeps the account its profile names.
+
+The composer follows the same rule. A draft opens on the remembered account
+while it is signed in, else on another of that provider. The picker shows a
+provider's models for its first signed-in account, and a signed-out account
+chip cannot be picked; it signs in again from Providers. `Sign in again` and
+Account removed appear only when no other account of the agent can take the
+next turn.
 
 ## Provider controls and account pools
 

@@ -97,6 +97,31 @@ export interface ProviderInstall {
   arch?: 'x64' | 'arm64';
   /** Files expected inside the archive, relative paths inside it, with their sizes; the first one is the executable. */
   files: { path: string; bytes: number; executable?: boolean }[];
+  /**
+   * Where the newest release is published, for a `binary` install. The core
+   * reads it before an install, at each update check, and behind a provider
+   * list when the last read is an hour old so the install card names it. It
+   * installs that release instead of the pinned one, which stays the fallback
+   * when the publisher was never reached.
+   */
+  latest?: ProviderInstallLatest;
+}
+
+/**
+ * A publisher that names its newest release in a plain-text file and describes
+ * each release in a JSON manifest carrying, per platform, the binary's name,
+ * SHA-256 and size. Claude's release bucket has this shape. `manifest` and
+ * `url` contain `{version}`.
+ */
+export interface ProviderInstallLatest {
+  /** A plain-text file holding the newest version. */
+  versionUrl: string;
+  /** That version's manifest. */
+  manifest: string;
+  /** The key under the manifest's `platforms`, such as `win32-x64`. */
+  platform: string;
+  /** That version's binary. */
+  url: string;
 }
 
 /**
@@ -987,6 +1012,12 @@ export interface ThreadSummary {
   moveNote?: MoveNotice | null;
   /** Answers accepted by the core, waiting for the running agent or the next turn. In memory only. */
   pendingAnswers?: string[];
+  /**
+   * Questions the agent asked without stopping (`boite ask`, Codex's own)
+   * that still wait for the user. The status stays `running` or `idle`, so a
+   * row reads this to say the thread needs the user. Missing on older cores.
+   */
+  openQuestions?: number;
   unread: boolean;
   archived: boolean;
   /** Kept above the other threads of its project in the sidebar, whatever runs. */

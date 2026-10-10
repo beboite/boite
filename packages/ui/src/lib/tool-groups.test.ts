@@ -83,6 +83,7 @@ test('successful file changes stand alone while failed attempts stay in their ru
     { kind: 'activity', indices: [1] },
     { kind: 'activity', indices: [2, 3, 4] }
   ]);
+  expect(partRuns(parts, 0, parts.length, true)).toEqual([{ kind: 'activity', indices: [0, 1, 2, 3, 4] }]);
 });
 
 test('reasoning folds into the calls around it so one stretch of work is one run', () => {

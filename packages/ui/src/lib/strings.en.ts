@@ -27,8 +27,8 @@ export const strings = {
   },
   remoteBrowser: {
     display: 'Display', resolution: 'Page resolution', fitPhone: 'Fit this screen', phone: 'Phone', tablet: 'Tablet', rotate: 'Rotate', width: 'Width', height: 'Height', apply: 'Apply', sharedSize: 'Resolution also changes the page the agent sees.', restoreSize: 'Restore the default size', previewZoom: 'Preview zoom (this device only)', fit: 'Fit', panHint: 'Drag to pan the preview. Use the arrows to scroll the page.',
-    address: 'Address', go: 'Go', back: 'Back', forward: 'Forward', reload: 'Reload', badAddress: 'Enter a web address (http or https).',
-    title: 'Agent’s browser', waiting: 'Waiting for the page', live: 'Live', paused: 'Paused', reconnecting: 'Reconnecting', pause: 'Pause', resume: 'Resume',
+    address: 'Address', addressPlaceholder: 'Enter an address', back: 'Back', forward: 'Forward', reload: 'Reload', badAddress: 'Enter a web address (http or https).',
+    title: 'Agent’s browser', waiting: 'Waiting for the page', paused: 'Paused', reconnecting: 'Reconnecting', pause: 'Pause', resume: 'Resume',
     interact: 'Tap or swipe the shared page', interactDesk: 'The shared page: click it, then type',
     deskHint: 'Click the page, then type in it. Drag to select, double-click a word, scroll with the wheel. Copy, cut and paste use the keyboard.',
     copy: 'Copy the selected text', copied: 'Copied.', nothingSelected: 'Nothing is selected in the page. Double-tap a word first.', copyCut: 'The selection was too long: its start was copied.', image: 'Live view of the agent’s browser', scrollUp: 'Scroll up', scrollDown: 'Scroll down',
@@ -39,7 +39,8 @@ export const strings = {
     cover: 'This agent controls a browser on {machine}', coverHint: 'Nothing streams to this device until you show it.',
     show: 'Show', hide: 'Hide', hideHint: 'Stop watching and cover the view again',
     none: 'The agent has no browser open', noneHint: 'It appears here when the agent opens a page.',
-    unavailable: 'No agent browser on {machine}', tabs: 'The agent’s tabs', untitled: 'Untitled page'
+    unavailable: 'No agent browser on {machine}', tabs: 'The agent’s tabs', untitled: 'Untitled page',
+    newTab: 'New tab', closeTab: 'Close {name}', newTabHint: 'Open a page in this conversation’s browser on {machine}. The agent sees it and can use it.', open: 'Open'
   },
   /** The Device panel: simulators and emulators an agent opened with `boite device`. */
   devicePanel: {
@@ -1749,8 +1750,8 @@ export const strings = {
     removeTitle: 'Remove {account}?',
     removeBody: 'This signs the account out of Boite and deletes its files.',
     removeDefaultBody: 'Boite stops using this login. It stays signed in on your computer.',
-    removeThread: '1 conversation still uses this account. To continue it, you will have to choose another account in it, which reloads its whole context.',
-    removeThreads: '{count} conversations still use this account. To continue one, you will have to choose another account in it, which reloads its whole context.',
+    removeThread: '1 conversation still uses this account. Its next message moves it to another signed-in account of the same agent, which reloads its whole context.',
+    removeThreads: '{count} conversations still use this account. The next message in each moves it to another signed-in account of the same agent, which reloads its whole context.',
     removed: 'Account removed',
     removedHint: 'The account of this conversation was removed. Choose a model on another account to continue.',
     status: {
@@ -1962,6 +1963,8 @@ export const strings = {
     materialMica: 'Mica',
     materialSolid: 'Solid',
     chatWidth: 'Chat width',
+    groupChanges: 'Group modified files in the conversation',
+    expandDiffs: 'Expand change previews by default',
     chatWidthComfortable: 'Comfortable',
     chatWidthWide: 'Wide',
     chatWidthFull: 'Full',
@@ -2737,7 +2740,6 @@ export const strings = {
       desktop: 'Your computer', phone: 'Your phone', synced: 'The same conversation', reachHint: 'After pairing by QR code, follow your agents from your phone. Your computer keeps running them.',
       notification: 'Contact form finished', quietBody: 'Let your agents work without taking over your screen or your speakers.',
       installVoice: 'Install local dictation', downloadVoice: 'About 200 MB. Audio stays on this computer.', installingVoice: 'Downloading voice engine', cancelVoice: 'Cancel download', readyVoice: 'Dictation is ready. Use the microphone in the composer.', retryVoice: 'Retry voice setup',
-      workspaceBody: 'Click a demo to see how it works.',
     },
     label: 'Getting started',
     skip: 'Skip',

@@ -1757,14 +1757,15 @@ test('a tool card shows the diff, the markdown and the image it produced', async
   await waitFor(() => !query<HTMLButtonElement>('[data-testid=composer-send]').disabled);
   query<HTMLButtonElement>('[data-testid=composer-send]').click();
 
-  // The edit comes open on its diff and counts its lines on its own line; the
-  // other two are folded and say what they carry.
+  // Changes and produced documents keep their previews behind a disclosure.
   await waitFor(() => document.querySelectorAll('[data-testid=tool-document-chip]').length === 2);
   expect(
     Array.from(document.querySelectorAll('[data-testid=tool-document-chip]')).map((el) => el.textContent)
   ).toEqual(['1 doc', '1 doc']);
   expect(query('[data-testid=tool-diff-counts]').textContent?.replace(/\s+/g, ' ').trim()).toBe('+2 -1');
-  expect(query('[data-testid=tool-card][data-family=edit] [data-testid=tool-toggle]').getAttribute('aria-expanded')).toBe('true');
+  expect(query('[data-testid=tool-card][data-family=edit] [data-testid=tool-toggle]').getAttribute('aria-expanded')).toBe('false');
+  query<HTMLButtonElement>('[data-testid=tool-card][data-family=edit] [data-testid=tool-toggle]').click();
+  flushSync();
   // A diff says it all: no raw input under it.
   expect(document.querySelector('[data-testid=tool-card][data-family=edit] [data-testid=tool-input]')).toBeNull();
 
@@ -2134,7 +2135,7 @@ test('the Tailscale switch serves the core over HTTPS, pairing links follow it, 
   await waitFor(() => document.querySelector('[data-testid=tailscale-access][data-state=off]') !== null);
   expect(store.settings?.publicUrl ?? null).toBeNull();
 });
-test('a new isolated account is signed out, and a thread on it offers the sign-in', async ({ app: _app }) => {
+test('a thread on a signed-out account offers the sign-in only once no other account of its agent can run it', async ({ app: _app }) => {
   const client = store.client!;
   const account = await client.call('accounts.add', { providerId: 'claude', label: 'Work', useDefaultLocation: false });
   expect(account.status).toBe('unauthenticated');
@@ -2142,6 +2143,10 @@ test('a new isolated account is signed out, and a thread on it offers the sign-i
   const thread = await client.call('threads.create', { projectId: project!.id, providerId: 'claude', accountId: account.id, title: 'Signed out' });
   await waitFor(() => store.threads.some((entry) => entry.id === thread.id));
   await store.open(thread.id);
+  // The signed-in main account takes the next send over, so nothing asks to sign in.
+  await waitFor(() => document.querySelector('[data-testid=composer-attach]') !== null);
+  expect(document.querySelector('[data-testid=composer-reconnect]')).toBeNull();
+  for (const entry of store.accounts) if (entry.providerId === 'claude') entry.status = 'unauthenticated';
   await waitFor(() => document.querySelector('[data-testid=composer-reconnect]') !== null);
 });
 

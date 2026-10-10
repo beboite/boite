@@ -8,8 +8,7 @@
   import { formatLocale } from '../lib/i18n.svelte';
   import { backgroundLabel } from '../lib/background';
   import type { Snippet } from 'svelte';
-  import TypingIndicator from './TypingIndicator.svelte';
-  let { turn, requestStartedAt = null, progress, waiting = false, activeTool = false, activeContent = false, typing = false, background = [], stop, actions }: {
+  let { turn, requestStartedAt = null, progress, waiting = false, activeTool = false, activeContent = false, background = [], stop, actions }: {
     turn: Turn;
     /**
      * When the user's request this turn belongs to started, earlier than the
@@ -23,8 +22,6 @@
     activeTool?: boolean;
     /** Streaming text or reasoning already shows that the agent is working. */
     activeContent?: boolean;
-    /** No text or reasoning is currently showing its own live activity. */
-    typing?: boolean;
     /** What the agent still runs in the background; only the thread's last turn is handed it. */
     background?: BackgroundTask[];
     /** Ends the agent process and its background work. */
@@ -38,7 +35,6 @@
   const compactOperation = $derived(turn.execution?.operation === 'compact');
   const observed = $derived(running && !waiting && progress?.turnId === turn.id ? progress : null);
   const compacting = $derived(running && !waiting && (compactOperation || observed?.phase === 'compacting'));
-  const preparing = $derived(running && typing && !waiting && !activeTool && !compacting);
   const label = $derived.by(() => {
     if (compacting) return strings.chat.compacting;
     if (turn.status === 'done') return compactOperation ? strings.chat.compactionUnknown : strings.notify.done;
@@ -80,11 +76,8 @@
   <span class="dot ui-label" aria-hidden="true">·</span>
   <span class="ui-label" class:quiet data-testid={id} {title}>{text}</span>
 {/snippet}
-{#if preparing}
-  <div class="reply-pending"><TypingIndicator /></div>
-{/if}
 {#if turn.status !== 'queued' && !(running && activeTool && !waiting && background.length === 0 && !observed && !compacting)}
-  <div class="summary" class:compacting class:preparing class:settled class:paused={hidden || waiting} data-testid="turn-summary" data-status={turn.status} role="status" aria-label={label} title={label}>
+  <div class="summary" class:compacting class:settled class:paused={hidden || waiting} data-testid="turn-summary" data-status={turn.status} role="status" aria-label={label} title={label}>
     {#if compacting}
       <LoaderCircle size={18} class="spinner compaction-icon" aria-hidden="true" />
       <div class="compaction-copy">
@@ -95,7 +88,7 @@
         {/if}
       </div>
     {:else}
-    {#if turn.status === 'done'}<Check size={14} />{:else if turn.status === 'error'}<CircleAlert size={14} />{:else if turn.status === 'stopped'}<Square size={12} />{:else if !preparing && !activeContent}<LoaderCircle size={16} class="spinner" />{/if}
+    {#if turn.status === 'done'}<Check size={14} />{:else if turn.status === 'error'}<CircleAlert size={14} />{:else if turn.status === 'stopped'}<Square size={12} />{:else if !activeContent && !activeTool}<LoaderCircle size={16} class="spinner" />{/if}
     {#if spent !== null}
       <span class="ui-label" data-testid="turn-elapsed" title={ownLabel}>{fill(elapsedLabel, { time: elapsed(spent) })}</span>
     {/if}
@@ -103,7 +96,7 @@
       {@render metric('compaction-result', label)}
     {/if}
     {#if observed}
-      {#if observed.detail || observed.phase === 'retrying' || quiet >= 60_000}
+      {#if !activeTool && !activeContent || observed.phase === 'retrying' || quiet >= 60_000}
         {@render metric('turn-progress', observed.detail ? `${activityLabel}: ${observed.detail}` : activityLabel, observed.detail ?? undefined)}
       {/if}
       {#if quiet >= 60_000}
@@ -137,14 +130,11 @@
 
 <style>
   .summary { display: flex; flex-wrap: wrap; align-self: stretch; align-items: center; gap: 4px 6px; margin: 12px 0 0 4px; font-size: var(--text-xs); color: var(--color-muted-foreground); font-variant-numeric: tabular-nums; }
-  .summary[data-status='running'] { color: var(--color-accent); }
+  .summary[data-status='running'] { color: var(--color-muted-foreground); }
   /* Read on demand: the message under the pointer or the keyboard shows it, a finger always does. */
   .summary.settled { opacity: 0; transition: opacity var(--dur-2); }
   :global(.message:hover) .summary.settled, .summary.settled:focus-within, .summary.settled:not(:has(button)) { opacity: 1; }
   @media (hover: none) { .summary.settled { opacity: 1; } }
-  .reply-pending { display: flex; align-items: center; align-self: flex-start; margin: var(--chat-block-gap) 0 0 var(--activity-padding); }
-  .reply-pending :global(.typing) { min-height: 40px; padding: 10px 14px; }
-  .summary.preparing { margin-top: 6px; color: var(--color-muted-foreground); }
   .summary[data-status='error'] { color: var(--color-danger); }
   .summary.compacting { align-self: flex-start; align-items: flex-start; flex-wrap: nowrap; gap: 10px; max-width: 520px; box-sizing: border-box; padding: 12px 14px; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-2); }
   .compaction-copy { min-width: 0; }

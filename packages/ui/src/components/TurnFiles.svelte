@@ -9,14 +9,16 @@
   import type { Store } from '../lib/store.svelte';
   import { countsOf, turnFileTree, turnLineCounts, type TurnDiff, type TurnFile, type TurnFileNode } from '../lib/turn-files';
   import DiffView from './DiffView.svelte';
+  import { chatPrefs } from '../lib/chat-prefs.svelte';
 
   /**
    * `diffs` is what the answer's own calls changed, shown here on demand. What
    * the whole thread changed is the working tree against its last commit: the
    * Changes panel, one click away for whoever can read the repository.
    */
-  let { store, files, diffs = [], cwd }: { store: Store; files: TurnFile[]; diffs?: TurnDiff[]; /** The directory `files` were read against. */ cwd: string } = $props();
-  let showDiff = $state(false);
+  let { store, files, diffs = [], cwd, deferred = [], loadDiffs }: { store: Store; files: TurnFile[]; diffs?: TurnDiff[]; /** The directory `files` were read against. */ cwd: string; deferred?: { messageId: string; toolId: string }[]; loadDiffs?: () => Promise<void> } = $props();
+  let diffToggled = $state<boolean | null>(null);
+  let showDiff = $derived(diffToggled ?? chatPrefs.expandDiffs);
   /** Folded by default: the count and the lines added and removed say enough until the list is wanted. */
   let open = $state(false);
   let lines = $derived(turnLineCounts(diffs, cwd));
@@ -25,6 +27,18 @@
   let expanded = $state<Record<string, boolean>>({});
   let allExpanded = $state(false);
   let hasFolders = $derived(tree.some((node) => node.kind === 'folder'));
+  let loading = $state(false);
+  let loadError = $state<string | null>(null);
+  let attempt = $state(0);
+  let attempted = '';
+  $effect(() => {
+    const key = `${attempt}:${deferred.map(source => `${source.messageId}/${source.toolId}`).join(',')}`;
+    if (!showDiff || !deferred.length || !loadDiffs || loading || attempted === key) return;
+    attempted = key;
+    loadError = null;
+    loading = true;
+    void loadDiffs().catch(reason => { loadError = reason instanceof Error ? reason.message : String(reason); }).finally(() => { loading = false; });
+  });
 
   function toggleAll(): void {
     allExpanded = !allExpanded;
@@ -69,8 +83,8 @@
       </button>
     {/if}
     <span class="tools">
-      {#if diffs.length > 0}
-        <button type="button" class="ghost small" data-testid="turn-diff-toggle" aria-expanded={showDiff} onclick={() => (showDiff = !showDiff)}>
+      {#if diffs.length > 0 || deferred.length > 0}
+        <button type="button" class="ghost small" data-testid="turn-diff-toggle" aria-expanded={showDiff} onclick={() => { if (!showDiff) { attempt += 1; loadError = null; } diffToggled = !showDiff; }}>
           <FileDiff size={14} /><span class="ui-label">{showDiff ? strings.chat.hideTurnDiff : strings.chat.showTurnDiff}</span>
         </button>
       {/if}
@@ -83,6 +97,8 @@
   {#if open}<div class="tree" data-testid="turn-files-tree">{@render branch(tree, 0)}</div>{/if}
   {#if showDiff}
     <div class="diffs" data-testid="turn-diff">
+      {#if loading}<p data-testid="turn-diff-loading">{strings.app.loading}</p>{/if}
+      {#if loadError}<p role="alert">{loadError}</p>{/if}
       {#each diffs as doc, index (index)}
         <DiffView path={doc.path} oldText={doc.oldText} newText={doc.newText} />
       {/each}
@@ -163,6 +179,7 @@
   .turn-files {
     display: flex;
     flex-direction: column;
+    min-width: 0;
     /* The answer's parts sit 4px in; the card lines up with them. */
     margin: 12px 0 0 4px;
     background: var(--color-surface);
@@ -172,6 +189,7 @@
 
   header {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 8px;
     min-height: var(--row);

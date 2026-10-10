@@ -51,17 +51,23 @@ says which providers have the hook.
 Settings, General, Conversations, `Title model` stores `settings.titleModel`,
 a provider and a model, or `null` for Automatic.
 
-- Automatic: the thread's own provider and account, on its small model. The
-  defaults follow T3 Code's (`packages/contracts/src/title-models.ts`):
-  `claude-haiku-4-5` for Claude, then `gpt-6-luna`, `gpt-5.6-luna`,
-  `gpt-5.4-mini` for Codex, the first one the account lists, else the first
-  name. A dated id such as `claude-haiku-4-5-20251001` counts as its name.
+- Automatic: the thread's own provider and account, on its small model
+  (`packages/contracts/src/title-models.ts`). Each provider names model
+  families, not ids: the newest Haiku the Claude account lists, the newest Luna
+  for Codex, then the newest `-mini` when it lists no Luna. Newest compares the
+  version numbers in the id, a release date left out, so `claude-haiku-5-5`
+  wins over `claude-haiku-4-5-20251001` and `gpt-6-luna` over `gpt-5.6-luna`.
+  An account that lists none of the family is asked for the fallback:
+  Claude's `haiku` alias, which its CLI resolves to its newest Haiku, and
+  `gpt-6-luna` for Codex.
 - A pick: every title goes to that model, on the thread's own account when
   the thread uses the same provider, else on that provider's first account
   signed in. A pick whose provider is gone, not installed or signed out falls
   back to Automatic for that title.
-- Neither: a thread whose provider is not installed, or whose account signed
-  out, starts no title call and keeps the prompt's title.
+- Neither: a thread whose provider is not installed, or whose provider has
+  every account signed out, starts no title call and keeps the prompt's title.
+  A thread whose own account signed out writes on the account its next turn
+  would use ([accounts.md](accounts.md#a-conversation-follows-its-agent)).
 
 `settings.update` refuses a `titleModel` whose provider is not loaded or has
 no `title` hook, and a blank or over 200 characters model. The menu lists

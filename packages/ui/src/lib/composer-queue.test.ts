@@ -1,7 +1,7 @@
 import { expect, test, vi } from 'vitest';
 import { ATTACHMENTS_PER_TURN } from '@boite/contracts';
 import type { Store } from './store.svelte';
-import { drainQueue, type ComposerState } from './composer-queue';
+import { drainQueue, textEntries, type ComposerState } from './composer-queue';
 
 const attachment = { kind: 'file' as const, name: 'note.txt', mimeType: 'text/plain', data: 'YQ==' };
 const reference = { id: 'save', url: 'https://example.test', selector: '#save', text: 'Save', bounds: { x: 0, y: 0, width: 80, height: 30 }, mention: { start: 0, end: 5 } };
@@ -13,12 +13,18 @@ const state = (): ComposerState => ({ text: '', attachments: [], sending: false,
 
 test('one batch carries every attachment and mention, while new arrivals wait for the next turn', async () => {
   const draft = state();
+  const original = [...draft.queued];
   let finish!: (accepted: boolean) => void;
   const send = vi.fn(() => new Promise<boolean>(resolve => { finish = resolve; }));
   const store = { send } as unknown as Store;
   const sending = drainQueue(store, 'thread', draft);
   draft.queued.push({ text: 'arrived during send', attachments: [] });
   await drainQueue(store, 'thread', draft);
+  // The batch stays drawn while it goes out: emptied, the queue would unmount
+  // and replay its arrival animation at every refused tool boundary.
+  expect(draft.queued.slice(0, 3)).toEqual(original);
+  draft.queued.slice(0, 3).forEach((entry, at) => expect(entry).toBe(original[at]));
+  expect(draft.outgoing).toBe(3);
   expect(send).toHaveBeenCalledTimes(1);
   const args = send.mock.calls[0] as unknown as [string, string, unknown[], typeof reference[]];
   expect(args.slice(0, 3)).toEqual(['@Save first\n\n@Save second\n\nthird', 'thread', [attachment]]);
@@ -27,6 +33,25 @@ test('one batch carries every attachment and mention, while new arrivals wait fo
   finish(true); await sending;
   expect(draft.queued.map(entry => entry.text)).toEqual(['arrived during send']);
   expect(draft.sending).toBe(false);
+});
+
+test('a steer the agent declines at each tool boundary leaves the same entries queued and unpaused', async () => {
+  const draft = state();
+  const original = [...draft.queued];
+  const steer = vi.fn<Store['steer']>(async () => {
+    // Mid-attempt the batch is still drawn, and locked against removal.
+    expect(draft.queued).toHaveLength(3);
+    expect(draft.outgoing).toBe(3);
+    return false;
+  });
+  const store = { steer } as unknown as Store;
+  await drainQueue(store, 'thread', draft, 'turn');
+  await drainQueue(store, 'thread', draft, 'turn');
+  expect(steer).toHaveBeenCalledTimes(2);
+  expect(draft.queued).toHaveLength(3);
+  draft.queued.forEach((entry, at) => expect(entry).toBe(original[at]));
+  expect(draft.paused).toBe(false);
+  expect(draft.outgoing).toBe(0);
 });
 
 test('a refused batch restores separate prompts and their files before later arrivals', async () => {
@@ -67,4 +92,13 @@ test('individually valid files stay split across turns when their combined count
   await drainQueue({ send } as unknown as Store, 'thread', draft);
   expect(send.mock.calls[1]?.[2]).toHaveLength(1);
   expect(draft.queued).toEqual([]);
+});
+
+test('pending answers keep their entry objects across thread updates, so keyed bubbles do not remount', () => {
+  const entries = textEntries();
+  const first = entries(['yes', 'use the parser']);
+  const again = entries(['yes', 'use the parser', 'also the lexer']);
+  expect(again[0]).toBe(first[0]);
+  expect(again[1]).toBe(first[1]);
+  expect(entries(['no', 'use the parser'])[0]).not.toBe(first[0]);
 });

@@ -57,6 +57,26 @@ test('a page the agent opens shows the Agent browser covered, naming the machine
   // The next frame draws the tap the page took.
   await Bun.sleep(1200);
   await capture('agent-browser-live-desktop.png');
+  // The owner opens a tab from the strip, on a new tab page, and leaves it without opening anything.
+  const loaded = `document.querySelector('${id('remote-browser-frame')}')?.complete && document.querySelector('${id('remote-browser-frame')}').naturalWidth > 100`;
+  for (const [width, height, name] of [[390, 844, 'phone'], [1280, 900, 'desktop']] as const) {
+    await size(width, height);
+    await page.click(id('agent-browser-new'));
+    await page.waitFor(`document.activeElement === document.querySelector('${id('agent-browser-start-address')}')`);
+    await capture(`agent-browser-new-tab-${name}.png`);
+    await page.click(id('agent-browser-draft-close'));
+    await page.waitFor(loaded);
+  }
+  // A page entered there opens as a tab of its own, live at once.
+  await page.click(id('agent-browser-new'));
+  await page.waitFor(`document.activeElement === document.querySelector('${id('agent-browser-start-address')}')`);
+  await page.evaluate(`(() => { const field = document.querySelector('${id('agent-browser-start-address')}'); field.value = 'shop.example/cart'; field.dispatchEvent(new Event('input', { bubbles: true })); document.querySelector('${id('agent-browser-start')}').requestSubmit(); })()`);
+  await page.waitFor(`document.querySelectorAll('${id('agent-browser-tab')}').length === 2 && document.querySelector('${id('remote-browser-address')}')?.value === 'https://shop.example/cart'`);
+  await page.waitFor(loaded);
+  // Its × closes it; the agent's page comes back.
+  await page.evaluate(`document.querySelector('.tab.selected ${id('agent-browser-close')}').click()`);
+  await page.waitFor(`document.querySelectorAll('${id('agent-browser-tab')}').length === 1 && document.querySelector('${id('remote-browser-address')}')?.value === 'https://example.com/docs'`);
+  await page.waitFor(loaded);
 
   // Hide covers it again on this client; the phone width shows the same cover.
   await page.click(id('agent-browser-hide'));

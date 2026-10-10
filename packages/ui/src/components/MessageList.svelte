@@ -5,8 +5,9 @@
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import MessageTurnSummary from './MessageTurnSummary.svelte';
-  import TurnFiles from './TurnFiles.svelte';
-  import { visibleTurnFiles } from '../lib/turn-files';
+  import TurnFiles from './TurnFilesLoader.svelte';
+  import { TurnFileCache, visibleTurnFiles, type TurnFilesData } from '../lib/turn-files';
+  import { chatPrefs } from '../lib/chat-prefs.svelte';
   import MessageOutline from './MessageOutline.svelte';
   import AgentMessageGroup from './AgentMessageGroup.svelte';
   import { agentMailFor, groupAgentMail, withAgentMail } from '../lib/agent-mail';
@@ -67,12 +68,12 @@
   });
   const delegation = $derived(store.delegation && (store.delegation.rootThreadId === threadId || store.delegation.agents.some(agent => agent.thread.id === threadId)) ? store.delegation : null);
   const mail = $derived(agentMailFor(store, threadId));
-  /** The thread's account is signed out: an error then carries the way back in. */
+  /** The thread's account is signed out and no other of its agent can take the next turn: an error carries the way back in. */
   const signedOut = $derived.by(() => {
     const thread = store.openThread;
     if (!thread || thread.id !== threadId) return null;
     const account = store.accountOf(thread.accountId);
-    return account?.status === 'unauthenticated' ? account : null;
+    return account?.status === 'unauthenticated' && store.usableAccountOf(account.providerId, account.id) === null ? account : null;
   });
   const team = $derived(delegation?.rootThreadId === threadId ? delegation.agents : []);
   const teamRowId = $derived(`delegation:${threadId}`);
@@ -702,17 +703,15 @@
     for (const message of timeline) result.set(message.turnId, message.id);
     return result;
   });
-  /**
-   * The turns whose last row is drawn, joined: the only ones whose card shows. A string, the same from one
-   * scroll to the next, so the files below are read again only when a turn's end enters or leaves the window.
-   */
+  /** Visible turn ends, kept as a stable string so scrolling within the same turns does not reread files. */
   const closingTurns = $derived(rendered.filter(row => row.last && lastInTurn.get(row.message.turnId) === row.message.id).map(row => row.message.turnId).join('\0'));
-  /** What each finished turn wrote, shown once at its end; a turn still running is left alone. */
+  /** One file summary at the turn's end, updated during work when changes are grouped. */
+  const fileCache = new TurnFileCache();
   const filesByTurn = $derived.by(() => {
     const thread = store.openThread;
-    if (!thread || thread.id !== threadId || closingTurns === '') return new Map();
+    if (!thread || thread.id !== threadId || closingTurns === '') return new Map<string, TurnFilesData>();
     windowStats.turnFiles += 1;
-    return visibleTurnFiles(messages, thread.turns, new Set(closingTurns.split('\0')), thread.cwd);
+    return visibleTurnFiles(messages, thread.turns, new Set(closingTurns.split('\0')), thread.cwd, chatPrefs.groupChanges, fileCache);
   });
   /** Everything the agent wrote in a turn, its tool cards left out: what the turn's copy button takes. */
   function answerOf(turnId: string): string {
@@ -795,7 +794,8 @@
               latestInTurn={lastInTurn.get(message.turnId) === message.id} memoryEvents={memoryPlacement.inline.get(message.id) ?? []} />
           {/if}
           {#if turn && closes && filesByTurn.has(turn.id)}
-            <TurnFiles {store} {...filesByTurn.get(turn.id)!} />
+            <TurnFiles {store} {...filesByTurn.get(turn.id)!}
+              loadDiffs={() => Promise.all(filesByTurn.get(turn.id)!.deferred.map(source => store.loadToolOutput(threadId, source.messageId, source.toolId))).then(() => {})} />
           {/if}
           {#if turn && closes}
             <MessageTurnSummary {store} {threadId} {turn} turns={shownTurns} message={source ?? message} {messages}>

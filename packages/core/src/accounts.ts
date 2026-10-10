@@ -384,6 +384,18 @@ export class AccountStore {
   }
 
   /**
+   * Reads again every account last seen signed out, at startup. A refused turn
+   * is all such an account gives, so a status left by an older rule would hold
+   * until someone opened the Providers page: Claude on Windows was one, read
+   * signed out once its CLI moved the login into Credential Manager.
+   */
+  recheckSignedOut(): void {
+    for (const account of this.list()) {
+      if (account.status === 'unauthenticated') this.check(account.id);
+    }
+  }
+
+  /**
    * Run the provider's login command for this account. The process goes through
    * `procs.spawnPiped` under the synthetic thread `login:<accountId>`, so it sits
    * in a Job Object and shows in the trace like any other agent process.

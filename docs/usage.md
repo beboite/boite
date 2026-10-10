@@ -115,7 +115,7 @@ quota views update the label immediately while retaining their cached windows.
 
 | Source | Read behavior and limits |
 | --- | --- |
-| Claude | OAuth usage endpoint for file logins; Keychain or expired-token fallback asks the CLI for usage with `skipBehaviors: true`, no prompt queue, tools or hooks. Fallback can omit resets and paid usage. |
+| Claude | OAuth usage endpoint for file logins; Keychain, Credential Manager or expired-token logins fall back to asking the CLI for usage with `skipBehaviors: true`, no prompt queue, tools or hooks. Fallback can omit resets and paid usage. |
 | Codex | `account/rateLimits/read`, without opening a conversation |
 | Muse Code | Last `usage/changed` observation from an existing host supporting that event; no host or prompt starts to refresh limits |
 | Grok | Credit percentage or legacy credit amounts from the selected CLI login's billing endpoint |

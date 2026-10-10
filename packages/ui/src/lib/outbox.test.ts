@@ -177,3 +177,31 @@ test('an outbox prompt put back in the box and sent unchanged keeps its request 
   expect(phone.starts.map(start => start.clientRequestId)).toEqual([id, id]);
   expect((await userPrompts(phone.client, thread)).filter(parts => parts.includes('Written in the tunnel'))).toHaveLength(1);
 });
+test('a drained batch whose send goes unanswered is saved as its outbox entry alone, never beside its originals', async () => {
+  const phone = await machine('one');
+  await phone.connect();
+  const thread = phone.store.threads.find(row => row.status === 'idle')!.id;
+  await phone.store.open(thread);
+  const original = vi.mocked(phone.client.call).getMockImplementation()!;
+  // The send and its retry under the same id both lose their answer; the outbox then delivers it.
+  let lost = 0;
+  vi.mocked(phone.client.call).mockImplementation(async (method, params) => {
+    if (method === 'turns.start' && lost < 2) { lost++; throw unansweredFailure('turns.start'); }
+    return original(method, params);
+  });
+  const saved = { outbox: 0, beside: 0 };
+  const setItem = Storage.prototype.setItem;
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+    if (key.includes(':entry:') && value.includes('"request"')) {
+      saved.outbox++;
+      if (value.includes('"text":"first"')) saved.beside++;
+    }
+    return setItem.call(this, key, value);
+  });
+  phone.store.composerStates[thread] = { text: '', attachments: [], queued: [{ text: 'first', attachments: [] }, { text: 'second', attachments: [] }], sending: false, paused: false };
+  await vi.waitFor(async () => expect((await userPrompts(phone.client, thread)).filter(parts => parts.includes('first\\n\\nsecond'))).toHaveLength(1), { timeout: 10_000 });
+  // A reload restores what was saved: originals beside the outbox entry would go out twice.
+  expect(saved.outbox).toBeGreaterThan(0);
+  expect(saved.beside).toBe(0);
+  expect(phone.store.composerStates[thread]!.queued).toEqual([]);
+});
