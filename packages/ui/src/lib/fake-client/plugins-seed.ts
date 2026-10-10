@@ -33,10 +33,10 @@ export function fakePlugins(): PluginState[] {
   const legacy = `${DATA_DIR}\\plugins\\pool-legacy\\installed.json`;
   return [
     {
-      ...base, id: 'bots', name: 'Bots', origin: 'recommended',
+      ...base, id: 'bots', name: 'B.O.T.S', origin: 'recommended',
       description: 'Little robots on your desktop that follow your Boite agents, answer your questions and keep you company while you work.',
-      homepage: 'https://github.com/beboite/bots', version: '0.1.3', availableVersion: '0.1.3', status: 'installed', source: null,
-      artifact: { url: 'https://github.com/beboite/bots/releases/download/v0.1.3/bots-x86_64-pc-windows-msvc.exe', sha256: '49091927143439a84163bc6c143793ac8f659c13259d707812abebe6dee8389d' },
+      homepage: 'https://github.com/beboite/bots', version: '0.1.4', availableVersion: '0.1.4', status: 'installed', source: null,
+      artifact: { url: 'https://github.com/beboite/bots/releases/download/v0.1.4/bots-x86_64-pc-windows-msvc.exe', sha256: 'd39d6aa1883f45d6a96d89e6032fd75e466001313a5da336b1764c6254cb0553' },
       commands: appCommands('bots', 'bots'), pools: [],
       app: { enabled: true, status: 'running', pid: 4242, exitCode: null, error: null, startedAt: Date.parse('2026-10-10T08:00:00Z') }
     },
