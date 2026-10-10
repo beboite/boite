@@ -3,9 +3,10 @@ import type { SessionContext } from './types.ts';
 type Diagnosable = Pick<SessionContext, 'diagnostic' | 'warmProcessMinutes'>;
 
 /**
- * Whether a turn got the thread's warm agent process or a new one, and why
- * a kept one was not good enough. A setup change is worth `info`; the routine
- * cases (no process kept, warm processes off) are `debug`.
+ * Whether a turn reused the thread's warm agent process or replaced the kept
+ * one, and why. A setup change is worth `info`; the routine cases (warm
+ * processes off, the warm process ended) are `debug`. The first turn keeps
+ * nothing, so it logs nothing.
  */
 export function noteWarmSession(ctx: Diagnosable, agent: string, choice: { kept: boolean; usable: boolean; sameSetup: boolean; setupChange?: string }): void {
   const note = ctx.diagnostic;
@@ -44,22 +45,26 @@ export function httpStatusOf(info: unknown): number | null {
  * How long an agent process took to open its session, or why it could not.
  * `opening` runs here, after the clock starts, so synchronous setup counts and
  * a synchronous throw is logged like a rejection. `details` adds what only
- * the session knows once open, such as the model it was served.
+ * the session knows once open, such as the model it was served. `stopped`
+ * says whether the user stopped the turn that opens it: closing the process
+ * is the only way to stop an open in flight, and the rejection that follows
+ * is routine, not a failure.
  */
 export function noteReady<T>(
   ctx: Pick<SessionContext, 'diagnostic' | 'sessionId'>,
   agent: string,
   opening: () => Promise<T>,
   details: () => { text?: string; data?: Record<string, string | number | boolean | null>; resumed?: boolean; abandoned?: boolean } = () => ({}),
+  stopped: () => boolean = () => false,
 ): Promise<T> {
   const at = Date.now();
   const resume = ctx.sessionId !== null;
   const abandoned = (): void => {
-    ctx.diagnostic?.('debug', `${agent} session open was abandoned after ${Date.now() - at} ms: the thread stopped before a process started`, { event: 'driver.session.open-abandoned', durationMs: Date.now() - at, data: { resume } });
+    ctx.diagnostic?.('debug', `${agent} session open was abandoned after ${Date.now() - at} ms: the turn was stopped before the session opened`, { event: 'driver.session.open-abandoned', durationMs: Date.now() - at, data: { resume } });
   };
   const failed = (error: unknown): never => {
     // A driver that must throw on a stop marks the error, so a normal stop is no warning.
-    if ((error as { abandoned?: unknown } | null)?.abandoned === true) { abandoned(); throw error; }
+    if ((error as { abandoned?: unknown } | null)?.abandoned === true || stopped()) { abandoned(); throw error; }
     ctx.diagnostic?.('warn', `${agent} session failed to open after ${Date.now() - at} ms: ${error instanceof Error ? error.message : String(error)}`, { event: 'driver.session.open-failed', durationMs: Date.now() - at, data: { resume, code: errorCodeOf((error as { code?: unknown } | null)?.code) } });
     throw error;
   };

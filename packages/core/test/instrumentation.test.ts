@@ -7,7 +7,8 @@ import { forgetStderr, noteStderr, STDERR_TAIL_CHARS, stderrTail } from '../src/
 import type { SpawnedChild } from '../src/procs.ts';
 import { clientField, closeLevel, slowRpcLevel } from '../src/server/connection-log.ts';
 import { noteReady } from '../src/drivers/driver-log.ts';
-import { isoTime } from '../src/drivers/claude/diagnostics.ts';
+import { isoTime, noteClaudeMessage } from '../src/drivers/claude/diagnostics.ts';
+import { git } from '../src/git/read.ts';
 import { detectionLogger } from '../src/providers/install-log.ts';
 import type { ProviderSummary } from '@boite/contracts';
 import { abnormalExit, programName, watchProviderProcess } from '../src/threads/provider-process-log.ts';
@@ -115,6 +116,13 @@ test('a session open that throws before its first await is logged as a failure, 
   await expect(noteReady(ctx, 'acp', () => Promise.reject(Object.assign(new Error('closed before it started'), { abandoned: true })))).rejects.toThrow('closed before');
   expect(notes).toMatchObject([{ level: 'debug', event: 'driver.session.open-abandoned' }]);
   notes.length = 0;
+  // Codex and Muse close the process to stop an open in flight: the plain rejection that follows is routine too.
+  await expect(noteReady(ctx, 'Codex app-server', () => Promise.reject(new Error('the codex startup was stopped')), undefined, () => true)).rejects.toThrow('startup was stopped');
+  expect(notes).toMatchObject([{ level: 'debug', event: 'driver.session.open-abandoned' }]);
+  notes.length = 0;
+  await expect(noteReady(ctx, 'Codex app-server', () => Promise.reject(new Error('spawn codex ENOENT')), undefined, () => false)).rejects.toThrow('ENOENT');
+  expect(notes).toMatchObject([{ level: 'warn', event: 'driver.session.open-failed' }]);
+  notes.length = 0;
   await noteReady(ctx, 'pi', () => { const until = Date.now() + 30; while (Date.now() < until) { /* synchronous setup */ } return Promise.resolve(); }, () => ({ text: ', on gpt', data: { model: 'gpt' } }));
   expect(notes[0]).toMatchObject({ level: 'info', event: 'driver.session.ready' });
   expect(notes[0]!.durationMs).toBeGreaterThanOrEqual(25);
@@ -145,3 +153,21 @@ test('provider detection warns once when the rejected descriptor count changes, 
   expect(records.filter(record => record.context.event === 'provider.detected')).toHaveLength(3);
 });
 
+
+test('a failed Claude result without an error list is logged, not thrown into the receive loop', () => {
+  const notes: { level: string; event: string; data?: Record<string, unknown> }[] = [];
+  const ctx = { diagnostic: (level: string, _message: string, context: { event: string; data?: Record<string, unknown> }) => { notes.push({ level, ...context }); } };
+  noteClaudeMessage(ctx, { type: 'result', subtype: 'error_from_a_newer_cli', is_error: true, num_turns: 2, duration_ms: 10, duration_api_ms: 5 } as never, null);
+  expect(notes).toMatchObject([{ level: 'warn', event: 'driver.result.error', data: { errors: 0 } }]);
+});
+
+test('a git read is logged as a timeout only when its deadline fired', async () => {
+  const { core, records } = recordingCore();
+  const spawnWith = (exited: Promise<number>) => ({ spawn: () => ({ proc: { stdout: new ReadableStream({ start: c => c.close() }), stderr: new ReadableStream({ start: c => c.close() }), kill: () => undefined }, exited }) });
+  (core as unknown as { procs: unknown }).procs = spawnWith(Promise.reject(new Error('wait failed')));
+  await expect(git(core, 'thr_git', process.cwd(), ['status'], 1000)).rejects.toThrow('wait failed');
+  expect(records.filter(record => record.context.event === 'git.timeout')).toHaveLength(0);
+  (core as unknown as { procs: unknown }).procs = spawnWith(new Promise<number>(() => undefined));
+  await expect(git(core, 'thr_git', process.cwd(), ['status'], 20)).rejects.toThrow('did not answer within');
+  expect(records.filter(record => record.context.event === 'git.timeout')).toHaveLength(1);
+});

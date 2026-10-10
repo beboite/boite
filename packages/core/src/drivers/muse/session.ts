@@ -314,7 +314,7 @@ export class MuseSession {
   // -- the process ----------------------------------------------------------
 
   private start(ctx: TurnContext): Promise<void> {
-    if (this.starting === null) this.starting = noteReady(ctx, 'Muse', () => this.open(ctx));
+    if (this.starting === null) this.starting = noteReady(ctx, 'Muse', () => this.open(ctx), undefined, () => this.opening?.isStopped === true);
     return this.starting;
   }
 

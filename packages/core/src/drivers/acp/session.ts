@@ -388,7 +388,7 @@ export class AcpSession {
         text: this.loaded ? ', loaded the saved session' : this.replaces !== null ? ', a new one replacing a session it cannot load' : '',
         data: { loaded: this.loaded, canLoad: this.canLoad, replaced: this.replaces !== null, images: this.imagesSupported },
         ...(this.replaces !== null ? { resumed: false } : {}),
-      }));
+      }), () => this.active?.isStopped === true);
     }
     return this.starting;
   }

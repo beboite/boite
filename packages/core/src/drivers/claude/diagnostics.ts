@@ -50,9 +50,11 @@ export function noteClaudeMessage(ctx: Diagnosable, message: SDKMessage, session
     return;
   }
   if (message.type === 'result' && (message.subtype !== 'success' || message.is_error)) {
+    // A subtype the SDK types do not know yet may carry no list: this runs inside the receive loop.
+    const errors = (message as { errors?: unknown }).errors;
     note('warn', `Claude ended the turn with result ${message.subtype}${message.is_error ? ' marked as an error' : ''} after ${message.num_turns} model turns, ${message.duration_api_ms} ms of API time`, {
       event: 'driver.result.error', durationMs: message.duration_ms,
-      data: { subtype: message.subtype, isError: message.is_error, numTurns: message.num_turns, apiMs: message.duration_api_ms, errors: message.subtype === 'success' ? 0 : message.errors.length, stopReason: message.stop_reason ?? null },
+      data: { subtype: message.subtype, isError: message.is_error, numTurns: message.num_turns, apiMs: message.duration_api_ms, errors: Array.isArray(errors) ? errors.length : 0, stopReason: message.stop_reason ?? null },
     });
   }
 }

@@ -43,12 +43,14 @@ function spawnRead(core: Core, threadId: ThreadId, cwd: string, args: string[], 
 /**
  * Waits for `work`, and stops that one git by its own process when it has not
  * answered in time: the thread's other processes are the agent's, never touched.
+ * `onLate` runs only when the deadline fired, not for a read or exit failure.
  */
-async function bounded<T>(spawned: { proc: { kill(): void } }, cwd: string, args: string[], work: Promise<T>, timeoutMs = GIT_READ_TIMEOUT_MS): Promise<T> {
+async function bounded<T>(spawned: { proc: { kill(): void } }, cwd: string, args: string[], work: Promise<T>, timeoutMs = GIT_READ_TIMEOUT_MS, onLate: () => void = () => undefined): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const late = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
       spawned.proc.kill();
+      onLate();
       reject(refused(`git ${args[0] ?? ''} did not answer within ${timeoutMs / 1000} s in ${cwd}`, { args, cwd }));
     }, timeoutMs);
   });
@@ -66,7 +68,7 @@ export async function git(core: Core, threadId: ThreadId, cwd: string, args: str
     new Response(spawned.proc.stdout).text(),
     new Response(spawned.proc.stderr).text(),
     spawned.exited,
-  ]), timeoutMs).catch((error: unknown) => { logGitTimeout(core, threadId, args, timeoutMs, at); throw error; });
+  ]), timeoutMs, () => logGitTimeout(core, threadId, args, timeoutMs, at));
   logGit(core, threadId, args, code, performance.now() - at, stderr);
   return { code, stdout, stderr };
 }
@@ -87,7 +89,7 @@ async function gitBytes(core: Core, threadId: ThreadId, cwd: string, args: strin
     new Response(spawned.proc.stdout).arrayBuffer(),
     new Response(spawned.proc.stderr).text(),
     spawned.exited,
-  ])).catch((error: unknown) => { logGitTimeout(core, threadId, args, GIT_READ_TIMEOUT_MS, at); throw error; });
+  ]), GIT_READ_TIMEOUT_MS, () => logGitTimeout(core, threadId, args, GIT_READ_TIMEOUT_MS, at));
   logGit(core, threadId, args, code, performance.now() - at, stderr);
   return { code, data: new Uint8Array(buffer) };
 }
