@@ -464,7 +464,7 @@ export function main(argv: string[]): void {
   }
 
   // Commands do not need the server graph. Finish imports before taking its data lock.
-  void Promise.all([import('./core.ts'), import('./server.ts')]).then(([{ Core }, { startServerOnStickyPort }]) => {
+  void Promise.all([import('./core.ts'), import('./server.ts')]).then(([{ Core }, { PREFERRED_PORTS, startServerOnStickyPort }]) => {
     let flags: Flags;
     let dataDir: string;
     let unlock: () => void;
@@ -500,7 +500,7 @@ export function main(argv: string[]): void {
     let server: ReturnType<typeof startServerOnStickyPort>;
     try {
       // An address the operator named is the only one this core answers on.
-      server = startServerOnStickyPort({ core, host, port: flags.port, explicitPort: flags.portExplicit, previousPort: previous.port, tailnet: !flags.hostExplicit });
+      server = startServerOnStickyPort({ core, host, port: flags.port, explicitPort: flags.portExplicit, previousPort: previous.port, preferredPorts: PREFERRED_PORTS[flags.channel], tailnet: !flags.hostExplicit });
     } catch (error) {
       const deadline = setTimeout(() => { unlock(); refuseToStart(error); }, SHUTDOWN_TIMEOUT_MS);
       deadline.unref();
