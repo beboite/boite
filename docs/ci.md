@@ -139,9 +139,9 @@ The tested installer becomes the release artifact.
 
 The total JavaScript measure excludes native binaries and source maps. On
 2026-10-10, `bun run build:ui` with Bun 1.4.2 measured 4,420,649 UI bytes at
-`feeb393b` and 4,425,328 with close confirmation and typed conversation deletion.
-The dialogs, input binding and English/French sentences add 4,679 bytes. The UI
-total limit increases by 5,000 bytes to 4,429,000, leaving 3,672 bytes; entry
+`feeb393b` and 4,425,557 with close confirmation and typed agent archival.
+The dialogs, input binding and English/French sentences add 4,908 bytes. The UI
+total limit increases by 5,000 bytes to 4,429,000, leaving 3,443 bytes; entry
 and core limits stay unchanged.
 
 On 2026-10-03, fresh builds of `e1f00a3` measured 2,695,204 core bytes and 3,932,309

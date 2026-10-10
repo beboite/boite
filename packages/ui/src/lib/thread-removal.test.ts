@@ -12,7 +12,6 @@ import { closed } from './archive-history';
 
 const stores: Store[] = [];
 afterEach(() => {
-  confirm.answer(false);
   vi.restoreAllMocks();
   undo.dismiss();
   closed.length = 0;
@@ -126,14 +125,13 @@ test('deletion clears the owning machine composer and leaves colliding IDs on an
   expect(second.openThread?.id).toBe('t-trace');
 });
 
-test('confirmed deletion keeps Settings restoration, reconnect undo and session invalidation working', async () => {
+test('deletion toast expires while Settings restoration, reconnect undo and session invalidation still work', async () => {
   const store = await ready();
-  const ask = vi.spyOn(confirm, 'ask').mockResolvedValue(true);
-  const title = store.threads.find(t => t.id === 't-trace')!.title;
+  const ask = vi.spyOn(confirm, 'ask').mockResolvedValue(false);
   vi.useFakeTimers();
   try {
     expect(await deleteThread(store, store.threads.find(t => t.id === 't-trace')!)).toBe(true);
-    expect(ask).toHaveBeenCalledWith(expect.objectContaining({ requiredText: title }));
+    expect(ask).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(UNDO_MS - 1);
     expect(undo.current).not.toBeNull();
     await vi.advanceTimersByTimeAsync(1);
@@ -175,49 +173,9 @@ test('a paired phone deletes a conversation and undo brings it back', async () =
   store.attach(new FakeClient({ delayMs: 0, principal: 'session' }));
   await store.connect();
   expect(store.owner).toBe(false);
-  vi.spyOn(confirm, 'ask').mockResolvedValue(true);
   expect(await deleteThread(store, store.threads.find(t => t.id === 't-trace')!)).toBe(true);
   expect(store.threads.some(t => t.id === 't-trace')).toBe(false);
   await undo.take();
   expect(store.threads.some(t => t.id === 't-trace')).toBe(true);
   expect(store.error).toBeNull();
-});
-
-test('deletion waits for the exact name and cancellation leaves the owning machine intact', async () => {
-  const store = await ready();
-  const thread = store.threads.find(t => t.id === 't-trace')!;
-  const remove = vi.spyOn(store, 'removeThread');
-  const cancelled = deleteThread(store, thread);
-  expect(confirm.current?.requiredText).toBe(thread.title);
-  confirm.typed = thread.title;
-  confirm.answer(false);
-  expect(await cancelled).toBe(false);
-  expect(remove).not.toHaveBeenCalled();
-  const deletion = deleteThread(store, thread);
-  expect(confirm.typed).toBe('');
-  confirm.typed = thread.title.toUpperCase();
-  confirm.answer(true);
-  expect(confirm.current).not.toBeNull();
-  expect(remove).not.toHaveBeenCalled();
-  confirm.typed = thread.title;
-  confirm.answer(true);
-  expect(await deletion).toBe(true);
-  expect(remove).toHaveBeenCalledWith(thread.id);
-  await undo.take();
-  expect(store.threads.some(t => t.id === thread.id)).toBe(true);
-});
-
-test.each(['', '   '])('a blank title %j still requires typing the displayed untitled name', async title => {
-  const store = await ready();
-  const thread = { ...store.threads.find(t => t.id === 't-trace')!, title };
-  const remove = vi.spyOn(store, 'removeThread');
-  const deletion = deleteThread(store, thread);
-  expect(confirm.current?.requiredText).toBe(strings.usage.untitled);
-  expect(confirm.current?.title).toContain(strings.usage.untitled);
-  confirm.answer(true);
-  expect(remove).not.toHaveBeenCalled();
-  expect(confirm.current).not.toBeNull();
-  confirm.typed = strings.usage.untitled;
-  confirm.answer(true);
-  expect(await deletion).toBe(true);
 });

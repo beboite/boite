@@ -101,6 +101,7 @@ export const strings = {
     mode: 'Who responds', mentions: 'Selected recipients', round: 'One response per member', autonomous: 'Take turns automatically',
     maxTurns: 'Maximum turns', perAgent: 'Turns per agent', modeHint: 'Each new message starts an allowance. Replies keep the same allowance. Automatic exchanges stop at either limit.',
     paused: 'Paused', pause: 'Pause', resume: 'Resume', archive: 'Archive', active: 'Active', archived: 'Archived',
+    archiveTitle: 'Archive "{name}"?', archiveBody: 'Archiving stops this agent’s work and removes it from the active list. Its profile and history remain available through search. Type its current name exactly to confirm.', archiveName: 'Agent name',
     objective: 'Objective', expectedResult: 'Expected result', minutes: 'Total execution minutes', tokens: 'Token limit, blank for none',
     finishMission: 'Finish mission', reopenMission: 'Reopen mission',
     conversation: 'Chat', activity: 'Activity', send: 'Send', message: 'Write a message', recipients: 'Recipients', everyone: 'Let the group rule choose',
@@ -730,9 +731,6 @@ export const strings = {
     unpin: 'Unpin',
     archive: 'Archive',
     delete: 'Delete',
-    deleteTitle: 'Delete "{title}"?',
-    deleteBody: 'Deleting this agent conversation stops its work and hides its history. Type its name exactly to confirm.',
-    deleteName: 'Agent conversation name',
     deleteUnavailable: 'Update Boite on the machine hosting this conversation to delete it. The conversation has been kept.',
     deletedToast: 'Deleted "{title}". You can restore it from Settings.',
     /** The toast after an archive, with its way back: the button and Ctrl+Z. */

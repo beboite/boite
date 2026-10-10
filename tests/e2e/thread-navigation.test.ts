@@ -2,7 +2,6 @@ import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp';
 import { startUi } from './lib/ui';
-import { confirmDeletion } from './lib/thread-removal';
 
 let server: { close(): Promise<void> };
 let url: string;
@@ -130,16 +129,13 @@ test('archive and delete leave a project draft on desktop and phone', async () =
     for (const phone of [false, true]) {
       await page.send('Emulation.setDeviceMetricsOverride', { width: phone ? 390 : 1280, height: phone ? 844 : 900, deviceScaleFactor: 1, mobile: phone });
       for (const action of ['archive', 'delete']) {
-        const title = phone && action === 'delete' ? '   ' : 'Navigation check';
         await page.evaluate(`(async () => {
-          const s = ${state}; const row = await s.client.call('threads.create', {projectId:'p-boite', title:${JSON.stringify(title)}, providerId:'echo', accountId:'a-echo', model:'echo-1', permissionMode:'default'});
+          const s = ${state}; const row = await s.client.call('threads.create', {projectId:'p-boite', title:'Navigation check', providerId:'echo', accountId:'a-echo', model:'echo-1', permissionMode:'default'});
           await globalThis.__boiteTest.workspace.select(s, row.id);
         })()`);
         await page.waitFor(`document.querySelector('${id('thread-menu-trigger')}')`);
-        const threadId = await page.evaluate<string>(`${state}.openThread.id`);
         await page.click(id('thread-menu-trigger'));
         await page.click(`${id('thread-menu-trigger-menu')} [data-value=${action}]`);
-        if (action === 'delete') await confirmDeletion(page, threadId);
         await page.waitFor(`${state}.openThread === null && ${state}.draft?.projectId === 'p-boite'`);
         expect(await page.evaluate(`!!document.querySelector('${id('composer-input')}')`)).toBe(true);
         expect(await page.evaluate(`${state}.openThread`)).toBeNull();

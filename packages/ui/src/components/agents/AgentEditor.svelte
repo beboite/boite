@@ -2,7 +2,8 @@
   import { secureId } from '../../lib/secure-id';
   import { untrack } from 'svelte';
   import type { AgentEntities, AgentProfile, AgentGroup, AgentTeam, AgentMission, AgentSelection as ExecutionSelection } from '@boite/contracts';
-  import { strings } from '../../lib/strings';
+  import { fill, strings } from '../../lib/strings';
+  import { confirm } from '../../lib/confirm.svelte';
   import type { AgentEntryKind, AgentsView, AgentSelection } from '../../lib/agents.svelte';
   import ModelPicker from '../ModelPicker.svelte';
   import EffortSlider from '../EffortSlider.svelte';
@@ -49,6 +50,7 @@
   let robotTouched = $state(!profile);
   let dressing = $state(false);
   let status = $state(profile?.status ?? 'active');
+  let saving = $state(false);
   let accountIntegration = $state(profile?.accountIntegration ?? 'provider');
   let memberIds = $state(group?.memberIds ?? team?.members.map(m => m.agentId) ?? mission?.agentIds ?? initial.preset?.memberIds ?? []);
   let responsibilities = $state<Record<string, string>>(Object.fromEntries(team?.members.map(m => [m.agentId, m.responsibility]) ?? []));
@@ -84,26 +86,40 @@
   }
 
   async function save() {
-    // A profile's Settings tab saves beside the runtime card, which may have moved the revision and
-    // the model since this form opened: keep the current route and revision, but only while every
-    // field this form edits is unchanged. Anything else keeps the revision it read, so a stale
-    // form is refused rather than written over newer values.
-    const latest = stored();
-    const edited = (r: AgentProfile) => JSON.stringify([r.name, r.domain, r.instructions, r.avatar, r.status, r.tools, r.accountIntegration]);
-    const rebase = kind === 'profile' && latest && profile && edited(latest as AgentProfile) === edited(profile);
-    const version = initial.record ? { id: initial.record.id, expectedRevision: (rebase ? latest : initial.record).revision } : {};
-    let result: AgentEntities[AgentEntryKind] | null = null;
-    if (kind === 'profile') result = await view.call('agents.profile.save', { ...version, value: { name, domain, instructions, avatar: robotTouched ? encodeRobot(robot) : profile?.avatar ?? '', selection: creating || !rebase ? selection : (latest as AgentProfile).selection, status, tools, accountIntegration } });
-    if (kind === 'group') result = await view.call('agents.group.save', { ...version, value: { name, memberIds, mode, maxTurns, maxTurnsPerAgent: perAgent, paused } });
-    if (kind === 'team') result = await view.call('agents.team.save', { ...version, value: { name, description, members: memberIds.map(agentId => ({ agentId, responsibility: responsibilities[agentId] ?? '' })), groupId, projectIds, paused } });
-    if (kind === 'mission') result = await view.call('agents.mission.save', { ...version, value: { title: name, objective, expectedResult, agentIds: memberIds, teamId, projectId, status: (latest as AgentMission | undefined)?.status ?? mission?.status ?? 'open', maxTurns, maxDurationMs: Math.round(minutes * 60000), maxTokens: tokens || null, resourceIds: resourceIds.filter(id => resourceOptions.some(r => r.id === id)) } });
-    if (result) ondone({ kind, id: result.id });
+    if (saving || view.pending) return;
+    saving = true;
+    try {
+      const existing = kind === 'profile' ? stored() as AgentProfile | undefined : undefined;
+      if (existing && existing.status !== 'archived' && status === 'archived' && !await confirm.ask({
+        title: fill(labels.archiveTitle, { name: existing.name }),
+        body: labels.archiveBody,
+        confirmLabel: labels.archive,
+        cancelLabel: labels.cancel,
+        danger: true,
+        requiredText: existing.name,
+        inputLabel: labels.archiveName,
+      })) return;
+      // A profile's Settings tab saves beside the runtime card, which may have moved the revision and
+      // the model since this form opened: keep the current route and revision, but only while every
+      // field this form edits is unchanged. Anything else keeps the revision it read, so a stale
+      // form is refused rather than written over newer values.
+      const latest = stored();
+      const edited = (r: AgentProfile) => JSON.stringify([r.name, r.domain, r.instructions, r.avatar, r.status, r.tools, r.accountIntegration]);
+      const rebase = kind === 'profile' && latest && profile && edited(latest as AgentProfile) === edited(profile);
+      const version = initial.record ? { id: initial.record.id, expectedRevision: (rebase ? latest : initial.record).revision } : {};
+      let result: AgentEntities[AgentEntryKind] | null = null;
+      if (kind === 'profile') result = await view.call('agents.profile.save', { ...version, value: { name, domain, instructions, avatar: robotTouched ? encodeRobot(robot) : profile?.avatar ?? '', selection: creating || !rebase ? selection : (latest as AgentProfile).selection, status, tools, accountIntegration } });
+      if (kind === 'group') result = await view.call('agents.group.save', { ...version, value: { name, memberIds, mode, maxTurns, maxTurnsPerAgent: perAgent, paused } });
+      if (kind === 'team') result = await view.call('agents.team.save', { ...version, value: { name, description, members: memberIds.map(agentId => ({ agentId, responsibility: responsibilities[agentId] ?? '' })), groupId, projectIds, paused } });
+      if (kind === 'mission') result = await view.call('agents.mission.save', { ...version, value: { title: name, objective, expectedResult, agentIds: memberIds, teamId, projectId, status: (latest as AgentMission | undefined)?.status ?? mission?.status ?? 'open', maxTurns, maxDurationMs: Math.round(minutes * 60000), maxTokens: tokens || null, resourceIds: resourceIds.filter(id => resourceOptions.some(r => r.id === id)) } });
+      if (result) ondone({ kind, id: result.id });
+    } finally { saving = false; }
   }
 </script>
 
 {#snippet actions()}
   <div class="agent-form-actions">
-    <button class="primary" type="submit" disabled={view.pending || !name.trim() || kind === 'profile' && creating && (!selection.accountId || !selection.model)} data-testid="agent-save"><span class="ui-label">{creating ? labels.createAction : labels.save}</span></button>
+    <button class="primary" type="submit" disabled={saving || view.pending || !name.trim() || kind === 'profile' && creating && (!selection.accountId || !selection.model)} data-testid="agent-save"><span class="ui-label">{creating ? labels.createAction : labels.save}</span></button>
     {#if creating}<button type="button" class="ghost" onclick={oncancel}><span class="ui-label">{labels.cancel}</span></button>{/if}
   </div>
 {/snippet}
