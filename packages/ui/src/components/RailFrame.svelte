@@ -55,6 +55,13 @@
   let rail = $state<HTMLElement | undefined>(undefined);
   let folded: boolean | undefined;
   let sliding: ReturnType<typeof setTimeout> | undefined;
+  let marked: HTMLElement | undefined;
+
+  function unmark(): void {
+    clearTimeout(sliding);
+    if (marked) delete marked.dataset.railSliding;
+    marked = undefined;
+  }
 
   /**
    * Marks the body row while the list folds or unfolds, so the chat card's own
@@ -68,12 +75,15 @@
     folded = now;
     const row = untrack(() => rail)?.parentElement;
     if (was === undefined || was === now || !row) return;
+    unmark();
     row.dataset.railSliding = '';
-    clearTimeout(sliding);
-    sliding = setTimeout(() => { delete row.dataset.railSliding; }, 600);
+    marked = row;
+    sliding = setTimeout(unmark, 600);
   });
 
-  $effect(() => () => clearTimeout(sliding));
+  // Gone before the slide ends (Settings opened at once): the row's next gap
+  // change, a page change, must not ease.
+  $effect(() => unmark);
 
   function startResize(event: PointerEvent) {
     if (event.button !== 0) return;
