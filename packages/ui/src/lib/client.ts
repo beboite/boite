@@ -101,6 +101,14 @@ export interface WsClientOptions {
    * is stored the same way.
    */
   ticket?: string;
+  /**
+   * When `url` is another member's relay route (`groupRelayUrl`), this
+   * client's key for that member, read at every connection: the member checks
+   * it and passes the rest of the hello on. Null when no key is held for it:
+   * nothing is sent then, since the hello carries this client's key for the
+   * machine at the end and would hand it to a member it is no longer paired with.
+   */
+  relay?: () => string | null;
   /** Returning false refuses the key: the client closes instead of using it. */
   onSession?: (session: Session) => unknown;
   /**
@@ -277,7 +285,7 @@ function browserSocket(url: string): SocketLike {
 }
 
 export class WsClient implements ObservableClient {
-  #options: Required<Omit<WsClientOptions, 'clientName' | 'version' | 'device' | 'grant' | 'ticket' | 'paired' | 'onSession' | 'onRevoked' | 'onUnauthorized'>> & {
+  #options: Required<Omit<WsClientOptions, 'clientName' | 'version' | 'device' | 'grant' | 'ticket' | 'paired' | 'relay' | 'onSession' | 'onRevoked' | 'onUnauthorized'>> & {
     clientName: ClientName;
     version: string;
     device: () => string | null;
@@ -294,6 +302,7 @@ export class WsClient implements ObservableClient {
   #nonce: string;
   /** The token is a pairing's session key, so a hello it no longer opens is a revoke. */
   #paired: boolean;
+  #relay: (() => string | null) | null;
   #onSession: ((session: Session) => unknown) | null;
   #onRevoked: (() => void) | null;
   #onUnauthorized: ((error: RpcFailure) => void) | null;
@@ -333,6 +342,7 @@ export class WsClient implements ObservableClient {
     this.#ticket = options.ticket ?? null;
     this.#nonce = this.#grant === null ? '' : pairingNonce();
     this.#paired = options.paired ?? (options.grant !== undefined || options.ticket !== undefined);
+    this.#relay = options.relay ?? null;
     this.#onSession = options.onSession ?? null;
     this.#onRevoked = options.onRevoked ?? null;
     this.#onUnauthorized = options.onUnauthorized ?? null;
@@ -541,7 +551,16 @@ export class WsClient implements ObservableClient {
       };
       socket.onopen = () => {
         const grant = this.#grant ?? this.#ticket;
-        this.#send(socket, 'hello', this.#helloParams()).then(
+        // The relay's key goes on the hello that opens the socket only: the member takes it out there,
+        // and a liveness hello later would carry it to the machine at the end.
+        const relay = this.#relay?.() ?? null;
+        if (this.#relay !== null && relay === null) {
+          this.#manuallyClosed = true;
+          fail('this device is no longer paired with the machine that carried it there');
+          socket.close();
+          return;
+        }
+        this.#send(socket, 'hello', { ...this.#helloParams(), ...(relay === null ? {} : { relay }) }).then(
           (result) => {
             if (result.core.protocolVersion !== PROTOCOL_VERSION) {
               this.#manuallyClosed = true;

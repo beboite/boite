@@ -16,6 +16,7 @@ import type {
 } from '@boite/contracts';
 import { untrack } from 'svelte';
 import { strings } from '../strings';
+import { coreHref } from '../endpoint';
 import type { FileAnswer } from '../store.svelte';
 import type { StoreContext } from './context';
 
@@ -166,7 +167,7 @@ export class Workbench {
       // The core answers a path on its own HTTP server: the origin is the one
       // this client reached it by, which a core cannot know from where it runs.
       if (value.kind !== 'text' && value.url.startsWith('/') && s.endpointUrl !== null) {
-        return { ok: true, value: { ...value, url: new URL(value.url, s.endpointUrl).href } };
+        return { ok: true, value: { ...value, url: coreHref(s.endpointUrl, value.url) } };
       }
       return { ok: true, value };
     } catch (error) {
@@ -181,7 +182,7 @@ export class Workbench {
     try {
       const value = await client.call('artifacts.read', { threadId, messageId, artifactId, ...(renew ? { renew } : {}), ...(view ? { view: true as const } : {}) });
       const endpoint = this.ctx.store.endpointUrl;
-      return { ok: true, value: { ...value, url: value.url.startsWith('/') && endpoint ? new URL(value.url, endpoint).href : value.url } };
+      return { ok: true, value: { ...value, url: value.url.startsWith('/') && endpoint ? coreHref(endpoint, value.url) : value.url } };
     } catch (error) { return { ok: false, error: this.ctx.reason(error) }; }
   }
 

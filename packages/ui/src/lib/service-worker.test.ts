@@ -48,6 +48,29 @@ test('a push displays a notification and clicking it opens only a same-origin th
   expect(sw.openWindow).toHaveBeenCalledWith('https://boite.test/?thread=thread-2');
 });
 
+test('a push another machine sent through this one opens its thread on that machine', async () => {
+  const sw = worker();
+  const core = 'c'.repeat(64);
+  await sw.emit('push', { data: { json: () => ({ title: 'On the PC', body: 'Done', threadId: 't1', tag: 'x:turn-1', core }) } });
+  // Its tag is that machine's: a thread of the same id here keeps its own notification.
+  expect(sw.notification).toHaveBeenCalledWith('On the PC', expect.objectContaining({ tag: `thread-${core}-t1`, data: { threadId: 't1', core } }));
+  const close = vi.fn();
+  await sw.emit('notificationclick', { notification: { close, data: { threadId: 't1', core } } });
+  expect(sw.postMessage).toHaveBeenCalledWith({ type: 'boite.open-thread', threadId: 't1', core });
+  sw.matchAll.mockResolvedValue([]);
+  await sw.emit('notificationclick', { notification: { close, data: { threadId: 't1', core } } });
+  expect(sw.openWindow).toHaveBeenCalledWith(`https://boite.test/?thread=t1&member=${core}`);
+  // Anything else in that field is no machine id, at the push and at the tap.
+  await sw.emit('push', { data: { json: () => ({ title: 'x', body: 'y', threadId: 't2', tag: 'z', core: 'https://evil.test' }) } });
+  expect(sw.notification).toHaveBeenLastCalledWith('x', expect.objectContaining({ tag: 'thread-t2', data: { threadId: 't2' } }));
+  await sw.emit('notificationclick', { notification: { close, data: { threadId: 't3', core: 'https://evil.test' } } });
+  expect(sw.openWindow).toHaveBeenLastCalledWith('https://boite.test/?thread=t3');
+  // Nor is it handed to a window that is open.
+  sw.matchAll.mockResolvedValue([{ url: 'https://boite.test/', navigate: sw.navigate, postMessage: sw.postMessage, focus: sw.focus }]);
+  await sw.emit('notificationclick', { notification: { close, data: { threadId: 't4', core: 'https://evil.test' } } });
+  expect(sw.postMessage).toHaveBeenLastCalledWith({ type: 'boite.open-thread', threadId: 't4' });
+});
+
 test('a push sets the icon badge to the count it carries, clears it at zero and leaves it without one', async () => {
   const sw = worker();
   await sw.emit('push', { data: { json: () => ({ title: 'Review', body: 'Done', threadId: 't1', tag: 'turn-1', badge: 3 }) } });

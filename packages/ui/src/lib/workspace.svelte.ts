@@ -131,6 +131,8 @@ export class Workspace {
    */
   main = $state<MainMachine | null>(readMainMachine());
   #generation = 0;
+  /** The latest notification tap waiting for the machine its thread is on. */
+  #memberTap = 0;
   #lifecycle = 0;
 
   #current(lifecycle: number): boolean {
@@ -693,6 +695,47 @@ export class Workspace {
       twin.store.detach();
     }
     this.machines = [entry, ...this.machines.filter((m) => m.store !== store && m !== twin)];
+  }
+
+  /**
+   * A notification another machine of the group sent through the core of this
+   * page: the thread is on that machine, which the group may still be
+   * connecting. False when it is not connected within `patience`.
+   */
+  async openMemberThread(coreId: string, threadId: string, patience = 90_000): Promise<boolean> {
+    const lifecycle = this.#lifecycle;
+    // A newer tap takes over, and so does the user opening something else meanwhile.
+    const tap = ++this.#memberTap;
+    const active = this.active;
+    const navigation = active.navigationGeneration;
+    // Longer than the group's own wait between two attempts at a machine (a minute), so one retry fits.
+    const deadline = Date.now() + patience;
+    for (;;) {
+      if (tap !== this.#memberTap || !this.#current(lifecycle) || this.active !== active || active.navigationGeneration !== navigation) return false;
+      const machine = this.machines.find((entry) => GroupLinks.coreOf(entry) === coreId && entry.store.connection === 'ready');
+      if (machine !== undefined) {
+        await this.select(machine.store, threadId);
+        return true;
+      }
+      if (Date.now() >= deadline) return false;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
+
+  /** A notification the worker reports tapped: its thread on the machine it names, else on the core that served the page. */
+  async openFromWorker(threadId: string, member?: unknown): Promise<void> {
+    if (typeof member === 'string' && /^[0-9a-f]{64}$/.test(member)) {
+      await this.openMemberThread(member, threadId);
+      return;
+    }
+    const machine = this.machines.find((entry) => entry.store.endpointUrl !== null && servesThisPage(entry.store.endpointUrl));
+    if (machine) await this.select(machine.store, threadId);
+  }
+
+  /** The boot, on the thread a notification tapped with no window open named, on whichever machine it is. */
+  async bootAt(tapped: { thread: string | null; member: string | null }): Promise<void> {
+    await this.boot(tapped.member === null ? tapped.thread : null);
+    if (tapped.member !== null && tapped.thread !== null) await this.openMemberThread(tapped.member, tapped.thread);
   }
 
   async openNotification(key: string): Promise<void> {

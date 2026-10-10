@@ -151,11 +151,93 @@ Clocks of two members may differ by one minute; past that, signed requests and
 tickets are refused for their date.
 
 A phone whose page is served over HTTPS can only open secure sockets. It
-connects to the members that give an HTTPS address and lists the others as
-not reachable from a secure page. The Tailscale switch of Settings, or
-`boite-core tailscale on` ([server](server.md)), serves a member on
-`https://<machine>.<tailnet>.ts.net` and sets it as its public address; a
-tailnet without HTTPS certificates needs a reverse proxy for that.
+connects directly to the members that give an HTTPS address, and reaches the
+others through a member it was paired with by hand ([relay](#relay)). The Tailscale
+switch of Settings, or `boite-core tailscale on` ([server](server.md)), serves
+a member on `https://<machine>.<tailnet>.ts.net` and sets it as its public
+address; a tailnet without HTTPS certificates needs a reverse proxy for that.
+
+## Relay
+
+A member a client cannot reach itself is reached through a member it can.
+That covers a desktop that gives only a plain-HTTP tailnet address, seen from
+a phone whose page came over HTTPS, and a machine on a network the client is
+not on but another member is.
+
+The client tries the member's own addresses first, those it may send a key
+to. When none is usable or none answers, it tries
+`<member>/group/relay/<core id>/rpc` at once on every machine it was paired
+with by hand that lists that member, and the first that answers carries it.
+Its `hello` names its key for the relaying machine in `relay`, beside the
+ticket or key for the member at the end. The relaying machine checks that key
+(a key it issued, or its owner's token; never an agent's), takes it out, opens
+a socket on the other member at one of its addresses and passes the rest of
+the hello on. A client that holds no key for the relaying machine any more
+sends nothing on that route: the hello would hand that machine its key for the
+member. Once the hello is passed on, the relaying machine forwards every frame
+both ways without acting on it, though it can read it (see below). The member
+at the end authenticates the hello as it would any other. `/file/<ticket>` and `/view/<ticket>` under the
+same route are fetched from that member and streamed back with their headers
+and ranges, their tickets being what opens them. Nothing else of the other
+member is carried.
+
+The ticket for a member reached that way comes from the relaying machine,
+which picks the address it names among the member's own: the member checks
+that it still gives that address, not that the socket arrived on it. The key
+the ticket becomes is the client's for that member, and lives as any key the
+group issued.
+
+The hop between the two members carries client traffic, so it follows the
+client's rule: the member's HTTPS address when it has one, otherwise one
+written as numbers. A member that gives neither, a MagicDNS name alone, is
+carried by nobody and shown as giving no usable address. A direct ticket goes
+to an address every machine the client was paired with by hand allows, so a
+common one is enough. A carrier dials whichever of its own addresses for the
+member answers, which the client does not choose: nobody carries the client
+there until those machines list the same addresses (their order does not
+count), since one of them may hold an older roster and dial an address the
+member gave up. One of them that no longer lists the member stops every route
+to it, as it stops a direct ticket.
+
+On the socket, a refusal of the relay key (no key for the relaying machine, or
+a wrong one) is answered `Refused`, and a member it cannot reach `Unavailable`:
+never `Unauthorized`, which the client would take for its key on the member
+being revoked. A first frame that is not a hello is answered `Unauthorized`, as
+on a direct socket. A file or a view answers 404 for a machine that is not another member
+and 502 when that member does not answer. Until its key is checked, a relayed
+socket counts against the same bounds as a direct one: five seconds and 64 KB
+for its hello, and the places for sockets waiting on one. Revoking the key it
+came in with closes it, and its sockets to a machine that leaves the group are
+closed within fifteen seconds.
+
+While a member is reached through another, the client tries its own addresses
+once a minute and moves to the first that answers, so a phone back on the
+tailnet, or a desktop given an HTTPS address, stops depending on the relaying
+machine. Settings, Machines names the machine a member is reached through.
+
+**What the relaying machine sees.** Everything the client and the member say
+to each other, the client's key for that member included. Every member of a
+group already has full control of the others ([trust](#trust)), so this gives
+it nothing it did not have. The client link is not sealed on that hop either:
+as private as the network between the two machines.
+
+### Notifications through the group
+
+A phone installs one machine's page and subscribes to Web Push there, with
+that machine's key. A member whose thread needs the user, or finished, also
+sends the news to the home machine of every device that holds a key it issued
+through the group and has no subscription of its own there; such a key cannot
+subscribe there, the refusal naming its home. That machine pushes it to the
+device with its own key, once per device, as a sealed `group.push` request
+between members. The request carries an id the home remembers for two
+minutes: tried on two addresses that both reach it, it pushes once. Title,
+body and tag are cut to 300, 2,000 and 200 characters on the way. The push
+carries the id of the machine the thread is on: the notification's tag is that
+machine's, and a tap opens the thread there once the group has connected it.
+The receiving machine pushes only to a device the roster lists as its own, and
+the badge adds the threads waiting on it to those waiting on the machine that
+sent the push. A machine holds a push back while the device watches the thread
+through any route, the relay included, as it does for its own.
 
 ## How it works
 
@@ -391,18 +473,23 @@ address, where it is worth nothing once the member has given that address up.
 - A member that has not heard a removal stays exposed to the removed machine,
   which may use it to act on the group. The only answer is to have every
   member on when a compromised machine is removed.
-- The group gives keys, not reachability. A machine that is off, asleep or on
-  a network the client cannot reach stays listed and unreachable. A client is
-  never relayed through another member.
+- The group gives keys, and a route through a member, not reachability. A
+  machine that is off or asleep stays listed and unreachable. One that neither
+  the client nor any machine it was paired with by hand can reach stays so too.
+- A member reached through another goes with it: that machine off, it is
+  unreachable until its own address answers. An agent's browser surface,
+  opened on a port of the member, is not carried.
 - A member that is off when a device is revoked, or a machine removed, keeps
   honouring it until it is back and has exchanged the roster.
 - The settings switch copies from one window; members do not replicate
   settings between themselves.
-- Push notifications stay per machine: enable them from each machine's own
-  page ([phone](phone.md#notifications-while-closed)).
-- Verified on loopback cores and in the in-memory client. Not exercised here:
-  two physical machines over a real tailnet, the Windows firewall prompt, a
-  phone on a tailnet.
+- Notifications of another member reach a device through the machine it
+  installed only once that device has connected to the member. A member that
+  runs a version without `group.push` sends none.
+- Verified on loopback cores and in the in-memory client, the relay also from
+  an HTTPS page in Chrome. Not exercised here: two physical machines over a
+  real tailnet, the Windows firewall prompt, a phone on a tailnet, a push
+  delivered by a real push service through another member.
 
 ## Tests
 
@@ -418,8 +505,18 @@ its sender was removed, a rewritten status line, a join recorded and sent
 again, requests held open from one address, the owner's app relaying between
 two members that cannot reach each other. `packages/ui/src/lib/group-links.test.ts`
 and `workspace.test.ts` hold the client rules: which addresses get a key, who
-says who is in a group, and what is asked before a held key is sent. The shared contract scenario in
+says who is in a group, and what is asked before a held key is sent, and when
+a member is carried by another and moved back to its own address.
+`packages/core/test/group-relay.test.ts` runs two real cores: a phone carried
+from one to the other with a ticket, then with the key it got; refusals by the
+relaying machine for a missing, wrong, agent or revoked key; a member outside
+the group or one that does not answer; a file with its range and a view with
+its headers; a socket closed when its member leaves; a notification forwarded
+to the device's home machine, refused for a device that is not its own. The shared contract scenario in
 `tests/contract/scenarios.ts` holds the refusals on the core and on the
 in-memory client. `tests/e2e/machines.test.ts` joins two real cores from the
 page, reloads a paired phone while its own machine answers nothing, and writes
-desktop and phone captures.
+desktop and phone captures. `tests/e2e/group-relay.test.ts` serves the page
+over HTTPS to a phone-sized Chrome paired with one core, and shows it reaching
+a second core that gives only a plain-HTTP address: through the first, chatting
+there, named in Settings, and again after a reload with the key it kept.
