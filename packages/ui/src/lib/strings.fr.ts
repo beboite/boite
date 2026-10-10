@@ -152,7 +152,7 @@ export const fr: Translation = {
     welcomeHint: 'Un agent garde son nom, sa mémoire et ses tâches. Parlez-lui, ou planifiez du travail qu’il fera seul.',
     runsHeading: 'Où il tourne', runsHint: 'Ses conversations, sa mémoire et ses tâches planifiées restent sur cette machine. Les modèles viennent des comptes de cette machine.',
     machine: 'Machine', modelLabel: 'Modèle', machineOffline: 'Hors ligne', machineNotOwner: 'Accès propriétaire requis',
-    whatItDoesHint: 'Ses instructions permanentes. Vous pourrez les changer plus tard dans ses réglages.',
+    machineUnreachable: '{name} n’est pas connectée. Reconnectez-la, puis créez l’agent à nouveau.', whatItDoesHint: 'Ses instructions permanentes. Vous pourrez les changer plus tard dans ses réglages.',
     namePlaceholder: 'Mira, Scout, Pixel', whatItDoes: 'Ce qu’il fait', instructionsPlaceholder: 'Par exemple : chaque matin, lis les nouvelles issues et résume-les en cinq lignes.',
     ownedBy: '{name} gère ce thread', ownedHint: 'Parlez à {name} dans sa discussion. Ce thread montre ce qu’il fait.', openAgent: 'Ouvrir {name}',
     robot: {

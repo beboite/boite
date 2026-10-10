@@ -132,8 +132,8 @@ The tested installer becomes the release artifact.
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 588,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,405,000 |
+| UI entry chunk | 590,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,415,000 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 3,710,000 |
 

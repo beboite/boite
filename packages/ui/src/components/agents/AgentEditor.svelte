@@ -3,13 +3,11 @@
   import { untrack } from 'svelte';
   import { Dices, Palette } from '@lucide/svelte';
   import type { AgentEntities, AgentProfile, AgentGroup, AgentTeam, AgentMission, AgentSelection as ExecutionSelection, RpcParams } from '@boite/contracts';
-  import { strings } from '../../lib/strings';
+  import { fill, strings } from '../../lib/strings';
   import type { AgentEntryKind, AgentsView, AgentSelection } from '../../lib/agents.svelte';
   import type { Store } from '../../lib/store.svelte';
   import type { MenuItem } from '../../lib/menu';
   import { workspace } from '../../lib/workspace.svelte';
-  import { machineGlyph } from '../../lib/machine-glyph';
-  import MachineIcon from '../MachineIcon.svelte';
   import ModelPicker from '../ModelPicker.svelte';
   import EffortSlider from '../EffortSlider.svelte';
   import Menu from '../Menu.svelte';
@@ -94,7 +92,7 @@
   const hostItems = $derived<MenuItem[]>(workspace.machines.map(m => {
     const offline = m.store.connection !== 'ready';
     const usable = !offline && m.store.owner;
-    return { id: m.id, label: m.label, glyph: machineGlyph(m.icon, m.store.core?.os), active: m.store === host, disabled: !usable, ...(usable ? {} : { hint: offline ? labels.machineOffline : labels.machineNotOwner }) };
+    return { id: m.id, label: m.label, active: m.store === host, disabled: !usable, ...(usable ? {} : { hint: offline ? labels.machineOffline : labels.machineNotOwner }) };
   }));
   const busy = $derived(view.pending || moving);
 
@@ -103,6 +101,8 @@
     if (!next || next === host) return;
     host = next;
     selection = defaultSelection(next, selection.permissionMode);
+    // The kebacc experiment is a setting of each core, read from this page's snapshot only.
+    accountIntegration = 'provider';
   }
 
   /** Creates the agent on another machine's core, then shows it there. */
@@ -111,7 +111,7 @@
     moving = true; view.error = '';
     let created: AgentProfile;
     try {
-      if (!target.client) throw new Error(strings.agents.offline);
+      if (!target.client || target.connection !== 'ready') throw new Error(fill(strings.agents.machineUnreachable, { name: hostMachine?.label ?? '' }));
       created = await target.client.call('agents.profile.save', { value: $state.snapshot(value) as typeof value });
     } catch (error) {
       view.error = error instanceof Error ? error.message : String(error);
@@ -250,10 +250,10 @@
           <div class="agent-row-value">
             {#if workspace.machines.length > 1}
               <Menu placement="bottom" label={labels.machine} items={hostItems} onpick={pickHost} testid="agent-machine">
-                <MachineIcon icon={hostMachine?.icon} os={host.core?.os} size={14} /><span class="ui-label">{hostMachine?.label ?? strings.machines.local}</span>
+                <span class="ui-label">{hostMachine?.label ?? strings.machines.local}</span>
               </Menu>
             {:else}
-              <span class="agent-machine" data-testid="agent-machine"><MachineIcon icon={hostMachine?.icon} os={host.core?.os} size={14} />{hostMachine?.label ?? strings.machines.local}</span>
+              <span class="agent-machine" data-testid="agent-machine">{hostMachine?.label ?? strings.machines.local}</span>
             {/if}
           </div>
         </div>
@@ -288,7 +288,7 @@
       <fieldset class="agent-field"><legend>{labels.tools}</legend>
         <div class="agent-checks">{#each TOOLS as tool (tool)}<label class="agent-chip-check"><input type="checkbox" checked={tools.includes(tool)} onchange={() => { tools = toggle(tools, tool); }} /><span class="ui-label">{labels[tool]}</span></label>{/each}</div>
       </fieldset>
-      {#if provider?.protocol === 'agy'}{@render kebacc()}{/if}
+      {#if provider?.protocol === 'agy' && host === view.store}{@render kebacc()}{/if}
     {:else if kind === 'group'}
       <div class="agent-columns"><label class="agent-field">{labels.maxTurns}<input type="number" min="1" max="100" required bind:value={maxTurns} /></label><label class="agent-field">{labels.perAgent}<input type="number" min="1" max="20" required bind:value={perAgent} /></label></div>
     {:else if kind === 'team'}
