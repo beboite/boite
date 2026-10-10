@@ -9,13 +9,23 @@ import { experimentOn } from '../experiments.svelte';
 /**
  * Called once from a component's setup: the effect lives as long as it does.
  * The companion's commands (`shell.ts`) load only here, so the main window's
- * entry does not carry them.
+ * entry does not carry them. One command runs at a time, in order, and one a
+ * later switch has replaced is skipped: a late open never follows a close.
  */
 export function followCompanionExperiment(onerror: (error: unknown) => void): void {
+  let queue = Promise.resolve();
+  let wanted: 'open' | 'close' | null = null;
   $effect(() => {
     if (window.__TAURI_INTERNALS__ === undefined) return;
     const action = experimentOn('companion') ? 'open' : 'close';
-    void import('./shell').then(({ companionWindow }) => companionWindow(action)).catch(onerror);
+    wanted = action;
+    queue = queue
+      .then(async () => {
+        if (action !== wanted) return;
+        const { companionWindow } = await import('./shell');
+        await companionWindow(action);
+      })
+      .catch(onerror);
   });
 }
 

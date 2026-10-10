@@ -136,9 +136,15 @@ export class Dropped {
     return reading;
   }
 
+  /**
+   * The caps are checked against what was held when the reading began. A
+   * chip removed while the files were read stays removed: only the files that
+   * passed are added to what is held now.
+   */
   private async read(files: File[]): Promise<void> {
-    const { held, refused } = await gatherDropped(files, this.held);
-    this.held = held;
+    const before = this.held;
+    const { held, refused } = await gatherDropped(files, before);
+    this.held = [...this.held, ...held.slice(before.length)];
     this.problem = refused ?? '';
   }
 

@@ -60,6 +60,17 @@ test('a second drop while the first is read comes after it, and neither is lost'
   expect(dropped.reading).toBe(false);
 });
 
+test('a chip removed while a drop is read stays removed', async () => {
+  const dropped = new Dropped();
+  await dropped.add([textFile('a.txt')]);
+  const reading = dropped.add([textFile('b.txt')]);
+  // The second file is being read (the FileReader answers on a later task): the first chip goes now.
+  for (let i = 0; i < 5; i++) await Promise.resolve();
+  dropped.remove(0);
+  await reading;
+  expect(dropped.held.map((file) => file.name)).toEqual(['b.txt']);
+});
+
 test('each cap is said by name, and the files that fit still come', async () => {
   const big = new File([new Uint8Array(ATTACHMENT_MAX_BYTES + 1)], 'huge.bin');
   const tooBig = await gatherDropped([big, textFile('small.txt')], [], async () => null);
