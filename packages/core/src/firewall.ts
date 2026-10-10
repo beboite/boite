@@ -72,7 +72,9 @@ export function parseReading(output: string): FirewallReading | null {
     const { adapter, category: name } = (network ?? {}) as { adapter?: unknown; category?: unknown };
     return typeof adapter === 'string' && typeof name === 'string' ? [{ adapter, category: name }] : [];
   });
-  return { rules, networks, off: typeof value.off === 'number' ? value.off : 0 };
+  // Any other object would read as no rule on no network, which is `ready`: what the script did not say is not known.
+  if (!('rules' in value) || !('networks' in value) || typeof value.off !== 'number') return null;
+  return { rules, networks, off: value.off };
 }
 
 const UNSUPPORTED: FirewallStatus = { state: 'unsupported', networks: [], allowed: [], blocked: [] };

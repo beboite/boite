@@ -38,6 +38,8 @@ test('parseReading takes the single objects ConvertTo-Json writes for one-elemen
     .toEqual({ rules: [{ action: 0, profiles: 4 }], networks: [{ adapter: 'Ethernet0', category: 'Public' }], off: 0 });
   expect(parseReading('{"rules":[],"networks":[],"off":0}')).toEqual({ rules: [], networks: [], off: 0 });
   expect(parseReading('Get-NetConnectionProfile : access denied')).toBeNull();
+  expect(parseReading('{}')).toBeNull();
+  expect(parseReading('{"rules":[],"networks":[]}')).toBeNull();
 });
 
 describe('the firewall methods', () => {
