@@ -5,11 +5,13 @@ import { startUi } from './lib/ui.ts';
 
 let page: BrowserPage;
 let server: { close(): Promise<void> };
+let base = '';
 beforeAll(async () => {
   const port = await freePort();
   server = await startUi(port);
+  base = `http://127.0.0.1:${port}`;
   // The Agents page is an experiment; the rest of this file drives it.
-  page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1`, experiments: ['resident-agents'] });
+  page = await BrowserPage.launch({ url: `${base}/?fake=1`, experiments: ['resident-agents'] });
   await page.waitFor(`document.querySelector('[data-testid="view-agents"]')`);
 }, 60000);
 
@@ -300,4 +302,43 @@ test('archiving an experimental agent requires its exact name on desktop and pho
   await page.click('[data-testid="agents-search-toggle"]');
   await page.type('.agents-search input', 'Pixel');
   await page.waitFor(`document.querySelector('[data-testid="agent-entry-' + window.__archiveAgent.id + '"]')?.textContent.includes('Archived')`);
+}, 60000);
+
+test('a new agent runs on the machine picked in its form, and opens there', async () => {
+  await page.navigate(`${base}/?fake=1&machines=1`);
+  await page.waitFor(`window.__boiteTest?.workspace.machines.length === 2 && window.__boiteTest.workspace.machines.every(m => m.store.connection === 'ready')`);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  await page.click('[data-testid="view-agents"]');
+  await page.waitFor(`document.querySelector('[data-testid="agents-create"]')`);
+  await page.click('[data-testid="agents-create"]');
+  await page.click('[data-value="profile"]');
+  await page.waitFor(`document.querySelector('[data-testid="agent-machine"]')`);
+  // The form opens on the machine the page shows; the other connected one is a choice.
+  expect(await page.evaluate(`document.querySelector('[data-testid="agent-machine"]').textContent.trim()`)).not.toBe('Builder');
+  await page.click('[data-testid="agent-machine"]');
+  await page.waitFor(`document.querySelector('[data-value="http://builder.test"]')`);
+  await capture('agents-editor-machines-desktop.png');
+  await page.click('[data-value="http://builder.test"]');
+  await page.waitFor(`document.querySelector('[data-testid="agent-machine"]').textContent.includes('Builder')`);
+  await page.type('[data-testid="agent-name"]', 'Scout');
+  await page.type('[data-testid="agent-instructions"]', 'Watch the build machine.');
+  await capture('agents-editor-builder-desktop.png');
+  // The robot's style opens under the identity, and the same button closes it.
+  await page.click('[data-testid="robot-customize"]');
+  await page.waitFor(`document.querySelector('.agent-dressing')`);
+  await capture('agents-editor-robot-desktop.png');
+  await page.click('[data-testid="robot-customize"]');
+  await page.waitFor(`!document.querySelector('.agent-dressing')`);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await capture('agents-editor-builder-phone.png');
+  expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  await page.click('[data-testid="agent-save"]');
+  // Created on Builder's core alone, and the page follows it there.
+  await page.waitFor(`window.__boiteTest.workspace.active.machineId === 'http://builder.test' && document.querySelector('[data-testid="agent-message-input"]')`);
+  const names = `(async () => Object.fromEntries(await Promise.all(window.__boiteTest.workspace.machines.map(async m => [m.label, (await m.store.client.call('agents.snapshot', {})).profiles.map(a => a.name)]))))()`;
+  const byMachine = await page.evaluate<Record<string, string[]>>(names);
+  expect(byMachine['Builder']).toContain('Scout');
+  expect(Object.entries(byMachine).filter(([label]) => label !== 'Builder').flatMap(([, list]) => list)).not.toContain('Scout');
+  await capture('agents-created-on-builder-desktop.png');
 }, 60000);

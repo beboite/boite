@@ -33,7 +33,9 @@ function windowOf(raw: unknown): QuotaWindow | null {
   const remaining = percent(row['remaining_percent']);
   const used = percent(row['used_percent']) ?? (remaining === null ? null : 100 - remaining);
   if (used === null) return null;
-  return { id, label: text(row['label'], 80) ?? id, usedPercent: used, resetsAt: time(row['reset_at']) };
+  const window: QuotaWindow = { id, label: text(row['label'], 80) ?? id, usedPercent: used, resetsAt: time(row['reset_at']) };
+  if (row['primary'] === true) window.primary = true;
+  return window;
 }
 
 function creditOf(raw: unknown): GatewayQuotaCredit | null {

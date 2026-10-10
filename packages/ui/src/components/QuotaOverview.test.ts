@@ -2,6 +2,7 @@ import { afterEach, expect, test } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import type { AccountQuota } from '@boite/contracts';
 import QuotaOverview from './QuotaOverview.svelte';
+import { quotaResetTime } from '../lib/format';
 
 let component: ReturnType<typeof mount> | undefined;
 afterEach(async () => { if (component) await unmount(component); component = undefined; document.body.innerHTML = ''; });
@@ -76,4 +77,34 @@ test('an unread account remains reorderable from its row with the keyboard', () 
   expect(writes).toEqual([['unread', 'known']]);
   expect(document.querySelector('[data-testid="quota-provider"]')!.getAttribute('data-account-id')).toBe('unread');
   expect(document.activeElement).toBe(row);
+});
+
+test('the headline and reset come from the primary window, weekly first unless Douane flags another', () => {
+  const soon = Date.now() + 3_600_000, later = Date.now() + 4 * 86_400_000;
+  const windows = [
+    { id: 'five-hour', label: '5 hours', usedPercent: 51, resetsAt: soon },
+    { id: 'seven-day', label: 'Weekly', usedPercent: 31, resetsAt: later },
+  ];
+  const row: AccountQuota = { ...quota('famille', 'Famille', 0), windows };
+  component = mount(QuotaOverview, { target: document.body, props: { rows: [row], connect: () => {} } });
+  flushSync();
+  const article = () => document.querySelector<HTMLElement>('[data-testid="quota-provider"]')!;
+  expect(article().querySelector('.amount')!.textContent).toBe('69%');
+  expect(article().querySelector('.mini-window.lead')!.getAttribute('title')).toContain('69%');
+  expect(article().querySelector('.caption.reset')!.textContent).toBe(quotaResetTime(later));
+  unmount(component);
+  document.body.innerHTML = '';
+  const flagged: AccountQuota = { ...row, windows: [{ ...windows[0]!, primary: true }, windows[1]!] };
+  component = mount(QuotaOverview, { target: document.body, props: { rows: [flagged], connect: () => {} } });
+  flushSync();
+  expect(article().querySelector('.amount')!.textContent).toBe('49%');
+  expect(article().querySelectorAll('.mini-window')).toHaveLength(2);
+  expect(article().querySelector('.caption.reset')!.textContent).toBe(quotaResetTime(soon));
+  unmount(component);
+  document.body.innerHTML = '';
+  // A primary without a reset shows none rather than another window's.
+  const unknown: AccountQuota = { ...row, windows: [{ ...windows[0]!, resetsAt: null, primary: true }, windows[1]!] };
+  component = mount(QuotaOverview, { target: document.body, props: { rows: [unknown], connect: () => {} } });
+  flushSync();
+  expect(article().querySelector('.caption.reset')).toBeNull();
 });
