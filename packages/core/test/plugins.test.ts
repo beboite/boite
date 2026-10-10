@@ -34,6 +34,8 @@ function git(cwd: string, ...args: string[]): string {
 }
 
 const sha256 = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
+/** kebacc-switcher's entry in the shipped list, wherever it sits in it. */
+const KEBACC = RECOMMENDED.find((manifest) => manifest.id === 'kebacc-switcher')!;
 
 /** Every download answered from memory: tests never reach the network. */
 function serveDownloads(files: Record<string, Uint8Array | number>): string[] {
@@ -120,7 +122,8 @@ test('a truncated manifest is an error on the card, not a Plugins page that will
   // manifest is half written. `JSON.parse` used to throw out of `state()`, so
   // `plugins.list` failed and the page had no way to reinstall.
   writeFileSync(join(dir, 'installed.json'), '{"version":');
-  const [broken] = await client.call('plugins.list', {});
+  const kebaccOf = async () => (await client.call('plugins.list', {})).find((plugin) => plugin.id === 'kebacc-switcher');
+  const broken = await kebaccOf();
   expect(broken?.status).toBe('error');
   expect(broken?.version).toBeNull();
   expect(broken?.error).toContain('installed.json');
@@ -128,7 +131,7 @@ test('a truncated manifest is an error on the card, not a Plugins page that will
 
   // A manifest that parses but carries the wrong type says so just as plainly.
   writeFileSync(join(dir, 'installed.json'), '{"version":2}');
-  const [typed] = await client.call('plugins.list', {});
+  const typed = await kebaccOf();
   expect(typed?.status).toBe('error');
   expect(typed?.error).toContain('must carry a "version" string, found number');
 
@@ -184,7 +187,7 @@ test('a plugin login switch announces the default account and drops its probed m
 describe('recommended plugins', () => {
   test('kebacc-switcher is listed and installs through the manifest path, its download checked and recorded', async () => {
     harness = await startTestCore(); const client = await harness.connect();
-    const kebacc = RECOMMENDED[0]!;
+    const kebacc = KEBACC;
     const published = kebacc.artifacts[platformKey() as keyof typeof kebacc.artifacts]!;
     const bytes = new Uint8Array([1, 2, 3, 4]);
     // Same URL as the release; only the digest follows the fixture's bytes.
@@ -215,7 +218,7 @@ describe('recommended plugins', () => {
 
   test('a download whose digest differs from the pinned one installs nothing', async () => {
     harness = await startTestCore(); const client = await harness.connect();
-    const url = RECOMMENDED[0]!.artifacts[platformKey() as keyof typeof RECOMMENDED[0]['artifacts']]!.url;
+    const url = KEBACC.artifacts[platformKey() as keyof typeof KEBACC.artifacts]!.url;
     serveDownloads({ [url]: new Uint8Array([9, 9, 9]) });
     await client.call('plugins.install', { id: 'kebacc-switcher' });
     await waitFor(() => harness!.core.plugins.state('kebacc-switcher').status !== 'installing');
@@ -230,7 +233,7 @@ describe('a plugin download on a slow link', () => {
   /** One recommended plugin whose download trickles `bytes` in pieces `gapMs` apart, then stalls forever when `stall` is set. */
   async function trickle(gapMs: number, stall: boolean): Promise<{ client: Awaited<ReturnType<TestCore['connect']>>; bytes: Uint8Array<ArrayBuffer> }> {
     harness = await startTestCore(); const client = await harness.connect();
-    const kebacc = RECOMMENDED[0]!;
+    const kebacc = KEBACC;
     const url = kebacc.artifacts[platformKey() as keyof typeof kebacc.artifacts]!.url;
     const bytes = new Uint8Array(8).map((_, index) => index + 1);
     harness.core.plugins.recommended = [{ ...kebacc, artifacts: { [platformKey()]: { url, sha256: sha256(bytes) } } }];
@@ -296,7 +299,7 @@ describe('plugins from a git URL', () => {
     const dir = join(harness.dataDir, 'plugins', 'seat-pool');
     const record = JSON.parse(readFileSync(join(dir, 'installed.json'), 'utf8')) as { source: { commit: string } };
     expect(record.source.commit).toBe(repo.commit);
-    expect((await client.call('plugins.list', {})).map((plugin) => plugin.id)).toEqual(['kebacc-switcher', 'seat-pool']);
+    expect((await client.call('plugins.list', {})).map((plugin) => plugin.id)).toEqual(['bots', 'kebacc-switcher', 'seat-pool']);
 
     // A preview is used once.
     await expect(client.call('plugins.add', { previewId: preview.previewId! })).rejects.toThrow('unknown or expired');
@@ -317,7 +320,7 @@ describe('plugins from a git URL', () => {
     const removed = await client.call('plugins.uninstall', { id: 'seat-pool' });
     expect(removed.status).toBe('not-installed');
     expect(existsSync(dir)).toBe(false);
-    expect((await client.call('plugins.list', {})).map((plugin) => plugin.id)).toEqual(['kebacc-switcher']);
+    expect((await client.call('plugins.list', {})).map((plugin) => plugin.id)).toEqual(['bots', 'kebacc-switcher']);
     await expect(client.call('plugins.install', { id: 'seat-pool' })).rejects.toThrow('unknown plugin');
   }, 30_000);
 
@@ -403,7 +406,7 @@ describe('plugins from a git URL', () => {
     await waitFor(() => harness!.core.plugins.state('seat-pool').status !== 'installing');
     expect(harness.core.plugins.state('seat-pool')).toMatchObject({ status: 'installed', source: { commit: repo.commit } });
     await client.call('plugins.uninstall', { id: 'seat-pool' });
-    expect((await client.call('plugins.list', {})).map((plugin) => plugin.id)).toEqual(['kebacc-switcher']);
+    expect((await client.call('plugins.list', {})).map((plugin) => plugin.id)).toEqual(['bots', 'kebacc-switcher']);
   }, 30_000);
 
   test('an installed.json the core no longer accepts is listed as rejected: it can be removed, never run', async () => {

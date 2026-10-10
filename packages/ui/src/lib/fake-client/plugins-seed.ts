@@ -23,29 +23,29 @@ export function appCommands(executable: string, pluginId: string): string[] {
 }
 
 /**
- * Every state the Plugins page draws: the recommended one not installed yet,
- * one added from a URL and installed, a desktop app running, one stuck
- * mid-download, and one whose installed.json the core refuses.
+ * Every state the Plugins page draws, in the order the core lists them: Bots,
+ * recommended first, installed and running as a desktop app; kebacc-switcher,
+ * recommended and not installed yet; then one added from a URL and installed,
+ * one stuck mid-download, and one whose installed.json the core refuses.
  */
 export function fakePlugins(): PluginState[] {
   const base = { platform: 'win32-x64', progress: 0, error: null, rejected: null, app: null };
   const legacy = `${DATA_DIR}\\plugins\\pool-legacy\\installed.json`;
   return [
     {
+      ...base, id: 'bots', name: 'Bots', origin: 'recommended',
+      description: 'Little robots on your desktop that follow your Boite agents, answer your questions and keep you company while you work.',
+      homepage: 'https://github.com/beboite/bots', version: '0.1.1', availableVersion: '0.1.1', status: 'installed', source: null,
+      artifact: { url: 'https://github.com/beboite/bots/releases/download/v0.1.1/bots-x86_64-pc-windows-msvc.exe', sha256: '0497ca8ba5c1830fbd5e21002690c7c9d00a5e87b1b8cef7fb8c9fa82108353d' },
+      commands: appCommands('bots', 'bots'), pools: [],
+      app: { enabled: true, status: 'running', pid: 4242, exitCode: null, error: null, startedAt: Date.parse('2026-10-10T08:00:00Z') }
+    },
+    {
       ...base, id: 'kebacc-switcher', name: 'kebacc-switcher', origin: 'recommended',
       description: 'Save and switch Claude, Codex and Antigravity CLI logins, with quota readings for each saved account.',
       homepage: 'https://github.com/kebab1337420/kebacc-switch', version: null, availableVersion: '2.0.1', status: 'not-installed', source: null,
       artifact: { url: `${KEBACC_RELEASE}/kebacc-x86_64-pc-windows-msvc.exe`, sha256: '9edc5c3af1db76e97a9c07e2fd1c3399ad8c9db22e0ad2684a1b885e33acc538' },
       commands: poolCommands('kebacc'), pools: ['claude', 'codex', 'antigravity']
-    },
-    {
-      ...base, id: 'bots', name: 'Bots', origin: 'url',
-      description: 'Little robots on your desktop, one for each agent at work.',
-      homepage: 'https://github.com/beboite/bots', version: '0.1.0', availableVersion: '0.1.0', status: 'installed',
-      source: { url: 'https://github.com/beboite/bots', ref: 'HEAD', commit: '5b7d9f1a3c5e7a9b1d3f5a7c9e1b3d5f7a9c1e3b' },
-      artifact: { url: 'https://github.com/beboite/bots/releases/download/v0.1.0/bots-win32-x64.exe', sha256: '7e9a1c3e5b7d9f2a4c6e8b0d1f3a5c7e9b2d4f6a8c0e1b3d5f7a9c2e4b6d8f0a' },
-      commands: appCommands('bots', 'bots'), pools: [],
-      app: { enabled: true, status: 'running', pid: 4242, exitCode: null, error: null, startedAt: Date.parse('2026-10-10T08:00:00Z') }
     },
     {
       ...base, id: 'seat-pool', name: 'Seat pool', origin: 'url',

@@ -11,7 +11,8 @@ Settings > Plugins has three sections:
 - Installed: every plugin on this core, with its version, the commit it came
   from, its pools and its errors.
 - Recommended: the plugins Boite ships a manifest for and that are not
-  installed yet. Today that is
+  installed yet, in the order Boite lists them. Today that is
+  [Bots](https://github.com/beboite/bots), the desktop companion, first, then
   [kebacc-switcher](https://github.com/kebab1337420/kebacc-switch).
 - Add from a git URL: any repository with a `boite-plugin.json` at its root.
 
