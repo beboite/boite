@@ -2,8 +2,9 @@
 
 A plugin is one native executable. Boite downloads it over https, checks it
 against the SHA-256 its manifest publishes, and runs it for the features the
-manifest names. There is one feature today: account pools, which save and
-switch the default login of an agent CLI.
+manifest names. There are two features today: account pools, which save and
+switch the default login of an agent CLI, and desktop apps, which Boite starts
+beside itself with the owner's access ([Desktop apps](#desktop-apps)).
 
 Settings > Plugins has three sections:
 
@@ -57,7 +58,7 @@ Put `boite-plugin.json` at the root of the repository:
 | `homepage` | An https URL with a host and no user or password, at most 2048 characters. The page links to it as the source code. |
 | `executable` | The file name Boite saves the download as: a letter or digit, then letters, digits, `_` and `-`, 64 characters at most, no extension. Boite adds `.exe` on Windows. |
 | `artifacts` | An object keyed by platform, at least one of `win32-x64`, `win32-arm64`, `darwin-x64`, `darwin-arm64`, `linux-x64`, `linux-arm64`. Each value is `{ "url", "sha256" }`: an https URL as for `homepage`, and the file's SHA-256 as 64 lowercase hexadecimal characters. |
-| `provides` | An object naming at least one feature. The only feature is `accountPools`, `{ "providers": [...] }`: a non-empty list of distinct provider ids among `antigravity`, `antigravity-cli`, `claude`, `codex`, `grok`, `muse`, `opencode` and `pi`. |
+| `provides` | An object naming at least one feature, among `accountPools` and `desktopApp`. `accountPools` is `{ "providers": [...] }`: a non-empty list of distinct provider ids among `antigravity`, `antigravity-cli`, `claude`, `codex`, `grok`, `muse`, `opencode` and `pi`. `desktopApp` is `{}`, an object with no field ([Desktop apps](#desktop-apps)). A plugin may provide both. |
 
 The platform key is `process.platform` and `process.arch` of the machine that
 runs the core, joined by a hyphen. A core on a Linux server downloads the
@@ -132,6 +133,99 @@ while a turn on that provider's default login is running, queued or waiting,
 releases any warm agent on that login, and holds new turns on it until the
 command exits. One login change runs at a time across all plugins.
 
+## Desktop apps
+
+A plugin that provides `desktopApp` is a program with a window of its own,
+such as [Bots](https://github.com/beboite/bots). Boite starts it and keeps it
+running; the app then talks to the core like any client.
+
+```json
+{
+  "schema": 1,
+  "id": "bots",
+  "name": "Bots",
+  "version": "0.1.0",
+  "description": "Little robots on your desktop, one for each agent at work.",
+  "homepage": "https://github.com/beboite/bots",
+  "executable": "bots",
+  "artifacts": {
+    "win32-x64": { "url": "https://github.com/beboite/bots/releases/download/v0.1.0/bots.exe", "sha256": "…" }
+  },
+  "provides": { "desktopApp": {} }
+}
+```
+
+`desktopApp` takes no field; any key in it is refused. The artifact is the
+app's single release executable.
+
+The core starts an installed, enabled app:
+
+- when the core starts;
+- right after its install or an update finishes;
+- when the owner clicks Start or Restart in Settings > Plugins
+  (`plugins.app {id, action: "start" | "stop" | "restart"}`).
+
+It runs the executable with no argument, from the plugin's directory, through
+the core's process launcher as `plugin:<id>:app`. On Windows its window is not
+hidden. Its stdout and stderr are read and dropped; no client ever sees them.
+
+The environment is the core's, minus every variable the core gives an agent
+(`BOITE_THREAD_ID`, `BOITE_AGENT_TOKEN` and any other `BOITE_AGENT_*`), plus:
+
+| Variable | Value |
+| --- | --- |
+| `BOITE_CORE_URL` | The core's address, `http://<host>:<port>`, in the form the `boite` CLI reads. |
+| `BOITE_TOKEN` | The owner token. |
+| `BOITE_PLUGIN_ID` | The plugin's id. |
+
+The app connects to `BOITE_CORE_URL` with `BOITE_TOKEN` as an owner client.
+
+Exits and stops:
+
+- An exit with code 0 leaves the app stopped. It starts again on the next core
+  start or when the owner starts it.
+- Any other exit, or a signal, starts it again after 2 seconds, then 10, then
+  30. A fourth crash within five minutes leaves it crashed, with the exit code
+  and a message on its row, until the owner starts it.
+- Stop kills the app's process tree and turns it off: it does not start with
+  the core again until the owner starts it. Start and Restart turn it back on.
+- Uninstall kills it first. An update kills it before the new executable
+  replaces the old one, and starts the new one after.
+- Core shutdown kills it.
+
+Whether the app is on is kept in `<dataDir>/plugins/<id>/app.json`, across core
+restarts and updates. A first install turns it on.
+
+A Linux core with neither `DISPLAY` nor `WAYLAND_DISPLAY` set has no desktop to
+show a window on: it does not start the app, and the row says so.
+
+The plugin's row shows the app's state (running, starting again, stopped,
+crashed with its exit code, or unavailable with the reason) with Start, Stop
+and Restart. `plugins.app` answers with the plugin's state, and every change is
+announced by `plugins.updated`. The state is `PluginState.app`:
+
+```ts
+{ enabled: boolean; status: 'stopped' | 'starting' | 'running' | 'crashed' | 'unavailable';
+  pid: number | null; exitCode: number | null; error: string | null; startedAt: number | null }
+```
+
+### Showing Boite
+
+An app that wants the owner to look at something calls
+`ui.reveal {target}`, where `target` is `{ "kind": "thread", "threadId": "…" }`
+or `{ "kind": "agent", "agentId": "…" }`. A thread must exist on the core. The
+core sends the `ui.reveal` event to every owner connection and answers
+`{delivered}`, the number of connections it reached.
+
+The desktop shell connected to the core it started on the same computer
+answers it: it unminimizes and focuses its window, then opens the thread, or the
+Agents page on that agent (switching the Resident agents experiment on if it was
+off). Browser tabs, paired devices and windows following another machine do
+nothing.
+
+`ui.reveal` is owner-only, as is the event: a paired device or an agent that
+calls it is refused, and neither receives it.
+
 ## Install and run
 
 A recommended plugin installs from its row. A plugin from a URL takes two
@@ -160,6 +254,7 @@ then records the install:
 <dataDir>/plugins/seat-pool/
   seat-pool.exe        the executable (no extension off Windows)
   installed.json       what was installed, from where, when
+  app.json             a desktop app only: whether it is on, once changed
 ```
 
 ```json
@@ -244,6 +339,14 @@ Refused before anything installs:
 At run time Boite passes only the arguments above, checks the email is an
 address, parses stdout only for `list`, and never shows a client the program's
 output.
+
+A desktop app holds the owner token. With it the app can do anything the owner
+can: read every thread, start turns, change settings, install other plugins.
+That is the price of a companion app that follows and drives your agents, and
+why the preview says so before installation. It never receives an agent's
+token or thread, so an agent cannot borrow the app's access, and an app is no
+more trusted than any other executable you install: install one only from a
+publisher you trust.
 
 ## Test a plugin locally
 
