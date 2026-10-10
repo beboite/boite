@@ -7,7 +7,7 @@
   import type { Store } from '../lib/store.svelte';
   import Menu from './Menu.svelte';
   import ProjectTile from './ProjectTile.svelte';
-  import SurfaceSwitch from './SurfaceSwitch.svelte';
+  import RailHead from './RailHead.svelte';
   import { recentPreferences } from '../lib/recent.svelte';
 
   let { entries, store, prefix = '' }: { entries: ProjectEntry[]; store: Store; prefix?: string } = $props();
@@ -28,21 +28,21 @@
   }
 </script>
 
-<div class="project-views">
-  <SurfaceSwitch {store} current="threads" {prefix} />
-  <div class="tools">
-  {#if workspace.view === 'recent' && entries.length}
-    <div class="filter">
-      <Menu {items} onpick={key => projectView.pick(key)} label={strings.sidebar.filterProject} placement="bottom" variant="text" testid={`${prefix}project-filter`}>
-        {#if selected}<ProjectTile project={selected.project} store={selected.machine.store} size={16} />{:else}<Folder size={13} />{/if}<span class="ui-label">{selected ? projectName(selected.project) : strings.sidebar.allProjects}</span>{#if selected && workspace.machines.length > 1}<span class="machine ui-label">{selected.machine.label}</span>{/if}<ChevronDown size={12} />
-      </Menu>
-    </div>
-  {:else if entries.length}
-    <button class="ghost order" title={strings.sidebar.toggleOrder} data-testid={`${prefix}project-sort`} data-order={projectView.order} onclick={() => projectView.toggle(entries)}>
-      {#if projectView.order === 'manual'}<GripVertical size={12} />{:else}<ArrowDownWideNarrow size={12} />{/if}<span class="ui-label">{mode}</span>
-    </button>
-  {/if}
-    <div class="actions">
+<RailHead {store} current="threads" {prefix}>
+  {#snippet lead()}
+    {#if workspace.view === 'recent' && entries.length}
+      <div class="filter">
+        <Menu {items} onpick={key => projectView.pick(key)} label={strings.sidebar.filterProject} placement="bottom" variant="text" testid={`${prefix}project-filter`}>
+          {#if selected}<ProjectTile project={selected.project} store={selected.machine.store} size={16} />{:else}<Folder size={13} />{/if}<span class="ui-label">{selected ? projectName(selected.project) : strings.sidebar.allProjects}</span>{#if selected && workspace.machines.length > 1}<span class="machine ui-label">{selected.machine.label}</span>{/if}<ChevronDown size={12} />
+        </Menu>
+      </div>
+    {:else if entries.length}
+      <button class="ghost order" title={strings.sidebar.toggleOrder} data-testid={`${prefix}project-sort`} data-order={projectView.order} onclick={() => projectView.toggle(entries)}>
+        {#if projectView.order === 'manual'}<GripVertical size={12} />{:else}<ArrowDownWideNarrow size={12} />{/if}<span class="ui-label">{mode}</span>
+      </button>
+    {/if}
+  {/snippet}
+  {#snippet actions()}
     {#if entries.length}
       <Menu items={[
         { id: 'view:projects', label: strings.sidebar.projectsView, hint: strings.sidebar.projectsViewHint, glyph: Folder, radio: true, checked: workspace.view === 'projects' },
@@ -64,17 +64,10 @@
       <button class="ghost icon small" title={`${strings.sidebar.search}${store.keyHint('palette')}`} aria-label={strings.sidebar.search} data-testid={`${prefix}sidebar-search-open`} onclick={() => store.paletteOpen = true}><Search size={15} /></button>
       {#if !prefix}<button class="ghost icon small" title={`${newLabel}${store.keyHint('new-thread')}`} aria-label={newLabel} data-testid="new-thread" onclick={create}><Plus size={16} /></button>{/if}
     {/if}
-    </div>
-  </div>
-</div>
+  {/snippet}
+</RailHead>
 
 <style>
-  .project-views { container-type: inline-size; min-width: 0; padding: 8px 0 6px; border-bottom: 1px solid var(--color-border); }
-  .tools { display: flex; align-items: center; gap: 6px; }
-  /* Under the Threads and Agents switch, when the Agents experiment draws it. */
-  .tools:not(:first-child) { margin-top: 5px; }
-  .actions { display: flex; align-items: center; gap: 2px; margin-left: auto; flex: none; }
-  .icon { flex: none; }
   .order { height: var(--control-sm); padding: 0 6px; gap: 6px; font-size: var(--text-xs); color: var(--color-muted-foreground); }
   /* A narrow sidebar shortens the order's name before it pushes the actions out. */
   .order { flex: 0 1 auto; min-width: 0; }

@@ -53,11 +53,19 @@ Resizing keeps that choice. The desktop shell always shows its full tour.
 
 ## The window it opens in
 
-The shell opens its main window at 1280 x 890, centred in the primary monitor's
-work area, and at 92% of that area on a smaller screen (`centred` in
-`apps/shell/src-tauri/src/window.rs`). The 890 px height fits the 808 px French consent screen, scrim margin and
-title bar. Taller content scrolls inside the panel. Screens share its height,
-limited by the window, so Next stays in place.
+The tour is a 600 x 600 panel. Every screen fits it in English and French,
+the conversation demonstrations included, and the end-to-end suite fails a
+screen that scrolls on a computer. A window shorter than the panel shrinks it,
+and the screen then scrolls inside it. Every screen takes that same height, so
+Next stays in one place from screen to screen. The privacy clip sits beside the
+text saying what is counted, and above it in a panel narrower than 480 px.
+
+The shell opens its main window at 70% of the primary monitor's work area in
+width and 80% in height, kept between 1200 x 720 and 1600 x 1000 and centred
+(`centred` in `apps/shell/src-tauri/src/window.rs`). A 1920 x 1080 screen gets
+1344 x 826 and a 2560 x 1440 one 1600 x 1000. On a screen too small for the
+floor the window takes 92% of the work area. The 720 floor holds the panel, the
+scrim's margins and the 44 px title bar.
 
 The scrim uses a flat tint. [Frame measurements](../bench/results/2026-09-30-ui-frames.md)
 record the cost of window-wide blur in the animated scenes.

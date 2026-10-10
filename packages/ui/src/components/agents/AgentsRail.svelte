@@ -1,18 +1,19 @@
 <script lang="ts">
-  import { Plus, Search, Settings, Settings2, UserRoundPlus, Users, X } from '@lucide/svelte';
+  import { Plus, Search, Settings2, UserRoundPlus, Users, X } from '@lucide/svelte';
   import type { ThreadSummary } from '@boite/contracts';
   import { chatKey, previewOf, type AgentChat, type AgentEntryKind, type AgentFocus, type AgentsView } from '../../lib/agents.svelte';
   import { type MenuItem } from '../../lib/menu';
   import { fill, strings } from '../../lib/strings';
   import { workspace } from '../../lib/workspace.svelte';
   import Menu from '../Menu.svelte';
-  import SurfaceSwitch from '../SurfaceSwitch.svelte';
+  import RailFrame from '../RailFrame.svelte';
+  import RailHead from '../RailHead.svelte';
   import AgentAvatar from './AgentAvatar.svelte';
   import AgentRow from './AgentRow.svelte';
 
   /**
    * The conversations with agents, listed the way a messenger lists its chats
-   * and cut like the thread list: the Threads and Agents switch on top, one
+   * in the thread list's own frame and head (`RailFrame`, `RailHead`): one
    * card of rows, each with its picture, its name, where it stands and the
    * last thing said. An agent that waits on the user says so on its row; what
    * it asks is in its conversation.
@@ -69,62 +70,63 @@
     const target = workspace.machines.find(m => m.id === id);
     if (target) void workspace.select(target.store).then(() => target.store.showAgents());
   }
-  function closeSearch() { searching = false; query = ''; }
+  let searchToggle = $state<HTMLButtonElement>();
+  /** The field unmounts under the focus: it goes back to the button that opened it. */
+  function closeSearch() { searching = false; query = ''; searchToggle?.focus(); }
 </script>
 
-<aside class="agents-rail" aria-label={labels.heading}>
-  <div class="agents-views">
-    <SurfaceSwitch store={view.store} current="agents" />
-    <div class="tools">
-      {#if multi}
-        <Menu items={machines} onpick={pickMachine} label={strings.machines.heading} placement="bottom" variant="text" testid="agents-machine"><span class="ui-label">{machine?.label ?? strings.machines.local}</span></Menu>
-      {/if}
-      <div class="actions">
-        <button type="button" class="ghost icon small" class:active={searching} aria-pressed={searching} title={labels.search} aria-label={labels.search} onclick={() => (searching ? closeSearch() : (searching = true))} data-testid="agents-search-toggle"><Search size={15} /></button>
+<RailFrame store={view.store} kind="agents-rail" label={labels.heading}>
+  {#snippet head()}
+    <RailHead store={view.store} current="agents">
+      {#snippet lead()}
+        {#if multi}
+          <Menu items={machines} onpick={pickMachine} label={strings.machines.heading} placement="bottom" variant="text" testid="agents-machine"><span class="ui-label">{machine?.label ?? strings.machines.local}</span></Menu>
+        {/if}
+      {/snippet}
+      {#snippet actions()}
+        <button type="button" class="ghost icon small" bind:this={searchToggle} class:active={searching} aria-pressed={searching} title={labels.search} aria-label={labels.search} onclick={() => (searching ? closeSearch() : (searching = true))} data-testid="agents-search-toggle"><Search size={15} /></button>
         {#if view.store.owner}
           <Menu placement="bottom" align="end" variant="ghost" label={labels.create} testid="agents-create" items={createItems} onpick={id => oncreate(id as AgentEntryKind)}><Plus size={16} /></Menu>
         {/if}
-      </div>
-    </div>
-  </div>
+      {/snippet}
+    </RailHead>
+  {/snippet}
 
-  {#if searching}
-    <label class="agents-search"><Search size={14} strokeWidth={1.75} />
-      <!-- svelte-ignore a11y_autofocus -->
-      <input type="search" bind:value={query} aria-label={labels.search} placeholder={labels.search} autofocus onkeydown={e => { if (e.key === 'Escape') closeSearch(); }} />
-      <button type="button" class="ghost icon small" aria-label={labels.close} onclick={closeSearch}><X size={13} /></button>
-    </label>
+  {#snippet subhead()}
+    {#if searching}
+      <label class="agents-search"><Search size={14} strokeWidth={1.75} />
+        <!-- svelte-ignore a11y_autofocus -->
+        <input type="search" bind:value={query} aria-label={labels.search} placeholder={labels.search} autofocus onkeydown={e => { if (e.key === 'Escape') closeSearch(); }} />
+        <button type="button" class="ghost icon small" aria-label={labels.close} onclick={closeSearch}><X size={13} /></button>
+      </label>
+    {/if}
+  {/snippet}
+
+  {#if shown.length}
+    <section class="agents-card" aria-label={labels.heading}>
+      {#each shown as chat (chatKey(chat.kind, chat.id))}
+        {@const key = chatKey(chat.kind, chat.id)}
+        {@const thread = live.get(key) ?? null}
+        {@const waiting = chat.attention > 0 || chat.status === 'waiting'}
+        <AgentRow title={chat.name} open={active === key} unread={chat.unread} live={thread} {waiting} at={chat.at} {now} detail={detail(chat)} testid="agent-entry-{chat.id}" onclick={() => onfocus({ kind: chat.kind, id: chat.id })}>
+          {#snippet picture()}<AgentAvatar kind={chat.kind} id={chat.id} name={chat.name} avatar={chat.avatar} members={memberList(chat)} status={waiting ? 'waiting' : thread ? 'running' : 'idle'} size={22} />{/snippet}
+        </AgentRow>
+      {/each}
+    </section>
   {/if}
+  {#if found.length}
+    <section class="agents-card">
+      {#each found as entry (`${entry.kind}:${entry.id}`)}
+        <AgentRow title={entry.name} at={0} {now} detail={entry.state} testid="agent-entry-{entry.id}" onclick={() => onfocus({ kind: entry.kind, id: entry.id })}>
+          {#snippet picture()}<AgentAvatar kind={entry.kind} id={entry.id} name={entry.name} avatar={entry.avatar} size={22} />{/snippet}
+          {#snippet aside()}{/snippet}
+        </AgentRow>
+      {/each}
+    </section>
+  {/if}
+  {#if needle && !shown.length && !found.length}<p class="agent-empty">{labels.noMatch}</p>{/if}
 
-  <div class="agents-scroll">
-    {#if shown.length}
-      <section class="agents-card" aria-label={labels.heading}>
-        {#each shown as chat (chatKey(chat.kind, chat.id))}
-          {@const key = chatKey(chat.kind, chat.id)}
-          {@const thread = live.get(key) ?? null}
-          {@const waiting = chat.attention > 0 || chat.status === 'waiting'}
-          <AgentRow title={chat.name} open={active === key} unread={chat.unread} live={thread} {waiting} at={chat.at} {now} detail={detail(chat)} testid="agent-entry-{chat.id}" onclick={() => onfocus({ kind: chat.kind, id: chat.id })}>
-            {#snippet picture()}<AgentAvatar kind={chat.kind} id={chat.id} name={chat.name} avatar={chat.avatar} members={memberList(chat)} status={waiting ? 'waiting' : thread ? 'running' : 'idle'} size={22} />{/snippet}
-          </AgentRow>
-        {/each}
-      </section>
-    {/if}
-    {#if found.length}
-      <section class="agents-card">
-        {#each found as entry (`${entry.kind}:${entry.id}`)}
-          <AgentRow title={entry.name} at={0} {now} detail={entry.state} testid="agent-entry-{entry.id}" onclick={() => onfocus({ kind: entry.kind, id: entry.id })}>
-            {#snippet picture()}<AgentAvatar kind={entry.kind} id={entry.id} name={entry.name} avatar={entry.avatar} size={22} />{/snippet}
-            {#snippet aside()}{/snippet}
-          </AgentRow>
-        {/each}
-      </section>
-    {/if}
-    {#if needle && !shown.length && !found.length}<p class="agent-empty">{labels.noMatch}</p>{/if}
-  </div>
-
-  <div class="agents-foot">
-    <span class="agents-grow"></span>
+  {#snippet foot()}
     {#if view.store.owner}<button type="button" class="ghost icon" class:active={active === 'engine'} title={labels.engineSettings} aria-label={labels.engineSettings} onclick={() => onfocus({ kind: 'engine' })} data-testid="agents-engine"><Settings2 size={16} /></button>{/if}
-    <button type="button" class="ghost icon" title={strings.sidebar.settings} aria-label={strings.sidebar.settings} onclick={() => view.store.showSettings()}><Settings size={16} /></button>
-  </div>
-</aside>
+  {/snippet}
+</RailFrame>
