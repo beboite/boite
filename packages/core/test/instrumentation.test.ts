@@ -5,7 +5,11 @@ import { connect } from '../src/client.ts';
 import type { Core } from '../src/core.ts';
 import { forgetStderr, noteStderr, STDERR_TAIL_CHARS, stderrTail } from '../src/drivers/stderr-tail.ts';
 import type { SpawnedChild } from '../src/procs.ts';
-import { closeLevel, slowRpcLevel } from '../src/server/connection-log.ts';
+import { clientField, closeLevel, slowRpcLevel } from '../src/server/connection-log.ts';
+import { noteReady } from '../src/drivers/driver-log.ts';
+import { isoTime } from '../src/drivers/claude/diagnostics.ts';
+import { detectionLogger } from '../src/providers/install-log.ts';
+import type { ProviderSummary } from '@boite/contracts';
 import { abnormalExit, programName, watchProviderProcess } from '../src/threads/provider-process-log.ts';
 import { gitSubcommand } from '../src/git/git-log.ts';
 import { startTestCore } from './harness.ts';
@@ -91,3 +95,40 @@ test('a connection logs who it was, how long it lived and who closed it; a refus
     expect(JSON.stringify(refused)).not.toContain('not-the-token');
   } finally { await harness.stop(); }
 });
+
+test('a session open that throws before its first await is logged as a failure, and the clock covers synchronous setup', async () => {
+  const notes: { level: string; message: string; event: string; durationMs?: number }[] = [];
+  const ctx = { sessionId: null, diagnostic: (level: string, message: string, context: { event: string; durationMs?: number }) => { notes.push({ level, message, ...context }); } };
+  await expect(noteReady(ctx, 'pi', () => { throw new Error('no pi executable on this machine'); })).rejects.toThrow('no pi executable');
+  expect(notes).toMatchObject([{ level: 'warn', event: 'driver.session.open-failed' }]);
+  notes.length = 0;
+  await noteReady(ctx, 'pi', () => { const until = Date.now() + 30; while (Date.now() < until) { /* synchronous setup */ } return Promise.resolve(); }, () => ({ text: ', on gpt', data: { model: 'gpt' } }));
+  expect(notes[0]).toMatchObject({ level: 'info', event: 'driver.session.ready' });
+  expect(notes[0]!.durationMs).toBeGreaterThanOrEqual(25);
+  expect(notes[0]!.message).toContain(', on gpt');
+});
+
+test('log fields from an unauthenticated hello cannot forge a line, and a reset time a Date cannot hold is dropped', () => {
+  expect(clientField('shell\n2026-10-10 ERROR core forged')).toBe('shell2026-10-10 ERROR core forged'.slice(0, 40));
+  expect(clientField('\u0000\u2028')).toBe('unknown');
+  expect(clientField(42)).toBe('unknown');
+  expect(isoTime(1_760_000_000)).toBe(new Date(1_760_000_000_000).toISOString());
+  expect(isoTime(1e300)).toBeNull();
+  expect(isoTime(Number.NaN)).toBeNull();
+});
+
+test('provider detection warns once when the rejected descriptor count changes, not on every other change', () => {
+  const { core, records } = recordingCore();
+  const log = detectionLogger(core);
+  const provider = (available: boolean) => ({ id: 'codex', executable: null, available, enabled: true }) as unknown as ProviderSummary;
+  log([provider(true)], 0);
+  log([provider(true)], 1);
+  log([provider(false)], 1);
+  log([provider(true)], 1);
+  const rejected = records.filter(record => record.context.event === 'provider.rejected');
+  expect(rejected).toHaveLength(1);
+  // The warning belongs to the call where the count moved, before the two availability changes.
+  expect(records.findIndex(record => record.context.event === 'provider.rejected')).toBe(1);
+  expect(records.filter(record => record.context.event === 'provider.detected')).toHaveLength(3);
+});
+

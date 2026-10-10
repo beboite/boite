@@ -15,9 +15,14 @@ export function noteClaudeMessage(ctx: Diagnosable, message: SDKMessage, session
   if (message.type === 'system') {
     const system = message as { subtype?: string } & Record<string, unknown>;
     if (system.subtype === 'init') {
-      const ready = sessionStartedAt === null ? null : Date.now() - sessionStartedAt;
-      note('info', `Claude Code ${String(system.claude_code_version ?? 'unknown')} ready${ready === null ? '' : ` in ${ready} ms`} with model ${String(system.model ?? 'unknown')}, permission mode ${String(system.permissionMode ?? 'unknown')}`, {
-        event: 'driver.session.ready', ...(ready === null ? {} : { durationMs: ready }),
+      // The CLI sends init again after a flag change; only the first one after a spawn is its start.
+      if (sessionStartedAt === null) {
+        note('debug', `Claude Code sent init again, model ${String(system.model ?? 'unknown')}, permission mode ${String(system.permissionMode ?? 'unknown')}`, { event: 'driver.session.reinit', data: { model: str(system.model), permissionMode: str(system.permissionMode) } });
+        return;
+      }
+      const ready = Date.now() - sessionStartedAt;
+      note('info', `Claude Code ${String(system.claude_code_version ?? 'unknown')} ready in ${ready} ms with model ${String(system.model ?? 'unknown')}, permission mode ${String(system.permissionMode ?? 'unknown')}`, {
+        event: 'driver.session.ready', durationMs: ready,
         data: { version: str(system.claude_code_version), model: str(system.model), permissionMode: str(system.permissionMode), tools: Array.isArray(system.tools) ? system.tools.length : null, mcpServers: Array.isArray(system.mcp_servers) ? system.mcp_servers.length : null, apiKeySource: str(system.apiKeySource) },
       });
     } else if (system.subtype === 'api_retry') {
@@ -36,7 +41,7 @@ export function noteClaudeMessage(ctx: Diagnosable, message: SDKMessage, session
   if (message.type === 'rate_limit_event') {
     const info = message.rate_limit_info;
     if (info.status === 'allowed') return;
-    const resets = typeof info.resetsAt === 'number' ? new Date(info.resetsAt * (info.resetsAt < 1e12 ? 1000 : 1)).toISOString() : null;
+    const resets = isoTime(info.resetsAt);
     note(info.status === 'rejected' ? 'warn' : 'info', `Claude rate limit ${info.status === 'rejected' ? 'reached' : 'warning'}${info.rateLimitType ? ` on the ${info.rateLimitType} window` : ''}${typeof info.utilization === 'number' ? `, ${Math.round(info.utilization * 100)}% used` : ''}${resets ? `, resets ${resets}` : ''}`, {
       event: 'driver.rate-limit',
       data: { status: info.status, window: info.rateLimitType ?? null, utilization: info.utilization ?? null, resetsAt: resets, overage: info.overageStatus ?? null, overageDisabled: info.overageDisabledReason ?? null },
@@ -53,6 +58,13 @@ export function noteClaudeMessage(ctx: Diagnosable, message: SDKMessage, session
       data: { subtype: message.subtype, isError: message.is_error, numTurns: message.num_turns, apiMs: message.duration_api_ms, errors: message.subtype === 'success' ? 0 : message.errors.length, stopReason: message.stop_reason ?? null },
     });
   }
+}
+
+/** A reset time in seconds or milliseconds as ISO text; null for anything a Date cannot hold, which would throw. */
+export function isoTime(value: unknown): string | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  const date = new Date(value * (value < 1e12 ? 1000 : 1));
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
 function str(value: unknown): string | null { return typeof value === 'string' ? value : null; }

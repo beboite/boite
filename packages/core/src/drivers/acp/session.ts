@@ -24,6 +24,7 @@ import { CLIENT_NAME, EXIT_GRACE_MS, isGrok, STDERR_MAX, type AcpDeps, type Time
 import { jsonLinesOnly } from './stdout.ts';
 import { commandsOf, imageBlocksOf, usdCostOf, type AcpTurn } from './turn.ts';
 import { answerPermission, drawUpdate } from './updates.ts';
+import { noteReady } from '../driver-log.ts';
 
 /** A glog line at info severity: `I0921 09:51:32.917720 10292 main.py:80] ...`. */
 const GLOG_INFO = /^I\d{4} \d{2}:\d{2}:\d{2}\.\d+\s/;
@@ -382,20 +383,16 @@ export class AcpSession {
   }
 
   private start(ctx: TurnContext): Promise<void> {
-    if (this.starting === null) this.starting = this.open(ctx);
+    if (this.starting === null) {
+      this.starting = noteReady(ctx, `${ctx.provider.id} ACP`, () => this.open(ctx), () => ({
+        text: this.loaded ? ', loaded the saved session' : this.replaces !== null ? ', a new one replacing a session it cannot load' : '',
+        data: { loaded: this.loaded, canLoad: this.canLoad, replaced: this.replaces !== null, images: this.imagesSupported },
+      }));
+    }
     return this.starting;
   }
 
   private async open(ctx: TurnContext): Promise<void> {
-    const openedAt = Date.now();
-    await this.openSession(ctx);
-    const ready = Date.now() - openedAt;
-    ctx.diagnostic?.('info', `${ctx.provider.id} ACP session ready in ${ready} ms: ${this.loaded ? 'loaded the saved session' : this.replaces !== null ? 'new session replacing one it cannot load' : 'new session'}`, {
-      event: 'driver.session.ready', durationMs: ready, data: { loaded: this.loaded, canLoad: this.canLoad, replaced: this.replaces !== null, images: this.imagesSupported },
-    });
-  }
-
-  private async openSession(ctx: TurnContext): Promise<void> {
     const sdk = await this.deps.loadSdk();
     // A stop while the SDK loaded: nothing may be spawned for a session that is over.
     if (this.ended) throw new Error('the acp session was closed before it started');

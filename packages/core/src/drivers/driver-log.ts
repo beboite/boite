@@ -40,15 +40,29 @@ export function httpStatusOf(info: unknown): number | null {
   return null;
 }
 
-/** How long an agent process took to open its session, or why it could not. */
-export function noteReady<T>(ctx: Pick<SessionContext, 'diagnostic' | 'sessionId'>, agent: string, opening: Promise<T>): Promise<T> {
+/**
+ * How long an agent process took to open its session, or why it could not.
+ * `opening` runs here, after the clock starts, so synchronous setup counts and
+ * a synchronous throw is logged like a rejection. `details` adds what only
+ * the session knows once open, such as the model it was served.
+ */
+export function noteReady<T>(
+  ctx: Pick<SessionContext, 'diagnostic' | 'sessionId'>,
+  agent: string,
+  opening: () => Promise<T>,
+  details: () => { text?: string; data?: Record<string, string | number | boolean | null> } = () => ({}),
+): Promise<T> {
   const at = Date.now();
   const resume = ctx.sessionId !== null;
-  return opening.then((value) => {
-    ctx.diagnostic?.('info', `${agent} session ready in ${Date.now() - at} ms, ${resume ? 'resumed' : 'new'}`, { event: 'driver.session.ready', durationMs: Date.now() - at, data: { resume } });
-    return value;
-  }, (error: unknown) => {
+  const failed = (error: unknown): never => {
     ctx.diagnostic?.('warn', `${agent} session failed to open after ${Date.now() - at} ms: ${error instanceof Error ? error.message : String(error)}`, { event: 'driver.session.open-failed', durationMs: Date.now() - at, data: { resume, code: errorCodeOf((error as { code?: unknown } | null)?.code) } });
     throw error;
-  });
+  };
+  let started: Promise<T>;
+  try { started = opening(); } catch (error) { return Promise.reject(error).catch(failed); }
+  return started.then((value) => {
+    const extra = details();
+    ctx.diagnostic?.('info', `${agent} session ready in ${Date.now() - at} ms, ${resume ? 'resumed' : 'new'}${extra.text ?? ''}`, { event: 'driver.session.ready', durationMs: Date.now() - at, data: { resume, ...extra.data } });
+    return value;
+  }, failed);
 }

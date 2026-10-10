@@ -15,6 +15,8 @@ export { LOG_MESSAGE_CHARS } from '@boite/contracts';
 const PENDING_RECORDS = 1024;
 const RECENT_RECORDS = 4096;
 const FLUSH_MS = 250;
+/** How far ahead of the core a record's time may be: clients' times are kept within 10 minutes. */
+const CLOCK_SKEW_MS = 10 * 60_000;
 
 /** Only explicit diagnostic metadata can cross this boundary. Never pass a payload. */
 export type LogContext = Pick<CoreLogRecord, 'source' | 'event' | 'threadId' | 'turnId' | 'requestId'> & {
@@ -308,21 +310,28 @@ export class DiagnosticLogs {
       const records = new Map<string, CoreLogRecord>();
       for (const record of fromMemory()) records.set(record.id, record);
       for (let index = 0; index < LOG_FILE_COUNT; index += 1) {
-        const file = await this.read(this.path(index), 'core', keep);
-        for (const record of file) if (!records.has(record.id)) records.set(record.id, record);
-        // Older files hold older records: once `limit` kept records are no older
-        // than this file's oldest, the next file cannot enter the answer.
-        if (records.size >= limit && file.length > 0) {
-          const oldest = file.reduce((min, record) => Math.min(min, record.at), Number.POSITIVE_INFINITY);
-          const limitTh = [...records.values()].map(record => record.at).sort((a, b) => b - a)[limit - 1] ?? Number.NEGATIVE_INFINITY;
-          if (limitTh >= oldest) break;
+        // A record's time can be earlier than its write (a turn logs when it was queued), so file
+        // order says nothing about `at`. A file's modification time does bound what it holds:
+        // nothing in it is newer than its last write, give or take a client's allowed clock skew.
+        // Once `limit` kept records are all newer than that, this file and older ones cannot enter.
+        if (index > 0 && records.size >= limit) {
+          const modified = await this.modified(this.path(index));
+          if (modified === null) break;
+          const limitTh = [...records.values()].map(record => record.at).sort((a, b) => b - a)[limit - 1]!;
+          if (limitTh > modified + CLOCK_SKEW_MS) break;
         }
+        for (const record of await this.read(this.path(index), 'core', keep)) if (!records.has(record.id)) records.set(record.id, record);
       }
       for (let index = 0; index < SHELL_LOG_FILE_COUNT; index += 1) for (const record of await this.read(this.shellPath(index), 'shell', keep)) records.set(record.id, record);
       result = sortNewest([...records.values()]).slice(0, limit);
     }).catch(error => { this.failure(error); result = sortNewest(fromMemory()).slice(0, limit); });
     await this.writing;
     return result;
+  }
+
+  private async modified(path: string): Promise<number | null> {
+    try { return (await stat(path)).mtimeMs; }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
   }
 
   private async read(path: string, origin: LogOrigin, keep: (record: CoreLogRecord) => boolean): Promise<CoreLogRecord[]> {
@@ -337,7 +346,9 @@ export class DiagnosticLogs {
         // A crash can leave an incomplete final line; other records still answer.
         const parsed = parseLogRecord(line, origin);
         if (parsed === null) continue;
+        // Re-redacted with today's secrets: a credential configured after the write is still removed.
         const record: CoreLogRecord = { ...parsed, message: redactLogText(parsed.message, this.secrets) };
+        if (parsed.data) { const data = normalizeLogData(parsed.data, this.secrets); if (data) record.data = data; else delete record.data; }
         if (keep(record)) records.push(record);
       }
       return records;

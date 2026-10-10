@@ -93,7 +93,7 @@ export function createAcpDriver(deps: AcpDeps): Driver {
 
       let session = sessions.get(threadId) ?? null;
       const usable = session?.usable(key, warmMs) === true;
-      noteWarmSession(ctx, `${ctx.provider.id} ACP`, { kept: session !== null, usable, sameSetup: session?.key === key, setupChange: 'the thread changed mode, account or folder' });
+      noteWarmSession(ctx, `${ctx.provider.id} ACP`, { kept: session !== null, usable, sameSetup: session?.key === key, setupChange: isGrok(ctx.provider) ? 'the thread changed mode, account or folder' : 'the thread changed account or folder' });
       if (session !== null && !usable) {
         sessions.delete(threadId);
         session.close(

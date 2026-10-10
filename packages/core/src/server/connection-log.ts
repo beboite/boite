@@ -14,6 +14,16 @@ export const SLOW_RPC_WARN_MS = 10_000;
  */
 const HELD_METHODS = /^(delegation\.(wait|send)|collaboration\.(wait|send)|questions\.ask|agents\.decision\.request|browser\.|devices\.|terminals\.|panel\.|accounts\.login|providers\.(install|update|dryRun)|plugins\.(install|uninstall)|speech\.(install|transcribe|stream)|imports\.run|brain\.sync|core\.update)/;
 
+/**
+ * A value an unauthenticated client chose, made safe for a log line: control,
+ * format and separator characters removed (a newline would forge a record in
+ * a readable export), trimmed, cut to `max`; `fallback` when nothing is left.
+ */
+export function clientField(value: unknown, max = 40, fallback = 'unknown'): string {
+  if (typeof value !== 'string') return fallback;
+  return value.replace(/[\p{C}\p{Zl}\p{Zp}]/gu, '').trim().slice(0, max) || fallback;
+}
+
 /** Who is behind a socket, in words a timeline reader understands. */
 export function describeConnection(connection: ServerConnection): { principal: string; client: string; remote: boolean } {
   return {

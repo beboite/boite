@@ -460,6 +460,7 @@ export class ClaudeSession {
     if (typeof sessionId === 'string' && sessionId.length > 0) this.sessionId = sessionId;
     if (message.type === 'system') this.noteTasks(message);
     noteClaudeMessage(this.head()?.ctx ?? this.ctx, message, this.spawnedAt);
+    if (message.type === 'system' && message.subtype === 'init') this.spawnedAt = null;
     if (message.type === 'system' && message.subtype === 'init') {
       for (const report of this.fastReports.splice(0)) report(message.fast_mode_state);
     }

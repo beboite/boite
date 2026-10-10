@@ -34,6 +34,7 @@ export function installLogger(core: Core): (payload: ProviderInstallState & { pr
  */
 export function detectionLogger(core: Core): (providers: ProviderSummary[], rejected: number) => void {
   let last = new Map<string, string>();
+  let lastRejected = 0;
   return (providers, rejected) => {
     const now = new Map<string, string>();
     for (const provider of providers) {
@@ -43,7 +44,9 @@ export function detectionLogger(core: Core): (providers: ProviderSummary[], reje
     const changed = [...now].filter(([id, state]) => last.get(id) !== state).map(([id]) => id);
     const gone = [...last.keys()].filter(id => !now.has(id));
     last = now;
-    if (changed.length === 0 && gone.length === 0) return;
+    const rejectedChanged = rejected !== lastRejected;
+    lastRejected = rejected;
+    if (changed.length === 0 && gone.length === 0 && !rejectedChanged) return;
     for (const id of changed) {
       const [state, program, version] = now.get(id)!.split('|');
       core.logs.info(`Provider ${id} is ${state}${program ? `, program ${program}${version ? ` ${version}` : ''}` : ''}`, {
@@ -51,7 +54,7 @@ export function detectionLogger(core: Core): (providers: ProviderSummary[], reje
       });
     }
     for (const id of gone) core.logs.info(`Provider ${id} is no longer loaded`, { source: 'providers', event: 'provider.removed', data: { providerId: id } });
-    if (rejected > 0) core.logs.warn(`${rejected} provider descriptors were rejected; Settings > Providers lists why`, { source: 'providers', event: 'provider.rejected', data: { rejected } });
+    if (rejectedChanged && rejected > 0) core.logs.warn(`${rejected} provider descriptors were rejected; Settings > Providers lists why`, { source: 'providers', event: 'provider.rejected', data: { rejected } });
   };
 }
 

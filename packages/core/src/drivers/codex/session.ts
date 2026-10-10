@@ -39,7 +39,7 @@ import { CodexRpc } from './rpc.ts';
 import { updateTurnSettings } from './live-settings.ts';
 import { CodexTurn } from './turn.ts';
 import { SessionRetention } from '../session-retention.ts';
-import { errorCodeOf, httpStatusOf } from '../driver-log.ts';
+import { errorCodeOf, httpStatusOf, noteReady } from '../driver-log.ts';
 
 /**
  * What `thread/resume` answers when the thread's rollout file is gone. Both
@@ -313,20 +313,11 @@ export class CodexSession {
   // -- the process ----------------------------------------------------------
 
   private start(ctx: SessionContext): Promise<void> {
-    if (this.starting === null) this.starting = this.open(ctx);
+    if (this.starting === null) this.starting = noteReady(ctx, 'Codex app-server', () => this.open(ctx), () => ({ text: this.served.model ? `, on ${this.served.model}` : '', data: { model: this.served.model } }));
     return this.starting;
   }
 
   private async open(ctx: SessionContext): Promise<void> {
-    const openedAt = Date.now();
-    await this.openThread(ctx);
-    const ready = Date.now() - openedAt;
-    ctx.diagnostic?.('info', `Codex app-server ready in ${ready} ms, ${ctx.sessionId !== null ? 'resumed its thread' : 'started a new thread'}${this.served?.model ? ` on ${this.served.model}` : ''}`, {
-      event: 'driver.session.ready', durationMs: ready, data: { resume: ctx.sessionId !== null, model: this.served?.model ?? null },
-    });
-  }
-
-  private async openThread(ctx: SessionContext): Promise<void> {
     const profile = profileFor(ctx.provider);
     const executable = profile === undefined ? null : resolveExecutable(profile);
     if (executable === null) {

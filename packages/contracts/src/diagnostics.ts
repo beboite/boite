@@ -237,11 +237,21 @@ function shortHash(salt: string, value: string): string {
 function escapeRegExp(value: string): string { return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
 /** A path's separators, any run of `/` or `\\` (JSON escapes included), and no trailing one. */
-function pathKey(path: string): string { return path.replace(/[\\/]+/g, '/').replace(/\/+$/, '').toLowerCase(); }
+function pathKey(path: string): string { return withoutTrailing(path.replace(/[\\/]+/g, '/'), '/').toLowerCase(); }
+
+/**
+ * `value` without its trailing run of these characters. A loop, not `/x+$/`:
+ * an end-anchored repetition retries from every position of a long run.
+ */
+function withoutTrailing(value: string, characters: string): string {
+  let end = value.length;
+  while (end > 0 && characters.includes(value[end - 1]!)) end -= 1;
+  return value.slice(0, end);
+}
 
 /** The body of a path pattern, either separator between segments; null for a path too short to be personal. */
 function pathBody(path: string): string | null {
-  const parts = path.replace(/[\\/]+$/, '').split(/[\\/]+/).filter((part, index) => part.length > 0 || index === 0);
+  const parts = withoutTrailing(path, '\\/').split(/[\\/]+/).filter((part, index) => part.length > 0 || index === 0);
   if (parts.join('').length < 3) return null;
   return parts.map(escapeRegExp).join('[\\\\/]+');
 }
@@ -264,7 +274,8 @@ function combined(entries: readonly { body: string; key: string; value: string }
 const PATH_END = '(?=$|[\\\\/\\s"\'`:;,)\\]}>]|\\.(?![\\w-]))';
 
 /** Anything shaped like an absolute path; a drive letter only when no letter precedes it (`file:///` is not drive `e:`). */
-const PATH_TOKEN = /([A-Za-z]:)?((?:[\\/]+[^\\/\s"'`;,()[\]{}<>|*?]+)+[\\/]*)/g;
+// Separator runs are bounded: an unbounded `[\\/]+` inside the repetition retries from every slash of a long run.
+const PATH_TOKEN = /([A-Za-z]:)?((?:[\\/]{1,4}[^\\/\s"'`;,()[\]{}<>|*?]+)+[\\/]{0,4})/g;
 
 /**
  * Paths without spaces, replaced by their longest known prefix: each path in
@@ -273,6 +284,9 @@ const PATH_TOKEN = /([A-Za-z]:)?((?:[\\/]+[^\\/\s"'`;,()[\]{}<>|*?]+)+[\\/]*)/g;
  */
 function prefixReplacer(prefixes: ReadonlyMap<string, string>): ((text: string) => string) | null {
   if (prefixes.size === 0) return null;
+  // No known path has more separators than this, so a deeper prefix cannot match.
+  let depth = 0;
+  for (const key of prefixes.keys()) depth = Math.max(depth, key.split('/').length);
   return text => text.replace(PATH_TOKEN, (match: string, drive: string | undefined, rest: string, offset: number, whole: string) => {
     // A drive letter right after another letter is a scheme's end (`file:///`), not a drive.
     const scheme = drive !== undefined && offset > 0 && /[A-Za-z]/.test(whole[offset - 1]!);
@@ -280,14 +294,14 @@ function prefixReplacer(prefixes: ReadonlyMap<string, string>): ((text: string) 
     const lead = scheme ? (/^[\\/]+/.exec(rest)?.[0] ?? '').slice(1) : '';
     const kept = scheme ? drive + lead : '';
     const token = scheme ? rest.slice(lead.length) : match;
-    const trailing = /\.+$/.exec(token)?.[0] ?? '';
-    const path = trailing ? token.slice(0, -trailing.length) : token;
+    const path = withoutTrailing(token, '.');
+    const trailing = token.slice(path.length);
     const ends: number[] = [];
     const separators = /[\\/]+/g;
     let found: RegExpExecArray | null;
     while ((found = separators.exec(path)) !== null) if (found.index > 0) ends.push(found.index);
     ends.push(path.length);
-    for (let index = ends.length - 1; index >= 0; index -= 1) {
+    for (let index = Math.min(ends.length - 1, depth); index >= 0; index -= 1) {
       const value = prefixes.get(pathKey(path.slice(0, ends[index]!)));
       if (value !== undefined) return kept + value + path.slice(ends[index]!) + trailing;
     }

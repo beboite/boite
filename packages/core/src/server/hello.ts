@@ -5,11 +5,11 @@ import type { Core } from '../core.ts';
 import { messageOf } from '../errors.ts';
 import { NONCE_MAX, NONCE_MIN, nonceProblem, principalOf, type Identity } from '../sessions.ts';
 import type { ServerConnection } from './connection.ts';
-import { logHelloAccepted, logHelloRefused } from './connection-log.ts';
+import { clientField, logHelloAccepted, logHelloRefused } from './connection-log.ts';
 
 export function hello(core: Core, connection: ServerConnection, id: number | string, method: string, rawParams: unknown): void {
   if (method !== 'hello') {
-    logHelloRefused(core, connection, `the first frame was ${method || 'not a method call'}, not hello`, 'unknown');
+    logHelloRefused(core, connection, `the first frame was ${clientField(method, 60, 'not a method call')}, not hello`, 'unknown');
     connection.sendResponse({
       jsonrpc: '2.0',
       id,
@@ -21,7 +21,7 @@ export function hello(core: Core, connection: ServerConnection, id: number | str
   const params = rawParams as
     | { token?: unknown; grant?: unknown; ticket?: unknown; nonce?: unknown; protocolVersion?: unknown; client?: { name?: unknown; version?: unknown; device?: unknown } }
     | undefined;
-  const clientName = typeof params?.client?.name === 'string' ? params.client.name.slice(0, 40) : 'unknown';
+  const clientName = clientField(params?.client?.name);
   const refuse = (message: string, reason: string): void => {
     logHelloRefused(core, connection, `${reason}: ${message}`, clientName);
     connection.sendResponse({ jsonrpc: '2.0', id, error: { code: RpcErrorCode.Unauthorized, message } });
@@ -99,7 +99,7 @@ export function hello(core: Core, connection: ServerConnection, id: number | str
   connection.sentFrom = sentFromOf(identity, client.name, params?.client?.device, connection.remote);
   connection.authenticated = true;
   connection.clientName = clientName;
-  logHelloAccepted(core, connection, client.version.slice(0, 40));
+  logHelloAccepted(core, connection, clientField(client.version, 40, ''));
   connection.sendResponse({
     jsonrpc: '2.0',
     id,

@@ -151,6 +151,24 @@ describe('bounded persistent diagnostics', () => {
     } finally { await second.close(); rmSync(directory, { recursive: true, force: true }); }
   });
 
+  test('after a restart, a backdated record in the newest file does not hide newer records in older files, and data is redacted with current secrets', async () => {
+    const directory = temporary();
+    const now = Date.now();
+    const writer = new DiagnosticLogs(directory, [], undefined, 1024);
+    try {
+      for (let index = 0; index < 20; index += 1) writer.record('info', `recent ${index} ${'x'.repeat(150)}`, { source: 'test', event: 'recent', data: { where: 'later-secret here' } }, now - 20_000 + index * 1000);
+      await writer.flush();
+      // Written last, dated first: a turn logged with the time it was queued.
+      writer.record('info', 'queued long ago', { source: 'test', event: 'backdated' }, now - 3_600_000);
+    } finally { await writer.close(); }
+    const reader = new DiagnosticLogs(directory, ['later-secret'], undefined, 1024);
+    try {
+      const newest = await reader.query({ limit: 3 });
+      expect(newest.map(record => record.message.split(' ').slice(0, 2).join(' '))).toEqual(['recent 19', 'recent 18', 'recent 17']);
+      expect(newest[0]?.data?.where).toBe('[redacted] here');
+    } finally { await reader.close(); rmSync(directory, { recursive: true, force: true }); }
+  });
+
   test('a burst cannot grow the pending queue and persists an explicit loss count', async () => {
     const directory = temporary();
     const reports: string[] = [];

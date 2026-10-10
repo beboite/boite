@@ -385,7 +385,7 @@ export class PiSession {
   // -- the process ----------------------------------------------------------
 
   private start(ctx: TurnContext): Promise<void> {
-    if (this.starting === null) this.starting = noteReady(ctx, 'pi', this.open(ctx));
+    if (this.starting === null) this.starting = noteReady(ctx, 'pi', () => this.open(ctx));
     return this.starting;
   }
 
