@@ -22,16 +22,18 @@ unshare -rmnu --propagation private bash netns.sh bash -c 'hostname DESKTOP-W10S
 - `/etc/hosts` stands in for MagicDNS: `boite-srv` and
   `boite-srv.tail-fake.ts.net` name 100.80.1.10.
 
-`run.ts` starts a core with `--lan` on the server and creates an Echo thread.
-For each scenario it mints a new link, as the pairing card does, and starts
-`client.ts` in the client's namespace:
+`run.ts` starts a core with `--lan` on the server, creates an Echo thread and a
+group. Each phone gets a new pairing link, as the pairing card mints it, and
+each desktop a group invitation; `client.ts` then runs in the client's
+namespace:
 
 - a phone: Chrome at 412x915 with an Android user agent and touch, opening the
   pairing link;
 - a desktop shell: Chrome serving the UI from `http://tauri.localhost`, the
   origin WebView2 gives the Windows shell, with the shell's own CSP read from
-  `tauri.conf.json`, adding the server under Settings, Machines. It also opens
-  a picture from the server's folder in the panel.
+  `tauri.conf.json`. Its own core joins the server's group with an invitation,
+  as Settings, Machines does, then it opens a picture from the server's
+  folder in the panel.
 
 Each client sends a prompt and waits for the answer, reloads, loses its link for
 20 seconds while reading the thread (a phone also while on its list), and sends again.

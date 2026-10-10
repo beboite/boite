@@ -63,7 +63,12 @@ async function desktop(ns: string, label: string, localPort: number) {
   const marker = `/run/bench-watching-${label}`;
   const watcher = (async () => {
     for (let i = 0; i < 600 && !(await Bun.file(marker).exists()); i++) await Bun.sleep(100);
-    await rpc('srv', srvDataDir, 'panel.open', { threadId, surface: { kind: 'file', path: join(srvDataDir, 'capture.png') } });
+    // Shown only once the client watches the thread: on a slow tailnet its subscription lands later.
+    for (let i = 0; i < 20; i++) {
+      const { shown } = await rpc('srv', srvDataDir, 'panel.open', { threadId, surface: { kind: 'file', path: join(srvDataDir, 'capture.png') } });
+      if (shown) break;
+      await Bun.sleep(500);
+    }
   })().catch((e) => console.error(`[bench] panel.open: ${e}`));
   const { invite } = await rpc('srv', srvDataDir, 'group.invite');
   const line = await run(ns, ['bun', join(here, 'client.ts'), 'desktop', label, outDir, threadId, 'http://tauri.localhost', local.token, invite], env)
