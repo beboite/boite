@@ -100,7 +100,8 @@ const alive = (pid: number): boolean => { try { process.kill(pid, 0); return tru
 const app = () => harness!.core.plugins.state('bots').app!;
 /**
  * A test core whose own start pass, a 0 ms timer, has run and found no plugin.
- * Left for later, it could launch a second copy of a crashing app mid-test.
+ * Left for later, it could launch the app the test is about to install, once
+ * more than the test counts, or one that quits before `start` answers.
  */
 const startQuietCore = async (): Promise<TestCore> => { const core = await startTestCore(); await Bun.sleep(10); return core; };
 
@@ -115,7 +116,7 @@ test('the environment drops every agent variable and carries the owner token', (
 
 describe('a desktop app', () => {
   test('starts with the core address and owner token, no agent variable, and a clean quit leaves it stopped', async () => {
-    harness = await startTestCore(); const client = await harness.connect();
+    harness = await startQuietCore(); const client = await harness.connect();
     const dir = installBots(harness.dataDir);
     const fake = fakeApp(harness); fake.mode('exit0');
     const saved = { thread: process.env.BOITE_THREAD_ID, token: process.env.BOITE_AGENT_TOKEN };
@@ -184,7 +185,7 @@ describe('a desktop app', () => {
   });
 
   test('quick start, stop and restart calls run one after the other', async () => {
-    harness = await startTestCore(); const client = await harness.connect();
+    harness = await startQuietCore(); const client = await harness.connect();
     const dir = installBots(harness.dataDir);
     const fake = fakeApp(harness); fake.mode('stay');
     const actions = ['start', 'stop', 'restart', 'stop', 'start', 'stop'] as const;
@@ -196,7 +197,7 @@ describe('a desktop app', () => {
   });
 
   test('stop disables it for good, start and restart bring it back, and the choice survives a new store', async () => {
-    harness = await startTestCore(); const client = await harness.connect();
+    harness = await startQuietCore(); const client = await harness.connect();
     const dir = installBots(harness.dataDir);
     const fake = fakeApp(harness); fake.mode('stay');
     await client.call('plugins.app', { id: 'bots', action: 'start' });
@@ -224,7 +225,7 @@ describe('a desktop app', () => {
   });
 
   test('the core start launches an enabled app, and close() kills it', async () => {
-    harness = await startTestCore();
+    harness = await startQuietCore();
     installBots(harness.dataDir);
     const fake = fakeApp(harness); fake.mode('stay');
     harness.core.plugins.startApps();
@@ -237,7 +238,7 @@ describe('a desktop app', () => {
   });
 
   test('without a desktop it does not launch and says why', async () => {
-    harness = await startTestCore(); const client = await harness.connect();
+    harness = await startQuietCore(); const client = await harness.connect();
     installBots(harness.dataDir);
     const fake = fakeApp(harness); fake.mode('stay');
     harness.core.plugins.apps.desktop = () => 'no desktop here';
@@ -247,7 +248,7 @@ describe('a desktop app', () => {
   });
 
   test('an install launches it, an update stops it before replacing the binary and starts it after, uninstall kills it', async () => {
-    harness = await startTestCore(); const client = await harness.connect();
+    harness = await startQuietCore(); const client = await harness.connect();
     harness.core.plugins.allowLocalSources = true;
     const fake = fakeApp(harness); fake.mode('stay');
     const repo = join(harness.dataDir, 'repos', 'bots');
