@@ -132,16 +132,16 @@ The tested installer becomes the release artifact.
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 590,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,414,000 |
+| UI entry chunk | 591,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,429,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 3,710,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 3,714,000 |
 
 The total JavaScript measure excludes native binaries and source maps. On
-2026-10-10, `bun run build:ui` with Bun 1.4.2 measured 4,407,959 UI bytes at
-`c30a17a5` and 4,412,538 with close confirmation and typed conversation deletion.
-The dialogs, input binding and English/French sentences add 4,579 bytes. The UI
-total limit increases by 5,000 bytes to 4,414,000, leaving 1,462 bytes; entry
+2026-10-10, `bun run build:ui` with Bun 1.4.2 measured 4,420,649 UI bytes at
+`feeb393b` and 4,425,328 with close confirmation and typed conversation deletion.
+The dialogs, input binding and English/French sentences add 4,679 bytes. The UI
+total limit increases by 5,000 bytes to 4,429,000, leaving 3,672 bytes; entry
 and core limits stay unchanged.
 
 On 2026-10-03, fresh builds of `e1f00a3` measured 2,695,204 core bytes and 3,932,309

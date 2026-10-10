@@ -2,7 +2,7 @@ import { afterEach, expect, test, vi } from 'vitest';
 import type { ThreadSummary } from '@boite/contracts';
 import { Store } from './store.svelte';
 import { confirm } from './confirm.svelte';
-import { QUIT_CHECK_TIMEOUT_MS, shellQuit } from './shell-quit';
+import { confirmedQuitHold, QUIT_CHECK_TIMEOUT_MS, shellQuit } from './shell-quit';
 import { strings } from './strings';
 
 afterEach(() => { confirm.answer(false); vi.restoreAllMocks(); vi.useRealTimers(); });
@@ -31,6 +31,28 @@ test('idle machines close without asking; work on another machine requires confi
   await request();
   expect(quit).toHaveBeenCalledTimes(2);
   expect(busy.client!.call).toHaveBeenCalledWith('threads.list', { includeArchived: true });
+});
+
+test('cancelling a keyboard close permits a second hold, while disposal during confirmation remains final', async () => {
+  vi.useFakeTimers();
+  const quit = vi.fn(async () => {});
+  const request = shellQuit(() => [machine(['running'])], quit);
+  const hold = confirmedQuitHold(request, { onHolding: () => {}, hasQuit: () => false, failed: error => { throw error; } });
+  hold.press();
+  await vi.advanceTimersByTimeAsync(1200);
+  expect(confirm.current).not.toBeNull();
+  confirm.answer(false);
+  await vi.advanceTimersByTimeAsync(0);
+  hold.press();
+  await vi.advanceTimersByTimeAsync(1200);
+  expect(confirm.current).not.toBeNull();
+  hold.dispose();
+  confirm.answer(false);
+  await vi.advanceTimersByTimeAsync(0);
+  hold.press();
+  await vi.advanceTimersByTimeAsync(1200);
+  expect(confirm.current).toBeNull();
+  expect(quit).not.toHaveBeenCalled();
 });
 
 test('disconnected or failed reads ask before closing and repeated exit gestures share the same dialog', async () => {

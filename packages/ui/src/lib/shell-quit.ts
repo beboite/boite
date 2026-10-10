@@ -3,8 +3,22 @@ import { confirm } from './confirm.svelte';
 import type { Store } from './store.svelte';
 import { fill, strings } from './strings';
 import { count as formatCount } from './format';
+import { QuitHold } from './quit-hold';
 
 export const QUIT_CHECK_TIMEOUT_MS = 1500;
+
+/** A cancelled or failed close request permits another keyboard attempt. */
+export function confirmedQuitHold(request: () => Promise<void>, options: {
+  onHolding: (holding: boolean) => void;
+  hasQuit: () => boolean;
+  failed: (error: unknown) => void;
+}): QuitHold {
+  const hold = new QuitHold({
+    onHolding: options.onHolding,
+    onQuit: () => { void request().catch(options.failed).finally(() => { if (!options.hasQuit()) hold.reset(); }); },
+  });
+  return hold;
+}
 
 async function quitState(store: Store) {
   let timer: ReturnType<typeof setTimeout> | undefined;

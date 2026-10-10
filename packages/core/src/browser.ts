@@ -42,11 +42,14 @@ import type { Core } from './core.ts';
 import type { Connection } from './router.ts';
 import { refused } from './errors.ts';
 import { Cdp } from './browser/cdp.ts';
-import { findChromium, readSavedCookies, writeSavedCookies, type BrowserIdentity } from './browser/chromium.ts';
+import { findChromium, readSavedCookies, type BrowserIdentity } from './browser/chromium.ts';
+import { restoreMissingCookies, saveCookies } from './browser/saved-cookies.ts';
 import { BrowserIdentities, startChromium, type Started } from './browser/launch.ts';
 import { PageProbes, PROBE_TIMEOUT_MS, type PageProbe } from './browser/probe.ts';
 import { TabRecorder } from './browser/recorder.ts';
 import { captureFrame, type PageInfo } from './browser/frames.ts';
+import { watchPage } from './browser/page-events.ts';
+import { BrowserHost } from './browser/host.ts';
 import { EDITABLE_SCRIPT, KEY_CODES, PAGE_INFO_SCRIPT, selectionScript, SETTLED_VIEWPORT_SCRIPT } from './browser/scripts.ts';
 import { automate, awaitDocument, documentToken, PAGE_ACTIONS, press, type AgentPage } from './browser/automation.ts';
 
@@ -72,13 +75,11 @@ const COOKIE_SAVE_DELAY_MS = 1000, COOKIE_SAVE_EVERY_MS = 30_000;
  * never finishes; agent-browser's commands work on the DOM.
  */
 const DOM_WAIT_MS = 10_000;
-const DIALOGS_MAX = 20;
 /** A frame is shared by every viewer of the tab that asks within this long. */
 const FRAME_REUSE_MS = 150;
 const FRAME_LIFE_MS = 5000;
 /** A capture or size change still running after this long lets the next one of its tab go: one stuck in the browser never freezes the tab's frames. */
 const SCREEN_TURN_MS = 5000;
-const DIAGNOSTICS_MAX = 200;
 const HISTORY_MAX = 100;
 const TAB_ID = /^browser:[a-zA-Z0-9:-]{1,100}$/;
 export const DISCARDED_RECORDING_ERROR = "the recording was discarded because the agent's turn ended while it was running: stop it with recording-stop in the turn that started it";
@@ -86,7 +87,11 @@ export const DISCARDED_RECORDING_ERROR = "the recording was discarded because th
 
 /** One Chromium process: a profile folder, or a throwaway one for private tabs. */
 interface Engine {
+  /** The profile, prefixed `host:` when the desktop app hosts it (`browser/host.ts`). */
+  key: string;
   profile: string;
+  /** Its tabs are webviews of the desktop app: windows and cookies are that app's own, a copy saved here. */
+  hosted: boolean;
   dir: string;
   cdp: Cdp;
   kill(): void;
@@ -133,15 +138,11 @@ interface Tab {
 
 interface Viewer { requestedAt: number; frames: Array<{ frame: RemoteBrowserFrame; page: PageInfo }> }
 
-/** Credentials, query and fragment never enter diagnostics: they can carry tokens. */
-function bareUrl(raw: string): string {
-  try { const url = new URL(raw); return `${url.protocol}//${url.host}${url.pathname}`.slice(0, 2000); } catch { return raw.slice(0, 200); }
-}
-
 export class AgentBrowser {
   readonly #core: Core;
   readonly #machine = hostname();
   #engines = new Map<string, Promise<Engine>>();
+  readonly #host = new BrowserHost();
   #tabs = new Map<string, Tab>();
   /** Per conversation, its tabs in opening order and the active one. */
   #threads = new Map<ThreadId, { order: string[]; active: string | null }>();
@@ -188,7 +189,7 @@ export class AgentBrowser {
     if (!state) return [];
     return state.order.flatMap(id => {
       const tab = this.#tabs.get(id);
-      return tab ? [{ tabId: id, url: tab.url, title: tab.title, profile: tab.engine.profile, active: id === state.active }] : [];
+      return tab ? [{ tabId: id, url: tab.url, title: tab.title, profile: tab.engine.profile, active: id === state.active, ...(tab.engine.hosted ? { view: tab.targetId } : {}) }] : [];
     });
   }
 
@@ -220,7 +221,8 @@ export class AgentBrowser {
   status({ threadId }: { threadId: ThreadId }): AgentBrowserStatus {
     const found = this.findBrowser();
     const tabs = this.#list(threadId);
-    return { live: tabs.length > 0, tabs, available: found.path !== null, ...(found.path === null ? { reason: found.reason } : {}) };
+    const available = found.path !== null || this.#host.attached;
+    return { live: tabs.length > 0, tabs, available, ...(available ? {} : { reason: found.reason }) };
   }
 
   // ---------- browser processes ----------
@@ -231,17 +233,44 @@ export class AgentBrowser {
       : join(this.#core.dataDir, 'browser', profile);
   }
 
+  /** While the desktop app hosts, a new tab opens in its webviews; tabs already open stay where they are. */
   #engine(profile: string): Promise<Engine> {
-    let engine = this.#engines.get(profile);
+    const key = this.#host.attached ? `host:${profile}` : profile;
+    let engine = this.#engines.get(key);
     if (!engine) {
-      engine = this.#launch(profile);
-      this.#engines.set(profile, engine);
+      engine = this.#host.attached ? this.#launchHosted(profile) : this.#launch(profile);
+      this.#engines.set(key, engine);
       engine.then(started => {
         void started.exited.then(() => this.#lost(started));
         started.cdp.closed.then(() => this.#lost(started));
-      }, () => { if (this.#engines.get(profile) === engine) this.#engines.delete(profile); });
+      }, () => { if (this.#engines.get(key) === engine) this.#engines.delete(key); });
     }
     return engine;
+  }
+
+  async #launchHosted(profile: string): Promise<Engine> {
+    const cdp = this.#host.connect(profile);
+    try { await cdp.send('Browser.getVersion', {}, undefined, START_TIMEOUT_MS); }
+    catch (error) { cdp.close(); throw refused(`the desktop app could not open the agent browser: ${error instanceof Error ? error.message : String(error)}`); }
+    // The webviews keep the app's own cookies; the core still keeps a copy, so a
+    // sign-in follows the profile whether the app hosts or a browser it starts does.
+    const dir = profile === PRIVATE_BROWSER_PROFILE ? '' : this.#profileDir(profile);
+    const engine: Engine = { key: `host:${profile}`, profile, hosted: true, dir, cdp, kill: () => cdp.close(), exited: cdp.closed, tabs: new Set(), throwaway: false, identity: null };
+    if (dir) {
+      mkdirSync(dir, { recursive: true });
+      await restoreMissingCookies(engine, message => this.#core.log('warn', message));
+      engine.saveEvery = setInterval(() => { if (engine.tabs.size) void this.#saveCookies(engine); }, COOKIE_SAVE_EVERY_MS);
+    }
+    this.#targets(engine);
+    await cdp.send('Target.setDiscoverTargets', { discover: true }).catch(() => {});
+    return engine;
+  }
+
+  /** Pages that open a window (a sign-in popup) are adopted as tabs of the same conversation. */
+  #targets(engine: Engine): void {
+    engine.cdp.on('Target.targetCreated', params => void this.#adopt(engine, params.targetInfo as { targetId: string; type: string; openerId?: string; url: string }));
+    engine.cdp.on('Target.targetDestroyed', params => this.#gone(engine, String(params.targetId)));
+    engine.cdp.on('Target.targetInfoChanged', params => this.#info(engine, params.targetInfo as { targetId: string; url: string; title: string }));
   }
 
   #start(path: string, dir: string, userAgent?: string): Promise<Started> {
@@ -265,13 +294,10 @@ export class AgentBrowser {
       // The cookies this profile held when its browser last closed, session cookies included.
       const saved = profile === PRIVATE_BROWSER_PROFILE ? [] : readSavedCookies(dir);
       if (saved.length) await cdp.send('Storage.setCookies', { cookies: saved }).catch(error => this.#core.log('warn', `the saved cookies of browser profile ${profile} were refused: ${error instanceof Error ? error.message : String(error)}`));
-      // Pages that open a window (a sign-in popup) are adopted as tabs of the same conversation.
       await cdp.send('Target.setDiscoverTargets', { discover: true });
       await cdp.send('Browser.setDownloadBehavior', { behavior: 'deny' }).catch(() => {});
-      const engine: Engine = { profile, dir, cdp, kill, exited: started.exited, tabs: new Set(), throwaway: profile === PRIVATE_BROWSER_PROFILE, identity };
-      cdp.on('Target.targetCreated', params => void this.#adopt(engine, params.targetInfo as { targetId: string; type: string; openerId?: string; url: string }));
-      cdp.on('Target.targetDestroyed', params => this.#gone(engine, String(params.targetId)));
-      cdp.on('Target.targetInfoChanged', params => this.#info(engine, params.targetInfo as { targetId: string; url: string; title: string }));
+      const engine: Engine = { key: profile, profile, hosted: false, dir, cdp, kill, exited: started.exited, tabs: new Set(), throwaway: profile === PRIVATE_BROWSER_PROFILE, identity };
+      this.#targets(engine);
       if (!engine.throwaway) engine.saveEvery = setInterval(() => { if (engine.tabs.size) void this.#saveCookies(engine); }, COOKIE_SAVE_EVERY_MS);
       return engine;
     } catch (error) {
@@ -283,8 +309,8 @@ export class AgentBrowser {
 
   /** The process ended or dropped its connection: its tabs are gone. */
   #lost(engine: Engine): void {
-    const current = this.#engines.get(engine.profile);
-    void current?.then(value => { if (value === engine) this.#engines.delete(engine.profile); }, () => {});
+    const current = this.#engines.get(engine.key);
+    void current?.then(value => { if (value === engine) this.#engines.delete(engine.key); }, () => {});
     this.#stopTimers(engine);
     for (const id of [...engine.tabs]) this.#drop(id);
     engine.cdp.close(); engine.kill();
@@ -292,9 +318,9 @@ export class AgentBrowser {
   }
 
   async #shut(engine: Engine): Promise<void> {
-    if (this.#engines.has(engine.profile)) {
-      const current = await this.#engines.get(engine.profile)!.catch(() => null);
-      if (current === engine) this.#engines.delete(engine.profile);
+    if (this.#engines.has(engine.key)) {
+      const current = await this.#engines.get(engine.key)!.catch(() => null);
+      if (current === engine) this.#engines.delete(engine.key);
     }
     this.#stopTimers(engine);
     await this.#saveCookies(engine);
@@ -304,25 +330,9 @@ export class AgentBrowser {
     this.#lost(engine);
   }
 
-  /**
-   * The core keeps each profile's cookies itself. A browser writes its own
-   * late and, on Windows and macOS, lost them when it closed a minute after
-   * its last tab; one without an expiry date is never written by it at all.
-   * Saved a second after a page moves (a sign-in ends on one), every 30
-   * seconds while a tab is open, when a tab closes and before the process
-   * ends; restored at start. A core killed outright loses at most that.
-   */
-  async #saveCookies(engine: Engine): Promise<void> {
-    if (engine.throwaway || !engine.cdp.open) return;
-    try {
-      const { cookies } = await engine.cdp.send<{ cookies: Record<string, unknown>[] }>('Storage.getCookies', {}, undefined, 5000);
-      const held = JSON.stringify(cookies);
-      if (held === engine.saved) return;
-      writeSavedCookies(engine.dir, cookies);
-      engine.saved = held;
-    } catch (error) {
-      this.#core.log('warn', `the cookies of browser profile ${engine.profile} could not be saved: ${error instanceof Error ? error.message : String(error)}`);
-    }
+  /** `browser/saved-cookies.ts`. */
+  #saveCookies(engine: Engine): Promise<void> {
+    return saveCookies(engine, message => this.#core.log('warn', message));
   }
 
   #saveCookiesSoon(engine: Engine): void {
@@ -356,50 +366,8 @@ export class AgentBrowser {
     };
     const on = (method: string, listener: (params: Record<string, unknown>) => void) =>
       tab.off.push(engine.cdp.on(method, (params, session) => { if (session === sessionId) listener(params); }));
-    const note = (entry: Omit<BrowserDiagnostic, 'at'>) => {
-      tab.diagnostics.push({ at: Date.now(), ...entry, text: entry.text.slice(0, 2000) });
-      if (tab.diagnostics.length > DIAGNOSTICS_MAX) { tab.diagnostics.shift(); tab.dropped++; }
-    };
-    on('Page.frameNavigated', params => {
-      const frame = params.frame as { parentId?: string; url: string };
-      if (!frame.parentId) { tab.url = frame.url; tab.frame = null; this.#changed(threadId); this.#saveCookiesSoon(engine); }
-    });
-    on('Page.javascriptDialogOpening', params => {
-      // Nobody can answer a dialog in a headless page. One an agent command raised follows
-      // `dialog accept|dismiss` and is reported to it; any other alert is accepted and a
-      // question declined, so a person acting in the panel never confirms by accident.
-      const type = String(params.type), message = String(params.message ?? '');
-      note({ kind: 'console', level: 'info', text: `${type} dialog: ${message}` });
-      const policy = tab.page.dialogPolicy;
-      const accept = tab.acting && type !== 'beforeunload' ? policy.accept : type === 'alert' || type === 'beforeunload';
-      const promptText = accept && type === 'prompt' ? policy.text ?? String(params.defaultPrompt ?? '') : undefined;
-      if (tab.acting && (type === 'alert' || type === 'confirm' || type === 'prompt')) {
-        tab.page.dialogs.push({ type, message: message.slice(0, 500), accepted: accept, ...(type === 'prompt' ? { value: accept ? promptText ?? '' : null } : {}) });
-        if (tab.page.dialogs.length > DIALOGS_MAX) tab.page.dialogs.shift();
-      }
-      void engine.cdp.send('Page.handleJavaScriptDialog', { accept, ...(promptText === undefined ? {} : { promptText }) }, sessionId).catch(() => {});
-    });
-    on('Runtime.consoleAPICalled', params => {
-      const args = (params.args as Array<{ value?: unknown; description?: string }> | undefined) ?? [];
-      note({ kind: 'console', level: String(params.type ?? 'log'), text: args.map(arg => arg.description ?? (typeof arg.value === 'string' ? arg.value : JSON.stringify(arg.value))).join(' ') });
-    });
-    on('Runtime.exceptionThrown', params => {
-      const details = params.exceptionDetails as { text?: string; exception?: { description?: string }; url?: string };
-      note({ kind: 'exception', level: 'error', text: details.exception?.description ?? details.text ?? 'exception', ...(details.url ? { url: bareUrl(details.url) } : {}) });
-    });
-    on('Network.requestWillBeSent', params => {
-      tab.requests.set(String(params.requestId), String((params.request as { url: string }).url));
-      if (tab.requests.size > 500) tab.requests.delete(tab.requests.keys().next().value!);
-    });
-    on('Network.responseReceived', params => {
-      const response = params.response as { status: number; statusText?: string; url: string };
-      if (response.status >= 400) note({ kind: 'network', level: 'error', text: `HTTP ${response.status} ${response.statusText ?? ''}`.trim(), url: bareUrl(response.url) });
-    });
-    on('Network.loadingFailed', params => {
-      if (params.canceled) return;
-      const url = tab.requests.get(String(params.requestId));
-      note({ kind: 'network', level: 'error', text: String(params.errorText ?? 'request failed'), ...(url ? { url: bareUrl(url) } : {}) });
-    });
+    watchPage(tab, on, (accept, promptText) => void engine.cdp.send('Page.handleJavaScriptDialog', { accept, ...(promptText === undefined ? {} : { promptText }) }, sessionId).catch(() => {}),
+      url => { tab.url = url; tab.frame = null; this.#changed(threadId); this.#saveCookiesSoon(engine); });
     // Before its first request: the page, its workers and its requests say what a browser with a window says.
     if (engine.identity) await engine.cdp.send('Emulation.setUserAgentOverride', { userAgent: engine.identity.userAgent, userAgentMetadata: engine.identity.metadata }, sessionId).catch(() => {});
     await Promise.all(['Page.enable', 'Runtime.enable', 'Network.enable'].map(method => engine.cdp.send(method, {}, sessionId)));
@@ -503,7 +471,8 @@ export class AgentBrowser {
     switch (action.kind) {
       case 'status': {
         const found = this.findBrowser();
-        return { value: { available: found.path !== null, machine: this.#machine, ...(found.path === null ? { reason: found.reason } : {}), tabs: this.#list(threadId).map(tab => ({ ...tab, profileName: this.#profileName(tab.profile) })) } };
+        const available = found.path !== null || this.#host.attached;
+        return { value: { available, hosted: this.#host.attached, machine: this.#machine, ...(available ? {} : { reason: found.reason }), tabs: this.#list(threadId).map(tab => ({ ...tab, profileName: this.#profileName(tab.profile) })) } };
       }
       case 'profiles': {
         const { profiles, defaultId } = browserProfilesOf(this.#core.settings.get());
@@ -694,7 +663,8 @@ export class AgentBrowser {
   async #pruneProfiles(settings: Settings): Promise<void> {
     try {
       const kept = new Set([DEFAULT_BROWSER_PROFILE, ...browserProfilesOf(settings).profiles.map(profile => profile.id)]);
-      for (const [profile, pending] of [...this.#engines]) {
+      for (const [key, pending] of [...this.#engines]) {
+        const profile = key.replace(/^host:/, '');
         if (kept.has(profile) || profile === PRIVATE_BROWSER_PROFILE) continue;
         const engine = await pending.catch(() => null);
         if (engine) await this.#shut(engine);
@@ -883,6 +853,11 @@ export class AgentBrowser {
       if (tab) void this.#closeTab(tab);
     }
   }
+
+  /** The desktop app of this machine hosts new tabs from now on (`browser/host.ts`). */
+  hostAttach(connection: Connection): { ok: true } { this.#host.attach(connection); return { ok: true }; }
+  hostDetach(connection: Connection): { ok: true } { this.#host.detach(connection); return { ok: true }; }
+  hostReply({ profile, messages }: RpcParams<'browser.hostReply'>, connection: Connection): { ok: true } { this.#host.reply(connection, profile, messages); return { ok: true }; }
 
   disconnect(connectionId: string): void {
     for (const id of this.#viewers.keys()) if (id.startsWith(`${connectionId}:`)) this.#viewers.delete(id);

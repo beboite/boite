@@ -83,6 +83,14 @@ export class Cdp {
     });
   }
 
+  /**
+   * A connection someone else carries: the desktop app relays each message to
+   * its own webviews and hands back their answers and events (`browser/host.ts`).
+   */
+  static relay(write: (text: string) => void, stop: () => void): { cdp: Cdp; receive(text: string): void; end(): void } {
+    const cdp = new Cdp(write, stop);
+    return { cdp, receive: text => cdp.#receive(text), end: () => cdp.#ended() };
+  }
   get open(): boolean { return this.#closed === null; }
 
   send<T = Record<string, unknown>>(method: string, params: Record<string, unknown> = {}, sessionId?: string, timeoutMs = COMMAND_TIMEOUT_MS): Promise<T> {

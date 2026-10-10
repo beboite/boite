@@ -7,6 +7,8 @@
   import { liveViews, machineName } from '../lib/live-view.svelte';
   import { normalizeUrl } from '../lib/browser-bridge';
   import RemoteBrowser from './RemoteBrowser.svelte';
+  import AgentNativeView from './AgentNativeView.svelte';
+  import { agentHost } from '../lib/agent-browser-host.svelte';
 
   /**
    * The browser this conversation's agent drives on the machine that runs it
@@ -166,7 +168,11 @@
         </div>
       </div>
     {:else if watched}
-      {#key watched.tabId}<RemoteBrowser {store} {threadId} tabId={watched.tabId} />{/key}
+      {#key watched.tabId}
+        <!-- This app hosts the tab: its own webview shows here, nothing is streamed. -->
+        {#if here && agentHost.active && watched.view}<AgentNativeView view={watched.view} url={watched.url} />
+        {:else}<RemoteBrowser {store} {threadId} tabId={watched.tabId} />{/if}
+      {/key}
     {/if}
   {/if}
 </section>

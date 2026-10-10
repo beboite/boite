@@ -23,8 +23,8 @@
   import { startGlass } from './lib/glass';
   import { installExternalLinks } from './lib/links';
   import { installDropNavigationGuard } from './lib/drop-navigation';
-  import { isQuitChord, QUIT_HOLD_MS, QuitHold } from './lib/quit-hold';
-  import { desktopQuit, installQuitGuard } from './lib/shell-quit';
+  import { isQuitChord, QUIT_HOLD_MS } from './lib/quit-hold';
+  import { confirmedQuitHold, desktopQuit, installQuitGuard } from './lib/shell-quit';
   import { notificationWords, onNotificationOpen, storeNotificationWords } from './lib/notify';
   import { closeTabs } from './lib/panel-close';
   import { strings } from './lib/strings';
@@ -32,6 +32,7 @@
   import { installWhipEscape } from './lib/whip.svelte';
   import { rightPanel } from './lib/right-panel.svelte';
   import { workspace } from './lib/workspace.svelte';
+  import { hostLocalAgentBrowser } from './lib/agent-browser-host.svelte';
   import type { Store } from './lib/store.svelte';
   import { tourRequested, tourSeen } from './lib/onboarding.svelte';
   import { prefetchAllowed, prefetchNames, whenIdle } from './lib/prefetch';
@@ -133,6 +134,7 @@
   $effect(() => {
     browserProfiles.source = workspace.machines.find((machine) => machine.store.localCore)?.store ?? store;
   });
+  hostLocalAgentBrowser();
   let SettingsShell = $state<typeof import('./components/SettingsShell.svelte').default>();
   let AgentsPage = $state<typeof import('./components/agents/AgentsPage.svelte').default>();
   let agentsLoadError = $state('');
@@ -263,14 +265,13 @@
   const requestQuit = desktopQuit(() => [workspace.primary, ...workspace.machines.map(m => m.store)], () => { quitting = true; });
   onMount(() => { if (inShell) return installQuitGuard(requestQuit, error => { store.error = String(error); }); });
   const quitHold = inShell
-    ? new QuitHold({
+    ? confirmedQuitHold(requestQuit, {
         onHolding: (holding) => {
           if (holding) quitHint.show();
           else quitHint.hide();
         },
-        onQuit: () => {
-          void requestQuit().catch(error => { store.error = String(error); }).finally(() => { if (!quitting) quitHold?.reset(); });
-        }
+        hasQuit: () => quitting,
+        failed: error => { store.error = String(error); }
       })
     : null;
 
