@@ -8,7 +8,7 @@ import { refused, type RpcFailure } from '../src/errors.ts';
 import { Core } from '../src/core.ts';
 import { newToken } from '../src/ids.ts';
 import { pair, readPreviousRun } from '../src/main.ts';
-import { isAllowedOrigin, PLACEHOLDER_HTML, preauthPeer, preauthRefusal, ServerConnection, startServer, startServerOnStickyPort, UI_DIST } from '../src/server.ts';
+import { isAllowedOrigin, PLACEHOLDER_HTML, PREFERRED_PORTS, preauthPeer, preauthRefusal, ServerConnection, startServer, startServerOnStickyPort, UI_DIST } from '../src/server.ts';
 import { lanAddress } from '../src/server/lan.ts';
 import { echoThread, removeDir, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
@@ -481,35 +481,66 @@ describe('server', () => {
     }
   });
 
-  test('a restarted core listens on the port of its previous run, and on another when that one is taken', async () => {
+  test('a core listens on the port of its previous run, then on its preferred ports, then on any', async () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'boite-sticky-'));
     const core = new Core({ dataDir, token: newToken() });
     const warnings: string[] = [];
     const log = core.log.bind(core);
     core.log = (level, message) => { if (level === 'warn') warnings.push(message); log(level, message); };
-    const first = startServerOnStickyPort({ core, host: '127.0.0.1', port: 0, explicitPort: false, previousPort: null });
-    const port = first.port;
-    await first.stop();
-    const coreFile = join(dataDir, 'core.json');
-    writeFileSync(coreFile, JSON.stringify({ port, host: '127.0.0.1', token: 'kept', pid: 1 }));
-    expect(readPreviousRun(coreFile)).toEqual({ token: 'kept', port });
-    const again = startServerOnStickyPort({ core, host: '127.0.0.1', port: 0, explicitPort: false, previousPort: readPreviousRun(coreFile).port });
+    // A squatter holds one port first, so the two freed below cannot be handed to it; they stand for the channel's preferred ones.
     const squatter = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('mine') });
+    const free = [Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('') }), Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('') })];
+    const preferred = free.map((server) => server.port!);
+    await Promise.all(free.map((server) => server.stop(true)));
+    const sticky = (previousPort: number | null, preferredPorts: readonly number[], port = 0, explicitPort = false) =>
+      startServerOnStickyPort({ core, host: '127.0.0.1', port, explicitPort, previousPort, preferredPorts });
     try {
-      expect(again.port).toBe(port);
+      // A first run takes the first preferred port, never a random one.
+      const first = sticky(null, preferred);
+      expect(first.port).toBe(preferred[0]!);
+      await first.stop();
+      const coreFile = join(dataDir, 'core.json');
+      writeFileSync(coreFile, JSON.stringify({ port: first.port, host: '127.0.0.1', token: 'kept', pid: 1 }));
+      expect(readPreviousRun(coreFile)).toEqual({ token: 'kept', port: first.port });
+      // A restart keeps the port of the previous run, even outside the preferred ones.
+      const again = sticky(readPreviousRun(coreFile).port, [preferred[1]!]);
+      expect(again.port).toBe(preferred[0]!);
       await again.stop();
-      // Another program took the port meanwhile: a new one, said in the log.
-      const moved = startServerOnStickyPort({ core, host: '127.0.0.1', port: 0, explicitPort: false, previousPort: squatter.port! });
-      expect(moved.port).not.toBe(squatter.port!);
-      expect(warnings.some((line) => line.includes(`port ${squatter.port}`))).toBe(true);
+      // Another program took it meanwhile: the next preferred port, said in the log.
+      const moved = sticky(squatter.port!, [squatter.port!, preferred[1]!]);
+      expect(moved.port).toBe(preferred[1]!);
+      expect(warnings.some((line) => line.includes(`port ${squatter.port} of the previous run is taken, listening on ${preferred[1]}`))).toBe(true);
       await moved.stop();
+      // Every candidate taken: any free port, with the refusal named.
+      const any = sticky(squatter.port!, [squatter.port!]);
+      expect(any.port).not.toBe(squatter.port!);
+      expect(warnings.some((line) => line.startsWith(`ports ${squatter.port} refused the server (`))).toBe(true);
+      await any.stop();
+      // A core of the dev channel tries its own range by default, never the installed app's;
+      // a host nothing can bind fails each port and is named, not called taken.
+      const devDir = mkdtempSync(join(tmpdir(), 'boite-sticky-dev-'));
+      const dev = new Core({ dataDir: devDir, token: newToken(), channel: 'dev' });
+      const devWarnings: string[] = [];
+      dev.log = (level, message) => { if (level === 'warn') devWarnings.push(message); };
+      try {
+        expect(() => startServerOnStickyPort({ core: dev, host: '256.0.0.1', port: 0, explicitPort: false, previousPort: null })).toThrow();
+        expect(devWarnings.some((line) => line.startsWith(`ports ${PREFERRED_PORTS.dev.join(', ')} refused the server (`))).toBe(true);
+      } finally {
+        await dev.close();
+        await removeDir(devDir);
+      }
       // A port the operator named is never swapped for another.
-      expect(() => startServerOnStickyPort({ core, host: '127.0.0.1', port: squatter.port!, explicitPort: true, previousPort: port })).toThrow();
+      expect(() => sticky(preferred[0]!, preferred, squatter.port!, true)).toThrow();
     } finally {
       void squatter.stop(true);
       await core.close();
       await removeDir(dataDir);
     }
+  });
+
+  test('the preferred ports stay below the range Windows lends to outgoing connections', () => {
+    for (const ports of Object.values(PREFERRED_PORTS)) expect(ports.every((port) => port > 1024 && port < 49152)).toBe(true);
+    expect(PREFERRED_PORTS.stable.some((port) => PREFERRED_PORTS.dev.includes(port))).toBe(false);
   });
 
   test('a pairing link names the LAN address of a core listening on every interface', () => {
