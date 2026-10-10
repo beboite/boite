@@ -993,6 +993,9 @@ export const strings = {
       dontAsk: 'with automatic denial of approval requests'
     },
     changeProject: 'Change project',
+    /** The project dropdown's search field and what it says when no project matches. */
+    searchProjects: 'Search projects',
+    noProjectMatch: 'No project matches "{query}"',
     /** The header badge of a thread working in its own worktree; the title says where. */
     branchHint: 'Working in a worktree on this branch',
   },

@@ -38,7 +38,7 @@ test('height-capped desktop popovers can scroll to their last action', async () 
     await page.click('[data-testid=draft-project]');
     await page.waitFor('document.querySelector("[data-testid=draft-project-menu]")');
     await page.settleAnimations();
-    const list = await page.evaluate<{ client: number; scroll: number; squashed: number }>(`(() => { const el = document.querySelector('[data-testid=draft-project-menu]'); return { client: el.clientHeight, scroll: el.scrollHeight, squashed: Array.from(el.querySelectorAll('[data-row]')).filter(row => row.scrollHeight > row.clientHeight + 4).length }; })()`);
+    const list = await page.evaluate<{ client: number; scroll: number; squashed: number }>(`(() => { const el = document.querySelector('[data-testid=draft-project-list]'); return { client: el.clientHeight, scroll: el.scrollHeight, squashed: Array.from(el.querySelectorAll('[data-row]')).filter(row => row.scrollHeight > row.clientHeight + 4).length }; })()`);
     expect(list.scroll).toBeGreaterThan(list.client);
     expect(list.squashed).toBe(0);
     await page.screenshot(join(import.meta.dir, '.artifacts', 'draft-project-menu-short.png'));

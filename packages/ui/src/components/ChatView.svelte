@@ -1,19 +1,16 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { ChevronDown, FolderOpen, VenetianMask } from '@lucide/svelte';
-  import type { ProjectId } from '@boite/contracts';
-  import { separator, type MenuItem } from '../lib/menu';
   import { fill, strings } from '../lib/strings';
   import { levelName, projectName } from '../lib/format';
   import type { Store } from '../lib/store.svelte';
-  import { workspace } from '../lib/workspace.svelte';
   import { DRAFT_STASH_KEY } from '../lib/prefs';
   import { lastIndexById } from '../lib/thread-rows';
   import Composer from './Composer.svelte';
   import FolderGoneNotice from './FolderGoneNotice.svelte';
   import AgentDock from './AgentDock.svelte';
   import AgentOwnerBar from './AgentOwnerBar.svelte';
-  import Menu from './Menu.svelte';
+  import ProjectChoice from './ProjectChoice.svelte';
   import MessageList from './MessageList.svelte';
   import ThreadLoading from './ThreadLoading.svelte';
   import ThreadRecovery from './ThreadRecovery.svelte';
@@ -59,51 +56,6 @@
   let draftEffort = $derived(draftChoice?.effort ?? draftModel?.effort?.default ?? null);
   let effortLabel = $derived.by(() => { const level = draftModel?.effort?.levels.find((level) => level.id === draftEffort); return level ? levelName(level) : draftEffort; });
   let modelLabel = $derived(draftModel?.name ?? draftChoice?.model ?? draftProvider?.name ?? '');
-
-  const OPEN_FOLDER = 'open-folder';
-
-  /**
-   * Every machine's drafts first, whether the core has made them yet or not,
-   * then its projects, the draft's own marked, and for the owner the way to
-   * open a folder: what the heading's dropdown lists.
-   */
-  let projectItems = $derived<MenuItem[]>([
-    ...(workspace.machines.length ? workspace.machines : [{ id: '', label: '', store }]).flatMap(machine => {
-      const here = machine.store === store;
-      const drafts = machine.store.draftsProject;
-      // One machine names no machine: the path alone tells the projects apart.
-      const place = workspace.machines.length > 1 ? machine.label : '';
-      return [
-        {
-          id: JSON.stringify([machine.id, null]),
-          label: strings.drafts.name,
-          hint: place ? `${place} · ${strings.drafts.hint}` : strings.drafts.hint,
-          active: here && store.draftInDrafts,
-          projectTile: drafts ? { project: drafts, store: machine.store } : undefined
-        },
-        ...machine.store.projects.filter((entry) => entry.id !== drafts?.id && entry.archived !== true).map((entry) => ({
-          id: JSON.stringify([machine.id, entry.id]),
-          label: projectName(entry),
-          hint: place ? `${place} · ${entry.path}` : entry.path,
-          active: here && entry.id === store.draft?.projectId,
-          projectTile: { project: entry, store: machine.store }
-        }))
-      ];
-    }),
-    ...(store.owner ? [separator(), { id: OPEN_FOLDER, label: strings.drafts.pickFolder }] : [])
-  ]);
-
-  function pickProject(id: string) {
-    if (id === OPEN_FOLDER) {
-      store.projectPickerOpen = true;
-      return;
-    }
-    const [machineId, projectId] = JSON.parse(id) as [string, ProjectId | null];
-    const target = workspace.machines.find(m => m.id === machineId)?.store ?? store;
-    if (target === store) store.setDraftProject(projectId);
-    else if (projectId !== null) void workspace.select(target, undefined, projectId);
-    else void workspace.select(target).then(() => target.startDraft(null));
-  }
 </script>
 
 {#if !thread && !store.draft}
@@ -133,7 +85,7 @@
           <img src="./icons/icon.svg" alt="" width="42" height="42" />
           <h1>{strings.mobile.draftTitle}</h1>
           <p>{strings.mobile.draftHint}</p>
-          <span class="project-choice"><Menu items={projectItems} onpick={pickProject} variant="text" label={strings.thread.changeProject} testid="mobile-draft-project">{#if project}<ProjectTile {project} {store} />{:else}<FolderOpen size={15} />{/if}<span class="project-label ui-label">{project ? projectName(project) : strings.drafts.name}</span><ChevronDown size={14} /></Menu></span>
+          <span class="project-choice"><ProjectChoice {store} testid="mobile-draft-project">{#if project}<ProjectTile {project} {store} />{:else}<FolderOpen size={15} />{/if}<span class="project-label ui-label">{project ? projectName(project) : strings.drafts.name}</span><ChevronDown size={14} /></ProjectChoice></span>
           {#if draftChoice}<small>{strings.thread.draftMode[draftChoice.permissionMode]}</small>{/if}
           {#if store.draft?.worktree}<small>{strings.thread.inWorktree}</small>{/if}
         </div>
@@ -143,17 +95,11 @@
             <span class="ui-label">{strings.thread.inProject}</span>
             <!-- It opens upward, into the empty half of the column: under the
                  heading it would land on the composer. -->
-            <span class="project-choice"><Menu
-              items={projectItems}
-              onpick={pickProject}
-              variant="text"
-              label={strings.thread.changeProject}
-              testid="draft-project"
-            >
+            <span class="project-choice"><ProjectChoice {store} testid="draft-project">
               {#if project}<ProjectTile {project} {store} />{:else}<FolderOpen size={15} />{/if}
               <span class="project-label ui-label">{project ? projectName(project) : strings.drafts.name}</span>
               <ChevronDown size={14} strokeWidth={2} />
-            </Menu></span>
+            </ProjectChoice></span>
           </h1>
           {#if draftChoice || store.draft?.worktree}
             <p class="draft-details">
@@ -204,7 +150,7 @@
 <style>
   .project-choice { display: inline-flex; max-width: 100%; border: 1px dashed var(--color-muted-foreground); border-radius: var(--radius-md); }
   .project-choice:hover, .project-choice:focus-within { border-color: var(--color-accent); }
-  .project-choice :global(.menu) { min-width: 0; max-width: 100%; }
+  .project-choice :global(.choice) { min-width: 0; max-width: 100%; }
   .project-choice :global(.trigger) { min-height: var(--row); height: auto; max-width: 100%; padding: 7px 12px; gap: 8px; }
   .project-label { min-width: 0; overflow-wrap: anywhere; }
   .mobile-welcome { display: none; }
