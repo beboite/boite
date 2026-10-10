@@ -29,7 +29,6 @@
   import { strings } from './lib/strings';
   import { experimentOn } from './lib/experiments.svelte';
   import { installWhipEscape } from './lib/whip.svelte';
-  import { companionEvents, followCompanionExperiment } from './lib/companion/follow.svelte';
   import { rightPanel } from './lib/right-panel.svelte';
   import { workspace } from './lib/workspace.svelte';
   import type { Store } from './lib/store.svelte';
@@ -133,7 +132,6 @@
   $effect(() => {
     browserProfiles.source = workspace.machines.find((machine) => machine.store.localCore)?.store ?? store;
   });
-  followCompanionExperiment((error) => { store.error = String(error); });
   let SettingsShell = $state<typeof import('./components/SettingsShell.svelte').default>();
   let AgentsPage = $state<typeof import('./components/agents/AgentsPage.svelte').default>();
   let agentsLoadError = $state('');
@@ -399,17 +397,16 @@
     let unlisten: (() => void) | undefined;
     let disposed = false;
     let stopTray: (() => void) | undefined;
-    const onLocal = async (open: (local: Store) => void) => {
+    const traySettings = async (tab: 'accounts' | 'limits') => {
       const local = workspace.machines.find((machine) => machine.store.localCore)?.store;
       if (!local) return;
       await workspace.select(local);
-      if (workspace.active === local) open(local);
+      if (workspace.active === local) local.showSettings(tab);
     };
     void import('@tauri-apps/api/event').then(async ({ listen }) => {
       const stops = await Promise.all([
-        listen('tray://providers', () => void onLocal((local) => local.showSettings('accounts'))),
-        listen('tray://limits', () => void onLocal((local) => local.showSettings('limits'))),
-        ...companionEvents(listen, onLocal),
+        listen('tray://providers', () => void traySettings('accounts')),
+        listen('tray://limits', () => void traySettings('limits')),
       ]);
       const stop = () => stops.forEach((off) => off());
       if (disposed) stop(); else stopTray = stop;

@@ -13,7 +13,6 @@ mod browser;
 mod browser_control;
 mod channel;
 mod closing;
-mod companion_window;
 mod failure;
 mod instance;
 mod local_core;
@@ -147,7 +146,6 @@ pub fn run() {
         .manage(Reveal::default())
         .manage(whip::WhipState::default())
         .manage(quota_window::HoverState::default())
-        .manage(companion_window::CompanionState::default())
         .manage(CloseBehavior { enabled: AtomicBool::new(close_to_tray), path: preferences_path })
         .invoke_handler(tauri::generate_handler![
             local_core::core_endpoint,
@@ -168,19 +166,6 @@ pub fn run() {
             updater::app_update_install,
             updater::app_update_cancel_install,
             quota_window::quota_window,
-            companion_window::companion_window,
-            companion_window::companion_monitors,
-            companion_window::companion_place,
-            companion_window::companion_hit_rects,
-            companion_window::companion_media,
-            companion_window::companion_media_control,
-            companion_window::companion_show_main,
-            companion_window::companion_configure,
-            companion_window::companion_drag,
-            companion_window::companion_capture,
-            companion_window::companion_cover,
-            companion_window::companion_focus,
-            companion_window::companion_keep,
             material::window_material,
             material::window_material_supported,
             tray::tray_labels,

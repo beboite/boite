@@ -1,7 +1,0 @@
-{
-  "$schema": "../gen/schemas/desktop-schema.json",
-  "identifier": "companion",
-  "description": "The desktop companion may connect to the core, place its own window, take clicks where it draws, read and press the media buttons, and bring the main UI forward.",
-  "webviews": ["companion"],
-  "permissions": ["allow-companion-ui", "core:event:default"]
-}

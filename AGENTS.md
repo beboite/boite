@@ -127,8 +127,6 @@ and assertions when making the suite faster.
 - [Panel](docs/panel.md) and [CLI](docs/cli.md): the surfaces beside the chat
   and the `boite` command an agent uses to reach them.
 - [Devices](docs/devices.md): SDK detection, `boite device` and the Device panel.
-- [Desktop companion](docs/companion.md): the experiment's window, its brain
-  thread and its preferences.
 - [Releasing](docs/releasing.md): build artifacts, channels and installers.
 
 Keep tracked documentation in this worktree and verify source paths before

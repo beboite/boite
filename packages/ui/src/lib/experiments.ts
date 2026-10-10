@@ -14,16 +14,15 @@
  * `session-import` is on before showing or running the import, and the
  * context meter asks the same of `prompt-cache` before drawing its timer. The
  * bottom-left launchers and the store ask `resident-agents` before offering
- * the dedicated Agents interface. The desktop shell opens the companion's
- * window while `companion` is on, and Settings gains its Companion page.
+ * the dedicated Agents interface.
  */
 
-export type ExperimentId = 'theme-grain' | 'session-import' | 'prompt-cache' | 'open-chat-links' | 'preview-comments' | 'resident-agents' | 'whip' | 'recording-indicators' | 'companion';
+export type ExperimentId = 'theme-grain' | 'session-import' | 'prompt-cache' | 'open-chat-links' | 'preview-comments' | 'resident-agents' | 'whip' | 'recording-indicators';
 
 export const EXPERIMENTS_STORAGE_KEY = 'boite.experiments';
 
 /** Every experiment this build ships, in the order the page lists them. */
-export const EXPERIMENT_IDS: ExperimentId[] = ['theme-grain', 'session-import', 'prompt-cache', 'open-chat-links', 'preview-comments', 'resident-agents', 'whip', 'recording-indicators', 'companion'];
+export const EXPERIMENT_IDS: ExperimentId[] = ['theme-grain', 'session-import', 'prompt-cache', 'open-chat-links', 'preview-comments', 'resident-agents', 'whip', 'recording-indicators'];
 
 type Listener = (enabled: ExperimentId[]) => void;
 

@@ -88,29 +88,3 @@ test('HTTP agent sending keeps its secure request id for an uncertain retry', as
   expect(call.mock.calls[1]![1]).toEqual(first);
   expect(input.value).toBe('');
 });
-
-test('what the companion adds to a message shows only in the conversation of an agent standing as the companion', async () => {
-  const asked = 'Where is the build?\n\n[[context: local time Friday 2026-10-09 14:05]]';
-  const replied = 'Noted.  \nIt runs.\n[[remember: likes tea]]';
-  const conversation = async (instructions: string) => {
-    const view = {
-      seen: { messages: [{ ...message('u', null), text: asked }, { ...message('r', 'a-ada'), text: replied }], deliveries: [], decisions: [] },
-      snapshot: { profiles: [{ id: 'a-ada', name: 'Ada', avatar: '', instructions }], groups: [], work: [], sessions: [] },
-      store: { owner: true }, pending: false, loadingOlder: null, fill() {}, markRead() {}, hasOlder: () => false, loadOlder: async () => {}, call: async () => null,
-    };
-    const target = document.createElement('div');
-    document.body.append(target);
-    const shown = mount(AgentConversation, { target, props: { view: view as unknown as AgentsView, scope } });
-    await settle();
-    const texts = { asked: target.querySelector('.user-text')!.textContent, replied: target.querySelector('.answer')!.textContent };
-    await unmount(shown);
-    target.remove();
-    return texts;
-  };
-  const companion = await conversation('Be brief.\n\n<!-- boite-companion -->\nrole\n<!-- /boite-companion -->');
-  expect(companion.asked).toBe('Where is the build?');
-  expect(companion.replied).not.toContain('[[');
-  const plain = await conversation('Be brief.');
-  expect(plain.asked).toBe(asked);
-  expect(plain.replied).toContain('[[remember: likes tea]]');
-});

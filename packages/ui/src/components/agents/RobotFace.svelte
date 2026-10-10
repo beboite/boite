@@ -1,7 +1,5 @@
 <script lang="ts">
-  import { boxPaint } from '../../lib/companion/skin';
   import { robotColor, type Robot } from '../../lib/robots';
-  import BoxTop from '../companion/BoxTop.svelte';
 
   /**
    * One robot, drawn in a 64 unit square that its holder crops to a disc. The
@@ -54,8 +52,6 @@
   const up = $derived(Math.max(jelly.crown, 15));
   const tip = $derived(Math.max(jelly.crown - 8, 6));
   const petals = [0, 72, 144, 216, 288].map(a => ({ x: 4.2 * Math.cos(a * Math.PI / 180), y: 4.2 * Math.sin(a * Math.PI / 180) }));
-  /** The box's colours, from `lib/companion/skin.ts` like the companion's. */
-  const paint = $derived(boxPaint(robot));
 </script>
 
 <svg viewBox="0 0 64 64" class="robot" data-family={robot.family} data-state={state} style:--rb={robotColor(robot)} aria-hidden="true">
@@ -189,20 +185,6 @@
           {/if}
         </g>
 
-      {:else if robot.family === 'box'}
-        <!-- Box: the desktop companion in the agent's colours (companion units, scaled), its accessory half as big again so it reads at 32px. -->
-        <g transform="translate(7 13) scale(0.5)" style:--box-body={paint.body} style:--box-lid={paint.lid} style:--box-line={paint.line} style:--box-eye={paint.eye}>
-          <rect class="box-body" x="15" y="38" width="70" height="50" rx="9" />
-          <g class="eyes">
-            <rect class="box-eye" class:lit={paint.lit} x="34.5" y="54" width="9" height="14" rx="4.5" />
-            <rect class="box-eye" class:lit={paint.lit} x="56.5" y="54" width="9" height="14" rx="4.5" />
-          </g>
-          <rect class="box-rim" x="15" y="38" width="70" height="50" rx="9" />
-          <rect class="box-lid" x="10" y="26" width="80" height="13" rx="5" />
-          <rect class="box-led led" x="43" y="30.25" width="14" height="4.5" rx="2.25" />
-          <BoxTop top={paint.top} x={50} y={26} scale={1.5} />
-        </g>
-
       {:else}
         <!-- Retro: a head with a dark screen, the eyes lit on it. -->
         {#if robot.top === 0}
@@ -263,13 +245,6 @@
   .gloss { fill: var(--robot-shine); opacity: 0.45; }
   .petal { fill: var(--robot-blush); }
   .tongue { fill: var(--robot-blush); }
-  /* The box: the companion's outline, a lit light on its lid. */
-  .box-body { fill: var(--box-body); }
-  .box-rim { fill: none; stroke: var(--box-line); stroke-width: 4; stroke-linejoin: round; }
-  .box-lid { fill: var(--box-lid); stroke: var(--box-line); stroke-width: 4; stroke-linejoin: round; }
-  .box-eye { fill: var(--box-eye); }
-  .box-eye.lit { stroke: var(--robot-ink); stroke-width: 2; }
-  .box-led { fill: var(--robot-led); stroke: var(--box-line); stroke-width: 1.5; }
 
   /* A blink at rest, a glance while working, a hop while it waits on the user. */
   .eyes { transform-box: fill-box; transform-origin: center; }

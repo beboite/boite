@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { choices, encodeRobot, parseRobot, robotColor, robotOf, ROBOT_COLORS, ROBOT_FAMILIES, ROBOT_PARTS, seededRobot, withPart } from './robots';
+import { encodeRobot, parseRobot, robotColor, robotOf, ROBOT_COLORS, ROBOT_FAMILIES, ROBOT_PARTS, seededRobot, withPart } from './robots';
 
 test('a robot round-trips through the avatar field and fits the core limit', () => {
   for (const family of ROBOT_FAMILIES) {
@@ -39,20 +39,4 @@ test('parts out of range wrap into the family, and a new family keeps what still
   const bubble = { family: 'bubble' as const, shape: 2, color: 4, eyes: 1, top: 6 };
   expect(withPart(bubble, 'family', 'retro')).toEqual({ family: 'retro', shape: 2, color: 4, eyes: 1, top: 6 % ROBOT_PARTS.retro.top });
   expect(withPart(bubble, 'color', 7)).toEqual({ ...bubble, color: 7 });
-});
-
-test('a box has ten body colours, the classic one first, and keeps its colour across a family change', () => {
-  const box = { family: 'box' as const, shape: 0, color: 0, eyes: 0, top: 0 };
-  expect(choices(box, 'color')).toBe(10);
-  expect(choices({ ...box, family: 'jelly' }, 'color')).toBe(ROBOT_COLORS);
-  expect(robotColor(box)).toBe('var(--color-surface)');
-  expect(robotColor({ family: 'box', color: 9 })).toBe('var(--jelly-9)');
-  expect(parseRobot('bot:e.9.9.5.11')).toEqual({ family: 'box', shape: 9, color: 9, eyes: 5, top: 11 });
-  expect(parseRobot('bot:e.0.10.0.0')).toEqual(box);
-  // The same jelly colour whichever way: jelly 2 is `--jelly-3`, box 3 too; a coral pastel becomes the coral jelly.
-  const jelly = { family: 'jelly' as const, shape: 1, color: 2, eyes: 3, top: 4 };
-  expect(withPart(jelly, 'family', 'box')).toEqual({ family: 'box', shape: 1, color: 3, eyes: 3, top: 4 });
-  expect(withPart(withPart(jelly, 'family', 'box'), 'family', 'jelly')).toEqual(jelly);
-  expect(withPart({ ...jelly, family: 'bubble', color: 0 }, 'family', 'box').color).toBe(3);
-  expect(withPart(box, 'family', 'retro').color).toBe(8);
 });

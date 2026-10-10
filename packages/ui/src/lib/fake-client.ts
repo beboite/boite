@@ -24,7 +24,6 @@ import { logMethods } from './fake-client/logs';
 import { coordinationMethods, registerCore, unregisterCore } from './fake-client/coordination';
 import { seedStewardDemo, stewardMethods } from './fake-client/stewards';
 import { delegationMethods, seedDelegationDemo } from './fake-client/delegation';
-import { seedHudDemo } from './fake-client/hud-demo';
 import { groupMethods } from './fake-client/group';
 import { pairingMethods } from './fake-client/pairing';
 import { projectMethods } from './fake-client/projects';
@@ -91,7 +90,6 @@ export class FakeClient implements ObservableClient {
     seed(ctx);
     if (options.delegationDemo) seedDelegationDemo(ctx);
     if (options.stewardDemo) seedStewardDemo(ctx);
-    if (ctx.hudDemo) seedHudDemo(ctx);
     if (options.uninstalled) {
       ctx.providers = ctx.providers.filter(provider => provider.id !== 'echo').map(provider => ({
         ...provider, available: false, executable: null,

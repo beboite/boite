@@ -98,8 +98,6 @@ export interface FakeClientOptions {
   delegationDemo?: boolean;
   /** A steward thread with a letter it sent, a notice it received and a thread its agent started, on `?fake=1&steward=1`. */
   stewardDemo?: boolean;
-  /** A Douane as the subscription proxy and three threads at work for the companion's HUD, on `?fake=1&hud=1`. */
-  hudDemo?: boolean;
   /** Who this client is. `'session'` makes it a paired phone, refused like one. */
   principal?: Principal;
   /** Stable public identity for multi-machine coordination tests. */
@@ -238,8 +236,6 @@ export class FakeContext {
   readonly long: boolean;
   readonly heavy: boolean;
   readonly quotaExtras: boolean;
-  /** Seeds what the companion's HUD shows (`hud-demo.ts`). */
-  readonly hudDemo: boolean;
   /**
    * Two agents behind their newest release, one by each route, so the notices
    * have a subject (`provider-installs.ts`).
@@ -248,7 +244,6 @@ export class FakeContext {
 
   constructor(options: FakeClientOptions = {}) {
     this.quotaExtras = options.quotaExtras ?? (typeof location !== 'undefined' && new URLSearchParams(location.search).get('quotaExtras') === '1');
-    this.hudDemo = options.hudDemo ?? (typeof location !== 'undefined' && new URLSearchParams(location.search).get('hud') === '1');
     this.bus = new FakeBus(options.principal ?? 'owner');
     this.agents = new FakeAgents(revision => this.emit('agents.changed', { revision }), {
       create: (agent, sessionId, work) => createAgentSession(this, agent, sessionId, work),

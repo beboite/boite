@@ -163,7 +163,7 @@ impl CoreState {
 /// other: a page a browser surface loaded asks and is told no.
 #[tauri::command]
 pub(crate) async fn core_endpoint(app: AppHandle, webview: Webview) -> Result<CoreEndpoint, String> {
-    quota_window::only_ui(&webview).or_else(|_| crate::companion_window::only_companion(&webview))?;
+    quota_window::only_ui(&webview)?;
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.try_state::<CoreState>().ok_or("the shell has not set up its core yet")?;
         current_endpoint(&state)

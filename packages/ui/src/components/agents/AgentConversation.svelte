@@ -7,8 +7,6 @@
   import { fill, strings } from '../../lib/strings';
   import { formatLocale } from '../../lib/i18n.svelte';
   import Prose from '../Prose.svelte';
-  import { visibleReply } from '../../lib/companion/directives';
-  import { ROLE_START } from '../../lib/companion/brain';
   import AgentAvatar from './AgentAvatar.svelte';
   import AgentWorkCard from './AgentWorkCard.svelte';
 
@@ -64,8 +62,6 @@
   });
   const profileOf = (id: string) => view.snapshot?.profiles.find(a => a.id === id);
   const nameOf = (id: string) => profileOf(id)?.name ?? id;
-  /** The context line and the directives the companion adds show only with an agent that stands as the companion. */
-  const shown = (text: string, profile: { instructions?: string } | null | undefined) => (profile?.instructions?.includes(ROLE_START) ? visibleReply(text) : text);
   /**
    * The routine a message reports on: a reply from a run no message of the
    * user started. Its name when that routine's last run is the one, an empty
@@ -115,7 +111,7 @@
           {@const failed = view.seen.deliveries.filter(d => d.messageId === message.id && (d.status === 'failed' || d.status === 'limited'))}
           <article class="agent-message from-user" class:first>
             <span class="agent-sr-only">{labels.user}</span>
-            <div class="bubble"><p class="user-text">{shown(message.text, agent)}</p></div>
+            <div class="bubble"><p class="user-text">{message.text}</p></div>
             {#if lastOfRun || failed.length}
               <footer>
                 {#if lastOfRun}<time datetime={new Date(message.createdAt).toISOString()}>{time(message.createdAt)}</time>{/if}
@@ -140,7 +136,6 @@
           {@const sender = profileOf(message.senderId!)}
           {@const planned = plannedOf(message)}
           {@const event = message.thread}
-          {@const reply = shown(message.text, sender)}
           <article class="agent-message from-agent" class:first data-event={event?.event} data-testid={event ? 'agent-thread-event' : undefined}>
             {#if group && first}
               <header>
@@ -155,7 +150,7 @@
                 <span class="ui-label">{fill(labels.threadEvent[event.event], { name: nameOf(message.senderId!), title: event.title })}</span>
               </button>
             {:else if planned !== null}<p class="planned-label" data-testid="agent-planned-result"><CalendarClock size={13} strokeWidth={1.75} /><span>{planned || labels.plannedResult}</span></p>{/if}
-            {#if reply.trim()}<div class="answer"><Prose text={reply} store={view.store} bubble /></div>{/if}
+            {#if message.text.trim()}<div class="answer"><Prose text={message.text} store={view.store} bubble /></div>{/if}
             {#if lastOfRun}<footer><time datetime={new Date(message.createdAt).toISOString()}>{time(message.createdAt)}</time></footer>{/if}
           </article>
         {/if}
