@@ -7,6 +7,7 @@ function fakeBridge() {
   const handlers = new Set<(event: BrowserEvent) => void>();
   const listeners = new Map<string, (method: string, params: Record<string, unknown>) => void>();
   const created: Array<{ id: string; url: string; profile?: string }> = [], destroyed: string[] = [];
+  const cookieCalls: Array<{ profile: string; view?: string; cookies?: unknown[] }> = [];
   const protocol = vi.fn(async (id: string, method: string) => (method === 'Runtime.evaluate' ? { result: { value: id } } : {}));
   const bridge: HostBridge = {
     create(id, url, profile) { created.push({ id, url, ...(profile === undefined ? {} : { profile }) }); },
@@ -14,8 +15,10 @@ function fakeBridge() {
     relay: protocol,
     async events(id, names, listener) { expect(names).toEqual(HOST_PAGE_EVENTS); listeners.set(id, listener); return () => listeners.delete(id); },
     on(handler) { handlers.add(handler); return () => handlers.delete(handler); },
+    async cookies(profile, view) { cookieCalls.push({ profile, ...(view ? { view } : {}) }); return [{ name: 'sid', value: profile }]; },
+    async setCookies(profile, cookies, view) { cookieCalls.push({ profile, cookies, ...(view ? { view } : {}) }); },
   };
-  return { bridge, created, destroyed, protocol, listeners, emit: (event: BrowserEvent) => { for (const handler of handlers) handler(event); } };
+  return { bridge, created, destroyed, protocol, listeners, cookieCalls, emit: (event: BrowserEvent) => { for (const handler of handlers) handler(event); } };
 }
 
 /** The core's side: messages it sends per profile, and what came back on each. */
@@ -51,6 +54,11 @@ test('the app answers the core as a browser: a target is a webview, its session 
   expect(core.calls[0]).toEqual({ method: 'browser.hostAttach', params: {} });
 
   expect((await core.answer('work', core.send('work', 'Browser.getVersion'))).result).toMatchObject({ product: 'WebView2' });
+  // The core keeps a copy of the profile's cookies: read and restored through a webview made for it while no tab is open.
+  expect((await core.answer('work', core.send('work', 'Storage.getCookies'))).result).toEqual({ cookies: [{ name: 'sid', value: 'work' }] });
+  await core.answer('work', core.send('work', 'Storage.setCookies', { cookies: [{ name: 'kept', value: '1' }] }));
+  expect(shell.cookieCalls).toEqual([{ profile: 'work' }, { profile: 'work', cookies: [{ name: 'kept', value: '1' }] }]);
+  expect((await core.answer('private', core.send('private', 'Storage.getCookies'))).error.message).toContain('keeps no cookies');
   const { result: { targetId } } = await core.answer('work', core.send('work', 'Target.createTarget', { url: 'about:blank' }));
   expect(targetId.startsWith(AGENT_VIEW_PREFIX)).toBe(true);
   expect(shell.created).toEqual([{ id: targetId, url: 'about:blank', profile: 'work' }]);
@@ -60,6 +68,9 @@ test('the app answers the core as a browser: a target is a webview, its session 
   const evaluated = await core.answer('work', core.send('work', 'Runtime.evaluate', { expression: '1' }, targetId));
   expect(shell.protocol).toHaveBeenCalledWith(targetId, 'Runtime.evaluate', { expression: '1' });
   expect(evaluated).toMatchObject({ sessionId: targetId, result: { result: { value: targetId } } });
+  // With a tab of the profile open, its cookies go through that webview: none is made.
+  await core.answer('work', core.send('work', 'Storage.getCookies'));
+  expect(shell.cookieCalls.at(-1)).toEqual({ profile: 'work', view: targetId });
 
   // The webview's events and its address come back tagged with it.
   shell.listeners.get(targetId)!('Page.frameNavigated', { frame: { url: 'https://example.com/' } });
@@ -93,7 +104,7 @@ test('the app answers the core as a browser: a target is a webview, its session 
   expect((await core.answer('work', core.send('work', 'Runtime.evaluate', {}, targetId))).error.message).toContain('closed');
 
   // What a browser does not answer here is an error, not silence.
-  expect((await core.answer('work', core.send('work', 'Storage.getCookies'))).error.message).toContain('Storage.getCookies');
+  expect((await core.answer('work', core.send('work', 'Storage.clearCookies'))).error.message).toContain('Storage.clearCookies');
 
   relay.stop();
   expect(core.calls.at(-1)).toEqual({ method: 'browser.hostDetach', params: {} });

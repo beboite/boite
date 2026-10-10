@@ -141,7 +141,6 @@
             </div>
             <p class="detail">{strings.onboarding.profile.later}</p>
           {:else if step === 'agents'}
-            <p class="lead">{strings.onboarding.demo.workspaceBody}</p>
             <div class="examples" role="group" aria-label={strings.onboarding.agents.title}>
               {#each examples as item (item.id)}
                 <button class:on={example === item.id} aria-pressed={example === item.id} data-testid="onboarding-example-{item.id}" onclick={() => { example = item.id; }}>
@@ -211,15 +210,18 @@
   /* The title bar stays above the tour: the window can still be moved, minimized or closed. */
   .scrim.shell { top: var(--titlebar); }
   /* In the shell the scrim starts under the title bar, so the panel's room is that much shorter. */
-  .scrim.shell .panel { height: min(560px, calc(100dvh - 32px - var(--titlebar))); }
-  /* One height for every step, so Next stays under the pointer from one screen to the next; a longer step scrolls. */
-  .panel { display: flex; flex-direction: column; width: min(600px, 100%); height: min(560px, calc(100dvh - 32px)); background: var(--color-surface); border: 1px solid var(--color-edge); border-radius: var(--radius-xl); box-shadow: var(--shadow-e3); animation: pop var(--dur-3) var(--ease-out-quint); }
+  .scrim.shell .panel { height: min(600px, calc(100dvh - 32px - var(--titlebar))); }
+  /*
+   * One height for every step, so Next stays under the pointer from one screen to the next.
+   * Every screen fits it in both languages; only a window shorter than the panel scrolls.
+   */
+  .panel { display: flex; flex-direction: column; width: min(600px, 100%); height: min(600px, calc(100dvh - 32px)); background: var(--color-surface); border: 1px solid var(--color-edge); border-radius: var(--radius-xl); box-shadow: var(--shadow-e3); animation: pop var(--dur-3) var(--ease-out-quint); }
   .panel:focus, h1:focus { outline: none; }
   .panel.closing { animation: pop-out var(--dur-2) var(--ease-out-quint); }
-  header { display: flex; align-items: center; gap: 8px; padding: 12px 16px; color: var(--color-muted-foreground); font-size: var(--text-sm); }
+  header { display: flex; align-items: center; gap: 8px; padding: 8px 16px; color: var(--color-muted-foreground); font-size: var(--text-sm); }
   header button { margin-left: auto; }
-  .screen { flex: 1; overflow-y: auto; min-height: 0; padding: 12px 28px 24px; }
-  h1 { font-size: var(--text-lg); line-height: 1.35; margin: 0 0 8px; }
+  .screen { flex: 1; overflow-y: auto; min-height: 0; padding: 8px 28px 16px; }
+  h1 { font-size: var(--text-lg); line-height: 1.35; margin: 0 0 6px; }
   h1.soul { text-align: center; font-size: var(--text-xl); font-weight: 900; letter-spacing: .08em; animation: soul 10s linear forwards; }
   @keyframes soul {
     from { color: var(--color-foreground); text-shadow: 0 0 0 transparent; }
@@ -236,12 +238,12 @@
   .segmented { padding: 3px; border: 1px solid var(--color-border); border-radius: var(--radius-md); }
   .segmented button { border: 0; background: transparent; color: var(--color-muted-foreground); font-size: var(--text-sm); }
   .segmented button.on { background: var(--color-accent-soft); color: var(--color-foreground); }
-  .examples { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 16px; }
-  .examples button { position: relative; display: flex; flex-direction: column; justify-content: center; gap: 8px; height: auto; min-height: 76px; padding: 12px 8px; white-space: normal; line-height: 1.3; border: 1px solid var(--color-edge); border-radius: var(--radius-lg); background: var(--color-surface-2); color: var(--color-muted-foreground); font-size: var(--text-sm); cursor: pointer; }
+  .examples { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+  .examples button { position: relative; display: flex; align-items: center; justify-content: center; gap: 6px; height: auto; min-height: 48px; padding: 8px 20px 8px 10px; white-space: normal; line-height: 1.3; border: 1px solid var(--color-edge); border-radius: var(--radius-lg); background: var(--color-surface-2); color: var(--color-muted-foreground); font-size: var(--text-sm); cursor: pointer; }
   .examples button:hover { color: var(--color-foreground); background: var(--color-hover); border-color: var(--color-accent); }
   .examples button.on { border-color: var(--color-accent); background: var(--color-accent-soft); color: var(--color-foreground); box-shadow: inset 0 -2px var(--color-accent); }
   .examples :global(.selected-mark) { position: absolute; top: 7px; right: 7px; color: var(--color-accent); }
-  .profiles { display: grid; gap: 8px; margin: 16px 0 12px; }
+  .profiles { display: grid; gap: 8px; margin: 12px 0; }
   .profiles button { position: relative; display: flex; align-items: flex-start; gap: 14px; height: auto; padding: 16px 36px 16px 16px; white-space: normal; text-align: left; border: 1px solid var(--color-edge); border-radius: var(--radius-lg); background: var(--color-surface-2); color: var(--color-muted-foreground); cursor: pointer; }
   .profiles button :global(svg) { flex: none; margin-top: 2px; }
   .profiles button:hover { color: var(--color-foreground); background: var(--color-hover); border-color: var(--color-accent); }
@@ -253,15 +255,15 @@
   .voice-setup { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; font-size: var(--text-sm); color: var(--color-muted-foreground); }
   .voice-setup progress { display: block; width: 100%; margin-top: 6px; accent-color: var(--color-accent); }
   .quiet-scene { margin: auto; }
-  .rows { display: grid; gap: 4px; }
-  .row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--color-border); }
+  .rows { display: grid; }
+  .row { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--color-border); }
   .row > span { flex: 1; font-size: var(--text-base); }
   .row :global(svg) { flex: none; color: var(--color-muted-foreground); }
   input[type=checkbox] { appearance: none; position: relative; flex: 0 0 36px; width: 36px; height: 22px; margin: 0; border: 1px solid var(--color-edge); border-radius: 999px; background: var(--color-surface-3); cursor: pointer; }
   input::after { content: ''; position: absolute; width: 14px; height: 14px; top: 3px; left: 3px; border-radius: 50%; background: var(--color-muted-foreground); transition: transform var(--dur-2) var(--ease-out-quint); }
   input:checked { background: var(--color-foreground); } input:checked::after { background: var(--color-background); transform: translateX(14px); }
   [role=alert] { color: var(--color-danger); overflow-wrap: anywhere; }
-  footer { display: flex; align-items: center; gap: 8px; padding: 14px 20px; border-top: 1px solid var(--color-border); }
+  footer { display: flex; align-items: center; gap: 8px; padding: 10px 20px; border-top: 1px solid var(--color-border); }
   .dots { display: flex; margin-right: auto; }
   .dot { position: relative; width: 26px; height: 32px; padding: 0; border: 0; background: transparent; }
   .dot::after { content: ''; position: absolute; width: 6px; height: 6px; left: 10px; top: 13px; border-radius: 999px; background: var(--color-edge); }
@@ -269,6 +271,7 @@
   @media (max-width: 480px) {
     .panel { height: min(640px, calc(100dvh - 32px)); }
     .scrim.shell .panel { height: min(640px, calc(100dvh - 32px - var(--titlebar))); }
+    .examples button { flex-direction: column; gap: 6px; min-height: 72px; padding: 10px 8px; }
     .screen { padding: 8px 18px 18px; } .preference { flex-wrap: wrap; } .segmented { flex-basis: 100%; } .segmented button { flex: 1; }
     footer { padding: 12px; gap: 4px; } .dot { width: 20px; } .dot::after { left: 7px; } .dot.on::after { left: 3px; } .dot { height: var(--touch-target); } .dot::after { top: 19px; }
   }

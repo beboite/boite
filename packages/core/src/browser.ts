@@ -42,7 +42,9 @@ import type { Core } from './core.ts';
 import type { Connection } from './router.ts';
 import { refused } from './errors.ts';
 import { Cdp } from './browser/cdp.ts';
-import { chromiumArgs, clearActivePort, findChromium, pipesDevTools, readSavedCookies, waitForEndpoint, writeSavedCookies } from './browser/chromium.ts';
+import { findChromium, readSavedCookies, type BrowserIdentity } from './browser/chromium.ts';
+import { restoreMissingCookies, saveCookies } from './browser/saved-cookies.ts';
+import { BrowserIdentities, startChromium, type Started } from './browser/launch.ts';
 import { PageProbes, PROBE_TIMEOUT_MS, type PageProbe } from './browser/probe.ts';
 import { TabRecorder } from './browser/recorder.ts';
 import { captureFrame, type PageInfo } from './browser/frames.ts';
@@ -67,8 +69,6 @@ const TABS_MAX = 24;
 const IDLE_CLOSE_MS = 60_000;
 /** A page that moved has its cookies on disk this long after; one that stays put, at this interval. */
 const COOKIE_SAVE_DELAY_MS = 1000, COOKIE_SAVE_EVERY_MS = 30_000;
-/** The desktop app takes at most 5000 cookies a call (`browser_set_cookies`). */
-const HOSTED_COOKIES_BATCH = 1000;
 /**
  * How long `open` and `navigate` wait for the next page's DOM before answering
  * that it still loads. The load event can wait on an image or a script that
@@ -103,6 +103,8 @@ interface Engine {
   saved?: string;
   /** Removed when the process ends: private tabs keep nothing. */
   throwaway: boolean;
+  /** What its tabs say they are, as the same browser with a window would; null leaves the browser's own. */
+  identity: BrowserIdentity | null;
 }
 
 interface Tab {
@@ -148,7 +150,9 @@ export class AgentBrowser {
   #announce = new Map<ThreadId, ReturnType<typeof setTimeout>>();
   #closed = false;
   /** Browsers started to check a page (`probe`): no conversation lists them, so they are closed by name. */
-  readonly #probes = new PageProbes<Engine>(() => this.#launch(PRIVATE_BROWSER_PROFILE), engine => this.#lost(engine), message => this.#core.log('warn', message));
+  readonly #probes = new PageProbes<Engine>(() => this.#launch(PRIVATE_BROWSER_PROFILE, false), engine => this.#lost(engine), message => this.#core.log('warn', message));
+  readonly #identities = new BrowserIdentities(
+    (path, dir) => this.#start(path, dir), () => this.#profileDir(PRIVATE_BROWSER_PROFILE), dir => this.#removeDir(dir), message => this.#core.log('warn', message));
   #off: Array<() => void> = [];
   #watching = false;
 
@@ -249,34 +253,15 @@ export class AgentBrowser {
     // The webviews keep the app's own cookies; the core still keeps a copy, so a
     // sign-in follows the profile whether the app hosts or a browser it starts does.
     const dir = profile === PRIVATE_BROWSER_PROFILE ? '' : this.#profileDir(profile);
-    const engine: Engine = { key: `host:${profile}`, profile, hosted: true, dir, cdp, kill: () => cdp.close(), exited: cdp.closed, tabs: new Set(), throwaway: false };
+    const engine: Engine = { key: `host:${profile}`, profile, hosted: true, dir, cdp, kill: () => cdp.close(), exited: cdp.closed, tabs: new Set(), throwaway: false, identity: null };
     if (dir) {
       mkdirSync(dir, { recursive: true });
-      await this.#restoreMissing(engine);
+      await restoreMissingCookies(engine, message => this.#core.log('warn', message));
       engine.saveEvery = setInterval(() => { if (engine.tabs.size) void this.#saveCookies(engine); }, COOKIE_SAVE_EVERY_MS);
     }
     this.#targets(engine);
     await cdp.send('Target.setDiscoverTargets', { discover: true }).catch(() => {});
     return engine;
-  }
-
-  /**
-   * Hands the app's webviews the saved cookies they lack: a sign-in made while
-   * the app was closed, or a session cookie the app dropped when it quit. One
-   * the app already holds is its own, newer, and stays.
-   */
-  async #restoreMissing(engine: Engine): Promise<void> {
-    const saved = readSavedCookies(engine.dir);
-    if (!saved.length) return;
-    const key = (cookie: Record<string, unknown>) => `${String(cookie.name)}\n${String(cookie.domain)}\n${String(cookie.path ?? '/')}`;
-    try {
-      const { cookies: held } = await engine.cdp.send<{ cookies: Record<string, unknown>[] }>('Storage.getCookies', {}, undefined, 5000);
-      const have = new Set(held.map(key));
-      const missing = saved.filter(cookie => !have.has(key(cookie)));
-      for (let at = 0; at < missing.length; at += HOSTED_COOKIES_BATCH) await engine.cdp.send('Storage.setCookies', { cookies: missing.slice(at, at + HOSTED_COOKIES_BATCH) }, undefined, 10_000);
-    } catch (error) {
-      this.#core.log('warn', `the saved cookies of browser profile ${engine.profile} were not handed to the desktop app: ${error instanceof Error ? error.message : String(error)}`);
-    }
   }
 
   /** Pages that open a window (a sign-in popup) are adopted as tabs of the same conversation. */
@@ -286,43 +271,36 @@ export class AgentBrowser {
     engine.cdp.on('Target.targetInfoChanged', params => this.#info(engine, params.targetInfo as { targetId: string; url: string; title: string }));
   }
 
-  async #launch(profile: string): Promise<Engine> {
+  #start(path: string, dir: string, userAgent?: string): Promise<Started> {
+    return startChromium((cmd, args, options) => this.#core.procs.spawn(SCOPE, cmd, args, options), path, dir, START_TIMEOUT_MS, userAgent);
+  }
+
+  /** `identify` false starts the browser as it is: a page check (`probe`) visits no site. */
+  async #launch(profile: string, identify = true): Promise<Engine> {
     const found = this.findBrowser();
     if (found.path === null) throw refused(`the agent browser cannot start on ${this.#machine}: ${found.reason}`);
+    const identity = identify ? await this.#identities.of(found.path) : null;
     const dir = this.#profileDir(profile);
-    mkdirSync(dir, { recursive: true });
-    const piped = pipesDevTools();
-    if (!piped) clearActivePort(dir);
-    const spawned = this.#core.procs.spawn(SCOPE, found.path, chromiumArgs(dir), { agentRoot: false, ...(piped ? { extraPipes: 2 } : {}) });
-    // Chromium writes to both pipes; nobody reads them, so they are drained.
-    void spawned.proc.stdout.pipeTo(new WritableStream()).catch(() => {});
-    void spawned.proc.stderr.pipeTo(new WritableStream()).catch(() => {});
-    // Chromium's helpers exit with their parent; a clean close comes first (`#shut`).
-    const kill = () => { try { spawned.proc.kill(); } catch { /* gone */ } };
+    let started: Started;
+    try { started = await this.#start(found.path, dir, identity?.userAgent); }
+    catch (error) {
+      if (profile === PRIVATE_BROWSER_PROFILE) this.#removeDir(dir);
+      throw refused(`the agent browser could not start on ${this.#machine}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    const { cdp, kill } = started;
     try {
-      let cdp: Cdp;
-      if (piped) {
-        const [commands, replies] = spawned.fds ?? [];
-        if (commands === undefined || replies === undefined) throw new Error('the browser was started without its DevTools pipes');
-        cdp = Cdp.pipe(commands, replies);
-      } else cdp = await Cdp.connect(await waitForEndpoint(dir, spawned.exited, START_TIMEOUT_MS));
-      // The first answer says the browser is up; a browser that exits first never gives it.
-      await Promise.race([
-        cdp.send('Browser.getVersion', {}, undefined, START_TIMEOUT_MS),
-        spawned.exited.then(() => { throw new Error('the browser exited while starting; another process may hold its profile folder'); }),
-      ]);
       // The cookies this profile held when its browser last closed, session cookies included.
       const saved = profile === PRIVATE_BROWSER_PROFILE ? [] : readSavedCookies(dir);
       if (saved.length) await cdp.send('Storage.setCookies', { cookies: saved }).catch(error => this.#core.log('warn', `the saved cookies of browser profile ${profile} were refused: ${error instanceof Error ? error.message : String(error)}`));
       await cdp.send('Target.setDiscoverTargets', { discover: true });
       await cdp.send('Browser.setDownloadBehavior', { behavior: 'deny' }).catch(() => {});
-      const engine: Engine = { key: profile, profile, hosted: false, dir, cdp, kill, exited: spawned.exited, tabs: new Set(), throwaway: profile === PRIVATE_BROWSER_PROFILE };
+      const engine: Engine = { key: profile, profile, hosted: false, dir, cdp, kill, exited: started.exited, tabs: new Set(), throwaway: profile === PRIVATE_BROWSER_PROFILE, identity };
       this.#targets(engine);
       if (!engine.throwaway) engine.saveEvery = setInterval(() => { if (engine.tabs.size) void this.#saveCookies(engine); }, COOKIE_SAVE_EVERY_MS);
       return engine;
     } catch (error) {
       kill();
-      if (profile === PRIVATE_BROWSER_PROFILE) void spawned.exited.then(() => this.#removeDir(dir));
+      if (profile === PRIVATE_BROWSER_PROFILE) void started.exited.then(() => this.#removeDir(dir));
       throw refused(`the agent browser could not start on ${this.#machine}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -350,25 +328,9 @@ export class AgentBrowser {
     this.#lost(engine);
   }
 
-  /**
-   * The core keeps each profile's cookies itself. A browser writes its own
-   * late and, on Windows and macOS, lost them when it closed a minute after
-   * its last tab; one without an expiry date is never written by it at all.
-   * Saved a second after a page moves (a sign-in ends on one), every 30
-   * seconds while a tab is open, when a tab closes and before the process
-   * ends; restored at start. A core killed outright loses at most that.
-   */
-  async #saveCookies(engine: Engine): Promise<void> {
-    if (engine.throwaway || !engine.dir || !engine.cdp.open) return;
-    try {
-      const { cookies } = await engine.cdp.send<{ cookies: Record<string, unknown>[] }>('Storage.getCookies', {}, undefined, 5000);
-      const held = JSON.stringify(cookies);
-      if (held === engine.saved) return;
-      writeSavedCookies(engine.dir, cookies);
-      engine.saved = held;
-    } catch (error) {
-      this.#core.log('warn', `the cookies of browser profile ${engine.profile} could not be saved: ${error instanceof Error ? error.message : String(error)}`);
-    }
+  /** `browser/saved-cookies.ts`. */
+  #saveCookies(engine: Engine): Promise<void> {
+    return saveCookies(engine, message => this.#core.log('warn', message));
   }
 
   #saveCookiesSoon(engine: Engine): void {
@@ -404,6 +366,8 @@ export class AgentBrowser {
       tab.off.push(engine.cdp.on(method, (params, session) => { if (session === sessionId) listener(params); }));
     watchPage(tab, on, (accept, promptText) => void engine.cdp.send('Page.handleJavaScriptDialog', { accept, ...(promptText === undefined ? {} : { promptText }) }, sessionId).catch(() => {}),
       url => { tab.url = url; tab.frame = null; this.#changed(threadId); this.#saveCookiesSoon(engine); });
+    // Before its first request: the page, its workers and its requests say what a browser with a window says.
+    if (engine.identity) await engine.cdp.send('Emulation.setUserAgentOverride', { userAgent: engine.identity.userAgent, userAgentMetadata: engine.identity.metadata }, sessionId).catch(() => {});
     await Promise.all(['Page.enable', 'Runtime.enable', 'Network.enable'].map(method => engine.cdp.send(method, {}, sessionId)));
     // A window opened by a page may have navigated before it was attached: its address is read once now.
     const current = await engine.cdp.send<{ targetInfo: { url: string; title: string } }>('Target.getTargetInfo', { targetId }).catch(() => null);
@@ -710,7 +674,7 @@ export class AgentBrowser {
       for (const name of names) {
         const dir = join(root, name);
         const throwaway = /^private-[0-9a-f-]{36}$/.test(name);
-        if (throwaway ? dir === privateDir || this.#probes.holds(dir) : kept.has(name) || browserProfileIdError(name) !== null) continue;
+        if (throwaway ? dir === privateDir || this.#probes.holds(dir) || this.#identities.holds(dir) : kept.has(name) || browserProfileIdError(name) !== null) continue;
         this.#removeDir(dir);
       }
     } catch (error) {

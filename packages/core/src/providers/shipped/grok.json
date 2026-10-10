@@ -15,7 +15,7 @@
       ],
       "launch": { "args": ["agent", "stdio"] },
       "isolation": { "GROK_HOME": "{isolationDir}" },
-      "env": { "NO_COLOR": "1", "GROK_FEEDBACK_ENABLED": "0" },
+      "env": { "NO_COLOR": "1", "GROK_FEEDBACK_ENABLED": "0", "GROK_SUBAGENTS": "0", "GROK_WORKFLOWS": "0" },
       "unsetEnv": [
         "XAI_API_KEY",
         "GROK_AUTH_PROVIDER_COMMAND",
@@ -40,7 +40,7 @@
       ],
       "launch": { "args": ["agent", "stdio"] },
       "isolation": { "GROK_HOME": "{isolationDir}" },
-      "env": { "NO_COLOR": "1", "GROK_FEEDBACK_ENABLED": "0" },
+      "env": { "NO_COLOR": "1", "GROK_FEEDBACK_ENABLED": "0", "GROK_SUBAGENTS": "0", "GROK_WORKFLOWS": "0" },
       "unsetEnv": [
         "XAI_API_KEY",
         "GROK_AUTH_PROVIDER_COMMAND",
@@ -65,7 +65,7 @@
       ],
       "launch": { "args": ["agent", "stdio"] },
       "isolation": { "GROK_HOME": "{isolationDir}" },
-      "env": { "NO_COLOR": "1", "GROK_FEEDBACK_ENABLED": "0" },
+      "env": { "NO_COLOR": "1", "GROK_FEEDBACK_ENABLED": "0", "GROK_SUBAGENTS": "0", "GROK_WORKFLOWS": "0" },
       "unsetEnv": [
         "XAI_API_KEY",
         "GROK_AUTH_PROVIDER_COMMAND",

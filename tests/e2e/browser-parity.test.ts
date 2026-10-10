@@ -1,6 +1,6 @@
 import { test, expect } from 'bun:test';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { startBrowserSession } from './lib/browser-session.ts';
 import { runCli } from '../../packages/core/src/cli.ts';
 import type { BrowserDiagnostics } from '../../packages/contracts/src/index.ts';
@@ -21,6 +21,10 @@ test.skipIf(process.platform !== 'win32' || !executable)('in the desktop app, th
   try {
     // The app attaches as the host once it has connected to its core.
     for (let i = 0; i < 200 && !((await command({ kind: 'status' })).value as { hosted?: boolean }).hosted; i++) await Bun.sleep(100);
+    // A sign-in the core kept while the app was closed: the first hosted tab hands it to the app's profile.
+    const cookieFile = join(session.dataDir, 'browser', 'default', 'boite-cookies.json');
+    mkdirSync(dirname(cookieFile), { recursive: true });
+    writeFileSync(cookieFile, JSON.stringify([{ name: 'kept', value: 'by-core', domain: '127.0.0.1', path: '/' }]));
     const opened = await command({ kind: 'open', url: site.url.href });
     const id = opened.tabId!;
     expect(id).toStartWith('browser:');
@@ -28,6 +32,13 @@ test.skipIf(process.platform !== 'win32' || !executable)('in the desktop app, th
     const tabs = ((await command({ kind: 'status' })).value as { tabs: { tabId: string; view?: string }[] }).tabs;
     expect(tabs.find(tab => tab.tabId === id)?.view).toStartWith('agent-');
     console.log('The agent tab is a webview of the desktop app');
+    expect((await command({ kind: 'evaluate', expression: 'document.cookie' }, id)).value).toContain('kept=by-core');
+    await command({ kind: 'evaluate', expression: "document.cookie = 'login=hosted; max-age=3600'" }, id);
+    await command({ kind: 'navigate', url: site.url.href }, id);
+    const saved = () => { try { return readFileSync(cookieFile, 'utf8'); } catch { return ''; } };
+    for (let i = 0; i < 100 && !saved().includes('hosted'); i++) await Bun.sleep(100);
+    expect(saved()).toContain('"login"');
+    console.log('Saved sign-ins reach the hosted tab, and its own reach the core');
     expect(JSON.stringify(await command({ kind: 'snapshot' }, id))).toContain('ATELIER BOITE');
     await command({ kind: 'preset', preset: 'iphone-15-pro' }, id);
     expect((await command({ kind: 'evaluate', expression: '[innerWidth,innerHeight]' }, id)).value).toEqual([393, 852]);

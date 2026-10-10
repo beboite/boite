@@ -101,8 +101,34 @@ async function settled() {
 async function capture(name: string) { await settled(); await page.screenshot(join(import.meta.dir, '.artifacts', name)); }
 
 test('create, converse, configure the resident engine and follow background work on desktop and phone', async () => {
+  // The Agents list is the thread list's column: same place, same width, same
+  // card beside it, and the title bar's fold button stays.
+  const layout = `(() => { const r = s => { const b = document.querySelector(s)?.getBoundingClientRect(); return b && [b.left, b.top, b.width, b.height].map(Math.round); };
+    return { rail: r('[data-testid="sidebar"]') ?? r('.agents-rail'), card: r('.body main'), fold: !!document.querySelector('[data-testid="sidebar-toggle"]') }; })()`;
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  await page.waitFor(`document.querySelector('[data-testid="sidebar"]') && document.querySelector('.body main')`);
+  await settled();
+  const threads = await page.evaluate<{ rail?: number[]; card?: number[]; fold: boolean }>(layout);
+  expect(threads.rail?.[2]).toBeGreaterThan(0);
   await page.click('[data-testid="view-agents"]');
   await page.waitFor(`document.querySelector('[data-testid="agents-page"]')`);
+  await settled();
+  expect(await page.evaluate(layout)).toEqual(threads);
+  // Folding from the title bar hides the Agents list as it hides the thread list.
+  await page.click('[data-testid="sidebar-toggle"]');
+  await page.waitFor(`getComputedStyle(document.querySelector('.agents-rail')).display === 'none'`);
+  // One fold for both lists: the thread list comes back folded too.
+  expect(await page.evaluate(`window.__boiteTest.workspace.active.sidebarCollapsed`)).toBe(true);
+  await page.click('[data-testid="sidebar-toggle"]');
+  await page.waitFor(`getComputedStyle(document.querySelector('.agents-rail')).display !== 'none'`);
+  await settled();
+  expect(await page.evaluate(layout)).toEqual(threads);
+  // Closing the search unmounts the field under the focus: it lands back on the toggle.
+  await page.click('[data-testid="agents-search-toggle"]');
+  await page.waitFor(`document.activeElement?.matches('.agents-rail .agents-search input')`);
+  await page.evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+  await page.waitFor(`!document.querySelector('.agents-rail .agents-search')`);
+  expect(await page.evaluate(`document.activeElement?.dataset.testid`)).toBe('agents-search-toggle');
   await capture('agents-welcome-desktop.png');
   await page.click('[data-testid="agents-create"]');
   await page.waitFor(`document.querySelector('[data-testid="agents-create-menu"]')`);

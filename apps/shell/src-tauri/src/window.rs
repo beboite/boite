@@ -121,19 +121,29 @@ fn label_for(channel: Channel, prerelease: &str) -> &'static str {
     } else { channel.product_name() }
 }
 
-/// The size the main window opens at. The height fits the tour's tallest screen
-/// without a scrollbar: 808 px (French consent screen, measured 2026-09-23) plus
-/// the scrim's 32 px margin and the 44 px title bar left above it.
-const MAIN_SIZE: (f64, f64) = (1280.0, 890.0);
+/// The size the main window opens at when no monitor answers, and what a new
+/// window takes of the primary monitor's work area otherwise: 70% of its width
+/// and 80% of its height, kept between `MAIN_FLOOR` and `MAIN_CEILING`. A
+/// 1920 x 1080 screen gets 1344 x 826, a 2560 x 1440 one 1600 x 1000.
+const MAIN_SIZE: (f64, f64) = (1280.0, 800.0);
+const MAIN_SHARE: (f64, f64) = (0.7, 0.8);
+/// The floor fits the tour's 600 px panel under the 44 px title bar with the
+/// scrim's margins, so a first launch shows every screen without scrolling.
+const MAIN_FLOOR: (f64, f64) = (1200.0, 720.0);
+const MAIN_CEILING: (f64, f64) = (1600.0, 1000.0);
 const MAIN_MIN_SIZE: (f64, f64) = (880.0, 560.0);
 
-/// Logical `(x, y, width, height)` of a window of `size` centred in `area`
-/// (`left, top, width, height`), shrunk to 92% of the area on a smaller screen.
+/// Logical `(x, y, width, height)` of the opening window centred in `area`
+/// (`left, top, width, height`). Its size follows `MAIN_SHARE` of the area
+/// within `MAIN_FLOOR` and `MAIN_CEILING`, never past 92% of a small screen.
 /// An area below the minimum size gets the window at its top left, so the
 /// title bar stays on screen.
-fn centred(size: (f64, f64), min: (f64, f64), area: (f64, f64, f64, f64)) -> (f64, f64, f64, f64) {
-    let width = size.0.min(area.2 * 0.92).max(min.0);
-    let height = size.1.min(area.3 * 0.92).max(min.1);
+fn centred(area: (f64, f64, f64, f64)) -> (f64, f64, f64, f64) {
+    let side = |length: f64, share: f64, floor: f64, ceiling: f64, min: f64| {
+        (length * share).clamp(floor, ceiling).min(length * 0.92).max(min)
+    };
+    let width = side(area.2, MAIN_SHARE.0, MAIN_FLOOR.0, MAIN_CEILING.0, MAIN_MIN_SIZE.0);
+    let height = side(area.3, MAIN_SHARE.1, MAIN_FLOOR.1, MAIN_CEILING.1, MAIN_MIN_SIZE.1);
     (area.0 + ((area.2 - width) / 2.0).max(0.0), area.1 + ((area.3 - height) / 2.0).max(0.0), width, height)
 }
 
@@ -201,7 +211,7 @@ pub(crate) fn build_main_window<R: Runtime>(
     }
     builder = match work_area(app) {
         Some(area) => {
-            let (x, y, width, height) = centred(MAIN_SIZE, MAIN_MIN_SIZE, area);
+            let (x, y, width, height) = centred(area);
             builder.inner_size(width, height).position(x, y)
         }
         None => builder.center(),
@@ -276,18 +286,23 @@ mod tests {
     use super::{label_for, Channel, Reveal};
 
     #[test]
-    fn the_main_window_opens_centred_and_fits_a_small_screen() {
-        // 1080p at 100%, taskbar at the bottom: the full size, centred.
-        assert_eq!(super::centred((1280.0, 890.0), (880.0, 560.0), (0.0, 0.0, 1920.0, 1032.0)), (320.0, 71.0, 1280.0, 890.0));
+    fn the_main_window_opens_centred_at_a_share_of_the_screen() {
+        // 1080p at 100%, taskbar at the bottom: 70% x 80%, centred.
+        let (x, y, width, height) = super::centred((0.0, 0.0, 1920.0, 1032.0));
+        assert_eq!((x.round(), y.round(), width.round(), height.round()), (288.0, 103.0, 1344.0, 826.0));
+        // 1440p at 100%: the ceiling.
+        assert_eq!(super::centred((0.0, 0.0, 2560.0, 1392.0)), (480.0, 196.0, 1600.0, 1000.0));
+        // 1080p at 125%: the floor, which still leaves the tour unscrolled.
+        assert_eq!(super::centred((0.0, 0.0, 1536.0, 824.0)), (168.0, 52.0, 1200.0, 720.0));
         // 1080p at 150%: 1280 x 688 logical, so 92% of it, still centred.
-        let (x, y, width, height) = super::centred((1280.0, 890.0), (880.0, 560.0), (0.0, 0.0, 1280.0, 688.0));
+        let (x, y, width, height) = super::centred((0.0, 0.0, 1280.0, 688.0));
         assert_eq!((width.round(), height.round()), (1178.0, 633.0));
         assert_eq!(((x * 2.0).round(), (y * 2.0).round()), (102.0, 55.0));
         // A taskbar on the left moves the centre with the work area.
-        assert_eq!(super::centred((1280.0, 890.0), (880.0, 560.0), (60.0, 0.0, 1860.0, 1080.0)).0, 350.0);
+        assert_eq!(super::centred((60.0, 0.0, 1860.0, 1080.0)).0.round(), 339.0);
         // Never below the minimum size, and then pinned to the top left.
-        assert_eq!(super::centred((1280.0, 890.0), (880.0, 560.0), (0.0, 0.0, 800.0, 500.0)), (0.0, 0.0, 880.0, 560.0));
-        assert_eq!(super::centred((1280.0, 890.0), (880.0, 560.0), (60.0, 40.0, 800.0, 500.0)), (60.0, 40.0, 880.0, 560.0));
+        assert_eq!(super::centred((0.0, 0.0, 800.0, 500.0)), (0.0, 0.0, 880.0, 560.0));
+        assert_eq!(super::centred((60.0, 40.0, 800.0, 500.0)), (60.0, 40.0, 880.0, 560.0));
     }
 
     #[test]
