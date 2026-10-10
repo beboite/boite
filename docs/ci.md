@@ -194,6 +194,12 @@ Managed releases that follow their publisher, Claude's on Windows, add about
 update joining an older download. Merged with `main` at `2ffd95e0`, they measured
 3,703,464 bytes on Linux on 2026-10-10, under the same 3,710,000 limit.
 
+Choosing the machine a new agent runs on, with the form's labelled rows,
+adds 5,122 UI bytes: 4,413,081 against 4,407,959 for `main` at `c30a17a5`,
+measured on Linux on 2026-10-10. A machine icon in the picker cost another
+2,563 bytes through a chunk split and was left out. The UI limit rises from
+4,409,000 to 4,415,000, leaving about 1.9 KB.
+
 Recent's Done and Working groups measured 3,949,936 UI bytes on 2026-10-03
 before integrating these orchestration additions. The combined build measured
 3,961,330 UI bytes and 3,239,585 emitted core JavaScript bytes on the same day.
