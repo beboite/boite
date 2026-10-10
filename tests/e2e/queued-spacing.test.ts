@@ -33,6 +33,25 @@ test('queued prompts sit above the activity dock attached to the input', async (
       expect(gap).toBeLessThanOrEqual(40);
       expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
     }
+    // Going out, the queue has no Send now: its foot keeps the button's height so
+    // the label's ink room does not overflow the list into a scrollbar, and a
+    // long prompt shows three whole lines, not a sliver of the fourth.
+    await page.evaluate(`(() => {
+      const state = globalThis.__boiteTest.workspace.active.composerStates['t-trace'];
+      state.queued[0].text = 'A follow-up long enough to need more than three lines in the bubble. '.repeat(8);
+      state.sending = true;
+    })()`);
+    await page.waitFor(`!document.querySelector('[data-testid="composer-send-now"]')`);
+    for (const width of [1300, 390]) {
+      await page.send('Emulation.setDeviceMetricsOverride', { width, height: 850, deviceScaleFactor: 1, mobile: width === 390 });
+      const fit = await page.evaluate<{ overflow: number; lines: number }>(`(() => {
+        const queue = document.querySelector('[data-testid="composer-queued"]');
+        const text = queue.querySelector('.queued-text');
+        return { overflow: queue.scrollHeight - queue.clientHeight, lines: text.clientHeight / parseFloat(getComputedStyle(text).lineHeight) };
+      })()`);
+      expect(fit).toEqual({ overflow: 0, lines: 3 });
+    }
+    await page.evaluate(`globalThis.__boiteTest.workspace.active.composerStates['t-trace'].sending = false`);
     await page.evaluate(`globalThis.__boiteTest.workspace.active.openThread.activity = { goal: null, loop: null, tasks: [{ id: 'work', text: 'Keep the latest answer visible', status: 'in_progress' }] }`);
     for (const width of [1300, 390]) {
       await page.send('Emulation.setDeviceMetricsOverride', { width, height: 850, deviceScaleFactor: 1, mobile: width === 390 });
