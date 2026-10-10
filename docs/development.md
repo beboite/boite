@@ -625,6 +625,18 @@ are inert. Settings pages use `--settings-width`, `--settings-padding` and
 `settings-stack`; explanatory text belongs in `InfoTip`, with visible hints
 reserved for current errors, counts or missing steps.
 
+The terminal, the right panel and the sidebar make their room as they arrive,
+on `--dur-slide` and `--ease-slide`: the terminal grows its slot, the panel and
+the sidebar slide in from their window edge behind a negative margin that
+shrinks to zero. The chat gives way over the whole movement instead of jumping
+in one frame. The panel and the sidebar keep their final size while they
+slide, so nothing inside them rewraps. Over the chat, under 981 px, the panel moves by a transform; floating,
+it only fades out. A panel tab opened or picked after the panel is in fades
+its surface in. Captures and pointer aims wait on `page.settleAnimations()`
+from `tests/e2e/lib/cdp.ts`, which leaves out animations inside a folded
+`content-visibility` section: Chrome never updates those, so their `finished`
+promise stays pending.
+
 For text beside icons, put `ui-label` on the text leaf inside the flex or grid
 row. The shared rule in `app.css` centres the font's cap height and alphabetic
 baseline with `text-box`; it keeps padding for accents and descenders when a

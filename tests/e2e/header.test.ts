@@ -8,13 +8,15 @@ let page: BrowserPage;
 let url: string;
 const id = (name: string) => `[data-testid="${name}"]`;
 async function pointerClick(selector: string) {
+  // The sidebar and the panel slide: aim once they have landed.
+  await page.settleAnimations();
   const point = await page.evaluate<{ x: number; y: number }>(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return {x:r.left + Math.min(12, r.width / 2), y:r.top + r.height / 2}; })()`);
   await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point });
   await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...point });
   await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...point });
 }
 async function capture(name: string) {
-  await page.evaluate(`Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])`);
+  await page.settleAnimations();
   await page.screenshot(join(import.meta.dir, '.artifacts', name));
 }
 beforeAll(async () => {

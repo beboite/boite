@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Snippet } from 'svelte';
+  import { untrack, type Snippet } from 'svelte';
   import { Settings } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
   import { clampSidebar, SIDEBAR_DEFAULT } from '../lib/prefs';
@@ -52,6 +52,39 @@
     foot?: Snippet;
   } = $props();
 
+  let rail = $state<HTMLElement | undefined>(undefined);
+  let folded: boolean | undefined;
+  let sliding: ReturnType<typeof setTimeout> | undefined;
+  let marked: HTMLElement | undefined;
+
+  function unmark(): void {
+    clearTimeout(sliding);
+    if (marked) delete marked.dataset.railSliding;
+    marked = undefined;
+  }
+
+  /**
+   * Marks the body row while the list folds or unfolds, so the chat card's own
+   * left gap eases in step (app.css); the boot and a page change move that gap
+   * at once. An attribute, since Svelte rewrites the row's class list. Before
+   * the DOM update, so the mark and the fold reach the same style pass.
+   */
+  $effect.pre(() => {
+    const now = store.sidebarCollapsed;
+    const was = folded;
+    folded = now;
+    const row = untrack(() => rail)?.parentElement;
+    if (was === undefined || was === now || !row) return;
+    unmark();
+    row.dataset.railSliding = '';
+    marked = row;
+    sliding = setTimeout(unmark, 600);
+  });
+
+  // Gone before the slide ends (Settings opened at once): the row's next gap
+  // change, a page change, must not ease.
+  $effect(() => unmark);
+
   function startResize(event: PointerEvent) {
     if (event.button !== 0) return;
     event.preventDefault();
@@ -73,6 +106,7 @@
 </script>
 
 <aside
+  bind:this={rail}
   class="rail {kind}"
   class:drawer
   class:open={drawer && store.sidebarOpen}
@@ -187,16 +221,22 @@
     background: var(--color-edge);
   }
   @media (min-width: 721px) {
+    /* Folding slides it out past the window's left edge and the chat card
+       widens with it: a margin as wide as the list and its gap gives that room
+       back, so the chat never jumps. App.svelte eases the card's own left gap
+       in step. */
     .rail {
-      transition: opacity var(--dur-3) var(--ease-out-quint), transform var(--dur-3) var(--ease-out-quint), display var(--dur-3) allow-discrete;
+      --slide-room: calc(var(--sidebar-width) + var(--frame-gap));
+      transition: margin-left var(--dur-slide) var(--ease-slide), opacity var(--dur-3) var(--ease-out-quint), display var(--dur-slide) allow-discrete;
     }
     .rail.collapsed {
       display: none;
       pointer-events: none;
       opacity: 0;
-      transform: translateY(4px);
+      margin-left: calc(-1 * var(--slide-room));
+      transition: margin-left var(--dur-slide-out) var(--ease-slide), opacity var(--dur-2) var(--ease-out-quint), display var(--dur-slide-out) allow-discrete;
     }
-    @starting-style { .rail:not(.collapsed) { opacity: 0; transform: translateY(4px); } }
+    @starting-style { .rail:not(.collapsed) { opacity: 0; margin-left: calc(-1 * var(--slide-room)); } }
   }
   @media (max-width: 720px) {
     .rail.drawer {
@@ -209,8 +249,9 @@
       visibility: hidden;
       pointer-events: none;
       opacity: 0;
-      transform: translateY(4px);
-      transition: opacity var(--dur-3) var(--ease-out-quint), transform var(--dur-3) var(--ease-out-quint), visibility var(--dur-3);
+      /* A drawer from the left edge, where its button is. */
+      transform: translateX(calc(-100% - 12px));
+      transition: opacity var(--dur-3) var(--ease-out-quint), transform var(--dur-slide) var(--ease-slide), visibility var(--dur-slide);
       box-shadow: var(--shadow-e3);
     }
     .rail.drawer.open {
