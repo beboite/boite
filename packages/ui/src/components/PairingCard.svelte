@@ -1,4 +1,5 @@
 <script lang="ts">
+  import FirewallNotice from './FirewallNotice.svelte';
   import InfoTip from './InfoTip.svelte';
   import type { PairedSession } from '@boite/contracts';
   import { confirm } from '../lib/confirm.svelte';
@@ -46,10 +47,18 @@
     return name === 'pwa' ? strings.settings.pairing.clients.pwa : name === 'shell' ? strings.settings.pairing.clients.shell : name;
   }
 
-  /** A switch saves when it flips, as every other switch in Settings does; a refusal puts it back. */
+  let firewall: FirewallNotice | undefined = $state();
+
+  /**
+   * A switch saves when it flips, as every other switch in Settings does; a
+   * refusal puts it back. Turning the network on asks Windows for its firewall
+   * rule at once, while the owner is looking, so its own prompt naming the
+   * core's runtime never comes up.
+   */
   async function toggleLan(input: HTMLInputElement) {
     const ok = await store.saveSettings({ listenOnLan: input.checked });
     if (!ok) input.checked = store.settings?.listenOnLan ?? !input.checked;
+    else if (input.checked) await firewall?.allow();
   }
 
   async function revoke(session: PairedSession) {
@@ -121,6 +130,7 @@
         </div>
       </div>
     {/if}
+    <FirewallNotice {store} bind:this={firewall} />
   {:else}
     <p class="hint">{strings.settings.pairing.paired}</p>
   {/if}

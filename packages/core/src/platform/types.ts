@@ -74,11 +74,16 @@ export interface GuardStatus {
   mutedPids: number[];
 }
 
+/** What the firewall's allow command exits with when nobody accepted the administrator prompt. */
+export const FIREWALL_PROMPT_REFUSED = 3;
+
 /** OS services used by the shared process registry. No native imports here. */
 export interface ProcessPlatform {
   serverUpdates?: ServerUpdatePlatform;
   /** Absolute path of the tailscale CLI, or null when it is not installed. */
   tailscaleCli?(): string | null;
+  /** The command lines that read and fix the OS firewall for `program`; Windows only (`windows/firewall.ts`). */
+  firewall?: { query(program: string): string[]; allow(program: string): string[] };
   retain(jobs: ProcessEventSink, guards: GuardEventSink): void;
   /** Resolves once nothing native is left holding the user's state: hooks, muted sessions. */
   release(): Promise<void>;
