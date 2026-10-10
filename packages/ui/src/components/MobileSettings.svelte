@@ -1,6 +1,6 @@
 <script lang="ts">
   import TelemetrySettings from './TelemetrySettings.svelte';
-  import { Activity, ArchiveRestore, ArrowLeft, Bell, Brain, ChevronRight, Coins, Compass, FlaskConical, Gauge, Minimize2, Monitor, Palette, Mic, ShieldCheck } from '@lucide/svelte';
+  import { Activity, ArchiveRestore, ArrowLeft, Bell, Brain, ChevronRight, Coins, Compass, FlaskConical, Gauge, Minimize2, Monitor, Palette, Mic, ShieldCheck, Stethoscope } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import { strings } from '../lib/strings';
@@ -9,6 +9,7 @@
   import { openTour } from '../lib/onboarding.svelte';
   import AppearancePage from './AppearancePage.svelte';
   import ExperimentsPage from './ExperimentsPage.svelte';
+  import DiagnosticsPage from './DiagnosticsPage.svelte';
   import LimitsPage from './LimitsPage.svelte';
   import QuotaMachineScope from './QuotaMachineScope.svelte';
   import ResourcesPage from './ResourcesPage.svelte';
@@ -35,7 +36,7 @@
   let worktreesPage = $derived(store.owner && store.settingsTab === 'general' && store.settingsSection?.id === 'worktrees');
   /** The one card of the desktop's Advanced page that is about conversations, not about the machine. */
   let compactPage = $derived(store.owner && store.settingsTab === 'advanced' && store.settingsSection?.id === 'auto-compact');
-  let page = $derived((store.owner && (store.settingsTab === 'brain' || store.settingsTab === 'resources')) || store.settingsTab === 'appearance' || store.settingsTab === 'machines' || store.settingsTab === 'voice' || store.settingsTab === 'usage' || store.settingsTab === 'limits' || store.settingsTab === 'task-manager' || store.settingsTab === 'experiments'
+  let page = $derived((store.owner && (store.settingsTab === 'brain' || store.settingsTab === 'resources' || store.settingsTab === 'diagnostics')) || store.settingsTab === 'appearance' || store.settingsTab === 'machines' || store.settingsTab === 'voice' || store.settingsTab === 'usage' || store.settingsTab === 'limits' || store.settingsTab === 'task-manager' || store.settingsTab === 'experiments'
     ? store.settingsTab : phone ? 'phone' : archivePage ? 'archived' : worktreesPage ? 'worktrees' : compactPage ? 'auto-compact' : 'home');
   let machine = $derived(workspace.machines.find(machine => machine.store === store));
   let title = $derived(page === 'brain' ? strings.brain.heading : page === 'phone' ? strings.mobile.settingsPhone
@@ -46,6 +47,7 @@
     : page === 'usage' ? strings.usage.heading : page === 'limits' ? strings.usage.limits
     : page === 'resources' ? strings.settings.tabs.resources
     : page === 'task-manager' ? strings.taskManager.title
+    : page === 'diagnostics' ? strings.diagnostics.heading
     : page === 'experiments' ? strings.settings.tabs.experiments : strings.settings.tabs.machines);
   /** The page's own title and its info mark step aside for the bar, so the bar carries the mark. */
   let info = $derived(page === 'usage' ? `${strings.usage.intro} ${strings.usage.note}`
@@ -122,6 +124,9 @@
             <button class="ghost row" data-testid="mobile-settings-auto-compact" onclick={() => store.showSettings('advanced', 'auto-compact')}>
               <Minimize2 size={20} /><span class="ui-label">{strings.settings.autoCompact}</span><ChevronRight size={18} />
             </button>
+            <button class="ghost row" data-testid="settings-tab-diagnostics" onclick={() => store.showSettings('diagnostics')}>
+              <Stethoscope size={20} /><span class="ui-label">{strings.diagnostics.heading}</span><ChevronRight size={18} />
+            </button>
           {/if}
         </div>
       </section>
@@ -157,6 +162,8 @@
         <ResourcesPage {store} />
       {:else if page === 'experiments'}
         <ExperimentsPage />
+      {:else if page === 'diagnostics' && store.owner}
+        <DiagnosticsPage {store} {onopenthread} />
       {:else if page === 'worktrees'}
         <div class="page"><WorktreesCard {store} /></div>
       {:else if page === 'auto-compact'}

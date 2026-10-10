@@ -261,6 +261,7 @@ export class Stewards {
         await this.core.threads.remove(target.id);
         return { thread: null };
       case 'stop':
+        this.core.logs.info('Stop requested by a steward', { source: 'turns', event: 'turn.stop-asked', threadId: target.id, data: { principal: 'steward' } });
         this.core.activity.pauseAll(target.id);
         if (this.core.threads.stopTurn(target.id)) this.line(target.id, `Stopped by ${by}.`);
         break;

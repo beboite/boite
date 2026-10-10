@@ -4,6 +4,7 @@ import { BRANCH_NAME_MAX, type Project, type ThreadId, type WorktreeStorage } fr
 import type { Core } from './core.ts';
 import { folderGone, messageOf, refused } from './errors.ts';
 import { newId } from './ids.ts';
+import { logGit } from './git/git-log.ts';
 
 /** Every branch the core makes on its own starts with this. */
 export const BRANCH_PREFIX = 'boite/';
@@ -193,7 +194,9 @@ export class Worktrees {
     } catch (error) {
       throw refused(`git did not start (${messageOf(error)}): a worktree needs git on PATH`, { cwd, args });
     }
+    const at = performance.now();
     const [stderr, stdout, code] = await Promise.all([new Response(spawned.proc.stderr).text(), new Response(spawned.proc.stdout).text(), spawned.exited]);
+    logGit(this.core, threadId, args, code, performance.now() - at, stderr);
     return { code, stderr, stdout };
   }
 }

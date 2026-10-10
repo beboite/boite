@@ -1,3 +1,4 @@
+import { builtinSkills } from '../builtin-skills.ts';
 import type {
   Account,
   AgentCommand,
@@ -22,6 +23,8 @@ import type { Core } from '../core.ts';
 import type { EmitSink, PermissionTicket, QuestionAsk, QuestionTicket, SessionContext, TurnContext } from '../drivers/types.ts';
 import { newId } from '../ids.ts';
 import type { SpawnedChild, SpawnOptions } from '../procs.ts';
+import { noteStderr } from '../drivers/stderr-tail.ts';
+import { watchProviderProcess } from './provider-process-log.ts';
 import type { ThreadStore } from '../threads.ts';
 import { nativeCommandPrompt, systemOperation } from './operations.ts';
 
@@ -56,14 +59,18 @@ export class TurnContexts {
       sessionBefore: this.sessionBefore(thread, ''),
       accountEnv: this.core.accounts.accountEnv(account, provider),
       warmProcessMinutes: this.core.settings.get().warmProcessMinutes,
-      log: (level, message, context) => this.core.log(level, message, { ...context, source: provider.id, threadId }),
+      log: (level, message, context) => {
+        if (context?.kind === 'provider-output') noteStderr(threadId, message);
+        this.core.log(level, message, { ...context, source: provider.id, threadId });
+      },
+      diagnostic: (level, message, context) => this.core.logs.record(level, message, { ...context, source: provider.id, threadId }),
       authenticationFailed: () => this.core.accounts.authenticationFailed(account.id),
       commands: list => { if (current()) this.threads.agentState.noteCommands(threadId, list); },
       context: use => { if (current()) this.threads.agentState.noteContext(threadId, use); },
       hook: report => this.core.hooks.record({ providerId: provider.id, accountId: account.id, threadId }, report),
       background: list => this.threads.agentState.noteBackground(threadId, list, backgroundOwner),
       backgroundFinished: (id, state) => this.threads.agentState.finishBackground(threadId, id, backgroundOwner, state),
-      spawnChild: this.leasedSpawnChild(threadId, provider),
+      spawnChild: this.leasedSpawnChild(threadId, provider, { resume: thread.sessionId !== null }),
       finishStartup: () => this.core.procs.finishStartup(threadId),
     };
   }
@@ -276,7 +283,7 @@ export class TurnContexts {
         ? sentFromNote(origin.from) : '';
       const coordinationGuide = inject && operation !== 'compact' && guideEnabled ? this.core.coordination.instructions(threadId) + this.core.stewards.instructions(threadId) + this.core.workforce.entrusted.instructions(threadId) : '';
       const guide = inject && sessionId === null && guideEnabled
-        ? agentGuide(provider.protocol !== 'echo' && this.core.settings.get().asyncQuestions !== false) : '';
+        ? agentGuide(provider.protocol !== 'echo' && this.core.settings.get().asyncQuestions !== false, this.core.settings.get().agentLogAccess === false ? [] : builtinSkills(this.core.dataDir, message => this.core.logs.warn(message, { source: 'skills', event: 'skills.write-failed' }))) : '';
       const prefix = (inject ? this.core.brain.instructions(provider.id) : '') + guide;
       return carried.memory + prefix + (prefix ? 'User request:\n' : '') + said + deferred + body + coordinationGuide + tail(inject && sessionId === null && guideEnabled) + this.threads.cards.askInstructions({ ...thread, sessionId }, provider, turn, body);
     };
@@ -303,8 +310,10 @@ export class TurnContexts {
       reportProviderEvent: () => this.threads.progress.contact(threadId, turn.id),
       authenticationFailed: () => this.core.accounts.authenticationFailed(account.id),
       log: (level, message, context) => {
+        if (context?.kind === 'provider-output') noteStderr(threadId, message);
         this.core.log(level, message, { ...context, source: provider.id, threadId, turnId: turn.id });
       },
+      diagnostic: (level, message, context) => this.core.logs.record(level, message, { ...context, source: provider.id, threadId, turnId: turn.id }),
       commands: (list: AgentCommand[]) => {
         if ((this.threads.require(threadId).sessionGeneration ?? 0) === (thread.sessionGeneration ?? 0)) this.threads.agentState.noteCommands(threadId, list);
       },
@@ -343,7 +352,7 @@ export class TurnContexts {
         });
         return spawned;
       },
-      spawnChild: this.leasedSpawnChild(threadId, provider),
+      spawnChild: this.leasedSpawnChild(threadId, provider, { resume: thread.sessionId !== null, turnId: turn.id }),
       finishStartup: () => this.core.procs.finishStartup(threadId),
       killTree: () => {
         this.core.procs.killTree(threadId);
@@ -355,6 +364,8 @@ export class TurnContexts {
   leasedSpawnChild(
     threadId: ThreadId,
     provider: ProviderDescriptor,
+    /** Set for a session's own agent process, which the log follows from spawn to exit. */
+    session?: { resume: boolean; turnId?: TurnId },
   ): (cmd: string, args: string[], opts?: SpawnOptions) => SpawnedChild {
     return (cmd, args, opts) => {
       // The SDK drivers hand a whole environment here, so the agent's own
@@ -363,6 +374,7 @@ export class TurnContexts {
         ...opts,
         env: agentEnvOf(this.core, threadId, opts?.env ?? process.env),
       });
+      if (session !== undefined) watchProviderProcess(this.core, child, cmd, { threadId, providerId: provider.id, ...session });
       const installs = this.core.providers.installs;
       installs.acquire(provider.id);
       let released = false;

@@ -12,6 +12,7 @@ import { JOIN_ROUTE } from './group.ts';
 import type { Connection } from './router.ts';
 import type { SocketData } from './server/connection.ts';
 import { ServerConnection } from './server/connection.ts';
+import { logConnectionClosed } from './server/connection-log.ts';
 import { handleFrame } from './server/frame.ts';
 import { FrameQueue } from './server/frame-queue.ts';
 import { Refusals } from './server/refusals.ts';
@@ -346,7 +347,7 @@ export function startServerOnStickyPort(
   try {
     return startServer({ ...server, port: previousPort });
   } catch (error) {
-    server.core.log('warn', `port ${previousPort} of the previous run is taken (${messageOf(error)}), listening on another`);
+    server.core.log('warn', `port ${previousPort} of the previous run is taken (${messageOf(error)}), listening on another`, { source: 'startup', event: 'startup.port-fallback', data: { previousPort } });
     return startServer({ ...server, port: 0 });
   }
 }
@@ -422,13 +423,13 @@ export function startServer(options: ServerOptions): RunningServer {
         const origin = request.headers.get('origin');
         // A page served by one machine of the group opens its socket on the others.
         if (!isAllowedOrigin(origin, self.port ?? 0, hostname) && !(origin !== null && (core.settings.get().browserOrigins?.includes(origin) || origin === core.settings.get().publicUrl || core.group.allowsOrigin(origin)))) {
-          core.log('warn', `refused a websocket from origin ${origin ?? '(none)'}`);
+          core.log('warn', `refused a websocket from origin ${origin ?? '(none)'}`, { source: 'connections', event: 'connection.origin-refused' });
           return new Response('forbidden origin', { status: 403 });
         }
         const peer = preauthPeer(self.requestIP(request)?.address ?? null, request.headers.get('host'));
         const refusal = peer === null ? null : preauthRefusal(waitingPeers(), peer);
         if (refusal !== null) {
-          core.log('warn', `refused a websocket: ${refusal}`);
+          core.log('warn', `refused a websocket: ${refusal}`, { source: 'connections', event: 'connection.preauth-refused' });
           return new Response('too many connections waiting for hello', { status: 503 });
         }
         const connection = new ServerConnection(core, !isLoopbackHost(request.headers.get('host')));
@@ -486,7 +487,8 @@ export function startServer(options: ServerOptions): RunningServer {
 
       drain(socket) { socket.data.connection.drain(); },
 
-      close(socket) {
+      close(socket, code, reason) {
+        logConnectionClosed(core, socket.data.connection, code, reason);
         core.procs.unwatchResources(socket.data.connection.id);
         core.coordination.bridge.disconnect(socket.data.connection.id);
         core.browser.disconnect(socket.data.connection.id);

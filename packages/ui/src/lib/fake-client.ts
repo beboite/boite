@@ -20,7 +20,7 @@ import { activityMethods, pauseActivity } from './fake-client/activity';
 import { brainMethods } from './fake-client/brain';
 import { FakeContext, type FakeClientOptions, type FakeMethods } from './fake-client/context';
 import { hookMethods, recordHookRun } from './fake-client/hooks';
-import { logMethods } from './fake-client/logs';
+import { logMethods, seedDiagnostics } from './fake-client/logs';
 import { coordinationMethods, registerCore, unregisterCore } from './fake-client/coordination';
 import { seedStewardDemo, stewardMethods } from './fake-client/stewards';
 import { delegationMethods, seedDelegationDemo } from './fake-client/delegation';
@@ -88,6 +88,7 @@ export class FakeClient implements ObservableClient {
     this.#methods = this.#answer(ctx);
     registerCore(ctx);
     seed(ctx);
+    seedDiagnostics(ctx);
     if (options.delegationDemo) seedDelegationDemo(ctx);
     if (options.stewardDemo) seedStewardDemo(ctx);
     if (options.uninstalled) {

@@ -18,11 +18,13 @@ import { ImportStore } from './imports.ts';
 import { Journal } from './journal.ts';
 import { scheduleEventRetention, scheduleInlineValueMoves } from './journal/retention.ts';
 import { KeybindingStore } from './keybindings.ts';
-import { DiagnosticLogs } from './logs.ts';
+import { DiagnosticLogs, type ThreadIdentity } from './logs.ts';
+import { Diagnostics } from './diagnostics.ts';
 import { registerModules } from './modules.ts';
 import { currentOs } from './paths.ts';
 import { lanAddress } from './server/lan.ts';
 import { ProcRegistry } from './procs.ts';
+import { attachResourceLog } from './resource-log.ts';
 import { withLoad } from './threads/records.ts';
 import { ProjectStore } from './projects.ts';
 import { PROVIDER_SWITCHES, ProviderRegistry } from './providers/loader.ts';
@@ -76,6 +78,8 @@ export interface CoreOptions {
   channel?: Channel;
   /** The executable owns process exit; embedded cores may omit it. */
   onShutdown?: () => void;
+  /** Whether the data directory is the channel's default or one a flag or BOITE_DATA_DIR named; the log never holds the path. */
+  dataDirKind?: 'default' | 'custom';
 }
 
 /**
@@ -120,6 +124,7 @@ export class Core {
 
   readonly bus: Bus;
   readonly logs: DiagnosticLogs;
+  readonly diagnostics: Diagnostics;
   readonly pullRequests: PullRequests;
   readonly mergedPrArchive: MergedPrArchive;
   readonly journal: Journal;
@@ -205,6 +210,7 @@ export class Core {
       || [...threads.agentState.background.values()].some(tasks => tasks.length > 0)) return 'busy';
     // Persist an updater's acknowledgement before closing admission or scheduling exit.
     beforeShutdown?.();
+    this.logs.info('Idle shutdown accepted: no turn, request or agent process is running', { source: 'core', event: 'core.idle-shutdown.accepted' });
     this.#idleShutdownAdmitted = true;
     this.#stopping = true;
     this.threads.focus.close();
@@ -223,6 +229,7 @@ export class Core {
   requestHandoffShutdown(graceMs?: number): 'accepted' | 'unsupported' {
     if (!this.#onShutdown) return 'unsupported';
     if (this.#shutdownRequested || this.threads.handoff.active) return 'accepted';
+    this.logs.info(`Restart handoff started: ${this.scheduler.state().running.length} running turns end their tool call, then stop`, { source: 'core', event: 'core.handoff.started', data: { running: this.scheduler.state().running.length, graceMs: graceMs ?? null } });
     this.#stopping = true;
     void this.threads.handoff.begin(graceMs).then(() => this.requestShutdown());
     return 'accepted';
@@ -256,7 +263,18 @@ export class Core {
     this.logs = new DiagnosticLogs(this.dataDir, [this.token]);
     this.logs.attach(this.bus);
     this.bus.onError = (message) => this.log('error', message);
+    let phaseAt = performance.now();
+    const phase = (event: string, message: string, data?: Record<string, string | number | boolean | null>): void => {
+      const now = performance.now();
+      this.logs.info(`${message} in ${Math.round(now - phaseAt)} ms`, { source: 'startup', event, durationMs: now - phaseAt, ...(data ? { data } : {}) });
+      phaseAt = now;
+    };
     this.journal = new Journal(join(this.dataDir, 'journal.db'), { onError: (message) => this.log('error', message) });
+    const schema = this.journal.schema;
+    phase('startup.journal-opened', schema.from === schema.to ? `Journal opened at schema ${schema.to}` : `Journal opened and migrated from schema ${schema.from} to ${schema.to}`,
+      { schemaFrom: schema.from, schemaTo: schema.to, dataDir: options.dataDirKind ?? 'custom', channel: this.channel });
+    this.logs.describeThread = threadIdentities(this.journal);
+    this.diagnostics = new Diagnostics(this);
     this.stopArtifactRetention = scheduleArtifactRetention(this);
     // The journal just erased every incognito conversation; their folders follow.
     eraseIncognitoRoot(this.dataDir, (message) => console.error(message));
@@ -268,7 +286,11 @@ export class Core {
     this.providers.loadSwitches(this.journal.getSetting(PROVIDER_SWITCHES));
     this.accounts = new AccountStore(this);
     this.projects = new ProjectStore(this);
-    this.procs = new ProcRegistry(this.journal, this.bus, undefined, { summarize: (thread) => withLoad(this, thread) });
+    this.procs = new ProcRegistry(this.journal, this.bus, undefined, {
+      summarize: (thread) => withLoad(this, thread),
+      diagnostic: (message, context) => this.logs.warn(message, { source: 'guards', ...context }),
+    });
+    attachResourceLog(this);
     this.scheduler = new Scheduler(this);
     this.threads = new ThreadStore(this);
     this.quotas = new QuotaStore(this);
@@ -296,6 +318,7 @@ export class Core {
     this.workforce = new AgentStore(this);
     this.pullRequests = new PullRequests(this);
     registerModules(this);
+    phase('startup.stores-ready', 'Stores and RPC handlers ready', { methods: this.router.methods().length });
     this.#onShutdown = options.onShutdown;
     this.router.register('core.shutdown', () => {
       if (!this.requestShutdown()) throw new Error('This embedded core does not support process shutdown.');
@@ -309,17 +332,22 @@ export class Core {
     // The journal is open and no socket is accepted yet: whatever a dead core
     // left running or queued is closed here, or nothing ever would.
     this.threads.agentState.backgroundHistory.interruptLive();
-    this.threads.recoverStuckTurns();
+    const recovered = this.threads.recoverStuckTurns();
     this.threads.cards.restoreAsyncQuestions();
+    phase('startup.recovered', `Previous run recovered, ${recovered} unfinished turns`, { stuckTurns: recovered });
     queueMicrotask(() => this.threads.titles.recover());
     this.agentRuntime = new AgentRuntime(this);
     this.brain.start();
     this.mergedPrArchive = new MergedPrArchive(this, this.pullRequests);
     this.mergedPrArchive.start();
-    this.logs.record('info', 'Core started', { source: 'core', event: 'core.started' }, this.startedAt);
+    this.logs.record('info', `Core ${this.version} started in ${Date.now() - this.startedAt} ms, ${process.platform} ${process.arch}, Bun ${process.versions.bun ?? 'unknown'}`, {
+      source: 'core', event: 'core.started', durationMs: Date.now() - this.startedAt,
+      data: { version: this.version, channel: this.channel, os: process.platform, arch: process.arch, bun: process.versions.bun ?? null, pid: process.pid, cliShim: this.cliDir !== null, trace: this.procs.capability().mode },
+    }, this.startedAt);
   }
 
   setEndpoint(host: string, port: number): void {
+    this.logs.info(`Listening on ${host}:${port}`, { source: 'core', event: 'core.listening', data: { port } });
     this.endpoint = { host, port };
   }
 
@@ -404,6 +432,7 @@ export class Core {
   get stopping(): boolean { return this.#stopping; }
 
   async close(): Promise<void> {
+    const closingAt = performance.now();
     await this.browser.close();
     this.devices.stop();
     this.artifactPreviews.stop();
@@ -449,7 +478,25 @@ export class Core {
     this.journal.close();
     // Every agent is stopped by now, so nothing holds an incognito folder.
     eraseIncognitoRoot(this.dataDir, (message) => console.error(message));
-    this.logs.record('info', 'Core stopped', { source: 'core', event: 'core.stopped' });
+    this.logs.record('info', `Core stopped after ${Math.round((Date.now() - this.startedAt) / 1000)} s up; closing took ${Math.round(performance.now() - closingAt)} ms`, { source: 'core', event: 'core.stopped', durationMs: performance.now() - closingAt, data: { uptimeS: Math.round((Date.now() - this.startedAt) / 1000) } });
     await this.logs.close();
   }
+}
+
+/**
+ * Who each thread is, for the log records about it. A burst of records about
+ * one turn reads the journal once a second, not once a record.
+ */
+function threadIdentities(journal: Journal): (threadId: string) => ThreadIdentity | null {
+  const cache = new Map<string, { at: number; identity: ThreadIdentity | null }>();
+  return (threadId) => {
+    const now = Date.now();
+    const kept = cache.get(threadId);
+    if (kept !== undefined && now - kept.at < 1000) return kept.identity;
+    const thread = journal.getThread(threadId);
+    const identity = thread === null ? null : { providerId: thread.providerId, model: thread.model, parentThreadId: thread.parentThreadId ?? null };
+    cache.set(threadId, { at: now, identity });
+    if (cache.size > 512) cache.delete(cache.keys().next().value!);
+    return identity;
+  };
 }

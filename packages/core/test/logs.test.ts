@@ -112,7 +112,10 @@ describe('bounded persistent diagnostics', () => {
       expect(records.map(record => record.event)).toEqual(['process.exited', 'turn.finished', 'process.started', 'turn.started', 'turn.queued']);
       expect(records.every(record => record.turnId === turn.id)).toBe(true);
       expect(records[1]?.level).toBe('error');
-      expect(JSON.stringify(records)).not.toMatch(/private|rolled-back|--prompt|provider/);
+      // The program's file name says which tool exited; its folder and arguments stay in the trace view.
+      expect(JSON.stringify(records)).not.toMatch(/private|rolled-back|--prompt|secret/);
+      expect(records[0]?.data).toMatchObject({ pid: 123, exe: 'provider', exitCode: 0 });
+      expect(records[1]?.durationMs).toBe(2);
     } finally { bus.dispose(); await logs.close(); rmSync(directory, { recursive: true, force: true }); }
   });
 
@@ -153,31 +156,32 @@ describe('bounded persistent diagnostics', () => {
     const reports: string[] = [];
     const logs = new DiagnosticLogs(directory, [], message => reports.push(message));
     try {
-      for (let index = 0; index < 300; index += 1) logs.record('info', `burst ${index}`);
+      for (let index = 0; index < 1100; index += 1) logs.record('info', `burst ${index}`, {}, 1000 + index);
       const records = await logs.query({ limit: 2 });
-      expect(records[0]).toMatchObject({ event: 'logs.dropped', level: 'warn', message: '44 diagnostics were not persisted because the pending buffer was full' });
-      expect(records[1]?.message).toBe('burst 299');
+      expect(records[0]).toMatchObject({ event: 'logs.dropped', level: 'warn', message: '76 diagnostics were not persisted because the pending buffer was full', data: { count: 76 } });
+      expect(records[1]?.message).toBe('burst 1099');
       expect(reports).toHaveLength(1);
       await logs.close();
       const restarted = new DiagnosticLogs(directory);
       try {
         const retained = await restarted.query({ limit: 2 });
         expect(retained[0]?.event).toBe('logs.dropped');
-        expect(retained[1]?.message).toBe('burst 255');
+        expect(retained[1]?.message).toBe('burst 1023');
       } finally { await restarted.close(); }
     } finally { await logs.close(); rmSync(directory, { recursive: true, force: true }); }
   });
 });
 
-const invalidQueries: unknown[] = [null, [], 'all', { limit: 0 }, { limit: 201 }, { limit: 1.5 }, { limit: null }, { limit: '10' }, { threadId: '' }, { threadId: 'x'.repeat(201) }, { threadId: 'bad\nthread' }, { level: 'debug' }, { level: {} }, { before: 1 }];
+const invalidQueries: unknown[] = [null, [], 'all', { limit: 0 }, { limit: 1001 }, { limit: 1.5 }, { limit: null }, { limit: '10' }, { threadId: '' }, { threadId: 'x'.repeat(201) }, { threadId: 'bad\nthread' }, { level: 'trace' }, { level: {} }, { minLevel: 'verbose' }, { origin: 'kernel' }, { since: -1 }, { anonymize: 'yes' }, { before: 1 }];
 
 test('real logs queries enforce strict validation, newest-first filters and owner-only access', async () => {
   const harness = await startTestCore();
   try {
     const owner = await harness.connect();
     const { threadId } = await echoThread(harness, owner);
-    harness.core.bus.emit('core.log', { at: 1, level: 'info', message: 'first diagnostic' });
-    harness.core.bus.emit('core.log', { at: 2, level: 'warn', message: 'second diagnostic' });
+    // Newest first is by time: a record dated in the past sorts below newer ones.
+    harness.core.bus.emit('core.log', { at: Date.now() + 1000, level: 'info', message: 'first diagnostic' });
+    harness.core.bus.emit('core.log', { at: Date.now() + 2000, level: 'warn', message: 'second diagnostic' });
     for (const client of [owner]) {
       expect((await client.call('core.logs', { limit: 2 })).map(record => record.message)).toEqual(['second diagnostic', 'first diagnostic']);
       expect((await client.call('core.logs', { level: 'warn' }))[0]?.message).toBe('second diagnostic');
@@ -197,7 +201,7 @@ test('real logs queries enforce strict validation, newest-first filters and owne
       phone.on('core.log', log => phoneLogs.push(log));
       const oauth = 'https://login.example.test/authorize?client_id=synthetic-client&redirect_uri=http%3A%2F%2Flocalhost%2Fcallback&scope=openid&state=synthetic-state&code_challenge=synthetic-challenge&nonce=synthetic-nonce';
       const message = `Open the following link: ${oauth}\ncore handle ${harness.token}\x00\x1b`;
-      harness.core.bus.emit('core.log', { level: 'warn', at: 3, message, source: 'acp', event: 'provider.output', kind: 'provider-output', threadId });
+      harness.core.bus.emit('core.log', { level: 'warn', at: Date.now() + 3000, message, source: 'acp', event: 'provider.output', kind: 'provider-output', threadId });
       const [retained] = await owner.call('core.logs', { limit: 1 });
       expect(live).toHaveLength(1);
       expect(live[0]).toMatchObject({ kind: 'provider-output', source: 'acp', threadId, message: `Open the following link: ${oauth}\ncore handle [redacted]` });
@@ -237,7 +241,7 @@ test('unexpected RPC causes persist with request correlation while clients recei
   } finally { await harness.stop(); }
 });
 
-test('known stderr remains in the existing turn error while its fixed diagnostic and correlation are retained', async () => {
+test('known stderr remains in the turn error, reaches the owner log only as data.stderrTail and never an agent view or export', async () => {
   const harness = await startTestCore();
   const raw = 'the test agent exited with code 17: private prompt echoed to stderr';
   const diagnostic = 'the test agent exited with code 17';
@@ -252,7 +256,13 @@ test('known stderr remains in the existing turn error while its fixed diagnostic
     await waitFor(() => harness.core.journal.listTurns(threadId).some(saved => saved.id === turn.id && saved.status === 'error'));
     expect(harness.core.journal.listTurns(threadId)[0]?.error).toBe(raw);
     const records = await owner.call('core.logs', { threadId });
-    expect(JSON.stringify(records)).not.toContain('private prompt');
+    // The agent's stderr is the cause a developer needs: kept for the owner in one field, never in a message.
+    const tail = records.find(record => record.event === 'turn.failed.stderr');
+    expect(tail).toMatchObject({ level: 'warn', threadId, turnId: turn.id, data: { stderrTail: 'private prompt echoed to stderr' } });
+    expect(records.map(record => record.message).join('\n')).not.toContain('private prompt');
+    expect(JSON.stringify(records.filter(record => record !== tail))).not.toContain('private prompt');
+    expect(JSON.stringify(await owner.call('diagnostics.logs', { threadId, scope: 'thread' }))).not.toContain('private prompt');
+    expect((await owner.call('diagnostics.export', { focusThreadId: threadId })).text).not.toContain('private prompt');
     expect(records.find(record => record.event === 'turn.failed')).toMatchObject({ source: 'echo', threadId, turnId: turn.id, message: `turn ${turn.id} failed: ${diagnostic}` });
     expect(records.find(record => record.event === 'provider.output')?.message).toBe('[provider output omitted]');
     const error = withLogDiagnostic(new Error(raw), diagnostic);
@@ -271,7 +281,7 @@ test('real echo turns capture queued, started, finished lifecycle and CLI reads 
     const turn = await owner.call('turns.start', { threadId, prompt: 'private prompt should never be diagnostic' });
     await waitFor(() => harness.core.journal.listTurns(threadId).some(saved => saved.id === turn.id && saved.status === 'done'));
     const records = await owner.call('core.logs', { threadId });
-    expect(records.map(record => record.event)).toEqual(['turn.finished', 'turn.started', 'turn.queued']);
+    expect(records.map(record => record.event)).toEqual(['turn.finished', 'turn.attempt.finished', 'turn.attempt.started', 'turn.started', 'turn.queued']);
     expect(records.every(record => record.turnId === turn.id)).toBe(true);
     expect(JSON.stringify(records)).not.toContain('private prompt');
     writeFileSync(join(harness.dataDir, 'core.json'), JSON.stringify({ port: harness.server.port, host: '127.0.0.1', token: harness.token }), { mode: 0o600 });
@@ -280,7 +290,7 @@ test('real echo turns capture queued, started, finished lifecycle and CLI reads 
       const code = await runCli(['logs', '--data-dir', harness.dataDir, '--thread', threadId, '--limit', '1', ...(json ? ['--json'] : [])], { env: {}, cwd: harness.dataDir, out: value => { output += value; }, err: value => { errors += value; } });
       expect({ code, errors }).toEqual({ code: 0, errors: '' });
       if (json) expect(JSON.parse(output)[0]).toMatchObject({ event: 'turn.finished', threadId, turnId: turn.id });
-      else expect(output).toContain(`INFO turns/turn.finished thread=${threadId} turn=${turn.id} Turn finished: done`);
+      else expect(output).toMatch(new RegExp(`^\\d{4}-\\d\\d-\\d\\d \\d\\d:\\d\\d:\\d\\d\\.\\d{3}Z INFO  core  turns/turn\\.finished \\[${threadId} echo/echo turn=${turn.id}\\] \\(\\d+ ms\\) Turn finished: done \\{status=done`));
     }
     let output = '';
     expect(await runCli(['logs', '--data-dir', harness.dataDir, '--json'], { env: {}, cwd: harness.dataDir, out: value => { output += value; }, err: () => undefined })).toBe(0);

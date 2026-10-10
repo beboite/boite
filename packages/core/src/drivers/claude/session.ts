@@ -11,6 +11,7 @@ import { childEnv, liveSetup, PROMPT_EFFORT, PromptQueue, STDERR_MAX } from './q
 import type { ClaudeDeps, LiveSetup } from './query.ts';
 import type { ClaudeTurn } from './turn.ts';
 import { SessionRetention } from '../session-retention.ts';
+import { noteClaudeMessage } from './diagnostics.ts';
 
 /** How long `stop()` lets the CLI end its turn before the abort signal takes it. */
 /** Claude Code's own subagent and workflow tools; `Task` is the older name of `Agent`. */
@@ -87,6 +88,8 @@ export class ClaudeSession {
   private sessionId: string | null;
   private idle: Timer | null = null;
   private started = false;
+  /** When the CLI was spawned, for the time it took to say init. */
+  private spawnedAt: number | null = null;
   private closing = false;
   private ended = false;
   private loginRejected = false;
@@ -456,6 +459,7 @@ export class ClaudeSession {
     const sessionId = (message as { session_id?: string }).session_id;
     if (typeof sessionId === 'string' && sessionId.length > 0) this.sessionId = sessionId;
     if (message.type === 'system') this.noteTasks(message);
+    noteClaudeMessage(this.head()?.ctx ?? this.ctx, message, this.spawnedAt);
     if (message.type === 'system' && message.subtype === 'init') {
       for (const report of this.fastReports.splice(0)) report(message.fast_mode_state);
     }
@@ -716,6 +720,7 @@ export class ClaudeSession {
   }
 
   private spawnCli(options: SdkSpawnOptions): SpawnedChild {
+    this.spawnedAt = Date.now();
     const child = this.ctx.spawnChild(options.command, options.args, {
       cwd: options.cwd,
       env: options.env,

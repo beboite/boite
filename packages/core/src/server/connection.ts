@@ -33,6 +33,10 @@ export class ServerConnection implements Connection {
   identity: Identity = { principal: 'owner', sessionId: null, threadId: null };
   transport: TransportOptions = {};
   sentFrom: SentFrom | null = null;
+  /** For the log: when the socket opened, the client name hello gave and the close the core asked for. */
+  readonly openedAt = Date.now();
+  clientName = 'unknown';
+  closedBy: { code: number; reason: string } | null = null;
 
   private socket: ServerWebSocket<SocketData> | null = null;
   private congested = false;
@@ -231,6 +235,8 @@ export class ServerConnection implements Connection {
   close(code: number, reason?: string): void {
     if (this.closed) return;
     this.closed = true;
+    // The server logs a close before its own handler calls this, so a value here is the core's choice.
+    this.closedBy = { code, reason: reason ?? '' };
     for (const callback of [...this.closeListeners]) {
       try { callback(); } catch { /* One held request must not interrupt socket cleanup. */ }
     }

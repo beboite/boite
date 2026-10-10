@@ -31,9 +31,12 @@ export class ThreadRecovery {
     const inherited = handoff.inheritedTurns();
     /** Threads whose queued turn goes back in line once the server listens. */
     const waiting = new Set<ThreadId>();
+    const counts = { requeued: 0, held: 0, handedOver: 0, failed: 0 };
     for (const turn of stuck) {
       const previous = turn.status;
       if (handoff.requeues(turn)) {
+        counts.requeued += 1;
+        this.core.logs.info(`Turn ${turn.id} was handed over by the previous core and goes back in the queue`, { source: 'turns', event: 'turn.recovery.requeued', threadId: turn.threadId, turnId: turn.id, data: { previous } });
         waiting.add(turn.threadId);
         continue;
       }
@@ -46,22 +49,33 @@ export class ThreadRecovery {
           if (thread.status !== 'queued') saveThread(this.core, { ...thread, status: 'queued' }, 'thread.status');
         })());
         this.core.scheduler.enqueue(held, held.execution!.accountId);
+        counts.held += 1;
+        this.core.logs.info(`Turn ${turn.id} was queued when the previous core stopped; it is held until the user resumes or discards it`, { source: 'turns', event: 'turn.recovery.held', threadId: turn.threadId, turnId: turn.id, data: { reason: held.queueHold!.reason } });
         waiting.add(turn.threadId);
         continue;
       }
       if (previous === 'running' && inherited.get(turn.id) === 'running') {
         // Killed during a restart handoff: the next turn of the thread resumes it, so this is no failure.
         this.core.journal.db.transaction(() => this.closeHandedOver(turn))();
+        counts.handedOver += 1;
+        this.core.logs.info(`Turn ${turn.id} was stopped by a restart handoff; the thread's next turn resumes it`, { source: 'turns', event: 'turn.recovery.handed-over', threadId: turn.threadId, turnId: turn.id });
         continue;
       }
       this.core.journal.db.transaction(() => {
         this.failStuckTurn(turn, previous === 'running' ? CRASH_WHILE_RUNNING : CRASH_WHILE_QUEUED);
         if (previous === 'queued' && turn.execution?.operation === 'coordination') this.core.coordination.queuedCancelled(turn.threadId);
       })();
+      counts.failed += 1;
       this.core.log(
         'warn',
         `recovered turn ${turn.id} of thread ${turn.threadId}, left ${previous} by a stopped core`,
+        { source: 'turns', event: 'turn.recovery.failed', threadId: turn.threadId, turnId: turn.id, data: { previous } },
       );
+    }
+    if (stuck.length > 0) {
+      this.core.logs.warn(`Recovered ${stuck.length} unfinished turns left by the previous core: ${counts.requeued} requeued, ${counts.held} held, ${counts.handedOver} handed over, ${counts.failed} marked failed`, {
+        source: 'startup', event: 'startup.turns-recovered', data: { total: stuck.length, ...counts },
+      });
     }
     for (const thread of this.core.journal.listThreads()) {
       if (['queued', 'running', 'waiting'].includes(thread.status) && !waiting.has(thread.id)) {

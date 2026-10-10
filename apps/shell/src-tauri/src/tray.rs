@@ -31,9 +31,14 @@ pub(crate) fn quit_guard(app: AppHandle, webview: Webview) -> Result<(), String>
 }
 
 pub(crate) fn request_quit<R: Runtime>(app: &AppHandle<R>) {
-    if app.state::<QuitGuard>().0.load(Ordering::Acquire) {
+    let guarded = app.state::<QuitGuard>().0.load(Ordering::Acquire);
+    crate::shell_log::info("shell", "shell.quit-requested",
+        if guarded { "quit requested; the UI asks for confirmation first" } else { "quit requested; quitting now" },
+        serde_json::json!({ "confirm": guarded }));
+    if guarded {
         if let Err(error) = app.emit_to("main", "boite:quit-requested", ()) {
             eprintln!("[shell] quit confirmation could not be requested: {error}");
+            crate::shell_log::warn("shell", "shell.quit-confirm-failed", format!("quit confirmation could not be requested, quitting now: {error}"), serde_json::json!({}));
             quit(app);
             return;
         }
@@ -53,6 +58,7 @@ pub(crate) fn quit_shell(app: AppHandle, webview: Webview) -> Result<(), String>
 }
 
 pub(crate) fn quit<R: Runtime>(app: &AppHandle<R>) {
+    crate::shell_log::info("shell", "shell.quit", "quitting the shell", serde_json::json!({}));
     if let Some(state) = app.try_state::<CoreState>() {
         state.kill_child();
     }
@@ -98,14 +104,27 @@ pub(crate) fn build_tray<R: Runtime>(app: &AppHandle<R>, channel: Channel) -> ta
                 // Enter that did not come; `enter` ignores the repeats.
                 TrayIconEvent::Enter { .. } | TrayIconEvent::Move { .. } => quota_window::enter(tray.app_handle()),
                 TrayIconEvent::Leave { .. } => quota_window::leave(tray.app_handle()),
-                TrayIconEvent::DoubleClick { button: MouseButton::Left, .. } => show_main(tray.app_handle()),
-                _ => {}
+                TrayIconEvent::DoubleClick { button: MouseButton::Left, .. } => {
+                    crate::watchdog::saw(crate::watchdog::Seen::TrayEvent);
+                    crate::shell_log::info("tray", "shell.tray.action", "tray icon double-clicked: showing the window", serde_json::json!({ "action": "double-click" }));
+                    show_main(tray.app_handle())
+                }
+                _ => crate::watchdog::saw(crate::watchdog::Seen::TrayEvent),
             }
         })
-        .on_menu_event(|app, event| match event.id().as_ref() {
-            "show" => show_main(app),
-            "quit" => request_quit(app),
-            _ => {}
+        .on_menu_event(|app, event| {
+            crate::watchdog::saw(crate::watchdog::Seen::MenuEvent);
+            match event.id().as_ref() {
+                "show" => {
+                    crate::shell_log::info("tray", "shell.tray.action", "tray menu Show chosen", serde_json::json!({ "action": "show" }));
+                    show_main(app)
+                }
+                "quit" => {
+                    crate::shell_log::info("tray", "shell.tray.action", "tray menu Quit chosen", serde_json::json!({ "action": "quit" }));
+                    request_quit(app)
+                }
+                _ => {}
+            }
         });
     if let Some(icon) = app.default_window_icon().cloned() {
         builder = builder.icon(icon);

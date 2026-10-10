@@ -18,7 +18,8 @@
  * method added tomorrow is refused to both until someone decides otherwise,
  * on purpose.
  * core.logs stays owner-only: diagnostic causes can describe other threads,
- * local paths and account failures even after credential redaction.
+ * local paths and account failures even after credential redaction. Agents
+ * read the anonymized diagnostics.* view instead, which the owner can turn off.
  * resources.usage permits paired reads of sanitized metrics; process traces,
  * resource settings and tree termination remain owner-only.
  * speech.streamStart/Chunk/Finish permit phone dictation only through the
@@ -136,6 +137,11 @@ export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMeth
   ['git.diff', 'both sides of one file, for the same reason'],
   ['files.list', 'one directory of the working directory it already runs in'],
   ['files.read', 'one file of it, text inline and anything else through a ticket'],
+  // Diagnostics reach an agent anonymized, and only while the owner leaves agentLogAccess on (checked in diagnostics.ts).
+  ['diagnostics.logs', 'anonymized app records so it can tell whether Boite itself failed; paths, names and addresses are placeholders'],
+  ['diagnostics.summary', 'the anonymized environment and grouped recent problems'],
+  ['diagnostics.export', 'the anonymized export a developer reads, the same file the owner would send'],
+  ['diagnostics.issue', 'a GitHub issue draft about Boite; it is created only when the agent submits it with the owner signed in to gh'],
 ]);
 
 export function isAgentMethod(method: RpcMethodName): boolean {

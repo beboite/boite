@@ -5,9 +5,11 @@ import type { Core } from '../core.ts';
 import { messageOf } from '../errors.ts';
 import { NONCE_MAX, NONCE_MIN, nonceProblem, principalOf, type Identity } from '../sessions.ts';
 import type { ServerConnection } from './connection.ts';
+import { logHelloAccepted, logHelloRefused } from './connection-log.ts';
 
 export function hello(core: Core, connection: ServerConnection, id: number | string, method: string, rawParams: unknown): void {
   if (method !== 'hello') {
+    logHelloRefused(core, connection, `the first frame was ${method || 'not a method call'}, not hello`, 'unknown');
     connection.sendResponse({
       jsonrpc: '2.0',
       id,
@@ -19,7 +21,9 @@ export function hello(core: Core, connection: ServerConnection, id: number | str
   const params = rawParams as
     | { token?: unknown; grant?: unknown; ticket?: unknown; nonce?: unknown; protocolVersion?: unknown; client?: { name?: unknown; version?: unknown; device?: unknown } }
     | undefined;
+  const clientName = typeof params?.client?.name === 'string' ? params.client.name.slice(0, 40) : 'unknown';
   const refuse = (message: string, reason: string): void => {
+    logHelloRefused(core, connection, `${reason}: ${message}`, clientName);
     connection.sendResponse({ jsonrpc: '2.0', id, error: { code: RpcErrorCode.Unauthorized, message } });
     connection.close(RpcCloseCode.Unauthorized, reason);
   };
@@ -40,6 +44,7 @@ export function hello(core: Core, connection: ServerConnection, id: number | str
       ? 'nonce goes with a grant; a hello with a token takes none'
       : nonceProblem(params.nonce);
     if (problem !== null) {
+      logHelloRefused(core, connection, `bad nonce: ${problem}`, clientName);
       connection.sendResponse({
         jsonrpc: '2.0', id, error: {
           code: RpcErrorCode.InvalidParams, message: problem, data: { field: 'nonce', min: NONCE_MIN, max: NONCE_MAX },
@@ -51,6 +56,7 @@ export function hello(core: Core, connection: ServerConnection, id: number | str
   }
   const wrongProtocol = (): boolean => {
     if (params?.protocolVersion === PROTOCOL_VERSION) return false;
+    logHelloRefused(core, connection, `protocol version ${typeof params?.protocolVersion === 'number' ? params.protocolVersion : 'missing'}, this core speaks ${PROTOCOL_VERSION}`, clientName);
     connection.sendResponse({
       jsonrpc: '2.0', id, error: {
         code: RpcErrorCode.InvalidParams, message: `protocolVersion must be ${PROTOCOL_VERSION}`,
@@ -92,6 +98,8 @@ export function hello(core: Core, connection: ServerConnection, id: number | str
   connection.identity = identity;
   connection.sentFrom = sentFromOf(identity, client.name, params?.client?.device, connection.remote);
   connection.authenticated = true;
+  connection.clientName = clientName;
+  logHelloAccepted(core, connection, client.version.slice(0, 40));
   connection.sendResponse({
     jsonrpc: '2.0',
     id,

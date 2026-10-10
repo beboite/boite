@@ -148,6 +148,11 @@ function recheckWhenDue(program: string, args: string[]): void {
  * version. With `ask` false nothing is ever started: the answer is what is
  * already known, for a provider that is turned off and must start nothing.
  */
+/** The version a program last reported, without asking it again; null when unknown. */
+export function knownVersion(program: string): string | null {
+  return readings.get(program)?.version ?? null;
+}
+
 export function majorAt(program: string, args: readonly string[], ask = true): number | null | undefined {
   let stat: { mtimeMs: number; size: number };
   try {

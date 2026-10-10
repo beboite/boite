@@ -241,7 +241,8 @@ describe('scheduler', () => {
     expect(harness.core.scheduler.state().running.map(entry => entry.turnId)).toEqual([immediate.id, toRelease.id]);
     const records = (await harness.core.logs.query({ limit: 200 })).reverse();
     for (const turn of [immediate, toStop, toArchive, toRelease]) {
-      const lifecycle = records.filter(record => record.turnId === turn.id);
+      // Waits, stops and attempts are logged too; this checks the order of the three lifecycle records.
+      const lifecycle = records.filter(record => record.turnId === turn.id && ['turn.queued', 'turn.started', 'turn.finished'].includes(record.event));
       expect(lifecycle.filter(record => record.event === 'turn.queued')).toHaveLength(1);
       expect(lifecycle[0]).toMatchObject({ event: 'turn.queued', at: turn.queuedAt });
       expect(lifecycle[1]?.event).toBe(turn === toStop || turn === toArchive ? 'turn.finished' : 'turn.started');

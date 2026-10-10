@@ -387,6 +387,15 @@ export class AcpSession {
   }
 
   private async open(ctx: TurnContext): Promise<void> {
+    const openedAt = Date.now();
+    await this.openSession(ctx);
+    const ready = Date.now() - openedAt;
+    ctx.diagnostic?.('info', `${ctx.provider.id} ACP session ready in ${ready} ms: ${this.loaded ? 'loaded the saved session' : this.replaces !== null ? 'new session replacing one it cannot load' : 'new session'}`, {
+      event: 'driver.session.ready', durationMs: ready, data: { loaded: this.loaded, canLoad: this.canLoad, replaced: this.replaces !== null, images: this.imagesSupported },
+    });
+  }
+
+  private async openSession(ctx: TurnContext): Promise<void> {
     const sdk = await this.deps.loadSdk();
     // A stop while the SDK loaded: nothing may be spawned for a session that is over.
     if (this.ended) throw new Error('the acp session was closed before it started');
@@ -428,6 +437,9 @@ export class AcpSession {
     });
     this.canLoad = init.agentCapabilities?.loadSession === true;
     this.imagesSupported = init.agentCapabilities?.promptCapabilities?.image === true;
+    ctx.diagnostic?.('info', `${ctx.provider.id} answered initialize as ${init.agentInfo?.name ?? 'an unnamed agent'} ${init.agentInfo?.version ?? ''}, ACP protocol ${init.protocolVersion}`.trim(), {
+      event: 'driver.initialized', data: { agent: init.agentInfo?.name ?? null, version: init.agentInfo?.version ?? null, protocol: init.protocolVersion, loadSession: this.canLoad },
+    });
 
     if (ctx.sessionId !== null && this.canLoad) {
       // A fresh core has no probe cache, and session/load may omit controls.
@@ -457,6 +469,7 @@ export class AcpSession {
         const reason = rpcReason(error);
         ctx.log('warn', `acp: ${ctx.provider.id} refused to load the session ${ctx.sessionId}: ${reason}`);
         const kind = loadRefusal(error, reason);
+        ctx.diagnostic?.('warn', `session/load refused with code ${String((error as { code?: unknown }).code)}, read as ${kind}`, { event: 'driver.session.load-refused', data: { code: (error as { code?: number }).code ?? null, kind } });
         if (kind === 'gone' || (kind === 'unsure' && this.memory.refusedLoads.has(refusedKey))) {
           // Pruned, migrated, another project: retrying the same id would fail
           // every turn of the thread from now on.

@@ -4,6 +4,7 @@ import { RpcFailure } from '../errors.ts';
 import { logMessageOf } from '../log-errors.ts';
 import { ServerConnection } from './connection.ts';
 import { hello } from './hello.ts';
+import { logRpcTiming } from './connection-log.ts';
 
 export async function handleFrame(core: Core, connection: ServerConnection, raw: string): Promise<void> {
   let frame: { id?: unknown; method?: unknown; params?: unknown; progress?: unknown };
@@ -40,12 +41,15 @@ export async function handleFrame(core: Core, connection: ServerConnection, raw:
     return;
   }
 
+  const startedAt = performance.now();
   try {
     const result = await core.router.dispatch(method, frame.params, { connection });
+    logRpcTiming(core, connection, method, String(id), performance.now() - startedAt, null);
     // A client that counts what it receives gets a long answer in slices it can count.
     connection.sendResponse({ jsonrpc: '2.0', id, result }, frame.progress === true);
   } catch (error) {
     if (error instanceof RpcFailure) {
+      logRpcTiming(core, connection, method, String(id), performance.now() - startedAt, error);
       connection.sendResponse({ jsonrpc: '2.0', id, error: error.toError() });
       return;
     }
@@ -63,7 +67,7 @@ export async function handleFrame(core: Core, connection: ServerConnection, raw:
       cause = cause instanceof Error ? cause.cause : undefined;
     }
     core.logs.record('error', `${method} failed: ${causes.join('; caused by: ')}`, {
-      source: 'rpc', event: 'rpc.failed', requestId: String(id),
+      source: 'rpc', event: 'rpc.failed', requestId: String(id), durationMs: performance.now() - startedAt, data: { method, principal: connection.identity.principal },
       ...(connection.identity.threadId === null ? {} : { threadId: connection.identity.threadId }),
     });
     connection.sendResponse({

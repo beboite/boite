@@ -193,7 +193,8 @@ The CLI says hello with that token and becomes the `agent` principal of that
 one thread. `AGENT_METHODS` in `packages/core/src/access.ts` lists its allowed
 calls and reasons. Each call is bound to that authenticated thread; delegation
 and coordination additionally check relationships and authorized contacts.
-An owner-only method such as `files.write`, `trace.get` or `core.logs` is refused. The
+An owner-only method such as `files.write`, `trace.get` or `core.logs` is refused;
+the anonymized `diagnostics.*` view is the agent's ([diagnostics](#diagnostics)). The
 token is forgotten when the thread is
 archived or removed, a socket an agent already opened with it is closed at the
 same moment, and the token is never written to disk.
@@ -456,23 +457,44 @@ only the owner can change profiles or resume a paused team.
 prints the whole format, `workflow run` starts it and opens it in the panel,
 and the results come back as one message when the run ends.
 
-## Owner diagnostics
+## Diagnostics
 
-Outside a thread, an owner can read recent structured diagnostics without
-selecting a conversation:
+`boite logs` reads Boite's own diagnostics: the core, the desktop shell and the
+clients. Lines are oldest first, one record each:
 
-```sh
-boite logs --limit 50 --level error
-boite logs --thread <thread-id> --limit 100 --json
-boite logs --data-dir <data-directory> --level warn
+```text
+2026-10-10 14:03:22.120Z ERROR shell watchdog/shell.main-thread.blocked (6.2 s) The main thread has not answered for 6.2 s while notify ran {command=notify}
+2026-10-10 14:03:25.002Z INFO  core  turns/turn.finished [thr_x claude/claude-opus-5-5 <thr_parent turn=trn_y] (41.3 s) Turn finished: done {status=done, outputTokens=812}
 ```
 
-The CLI reads the owner credential from that core's `core.json`. `--thread`
-filters the history; it is optional. Each text row carries timestamp, level,
-source/event and available thread, turn and request correlation. `--json` keeps
-the record fields. [Trace](trace.md#structured-diagnostics) owns rotation,
-redaction, output exclusions and query bounds. Inside a thread the CLI remains
-an agent and cannot gain this access by changing a data-directory flag.
+```sh
+boite logs --min-level warn --since 2h        # warnings and errors of the last two hours
+boite logs --origin shell --min-level debug   # the desktop window's detail
+boite logs --search memory-guard --since 1d
+boite logs problems --since 24h               # grouped, with the threads they touched
+boite logs export --out report.txt            # the anonymized file a developer reads
+boite issue draft --title "Window froze" --description-file what-happened.md
+boite issue submit --title "Window froze" --description-file what-happened.md
+boite logs help
+```
+
+Filters: `--limit` (default 100), `--min-level` (default `info`), `--since`
+(`30m`, `2h`, `1d` or a date), `--origin core|shell|ui`, `--search`. Owner
+only: `--level` (exact), `--turn`, `--thread` and `--anonymize`. Agent only:
+`--mine`, the thread and the threads it started. `--json` keeps the records.
+
+From a terminal outside a thread, the CLI reads the owner credential from that
+core's `core.json` (`--data-dir` picks another) and prints the stored records,
+credentials already removed. Inside a thread the CLI is that thread's agent:
+it reads the anonymized `diagnostics.*` view, and only while the owner leaves
+agent access on. Changing a data-directory flag does not change that.
+
+`logs export` prints where the core saved the file (`<dataDir>/logs/exports/`)
+and, with `--out`, also writes it relative to the working directory.
+`issue draft` prints the issue body without sending anything. `issue submit`
+creates it on `beboite/boite` with `gh` when `gh` is signed in, or prints a
+prefilled GitHub link and the export to attach. [Trace](trace.md#structured-diagnostics)
+owns the record format, rotation, anonymization and query bounds.
 
 ## Where the command lives
 

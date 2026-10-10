@@ -279,6 +279,18 @@ export class AgentBrowser {
 
   /** `identify` false starts the browser as it is: a page check (`probe`) visits no site. */
   async #launch(profile: string, identify = true): Promise<Engine> {
+    const at = performance.now();
+    try {
+      const engine = await this.#launchLocal(profile, identify);
+      this.#core.logs.info(`Agent browser started for profile ${profile} in ${Math.round(performance.now() - at)} ms`, { source: 'browser', event: 'browser.started', durationMs: performance.now() - at, data: { profile, program: this.findBrowser().path?.split(/[\\/]/).pop() ?? null } });
+      return engine;
+    } catch (error) {
+      this.#core.logs.warn(`Agent browser for profile ${profile} did not start after ${Math.round(performance.now() - at)} ms: ${error instanceof Error ? error.message : String(error)}`, { source: 'browser', event: 'browser.start-failed', durationMs: performance.now() - at, data: { profile } });
+      throw error;
+    }
+  }
+
+  async #launchLocal(profile: string, identify: boolean): Promise<Engine> {
     const found = this.findBrowser();
     if (found.path === null) throw refused(`the agent browser cannot start on ${this.#machine}: ${found.reason}`);
     const identity = identify ? await this.#identities.of(found.path) : null;
@@ -309,6 +321,7 @@ export class AgentBrowser {
 
   /** The process ended or dropped its connection: its tabs are gone. */
   #lost(engine: Engine): void {
+    this.#core.logs.info(`Agent browser for profile ${engine.profile} ended with ${engine.tabs.size} tabs open`, { source: 'browser', event: 'browser.ended', data: { profile: engine.profile, tabs: engine.tabs.size, hosted: engine.hosted } });
     const current = this.#engines.get(engine.key);
     void current?.then(value => { if (value === engine) this.#engines.delete(engine.key); }, () => {});
     this.#stopTimers(engine);
@@ -460,7 +473,9 @@ export class AgentBrowser {
     if (this.#closed) throw refused('the core is shutting down');
     this.#watch();
     const previous = this.#queues.get(threadId) ?? Promise.resolve();
+    const at = performance.now();
     const run = previous.catch(() => {}).then(() => this.#run(threadId, params.tabId, action));
+    run.catch((error: unknown) => this.#core.logs.debug(`browser ${action.kind} failed after ${Math.round(performance.now() - at)} ms: ${error instanceof Error ? error.message : String(error)}`, { source: 'browser', event: 'browser.command-failed', threadId, durationMs: performance.now() - at, data: { action: action.kind } }));
     this.#queues.set(threadId, run);
     void run.finally(() => { if (this.#queues.get(threadId) === run) this.#queues.delete(threadId); }).catch(() => {});
     return run;

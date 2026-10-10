@@ -279,10 +279,16 @@ export class TerminalStore {
       clearTimeout(fallback);
       throw refused(`the shell ${shell.exe} did not start: ${messageOf(error)}`, { id, shell: shell.exe });
     }
+    const openedAt = Date.now();
+    const shellName = shell.exe.split(/[\\/]/).pop() ?? 'shell';
+    this.core.logs.info(`Terminal ${id} opened with ${shellName}`, { source: 'terminals', event: 'terminal.opened', data: { id, shell: shellName } });
     const exited = spawned.exited.then(
       (code) => code,
       () => null,
     ).then((code) => {
+      this.core.logs.record(code === 0 || code === null ? 'info' : 'warn', `Terminal ${id} (${shellName}) exited with code ${code ?? 'unknown'} after ${Math.round((Date.now() - openedAt) / 1000)} s`, {
+        source: 'terminals', event: 'terminal.exited', durationMs: Date.now() - openedAt, data: { id, shell: shellName, exitCode: code },
+      });
       clearTimeout(fallback);
       if (quiet !== null) clearTimeout(quiet);
       if (gate !== null) clearTimeout(gate);

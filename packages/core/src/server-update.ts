@@ -44,7 +44,14 @@ export class ServerUpdates {
   private get platform(): ServerUpdatePlatform | undefined { return this.options.platform ?? processPlatform.serverUpdates; }
   snapshot(): ServerUpdateStatus { return { ...this.state }; }
   private move(patch: Partial<ServerUpdateStatus>): ServerUpdateStatus {
+    const was = this.state.phase;
     this.state = { ...this.state, ...patch };
+    // Each phase once, not each download tick; checking and current are the routine poll.
+    if (this.state.phase !== was && !['checking', 'current'].includes(this.state.phase)) {
+      this.core.logs.record(this.state.phase === 'error' ? 'warn' : 'info', `Server update ${was} -> ${this.state.phase}: ${this.state.currentVersion} to ${this.state.version ?? 'unknown'} (${this.state.mode}, ${this.state.channel})${this.state.error ? `: ${this.state.error}` : ''}`, {
+        source: 'updates', event: `server-update.${this.state.phase}`, data: { from: was, phase: this.state.phase, mode: this.state.mode, current: this.state.currentVersion, version: this.state.version, channel: this.state.channel, totalBytes: this.state.total },
+      });
+    }
     this.core.bus.emit('core.updateChanged', this.snapshot());
     return this.snapshot();
   }
@@ -195,7 +202,7 @@ export class ServerUpdates {
   }
   start(): void {
     this.first = setTimeout(() => {
-      void this.status(true).catch(error => this.core.log('warn', `server update check: ${messageOf(error)}`));
+      void this.status(true).catch(error => this.core.log('warn', `server update check: ${messageOf(error)}`, { source: 'updates', event: 'server-update.check-failed' }));
       this.interval = setInterval(() => { void this.status(true).catch(error => this.core.log('warn', `server update check: ${messageOf(error)}`)); }, 6 * 60 * 60 * 1000);
       this.interval.unref();
     }, 8000);

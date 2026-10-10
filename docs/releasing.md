@@ -310,6 +310,20 @@ shells never request it. Setup failures and panics go to `shell-error.log`;
 visible setup failures name that file in a dialog. Missing WebView2 uses Tauri's
 dialog. A tray-creation failure leaves a usable window that exits on Close.
 
+The shell also writes `logs/shell.0.ndjson` to `shell.3.ndjson` under the data
+directory, 1 MiB each, in the core's record format with `origin: "shell"`
+(`src/shell_log.rs`). A background thread does the writing from a queue of 1024
+records; a full queue drops records and the next line counts them. Records
+cover startup phases with their duration, the OS build and WebView version,
+core attach, spawn, readiness, exits and restarts, window and tray actions,
+updater steps, panics and, on Windows, WebView2 `ProcessFailed` events. A
+command that holds the main thread over 250 ms is a `debug` line, over 2 s a
+`warn`. A watchdog posts a no-op to the main thread every second
+(`src/watchdog.rs`). When 5 s pass without an answer it writes one
+`shell.main-thread.blocked` error naming the running command or the last
+window event, plus `IsHungAppWindow` on Windows, then one
+`shell.main-thread.recovered` warning with the total blocked time.
+
 Resident cores append to `core-output.log`, truncated at startup above 8 MiB.
 `BOITE_CORE_RESIDENT=0` makes a Windows shell own its core through a
 `KILL_ON_JOB_CLOSE` Job Object. POSIX gives its owned core three seconds for

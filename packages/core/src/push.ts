@@ -229,7 +229,14 @@ export class PushStore {
       await this.send(subscription, JSON.stringify(payload), keys, createHash('sha256').update(payload.tag).digest('base64url').slice(0, 32));
     } catch (error) {
       const status = (error as { statusCode?: number }).statusCode;
-      if ((status === 404 || status === 410) && this.subscriptions()[sessionId]?.endpoint === subscription.endpoint) this.remove(sessionId);
+      const gone = (status === 404 || status === 410) && this.subscriptions()[sessionId]?.endpoint === subscription.endpoint;
+      if (gone) this.remove(sessionId);
+      // Only the status and the push service's host: the endpoint path is the device's address.
+      let service = 'unknown';
+      try { service = new URL(subscription.endpoint).hostname; } catch { /* stays unknown */ }
+      this.core.logs.warn(`Web Push to session ${sessionId} via ${service} failed${status ? ` with HTTP ${status}` : ' before an answer'}${gone ? '; the subscription is gone and was removed' : ''}`, {
+        source: 'push', event: 'push.failed', ...(payload.threadId ? { threadId: payload.threadId } : {}), data: { sessionId, status: status ?? null, service, removed: gone, code: (error as { code?: string }).code ?? null },
+      });
       // Provider errors often contain the endpoint and encryption material. Do not forward them.
       throw refused(`Web Push delivery failed${status ? ` (${status})` : ''}`);
     }

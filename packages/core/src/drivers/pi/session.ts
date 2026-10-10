@@ -21,6 +21,7 @@ import type { PiAssistantMessage, PiCommand, PiUsage } from './protocol.ts';
 import { dataOf, PiPeer } from './rpc.ts';
 import type { PiTurn } from './turn.ts';
 import { answerText } from '../../attachments.ts';
+import { noteReady } from '../driver-log.ts';
 
 type Timer = ReturnType<typeof setTimeout>;
 
@@ -384,7 +385,7 @@ export class PiSession {
   // -- the process ----------------------------------------------------------
 
   private start(ctx: TurnContext): Promise<void> {
-    if (this.starting === null) this.starting = this.open(ctx);
+    if (this.starting === null) this.starting = noteReady(ctx, 'pi', this.open(ctx));
     return this.starting;
   }
 
@@ -627,6 +628,9 @@ export class PiSession {
       }
       case 'auto_retry_start':
         turn.ctx.reportProgress?.('retrying', `${String(message['attempt'])}/${String(message['maxAttempts'])}`);
+        turn.ctx.diagnostic?.('warn', `pi request failed, retry ${String(message['attempt'])} of ${String(message['maxAttempts'])} in ${String(message['delayMs'])} ms: ${textOf(message['errorMessage'])}`, {
+          event: 'driver.api.retry', data: { attempt: typeof message['attempt'] === 'number' ? message['attempt'] : null, maxAttempts: typeof message['maxAttempts'] === 'number' ? message['maxAttempts'] : null, retryAfterMs: typeof message['delayMs'] === 'number' ? message['delayMs'] : null },
+        });
         turn.ctx.log(
           'info',
           `pi: retrying the request (attempt ${String(message['attempt'])} of ${String(message['maxAttempts'])}, in ${String(message['delayMs'])} ms): ${textOf(message['errorMessage'])}`,
@@ -634,6 +638,7 @@ export class PiSession {
         break;
       case 'auto_retry_end':
         turn.ctx.reportProgress?.('working');
+        turn.ctx.diagnostic?.(message['success'] === false ? 'warn' : 'info', message['success'] === false ? `pi gave up retrying: ${textOf(message['finalError'])}` : 'pi retry succeeded', { event: 'driver.api.retry-ended', data: { success: message['success'] !== false } });
         if (message['success'] === false) {
           turn.noteOutcome(textOf(message['finalError']) || turn.pendingError || 'pi gave up retrying the request');
         }

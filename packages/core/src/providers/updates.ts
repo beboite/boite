@@ -13,6 +13,7 @@ import { resumeAfterUpdate, resumePostponed, resumeUnwaited, type Resume } from 
 import { readVersion, recheckVersions } from './versions.ts';
 import { forgetWhich } from './which.ts';
 import { compareVersions, INSTALL_LATEST_MAX_AGE_MS, upToDate } from './install-latest.ts';
+import { logUpdate } from './install-log.ts';
 
 export { readVersion };
 
@@ -722,6 +723,7 @@ export class HarnessUpdates {
     const waiting = this.waitingFor(providerId);
     if (waiting > 0) {
       if (waiting !== drain.waitingFor) {
+        logUpdate(this.core, providerId, 'waiting', { running: waiting });
         drain.waitingFor = waiting;
         this.emit();
       }
@@ -736,7 +738,9 @@ export class HarnessUpdates {
       if (thread.providerId === providerId) this.core.threads.releaseAgent(thread.id);
     }
     this.emit();
+    const updateAt = logUpdate(this.core, providerId, 'started', { from: drain.before.current });
     void this.runUpdate(drain.target, drain.before)
+      .then(() => logUpdate(this.core, providerId, 'finished', { from: drain.before.current, to: this.entries.get(providerId)?.current ?? null, state: this.entries.get(providerId)?.state ?? null }, updateAt))
       .catch((error: unknown) => {
         this.core.log('error', `updating ${providerId}: ${error instanceof Error ? error.message : String(error)}`);
       })

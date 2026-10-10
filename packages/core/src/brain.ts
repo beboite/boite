@@ -304,6 +304,8 @@ export class BrainStore {
     if (this.closed) throw refused('Brain is shutting down');
     if (this.busy) throw refused('Brain synchronization is already running');
     this.busy = true;
+    const at = performance.now();
+    const counts = { ahead: 0, behind: 0 };
     try {
       const path = this.config().path;
       if (!path || !exists(join(path, '.git'))) throw refused('brain.path must point to the root of a Git checkout to synchronize');
@@ -319,6 +321,7 @@ export class BrainStore {
       if (state.branch !== started.branch || state.upstream !== started.upstream || state.head !== started.head) {
         throw refused('Brain branch, upstream or HEAD changed during synchronization. Retry from the intended branch.');
       }
+      Object.assign(counts, { ahead: state.ahead, behind: state.behind });
       if (state.dirty || (state.ahead > 0 && state.behind > 0)) throw refused('Brain has local changes or diverging commits. Resolve them before synchronizing; Boite does not merge conflicts.');
       if (state.behind > 0) await this.git(path, ['merge', '--ff-only', '@{upstream}']);
       // An external checkout after the check must never change what gets published.
@@ -327,7 +330,11 @@ export class BrainStore {
       this.core.journal.setSetting('brain.lastSync', Date.now());
       this.core.journal.setSetting('brain.pullError', null);
       this.links.apply(this.globalRoot());
+      this.core.logs.info(`Brain ${push ? 'synchronized' : 'pulled'}: ${counts.behind} commits pulled${push ? `, ${counts.ahead} pushed` : ''}`, { source: 'brain', event: 'brain.synced', durationMs: performance.now() - at, data: { ...counts, push } });
       return await this.status();
+    } catch (cause) {
+      this.core.logs.warn(`Brain ${push ? 'synchronization' : 'automatic pull'} failed: ${messageOf(cause)}`, { source: 'brain', event: 'brain.sync-failed', durationMs: performance.now() - at, data: { ...counts, push } });
+      throw cause;
     } finally { this.busy = false; }
   }
 

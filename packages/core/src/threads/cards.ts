@@ -22,6 +22,15 @@ import type { ThreadStore } from '../threads.ts';
 import { nativeCommandPrompt } from './operations.ts';
 import { setThreadStatus, withLoad } from './records.ts';
 
+/** Tool name, decision, who decided and how long it waited: never the tool input or the question text. */
+function logCard(core: Core, request: PermissionRequest | QuestionRequest, event: string, message: string, data: Record<string, string | number | boolean>): void {
+  const waited = Date.now() - request.createdAt;
+  core.logs.record(waited >= 60_000 ? 'info' : 'debug', `${message} after ${Math.round(waited / 1000)} s`, {
+    source: 'permissions', event, threadId: request.threadId, turnId: request.turnId, requestId: request.id, durationMs: waited,
+    data: { ...('toolName' in request ? { tool: request.toolName } : {}), ...data },
+  });
+}
+
 interface PendingPermission {
   request: PermissionRequest;
   resolve: (decision: 'allow' | 'deny') => void;
@@ -61,7 +70,7 @@ export class ThreadCards {
     const decision = mode === 'bypassPermissions' || mode === 'yolo' ? 'allow'
       : mode === 'plan' || mode === 'dontAsk' ? 'deny' : null;
     if (decision === null) return;
-    for (const request of this.listPermissions(threadId)) this.answerPermission({ requestId: request.id, decision });
+    for (const request of this.listPermissions(threadId)) this.answerPermission({ requestId: request.id, decision }, `permission mode ${mode}`);
   }
 
   /**
@@ -88,11 +97,12 @@ export class ThreadCards {
     if (thread !== null) this.core.bus.emit('thread.updated', withLoad(this.core, thread));
   }
 
-  answerPermission(params: { requestId: RequestId; decision: 'allow' | 'deny' }): void {
+  answerPermission(params: { requestId: RequestId; decision: 'allow' | 'deny' }, by = 'user'): void {
     const pending = this.permissions.get(params.requestId);
     if (pending === undefined) throw notFound(`unknown permission request ${params.requestId}`, params);
     this.permissions.delete(params.requestId);
     const threadId = pending.request.threadId;
+    logCard(this.core, pending.request, 'permission.decided', `Permission for ${pending.request.toolName} ${params.decision === 'allow' ? 'allowed' : 'denied'} by ${by}`, { decision: params.decision, by });
     this.core.journal.append(
       { type: 'permission.resolved', threadId, version: 1, payload: { ...params } },
       () => undefined,
@@ -121,6 +131,7 @@ export class ThreadCards {
       throw refused('the question belongs to another thread', { ...params, expected: request.threadId });
     }
     this.questions.delete(request.id);
+    logCard(this.core, request, 'question.skipped', 'Question skipped by the user', { async: request.async === true });
     this.core.journal.append(
       { type: 'question.answered', threadId: request.threadId, version: 1, payload: { questionId: request.id, answer: null } },
       () => undefined,
@@ -189,6 +200,7 @@ export class ThreadCards {
       () => undefined,
     );
     this.core.bus.emit('question.answered', { questionId: request.id, threadId: request.threadId, answer });
+    logCard(this.core, request, 'question.answered', `Question answered with ${answer.optionIds.length} options${answer.text ? ' and text' : ''}`, { options: answer.optionIds.length, text: Boolean(answer.text), async: request.async === true });
     if (request.async === true) {
       this.foldAsyncCard(request.id, answer);
       this.asyncChanged(request.threadId);
@@ -277,8 +289,9 @@ export class ThreadCards {
     );
     setThreadStatus(this.core, thread.id, 'waiting');
     this.core.bus.emit('permission.requested', request);
+    this.core.logs.debug(`Permission requested for ${toolName}`, { source: 'permissions', event: 'permission.requested', threadId: thread.id, turnId: turn.id, requestId: request.id, data: { tool: toolName, permissionMode: thread.permissionMode } });
     const withdraw = (): void => {
-      if (this.permissions.has(request.id)) this.answerPermission({ requestId: request.id, decision: 'deny' });
+      if (this.permissions.has(request.id)) this.answerPermission({ requestId: request.id, decision: 'deny' }, 'the agent, which withdrew it');
     };
     return Object.assign(promise, { requestId: request.id, withdraw });
   }
@@ -308,6 +321,7 @@ export class ThreadCards {
     if (ask.async !== true) setThreadStatus(this.core, thread.id, 'waiting');
     else this.asyncChanged(thread.id);
     this.core.bus.emit('question.asked', request);
+    this.core.logs.debug(`Question asked with ${ask.options.length} options${ask.async === true ? ', without stopping the turn' : ''}`, { source: 'permissions', event: 'question.asked', threadId: thread.id, turnId: turn.id, requestId: request.id, data: { options: ask.options.length, async: ask.async === true, allowText: ask.allowText, multiple: ask.multiple } });
     return Object.assign(promise, { questionId: request.id });
   }
 
@@ -368,6 +382,7 @@ export class ThreadCards {
   withdrawQuestion(threadId: ThreadId, questionId: QuestionTicket['questionId']): void {
     const pending = this.questions.get(questionId);
     if (pending === undefined || pending.request.threadId !== threadId) return;
+    logCard(this.core, pending.request, 'question.withdrawn', 'Question withdrawn by the agent before an answer', { async: pending.request.async === true });
     this.questions.delete(questionId);
     this.asyncCards.delete(questionId);
     this.closeUnanswered(pending.request);
@@ -382,6 +397,7 @@ export class ThreadCards {
     for (const [id, pending] of [...this.permissions]) {
       if (pending.request.threadId !== threadId) continue;
       this.permissions.delete(id);
+      logCard(this.core, pending.request, 'permission.decided', `Permission for ${pending.request.toolName} denied because the turn ended`, { decision: 'deny', by: 'turn end' });
       // Without this the card stays on screen with live buttons, and pressing
       // one answers `unknown permission request`.
       this.core.bus.emit('permission.resolved', { requestId: id, threadId, decision: 'deny' });

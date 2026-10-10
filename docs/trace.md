@@ -128,37 +128,101 @@ activity on unsupported platforms display unavailable rather than zero.
 
 ## Structured diagnostics
 
-`packages/core/src/logs.ts` writes diagnostics separately from SQLite events
-under `<dataDir>/logs/core.0.ndjson` through `core.3.ndjson`, rotating at 1 MiB
-per file. Each record carries `id`, `runId`, timestamp, level, `source`, `event`
-and a bounded message. Explicit `threadId`, `turnId` and `requestId` correlate
-records when available. Scheduler, turn and process transitions contribute
-fixed messages; request failures retain bounded causes while the client gets
-the generic RPC error.
+Diagnostics are written apart from SQLite events, one JSON record per line,
+under `<dataDir>/logs/`:
+
+| Files | Writer | Rotation |
+| --- | --- | --- |
+| `core.0.ndjson` to `core.7.ndjson` | the core (`packages/core/src/logs.ts`), plus `origin: "ui"` records clients send | 2 MiB per file |
+| `shell.0.ndjson` to `shell.3.ndjson` | the desktop shell (`apps/shell/src-tauri/src/shell_log.rs`) | 1 MiB per file |
+| `exports/boite-diagnostics-*.txt` | an export | the newest 10 |
+
+Every record carries `id`, `runId` (one per process start), `at`, a level
+(`debug`, `info`, `warn`, `error`), `origin` (`core`, `shell` or `ui`; absent
+on older records, which are the core's), `source`, a dotted `event` and a
+readable `message`. Optional fields correlate it: `threadId`, `turnId`,
+`requestId`, `durationMs`, and `data`, at most 16 scalar values. A record
+about a thread also names its agent, `providerId`, `model` and
+`parentThreadId`, resolved when it is written, so a delegated child reads as
+`[thr_child claude/claude-opus-5-5 <thr_parent]` on every line. Turn records
+carry the queue wait, the duration, the token counts and the effort; process
+records the program's file name, pid, exit code, CPU time and peak memory.
 
 The sink redacts configured credentials and recognized sensitive fields before
-bounding messages to 4,096 characters and metadata to 200. It accepts explicit
-diagnostic metadata, not RPC payloads or process arguments. Raw provider output
-classified as `kind: 'provider-output'` stays visible in the owner's live log,
-including usable login links, with configured credentials removed and the same
-4,096-character limit. Paired devices and agents do not receive that log event.
-Persistence and diagnostic queries replace it with `[provider output omitted]`.
-User-facing driver errors can still show their existing provider reason.
-Producers must classify output; text redaction alone is not a transcript filter.
+bounding messages to 4,096 characters, metadata to 200 and `data` strings to
+300. It accepts explicit diagnostic metadata, not RPC payloads or process
+arguments. Raw provider output classified as `kind: 'provider-output'` stays
+visible in the owner's live log, including usable login links, with
+configured credentials removed and the same 4,096-character limit. Paired
+devices and agents do not receive that log event. Persistence and diagnostic
+queries replace it with `[provider output omitted]`. A turn's own error text
+can carry provider output, so `turn.finished` records only the status; the
+cause is in the `turn.failed` record built from the driver's diagnostic.
+Producers must classify output; text redaction alone is not a transcript
+filter.
 
-Writes use a bounded 256-record pending buffer and 250 ms batching, with earlier
-flushes for large batches. Overflow reports dropped persistence; recent memory
-retains up to 4,096 records. A failed sink reports once and leaves core work
-running. Queries merge bounded disk history with recent memory, ignore malformed
-or partial crash records and serialize reads with rotation. Close flushes writes.
-POSIX directories use `0700` and files `0600`.
+Writes use a bounded 1,024-record pending buffer and 250 ms batching, with
+earlier flushes for large batches. Overflow reports dropped persistence;
+recent memory retains up to 4,096 records. A failed sink reports once and
+leaves core work running. Queries merge recent memory, the core files newest
+first (stopping once an older file cannot change the answer) and the shell's
+files, ignore malformed or partial crash records, sort by time and serialize
+reads with rotation. Close flushes writes. POSIX directories use `0700` and
+files `0600`.
 
-`core.logs { limit?, level?, threadId? }` is owner-only because redacted causes
-can still describe paths or other conversations. It returns newest first,
-defaults to 100 and accepts 1 to 200 records. Invalid fields, filters and levels
-are refused. The in-memory client follows the same query/access contract with
-bounded synthetic records and no disk files. [CLI](cli.md#owner-diagnostics)
-documents `boite logs` outside an agent session.
+### Anonymization
+
+Local files keep redacted text. What leaves the owner, an export, an issue or
+an agent's read, also goes through `createLogAnonymizer` in
+`@boite/contracts`. Project paths and names become `<project:xxxxxx>`, worktree
+and thread folders outside a project too; the data directory `<data>`, the
+home `~`, other accounts' homes `<user>`, the account name `<user>`, the host
+name `<host>`, account labels `<private:xxxxxx>`, e-mail addresses `<email>`,
+non-loopback IPv4, IPv6 and MAC addresses `<ip>`, `<ip6>` and `<mac>`. A URL
+keeps its host and path only for public services (provider APIs, GitHub,
+package registries); any other host becomes `<host:xxxxxx>/<path>`, and a
+GitHub owner other than Boite's own `<owner:xxxxxx>`. `xxxxxx` is a hash
+salted with `<dataDir>/logs/anonymize.salt`, so one machine's exports agree
+with each other and differ from another machine's. Thread, turn and run ids,
+versions, times and loopback addresses stay readable.
+
+### Reading them
+
+`core.logs { limit?, threadId?, turnId?, level?, minLevel?, origin?, source?, since?, until?, search?, anonymize? }`
+is owner-only because redacted causes can still describe paths or other
+conversations. It returns newest first, defaults to 100 and accepts 1 to 1000
+records. Invalid fields, filters and levels are refused.
+
+`diagnostics.logs`, `diagnostics.summary`, `diagnostics.export` and
+`diagnostics.issue` return the anonymized view. The owner calls them freely;
+an agent names its own thread and is refused while the `agentLogAccess`
+setting is off (Settings > Diagnostics). `diagnostics.logs` reads the whole
+app by default and, with `scope: 'thread'`, the thread and every thread it
+started. `diagnostics.summary` groups warnings and errors by origin, source,
+event and level, and lists each thread the window touched with its agent,
+status, parent, project placeholder and error count.
+
+`diagnostics.export` writes one text file a developer reads top to bottom:
+environment (version, channel, OS build, CPUs, memory, uptime, trace mode),
+agents and their versions, behaviour settings without addresses or paths,
+grouped problems, threads, log file sizes, the ends of `core-output.log` and
+`shell-error.log`, then the timeline oldest first, one `formatLogLine` per
+record. It covers the last 24 hours by default, at most 20,000 records.
+
+`diagnostics.issue` drafts a GitHub issue for `beboite/boite`: the user's
+description, the environment, the problems and as many of the newest log lines
+as fit. With `submit: true` it runs `gh issue create` under the core's own
+`gh` login and returns the issue URL; without a signed-in `gh` it returns a
+prefilled `issues/new` link the user opens in a browser signed in to GitHub.
+Either way the saved export path is returned so the full file can be attached.
+
+`diagnostics.report` takes up to 50 records from a client, owner or paired
+device, stored with `origin: "ui"`, the client kind and whether it is remote.
+A connection may send 300 a minute; the rest of that minute is dropped with one
+warning. A client time more than 10 minutes off is replaced by the core's.
+
+[CLI](cli.md#diagnostics) documents `boite logs` and `boite issue`, and the
+built-in `boite-report-issue` skill agents receive ([brain](brain.md#boite-guide)).
 
 ## Caps
 

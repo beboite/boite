@@ -5,6 +5,7 @@ import type { FileHandle } from 'node:fs/promises';
 import { lstat, open, readlink } from 'node:fs/promises';
 import type { Core } from '../core.ts';
 import { folderGone, messageOf, refused } from '../errors.ts';
+import { gitSubcommand, logGit } from './git-log.ts';
 
 /**
  * What one side of a diff may weigh before it is refused outright. Well past
@@ -60,11 +61,16 @@ async function bounded<T>(spawned: { proc: { kill(): void } }, cwd: string, args
 
 export async function git(core: Core, threadId: ThreadId, cwd: string, args: string[], timeoutMs = GIT_READ_TIMEOUT_MS): Promise<GitRun> {
   const spawned = spawnRead(core, threadId, cwd, args, 'reading the changes');
+  const at = performance.now();
   const [stdout, stderr, code] = await bounded(spawned, cwd, args, Promise.all([
     new Response(spawned.proc.stdout).text(),
     new Response(spawned.proc.stderr).text(),
     spawned.exited,
-  ]), timeoutMs);
+  ]), timeoutMs).catch((error: unknown) => {
+    core.logs.warn(`git ${gitSubcommand(args)} gave no answer within ${timeoutMs / 1000} s and was stopped`, { source: 'git', event: 'git.timeout', durationMs: performance.now() - at, data: { subcommand: gitSubcommand(args), timeoutMs } });
+    throw error;
+  });
+  logGit(core, threadId, args, code, performance.now() - at, stderr);
   return { code, stdout, stderr };
 }
 

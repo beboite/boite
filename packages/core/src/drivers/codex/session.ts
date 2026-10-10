@@ -39,6 +39,7 @@ import { CodexRpc } from './rpc.ts';
 import { updateTurnSettings } from './live-settings.ts';
 import { CodexTurn } from './turn.ts';
 import { SessionRetention } from '../session-retention.ts';
+import { errorCodeOf, httpStatusOf } from '../driver-log.ts';
 
 /**
  * What `thread/resume` answers when the thread's rollout file is gone. Both
@@ -317,6 +318,15 @@ export class CodexSession {
   }
 
   private async open(ctx: SessionContext): Promise<void> {
+    const openedAt = Date.now();
+    await this.openThread(ctx);
+    const ready = Date.now() - openedAt;
+    ctx.diagnostic?.('info', `Codex app-server ready in ${ready} ms, ${ctx.sessionId !== null ? 'resumed its thread' : 'started a new thread'}${this.served?.model ? ` on ${this.served.model}` : ''}`, {
+      event: 'driver.session.ready', durationMs: ready, data: { resume: ctx.sessionId !== null, model: this.served?.model ?? null },
+    });
+  }
+
+  private async openThread(ctx: SessionContext): Promise<void> {
     const profile = profileFor(ctx.provider);
     const executable = profile === undefined ? null : resolveExecutable(profile);
     if (executable === null) {
@@ -580,6 +590,10 @@ export class CodexSession {
         const error = params['error'] as CodexTurnError | undefined;
         const willRetry = params['willRetry'] === true;
         const text = error?.message ?? 'the codex agent reported an error';
+        const info = (error as { codexErrorInfo?: unknown } | undefined)?.codexErrorInfo;
+        turn.ctx.diagnostic?.('warn', `Codex reported ${errorCodeOf(info) ?? 'an error'}${httpStatusOf(info) === null ? '' : ` (HTTP ${httpStatusOf(info)})`}${willRetry ? ', it retries' : ', no retry'}: ${text}`, {
+          event: willRetry ? 'driver.api.retry' : 'driver.api.error', data: { code: errorCodeOf(info), status: httpStatusOf(info), willRetry },
+        });
         // `turn/completed` says whether the turn survived it, so this is a line
         // in the log and never the turn's own outcome.
         turn.ctx.log('warn', `codex agent: ${text}${willRetry ? ' (retrying)' : ''}`);

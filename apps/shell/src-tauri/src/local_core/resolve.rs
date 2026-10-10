@@ -8,6 +8,8 @@ use std::time::{Duration, Instant};
 use super::health::{endpoint_of, health, probe, read_core_file, Probe};
 use super::spawn::spawn_core;
 use super::{CoreEndpoint, CoreState, HELD, POLL_INTERVAL};
+use crate::shell_log::{self, Level};
+use serde_json::json;
 use crate::platform::{self, job};
 use crate::resident;
 
@@ -37,6 +39,8 @@ fn exited_early(state: &CoreState) -> Option<String> {
     if let Ok(mut job) = state.job.lock() { job.take(); }
     let (spawned, status) = spawned;
     spawned.settle();
+    shell_log::error("core", "shell.core.exited", format!("the core pid {} exited ({status}) before it was ready", spawned.child.id()),
+        json!({ "pid": spawned.child.id(), "exitCode": status.code() }));
     Some(format!("the core exited ({status}) before it was ready{}", spawned.output.quoted()))
 }
 
@@ -57,9 +61,16 @@ pub(super) fn resolve_core(state: &CoreState) -> Result<(CoreEndpoint, Option<u3
     match read_core_file(&file) {
         Ok(Some(existing)) => {
             match probe(&existing, &launch.version, launch.bundle_hash.as_deref()) {
-                Probe::Current => return Ok((endpoint_of(&existing), existing.pid)),
+                Probe::Current => {
+                    shell_log::info("core", "shell.core.attached", format!("attached to the running core pid {} on port {}",
+                        existing.pid.map(|pid| pid.to_string()).unwrap_or_else(|| "unknown".into()), existing.port),
+                        json!({ "pid": existing.pid, "port": existing.port }));
+                    return Ok((endpoint_of(&existing), existing.pid));
+                }
                 Probe::Stale(version) => {
                     eprintln!("[shell] the running core is version {version} and this shell {}: stopping it", launch.version);
+                    shell_log::info("core", "shell.core.stale", format!("the running core is version {version} and this shell {}: stopping it", launch.version),
+                        json!({ "pid": existing.pid, "coreVersion": version.to_string(), "shellVersion": launch.version }));
                     resident::stop_local_core(&launch.directory, resident::GRACE).map_err(|error| {
                         format!("the core of version {version} an earlier install left running could not be stopped: {error}")
                     })?;
@@ -69,7 +80,10 @@ pub(super) fn resolve_core(state: &CoreState) -> Result<(CoreEndpoint, Option<u3
             before = Some(existing.identity());
         }
         Ok(None) => {}
-        Err(error) => eprintln!("[shell] {error}"),
+        Err(error) => {
+            eprintln!("[shell] {error}");
+            shell_log::warn("core", "shell.core.file-unreadable", format!("core.json could not be read, so a core is started: {error}"), json!({}));
+        }
     }
 
     let ready = match running_child(state) {
@@ -79,7 +93,12 @@ pub(super) fn resolve_core(state: &CoreState) -> Result<(CoreEndpoint, Option<u3
             if state.held.load(Ordering::SeqCst) {
                 return Err(HELD.to_string());
             }
-            let (spawned, job) = spawn_core(launch)?;
+            let (spawned, job) = spawn_core(launch).inspect_err(|error| {
+                shell_log::error("core", "shell.core.spawn-failed", format!("the core could not be started: {error}"), json!({}));
+            })?;
+            shell_log::info("core", "shell.core.spawned", format!("started the core as pid {} ({})", spawned.child.id(),
+                if launch.resident { "resident, it outlives this window" } else { "owned, it stops with this window" }),
+                json!({ "pid": spawned.child.id(), "resident": launch.resident }));
             let ready = spawned.ready.clone();
             if let Ok(mut guard) = state.child.lock() { *guard = Some(spawned); }
             if let Ok(mut guard) = state.job.lock() { *guard = job; }
@@ -98,6 +117,10 @@ pub(super) fn resolve_core(state: &CoreState) -> Result<(CoreEndpoint, Option<u3
                 // Any version: this is the core the shell just started.
                 if let Some(pid) = found.pid.filter(|pid| fresh && platform::process::alive(*pid)) {
                     if health(found.port, pid).is_some() {
+                        let took = started.elapsed();
+                        shell_log::timed(Level::Info, "core", "shell.core.ready",
+                            format!("the core pid {pid} answered on port {} after {} ms", found.port, took.as_millis()),
+                            took, json!({ "pid": pid, "port": found.port }));
                         return Ok((endpoint_of(&found), Some(pid)));
                     }
                 }
@@ -112,6 +135,8 @@ pub(super) fn resolve_core(state: &CoreState) -> Result<(CoreEndpoint, Option<u3
     // A slow resident core is left to finish: killing it would only make the
     // next try start from nothing again. That next try adopts it.
     if launch.resident && running_child(state).is_some() {
+        shell_log::error("core", "shell.core.timeout", format!("the resident core has not answered within {} s and is left starting", launch.timeout.as_secs()),
+            json!({ "timeoutMs": launch.timeout.as_millis() as u64, "resident": true }));
         return Err(format!(
             "the core has not answered within {} s; it is still starting, and trying again picks it up",
             launch.timeout.as_secs()
@@ -126,6 +151,8 @@ pub(super) fn resolve_core(state: &CoreState) -> Result<(CoreEndpoint, Option<u3
         None => String::new(),
     };
     if let Ok(mut guard) = state.job.lock() { drop(guard.take()); }
+    shell_log::error("core", "shell.core.timeout", format!("the core did not answer /health within {} s and was stopped", launch.timeout.as_secs()),
+        json!({ "timeoutMs": launch.timeout.as_millis() as u64, "resident": false }));
     Err(format!(
         "the core did not write {} and answer /health within {} s{output}",
         file.display(),

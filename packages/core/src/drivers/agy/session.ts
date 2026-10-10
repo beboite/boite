@@ -7,6 +7,7 @@ import { LineSplitter, STDOUT_LINE_MAX, stderrLines } from '../lines.ts';
 import type { TurnContext } from '../types.ts';
 import { conversationOf, rowOf, STDERR_MAX, textOf, type Row } from './events.ts';
 import { drawStep, type AgyTurn } from './turn.ts';
+import { noteReady } from '../driver-log.ts';
 
 /**
  * How long a process whose stdin was closed gets to leave on its own. agy
@@ -203,7 +204,7 @@ export class AgySession {
   }
 
   private start(ctx: TurnContext): Promise<void> {
-    if (this.starting === null) this.starting = this.open(ctx);
+    if (this.starting === null) this.starting = noteReady(ctx, 'agy', this.open(ctx));
     return this.starting;
   }
 
