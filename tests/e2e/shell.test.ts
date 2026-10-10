@@ -380,7 +380,9 @@ shellTest('close exits by default; the persisted setting hides instead; the nati
     expect(Math.abs(main.dx), JSON.stringify(main)).toBeLessThanOrEqual(16);
     expect(Math.abs(main.dy), JSON.stringify(main)).toBeLessThanOrEqual(16);
     expect(await ownPage.evaluate(`window.__TAURI_INTERNALS__.invoke('close_behavior')`)).toBe(false);
-    await ownPage.waitFor(`document.querySelector('[data-testid="titlebar"] .close')`);
+    // Before connection readiness, closing must ask about unverifiable work.
+    // This scenario checks a known idle engine, which closes without asking.
+    await ownPage.waitFor(`document.querySelector('.app.ready') && document.querySelector('[data-testid="titlebar"] .close')`);
     await ownPage.evaluate(`document.querySelector('[data-testid="titlebar"] .close').click()`);
     await waitUntil(() => !pidAlive(ownPid) && !pidAlive(ownCore!.pid), CORE_GONE_TIMEOUT_MS);
     expect(pidAlive(ownPid)).toBe(false); expect(pidAlive(ownCore.pid)).toBe(false);
