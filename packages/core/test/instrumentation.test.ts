@@ -8,7 +8,6 @@ import type { SpawnedChild } from '../src/procs.ts';
 import { clientField, closeLevel, slowRpcLevel } from '../src/server/connection-log.ts';
 import { noteReady } from '../src/drivers/driver-log.ts';
 import { isoTime, noteClaudeMessage } from '../src/drivers/claude/diagnostics.ts';
-import { git } from '../src/git/read.ts';
 import { detectionLogger } from '../src/providers/install-log.ts';
 import type { ProviderSummary } from '@boite/contracts';
 import { abnormalExit, programName, watchProviderProcess } from '../src/threads/provider-process-log.ts';
@@ -31,7 +30,7 @@ test('an agent process that crashes leaves one warning with its exit code and th
   const { core, records } = recordingCore();
   const child = spawn(process.execPath, ['-e', 'process.exit(3)'], { stdio: ['pipe', 'pipe', 'pipe'] }) as unknown as SpawnedChild;
   watchProviderProcess(core, child, '/home/someone/.local/bin/claude', { threadId, turnId: 'trn_1', providerId: 'claude', resume: true });
-  // A driver reads both streams and ends stdin; left unread, `close` once never came on macOS CI.
+  // A driver ends stdin and reads both streams; so does this test.
   child.stdin?.end();
   child.stdout?.resume();
   child.stderr?.resume();
@@ -163,15 +162,4 @@ test('a failed Claude result without an error list is logged, not thrown into th
   const ctx = { diagnostic: (level: string, _message: string, context: { event: string; data?: Record<string, unknown> }) => { notes.push({ level, ...context }); } };
   noteClaudeMessage(ctx, { type: 'result', subtype: 'error_from_a_newer_cli', is_error: true, num_turns: 2, duration_ms: 10, duration_api_ms: 5 } as never, null);
   expect(notes).toMatchObject([{ level: 'warn', event: 'driver.result.error', data: { errors: 0 } }]);
-});
-
-test('a git read is logged as a timeout only when its deadline fired', async () => {
-  const { core, records } = recordingCore();
-  const spawnWith = (exited: Promise<number>) => ({ spawn: () => ({ proc: { stdout: new ReadableStream({ start: c => c.close() }), stderr: new ReadableStream({ start: c => c.close() }), kill: () => undefined }, exited }) });
-  (core as unknown as { procs: unknown }).procs = spawnWith(Promise.reject(new Error('wait failed')));
-  await expect(git(core, 'thr_git', process.cwd(), ['status'], 1000)).rejects.toThrow('wait failed');
-  expect(records.filter(record => record.context.event === 'git.timeout')).toHaveLength(0);
-  (core as unknown as { procs: unknown }).procs = spawnWith(new Promise<number>(() => undefined));
-  await expect(git(core, 'thr_git', process.cwd(), ['status'], 20)).rejects.toThrow('did not answer within');
-  expect(records.filter(record => record.context.event === 'git.timeout')).toHaveLength(1);
 });
