@@ -132,13 +132,19 @@ The tested installer becomes the release artifact.
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 588,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,405,000 |
+| UI entry chunk | 591,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,435,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 3,710,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 3,714,000 |
 
 The total JavaScript measure excludes native binaries and source maps. On
-2026-10-03, fresh builds of `e1f00a3` measured 2,695,204 core bytes and 3,932,309
+2026-10-10, `bun run build:ui` with Bun 1.4.2 measured 4,420,649 UI bytes at
+`feeb393b` and 4,425,557 with close confirmation and typed agent archival.
+The dialogs, input binding and English/French sentences add 4,908 bytes. The UI
+total limit increases by 5,000 bytes to 4,429,000, leaving 3,443 bytes; entry
+and core limits stay unchanged.
+
+On 2026-10-03, fresh builds of `e1f00a3` measured 2,695,204 core bytes and 3,932,309
 UI bytes. The orchestration additions measured 3,228,444 and 3,943,301 bytes:
 the core gains 533,240 bytes, mostly the official MCP SDK and its validation
 dependency, loaded only by `boite mcp`; the UI gains 10,992 bytes for recovery,
@@ -193,6 +199,12 @@ Managed releases that follow their publisher, Claude's on Windows, add about
 7 KB: reading the version file and the manifest, the forward-only rule and the
 update joining an older download. Merged with `main` at `2ffd95e0`, they measured
 3,703,464 bytes on Linux on 2026-10-10, under the same 3,710,000 limit.
+
+Choosing the machine a new agent runs on, with the form's labelled rows,
+adds 5,137 UI bytes: 4,430,694 against 4,425,557 for `main` at `19ef51b2`,
+measured on Linux on 2026-10-10. A machine icon in the picker cost another
+2,563 bytes through a chunk split and was left out. The UI limit rises from
+4,429,000 to 4,435,000, leaving about 4 KB.
 
 Recent's Done and Working groups measured 3,949,936 UI bytes on 2026-10-03
 before integrating these orchestration additions. The combined build measured

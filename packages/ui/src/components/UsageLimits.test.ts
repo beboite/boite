@@ -122,3 +122,13 @@ test('subscriptions from the same provider get separate cards with their chosen 
   expect(cards[0]!.querySelector('header small')).not.toBeNull();
   expect(cards[1]!.querySelector('header small')).toBeNull();
 });
+
+test('the weekly window leads the card large with its reset, the others follow compact', () => {
+  component = mount(UsageLimits, { target: document.body, props: { rows: [quota] } });
+  flushSync();
+  const primary = document.querySelector<HTMLElement>('[data-testid="usage-limit-primary"]')!;
+  expect(primary.dataset.windowId).toBe('seven_day');
+  expect(primary.querySelector('.primary-left')!.textContent).toBe('60%');
+  expect(primary.querySelector('.primary-reset')!.textContent).toContain('Resets');
+  expect([...document.querySelectorAll<HTMLElement>('.others .window')].map((window) => window.dataset.windowId)).toEqual(['five_hour']);
+});

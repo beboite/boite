@@ -101,6 +101,7 @@ export const strings = {
     mode: 'Who responds', mentions: 'Selected recipients', round: 'One response per member', autonomous: 'Take turns automatically',
     maxTurns: 'Maximum turns', perAgent: 'Turns per agent', modeHint: 'Each new message starts an allowance. Replies keep the same allowance. Automatic exchanges stop at either limit.',
     paused: 'Paused', pause: 'Pause', resume: 'Resume', archive: 'Archive', active: 'Active', archived: 'Archived',
+    archiveTitle: 'Archive "{name}"?', archiveBody: 'Archiving stops this agent’s work and removes it from the active list. Its profile and history remain available through search. Type its current name exactly to confirm.', archiveName: 'Agent name',
     objective: 'Objective', expectedResult: 'Expected result', minutes: 'Total execution minutes', tokens: 'Token limit, blank for none',
     finishMission: 'Finish mission', reopenMission: 'Reopen mission',
     conversation: 'Chat', activity: 'Activity', send: 'Send', message: 'Write a message', recipients: 'Recipients', everyone: 'Let the group rule choose',
@@ -143,6 +144,9 @@ export const strings = {
     messageTo: 'Message {name}', sayHello: 'Say hello to {name}, or plan a task it will do on its own.',
     liveWorking: '{name} is working', liveWaiting: '{name} needs you', seeThread: 'Open its thread',
     welcomeHint: 'An agent keeps its name, its memory and its tasks. Talk to it, or plan work it does on its own.',
+    runsHeading: 'Where it runs', runsHint: 'Its conversations, memory and planned tasks stay on this machine. The models come from that machine’s accounts.',
+    machine: 'Machine', modelLabel: 'Model', machineOffline: 'Offline', machineNotOwner: 'Owner access needed',
+    machineUnreachable: '{name} is not connected. Reconnect it, then create the agent again.', whatItDoesHint: 'Its standing instructions. You can change them later in its settings.',
     namePlaceholder: 'Mira, Scout, Pixel', whatItDoes: 'What it does', instructionsPlaceholder: 'For example: every morning, read the new issues and sum them up in five lines.',
     ownedBy: '{name} runs this thread', ownedHint: 'Talk to {name} in its conversation. This thread shows what it does.', openAgent: 'Open {name}',
     robot: {
@@ -473,7 +477,14 @@ export const strings = {
     restore: 'Restore',
     close: 'Close',
     quitHold: 'Hold Ctrl+Q to quit',
-    quitHoldHint: 'or press it twice'
+    quitHoldHint: 'or press it twice',
+    quitTitle: 'Close Boite?',
+    quitWorkingOne: '1 agent is still working or waiting. Are you sure you want to close Boite?',
+    quitWorkingMany: '{count} agents are still working or waiting. Are you sure you want to close Boite?',
+    quitUnknownBody: 'Work on a disconnected machine could not be checked.',
+    quitResidentBody: 'Resident engines keep working after the app closes. Engines configured to stop with the app will stop.',
+    quitConfirm: 'Close Boite',
+    quitCancel: 'Keep open'
   },
 
   serverUpdate: {

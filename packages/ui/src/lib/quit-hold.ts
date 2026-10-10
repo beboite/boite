@@ -2,7 +2,7 @@
  * The quit hold: `Ctrl+Q` quits the shell only when it is held for a while or
  * pressed twice in a row, T3 Code's "hold" confirmation. A key that is
  * hit once by accident does nothing but show the hint; the tray's Quit
- * stays immediate, since a menu item is never a slip of the finger.
+ * skips the hold, since a menu item is never a slip of the finger.
  *
  * Pure timing over injected clocks, so the whole rule is a unit test. The
  * hold runs on a timer rather than on key repeat: repeat rates are the OS's
@@ -36,6 +36,7 @@ export class QuitHold {
   #holding = false;
   #lastRelease = Number.NEGATIVE_INFINITY;
   #done = false;
+  #disposed = false;
 
   constructor(options: QuitHoldOptions) {
     this.holdMs = options.holdMs ?? QUIT_HOLD_MS;
@@ -78,6 +79,15 @@ export class QuitHold {
   dispose(): void {
     this.#stop();
     this.#done = true;
+    this.#disposed = true;
+  }
+
+  /** A cancelled confirmation permits a fresh hold or double press. */
+  reset(): void {
+    if (this.#disposed) return;
+    this.#stop();
+    this.#lastRelease = Number.NEGATIVE_INFINITY;
+    this.#done = false;
   }
 
   #stop(): void {

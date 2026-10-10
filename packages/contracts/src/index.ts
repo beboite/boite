@@ -497,6 +497,8 @@ export interface QuotaWindow {
   label: string;
   usedPercent: number;
   resetsAt: Timestamp | null;
+  /** Douane's choice of the window shown first and largest. Missing means the weekly window leads. */
+  primary?: true;
 }
 
 /** No redeemable identifiers reach the client. The core selects the next credit. */

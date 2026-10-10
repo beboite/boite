@@ -11,6 +11,7 @@ commands.allow = [
   "show_window",
   "whip_window",
   "quit_shell",
+  "quit_guard",
   "notify",
   "user_presence",
   "close_behavior",
