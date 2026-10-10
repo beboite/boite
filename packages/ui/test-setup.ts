@@ -1,4 +1,10 @@
 import { vi } from 'vitest';
+import { releaseVersion } from './release-version';
+
+// What Vite's define gives the app (`vite.config.ts`). Set here rather than in
+// vitest.config.ts, whose hash keys CI's transform cache: a change there runs
+// every pull request on a cold cache.
+vi.stubGlobal('__BOITE_VERSION__', releaseVersion());
 Object.defineProperty(window, 'matchMedia', { configurable: true, writable: true, value: (media: string) => Object.assign(new EventTarget(), {
   media, matches: false, onchange: null, addListener() {}, removeListener() {}
 }) });

@@ -7,8 +7,8 @@ const here: string = typeof import.meta.dirname === 'string' ? import.meta.dirna
 
 /**
  * The release this build belongs to, as the root package.json says: the
- * nightly build stamps it there (`scripts/ci/nightly-build.ts`). Vite and
- * Vitest both define it as `__BOITE_VERSION__`.
+ * nightly build stamps it there (`scripts/ci/nightly-build.ts`). Vite defines
+ * it as `__BOITE_VERSION__`, and the tests' setup sets the same global.
  */
 export function releaseVersion(rootPackage: string = join(here, '..', '..', 'package.json')): string {
   const version = (JSON.parse(readFileSync(rootPackage, 'utf8')) as { version?: unknown }).version;
