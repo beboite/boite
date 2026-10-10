@@ -9,6 +9,18 @@ use crate::browser;
 use crate::platform::login::{LoginItem, LOGIN_ARG};
 use crate::window::hidden;
 
+/// What the Windows installer adds to the shell's arguments when it starts
+/// the shell again after an update (`installer.nsi`, `.onInstSuccess`). The
+/// updater hands it the arguments the old shell had, `LOGIN_ARG` included, and
+/// Windows has no other way to tell the new shell that the restart is the
+/// one the user asked for from the window.
+pub(crate) const AFTER_UPDATE_ARG: &str = "--after-update";
+
+/// Whether the Windows installer started this process after an update.
+pub(crate) fn restarted_by_installer(mut args: impl Iterator<Item = std::ffi::OsString>) -> bool {
+    args.any(|arg| arg == AFTER_UPDATE_ARG)
+}
+
 /// Whether this process is the one the login entry started. A restart after
 /// an update keeps the original arguments, and that one is the user's own
 /// action: its window comes back.
@@ -41,7 +53,7 @@ pub(crate) fn launch_at_login(app: AppHandle, webview: Webview, enabled: Option<
 
 #[cfg(test)]
 mod tests {
-    use super::{launched_at_login, starts_in_tray};
+    use super::{launched_at_login, restarted_by_installer, starts_in_tray};
 
     fn args(list: &[&str]) -> impl Iterator<Item = std::ffi::OsString> {
         list.iter().map(std::ffi::OsString::from).collect::<Vec<_>>().into_iter()
@@ -53,6 +65,9 @@ mod tests {
         assert!(!launched_at_login(args(&["boite-shell"]), false), "a launch by hand shows its window");
         assert!(!launched_at_login(args(&["boite-shell", "--autostart"]), true), "the restart after an update shows its window");
         assert!(starts_in_tray(true, true, false));
+        assert!(restarted_by_installer(args(&["boite-shell", "--autostart", "--after-update"])),
+            "Windows restarts with the login argument still there");
+        assert!(!restarted_by_installer(args(&["boite-shell", "--autostart"])));
         assert!(!starts_in_tray(true, false, false), "no tray: a hidden window could never come back");
         assert!(!starts_in_tray(false, true, false));
     }
