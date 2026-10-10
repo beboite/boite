@@ -18,6 +18,7 @@
   import ToolGroup from './ToolGroup.svelte';
   import { activityShown, runKey, type ActivityPart } from '../lib/tool-groups';
   import { memoryPartRuns } from '../lib/memory-timeline';
+  import { chatPrefs } from '../lib/chat-prefs.svelte';
   import { shownText as shownTextOf } from '../lib/timeline-rows';
   import MemoryRow from './MemoryRow.svelte';
 
@@ -59,7 +60,9 @@
     store.openThread?.progress?.turnId === message.turnId && store.openThread.progress.phase === 'compacting');
   const caretAt = $derived(message.state === 'streaming' ? lastTextIndex(message) : -1);
   const end = $derived(to ?? message.parts.length);
-  const runs = $derived(memoryPartRuns(message.parts, memoryEvents, from, end));
+  const runs = $derived(memoryPartRuns(message.parts, memoryEvents, from, end, chatPrefs.groupChanges));
+  const toolRunning = $derived(message.parts.some(part => part.type === 'tool' && part.status === 'running') ||
+    latestInTurn && store.openThread?.messages.some(current => current.turnId === message.turnId && current.role === 'assistant' && current.parts.some(part => part.type === 'tool' && part.status === 'running')));
   const isBackground = (toolId: string) => store.openThread?.background?.some((task) => task.toolId === toolId) ?? false;
   // A proposed plan is read from its call's input: a page that cut it is completed at once.
   $effect(() => {
@@ -98,11 +101,11 @@
     {@const index = run.index}
     {@const part = message.parts[run.index]!}
     {@const shownText = part.type === 'text' ? shownTextOf(message, part) : ''}
-    {#if part.type !== 'text' || shownText.length > 0 || index === caretAt}
+    {#if part.type !== 'text' || shownText.trim().length > 0}
     <div class="part" data-kind={part.type}>
       {#if part.type === 'text'}
         <Prose text={shownText} live={index === caretAt && part.complete !== true} bubble={message.role === 'assistant'}
-          typing={!compacting && latestInTurn && message.role === 'assistant' && store.connection === 'ready' && store.openThread?.status === 'running' && index === message.parts.length - 1 && index === caretAt && part.complete !== true} {store} {threadId} />
+          typing={!compacting && latestInTurn && !toolRunning && message.role === 'assistant' && store.connection === 'ready' && store.openThread?.status === 'running' && index === message.parts.length - 1 && index === caretAt && part.complete !== true} {store} {threadId} />
         {#if part.omitted}<p class="omitted" data-testid="text-omitted">{fill(strings.chat.textOmitted, { count: count(part.omitted) })}</p>{/if}
 
       {:else if part.type === 'artifact' && part.view}
