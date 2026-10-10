@@ -67,6 +67,8 @@ const TABS_MAX = 24;
 const IDLE_CLOSE_MS = 60_000;
 /** A page that moved has its cookies on disk this long after; one that stays put, at this interval. */
 const COOKIE_SAVE_DELAY_MS = 1000, COOKIE_SAVE_EVERY_MS = 30_000;
+/** The desktop app takes at most 5000 cookies a call (`browser_set_cookies`). */
+const HOSTED_COOKIES_BATCH = 1000;
 /**
  * How long `open` and `navigate` wait for the next page's DOM before answering
  * that it still loads. The load event can wait on an image or a script that
@@ -86,7 +88,7 @@ interface Engine {
   /** The profile, prefixed `host:` when the desktop app hosts it (`browser/host.ts`). */
   key: string;
   profile: string;
-  /** Its tabs are webviews of the desktop app: cookies and windows are that app's own. */
+  /** Its tabs are webviews of the desktop app: windows and cookies are that app's own, a copy saved here. */
   hosted: boolean;
   dir: string;
   cdp: Cdp;
@@ -244,10 +246,37 @@ export class AgentBrowser {
     const cdp = this.#host.connect(profile);
     try { await cdp.send('Browser.getVersion', {}, undefined, START_TIMEOUT_MS); }
     catch (error) { cdp.close(); throw refused(`the desktop app could not open the agent browser: ${error instanceof Error ? error.message : String(error)}`); }
-    const engine: Engine = { key: `host:${profile}`, profile, hosted: true, dir: '', cdp, kill: () => cdp.close(), exited: cdp.closed, tabs: new Set(), throwaway: false };
+    // The webviews keep the app's own cookies; the core still keeps a copy, so a
+    // sign-in follows the profile whether the app hosts or a browser it starts does.
+    const dir = profile === PRIVATE_BROWSER_PROFILE ? '' : this.#profileDir(profile);
+    const engine: Engine = { key: `host:${profile}`, profile, hosted: true, dir, cdp, kill: () => cdp.close(), exited: cdp.closed, tabs: new Set(), throwaway: false };
+    if (dir) {
+      mkdirSync(dir, { recursive: true });
+      await this.#restoreMissing(engine);
+      engine.saveEvery = setInterval(() => { if (engine.tabs.size) void this.#saveCookies(engine); }, COOKIE_SAVE_EVERY_MS);
+    }
     this.#targets(engine);
     await cdp.send('Target.setDiscoverTargets', { discover: true }).catch(() => {});
     return engine;
+  }
+
+  /**
+   * Hands the app's webviews the saved cookies they lack: a sign-in made while
+   * the app was closed, or a session cookie the app dropped when it quit. One
+   * the app already holds is its own, newer, and stays.
+   */
+  async #restoreMissing(engine: Engine): Promise<void> {
+    const saved = readSavedCookies(engine.dir);
+    if (!saved.length) return;
+    const key = (cookie: Record<string, unknown>) => `${String(cookie.name)}\n${String(cookie.domain)}\n${String(cookie.path ?? '/')}`;
+    try {
+      const { cookies: held } = await engine.cdp.send<{ cookies: Record<string, unknown>[] }>('Storage.getCookies', {}, undefined, 5000);
+      const have = new Set(held.map(key));
+      const missing = saved.filter(cookie => !have.has(key(cookie)));
+      for (let at = 0; at < missing.length; at += HOSTED_COOKIES_BATCH) await engine.cdp.send('Storage.setCookies', { cookies: missing.slice(at, at + HOSTED_COOKIES_BATCH) }, undefined, 10_000);
+    } catch (error) {
+      this.#core.log('warn', `the saved cookies of browser profile ${engine.profile} were not handed to the desktop app: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   /** Pages that open a window (a sign-in popup) are adopted as tabs of the same conversation. */
@@ -330,7 +359,7 @@ export class AgentBrowser {
    * ends; restored at start. A core killed outright loses at most that.
    */
   async #saveCookies(engine: Engine): Promise<void> {
-    if (engine.throwaway || engine.hosted || !engine.cdp.open) return;
+    if (engine.throwaway || !engine.dir || !engine.cdp.open) return;
     try {
       const { cookies } = await engine.cdp.send<{ cookies: Record<string, unknown>[] }>('Storage.getCookies', {}, undefined, 5000);
       const held = JSON.stringify(cookies);

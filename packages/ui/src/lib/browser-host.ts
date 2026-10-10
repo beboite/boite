@@ -9,7 +9,9 @@
  * (one with a `sessionId`) goes to that webview's own DevTools channel; a
  * browser-level one (`Target.*`, `Browser.*`) is answered here by creating,
  * listing and closing webviews. A webview's own events, its address and title
- * changes and the windows it opens come back the same way.
+ * changes and the windows it opens come back the same way. The profile's
+ * cookies (`Storage.getCookies`, `Storage.setCookies`) are the webviews' own, so
+ * the core keeps saving and restoring them as it does for a browser it started.
  *
  * No port is opened: WebView2 hands each webview's protocol to the app itself.
  */
@@ -24,6 +26,9 @@ export interface HostBridge {
   relay(id: string, method: string, params: Record<string, unknown>): Promise<unknown>;
   events(id: string, names: readonly string[], listener: (method: string, params: Record<string, unknown>) => void): Promise<() => void>;
   on(handler: (event: BrowserEvent) => void): () => void;
+  /** The profile's cookies, read through `view` when given, a live webview of it. */
+  cookies(profile: string, view?: string): Promise<unknown[]>;
+  setCookies(profile: string, cookies: unknown[], view?: string): Promise<void>;
 }
 
 /** What the relay needs of the client of the core it hosts for. */
@@ -99,6 +104,12 @@ export class BrowserHostRelay {
     switch (method) {
       case 'Browser.getVersion': return { protocolVersion: '1.3', product: 'WebView2', userAgent: navigator.userAgent, jsVersion: '' };
       case 'Browser.setDownloadBehavior': case 'Browser.close': case 'Target.setDiscoverTargets': return {};
+      case 'Storage.getCookies': return { cookies: await this.bridge.cookies(this.#profileOf(profile), this.#viewOf(profile)) };
+      case 'Storage.setCookies': {
+        const cookies = Array.isArray(params.cookies) ? params.cookies : [];
+        if (cookies.length) await this.bridge.setCookies(this.#profileOf(profile), cookies, this.#viewOf(profile));
+        return {};
+      }
       case 'Target.createBrowserContext': {
         const context = `context-${crypto.randomUUID()}`;
         this.#contexts.add(context);
@@ -131,6 +142,18 @@ export class BrowserHostRelay {
       }
       default: throw new Error(`${method} is not something the desktop app's webviews answer`);
     }
+  }
+
+  /** A profile whose cookies the core keeps: a private view keeps none. */
+  #profileOf(profile: string): string {
+    if (profile === PRIVATE_BROWSER_PROFILE) throw new Error('a private webview keeps no cookies');
+    return profile;
+  }
+
+  /** A live webview of the profile, so its cookies are read without making one. */
+  #viewOf(profile: string): string | undefined {
+    for (const target of this.#targets.values()) if (target.relay === profile && target.profile === profile) return target.id;
+    return undefined;
   }
 
   #target(id: unknown): Target {

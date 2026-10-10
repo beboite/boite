@@ -119,6 +119,34 @@ pub async fn browser_cookies(app: AppHandle, webview: Webview, id: String) -> Re
     { let _ = view; Err("reading a browser profile's cookies currently requires Windows WebView2".into()) }
 }
 
+/// As many cookies as the core keeps for a profile (`BROWSER_COOKIES_MAX`), and
+/// what they weigh together at most, names and values of 4 KB included.
+const SET_COOKIES_MAX: usize = 5000;
+const SET_COOKIES_MAX_BYTES: usize = 32 * 1024 * 1024;
+
+/// The cookies the core saved for a profile, handed back to the profile a view
+/// runs in while this app hosts the agent browser: a sign-in made while the app
+/// was closed reaches the webviews too. Like `browser_cookies`, its own command
+/// and only from the main UI; `browser_protocol` never touches profile cookies.
+#[tauri::command]
+pub async fn browser_set_cookies(app: AppHandle, webview: Webview, id: String, cookies: Value) -> Result<(), String> {
+    only_main(&webview)?;
+    check_cookies(&cookies)?;
+    let view = view_of(&app, &id)?;
+    #[cfg(windows)]
+    { crate::platform::browser_control::call(view, "Network.setCookies".to_string(), serde_json::json!({ "cookies": cookies })).await.map(|_| ()) }
+    #[cfg(not(windows))]
+    { let _ = view; Err("writing a browser profile's cookies currently requires Windows WebView2".into()) }
+}
+
+fn check_cookies(cookies: &Value) -> Result<(), String> {
+    let list = cookies.as_array().ok_or("cookies must be a list of DevTools cookies")?;
+    if list.is_empty() || list.len() > SET_COOKIES_MAX { return Err(format!("cookies must list 1 to {SET_COOKIES_MAX} cookies, not {}", list.len())); }
+    if !list.iter().all(Value::is_object) { return Err("each cookie must be an object".into()); }
+    if cookies.to_string().len() > SET_COOKIES_MAX_BYTES { return Err(format!("cookies must weigh at most {SET_COOKIES_MAX_BYTES} bytes together")); }
+    Ok(())
+}
+
 /// The rates a recording may ask for, as `BROWSER_RECORDING_FRAME_RATES` in the contracts.
 const FRAME_RATES: [u32; 2] = [30, 60];
 
@@ -208,6 +236,14 @@ mod tests {
         assert_eq!(value["params"]["frame"]["url"], "https://example.test/");
         let empty: Value = serde_json::from_str(&event_message("Runtime.executionContextsCleared", "")).unwrap();
         assert_eq!(empty["params"], serde_json::json!({}));
+    }
+
+    #[test]
+    fn restored_cookies_are_a_bounded_list_of_objects() {
+        assert!(check_cookies(&serde_json::json!([{ "name": "sid", "value": "1", "domain": "example.test" }])).is_ok());
+        for bad in [serde_json::json!({}), serde_json::json!([]), serde_json::json!(["sid=1"]), Value::Array(vec![serde_json::json!({}); SET_COOKIES_MAX + 1])] {
+            assert!(check_cookies(&bad).is_err(), "{bad} accepted");
+        }
     }
 
     /// Feeds frames the way Chromium sends them: up to two unacknowledged, the next one

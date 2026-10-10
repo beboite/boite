@@ -154,15 +154,29 @@ export class TauriBridge implements BrowserBridge {
   }
 
   /**
-   * Read through a view of that profile made for the purpose, blank and never
+   * Read through `view` when it is a live view of that profile (an agent tab
+   * the app hosts), else through one made for the purpose, blank and never
    * placed, then destroyed: no tab of the user's is touched.
    */
-  async cookies(profile: string): Promise<unknown[]> {
+  async cookies(profile: string, view?: string): Promise<unknown[]> {
+    const reply = await this.#throughProfile(profile, view, (invoke, id) => invoke<{ cookies?: unknown }>('browser_cookies', { id }));
+    return Array.isArray(reply?.cookies) ? reply.cookies : [];
+  }
+
+  /** Writes cookies into the profile, the way `cookies` reads them. */
+  async setCookies(profile: string, cookies: unknown[], view?: string): Promise<void> {
+    await this.#throughProfile(profile, view, (invoke, id) => invoke<null>('browser_set_cookies', { id, cookies }));
+  }
+
+  async #throughProfile<T>(profile: string, view: string | undefined, run: (invoke: Invoke, id: string) => Promise<T>): Promise<T> {
+    if (view !== undefined && this.#live.has(view)) {
+      await (this.#queues.get(view) ?? Promise.resolve());
+      return run(await this.#ready(), view);
+    }
     const id = `browser:cookies-${crypto.randomUUID()}`;
     this.create(id, '', profile === DEFAULT_BROWSER_PROFILE ? undefined : profile);
     try {
-      const reply = await (this.#queues.get(id) ?? Promise.resolve()).then(async () => (await this.#ready())<{ cookies?: unknown }>('browser_cookies', { id }));
-      return Array.isArray(reply?.cookies) ? reply.cookies : [];
+      return await (this.#queues.get(id) ?? Promise.resolve()).then(async () => run(await this.#ready(), id));
     } finally { this.destroy(id); }
   }
 

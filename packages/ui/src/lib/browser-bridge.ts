@@ -51,7 +51,9 @@ export interface BrowserBridge {
   /** Erases a profile's cookies, storage and sign-ins on this computer. Only the shell has any. */
   deleteProfile?(profile: string): Promise<void>;
   /** Every cookie the profile holds on this computer, as the DevTools protocol lists them. Only the Windows shell reads any. */
-  cookies?(profile: string): Promise<unknown[]>;
+  cookies?(profile: string, view?: string): Promise<unknown[]>;
+  /** Writes DevTools cookies into the profile: the agent browser this app hosts, restoring what its core saved. */
+  setCookies?(profile: string, cookies: unknown[], view?: string): Promise<void>;
   navigate(id: string, url: string): void;
   back(id: string): void;
   forward(id: string): void;
