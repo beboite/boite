@@ -128,7 +128,7 @@ function sameSecret(given: string, secret: string): boolean {
 }
 
 /** Owner tokens, paired sessions and per-thread agent tokens share the hello frame. */
-function authenticateToken(core: Core, token: string): Identity | null {
+export function authenticateToken(core: Core, token: string): Identity | null {
   if (sameSecret(token, core.token)) return { principal: 'owner', sessionId: null, threadId: null };
   if (token.length === 0) return null;
   const session = core.sessions.authenticate(token);

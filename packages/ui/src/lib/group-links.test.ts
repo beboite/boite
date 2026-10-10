@@ -78,13 +78,15 @@ describe('group links', () => {
     await settle();
     expect(links.states).toEqual({ b: 'unreachable' });
     expect(storeOf(a).client!.call).not.toHaveBeenCalled();
-    await links.reconcile();
-    await settle();
-    expect(reach).toHaveBeenCalledTimes(1);
-    now += 60_000;
+    // Its own addresses first, then through the machine this client was paired with.
+    expect(reach.mock.calls).toEqual([[['http://100.64.0.2:1', 'http://192.168.1.20:1']], [['http://10.0.0.1:1/group/relay/b']]]);
     await links.reconcile();
     await settle();
     expect(reach).toHaveBeenCalledTimes(2);
+    now += 60_000;
+    await links.reconcile();
+    await settle();
+    expect(reach).toHaveBeenCalledTimes(4);
     expect(added).toEqual([]);
   });
 
@@ -98,6 +100,7 @@ describe('group links', () => {
     expect(usableAddresses(all.slice(1), true)).toEqual([]);
     expect(usableAddresses(['http://b.tail:1', 'http://100.64.0.2.evil.example:1', 'http://user@100.64.0.2:1'], false)).toEqual([]);
 
+    // A machine that gives none of those is not dialled, nor carried: the member that would carry it dials the same ones.
     const named = [members[0]!, core('c', ['http://c.tail:1'])];
     const a = machine('http://10.0.0.1:1', { group: group('a', named) });
     const { workspace: ws } = workspace([a]);
@@ -105,8 +108,8 @@ describe('group links', () => {
     const links = new GroupLinks(ws, { reach, secure: () => false });
     await links.reconcile();
     await settle();
-    expect(links.states).toEqual({ c: 'insecure' });
     expect(reach).not.toHaveBeenCalled();
+    expect(links.states).toEqual({ c: 'insecure' });
     expect(storeOf(a).client!.call).not.toHaveBeenCalled();
   });
 
@@ -400,5 +403,103 @@ describe('group links', () => {
     // b is listed by one and dropped by the other: no ticket is asked for it.
     expect(added.map((entry) => entry.endpoint.coreId)).toEqual([]);
   });
-});
 
+  it('reaches a member a secure page cannot dial through the hand-paired machine that answers, with a ticket that machine picks the address of', async () => {
+    // The phone's page came from this machine over HTTPS; the desktop gives tailnet and LAN addresses over plain HTTP only,
+    // which the two rosters list in a different order: the same addresses all the same.
+    const page = window.location.origin;
+    const lan = ['http://100.64.0.19:49466', 'http://192.168.1.3:49466'];
+    const other = machine('https://other.example', { group: group('o', [core('o', ['https://other.example']), core('pc', [...lan].reverse())]) });
+    const served = machine(page, { group: group('m2', [core('m2', [page]), core('pc', lan)]) });
+    const { workspace: ws, added } = workspace([other, served]);
+    // Both are tried at once; the page's machine answers first.
+    const reach = vi.fn(async (addresses: string[]) => addresses.find((address) => address.startsWith(page)) ?? null);
+    const links = new GroupLinks(ws, { reach, secure: () => true });
+    await links.reconcile();
+    await settle();
+    // Nothing of its own is dialled from a secure page; every hand-paired machine that lists it may carry it.
+    expect(reach.mock.calls).toEqual([[['https://other.example/group/relay/pc', `${page}/group/relay/pc`]]]);
+    expect(storeOf(served).client!.call).toHaveBeenCalledWith('group.ticket', { coreId: 'pc' });
+    expect(storeOf(other).client!.call).not.toHaveBeenCalled();
+    expect(added).toEqual([{ endpoint: { url: `${page}/group/relay/pc`, token: '', ticket: `ticket-for-${page}`, coreId: 'pc', groupId: 'grp', epoch: 1 }, label: 'PC', quiet: true }]);
+    expect(links.states).toEqual({});
+  });
+
+  it('asks no ticket to carry a member that a hand-paired machine stops listing while its route is tried', async () => {
+    const page = window.location.origin;
+    const desktop = core('pc', ['http://100.64.0.19:49466']);
+    const other = machine('https://other.example', { group: group('o', [core('o', ['https://other.example']), desktop]) });
+    const served = machine(page, { group: group('m2', [core('m2', [page]), desktop]) });
+    const { workspace: ws, added } = workspace([other, served]);
+    const links = new GroupLinks(ws, {
+      secure: () => true,
+      reach: async (addresses) => {
+        // The other machine removes it from the group meanwhile; the page's machine has not heard yet.
+        storeOf(other).group = group('o', [core('o', ['https://other.example'])]);
+        return addresses.find((address) => address.startsWith(page)) ?? null;
+      },
+    });
+    await links.reconcile();
+    await settle();
+    expect(storeOf(served).client!.call).not.toHaveBeenCalledWith('group.ticket', expect.anything());
+    expect(added).toEqual([]);
+  });
+
+  it('keeps a member carried by another while that one lists it, and moves it to its own address once one answers', async () => {
+    const a = machine('http://10.0.0.1:1', { group: group('a', members) });
+    const relayUrl = 'http://10.0.0.1:1/group/relay/b';
+    localStorage.setItem(ENVIRONMENTS_STORAGE_KEY, JSON.stringify([{ url: relayUrl, label: 'B', token: 'key', paired: true, coreId: 'b', groupId: 'grp' }]));
+    const carried = machine(relayUrl, { group: group('b', members) }, { coreId: 'b' });
+    const { stub, workspace: ws, added, removed } = workspace([a, carried]);
+    let now = 1_000_000;
+    let direct: string | null = null;
+    const reach = vi.fn(async (addresses: string[]) => (addresses[0]?.includes('/group/relay/') ? addresses[0] : direct));
+    const links = new GroupLinks(ws, { reach, secure: () => false, now: () => now });
+    await links.reconcile();
+    await settle();
+    // Its own addresses are tried, none answers: the carried machine stays as it is.
+    expect(reach.mock.calls).toEqual([[['http://100.64.0.2:1', 'http://192.168.1.20:1']]]);
+    expect(removed).toEqual([]);
+    expect(added).toEqual([]);
+    // Not again within the minute.
+    await links.reconcile();
+    await settle();
+    expect(reach).toHaveBeenCalledTimes(1);
+    // A minute on, one answers: the carried route goes and the machine is reached there.
+    now += 60_000;
+    direct = 'http://100.64.0.2:1';
+    await links.reconcile();
+    await settle();
+    expect(storeOf(a).client!.call).toHaveBeenCalledWith('group.ticket', { coreId: 'b', url: 'http://100.64.0.2:1' });
+    // It moved: the member and the route stay usable should it need carrying again.
+    expect(stub.remove).toHaveBeenCalledExactlyOnceWith(relayUrl, false);
+    expect(added.map((entry) => entry.endpoint.url)).toEqual(['http://100.64.0.2:1']);
+  });
+
+  it('keeps the carried route when the direct one it found does not take', async () => {
+    const a = machine('http://10.0.0.1:1', { group: group('a', members) });
+    const relayUrl = 'http://10.0.0.1:1/group/relay/b';
+    localStorage.setItem(ENVIRONMENTS_STORAGE_KEY, JSON.stringify([{ url: relayUrl, label: 'B', token: 'key', paired: true, coreId: 'b', groupId: 'grp' }]));
+    const carried = machine(relayUrl, { group: group('b', members) }, { coreId: 'b' });
+    const { stub, workspace: ws, removed } = workspace([a, carried]);
+    stub.add.mockResolvedValue(false);
+    const links = new GroupLinks(ws, { reach: async (addresses) => (addresses[0]?.includes('/group/relay/') ? addresses[0] : 'http://100.64.0.2:1'), secure: () => false });
+    await links.reconcile();
+    await settle();
+    expect(stub.add).toHaveBeenCalledTimes(1);
+    expect(removed).toEqual([]);
+    expect(stub.machines).toContain(carried);
+  });
+
+  it('at start, keeps the key of a member reached through another while the group still lists it', async () => {
+    // A real core id: a relay address names the machine by its 64-character fingerprint.
+    const pc = 'f'.repeat(64);
+    const anchor: Endpoint = { url: 'http://10.0.0.1:1', token: 'a-key' };
+    const relayed = { url: `http://10.0.0.1:1/group/relay/${pc}`, label: 'PC', token: 'key', paired: true, coreId: pc, groupId: 'grp' };
+    const { workspace: ws } = workspace([machine('http://10.0.0.1:1', {})]);
+    const listing = new GroupLinks(ws, { secure: () => false, ask: async () => group('a', [members[0]!, core(pc, ['http://pc.tail:1'])]) });
+    expect(await listing.vet([relayed], [anchor])).toEqual([relayed]);
+    const dropped = new GroupLinks(ws, { secure: () => false, ask: async () => group('a', [members[0]!]) });
+    expect(await dropped.vet([relayed], [anchor])).toEqual([]);
+  });
+});

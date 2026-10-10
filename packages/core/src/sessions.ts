@@ -239,7 +239,7 @@ export class SessionStore {
       createdAt: row.created_at,
       lastSeenAt: row.last_seen_at,
       current: row.id === current,
-      ...(this.core.group.owns(row.id) ? { group: true } : {}),
+      ...(this.core.group.issuedFor(row.id) !== undefined ? { group: true } : {}),
     }));
   }
 

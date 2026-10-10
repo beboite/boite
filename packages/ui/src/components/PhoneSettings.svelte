@@ -5,6 +5,8 @@
   import type { Store } from '../lib/store.svelte';
   import { strings } from '../lib/strings';
   import { installApp, installed, PUSH_ENABLED_KEY, worker } from '../lib/pwa';
+  import { parseGroupRelayUrl } from '@boite/contracts';
+  import { servesThisPage } from '../lib/endpoint';
   let { store, showServerSettings = true }: { store: Store; showServerSettings?: boolean } = $props();
   const uid = $props.id();
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
@@ -22,7 +24,12 @@
   let busy = $state(false);
   let message = $state('');
   let error = $state('');
-  let ownOrigin = $derived(!store.endpointUrl || new URL(store.endpointUrl).origin === location.origin);
+  // A machine reached through this page's core shares its origin and is not it: its notifications come through that core.
+  let relayed = $derived.by(() => {
+    const relay = store.endpointUrl === null ? null : parseGroupRelayUrl(store.endpointUrl);
+    return relay !== null && servesThisPage(relay.member);
+  });
+  let ownOrigin = $derived(!store.endpointUrl || servesThisPage(store.endpointUrl));
   let paired = $derived(store.sessions.some(session => session.current));
 
   $effect(() => {
@@ -109,6 +116,7 @@
     </div>
     <div class="block">
       {#if !secure}<p class="hint">{strings.phone.httpsRequired}</p>
+      {:else if relayed}<p class="hint" data-testid="phone-relayed">{strings.phone.relayed}</p>
       {:else if !ownOrigin}<p class="hint">{strings.phone.ownOrigin}</p>
       {:else if !paired}<p class="hint">{strings.phone.pairFirst}</p>
       {:else if !capable}<p class="hint">{strings.phone.unsupported}</p>
