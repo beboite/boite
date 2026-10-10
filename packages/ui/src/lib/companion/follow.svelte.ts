@@ -5,13 +5,17 @@
  */
 import { setExperiment } from '../experiments';
 import { experimentOn } from '../experiments.svelte';
-import { companionWindow, inShell } from './shell';
 
-/** Called once from a component's setup: the effect lives as long as it does. */
+/**
+ * Called once from a component's setup: the effect lives as long as it does.
+ * The companion's commands (`shell.ts`) load only here, so the main window's
+ * entry does not carry them.
+ */
 export function followCompanionExperiment(onerror: (error: unknown) => void): void {
   $effect(() => {
-    if (!inShell()) return;
-    void companionWindow(experimentOn('companion') ? 'open' : 'close').catch(onerror);
+    if (window.__TAURI_INTERNALS__ === undefined) return;
+    const action = experimentOn('companion') ? 'open' : 'close';
+    void import('./shell').then(({ companionWindow }) => companionWindow(action)).catch(onerror);
   });
 }
 
