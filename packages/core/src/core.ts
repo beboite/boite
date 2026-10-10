@@ -51,6 +51,7 @@ import { HarnessUpdates } from './providers/updates.ts';
 import { Coordination } from './coordination.ts';
 import { Stewards } from './stewards.ts';
 import { GroupStore, type NetworkSink } from './group.ts';
+import type { RelaySink } from './group/relay.ts';
 import { Delegation } from './delegation.ts';
 import { Workflows } from './workflows.ts';
 import { BrainStore } from './brain.ts';
@@ -190,6 +191,9 @@ export class Core {
 
   /** The server answers on one more address when a group asks; a core with no server answers on none. */
   network: NetworkSink = { also: () => false };
+
+  /** The clients this core carries to other members of its group (`group/relay.ts`); none without a server. */
+  relays: RelaySink = { size: 0, sweep: () => undefined };
 
   private endpoint = { host: '127.0.0.1', port: 0 };
   #onShutdown: (() => void) | undefined;

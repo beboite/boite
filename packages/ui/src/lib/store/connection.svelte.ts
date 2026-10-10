@@ -1,8 +1,8 @@
-import { RpcErrorCode, type CoreInfo, type Principal, type ThreadId } from '@boite/contracts';
+import { parseGroupRelayUrl, RpcErrorCode, type CoreInfo, type Principal, type ThreadId } from '@boite/contracts';
 import { RpcFailure, WsClient, type Client, type ClientState, type ObservableClient } from '../client';
 import { confirm } from '../confirm.svelte';
 import { deviceLabel, noteThisComputer } from '../device';
-import { clearStoredEndpoint, droppedSince, forgetGroupOf, readStoredEndpoint, rememberSession, refreshLocalEnvironment, removeBrought, fromTauri, shellEndpointError, parsePairingLink, readEnvironments, removeEnvironment, resolveEndpoint, servesThisPage, storeEndpoint, upsertEnvironment, type Endpoint, type StoredEnvironment } from '../endpoint';
+import { clearStoredEndpoint, droppedSince, relayKeyFor, forgetGroupOf, readStoredEndpoint, rememberSession, refreshLocalEnvironment, removeBrought, fromTauri, shellEndpointError, parsePairingLink, readEnvironments, removeEnvironment, resolveEndpoint, servesThisPage, storeEndpoint, upsertEnvironment, type Endpoint, type StoredEnvironment } from '../endpoint';
 import { onboardingSeen } from '../onboarding';
 import { rightPanel } from '../right-panel.svelte';
 import { fill, strings } from '../strings';
@@ -252,6 +252,8 @@ export class Connection {
       token: endpoint.token,
       ...(endpoint.grant === undefined ? {} : { grant: endpoint.grant }),
       ...(endpoint.ticket === undefined ? {} : { ticket: endpoint.ticket }),
+      // Reached through another member: the key for that member, as it stands at each connection.
+      ...(parseGroupRelayUrl(url) === null ? {} : { relay: () => relayKeyFor(url) }),
       paired,
       // The session a grant became is this device's own credential: kept
       // where the next load reads it, so the link is opened once, ever.

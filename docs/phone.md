@@ -429,7 +429,10 @@ the worker opens `/?thread=<id>`: the page's own core opens that thread as it
 boots, in place of the new-thread draft, and does not wait for other
 remembered machines to connect. The worker only opens
 URLs on its own origin. Enable notifications from the machine's own page, not
-while viewing it through another machine's UI.
+while viewing it through another machine's UI. A push another machine of the
+group sent through this one carries that machine's id: the worker opens
+`/?thread=<id>&member=<core id>`, and the page opens the thread on that machine
+once the group has connected it.
 
 An event makes one notification on a device. iOS shows every push and does not
 let a tag replace a notification the page shows, so a page whose own core
@@ -495,21 +498,23 @@ one arrives.
 The path is: the installed app's Enable notifications asks the permission from
 the tap, subscribes with the core's VAPID key, and stores the subscription with
 `push.subscribe` against its pairing. A notification's payload is
-`{title, body, threadId, tag, label, badge}` (`PushPayload` in the contracts); tapping it focuses an open window and
-posts it the thread, or, if the page refuses focus or none is open, opens
-`/?thread=<id>` on the worker's own origin.
+`{title, body, threadId, tag, label, badge}` (`PushPayload` in the contracts),
+plus `core` when another machine of the group sent it through this core;
+tapping it focuses an open window and posts it the thread, or, if the page
+refuses focus or none is open, opens `/?thread=<id>` on the worker's own
+origin, with `&member=<core id>` for such a push.
 
 ### One app, several machines
 
 An installed web app belongs to one origin, and a subscription is bound to the
 VAPID key of the core that served it. So one installed app receives the
-notifications of the machine it was installed from, not of the other machines
-it shows through that machine's UI; the Phone app section says so once
-subscribed. Today each machine whose notifications matter needs its own
-installed app, from its own HTTPS address (each one has its own icon and
-pairing). Doing it with one app would need the installing core to relay: the
-other cores send their events to it over coordination, and it pushes them
-with its own key.
+notifications of the machine it was installed from. The other machines of its
+[group](groups.md#notifications-through-the-group) send theirs through that
+machine, which pushes them with its own key. A machine outside the group needs
+its own installed app, from its own HTTPS address (each one has its own icon
+and pairing); the Phone app section says so once subscribed. A machine the
+page reaches through its own core says, in place of the switch, that its
+notifications come with the ones enabled there.
 
 ## The agent's browser on a phone
 

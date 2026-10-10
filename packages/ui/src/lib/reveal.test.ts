@@ -11,7 +11,7 @@ afterEach(() => {
   setExperiment('resident-agents', false);
 });
 
-const fakeStore = (localCore: boolean) => ({ localCore, showAgents: vi.fn() }) as unknown as Store & { showAgents: ReturnType<typeof vi.fn> };
+const fakeStore = (localCore: boolean) => ({ localCore, showAgents: vi.fn(), showSettings: vi.fn() }) as unknown as Store & { showAgents: ReturnType<typeof vi.fn>; showSettings: ReturnType<typeof vi.fn> };
 const thread: UiRevealTarget = { kind: 'thread', threadId: 'thr_1' as never };
 
 test('only the desktop shell answers, and only for the core it started', () => {
@@ -53,4 +53,17 @@ test('an agent opens on the Agents page, switching its experiment on', async () 
   const other = fakeStore(true);
   await reveal({ active: from, select: async () => undefined }, other, { kind: 'agent', agentId: 'agent-8' }, async () => undefined);
   expect(other.showAgents).not.toHaveBeenCalled();
+});
+
+test('the app updates open in Settings, on the machine that asked', async () => {
+  const from = fakeStore(true);
+  const workspace: RevealWorkspace = { active: from, select: vi.fn(async () => undefined) };
+  await reveal(workspace, from, { kind: 'update' }, async () => undefined);
+  expect(workspace.select).toHaveBeenCalledWith(from);
+  expect(from.showSettings).toHaveBeenCalledWith('machines', 'machines');
+  expect(from.showAgents).not.toHaveBeenCalled();
+
+  const other = fakeStore(true);
+  await reveal({ active: from, select: async () => undefined }, other, { kind: 'update' }, async () => undefined);
+  expect(other.showSettings).not.toHaveBeenCalled();
 });

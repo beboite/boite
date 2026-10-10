@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
+  import { takeNotificationTarget } from './lib/endpoint';
   import { watchAgentBrowser } from './lib/agent-browser-watch';
   import { watchDevices } from './lib/device-watch';
   import { browserProfiles } from './lib/browser-profiles.svelte';
@@ -213,8 +214,7 @@
     window.addEventListener('pageshow', pageshow);
     const notification = (event: MessageEvent) => {
       if (event.data?.type !== 'boite.open-thread' || typeof event.data.threadId !== 'string') return;
-      const machine = workspace.machines.find(m => m.store.endpointUrl && new URL(m.store.endpointUrl).origin === location.origin);
-      if (machine) void workspace.select(machine.store, event.data.threadId);
+      void workspace.openFromWorker(event.data.threadId, event.data.core);
       mobileScreen = 'chat';
     };
     navigator.serviceWorker?.addEventListener('message', notification);
@@ -371,11 +371,10 @@
   onMount(() => {
     // A notification tapped with no window open: taken off the address at
     // once, so a reload during the boot does not jump there again.
-    const requestedThread = new URLSearchParams(location.search).get('thread');
-    if (requestedThread) { const url = new URL(location.href); url.searchParams.delete('thread'); history.replaceState(history.state, '', url); }
+    const tapped = takeNotificationTarget();
     const stopSettingsSync = workspace.settingsSync.start();
     const stopGroupLinks = workspace.groups.start();
-    void workspace.boot(requestedThread || null);
+    void workspace.bootAt(tapped);
     // The stored theme, and the OS one while the setting reads `system`.
     const stopTheme = startTheme();
     // The stored window material, which only the shell wears.
