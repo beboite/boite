@@ -50,7 +50,12 @@ foreach ($bit in 1, 2, 4) { if (-not $fw.FirewallEnabled($bit)) { $off = $off -b
 `);
 }
 
-/** Exits 0 once the rule is in place, `FIREWALL_PROMPT_REFUSED` when the administrator prompt was refused. */
+/**
+ * Exits 0 once the rule is in place, `FIREWALL_PROMPT_REFUSED` when the
+ * administrator prompt was refused. `Process.Start` with the `runas` verb is
+ * used rather than `Start-Process`, whose error carries only a translated
+ * message: a refusal is a Win32Exception with ERROR_CANCELLED in any language.
+ */
 export function firewallAllow(program: string): string[] {
   const elevated = encoded(`
 $ErrorActionPreference = 'Stop'
@@ -61,11 +66,19 @@ New-NetFirewallRule -DisplayName 'Boite' -Description 'Lets a phone or another c
 `).slice(1);
   return encoded(`
 try {
-  $run = Start-Process -FilePath ${quote(POWERSHELL)} -ArgumentList ${elevated.map(quote).join(',')} -Verb RunAs -WindowStyle Hidden -Wait -PassThru
+  $info = New-Object System.Diagnostics.ProcessStartInfo
+  $info.FileName = ${quote(POWERSHELL)}
+  $info.Arguments = ${quote(elevated.join(' '))}
+  $info.Verb = 'runas'
+  $info.UseShellExecute = $true
+  $info.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+  $run = [System.Diagnostics.Process]::Start($info)
+  $run.WaitForExit()
   exit $run.ExitCode
+} catch [System.ComponentModel.Win32Exception] {
+  if ($_.Exception.NativeErrorCode -eq ${ELEVATION_CANCELLED}) { exit ${FIREWALL_PROMPT_REFUSED} }
+  exit 1
 } catch {
-  $code = $_.Exception.InnerException.NativeErrorCode
-  if ($code -eq ${ELEVATION_CANCELLED} -or $_.Exception.NativeErrorCode -eq ${ELEVATION_CANCELLED}) { exit ${FIREWALL_PROMPT_REFUSED} }
   exit 1
 }
 `);
