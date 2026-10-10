@@ -76,6 +76,8 @@ const DIALOGS_MAX = 20;
 /** A frame is shared by every viewer of the tab that asks within this long. */
 const FRAME_REUSE_MS = 150;
 const FRAME_LIFE_MS = 5000;
+/** A capture or size change still running after this long lets the next one of its tab go: one stuck in the browser never freezes the tab's frames. */
+const SCREEN_TURN_MS = 5000;
 const DIAGNOSTICS_MAX = 200;
 const HISTORY_MAX = 100;
 const TAB_ID = /^browser:[a-zA-Z0-9:-]{1,100}$/;
@@ -760,12 +762,12 @@ export class AgentBrowser {
   /** Captures, size changes and reads of the page's size take turns: see `browser/frames.ts`. */
   #screen<T>(tab: Tab, run: () => Promise<T>): Promise<T> {
     const next = tab.screen.then(run);
-    tab.screen = next.catch(() => {});
+    tab.screen = Promise.race([next.then(() => {}, () => {}), Bun.sleep(SCREEN_TURN_MS)]);
     return next;
   }
 
   #capture(tab: Tab, maxWidth: number | undefined, quality: number): Promise<{ frame: RemoteBrowserFrame; page: PageInfo }> {
-    return this.#screen(tab, () => captureFrame(tab.id, { evaluate: (script, ms) => this.#evaluate(tab, script, ms), send: (method, params) => this.#send(tab, method, params) }, maxWidth, quality));
+    return this.#screen(tab, () => captureFrame(tab.id, { evaluate: (script, ms) => this.#evaluate(tab, script, ms), send: (method, params, ms) => tab.engine.cdp.send(method, params ?? {}, tab.sessionId, ms) }, maxWidth, quality));
   }
 
   async remoteFrame({ threadId, tabId, maxWidth, quality }: RpcParams<'browser.remoteFrame'>, connection: Connection): Promise<RemoteBrowserFrame> {

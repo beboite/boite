@@ -7,7 +7,7 @@ export interface PageInfo { width: number; height: number; title: string; href: 
 
 interface FramePage {
   evaluate(script: string, timeoutMs: number): Promise<unknown>;
-  send(method: string, params?: Record<string, unknown>): Promise<unknown>;
+  send(method: string, params?: Record<string, unknown>, timeoutMs?: number): Promise<unknown>;
 }
 
 /**
@@ -25,14 +25,14 @@ export async function captureFrame(tabId: string, page: FramePage, maxWidth: num
   const dpr = info.dpr > 0 ? info.dpr : 1;
   const scale = maxWidth && info.width * dpr > maxWidth ? maxWidth / (info.width * dpr) : 1;
   // Headless, a scaled clip shows nobody a flash: the frame is shrunk by the browser itself.
-  const metrics = scale < 1 ? await page.send('Page.getLayoutMetrics') as { cssVisualViewport: { pageX: number; pageY: number; clientWidth: number; clientHeight: number } } : null;
+  const metrics = scale < 1 ? await page.send('Page.getLayoutMetrics', {}, 5000) as { cssVisualViewport: { pageX: number; pageY: number; clientWidth: number; clientHeight: number } } : null;
   const view = metrics?.cssVisualViewport;
   // Never more pixels than the viewer asked for: a slow link asked small for a reason.
   if (scale < 1 && !view) throw refused('the browser did not report the page layout; ask for the next frame');
   const shot = await page.send('Page.captureScreenshot', {
     format: 'jpeg', quality, captureBeyondViewport: false,
     ...(view ? { clip: { x: view.pageX, y: view.pageY, width: view.clientWidth, height: view.clientHeight, scale: scale * dpr } } : {}),
-  }) as { data?: string };
+  }, 10_000) as { data?: string };
   if (typeof shot.data !== 'string') throw refused('the browser returned no frame');
   const frame: RemoteBrowserFrame = { id: crypto.randomUUID(), tabId, title: String(info.title ?? '').slice(0, 200), width: info.width, height: info.height, base64: shot.data, at: Date.now(), url: String(info.href ?? '').slice(0, REMOTE_URL_MAX) };
   return { frame, page: info };
