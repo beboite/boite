@@ -179,6 +179,9 @@ The environment is the core's, minus every variable the core gives an agent
 | `BOITE_PLUGIN_ID` | The plugin's id. |
 
 The app connects to `BOITE_CORE_URL` with `BOITE_TOKEN` as an owner client.
+Its `hello` names the client `plugin`, not `shell`: the core then adds no
+"sent from the desktop app" note to its prompts and refuses it as the agent
+browser's host.
 
 Exits and stops:
 

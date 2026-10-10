@@ -4336,7 +4336,13 @@ export function normalizePairingCode(text: string): string | null {
   return code;
 }
 
-export const CLIENT_NAMES = ['shell', 'pwa', 'cli', 'test', 'bench'] as const;
+/**
+ * What a client says it is in its `hello`. `plugin` is a desktop-app plugin
+ * (`provides.desktopApp`) talking to the core that started it: it signs in
+ * with the owner token but is neither Boite's desktop app nor its web app, so
+ * its prompts carry no origin note and it cannot host the agent browser.
+ */
+export const CLIENT_NAMES = ['shell', 'pwa', 'cli', 'plugin', 'test', 'bench'] as const;
 export type ClientName = (typeof CLIENT_NAMES)[number];
 
 export { attachmentError, answerAttachmentError } from './attachment-validation.ts';
