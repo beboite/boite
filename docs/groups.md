@@ -152,7 +152,7 @@ tickets are refused for their date.
 
 A phone whose page is served over HTTPS can only open secure sockets. It
 connects directly to the members that give an HTTPS address, and reaches the
-others through a member it was paired with ([relay](#relay)). The Tailscale
+others through a member it was paired with by hand ([relay](#relay)). The Tailscale
 switch of Settings, or `boite-core tailscale on` ([server](server.md)), serves
 a member on `https://<machine>.<tailnet>.ts.net` and sets it as its public
 address; a tailnet without HTTPS certificates needs a reverse proxy for that.
@@ -186,7 +186,8 @@ group issued.
 
 The hop between the two members carries client traffic, so it follows the
 client's rule: the member's HTTPS address when it has one, otherwise one
-written as numbers. When the machines a client was paired with by hand list
+written as numbers. A member that gives neither, a MagicDNS name alone, is
+carried by nobody and shown as giving no usable address. When the machines a client was paired with by hand list
 different addresses for the member, nobody carries the client there until
 they agree, as for a direct ticket: one of them may hold an older roster and
 dial an address the member gave up.

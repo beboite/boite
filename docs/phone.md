@@ -498,9 +498,11 @@ one arrives.
 The path is: the installed app's Enable notifications asks the permission from
 the tap, subscribes with the core's VAPID key, and stores the subscription with
 `push.subscribe` against its pairing. A notification's payload is
-`{title, body, threadId, tag, label, badge}` (`PushPayload` in the contracts); tapping it focuses an open window and
-posts it the thread, or, if the page refuses focus or none is open, opens
-`/?thread=<id>` on the worker's own origin.
+`{title, body, threadId, tag, label, badge}` (`PushPayload` in the contracts),
+plus `core` when another machine of the group sent it through this core;
+tapping it focuses an open window and posts it the thread, or, if the page
+refuses focus or none is open, opens `/?thread=<id>` on the worker's own
+origin, with `&member=<core id>` for such a push.
 
 ### One app, several machines
 

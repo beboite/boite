@@ -100,7 +100,7 @@ describe('group links', () => {
     expect(usableAddresses(all.slice(1), true)).toEqual([]);
     expect(usableAddresses(['http://b.tail:1', 'http://100.64.0.2.evil.example:1', 'http://user@100.64.0.2:1'], false)).toEqual([]);
 
-    // A machine that gives none of those is not dialled: it is reached through the machine that lists it, or not at all.
+    // A machine that gives none of those is not dialled, nor carried: the member that would carry it dials the same ones.
     const named = [members[0]!, core('c', ['http://c.tail:1'])];
     const a = machine('http://10.0.0.1:1', { group: group('a', named) });
     const { workspace: ws } = workspace([a]);
@@ -108,8 +108,8 @@ describe('group links', () => {
     const links = new GroupLinks(ws, { reach, secure: () => false });
     await links.reconcile();
     await settle();
-    expect(reach.mock.calls).toEqual([[['http://10.0.0.1:1/group/relay/c']]]);
-    expect(links.states).toEqual({ c: 'unreachable' });
+    expect(reach).not.toHaveBeenCalled();
+    expect(links.states).toEqual({ c: 'insecure' });
     expect(storeOf(a).client!.call).not.toHaveBeenCalled();
   });
 
@@ -451,6 +451,21 @@ describe('group links', () => {
     expect(storeOf(a).client!.call).toHaveBeenCalledWith('group.ticket', { coreId: 'b', url: 'http://100.64.0.2:1' });
     expect(removed).toEqual([relayUrl]);
     expect(added.map((entry) => entry.endpoint.url)).toEqual(['http://100.64.0.2:1']);
+  });
+
+  it('keeps the carried route when the direct one it found does not take', async () => {
+    const a = machine('http://10.0.0.1:1', { group: group('a', members) });
+    const relayUrl = 'http://10.0.0.1:1/group/relay/b';
+    localStorage.setItem(ENVIRONMENTS_STORAGE_KEY, JSON.stringify([{ url: relayUrl, label: 'B', token: 'key', paired: true, coreId: 'b', groupId: 'grp' }]));
+    const carried = machine(relayUrl, { group: group('b', members) }, { coreId: 'b' });
+    const { stub, workspace: ws, removed } = workspace([a, carried]);
+    stub.add.mockResolvedValue(false);
+    const links = new GroupLinks(ws, { reach: async (addresses) => (addresses[0]?.includes('/group/relay/') ? addresses[0] : 'http://100.64.0.2:1'), secure: () => false });
+    await links.reconcile();
+    await settle();
+    expect(stub.add).toHaveBeenCalledTimes(1);
+    expect(removed).toEqual([]);
+    expect(stub.machines).toContain(carried);
   });
 
   it('at start, keeps the key of a member reached through another while the group still lists it', async () => {

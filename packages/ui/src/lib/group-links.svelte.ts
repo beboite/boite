@@ -282,8 +282,10 @@ export class GroupLinks {
     const listing = anchors.filter((machine) => machine.store.group?.id === groupId && machine.store.group.cores.some((listed) => listed.coreId === coreId));
     // The member dials the addresses its own roster gives, with this client's key. Two that disagree on them:
     // one holds an older roster and may dial an address the machine gave up, so nobody carries the key until they agree.
+    // Compared on what a member dials for a client (HTTPS, else numbers; never a name), which is all a carrier may use.
     const views = new Set(listing.map((machine) => usableAddresses(machine.store.group!.cores.find((listed) => listed.coreId === coreId)!.addresses, false).join(' ')));
-    if (views.size > 1) return [];
+    // A member that gives none of those is out of a carrier's reach too: nobody is asked to try.
+    if (views.size !== 1 || views.has('')) return [];
     const through = listing.filter((machine) => machine.store.endpointUrl !== null && parseGroupRelayUrl(machine.store.endpointUrl) === null);
     through.sort((a, b) => Number(servesPage(b)) - Number(servesPage(a)));
     return through.map((machine) => groupRelayUrl(machine.store.endpointUrl!, coreId));
@@ -390,9 +392,11 @@ export class GroupLinks {
         moved = true;
         return;
       }
-      // A direct route found for a machine a member carried: the carried one goes first, so the list holds the machine once.
-      if (upgrade !== undefined) await this.#drop(upgrade, false);
-      if (await this.workspace.add({ url, token: '', ticket, coreId, groupId, epoch: core.epoch }, core.name, true)) state = null;
+      if (await this.workspace.add({ url, token: '', ticket, coreId, groupId, epoch: core.epoch }, core.name, true)) {
+        state = null;
+        // A direct route found for a machine a member carried: the carried one goes once the direct one is in, never before.
+        if (upgrade !== undefined && this.workspace.machines.includes(upgrade)) await this.#drop(upgrade, false);
+      }
     } catch {
       // The machine that vouches went away, or the member refused: the next pass asks again.
     } finally {

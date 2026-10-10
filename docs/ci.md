@@ -147,8 +147,9 @@ UI about 4,400 for relay routes, the member's notification target and the
 English/French sentences. Merged with `bbffc85a`, whose panel slide had raised
 the UI limit to 4,442,000, the UI measured about 4,445,700 bytes. The UI limit
 rises to 4,450,000 and the core one from 3,722,000 to 3,736,000, about 4 KB
-each to spare. On
-2026-10-10, `bun run build:ui` with Bun 1.4.2 measured 4,420,649 UI bytes at
+each to spare.
+
+On 2026-10-10, `bun run build:ui` with Bun 1.4.2 measured 4,420,649 UI bytes at
 `feeb393b` and 4,425,557 with close confirmation and typed agent archival.
 The dialogs, input binding and English/French sentences add 4,908 bytes. The UI
 total limit increases by 5,000 bytes to 4,429,000, leaving 3,443 bytes; entry

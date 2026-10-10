@@ -1,6 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { groupRelayUrl, RpcErrorCode, type PushPayload, type RpcEvents } from '@boite/contracts';
 import { createECDH, randomBytes } from 'node:crypto';
@@ -63,7 +62,7 @@ test('a phone paired with one member reaches another through it, and keeps the k
   expect(onB.principal).toBe('session');
   // It is b that answers, under b's own rules for a device.
   expect((await onB.call('group.get', {}))?.self).toBe(id(b));
-  await expect(onB.call('projects.add', { path: b.dataDir })).rejects.toThrow('owner only');
+  await expect(onB.call('projects.add', { path: b.dataDir, name: 'relay' })).rejects.toThrow('owner only');
   const key = onB.session!.token;
   onB.close();
   await waitFor(() => a.core.relays.size === 0);
@@ -125,7 +124,8 @@ test('a relay leads only to another live member, and reports one that does not a
 
 test('a file and a view of the other member come through the relay with their headers and ranges', async () => {
   const { a, b, phone } = await home();
-  const dir = mkdtempSync(join(tmpdir(), 'boite-relay-'));
+  // Under the core's data directory, which its stop removes.
+  const dir = b.dataDir;
   const path = join(dir, 'note.txt');
   writeFileSync(path, 'carried across the group');
   const ticket = b.core.fileTickets.mint(path, 'text/plain');

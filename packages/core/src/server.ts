@@ -83,7 +83,7 @@ export interface RunningServer {
   host: string;
   port: number;
   url: string;
-  /** Sockets open now, the ones still saying hello included. */
+  /** Sockets open now, relayed ones and the ones still saying hello included. */
   connections(): number;
   stop(): Promise<void>;
 }
@@ -684,7 +684,8 @@ export function startServer(options: ServerOptions): RunningServer {
     host,
     port,
     url: core.baseUrl(),
-    connections: () => connections.size,
+    // Relayed sockets too, those still waiting for their hello included.
+    connections: () => connections.size + relays.size,
     async stop(): Promise<void> {
       stopping = true;
       incoming.close();
