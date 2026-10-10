@@ -67,10 +67,19 @@
     onexit(event);
   }
 
+  /** Detached to float mid-slide, the entrance is cancelled rather than ended. */
+  function onanimationcancel(event: AnimationEvent): void {
+    if (event.target === event.currentTarget && !closing) entered = true;
+  }
+
   // A floating panel, reduced motion past its frame, or a test environment has
   // no entrance whose end could say so.
   onMount(() => {
     if (!root || typeof root.getAnimations !== 'function' || root.getAnimations().length === 0) entered = true;
+    // Svelte's element types have no `onanimationcancel` attribute.
+    const node = root;
+    node?.addEventListener('animationcancel', onanimationcancel);
+    return () => node?.removeEventListener('animationcancel', onanimationcancel);
   });
 
   /**
