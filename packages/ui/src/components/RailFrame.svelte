@@ -187,16 +187,22 @@
     background: var(--color-edge);
   }
   @media (min-width: 721px) {
+    /* Folding slides it out past the window's left edge and the chat card
+       widens with it: a margin as wide as the list and its gap gives that room
+       back, so the chat never jumps. App.svelte eases the card's own left gap
+       in step. */
     .rail {
-      transition: opacity var(--dur-3) var(--ease-out-quint), transform var(--dur-3) var(--ease-out-quint), display var(--dur-3) allow-discrete;
+      --slide-room: calc(var(--sidebar-width) + var(--frame-gap));
+      transition: margin-left var(--dur-slide) var(--ease-slide), opacity var(--dur-3) var(--ease-out-quint), display var(--dur-slide) allow-discrete;
     }
     .rail.collapsed {
       display: none;
       pointer-events: none;
       opacity: 0;
-      transform: translateY(4px);
+      margin-left: calc(-1 * var(--slide-room));
+      transition: margin-left var(--dur-slide-out) var(--ease-slide), opacity var(--dur-2) var(--ease-out-quint), display var(--dur-slide-out) allow-discrete;
     }
-    @starting-style { .rail:not(.collapsed) { opacity: 0; transform: translateY(4px); } }
+    @starting-style { .rail:not(.collapsed) { opacity: 0; margin-left: calc(-1 * var(--slide-room)); } }
   }
   @media (max-width: 720px) {
     .rail.drawer {
@@ -209,8 +215,9 @@
       visibility: hidden;
       pointer-events: none;
       opacity: 0;
-      transform: translateY(4px);
-      transition: opacity var(--dur-3) var(--ease-out-quint), transform var(--dur-3) var(--ease-out-quint), visibility var(--dur-3);
+      /* A drawer from the left edge, where its button is. */
+      transform: translateX(calc(-100% - 12px));
+      transition: opacity var(--dur-3) var(--ease-out-quint), transform var(--dur-slide) var(--ease-slide), visibility var(--dur-slide);
       box-shadow: var(--shadow-e3);
     }
     .rail.drawer.open {

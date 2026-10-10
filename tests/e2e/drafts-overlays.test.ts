@@ -147,11 +147,11 @@ test('drafts survive reload and composer menus stay above the chrome', async () 
 
     await page.click('[data-testid=panel-toggle]');
     await page.waitFor('document.querySelector("[data-testid=right-panel]")');
-    expect(await page.evaluate('getComputedStyle(document.querySelector("[data-testid=right-panel]")).animationName')).toBe('rise');
+    expect(await page.evaluate('getComputedStyle(document.querySelector("[data-testid=right-panel]")).animationName')).toBe('slide-left');
     await settle(page);
     await page.screenshot(join(import.meta.dir, '.artifacts', 'panels-desktop.png'));
     await page.click('[data-testid=panel-close]');
-    expect(await page.evaluate('getComputedStyle(document.querySelector("[data-testid=right-panel]")).animationName')).toBe('rise-out');
+    expect(await page.evaluate('getComputedStyle(document.querySelector("[data-testid=right-panel]")).animationName')).toBe('slide-right-out');
     await page.waitFor('!document.querySelector("[data-testid=right-panel]")');
     await page.click('[data-testid=terminal-toggle]');
     await page.waitFor('document.querySelector("[data-testid=terminal-drawer]")');

@@ -55,6 +55,27 @@
   let overflowing = $state(false);
   let dragging = $state(false);
   let near = $state(false);
+  /**
+   * Off while the panel slides in: its tabs and surface arrive with it, and
+   * their own entrances would add a second movement on top. A tab opened or
+   * picked after that plays its own.
+   */
+  let entered = $state(false);
+
+  function onanimationend(event: AnimationEvent): void {
+    if (event.target === event.currentTarget && !closing) entered = true;
+    onexit(event);
+  }
+
+  /**
+   * `use:` on a tab or a surface: one created once the panel is in plays its
+   * entrance. Decided at creation, so the panel landing does not replay the
+   * entrance of what came in with it. An attribute, since Svelte rewrites the
+   * class list whenever `class:active` changes.
+   */
+  function arrive(node: HTMLElement): void {
+    if (untrack(() => entered)) node.dataset.arriving = '';
+  }
 
   let surfaces = $derived(panel.surfaces);
   let active = $derived(panel.active);
@@ -233,12 +254,13 @@
   type="button"
   class="sheet-scrim"
   class:floating={rightPanel.floating}
+  class:closing
   aria-label={strings.common.close}
   onclick={() => panel.toggle()}
 ></button>
 
 <aside
-  class="panel framed motion-panel"
+  class="panel framed"
   class:maximized={rightPanel.maximized}
   class:floating={rightPanel.floating}
   class:dragging
@@ -248,7 +270,7 @@
   bind:this={root}
   use:attach
   use:floatingPanel={{ enabled: rightPanel.floating, maximized: rightPanel.maximized }}
-  onanimationend={onexit}
+  {onanimationend}
   onpointerenter={() => (near = true)}
   onpointerleave={() => (near = false)}
   onfocusin={() => (near = true)}
@@ -289,6 +311,7 @@
       {#each surfaces as surface (surface.id)}
         <div
           class="tab"
+          use:arrive
           class:active={surface.id === panel.activeSurfaceId}
           role="tab"
           tabindex="0"
@@ -386,6 +409,10 @@
   </header>
 
   <div class="body">
+    <!-- Keyed on the tab, so picking another one fades its surface in rather
+         than swapping it in one frame, the way a settings page arrives. -->
+    {#key active?.id}
+    <div class="surface" use:arrive>
     {#if active?.kind === 'agents'}
       <DelegationSurface {store} surface={active} {panel} />
     {:else if active?.kind === 'messages'}
@@ -420,6 +447,8 @@
         oncustomize={() => store.showSettings('appearance', CONTROLS_SECTION)}
       />
     {/if}
+    </div>
+    {/key}
   </div>
   {#if rightPanel.floating && !rightPanel.maximized}
     {#each RESIZE_DIRECTIONS as direction}
@@ -441,6 +470,24 @@
     /* A framed card whose resize handle hangs out into the gap beside it, so
        the card itself does not clip: its body rounds the bottom corners. */
     overflow: visible;
+    /* It comes in from the window's right edge and the chat narrows with it,
+       at its own width all along, so nothing inside rewraps on the way. */
+    --slide-room: calc(var(--panel-width) + var(--frame-gap));
+    animation: slide-left var(--dur-slide) var(--ease-slide);
+  }
+
+  .panel.closing {
+    animation: slide-right-out var(--dur-slide-out) var(--ease-slide);
+    pointer-events: none;
+  }
+
+  /* Maximized, it already fills the room the chat leaves: it fades in place. */
+  .panel.maximized {
+    animation: fade var(--dur-3) var(--ease-out-quint);
+  }
+
+  .panel.maximized.closing {
+    animation: fade-out var(--dur-2) var(--ease-out-quint);
   }
 
   .panel.maximized {
@@ -494,10 +541,21 @@
     font-size: var(--text-xs);
     cursor: pointer;
     user-select: none;
-    animation: rise var(--dur-3) var(--ease-out-quint);
     transition:
       background var(--dur-2) var(--ease-out-quint),
       color var(--dur-2) var(--ease-out-quint);
+  }
+
+  /* A new tab opens from its left edge into the strip, the way the strip reads. */
+  .tab:global([data-arriving]) {
+    animation: tab-in var(--dur-3) var(--ease-out-quint);
+  }
+
+  @keyframes tab-in {
+    from {
+      opacity: 0;
+      transform: translateX(-6px);
+    }
   }
 
   .tab:hover {
@@ -579,6 +637,19 @@
     flex-direction: column;
   }
 
+  .surface {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Opacity only: a browser tab's page is a native view laid over this box,
+     and a moving box would drag it along. */
+  .surface:global([data-arriving]) {
+    animation: fade var(--dur-3) var(--ease-out-quint);
+  }
+
   @media (min-width: 721px) {
     .body {
       overflow: clip;
@@ -603,6 +674,14 @@
       min-width: 320px;
       flex: none;
       box-shadow: var(--shadow-e3);
+      /* Over the chat it takes no room: it slides across from the right edge. */
+      --slide-room: calc(100% + var(--frame-gap));
+      animation: slide-over-left var(--dur-slide) var(--ease-slide);
+    }
+
+    .panel.closing,
+    .panel.maximized.closing {
+      animation: slide-over-right-out var(--dur-slide-out) var(--ease-slide);
     }
 
     .sheet-scrim {
@@ -615,6 +694,12 @@
       border: none;
       border-radius: 0;
       background: var(--color-scrim);
+      animation: fade var(--dur-slide) var(--ease-slide);
+    }
+
+    .sheet-scrim.closing {
+      animation: fade-out var(--dur-slide-out) var(--ease-slide);
+      pointer-events: none;
     }
   }
 
@@ -660,7 +745,9 @@
     background: var(--color-surface);
     box-shadow: var(--shadow-e3);
   }
+  /* A floating panel appears where it was left and fades away from there. */
   .panel.floating:not(.closing) { animation: none; }
+  .panel.floating.closing { animation: fade-out var(--dur-2) var(--ease-out-quint); }
   .sheet-scrim.floating { display: none; }
   .panel.floating:not(.maximized) .strip { cursor: grab; touch-action: none; user-select: none; }
   .panel.floating:not(.maximized) .strip:active { cursor: grabbing; }

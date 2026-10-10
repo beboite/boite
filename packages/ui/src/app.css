@@ -372,6 +372,15 @@
   --dur-whip: 360ms;
   --dur-typing: 1100ms;
   --dur-typing-step: 140ms;
+  /* A pane that makes its room beside the chat (terminal, right panel,
+     sidebar). It starts gently and decelerates the whole way, so the chat
+     giving way reads as one movement; ease-out-quint covered 72% of the
+     terminal's height in its first 50 ms, then crawled. The exit is the same
+     curve, shorter: an accelerating one left the sidebar fading in place for
+     100 ms before it moved. */
+  --dur-slide: 300ms;
+  --dur-slide-out: 200ms;
+  --ease-slide: cubic-bezier(0.2, 0, 0, 1);
   --z-whip: 100;
   --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
 
@@ -771,6 +780,8 @@ html[data-chat-width='full'] {
     --dur-1: 0.01ms;
     --dur-2: 0.01ms;
     --dur-3: 0.01ms;
+    --dur-slide: 0.01ms;
+    --dur-slide-out: 0.01ms;
   }
 }
 
@@ -780,6 +791,8 @@ html[data-motion='reduced'] {
   --dur-1: 0.01ms;
   --dur-2: 0.01ms;
   --dur-3: 0.01ms;
+  --dur-slide: 0.01ms;
+  --dur-slide-out: 0.01ms;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -1725,16 +1738,48 @@ html[data-glass] #app {
   }
 }
 
+/* The app's body row (App.svelte): a pane sliding in from the right edge
+   comes from past it, and the chat card's own left gap eases in step with the
+   sidebar folding (RailFrame.svelte). */
+@media (min-width: 721px) {
+  .app > .body { overflow-x: clip; transition: padding-left var(--dur-slide) var(--ease-slide); }
+  .app > .body.sidebar-folded { transition-duration: var(--dur-slide-out); }
+}
+
 /* Keyframes shared by the components. */
-.motion-panel { animation: rise var(--dur-3) var(--ease-out-quint); }
-.motion-panel.closing { animation: rise-out var(--dur-2) var(--ease-out-quint); pointer-events: none; }
 .motion-fold { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--dur-3) var(--ease-out-quint); }
 .motion-fold.expanded { grid-template-rows: 1fr; }
 .motion-fold > div { min-height: 0; overflow: hidden; }
 
-@keyframes rise-out {
-  from { opacity: 1; transform: none; }
-  to { opacity: 0; transform: translateY(4px); }
+/* A pane that makes its own room, the way the terminal grows its slot: a
+   negative margin as large as the pane and its gap gives the room back to the
+   chat, so the chat narrows with the pane instead of jumping in one frame,
+   and the pane keeps its final size the whole way (no rewrap inside).
+   `--slide-room` is that size. The fade is over early; the movement carries
+   the rest. */
+@keyframes slide-left {
+  from { margin-right: calc(-1 * var(--slide-room)); opacity: 0; }
+  40% { opacity: 1; }
+  to { margin-right: 0; opacity: 1; }
+}
+
+@keyframes slide-right-out {
+  from { margin-right: 0; opacity: 1; }
+  60% { opacity: 1; }
+  to { margin-right: calc(-1 * var(--slide-room)); opacity: 0; }
+}
+
+/* The same over the chat, where the pane floats and takes no room. */
+@keyframes slide-over-left {
+  from { transform: translateX(var(--slide-room)); opacity: 0; }
+  40% { opacity: 1; }
+  to { transform: none; opacity: 1; }
+}
+
+@keyframes slide-over-right-out {
+  from { transform: none; opacity: 1; }
+  60% { opacity: 1; }
+  to { transform: translateX(var(--slide-room)); opacity: 0; }
 }
 
 @keyframes rise {
@@ -1759,7 +1804,7 @@ html[data-glass] #app {
   }
 }
 
-/* The three exits, each the reverse of an entrance, played by `lib/closing.svelte.ts`. */
+/* Exits, each the reverse of an entrance, played by `lib/closing.svelte.ts`. */
 @keyframes pop-out {
   from {
     opacity: 1;
