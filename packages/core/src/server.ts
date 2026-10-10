@@ -92,7 +92,15 @@ function envTimeout(): number | null {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
-export function isAllowedOrigin(origin: string | null, port: number, host: string): boolean {
+/**
+ * Names only the local network resolves: one label (`boite-pc`, what MagicDNS,
+ * NetBIOS and most home routers answer), mDNS, the home suffixes routers hand
+ * out, and a tailnet's MagicDNS domain. Nobody outside can point one at this
+ * machine, which is what keeps the rebinding of a public name out.
+ */
+const LOCAL_NAME = /^(?:[a-z0-9-]+|.+\.(?:local|lan|home|home\.arpa|internal|localdomain|ts\.net))$/;
+
+export function isAllowedOrigin(origin: string | null, port: number, host: string, hostHeader: string | null = null): boolean {
   if (origin === null) return true;
   if (SHELL_ORIGINS.includes(origin)) return true;
   try {
@@ -103,6 +111,9 @@ export function isAllowedOrigin(origin: string | null, port: number, host: strin
     if (['127.0.0.1', 'localhost', '::1'].includes(name)) return true;
     if (host !== '0.0.0.0' && host !== '::') return name === host.toLowerCase();
     if (name === hostname().toLowerCase()) return true;
+    // A page this core served under a local name, `http://boite-pc.tail1234.ts.net:7337`
+    // say: the socket dials the same name the page was loaded from.
+    if (hostHeader !== null && hostHeader.trim().toLowerCase() === url.host && LOCAL_NAME.test(name)) return true;
     return Object.values(networkInterfaces()).some((entries) => entries?.some((entry) => entry.address === name));
   } catch {
     return false;
@@ -421,7 +432,7 @@ export function startServer(options: ServerOptions): RunningServer {
       if (url.pathname === RPC_PATH) {
         const origin = request.headers.get('origin');
         // A page served by one machine of the group opens its socket on the others.
-        if (!isAllowedOrigin(origin, self.port ?? 0, hostname) && !(origin !== null && (core.settings.get().browserOrigins?.includes(origin) || origin === core.settings.get().publicUrl || core.group.allowsOrigin(origin)))) {
+        if (!isAllowedOrigin(origin, self.port ?? 0, hostname, request.headers.get('host')) && !(origin !== null && (core.settings.get().browserOrigins?.includes(origin) || origin === core.settings.get().publicUrl || core.group.allowsOrigin(origin)))) {
           core.log('warn', `refused a websocket from origin ${origin ?? '(none)'}`);
           return new Response('forbidden origin', { status: 403 });
         }

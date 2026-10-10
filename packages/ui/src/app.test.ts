@@ -2559,6 +2559,17 @@ test('the desktop still has every one of them', async ({ app: _app }) => {
   store.showSettings('machines');
   await waitFor(() => document.querySelector('[data-testid=pairing-mint]') !== null);
   for (const selector of OWNER_ONLY_IN_SETTINGS) expect(document.querySelector(selector)).not.toBeNull();
+  // One grant, every address: a phone away from home takes the tailnet's.
+  (query('[data-testid=pairing-mint]') as HTMLButtonElement).click();
+  await waitFor(() => document.querySelectorAll('[data-testid=pairing-network]').length === 2);
+  expect(query('[data-testid=pairing-link]').textContent).toBe(store.pairing?.url);
+  (query('[data-testid=pairing-network][data-network=tailscale]') as HTMLButtonElement).click();
+  await waitFor(() => query('[data-testid=pairing-link]').textContent?.includes('100.101.102.103') === true);
+  expect(query('[data-testid=pairing-network][data-network=tailscale]').getAttribute('aria-pressed')).toBe('true');
+  // A second link keeps the network the owner chose.
+  (query('[data-testid=pairing-mint]') as HTMLButtonElement).click();
+  await waitFor(() => query('[data-testid=pairing-link]').textContent?.includes('fake-grant-') === true && store.pairing?.grant !== undefined && query('[data-testid=pairing-link]').textContent?.includes(store.pairing.grant) === true);
+  expect(query('[data-testid=pairing-link]').textContent).toContain('100.101.102.103');
   store.showSettings('resources');
   await waitFor(() => document.querySelector('[data-testid=resources-page]') !== null);
   for (const id of ['setting-focus-guard', 'setting-mute-agents']) {

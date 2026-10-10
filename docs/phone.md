@@ -67,12 +67,54 @@ core chooses another and logs it; a phone then needs a new link. An explicit
 `--port` fails when occupied. A listener on all interfaces puts the machine's
 LAN address in pairing links, rather than loopback.
 
+Which address is the LAN one is read per link, from `server/lan.ts`. The
+address the default route leaves from comes first: a UDP socket "connected" to
+a documentation address resolves the route without sending anything. Then
+come the private addresses of real adapters. The host-only and NAT adapters
+of VMware, VirtualBox, Hyper-V and WSL, container bridges and tunnels count
+only when nothing else exists. Before this, a Windows PC with VMware listed
+`VMware Network Adapter VMnet8` before its Wi-Fi, and the QR code named
+`192.168.196.1`, which no phone reaches. A Hyper-V external switch carries
+the real LAN under a `vEthernet` name; the route keeps it first.
+
 Two things guard the socket whatever it is bound to. The `Origin` header must be
 absent, one of the shell origins, or the core's own HTTP origin, and the first
 frame must be `hello` carrying a credential within five seconds, or the socket
 closes with `4001`. A phone reaching the core over the LAN passes the first check
 with the core's own origin, and the second with the session key its pairing link
 became.
+
+The core's own origin is any of its addresses, its host name, or a local name
+the page was served under: one label (`boite-pc`), `.local`, `.lan`, `.home`,
+`.home.arpa`, `.internal`, `.localdomain` or a tailnet's `.ts.net`. A name only
+counts when the socket's `Host` header carries the same name and port, so the
+page dials the core it came from. A public name is not accepted that way: a
+site that rebinds its own name to this machine stays out. Before this, a phone
+that opened `http://boite-pc.tail1234.ts.net:7337` loaded the page and then read
+"socket error" forever.
+
+## Tailscale without HTTPS
+
+[HTTPS through Tailscale](#through-tailscale) needs MagicDNS certificates and
+Serve, which a Headscale tailnet or a locked-down one may not have. Plain HTTP
+over the tailnet still reaches a core listening on every interface. A phone
+away from home dials the tailnet address, not the LAN one, so a pairing grant
+carries `links`, the same grant at every address the core answers on: the
+group's address for this machine, the public HTTPS address when set, the LAN,
+then the `100.64.0.0/10` address of the tailnet. The pairing card shows them as a
+choice above the QR code when there is more than one. The choice outlives a
+new link, so a second phone gets the same kind.
+
+A page belongs to the address it was opened on: its stored key, its installed
+icon and its service worker live under that origin. A phone paired on the LAN
+address therefore needs a second pairing to work through the tailnet. Pairing
+on the tailnet address once covers both, since Tailscale also works at home.
+MagicDNS names work as well as the address, typed by hand.
+
+`tests/network/` runs the whole path on Linux without privileges: a server
+with VMware and WSL adapters, a home LAN and a tailnet with relay latency, each
+client in its own network namespace, a phone at Android size and a desktop
+shell from `http://tauri.localhost`. See its README.
 
 ## Pairing
 

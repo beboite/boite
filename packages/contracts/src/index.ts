@@ -2434,6 +2434,7 @@ export interface PairedSession {
  * leaves the machine. A grant that was used or that expired is refused by name.
  */
 export interface PairingGrant {
+  /** The link to show first: the group's address for this machine, the public HTTPS one, else the LAN one. */
   url: string;
   grant: string;
   role: PairingRole;
@@ -2445,6 +2446,12 @@ export interface PairingGrant {
    */
   code?: string;
   codeExpiresAt?: Timestamp;
+  /**
+   * The same grant at every address this core answers on, `url` first. A
+   * phone away from home reaches a tailnet address and not the LAN one, so
+   * the owner picks. Absent from cores older than this field.
+   */
+  links?: PairingLink[];
 }
 
 /**
@@ -2473,6 +2480,20 @@ export interface TailscaleStatus {
   detail?: 'not-logged-in' | 'permission-denied' | 'timeout' | 'serve-consent' | 'unknown';
   /** A Tailscale page to open to fix the state (login, enabling serve). */
   actionUrl?: string;
+}
+
+/**
+ * Where a pairing address leads. `lan` is the home or office network,
+ * `tailscale` the 100.64.0.0/10 range of a tailnet, `public` the HTTPS
+ * address of Settings, `local` this computer only, `other` anything else.
+ */
+export type PairingNetwork = 'public' | 'lan' | 'tailscale' | 'other' | 'local';
+
+export interface PairingLink {
+  url: string;
+  network: PairingNetwork;
+  /** The adapter the address belongs to, `Wi-Fi` or `tailscale0`, absent for `public` and `local`. */
+  interface?: string;
 }
 
 // ---------------------------------------------------------------------------

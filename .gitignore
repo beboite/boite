@@ -15,6 +15,7 @@ target/
 Thumbs.db
 bench/results/*.json
 tests/e2e/.artifacts/
+tests/network/.artifacts/
 apps/shell/src-tauri/binaries/
 .bun-cache/
 telemetry/.wrangler/

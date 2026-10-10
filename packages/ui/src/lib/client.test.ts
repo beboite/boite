@@ -93,7 +93,7 @@ describe('reconnect timing', () => {
     try {
       const first = client.connect().catch((error: Error) => error.message);
       await vi.advanceTimersByTimeAsync(10_000);
-      expect(await first).toBe('connection did not answer within 10 seconds');
+      expect(await first).toBe('core.test did not answer within 10 seconds; check that this device reaches that address');
       await vi.advanceTimersByTimeAsync(1);
       expect(sockets).toHaveLength(2);
       await vi.advanceTimersByTimeAsync(19_000);

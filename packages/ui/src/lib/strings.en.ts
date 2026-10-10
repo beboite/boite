@@ -2122,7 +2122,16 @@ export const strings = {
       ownerQrTitle: 'Give a phone full control?',
       ownerQrBody: 'Whoever scans this QR code or types its code in the next 5 minutes drives this core as you do: agents, files, accounts and settings. Show it only to your own phone, and revoke the device below if in doubt.',
       ownerQrConfirm: 'Show the code',
-      ownerScan: 'Scan it from the Boite app on your phone, or type the code there. It works once, within 5 minutes.'
+      ownerScan: 'Scan it from the Boite app on your phone, or type the code there. It works once, within 5 minutes.',
+      network: 'Network the link goes through',
+      networks: { public: 'HTTPS address', lan: 'Local network', tailscale: 'Tailscale', other: 'Other network', local: 'This computer' },
+      networkHints: {
+        public: 'Opens from anywhere through the public address set above.',
+        lan: 'The phone has to be on the same Wi-Fi or network as this computer.',
+        tailscale: 'Works at home and away, as long as Tailscale runs on the phone. Pair on it to keep one link everywhere.',
+        other: 'An address outside the usual private ranges: use it only if you know the phone reaches it.',
+        local: 'Only this computer reaches it. Turn on the local network to pair a phone.'
+      }
     }
   },
 

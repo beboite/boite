@@ -9,7 +9,7 @@ import { Core } from '../src/core.ts';
 import { newToken } from '../src/ids.ts';
 import { pair, readPreviousRun } from '../src/main.ts';
 import { isAllowedOrigin, PLACEHOLDER_HTML, preauthPeer, preauthRefusal, ServerConnection, startServer, startServerOnStickyPort, UI_DIST } from '../src/server.ts';
-import { lanAddress } from '../src/server/lan.ts';
+import { lanAddress, reachableAddresses } from '../src/server/lan.ts';
 import { echoThread, removeDir, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -427,6 +427,14 @@ describe('server', () => {
     expect(isAllowedOrigin('tauri://localhost', 4321, '0.0.0.0')).toBe(true);
     expect(isAllowedOrigin('http://192.0.2.1:4321', 4321, '192.0.2.1')).toBe(true);
     expect(isAllowedOrigin('http://192.0.2.1:4322', 4321, '192.0.2.1')).toBe(false);
+    // A page served under a tailnet or home-network name dials that same name.
+    expect(isAllowedOrigin('http://boite-pc.tail1234.ts.net:4321', 4321, '0.0.0.0', 'boite-pc.tail1234.ts.net:4321')).toBe(true);
+    expect(isAllowedOrigin('http://boite-pc:4321', 4321, '0.0.0.0', 'boite-pc:4321')).toBe(true);
+    expect(isAllowedOrigin('http://boite-pc.local:4321', 4321, '0.0.0.0', 'BOITE-PC.local:4321')).toBe(true);
+    // A public name rebound to this machine, or a page elsewhere dialling it, stays out.
+    expect(isAllowedOrigin('http://boite-pc.evil.example:4321', 4321, '0.0.0.0', 'boite-pc.evil.example:4321')).toBe(false);
+    expect(isAllowedOrigin('http://boite-pc.tail1234.ts.net:4321', 4321, '0.0.0.0', '192.168.1.20:4321')).toBe(false);
+    expect(isAllowedOrigin('http://boite-pc.tail1234.ts.net:4321', 4321, '0.0.0.0')).toBe(false);
   });
   test('health answers without auth', async () => {
     const response = await fetch(`${harness.url}/health`);
@@ -517,6 +525,22 @@ describe('server', () => {
     expect(lanAddress({ lo: [iface('127.0.0.1', true)], vpn: [iface('100.64.0.2')], eth: [iface('192.168.1.20')] })).toBe('192.168.1.20');
     expect(lanAddress({ eth: [iface('169.254.3.4')], wan: [iface('100.64.0.2')] })).toBe('100.64.0.2');
     expect(lanAddress({ lo: [iface('127.0.0.1', true)] })).toBeNull();
+    // A Windows PC with VMware and WSL lists their adapters before its Wi-Fi.
+    const windows = {
+      'VMware Network Adapter VMnet8': [iface('192.168.196.1')],
+      'vEthernet (WSL)': [iface('172.25.112.1')],
+      'Wi-Fi': [iface('192.168.1.20')],
+      Tailscale: [iface('100.80.1.10')],
+    };
+    expect(lanAddress(windows)).toBe('192.168.1.20');
+    expect(reachableAddresses(windows)).toEqual([
+      { address: '192.168.1.20', network: 'lan', interface: 'Wi-Fi' },
+      { address: '100.80.1.10', network: 'tailscale', interface: 'Tailscale' },
+    ]);
+    // A Hyper-V external switch carries the LAN itself: the default route says which.
+    expect(lanAddress({ 'vEthernet (External)': [iface('192.168.1.20')], 'vEthernet (Default Switch)': [iface('172.30.0.1')] }, '192.168.1.20')).toBe('192.168.1.20');
+    // Only virtual adapters: better one of them than no link at all.
+    expect(lanAddress({ vmnet8: [iface('192.168.196.1')] })).toBe('192.168.196.1');
     const url = new URL(harness.core.sessions.pairingUrl('grant'));
     expect(url.hostname).toBe('127.0.0.1');
     harness.core.setEndpoint('0.0.0.0', 4321);

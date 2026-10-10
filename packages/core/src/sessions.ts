@@ -32,7 +32,8 @@
 
 import { createHash, randomInt, timingSafeEqual } from 'node:crypto';
 import { GRANT_QUERY_PARAM, GRANT_TTL_MS, normalizePairingCode, PAIRING_CODE_ALPHABET, PAIRING_CODE_TTL_MS, PAIRING_ROLES } from '@boite/contracts';
-import type { PairedSession, PairingGrant, PairingRole, Principal, ThreadId } from '@boite/contracts';
+import type { PairedSession, PairingGrant, PairingLink, PairingRole, Principal, ThreadId } from '@boite/contracts';
+import { routedAddress } from './server/lan.ts';
 import type { Core } from './core.ts';
 import { invalidParams, refused, unauthorized } from './errors.ts';
 import { newId, newToken } from './ids.ts';
@@ -122,9 +123,10 @@ export class SessionStore {
   /**
    * A fresh grant, good for one exchange within `GRANT_TTL_MS`. A device
    * grant, and an owner grant asked `short`, also come as a code. A short owner
-   * grant expires with its code: it is the one meant to be scanned.
+   * grant expires with its code: it is the one meant to be scanned. `routed`
+   * is the address the default route leaves from, which ranks the links.
    */
-  grant(now = Date.now(), role: PairingRole = 'device', short = false): PairingGrant {
+  grant(now = Date.now(), role: PairingRole = 'device', short = false, routed: string | null = null): PairingGrant {
     if (!PAIRING_ROLES.includes(role)) {
       throw refused(`pairing.grant role must be ${PAIRING_ROLES.join(' or ')}, got ${String(role)}`, { role });
     }
@@ -133,7 +135,8 @@ export class SessionStore {
     const grant = newToken();
     const expiresAt = now + (role === 'owner' && short ? PAIRING_CODE_TTL_MS : GRANT_TTL_MS);
     this.grants.set(grant, { expiresAt, role });
-    const result: PairingGrant = { url: this.pairingUrl(grant), grant, role, expiresAt };
+    const links = this.pairingLinks(grant, routed);
+    const result: PairingGrant = { url: links[0]!.url, grant, role, expiresAt, links };
     if (role === 'device' || short) {
       let code = newCode();
       while (this.codes.has(code)) code = newCode();
@@ -163,8 +166,16 @@ export class SessionStore {
     return grant;
   }
 
-  pairingUrl(grant: string): string {
-    return `${this.core.settings.get().publicUrl ?? this.core.reachableUrl()}/?${GRANT_QUERY_PARAM}=${grant}`;
+  pairingUrl(grant: string, routed: string | null = null): string {
+    return this.pairingLinks(grant, routed)[0]!.url;
+  }
+
+  /** The grant at the public address first when one is set, then at every address the core answers on. */
+  pairingLinks(grant: string, routed: string | null = null): PairingLink[] {
+    const query = `/?${GRANT_QUERY_PARAM}=${grant}`;
+    const publicUrl = this.core.settings.get().publicUrl;
+    const found = this.core.reachableLinks(routed).map((link) => ({ ...link, url: `${link.url}${query}` }));
+    return publicUrl ? [{ url: `${publicUrl}${query}`, network: 'public' }, ...found] : found;
   }
 
   /**
@@ -291,7 +302,8 @@ export class SessionStore {
 // runs: `pairing.grant` and `sessions.revoke` are absent from `DEVICE_METHODS`,
 // so a paired device is refused them by name.
 export function registerSessionMethods(core: Core): void {
-  core.router.register('pairing.grant', (params) => core.sessions.grant(Date.now(), params?.role ?? 'device', params?.short ?? false));
+  // The route is read per grant: a laptop changes networks while its core runs.
+  core.router.register('pairing.grant', async (params) => core.sessions.grant(Date.now(), params?.role ?? 'device', params?.short ?? false, await routedAddress()));
   core.router.register('sessions.list', (_params, ctx) => core.sessions.list(ctx.connection.identity.sessionId));
   core.router.register('sessions.revoke', (params) => {
     core.sessions.revoke(params.sessionId);

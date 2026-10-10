@@ -2027,7 +2027,16 @@ export const fr: Translation = {
       ownerQrTitle: 'Donner le contrôle total à un téléphone ?',
       ownerQrBody: "Quiconque scanne ce QR code ou tape son code dans les 5 prochaines minutes pilote ce cœur comme vous : agents, fichiers, comptes et réglages. Ne le montrez qu'à votre propre téléphone, et révoquez l'appareil ci-dessous en cas de doute.",
       ownerQrConfirm: 'Afficher le code',
-      ownerScan: "Scannez-le depuis l'application Boite de votre téléphone, ou tapez-y le code. Il ne sert qu'une fois, dans les 5 minutes."
+      ownerScan: "Scannez-le depuis l'application Boite de votre téléphone, ou tapez-y le code. Il ne sert qu'une fois, dans les 5 minutes.",
+      network: 'Réseau par lequel passe le lien',
+      networks: { public: 'Adresse HTTPS', lan: 'Réseau local', tailscale: 'Tailscale', other: 'Autre réseau', local: 'Cet ordinateur' },
+      networkHints: {
+        public: "S'ouvre de partout, par l'adresse publique réglée plus haut.",
+        lan: 'Le téléphone doit être sur le même Wi-Fi ou réseau que cet ordinateur.',
+        tailscale: 'Marche à la maison comme dehors, tant que Tailscale tourne sur le téléphone. Appairez par là pour garder un seul lien partout.',
+        other: "Une adresse hors des plages privées habituelles : ne la prenez que si vous savez que le téléphone l'atteint.",
+        local: 'Seul cet ordinateur y accède. Activez le réseau local pour appairer un téléphone.'
+      }
     }
   },
 

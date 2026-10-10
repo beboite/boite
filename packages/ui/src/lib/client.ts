@@ -139,6 +139,15 @@ export function openDeadline(attempt: number): number {
   return 10_000 * (1 + Math.min(attempt, 2));
 }
 
+/** `192.168.1.20:7337`, the part of a core's address a person compares with their network. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
+
 export function rpcUrl(coreUrl: string): string {
   const url = new URL(coreUrl);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -508,7 +517,9 @@ export class WsClient implements ObservableClient {
     return new Promise<CoreInfo>((resolve, reject) => {
       let settled = false;
       const timeout = setTimeout(() => {
-        fail(`connection did not answer within ${deadline / 1000} seconds`);
+        // The address is the first thing to check: a link naming an adapter
+        // this device cannot reach looks exactly like a core that is down.
+        fail(`${hostOf(this.#options.url)} did not answer within ${deadline / 1000} seconds; check that this device reaches that address`);
         socket.close();
       }, deadline);
       const fail = (message: string) => {
@@ -520,7 +531,7 @@ export class WsClient implements ObservableClient {
       this.#cancelOpen = () => fail('connection replaced');
 
       socket.onmessage = (event) => this.#receive(event.data);
-      socket.onerror = () => fail('socket error');
+      socket.onerror = () => fail(`could not open a connection to ${hostOf(this.#options.url)}`);
       socket.onclose = (event) => {
         const incompatible = event?.code === RpcCloseCode.ProtocolMismatch;
         if (incompatible) this.#manuallyClosed = true;

@@ -1,6 +1,6 @@
 <script lang="ts">
   import InfoTip from './InfoTip.svelte';
-  import type { PairedSession } from '@boite/contracts';
+  import type { PairedSession, PairingLink, PairingNetwork } from '@boite/contracts';
   import { confirm } from '../lib/confirm.svelte';
   import { ago, exactTime, time } from '../lib/format';
   import { qrSvg } from '../lib/qr';
@@ -24,10 +24,29 @@
     if (store.connection === 'ready') void store.loadSessions();
   });
 
-  // The QR code follows the minted link: a new link redraws it, no link clears it.
+  // One grant, one link per address the core answers on: the home network for
+  // a phone on the same Wi-Fi, a tailnet's for one away from home. The choice
+  // of network outlives a new link, so a second phone gets the same kind.
+  let network = $state<PairingNetwork | null>(null);
+  let links = $derived<PairingLink[]>(store.pairing ? (store.pairing.links ?? [{ url: store.pairing.url, network: 'lan' }]) : []);
+  let shown = $derived(links.find((link) => link.network === network) ?? links[0] ?? null);
+  function linkLabel(link: PairingLink): string {
+    const name = strings.settings.pairing.networks[link.network];
+    const twins = links.filter((other) => other.network === link.network).length > 1;
+    return twins && link.interface ? `${name} · ${link.interface}` : name;
+  }
+  function hostOf(url: string): string {
+    try {
+      return new URL(url).host;
+    } catch {
+      return url;
+    }
+  }
+
+  // The QR code follows the chosen link: a new link redraws it, no link clears it.
   let qr = $state('');
   $effect(() => {
-    const url = store.pairing?.url;
+    const url = shown?.url;
     if (!url) {
       qr = '';
       return;
@@ -89,13 +108,23 @@
         <span class="ui-label">{ownerLink ? strings.settings.pairing.mintOwner : strings.settings.pairing.mint}</span>
       </button>
       {#if store.pairing}
-        <button type="button" onclick={() => void store.copy(store.pairing?.url ?? '')}><span class="ui-label">{strings.settings.pairing.copy}</span></button>
+        <button type="button" data-testid="pairing-copy" onclick={() => void store.copy(shown?.url ?? store.pairing?.url ?? '')}><span class="ui-label">{strings.settings.pairing.copy}</span></button>
         {#if store.pairing.role === 'owner' && !store.pairing.code}
           <button type="button" data-testid="pairing-owner-qr" onclick={() => void ownerQr()}><span class="ui-label">{strings.settings.pairing.ownerQr}</span></button>
         {/if}
         <button type="button" class="quiet" data-testid="pairing-close" onclick={() => store.closePairing()}><span class="ui-label">{strings.common.close}</span></button>
       {/if}
     </div>
+    {#if store.pairing && links.length > 1}
+      <div class="networks" role="group" aria-label={strings.settings.pairing.network} data-testid="pairing-networks">
+        {#each links as link (link.url)}
+          <button type="button" class:on={link === shown} aria-pressed={link === shown} data-network={link.network} data-testid="pairing-network"
+            title={hostOf(link.url)} onclick={() => (network = link.network)}>
+            {linkLabel(link)}
+          </button>
+        {/each}
+      </div>
+    {/if}
     {#if store.pairing}
       <div class="minted">
         <!-- A computer takes the link pasted, so its QR code would only be
@@ -105,8 +134,11 @@
           <div class="qr" data-testid="pairing-qr" aria-label={strings.settings.pairing.qr}>{@html qr}</div>
         {/if}
         <div class="minted-text">
-          <p class="mono link" data-testid="pairing-link">{store.pairing.url}</p>
+          <p class="mono link" data-testid="pairing-link">{shown?.url ?? store.pairing.url}</p>
           <p class="hint">{store.pairing.role !== 'owner' ? strings.settings.pairing.scan : store.pairing.code ? strings.settings.pairing.ownerScan : strings.settings.pairing.pasteOwner}</p>
+          {#if links.length > 1 && shown}
+            <p class="hint" data-testid="pairing-network-hint">{strings.settings.pairing.networkHints[shown.network]}</p>
+          {/if}
           <p class="hint">{fill(strings.settings.pairing.expires, { time: time(store.pairing.expiresAt) })}</p>
           {#if store.pairing.code}
             <div class="code-row">
@@ -170,6 +202,30 @@
   .actions { margin-top: 4px; }
   .options { margin-top: 16px; }
   .version { font-size: var(--text-xs); }
+  /* The addresses in one track, the chosen one filled, as Appearance draws its choices. */
+  .networks {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    width: fit-content;
+    max-width: 100%;
+    margin-top: 12px;
+    padding: 2px;
+    border: 1px solid var(--color-edge);
+    border-radius: var(--radius-md);
+    background: var(--color-surface-2);
+  }
+  .networks button {
+    min-height: var(--control-sm);
+    padding: 0 10px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--color-muted-foreground);
+    font-size: var(--text-sm);
+  }
+  .networks button:hover:not(.on) { background: var(--color-surface-3); color: var(--color-foreground); }
+  .networks button.on { background: var(--color-foreground); border-color: var(--color-foreground); color: var(--color-on-foreground); }
   .minted { display: flex; align-items: flex-start; gap: 14px; margin-top: 14px; }
   .minted-text { flex: 1; min-width: 0; display: grid; gap: 6px; }
   .qr {

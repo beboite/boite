@@ -4,7 +4,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { PROTOCOL_VERSION } from '@boite/contracts';
-import type { Channel, CoreInfo, CoreLogContext, ThreadId } from '@boite/contracts';
+import type { Channel, CoreInfo, CoreLogContext, PairingLink, PairingNetwork, ThreadId } from '@boite/contracts';
 import { CORE_VERSION } from './version.ts';
 import { AccountStore } from './accounts.ts';
 import { AgentStore } from './agents/store.ts';
@@ -21,7 +21,7 @@ import { KeybindingStore } from './keybindings.ts';
 import { DiagnosticLogs } from './logs.ts';
 import { registerModules } from './modules.ts';
 import { currentOs } from './paths.ts';
-import { lanAddress } from './server/lan.ts';
+import { isTailnetAddress, reachableAddresses } from './server/lan.ts';
 import { ProcRegistry } from './procs.ts';
 import { withLoad } from './threads/records.ts';
 import { ProjectStore } from './projects.ts';
@@ -341,14 +341,40 @@ export class Core {
    * reached from a phone through this machine's LAN address: 127.0.0.1 on the
    * phone is the phone.
    */
-  reachableUrl(): string {
-    // A machine of a group gives the address the group gives for it: its
+  reachableUrl(routed: string | null = null): string {
+    return this.reachableLinks(routed)[0]?.url ?? this.baseUrl();
+  }
+
+  /**
+   * Every address a pairing link may name, best first: on every interface,
+   * the LAN address the default route leaves from (`routed`), other real
+   * adapters, then a tailnet's. A core bound to one address has that one.
+   */
+  reachableLinks(routed: string | null = null): PairingLink[] {
+    // A machine of a group gives the address the group gives for it first: its
     // tailnet name when it has one, which a phone on the tailnet reaches from anywhere.
     const grouped = this.group.ownAddress();
-    if (grouped !== null) return grouped;
-    const everywhere = this.endpoint.host === '0.0.0.0' || this.endpoint.host === '::';
-    const lan = everywhere ? lanAddress() : null;
-    return lan === null ? this.baseUrl() : `http://${lan}:${this.endpoint.port}`;
+    const found = this.#interfaceLinks(routed).filter((link) => link.url !== grouped);
+    if (grouped === null) return found;
+    const host = new URL(grouped).hostname;
+    const network: PairingNetwork = isTailnetAddress(host) || host.endsWith('.ts.net') ? 'tailscale' : grouped.startsWith('https://') ? 'public' : 'lan';
+    return [{ url: grouped, network }, ...found];
+  }
+
+  #interfaceLinks(routed: string | null): PairingLink[] {
+    const { host, port } = this.endpoint;
+    const everywhere = host === '0.0.0.0' || host === '::';
+    if (!everywhere) {
+      const loopback = ['127.0.0.1', 'localhost', '::1'].includes(host);
+      const network: PairingNetwork = loopback ? 'local' : isTailnetAddress(host) ? 'tailscale' : 'lan';
+      return [{ url: this.baseUrl(), network }];
+    }
+    const links: PairingLink[] = reachableAddresses(undefined, routed).map((entry) => ({
+      url: `http://${entry.address}:${port}`,
+      network: entry.network,
+      interface: entry.interface,
+    }));
+    return links.length > 0 ? links : [{ url: this.baseUrl(), network: 'local' }];
   }
 
   info(): CoreInfo {

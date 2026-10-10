@@ -23,11 +23,16 @@ export function pairingMethods(ctx: FakeContext) {
       const short = role === 'owner' && params?.short === true;
       const expiresAt = ctx.now() + (short ? PAIRING_CODE_TTL_MS : 10 * 60 * 1000);
       const origin = ctx.settings.publicUrl ?? 'http://192.168.1.20:8777';
+      const url = `${origin}/?grant=${grant}`;
       return {
-        url: `${origin}/?grant=${grant}`,
+        url,
         grant,
         role,
         expiresAt,
+        links: [
+          { url, network: ctx.settings.publicUrl ? 'public' : 'lan', ...(ctx.settings.publicUrl ? {} : { interface: 'Wi-Fi' }) },
+          { url: `http://100.101.102.103:8777/?grant=${grant}`, network: 'tailscale', interface: 'Tailscale' }
+        ],
         ...(role === 'device' || short ? { code: `K7QM-${String(seq).padStart(4, '2')}`, codeExpiresAt: Math.min(expiresAt, ctx.now() + PAIRING_CODE_TTL_MS) } : {})
       };
     },
