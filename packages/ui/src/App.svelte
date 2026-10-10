@@ -31,6 +31,7 @@
   import { installWhipEscape } from './lib/whip.svelte';
   import { rightPanel } from './lib/right-panel.svelte';
   import { workspace } from './lib/workspace.svelte';
+  import { hostLocalAgentBrowser } from './lib/agent-browser-host.svelte';
   import type { Store } from './lib/store.svelte';
   import { tourRequested, tourSeen } from './lib/onboarding.svelte';
   import { prefetchAllowed, prefetchNames, whenIdle } from './lib/prefetch';
@@ -132,6 +133,7 @@
   $effect(() => {
     browserProfiles.source = workspace.machines.find((machine) => machine.store.localCore)?.store ?? store;
   });
+  hostLocalAgentBrowser();
   let SettingsShell = $state<typeof import('./components/SettingsShell.svelte').default>();
   let AgentsPage = $state<typeof import('./components/agents/AgentsPage.svelte').default>();
   let agentsLoadError = $state('');

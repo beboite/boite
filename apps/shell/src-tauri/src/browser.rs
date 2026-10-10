@@ -25,7 +25,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{LazyLock, Mutex};
 use tauri::webview::{PageLoadEvent, WebviewBuilder};
 use tauri::{
-    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Position, Rect, Runtime, Size, Url,
+    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, PhysicalPosition, Position, Rect, Runtime, Size, Url,
     Webview, WebviewUrl,
 };
 
@@ -170,7 +170,7 @@ enum Event {
 
 /// A slot's place in the window's content area, in logical pixels, which is
 /// what `getBoundingClientRect` gives the UI.
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct SurfaceRect {
     pub x: f64,
     pub y: f64,
@@ -219,6 +219,34 @@ pub fn only_main(webview: &Webview) -> Result<(), String> {
 struct Surfaces {
     shown: HashSet<String>,
     parked: bool,
+    /// The last rectangle the UI gave each agent surface, which comes back
+    /// when the surface does and sizes it while it waits off screen.
+    rects: HashMap<String, SurfaceRect>,
+}
+
+/// An agent surface: the core's agent browser drives it through the UI, and
+/// screenshots and records it while nobody looks at it.
+fn is_agent_label(label: &str) -> bool {
+    label.strip_prefix(LABEL_PREFIX).is_some_and(crate::browser_control::is_agent_surface)
+}
+
+/// The viewport an agent surface works in before the UI ever measured a slot for it.
+const AGENT_SIZE: (f64, f64) = (1280.0, 800.0);
+
+/// Where an agent surface waits while it is not on screen, in physical pixels
+/// left of the window: far past any client area, and within the 16-bit range
+/// some window coordinates still go through.
+const OFF_SCREEN_X: i32 = -32000;
+
+/// What `reconcile` does to one webview.
+#[derive(Debug, PartialEq)]
+enum Placement {
+    Show,
+    Hide,
+    /// An agent surface on screen, at the slot the UI gave it.
+    At(SurfaceRect),
+    /// An agent surface out of sight: shown, off screen, at this logical size.
+    OffScreen(f64, f64),
 }
 
 impl Surfaces {
@@ -242,6 +270,52 @@ impl Surfaces {
     /// the window is not parked, a surface while the UI also wants it.
     fn visible(&self, label: &str) -> bool {
         !self.parked && (label == MAIN_LABEL || self.shown.contains(label))
+    }
+
+    /// Records the slot the UI gave an agent surface.
+    fn place(&mut self, label: &str, rect: SurfaceRect) {
+        if is_agent_label(label) { self.rects.insert(label.to_owned(), rect); }
+    }
+
+    /// A destroyed surface's last slot goes with it.
+    fn forget(&mut self, label: &str) {
+        self.shown.remove(label);
+        self.rects.remove(label);
+    }
+
+    /// How the webview `label` is placed now. Hiding a WebView2 stops its page
+    /// painting, which is the point for a surface the user browses, but an
+    /// agent screenshots and records its surface while the user looks at
+    /// another conversation, the tray, or a minimized window: a hidden one
+    /// returns blank frames or none. An agent surface out of sight therefore
+    /// stays shown, moved outside the window's client area at its last size.
+    fn placement(&self, label: &str) -> Placement {
+        let visible = self.visible(label);
+        if !is_agent_label(label) {
+            return if visible { Placement::Show } else { Placement::Hide };
+        }
+        let rect = self.rects.get(label);
+        match (visible, rect) {
+            (true, Some(rect)) => Placement::At(rect.clone()),
+            (true, None) => Placement::Show,
+            (false, Some(rect)) => Placement::OffScreen(rect.width, rect.height),
+            (false, None) => Placement::OffScreen(AGENT_SIZE.0, AGENT_SIZE.1),
+        }
+    }
+}
+
+/// An agent surface's bounds out of sight: off screen, at `width` by `height`.
+fn off_screen(width: f64, height: f64) -> Rect {
+    Rect {
+        position: Position::Physical(PhysicalPosition::new(OFF_SCREEN_X, 0)),
+        size: Size::Logical(LogicalSize::new(width, height)),
+    }
+}
+
+fn bounds_of(rect: &SurfaceRect) -> Rect {
+    Rect {
+        position: Position::Logical(LogicalPosition::new(rect.x, rect.y)),
+        size: Size::Logical(LogicalSize::new(rect.width, rect.height)),
     }
 }
 
@@ -267,11 +341,15 @@ fn reconcile<R: Runtime>(app: &AppHandle<R>, labels: Vec<String>) {
             let Some(view) = handle.get_webview(&label) else { continue };
             // Read just before the call, and released before it: a webview
             // call that re-enters a window handler must not find it held.
-            let visible = surfaces().visible(&label);
-            let outcome = if visible { view.show() } else { view.hide() };
+            let placement = surfaces().placement(&label);
+            let outcome = match &placement {
+                Placement::Show => view.show(),
+                Placement::Hide => view.hide(),
+                Placement::At(rect) => view.set_bounds(bounds_of(rect)).and_then(|_| view.show()),
+                Placement::OffScreen(width, height) => view.set_bounds(off_screen(*width, *height)).and_then(|_| view.show()),
+            };
             if let Err(error) = outcome {
-                let verb = if visible { "shown" } else { "hidden" };
-                eprintln!("[shell] the webview {label} could not be {verb}: {error}");
+                eprintln!("[shell] the webview {label} could not be placed as {placement:?}: {error}");
             }
         }
     };
@@ -312,9 +390,16 @@ pub fn close_all<R: Runtime>(app: &AppHandle<R>) {
     if let Ok(mut picks) = PICKS.lock() {
         picks.clear();
     }
-    surfaces().shown.clear();
+    {
+        let mut surfaces = surfaces();
+        surfaces.shown.clear();
+        surfaces.rects.clear();
+    }
     #[cfg(windows)]
-    crate::platform::browser_screencast::remove_all();
+    {
+        crate::platform::browser_screencast::remove_all();
+        crate::platform::browser_events::remove_all();
+    }
     for (label, view) in app.webviews() {
         if !label.starts_with(LABEL_PREFIX) {
             continue;
@@ -601,17 +686,25 @@ pub async fn browser_create(
     let private = profile == Profile::Private;
     builder = builder.on_new_window(move |url, features| new_window(&handle, &surface, private, url, features));
 
-    let view = window
-        .add_child(
+    // An agent surface is never hidden, so it starts where it waits out of
+    // sight: see `Surfaces::placement`.
+    let agent = is_agent_label(&label);
+    let view = if agent {
+        window.add_child(builder, PhysicalPosition::new(OFF_SCREEN_X, 0), LogicalSize::new(AGENT_SIZE.0, AGENT_SIZE.1))
+    } else {
+        window.add_child(
             builder,
             LogicalPosition::new(0.0, 0.0),
             // A tab first opened by a background agent has no measured UI slot.
             // Give its hidden page a usable viewport until the panel shows it.
             LogicalSize::new(1024.0, 768.0),
         )
-        .map_err(|error| format!("the browser surface {id:?} could not be created: {error}"))?;
-    view.hide()
-        .map_err(|error| format!("the browser surface {id:?} could not be parked: {error}"))?;
+    }
+    .map_err(|error| format!("the browser surface {id:?} could not be created: {error}"))?;
+    if !agent {
+        view.hide()
+            .map_err(|error| format!("the browser surface {id:?} could not be parked: {error}"))?;
+    }
     #[cfg(windows)]
     {
         if let Err(error) = crate::platform::browser_page::surface(&view).await {
@@ -696,7 +789,8 @@ pub async fn browser_reload(app: AppHandle, webview: Webview, id: String) -> Res
 /// window's scale factor, so nothing is converted on the way.
 ///
 /// `null` parks the surface. It is hidden rather than moved off screen, so the
-/// page stops painting instead of painting somewhere nobody looks.
+/// page stops painting instead of painting somewhere nobody looks. An agent
+/// surface is the exception, moved off screen instead: see `Surfaces::placement`.
 #[tauri::command]
 pub async fn browser_set_bounds(
     app: AppHandle,
@@ -711,10 +805,7 @@ pub async fn browser_set_bounds(
         reconcile(&app, vec![view.label().to_owned()]);
         return Ok(());
     };
-    view.set_bounds(Rect {
-        position: Position::Logical(LogicalPosition::new(rect.x, rect.y)),
-        size: Size::Logical(LogicalSize::new(rect.width, rect.height)),
-    })
+    view.set_bounds(bounds_of(&rect))
     .map_err(|error| {
         format!(
             "the browser surface {id:?} could not be moved to {} by {} at {}, {}: {error}",
@@ -722,7 +813,11 @@ pub async fn browser_set_bounds(
         )
     })?;
     // Shown unless the window is parked meanwhile, which `reconcile` decides.
-    surfaces().want(view.label(), true);
+    {
+        let mut surfaces = surfaces();
+        surfaces.place(view.label(), rect);
+        surfaces.want(view.label(), true);
+    }
     reconcile(&app, vec![view.label().to_owned()]);
     Ok(())
 }
@@ -816,10 +911,11 @@ pub async fn browser_destroy(app: AppHandle, webview: Webview, id: String) -> Re
     {
         crate::platform::browser_diagnostics::remove(&id);
         crate::platform::browser_screencast::remove(&id);
+        crate::platform::browser_events::remove(&id);
     }
     cancel_pick(&id);
     if let Ok(mut highlights) = HIGHLIGHTS.lock() { highlights.remove(&id); }
-    surfaces().want(&label_of(&id)?, false);
+    surfaces().forget(&label_of(&id)?);
     close_popups(&app, Some(&id));
     view_of(&app, &id)?
         .close()
@@ -828,7 +924,47 @@ pub async fn browser_destroy(app: AppHandle, webview: Webview, id: String) -> Re
 
 #[cfg(test)]
 mod tests {
-    use super::{checked_url, label_of, profile_of, read_selection, Profile, Surfaces, LABEL_PREFIX, MAIN_LABEL, MAX_SELECTION_CALLBACK_BYTES, PICKS};
+    use super::{checked_url, label_of, profile_of, read_selection, Placement, Profile, SurfaceRect, Surfaces, LABEL_PREFIX, MAIN_LABEL, MAX_SELECTION_CALLBACK_BYTES, PICKS};
+
+    #[test]
+    fn an_agent_surface_out_of_sight_stays_shown_off_screen_at_its_last_size() {
+        let mut surfaces = Surfaces::default();
+        let agent = "boite-browser:agent-1";
+        // Never measured: off screen at the default viewport, never hidden.
+        assert_eq!(surfaces.placement(agent), Placement::OffScreen(1280.0, 800.0));
+        let rect = SurfaceRect { x: 10.0, y: 20.0, width: 900.0, height: 600.0 };
+        surfaces.place(agent, rect.clone());
+        surfaces.want(agent, true);
+        assert_eq!(surfaces.placement(agent), Placement::At(rect.clone()));
+        // The UI parks it: it keeps its size, off screen.
+        surfaces.want(agent, false);
+        assert_eq!(surfaces.placement(agent), Placement::OffScreen(900.0, 600.0));
+        // The window parks: the same, and its slot comes back with the window.
+        surfaces.want(agent, true);
+        surfaces.park();
+        assert_eq!(surfaces.placement(agent), Placement::OffScreen(900.0, 600.0));
+        assert_eq!(surfaces.unpark().unwrap(), [agent]);
+        assert_eq!(surfaces.placement(agent), Placement::At(rect));
+        surfaces.forget(agent);
+        assert_eq!(surfaces.placement(agent), Placement::OffScreen(1280.0, 800.0));
+    }
+
+    #[test]
+    fn a_user_surface_is_still_hidden_when_out_of_sight() {
+        let mut surfaces = Surfaces::default();
+        let user = "boite-browser:browser:1";
+        let rect = SurfaceRect { x: 0.0, y: 0.0, width: 10.0, height: 10.0 };
+        surfaces.place(user, rect);
+        assert!(surfaces.rects.is_empty());
+        assert_eq!(surfaces.placement(user), Placement::Hide);
+        surfaces.want(user, true);
+        assert_eq!(surfaces.placement(user), Placement::Show);
+        surfaces.park();
+        assert_eq!(surfaces.placement(user), Placement::Hide);
+        assert_eq!(surfaces.placement(MAIN_LABEL), Placement::Hide);
+        // A surface id that merely contains "agent-" is not an agent surface.
+        assert_eq!(surfaces.placement("boite-browser:browser:agent-1"), Placement::Hide);
+    }
 
     #[test]
     fn a_profile_is_the_default_the_private_session_or_a_safe_folder_name() {
