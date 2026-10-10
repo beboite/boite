@@ -132,6 +132,7 @@ async function withQuotaProbe<T>(core: Core, account: Account, name: string, rea
   const cwd = mkdtempSync(join(tmpdir(), 'boite-quota-'));
   const threadId = `${reset ? 'quota-reset' : 'quota'}:${account.id}`;
   const exits: Promise<void>[] = [];
+  const at = performance.now();
   try {
     return await read({
       provider, accountId: account.id, cwd,
@@ -142,8 +143,13 @@ async function withQuotaProbe<T>(core: Core, account: Account, name: string, rea
         return child;
       },
       killTree: () => core.procs.killTree(threadId),
-      log: (level, message) => core.log(level, `${name} quota: ${message}`),
+      log: (level, message) => core.log(level, `${name} quota: ${message}`, { source: 'quotas', event: 'quota.read' }),
     });
+  } catch (error) {
+    core.logs.warn(`Reading the ${name} quota of account ${account.id} failed after ${Math.round(performance.now() - at)} ms: ${error instanceof Error ? error.message : String(error)}`, {
+      source: 'quotas', event: 'quota.read-failed', durationMs: performance.now() - at, data: { accountId: account.id, providerId: account.providerId, reset },
+    });
+    throw error;
   } finally {
     core.procs.killTree(threadId);
     await Promise.all(exits);

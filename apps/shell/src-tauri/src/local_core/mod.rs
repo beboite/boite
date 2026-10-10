@@ -148,7 +148,15 @@ impl CoreState {
     pub(crate) fn kill_child(&self) {
         if let Ok(mut guard) = self.child.lock() {
             if let Some(mut spawned) = guard.take() {
-                if !self.launch.resident { job::stop_core(&mut spawned.child); }
+                let pid = spawned.child.id();
+                if self.launch.resident {
+                    crate::shell_log::info("core", "shell.core.kill-child", format!("leaving the resident core pid {pid} running as the shell exits"),
+                        serde_json::json!({ "pid": pid, "resident": true }));
+                } else {
+                    crate::shell_log::info("core", "shell.core.kill-child", format!("stopping the core pid {pid} this shell owns"),
+                        serde_json::json!({ "pid": pid, "resident": false }));
+                    job::stop_core(&mut spawned.child);
+                }
             }
         }
         // Dropping the job closes its handle, which kills whatever is still in
@@ -199,6 +207,13 @@ fn current_endpoint(state: &CoreState) -> Result<CoreEndpoint, String> {
         return settled.outcome;
     }
     if claim(&state.slot, settled.generation) {
+        let reason = match (&settled.outcome, settled.pid) {
+            (Err(error), _) => format!("the last start failed ({error})"),
+            (Ok(_), Some(pid)) => format!("the core pid {pid} is no longer running"),
+            (Ok(_), None) => "the core is gone".to_string(),
+        };
+        crate::shell_log::warn("core", "shell.core.restart", format!("resolving the core again: {reason}"),
+            serde_json::json!({ "pid": settled.pid, "generation": settled.generation + 1 }));
         publish(&state.slot, resolve_core(state));
     }
     wait_for_endpoint(&state.slot, patience)?.outcome

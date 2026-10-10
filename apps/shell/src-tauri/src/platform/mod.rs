@@ -22,6 +22,13 @@ pub(crate) mod process;
 pub(crate) mod process;
 
 #[cfg(windows)]
+#[path = "windows_watch.rs"]
+pub(crate) mod watch;
+#[cfg(not(windows))]
+#[path = "posix_watch.rs"]
+pub(crate) mod watch;
+
+#[cfg(windows)]
 pub(crate) mod dwm;
 #[cfg(windows)]
 pub(crate) mod windows;

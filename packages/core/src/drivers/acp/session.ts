@@ -24,6 +24,7 @@ import { CLIENT_NAME, EXIT_GRACE_MS, isGrok, STDERR_MAX, type AcpDeps, type Time
 import { jsonLinesOnly } from './stdout.ts';
 import { commandsOf, imageBlocksOf, usdCostOf, type AcpTurn } from './turn.ts';
 import { answerPermission, drawUpdate } from './updates.ts';
+import { noteReady } from '../driver-log.ts';
 
 /** A glog line at info severity: `I0921 09:51:32.917720 10292 main.py:80] ...`. */
 const GLOG_INFO = /^I\d{4} \d{2}:\d{2}:\d{2}\.\d+\s/;
@@ -382,14 +383,20 @@ export class AcpSession {
   }
 
   private start(ctx: TurnContext): Promise<void> {
-    if (this.starting === null) this.starting = this.open(ctx);
+    if (this.starting === null) {
+      this.starting = noteReady(ctx, `${ctx.provider.id} ACP`, () => this.open(ctx), () => ({
+        text: this.loaded ? ', loaded the saved session' : this.replaces !== null ? ', a new one replacing a session it cannot load' : '',
+        data: { loaded: this.loaded, canLoad: this.canLoad, replaced: this.replaces !== null, images: this.imagesSupported },
+        ...(this.replaces !== null ? { resumed: false } : {}),
+      }), () => this.active?.isStopped === true);
+    }
     return this.starting;
   }
 
   private async open(ctx: TurnContext): Promise<void> {
     const sdk = await this.deps.loadSdk();
     // A stop while the SDK loaded: nothing may be spawned for a session that is over.
-    if (this.ended) throw new Error('the acp session was closed before it started');
+    if (this.ended) throw Object.assign(new Error('the acp session was closed before it started'), { abandoned: true });
     const profile = profileFor(ctx.provider);
     const executable = profile === undefined ? null : resolveExecutable(profile);
     if (executable === null) {
@@ -428,6 +435,12 @@ export class AcpSession {
     });
     this.canLoad = init.agentCapabilities?.loadSession === true;
     this.imagesSupported = init.agentCapabilities?.promptCapabilities?.image === true;
+    // The agent binary fills these: only text and numbers reach the log.
+    const scalar = (value: unknown): string | null => typeof value === 'string' ? value : typeof value === 'number' ? String(value) : null;
+    const agentName = scalar(init.agentInfo?.name), agentVersion = scalar(init.agentInfo?.version), protocol = scalar(init.protocolVersion);
+    ctx.diagnostic?.('info', `${ctx.provider.id} answered initialize as ${agentName ?? 'an unnamed agent'} ${agentVersion ?? ''}, ACP protocol ${protocol ?? 'unknown'}`.replace(/ {2,}/g, ' '), {
+      event: 'driver.initialized', data: { agent: agentName, version: agentVersion, protocol, loadSession: this.canLoad },
+    });
 
     if (ctx.sessionId !== null && this.canLoad) {
       // A fresh core has no probe cache, and session/load may omit controls.
@@ -457,6 +470,7 @@ export class AcpSession {
         const reason = rpcReason(error);
         ctx.log('warn', `acp: ${ctx.provider.id} refused to load the session ${ctx.sessionId}: ${reason}`);
         const kind = loadRefusal(error, reason);
+        ctx.diagnostic?.('warn', `session/load refused with code ${String((error as { code?: unknown }).code)}, read as ${kind}`, { event: 'driver.session.load-refused', data: { code: (error as { code?: number }).code ?? null, kind } });
         if (kind === 'gone' || (kind === 'unsure' && this.memory.refusedLoads.has(refusedKey))) {
           // Pruned, migrated, another project: retrying the same id would fail
           // every turn of the thread from now on.

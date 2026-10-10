@@ -133,9 +133,9 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 591,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,460,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,520,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 3,740,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 3,852,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
@@ -158,6 +158,20 @@ On 2026-10-10, `bun run build:ui` with Bun 1.4.2 measured 4,420,649 UI bytes at
 The dialogs, input binding and English/French sentences add 4,908 bytes. The UI
 total limit increases by 5,000 bytes to 4,429,000, leaving 3,443 bytes; entry
 and core limits stay unchanged.
+
+On 2026-10-10 the Windows CI job printed 4,321.8 KB of UI and 3,623.0 KB of
+core JavaScript for `main`, and 4,481,389 and 3,815,569 bytes for the
+diagnostic logs branch. The UI gains about 56 KB for the Diagnostics page, the
+report dialog, the client error reporter and their English/French sentences;
+the core about 106 KB for the instrumentation of every subsystem, the
+anonymizer, the export and the `boite logs` and `boite issue` commands. A local
+Linux build of the same head measured 3,823,800 core bytes. The UI total limit
+becomes 4,493,000 (this increase on top of `main`'s own) and the core JavaScript
+limit 3,826,000; entry and core
+bundle limits stay unchanged.
+Merged with `ed68bd94` (group relay, project search, plugin updates), a local
+Linux build of the branch measured 4,511,575 UI bytes and 3,843,682 core
+bytes, and the limits become 4,520,000 and 3,852,000.
 
 On 2026-10-03, fresh builds of `e1f00a3` measured 2,695,204 core bytes and 3,932,309
 UI bytes. The orchestration additions measured 3,228,444 and 3,943,301 bytes:

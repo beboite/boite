@@ -39,6 +39,7 @@ import { CodexRpc } from './rpc.ts';
 import { updateTurnSettings } from './live-settings.ts';
 import { CodexTurn } from './turn.ts';
 import { SessionRetention } from '../session-retention.ts';
+import { errorCodeOf, httpStatusOf, noteReady } from '../driver-log.ts';
 
 /**
  * What `thread/resume` answers when the thread's rollout file is gone. Both
@@ -312,7 +313,7 @@ export class CodexSession {
   // -- the process ----------------------------------------------------------
 
   private start(ctx: SessionContext): Promise<void> {
-    if (this.starting === null) this.starting = this.open(ctx);
+    if (this.starting === null) this.starting = noteReady(ctx, 'Codex app-server', () => this.open(ctx), () => ({ text: this.served.model ? `, on ${this.served.model}` : '', data: { model: this.served.model } }), () => this.active?.isStopped === true);
     return this.starting;
   }
 
@@ -580,6 +581,10 @@ export class CodexSession {
         const error = params['error'] as CodexTurnError | undefined;
         const willRetry = params['willRetry'] === true;
         const text = error?.message ?? 'the codex agent reported an error';
+        const info = (error as { codexErrorInfo?: unknown } | undefined)?.codexErrorInfo;
+        turn.ctx.diagnostic?.('warn', `Codex reported ${errorCodeOf(info) ?? 'an error'}${httpStatusOf(info) === null ? '' : ` (HTTP ${httpStatusOf(info)})`}${willRetry ? ', it retries' : ', no retry'}: ${text}`, {
+          event: willRetry ? 'driver.api.retry' : 'driver.api.error', data: { code: errorCodeOf(info), status: httpStatusOf(info), willRetry },
+        });
         // `turn/completed` says whether the turn survived it, so this is a line
         // in the log and never the turn's own outcome.
         turn.ctx.log('warn', `codex agent: ${text}${willRetry ? ' (retrying)' : ''}`);

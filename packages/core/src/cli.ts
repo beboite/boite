@@ -25,6 +25,7 @@ import { browserCommand, BROWSER_HELP } from './browser-cli.ts';
 import { deviceCommand } from './device-cli.ts';
 import { agentsCommand, AgentsUsage, WAIT_MAX_S } from './agents-cli.ts';
 import { parse, requiredText, Usage, type Parsed } from './cli-args.ts';
+import { issueCommand, logsCommand } from './logs-cli.ts';
 import { CONTROL_HELP, controlCommand, isControlCommand, ownerThreadNew, ownerWithoutThread, type Caller } from './control-cli.ts';
 
 export interface CliIo {
@@ -68,9 +69,14 @@ ${CONTROL_HELP}
   server check|update|cancel      check or update this server, or cancel the
                                  pending update; no thread needed as owner
   journal-check [table rowid]     bounded read-only journal diagnostics, owner only
-  logs [--limit <n>] [--level info|warn|error]
-                                 recent private diagnostics, owner only;
-                                 --thread filters one conversation
+  logs [--min-level warn] [--since 2h]
+                                 Boite's own diagnostics: did the app, its shell
+                                 or a client fail? logs help has the filters,
+                                 logs problems groups them, logs export writes
+                                 the anonymized file a developer reads
+  issue draft|submit --title <t> --description <text>
+                                 report a Boite bug on GitHub with that export;
+                                 show the user the draft before submit
   ask <question> [option ...]    ask the user without stopping; the answer
                                  arrives later as a message (--multiple)
   task list                      the agent's task list
@@ -183,7 +189,7 @@ function targetOf(parsed: Parsed, env: CliIo['env']): Target {
     if (parsed.core !== undefined) throw new Error(`this CLI speaks for thread ${own} on its own core; --core is for a terminal`);
     return { url, token, threadId: own };
   }
-  const threadId = parsed.thread ?? own ?? (['server', 'logs', 'journal-check'].includes(parsed.positional[0] ?? '') || ownerWithoutThread(parsed) ? '' : undefined);
+  const threadId = parsed.thread ?? own ?? (['server', 'logs', 'issue', 'journal-check'].includes(parsed.positional[0] ?? '') || ownerWithoutThread(parsed) ? '' : undefined);
   if (parsed.core !== undefined) {
     // The token stays out of the command line, where any process listing would show it.
     const remoteToken = env.BOITE_TOKEN || undefined;
@@ -275,6 +281,8 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
     print([`shown: ${shown ? 'yes' : 'no, nobody is watching this thread; it is queued on its panel'}`], { shown });
   };
 
+  // An agent's token reads the anonymized view; the owner's terminal reads its own records.
+  const agentCaller = Boolean(io.env[AGENT_ENV.coreUrl] && io.env[AGENT_ENV.token] && io.env[AGENT_ENV.threadId]);
   const commands: Record<string, () => Promise<void>> = {
     'journal-check': async () => {
       if (rest.length !== 0 && rest.length !== 2) throw new Usage('journal-check expects no arguments or a cursor table and rowid');
@@ -301,15 +309,8 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
       const result = await deviceCommand(rest, io, client, threadId, parsed.timeout);
       print(result.lines, result.value);
     },
-    logs: async () => {
-      if (rest.length > 0) throw new Usage('logs takes --limit, --level and --thread filters');
-      const records = await client.call('core.logs', {
-        ...(parsed.limit === undefined ? {} : { limit: parsed.limit }),
-        ...(parsed.level === undefined ? {} : { level: parsed.level }),
-        ...(parsed.thread === undefined ? {} : { threadId: parsed.thread }),
-      });
-      print(records.map(record => `${new Date(record.at).toISOString()} ${record.level.toUpperCase()} ${record.source}/${record.event}${record.threadId ? ` thread=${record.threadId}` : ''}${record.turnId ? ` turn=${record.turnId}` : ''}${record.requestId ? ` request=${record.requestId}` : ''} ${record.message.replace(/[\r\n]+/g, ' ')}`), records);
-    },
+    logs: () => logsCommand(rest, client, threadId, agentCaller, io.cwd, print),
+    issue: () => issueCommand(rest, client, threadId, agentCaller, io.cwd, print),
     server: async () => {
       const action = rest[0] ?? 'check';
       if (!['check', 'update', 'cancel'].includes(action)) throw new Usage('server expects check, update or cancel');

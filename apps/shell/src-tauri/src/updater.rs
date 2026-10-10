@@ -79,14 +79,46 @@ impl AppUpdater {
         Ok(Operation(&self.busy))
     }
     fn change(&self, app: &AppHandle, f: impl FnOnce(&mut Snapshot)) -> Snapshot {
-        let snapshot = { let mut state = self.snapshot.lock().unwrap(); f(&mut state); state.clone() };
+        let (snapshot, before) = {
+            let mut state = self.snapshot.lock().unwrap();
+            let before = state.phase.clone();
+            f(&mut state);
+            (state.clone(), before)
+        };
+        // Progress events repeat a phase ten times a second; only a new phase is a line.
+        if snapshot.phase != before && snapshot.phase != "error" { log_phase(&snapshot, &before); }
         let _ = app.emit_to(crate::browser::MAIN_LABEL, "app-update", &snapshot);
         snapshot
     }
     fn fail(&self, app: &AppHandle, error: String) -> Snapshot {
+        let phase = self.snapshot.lock().unwrap().phase.clone();
+        crate::shell_log::error("updater", "shell.update.failed",
+            format!("the app update failed while {phase}: {error}"), serde_json::json!({ "phase": phase }));
         self.pending.lock().unwrap().take();
         self.change(app, |s| { s.phase = "error".into(); s.error = Some(error); })
     }
+}
+
+/// One line per updater step: checking, available, current, downloading,
+/// ready, waiting, installing.
+fn log_phase(snapshot: &Snapshot, before: &str) {
+    let version = snapshot.version.as_deref().unwrap_or("");
+    let channel = match snapshot.channel { Track::Stable => "stable", Track::Nightly => "nightly" };
+    let message = match snapshot.phase.as_str() {
+        "checking" => format!("checking the {channel} channel for an app update from {}", snapshot.current_version),
+        "available" => format!("app update {version} is available on the {channel} channel"),
+        "current" => format!("{} is the newest {channel} release", snapshot.current_version),
+        "downloading" => format!("downloading app update {version}"),
+        "ready" if before == "downloading" => format!("app update {version} downloaded and verified, {} bytes", snapshot.received),
+        "ready" => format!("app update {version} is ready again; the install did not start"),
+        "waiting" => format!("waiting for the core to hand over its turns before installing {version}"),
+        "installing" => format!("installing app update {version}"),
+        other => format!("the app updater moved to {other}"),
+    };
+    crate::shell_log::info("updater", "shell.update.phase", message, serde_json::json!({
+        "phase": snapshot.phase, "from": before, "channel": channel, "version": version,
+        "currentVersion": snapshot.current_version, "bytes": snapshot.received,
+    }));
 }
 
 const UNSUPPORTED: &str = "Updates require an installed Boite: the Windows x64 installer, a macOS application or a Linux .deb or AppImage";
@@ -311,11 +343,17 @@ pub async fn app_update_install(webview: Webview, app: AppHandle, state: State<'
     // On Windows Tauri exits once the installer launches. If it cannot
     // launch, the hold is released and the window's next reconnect starts the
     // engine again.
+    let version = pending.update.version.clone();
+    crate::shell_log::info("updater", "shell.update.install", format!("starting the installer for app update {version}; the shell exits or restarts next"),
+        serde_json::json!({ "version": version, "bytes": bytes.len() as u64 }));
+    crate::shell_log::flush(Duration::from_millis(500));
     let result = tauri::async_runtime::spawn_blocking(move || pending.update.install(bytes)).await;
     match result {
         Ok(Ok(())) => {
             // Windows never gets here: Tauri exits once the installer starts.
             std::env::set_var(crate::RESTARTED_AFTER_UPDATE, "1");
+            crate::shell_log::info("updater", "shell.update.restart", format!("app update {version} installed; restarting the shell"), serde_json::json!({ "version": version }));
+            crate::shell_log::flush(Duration::from_millis(500));
             app.restart();
         }
         outcome => {

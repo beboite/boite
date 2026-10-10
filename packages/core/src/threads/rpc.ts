@@ -158,7 +158,9 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
     await requireCwd(core, params.threadId);
     return core.threads.startTurn(params.threadId, params.prompt, params.attachments ?? [], params.expectedSelectionVersion, undefined, undefined, params.clientRequestId, undefined, params.previewReferences ?? [], undefined, undefined, ctx.connection.sentFrom ?? null);
   });
-  core.router.register('turns.stop', (params) => {
+  core.router.register('turns.stop', (params, ctx) => {
+    const by = ctx.connection.identity.principal === 'agent' ? `agent of ${ctx.connection.identity.threadId}` : `${ctx.connection.identity.principal} from ${ctx.connection.sentFrom?.client ?? 'a client'}`;
+    core.logs.info(`Stop requested by the ${by}`, { source: 'turns', event: 'turn.stop-asked', threadId: params.threadId, data: { principal: ctx.connection.identity.principal, client: ctx.connection.sentFrom?.client ?? null } });
     core.activity.pauseAll(params.threadId);
     return { stopped: core.threads.stopTurn(params.threadId) };
   });

@@ -51,7 +51,11 @@ export function followAgent(core: Core, thread: ThreadSummary): ThreadSummary {
   for (const [index, keep] of kept.entries()) {
     try {
       core.threads.update({ threadId: thread.id, accountId: other.id, ...keep });
-      return core.threads.require(thread.id);
+      const moved = core.threads.require(thread.id);
+      core.logs.warn(`Account ${thread.accountId} is ${own === null ? 'removed' : 'signed out'}; the thread moves to account ${other.id}${moved.model !== thread.model ? `, model ${thread.model ?? 'default'} to ${moved.model ?? 'default'}` : ''} and starts a fresh session`, {
+        source: 'accounts', event: 'account.fallback', threadId: thread.id, data: { from: thread.accountId, to: other.id, reason: own === null ? 'removed' : 'signed-out', modelKept: moved.model === thread.model, effortKept: moved.effort === thread.effort },
+      });
+      return moved;
     } catch (error) {
       if (index === kept.length - 1) throw error;
     }

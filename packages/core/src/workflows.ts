@@ -14,6 +14,7 @@ import { assertDriverRunnable } from './drivers/index.ts';
 import type { RpcContext } from './router.ts';
 import type { ProviderProbe } from './providers/probe.ts';
 import type { ChildRoute } from './delegation/routes.ts';
+import { WorkflowLog } from './workflow-log.ts';
 
 interface DataRow { data: string }
 interface StepRow { thread_id: string; run_id: string; step_key: string }
@@ -62,12 +63,14 @@ function planError<T>(run: () => T): T {
  */
 export class Workflows {
   private readonly stepOf = new Map<string, { runId: string; key: string }>();
+  private readonly log: WorkflowLog;
   private readonly advancing = new Set<string>();
   private readonly again = new Set<string>();
   private readonly off: () => void;
   private closed = false;
 
   constructor(private readonly core: Core) {
+    this.log = new WorkflowLog(core);
     for (const row of core.journal.db.query('SELECT * FROM workflow_steps').all() as StepRow[]) this.stepOf.set(row.thread_id, { runId: row.run_id, key: row.step_key });
     // A restart never resumes paid work by itself; the turns it interrupted fail on their own.
     // An interrupted step waits on its own thread, so a resume runs it again with the interruption in its prompt.
@@ -107,6 +110,7 @@ export class Workflows {
   }
   private save(run: WorkflowRun): void {
     run.updatedAt = Date.now();
+    this.log.saved(run);
     this.core.journal.append({ type: 'workflow.changed', threadId: run.rootThreadId, version: 1, payload: { runId: run.id, status: run.status } }, db => {
       db.query('INSERT OR REPLACE INTO workflow_runs VALUES (?, ?, ?, ?, ?, ?)').run(run.id, run.rootThreadId, run.status, run.createdAt, run.updatedAt, JSON.stringify(run));
     });

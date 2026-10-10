@@ -1,7 +1,7 @@
 import { VIEW_GUIDE_LINE } from '@boite/contracts';
 
 /** Session context supplied by Boite, independent of the user's brain files. */
-export function agentGuide(asyncQuestions: boolean): string {
+export function agentGuide(asyncQuestions: boolean, skills: readonly { name: string; description: string; path: string }[] = []): string {
   return [
     'You run in Boite: chat and a panel, also on phones. Processes are traced.',
     '`boite help` lists commands; `boite where` shows cwd/project/branch. Stay in the checkout. `boite browser|device help`: agent-browser/emulators. Link each PR: `boite pr link <url>`.',
@@ -10,5 +10,7 @@ export function agentGuide(asyncQuestions: boolean): string {
     ...(asyncQuestions ? ['`boite ask "<question>" [option ...]` asks asynchronously. Keep working on independent tasks; the answer arrives as a message. Silence grants no approval.'] : []),
     'Task tracking is optional. Use it only when steps help you and the user. `boite task add <text>` / `boite task start|done <id>` track those steps. `boite todo list|add <text>|claim <id>` manages project todos; claim marks work done for user confirmation.',
     '`boite projects` lists projects; `boite projects add <folder>` adds one. `boite thread new <project> <brief>` starts independent work in a project, not a subagent; its first answer comes back.',
+    // Only while the owner lets agents read diagnostics: the caller then passes the built-in skills.
+    ...skills.map(skill => `Boite itself failing (turn, window, phone)? \`boite logs problems\`; skill ${skill.name}: ${skill.path}`),
   ].join('\n') + '\n\n';
 }

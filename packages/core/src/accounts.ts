@@ -13,6 +13,7 @@ import { sqliteHasRows } from './providers/sqlite-login.ts';
 import { browserNoopPath, browserNoopScript, currentOs, homePath } from './paths.ts';
 import { ISOLATION_DEFAULTS, shareKeys, shareProfile, unshareProfile, type ShareProblem } from './profile-share.ts';
 import type { SpawnedPipedProcess } from './procs.ts';
+import { logAccountStatus, logLoginState } from './account-log.ts';
 
 /** The thread a login process is traced under. It is a name, never a real thread. */
 export function loginThreadId(accountId: AccountId): string {
@@ -216,6 +217,7 @@ export class AccountStore {
     // A session file cannot overrule an authentication refusal from the agent.
     if (status !== 'error' && this.core.journal.getSetting(`account-auth-rejected:${accountId}`) === true) status = 'unauthenticated';
     if (!announce && status === account.status) return account;
+    if (status !== account.status) logAccountStatus(this.core, account, status);
     const next: Account = { ...account, status };
     this.core.journal.append({ type: 'account.checked', threadId: null, version: 1, payload: next }, () => {
       this.core.journal.putAccount(next);
@@ -282,6 +284,7 @@ export class AccountStore {
     if (result.status === 'ok') this.core.journal.deleteSetting(`account-auth-rejected:${accountId}`);
     if (current.status === result.status && current.identity === result.identity) return current;
     const next = { ...current, ...result };
+    if (current.status !== result.status) logAccountStatus(this.core, current, result.status);
     this.core.journal.append({ type: 'account.checked', threadId: null, version: 1, payload: next }, () => this.core.journal.putAccount(next));
     this.core.bus.emit('accounts.updated', next);
     return next;
@@ -290,8 +293,10 @@ export class AccountStore {
   /** The native agent rejected this login, including during session preparation. */
   authenticationFailed(accountId: AccountId): void {
     if (this.core.journal.isClosed() || this.removing.has(accountId) || !this.core.journal.getAccount(accountId)) return;
+    const current = this.require(accountId);
     this.core.journal.setSetting(`account-auth-rejected:${accountId}`, true);
-    this.saveCheck(accountId, { status: 'unauthenticated', identity: this.require(accountId).identity });
+    this.core.logs.warn(`The agent rejected the login of account ${accountId}; it is marked signed out`, { source: 'accounts', event: 'account.auth-rejected', data: { accountId, providerId: current.providerId } });
+    this.saveCheck(accountId, { status: 'unauthenticated', identity: current.identity });
   }
 
   /**
@@ -744,6 +749,7 @@ export class AccountStore {
     exitCode: number | null = null,
   ): void {
     if (this.core.journal.isClosed()) return;
+    logLoginState(this.core, this.core.journal.getAccount(accountId), state, output, exitCode);
     this.core.bus.emit('account.login', { accountId, state, output, url: run.url, exitCode });
   }
 

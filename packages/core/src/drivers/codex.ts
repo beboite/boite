@@ -7,6 +7,7 @@ import { titleTurn } from './codex/title.ts';
 import { CodexTurn } from './codex/turn.ts';
 import { ModelProbes } from './model-probes.ts';
 import type { Driver, SessionContext, TurnContext, TurnHandle } from './types.ts';
+import { noteWarmSession } from './driver-log.ts';
 export { readCodexQuota } from './codex/models.ts';
 
 const MINUTE_MS = 60_000;
@@ -22,7 +23,9 @@ export function createCodexDriver(): Driver {
     const warmMs = Math.max(0, ctx.warmProcessMinutes) * MINUTE_MS;
     const key = sessionKey(ctx);
     let session = sessions.get(threadId) ?? null;
-    if (session !== null && !session.usable(key, warmMs)) {
+    const usable = session?.usable(key, warmMs) === true;
+    noteWarmSession(ctx, 'Codex app-server', { kept: session !== null, usable, sameSetup: session?.key === key, setupChange: 'the thread changed mode, account or folder' });
+    if (session !== null && !usable) {
       sessions.delete(threadId);
       session.close(session.key === key ? null : 'the thread changed mode, account or folder', ctx);
       session = null;

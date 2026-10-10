@@ -115,6 +115,12 @@ export interface TurnContext {
   warmProcessMinutes: number;
   emit: EmitSink;
   log(level: 'info' | 'warn' | 'error', message: string, context?: CoreLogContext): void;
+  /**
+   * Persists a diagnostic about this thread, and turn when there is one, under
+   * the provider's source. It never reaches the live log or a toast: use it
+   * for lifecycle detail a developer needs and the user does not.
+   */
+  diagnostic?(level: DiagnosticLevel, message: string, context: DiagnosticContext): void;
   /** Actual provider progress, not a timer heartbeat; the core stamps receipt time. */
   reportProgress?(phase: import('@boite/contracts').ThreadProgress['phase'], detail?: string | null): void;
   /** A provider signal that need not mean execution advanced. */
@@ -180,8 +186,12 @@ export interface TurnContext {
 /** Native session setup without a prompt, a turn or a message sink. */
 export type SessionContext = Pick<TurnContext,
   'thread' | 'account' | 'provider' | 'sessionId' | 'resumeAt' | 'sessionBefore' |
-  'accountEnv' | 'warmProcessMinutes' | 'log' | 'authenticationFailed' | 'commands' | 'context' | 'hook' |
+  'accountEnv' | 'warmProcessMinutes' | 'log' | 'diagnostic' | 'authenticationFailed' | 'commands' | 'context' | 'hook' |
   'background' | 'backgroundFinished' | 'wake' | 'spawnChild' | 'finishStartup'>;
+
+export type DiagnosticLevel = 'debug' | 'info' | 'warn' | 'error';
+/** Scalars only: never a prompt, a tool input or output, a command line or a token. */
+export interface DiagnosticContext { event: string; durationMs?: number; data?: Record<string, string | number | boolean | null> }
 
 export interface TurnResult {
   status: 'done' | 'stopped' | 'error';

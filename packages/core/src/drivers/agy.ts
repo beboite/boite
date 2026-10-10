@@ -32,6 +32,7 @@ import { AGENT_OWN_MODEL, readModels } from './agy/models.ts';
 import { AgySession, sessionKey } from './agy/session.ts';
 import { AgyTurn } from './agy/turn.ts';
 import type { Driver, ProbeContext, ProbeFilter, ProbeResult, TurnContext, TurnHandle } from './types.ts';
+import { noteWarmSession } from './driver-log.ts';
 
 const MINUTE_MS = 60_000;
 
@@ -135,7 +136,9 @@ export function createAgyDriver(): Driver {
       const turn = new AgyTurn(ctx);
 
       let session = sessions.get(threadId) ?? null;
-      if (session !== null && !session.usable(key, warmMs, ctx.sessionId)) {
+      const usable = session?.usable(key, warmMs, ctx.sessionId) === true;
+      noteWarmSession(ctx, 'agy', { kept: session !== null, usable, sameSetup: session?.key === key && session.conversationId === ctx.sessionId, setupChange: 'the thread changed model, effort, permission mode, account, folder or conversation' });
+      if (session !== null && !usable) {
         sessions.delete(threadId);
         session.close(session.key === key ? null : 'the thread changed model, effort, permission mode, account or folder', ctx);
         session = null;

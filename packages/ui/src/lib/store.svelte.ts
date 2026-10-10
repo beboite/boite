@@ -1,3 +1,4 @@
+import { startDiagnosticsReport } from './diagnostics-report';
 import type { Message, PermissionMode, ProjectId, ProviderId, ThreadId } from '@boite/contracts';
 import type { Client } from './client';
 import { readModelDefaults } from './model-defaults';
@@ -25,7 +26,7 @@ import type { Workbench } from './store/workbench.svelte';
 import type { Workflows } from './store/workflows.svelte';
 
 export type Page = 'chat' | 'settings' | 'agents';
-export type SettingsTab = 'home' | 'advanced' | 'brain' | 'voice' | 'general' | 'machines' | 'appearance' | 'keyboard' | 'accounts' | 'plugins' | 'usage' | 'limits' | 'resources' | 'task-manager' | 'experiments';
+export type { SettingsTab } from './settings-tabs';
 
 /** A login process the core runs for one account, as `account.login` reports it. */
 export interface LoginState {
@@ -151,6 +152,9 @@ export class Store {
     listen(ctx, client);
     ctx.off.push(ctx.composer.watchQueues());
     ctx.off.push(watchIncognito(ctx));
+    // Each machine hears about this window's own failures. Unit tests drive
+    // fake timers through stores by the hundred, so the reporter stays out of them.
+    if (import.meta.env.MODE !== 'test') ctx.off.push(startDiagnosticsReport(client));
   }
 
   detach(): void {

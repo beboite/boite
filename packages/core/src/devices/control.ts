@@ -133,6 +133,7 @@ export class MobileDevices {
     const existing = open.get(device.id);
     if (existing && existing.state !== 'failed') return { session: { ...existing } };
     if (!existing && open.size >= SESSIONS_MAX) throw refused(`a conversation shows at most ${SESSIONS_MAX} devices; close one first`, { threadId });
+    this.#core.logs.info(`Opening the ${device.platform} ${device.kind} device ${device.id} in the Device panel${existing ? ' again after a failure' : ''}`, { source: 'devices', event: 'device.opening', threadId, data: { deviceId: device.id, platform: device.platform, kind: device.kind, retry: existing !== undefined } });
     const session: MobileDeviceSession = {
       deviceId: device.id,
       hostId: LOCAL_DEVICE_HOST,
@@ -153,6 +154,7 @@ export class MobileDevices {
         this.#settle(device.id, { state: 'ready' });
       },
       (error: unknown) => {
+        if (this.#alive(boot)) this.#core.logs.warn(`Device ${device.id} failed to boot: ${error instanceof Error ? error.message : String(error)}`, { source: 'devices', event: 'device.boot-failed', data: { deviceId: device.id, platform: device.platform } });
         if (this.#alive(boot)) this.#settle(device.id, { state: 'failed', error: error instanceof Error ? error.message : String(error) });
       },
     );
@@ -205,11 +207,13 @@ export class MobileDevices {
       if (target) await this.#shutdown(target);
       this.#lives.set(deviceId, (this.#lives.get(deviceId) ?? 0) + 1);
       this.#boots.delete(deviceId);
+      this.#core.logs.info(`Device ${deviceId} shut down from the Device panel`, { source: 'devices', event: 'device.shutdown', threadId: params.threadId, data: { deviceId } });
       this.#emulators.get(deviceId)?.kill();
       for (const [threadId, open] of this.#sessions) if (open.delete(deviceId)) this.#changed(threadId);
       this.#forget(deviceId);
       return { closed: [deviceId] };
     }
+    this.#core.logs.info(`Device ${deviceId} closed in the Device panel`, { source: 'devices', event: 'device.closed', threadId: params.threadId, data: { deviceId } });
     this.#sessions.get(params.threadId)?.delete(deviceId);
     this.#changed(params.threadId);
     if (![...this.#sessions.values()].some((open) => open.has(deviceId))) this.#captures.delete(deviceId);

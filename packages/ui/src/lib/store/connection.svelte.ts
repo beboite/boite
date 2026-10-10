@@ -10,6 +10,7 @@ import { reconcileRows, unlistedPanels } from '../thread-rows';
 import { work } from '../work-prefs.svelte';
 import { installStatesOf } from './accounts.svelte';
 import type { StoreContext } from './context';
+import { SETTINGS_TABS, type SettingsTab } from '../settings-tabs';
 import { retainRows } from './snapshot-reads';
 
 export const UI_VERSION = '2.0.0-beta.1';
@@ -195,6 +196,9 @@ export class Connection {
       // `&panel=<kind>` opens that surface on the thread the page lands on, so
       // a capture of it needs no clicks. Fake core only, like `&long=1`.
       if (import.meta.env.DEV && params.get('fake') === '1') this.#openQueryPanel(params.get('panel'));
+      // `&settings=<tab>` opens that Settings page the same way, for a capture of it.
+      const tab = import.meta.env.DEV && params.get('fake') === '1' ? params.get('settings') : null;
+      if (tab !== null && (SETTINGS_TABS as readonly string[]).includes(tab)) s.showSettings(tab as SettingsTab);
     } finally {
       this.booted = true;
     }

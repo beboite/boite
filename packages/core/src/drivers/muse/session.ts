@@ -47,6 +47,7 @@ import {
 import { museQuotaReading } from '../../quota-details.ts';
 import { handshake, mintUuidV7, MspError, MuseRpc } from './rpc.ts';
 import { MuseTurn } from './turn.ts';
+import { noteReady } from '../driver-log.ts';
 
 /** One question set still open, settled by an answer, a stop or the host itself. */
 interface OpenQuestion {
@@ -313,7 +314,7 @@ export class MuseSession {
   // -- the process ----------------------------------------------------------
 
   private start(ctx: TurnContext): Promise<void> {
-    if (this.starting === null) this.starting = this.open(ctx);
+    if (this.starting === null) this.starting = noteReady(ctx, 'Muse', () => this.open(ctx), undefined, () => this.opening?.isStopped === true);
     return this.starting;
   }
 

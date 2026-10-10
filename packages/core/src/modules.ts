@@ -32,7 +32,17 @@ import { reveal } from './reveal.ts';
 /** Adding a module is one file plus one line here. `hello` is the server's own. */
 export function registerModules(core: Core): void {
   registerJournalInspection(core);
-  core.router.register('core.logs', params => core.logs.query(params));
+  core.router.register('core.logs', async params => {
+    const records = await core.logs.query(params);
+    if ((params as { anonymize?: unknown } | null)?.anonymize !== true) return records;
+    const anonymizer = core.diagnostics.anonymizer();
+    return records.map(record => anonymizer.record(record));
+  });
+  core.router.register('diagnostics.logs', (params, ctx) => core.diagnostics.logs(params, ctx.connection));
+  core.router.register('diagnostics.summary', (params, ctx) => core.diagnostics.summary(params ?? {}, ctx.connection));
+  core.router.register('diagnostics.export', (params, ctx) => core.diagnostics.export(params, ctx.connection));
+  core.router.register('diagnostics.issue', (params, ctx) => core.diagnostics.issue(params, ctx.connection));
+  core.router.register('diagnostics.report', (params, ctx) => core.diagnostics.report(params, ctx.connection));
   core.router.register('core.updateStatus', params => core.serverUpdates.status(params.refresh));
   core.router.register('core.updateInstall', params => core.serverUpdates.install(params.version));
   core.router.register('core.updateCancel', () => core.serverUpdates.cancel());

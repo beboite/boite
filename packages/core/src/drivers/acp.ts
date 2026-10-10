@@ -4,6 +4,7 @@ import { readModels, withModelEffort, type ProbeEntry } from './acp/probe.ts';
 import { isGrok, MINUTE_MS, type AcpDeps } from './acp/protocol.ts';
 import { AcpTurn } from './acp/turn.ts';
 import type { Driver, LiveTurnSettings, ProbeContext, ProbeFilter, ProbeResult, TurnContext, TurnHandle } from './types.ts';
+import { noteWarmSession } from './driver-log.ts';
 
 /** One ACP agent process per thread, kept between turns the way the Claude one is. */
 export function createAcpDriver(deps: AcpDeps): Driver {
@@ -91,7 +92,9 @@ export function createAcpDriver(deps: AcpDeps): Driver {
       const turn = new AcpTurn(ctx);
 
       let session = sessions.get(threadId) ?? null;
-      if (session !== null && !session.usable(key, warmMs)) {
+      const usable = session?.usable(key, warmMs) === true;
+      noteWarmSession(ctx, `${ctx.provider.id} ACP`, { kept: session !== null, usable, sameSetup: session?.key === key, setupChange: isGrok(ctx.provider) ? 'the thread changed mode, account or folder' : 'the thread changed account or folder' });
+      if (session !== null && !usable) {
         sessions.delete(threadId);
         session.close(
           session.key === key

@@ -17,7 +17,8 @@ import { InstallManager } from './install.ts';
 import { compareVersions, INSTALL_LATEST_MAX_AGE_MS, LATEST_MAX_AGE_MS, resolveLatestInstall } from './install-latest.ts';
 import { detectResolves, HOST_CANDIDATES, hostAgentsEnabled, launcherScriptOnly, profileFor, resolveCommand } from './resolve.ts';
 import { Rejection, validateDescriptor } from './validate.ts';
-import { attachVersions, loadVersions, versionsSettled } from './versions.ts';
+import { attachVersions, loadVersions, readVersion, versionsSettled } from './versions.ts';
+import { programName } from '../threads/provider-process-log.ts';
 import { invalidParams, notFound, refused } from '../errors.ts';
 import antigravityShipped from './shipped/antigravity.json';
 import antigravityCliShipped from './shipped/antigravity-cli.json';
@@ -29,6 +30,7 @@ import opencodeShipped from './shipped/opencode.json';
 import opencodeV2Shipped from './shipped/opencode-v2.json';
 import piShipped from './shipped/pi.json';
 import echoShipped from './shipped/echo.json';
+import { detectionLogger, installLogger } from './install-log.ts';
 
 /**
  * Echo is the fake agent the tests and the bench drive: no CLI, it repeats the
@@ -461,8 +463,10 @@ export class ProviderRegistry {
 }
 
 export function registerProviderMethods(core: Core): void {
+  const logInstall = installLogger(core);
   core.providers.installs.attach({
     emit: (payload) => {
+      logInstall(payload);
       core.bus.emit('providers.installProgress', payload);
     },
     updated: () => {
@@ -503,19 +507,35 @@ export function registerProviderMethods(core: Core): void {
   // A program that just reported its version may be what a provider was
   // waiting for: it is listed as installed from now on, and a login it already
   // has is adopted before the clients hear of it.
+  const logDetection = detectionLogger(core);
   let listed = fingerprint(core.providers.list());
+  { const first = core.providers.list(); logDetection(first.loaded, first.rejected.length); }
   // One fingerprint for every change found behind a list, so the next one is not announced twice.
   const announce = (after: string): void => {
     if (core.stopping || core.journal.isClosed()) return;
     const now = fingerprint(core.providers.list());
     if (now === listed) return;
     listed = now;
+    { const current = core.providers.list(); logDetection(current.loaded, current.rejected.length); }
     try { core.accounts.ensureDefaults(); }
     catch (error) { core.log('error', `default accounts after ${after}: ${error instanceof Error ? error.message : String(error)}`); }
     core.bus.emit('providers.updated', core.providers.list());
   };
   core.providers.attachVersions(
-    (program, args) => programOutput(core, program, args),
+    (program, args) => {
+      const at = performance.now();
+      const name = programName(program);
+      return programOutput(core, program, args).then((output) => {
+        const version = readVersion(output);
+        core.logs.record(version === null ? 'warn' : 'debug', version === null ? `${name} answered its version question with no version in ${Math.round(performance.now() - at)} ms` : `${name} reports version ${version}`, {
+          source: 'providers', event: 'provider.version-read', durationMs: performance.now() - at, data: { program: name, version },
+        });
+        return output;
+      }, (error: unknown) => {
+        core.logs.warn(`Reading the version of ${name} failed: ${error instanceof Error ? error.message : String(error)}`, { source: 'providers', event: 'provider.version-failed', durationMs: performance.now() - at, data: { program: name } });
+        throw error;
+      });
+    },
     () => announce('a version read'),
   );
   core.router.register('providers.reload', async () => {

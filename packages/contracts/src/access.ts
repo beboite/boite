@@ -25,6 +25,8 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'workflows.list', 'workflows.get', 'workflows.control', 'workflows.templates.list',
   // Coordination is visible with the conversation; only the owner enables it.
   'collaboration.get',
+  // A phone's own rendering errors and failed calls land in the owner's diagnostics, bounded per connection.
+  'diagnostics.report',
   'collaboration.directory',
   // Which conversations act as stewards and over what: shown beside Communication settings. Only the owner grants or revokes.
   'stewards.list',

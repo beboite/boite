@@ -61,6 +61,7 @@ export class SettingsStore {
       persistPrivate?.();
       this.core.journal.setSetting('settings', next);
     });
+    logSettingsChange(this.core, previous, next);
     this.core.scheduler.onSettingsChanged();
     this.core.procs.applySettings(next);
     this.core.bus.emit('settings.updated', next);
@@ -84,4 +85,20 @@ export class SettingsStore {
 export function registerSettingsMethods(core: Core): void {
   core.router.register('settings.get', () => core.settings.get());
   core.router.register('settings.set', (params) => core.settings.set(params));
+}
+
+/**
+ * Which settings changed, by key. A boolean or a number keeps its new value,
+ * since it explains behavior and holds nothing personal; anything else (a
+ * path, an address, a model, a list) is named only.
+ */
+function logSettingsChange(core: Core, previous: Settings, next: Settings): void {
+  const changed = (Object.keys(next) as (keyof Settings)[]).filter(key => JSON.stringify(previous[key]) !== JSON.stringify(next[key]));
+  if (changed.length === 0) return;
+  const data: Record<string, string | number | boolean | null> = { keys: changed.join(',').slice(0, 300) };
+  for (const key of changed.slice(0, 15)) {
+    const value = next[key];
+    if (typeof value === 'boolean' || typeof value === 'number') data[String(key).slice(0, 40)] = value;
+  }
+  core.logs.info(`Settings changed: ${changed.join(', ')}`, { source: 'settings', event: 'settings.changed', data });
 }

@@ -8,6 +8,7 @@ import { reportSettlementError, settleTurn } from './turn-settlement.ts';
 import type { ThreadStore } from '../threads.ts';
 import { setThreadStatus, withLoad } from './records.ts';
 import { TurnAttempts, type TurnAttemptState } from './turn-attempts.ts';
+import { stderrTail } from '../drivers/stderr-tail.ts';
 
 export { STOP_DEADLINE, STOP_DEADLINE_ERROR } from './turn-attempts.ts';
 
@@ -143,6 +144,9 @@ export class TurnRunner {
     this.core.bus.emit('turn.finished', finished);
     if (result.status === 'error') {
       this.core.log('error', `turn ${turnId} failed: ${result.diagnosticError ?? result.error ?? 'unknown error'}`, { source: thread.providerId, event: 'turn.failed', threadId, turnId });
+      // The agent's own last words are usually the cause; provider output is otherwise never persisted.
+      const tail = stderrTail(threadId);
+      if (tail !== null) this.core.logs.warn(`The agent printed ${tail.length} characters on stderr before turn ${turnId} failed; they are in data.stderrTail and stay on this machine`, { source: thread.providerId, event: 'turn.failed.stderr', threadId, turnId, data: { stderrTail: tail } });
     }
     if (!next) return;
     if (!threadOwned) {

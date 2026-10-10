@@ -11,6 +11,8 @@ interface Entry {
   queuedAt: Timestamp;
   reportedQueued: boolean;
   queueHold?: Turn['queueHold'];
+  /** Why the turn last waited, so the log says it once per change rather than on every pump. */
+  waiting?: string;
 }
 
 interface RunningEntry extends Entry {
@@ -73,10 +75,20 @@ export class Scheduler {
   }
 
   stop(threadId: ThreadId): boolean {
-    if (this.running.has(threadId)) return this.core.threads.stopRunning(threadId);
+    const running = this.running.get(threadId);
+    if (running !== undefined) {
+      const stopping = this.core.threads.stopRunning(threadId);
+      this.core.logs.info(stopping ? `Stop sent to the running turn after ${Math.round((Date.now() - running.startedAt) / 1000)} s` : 'Stop asked, but the running turn had no handle to stop yet', {
+        source: 'scheduler', event: 'turn.stop-requested', threadId, turnId: running.turnId, data: { state: 'running', accepted: stopping },
+      });
+      return stopping;
+    }
 
     for (const entry of this.queue.values()) {
       if (entry.threadId !== threadId) continue;
+      this.core.logs.info(`Queued turn removed before it started, after waiting ${Math.round((Date.now() - entry.queuedAt) / 1000)} s${entry.waiting ? ` (${entry.waiting})` : ''}`, {
+        source: 'scheduler', event: 'turn.stop-requested', threadId, turnId: entry.turnId, data: { state: 'queued', waiting: entry.waiting ?? null },
+      });
       this.recordQueued(entry);
       this.core.threads.markQueuedStopped(entry.turnId);
       this.queue.delete(entry.turnId);
@@ -97,14 +109,28 @@ export class Scheduler {
     // Settings and completions repump held entries; enqueue checks only its new turn.
     // Broad Map iteration still follows a reentrant start's additions and removals.
     for (const entry of entries) {
-      if (entry.queueHold || !this.core.delegation.canRun(entry.threadId)
-        || this.core.plugins.blocksAccount(entry.accountId)
-        // A program being replaced cannot start a turn; it starts once the updater is done.
-        || this.core.updates.holds(entry.providerId)
-        || this.running.has(entry.threadId)) continue;
+      const waiting = this.waitReason(entry);
+      if (waiting !== null) {
+        if (entry.waiting !== waiting) {
+          entry.waiting = waiting;
+          this.core.logs.info(`Turn waits: ${waiting}`, { source: 'scheduler', event: 'turn.waiting', threadId: entry.threadId, turnId: entry.turnId, data: { reason: waiting, queuedMs: Date.now() - entry.queuedAt } });
+        }
+        continue;
+      }
       this.queue.delete(entry.turnId);
       this.start(entry);
     }
+  }
+
+  /** Why a queued turn cannot start now, in words; null when it can. */
+  private waitReason(entry: Entry): string | null {
+    if (entry.queueHold) return `held until the user resumes it (${entry.queueHold.reason})`;
+    if (!this.core.delegation.canRun(entry.threadId)) return 'its team or parent is paused';
+    if (this.core.plugins.blocksAccount(entry.accountId)) return 'a plugin is changing the saved login of its account';
+    // A program being replaced cannot start a turn; it starts once the updater is done.
+    if (this.core.updates.holds(entry.providerId)) return `${entry.providerId ?? 'its provider'} is being updated`;
+    if (this.running.has(entry.threadId)) return 'another turn of the thread is running';
+    return null;
   }
 
   private start(entry: Entry): void {
@@ -134,6 +160,8 @@ export class Scheduler {
     const entries = [...this.running.values()];
     for (const entry of entries) this.core.threads.stopRunning(entry.threadId);
     if (entries.length === 0) return;
+    const drainAt = performance.now();
+    this.core.logs.info(`Shutdown stops ${entries.length} running turns and waits up to ${timeoutMs} ms for them`, { source: 'scheduler', event: 'scheduler.drain.started', data: { running: entries.length, timeoutMs } });
     // A driver that never answers its stop used to hang this wait for ever,
     // and with it the whole shutdown. What is still running past the deadline
     // is left to the process kill that follows.
@@ -142,8 +170,13 @@ export class Scheduler {
       timer = setTimeout(resolve, timeoutMs);
       timer.unref();
     });
-    await Promise.race([Promise.allSettled(entries.map((entry) => entry.done)), deadline]);
+    let settled = 0;
+    await Promise.race([Promise.allSettled(entries.map((entry) => entry.done.finally(() => { settled += 1; }))), deadline]);
     if (timer !== undefined) clearTimeout(timer);
+    const left = entries.length - settled;
+    this.core.logs.record(left > 0 ? 'warn' : 'info', left > 0 ? `${left} of ${entries.length} turns did not stop within ${timeoutMs} ms; the process kill ends them` : `All ${entries.length} running turns stopped in ${Math.round(performance.now() - drainAt)} ms`, {
+      source: 'scheduler', event: 'scheduler.drain.finished', durationMs: performance.now() - drainAt, data: { running: entries.length, left },
+    });
   }
 
   private emitUpdated(): void {

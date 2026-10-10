@@ -3,6 +3,8 @@ import type { WorkflowsRpcMethods, WorkflowsRpcEvents } from './workflows';
 import type { BrowserRpcMethods, BrowserRpcEvents, BrowserProfile } from './browser';
 import type { PullRequestsRpcMethods, PullRequestsRpcEvents } from './pull-requests';
 import type { MobileDevicesRpcMethods, MobileDevicesRpcEvents } from './mobile-devices';
+import type { CoreLogContext, CoreLogLevel, CoreLogRecord, CoreLogsQuery, DiagnosticsRpcMethods } from './diagnostics';
+export * from './diagnostics';
 export * from './pull-requests';
 export * from './browser';
 export * from './browser-remote';
@@ -1905,6 +1907,11 @@ export interface Settings {
    */
   asyncQuestions?: boolean;
   /**
+   * Agents may read this machine's anonymized diagnostics and draft an issue
+   * from them (`boite logs`, `boite issue`). Missing reads as on.
+   */
+  agentLogAccess?: boolean;
+  /**
    * The model that writes every thread's title after its first answer. Null
    * or missing: each thread's own provider on its small model
    * (`defaultTitleModel`), under the thread's account. A provider that can no
@@ -3173,77 +3180,7 @@ export interface ServerUpdateStatus {
   error: string | null;
 }
 
-export type CoreLogLevel = 'info' | 'warn' | 'error';
-
-/** Raw provider output reaches only owner live observers; diagnostic history retains a placeholder. */
-export interface CoreLogContext {
-  source?: string;
-  event?: string;
-  threadId?: ThreadId;
-  turnId?: TurnId;
-  requestId?: string;
-  kind?: 'provider-output';
-}
-
-/** A bounded diagnostic, with no transcript, RPC payload or process arguments. */
-export interface CoreLogRecord {
-  id: string;
-  runId: string;
-  at: Timestamp;
-  level: CoreLogLevel;
-  source: string;
-  event: string;
-  message: string;
-  threadId?: ThreadId;
-  turnId?: TurnId;
-  requestId?: string;
-}
-
-export interface CoreLogsQuery {
-  /** Defaults to 100; an integer from 1 to 200. Results are newest first. */
-  limit?: number;
-  threadId?: ThreadId;
-  level?: CoreLogLevel;
-}
-
-/** Real and in-memory cores share the same strict diagnostic query boundary. */
-export function validateCoreLogsQuery(raw: unknown): CoreLogsQuery & { limit: number } {
-  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('core.logs params: expected an object');
-  const query = raw as Record<string, unknown>;
-  for (const key of Object.keys(query)) if (!['limit', 'threadId', 'level'].includes(key)) throw new Error(`core.logs ${key}: expected limit, threadId or level`);
-  const limit = query.limit === undefined ? 100 : query.limit;
-  if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > 200) throw new Error('core.logs limit: expected an integer from 1 to 200');
-  if (query.threadId !== undefined && (typeof query.threadId !== 'string' || query.threadId.length < 1 || query.threadId.length > 200 || /[\x00-\x1f\x7f]/.test(query.threadId))) throw new Error('core.logs threadId: expected 1 to 200 characters without control characters');
-  if (query.level !== undefined && !['info', 'warn', 'error'].includes(query.level as string)) throw new Error('core.logs level: expected info, warn or error');
-  return { limit, ...(query.threadId === undefined ? {} : { threadId: query.threadId as string }), ...(query.level === undefined ? {} : { level: query.level as CoreLogLevel }) };
-}
-
-/** Owner-only live provider output keeps sign-in URLs usable. Never persist this text. */
-export function normalizeCoreLogOutput(text: string, secrets: readonly string[] = []): string {
-  let value = text;
-  for (const secret of secrets) if (secret.length > 0) value = value.split(secret).join('[redacted]');
-  return value.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '').slice(0, 4096);
-}
-
-/** Redact before bounding: cutting an Authorization value first could leave a secret prefix. */
-export function normalizeCoreLogText(text: string, secrets: readonly string[] = []): string {
-  const REDACTED = '[redacted]';
-  let value = text;
-  for (const secret of secrets) if (secret.length > 0) value = value.split(secret).join(REDACTED);
-  value = value
-    .replace(/((?:^|[^\w-])["']?[\w-]*(?:token|grant|secret|password|api[_-]?key|prompts?|attachments?|commandLine|arguments|params|content|messages|text|input|output)["']?\s*[:=]\s*)[\[{](?!redacted\])[\s\S]*/gi, `$1${REDACTED}`)
-    .replace(/\b(?:Authorization\s*[:=]\s*)?(?:Bearer|Basic)\s+[^\s,;"'<>]+/gi, REDACTED)
-    .replace(/\bAuthorization\s*[:=]\s*[^\r\n]+/gi, `Authorization: ${REDACTED}`)
-    .replace(/((?:^|[^\w-])["']?[\w-]*(?:token|grant|secret|password|api[_-]?key|prompt|attachments?|commandLine|arguments|params|content|messages|text|input|output)["']?\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;&}]+)/gi, `$1${REDACTED}`)
-    .replace(/\b(?:sk-[a-zA-Z0-9_-]{8,}|(?:ghp|github_pat)_[a-zA-Z0-9_]{8,})/g, REDACTED)
-    .replace(/(^|[^a-z0-9+.-])([a-z][a-z0-9+.-]*:\/\/[^\s<>"']+)/gi, (_match, prefix: string, raw: string) => prefix + raw
-      .replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/?#@]*@/i, `$1${REDACTED}@`)
-      // All query values and fragments are untrusted, including unfamiliar keys.
-      .replace(/[?#].*$/, `?${REDACTED}`));
-  return value.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '').slice(0, 4096);
-}
-
-export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, BrowserRpcMethods, PullRequestsRpcMethods, MobileDevicesRpcMethods {
+export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, BrowserRpcMethods, PullRequestsRpcMethods, MobileDevicesRpcMethods, DiagnosticsRpcMethods {
   /** Owner-only merged-PR visibility policy; absent defaults to enabled. Disabling reveals automatically hidden roots, retaining manual archives. */
   'projects.setAutoArchiveMergedPr': { params: { projectId: ProjectId; enabled: boolean }; result: Project };
   /** Owner-only, private bounded diagnostic history, including earlier runs. */

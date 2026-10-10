@@ -113,7 +113,14 @@ pub(crate) async fn window_material(app: AppHandle, webview: Webview, kind: Stri
     #[cfg(windows)]
     {
         let hwnd = window.hwnd().map_err(|error| format!("the {MAIN_LABEL:?} window has no handle: {error}"))?;
-        apply_material(hwnd.0, &kind, build)
+        let applied = apply_material(hwnd.0, &kind, build);
+        match &applied {
+            Ok(()) => crate::shell_log::info("window", "shell.window.material", format!("the window material changed to {kind}"),
+                serde_json::json!({ "material": kind, "build": build })),
+            Err(error) => crate::shell_log::warn("window", "shell.window.material", format!("the window material {kind} could not be applied: {error}"),
+                serde_json::json!({ "material": kind, "build": build })),
+        }
+        applied
     }
     #[cfg(not(windows))]
     {
