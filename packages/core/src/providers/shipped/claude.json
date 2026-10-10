@@ -29,6 +29,7 @@
         }
       },
       "isolation": { "CLAUDE_CONFIG_DIR": "{isolationDir}" },
+      "session": [],
       "close": { "processes": ["claude.exe"] }
     },
     "linux": {

@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
@@ -10,8 +10,8 @@ import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
 const ECHO_LOGIN_SCRIPT = fileURLToPath(new URL('../src/providers/shipped/echo-login.ts', import.meta.url));
-// A Claude login on macOS may be in the Keychain, so a missing file proves nothing there.
-const CLAUDE_SIGNED_OUT = process.platform === 'darwin' ? 'unknown' : 'unauthenticated';
+// A Claude login may be in the macOS Keychain or Windows Credential Manager, so a missing file proves nothing there.
+const CLAUDE_WITHOUT_SESSION_FILE = process.platform === 'darwin' || process.platform === 'win32' ? 'unknown' : 'unauthenticated';
 
 /**
  * The shipped echo provider needs no login (`auth.kind` is "none"), so it can
@@ -54,6 +54,14 @@ async function addLoginProvider(harness: TestCore, client: CoreClient): Promise<
   expect(loaded.rejected).toEqual([]);
   expect(loaded.loaded.some((provider) => provider.id === 'echo-auth')).toBe(true);
   return 'echo-auth';
+}
+
+/** An isolated account of `providerId` with a session file, checked signed in. */
+async function signedIn(client: CoreClient, providerId: string, label: string) {
+  const account = await client.call('accounts.add', { providerId, label });
+  writeFileSync(join(account.isolationDir ?? '', '.credentials.json'), '{"fake":true}', 'utf8');
+  expect((await client.call('accounts.check', { accountId: account.id })).status).toBe('ok');
+  return account;
 }
 
 let harness: TestCore;
@@ -271,7 +279,7 @@ describe('accounts', () => {
     expect(account.isolationDir).toBe(join(harness.dataDir, 'accounts', account.id));
 
     const before = await client.call('accounts.check', { accountId: account.id });
-    expect(before.status).toBe(CLAUDE_SIGNED_OUT);
+    expect(before.status).toBe(CLAUDE_WITHOUT_SESSION_FILE);
 
     writeFileSync(join(account.isolationDir ?? '', '.credentials.json'), '{"fake":true}', 'utf8');
     const after = await client.call('accounts.check', { accountId: account.id });
@@ -286,7 +294,7 @@ describe('accounts', () => {
     const rows = harness.core.journal.countEvents('account.checked');
 
     for (let index = 0; index < 3; index += 1) {
-      expect((await client.call('accounts.check', { accountId: account.id })).status).toBe(CLAUDE_SIGNED_OUT);
+      expect((await client.call('accounts.check', { accountId: account.id })).status).toBe(CLAUDE_WITHOUT_SESSION_FILE);
     }
     expect(harness.core.journal.countEvents('account.checked')).toBe(rows);
 
@@ -301,25 +309,51 @@ describe('accounts', () => {
     const client = await harness.connect();
     const providerId = await addLoginProvider(harness, client);
     const os = process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'macos' : 'linux';
+    // Read signed out under the old rule, the way an upgraded core finds them in its journal.
+    const stale = await client.call('accounts.add', { providerId, label: 'Read before', useDefaultLocation: false });
+    const refused = await client.call('accounts.add', { providerId, label: 'Refused by the agent', useDefaultLocation: false });
+    harness.core.accounts.authenticationFailed(refused.id);
+    expect([stale.status, harness.core.accounts.require(refused.id).status]).toEqual(['unauthenticated', 'unauthenticated']);
     const file = join(harness.dataDir, 'providers', 'echo-auth.json');
     const raw = JSON.parse(readFileSync(file, 'utf8')) as { profiles: Record<string, Record<string, unknown>> };
     raw.profiles[os]!['session'] = [];
     writeFileSync(file, JSON.stringify(raw), 'utf8');
     expect((await client.call('providers.reload', {})).rejected).toEqual([]);
+    expect(harness.core.accounts.require(stale.id).status).toBe('unauthenticated');
+    // A restart on the same data reads the stale one again; the agent's refusal still wins.
+    const copy = mkdtempSync(join(tmpdir(), 'boite-accounts-restart-'));
+    let restarted: Core | undefined;
+    try {
+      harness.core.journal.db.query('VACUUM INTO ?').run(join(copy, 'journal.db'));
+      mkdirSync(join(copy, 'providers'));
+      copyFileSync(file, join(copy, 'providers', 'echo-auth.json'));
+      restarted = new Core({ dataDir: copy, token: harness.token });
+      expect(restarted.accounts.require(stale.id).status).toBe('unknown');
+      expect(restarted.accounts.require(refused.id).status).toBe('unauthenticated');
+    } finally {
+      await restarted?.close();
+      rmSync(copy, { recursive: true, force: true });
+    }
 
     const account = await client.call('accounts.add', { providerId, label: 'Keychain', useDefaultLocation: false });
     expect(account.status).toBe('unknown');
     expect((await client.call('accounts.check', { accountId: account.id })).status).toBe('unknown');
     // A session file still proves the login.
-    writeFileSync(join(account.isolationDir ?? '', '.credentials.json'), '{}', 'utf8');
+    const session = join(account.isolationDir ?? '', '.credentials.json');
+    writeFileSync(session, '{}', 'utf8');
     expect((await client.call('accounts.check', { accountId: account.id })).status).toBe('ok');
+    // The CLI moving that login into the system store leaves the account usable.
+    rmSync(session);
+    expect((await client.call('accounts.check', { accountId: account.id })).status).toBe('unknown');
 
-    // Claude on macOS keeps its login in the Keychain, not in .credentials.json.
+    // Claude keeps its login in the macOS Keychain, and in Windows Credential
+    // Manager once its CLI turns that store on, rather than in .credentials.json.
     const shipped = JSON.parse(readFileSync(join(import.meta.dir, '../src/providers/shipped/claude.json'), 'utf8')) as {
       profiles: Record<string, { session?: string[] }>;
     };
     expect(shipped.profiles['macos']?.session).toEqual([]);
-    expect(shipped.profiles['windows']?.session).toBeUndefined();
+    expect(shipped.profiles['windows']?.session).toEqual([]);
+    expect(shipped.profiles['linux']?.session).toBeUndefined();
   });
 
   test('a profile session list that is not an array of strings is refused with the file and the field', async () => {
@@ -370,7 +404,7 @@ describe('accounts', () => {
     expect(existsSync(account.isolationDir ?? '')).toBe(false);
   });
 
-  test('removing an account leaves its threads waiting for another one', async () => {
+  test('removing an account hands its threads to another account of the agent on their next turn', async () => {
     const client = await harness.connect();
     const account = await client.call('accounts.add', { providerId: 'echo', label: 'Used' });
     const other = harness.core.accounts.list().find(entry => entry.providerId === 'echo' && entry.id !== account.id)!;
@@ -381,13 +415,44 @@ describe('accounts', () => {
     await client.call('accounts.remove', { accountId: account.id });
     expect(existsSync(account.isolationDir ?? '')).toBe(false);
     await client.call('threads.archive', { threadId: thread.id, archived: false });
+    const turn = await client.call('turns.start', { threadId: thread.id, prompt: 'hello' });
+    expect(turn.execution?.accountId).toBe(other.id);
+    expect((await client.call('threads.get', { threadId: thread.id })).accountId).toBe(other.id);
+    await harness.core.scheduler.stopAndWait(thread.id);
+  });
+
+  test('a thread whose agent has no account left waits for one to be chosen', async () => {
+    const client = await harness.connect();
+    const account = await client.call('accounts.add', { providerId: 'echo', label: 'Used' });
+    const project = await client.call('projects.add', { path: harness.dataDir });
+    const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account.id });
+    for (const entry of harness.core.accounts.list().filter(entry => entry.providerId === 'echo')) {
+      await client.call('accounts.remove', { accountId: entry.id });
+    }
     await expect(client.call('turns.start', { threadId: thread.id, prompt: 'hello' })).rejects.toThrow('was removed');
     await expect(client.call('threads.update', { threadId: thread.id, model: null })).rejects.toThrow('was removed');
     expect((await client.call('threads.update', { threadId: thread.id, title: 'Kept' })).title).toBe('Kept');
-    const moved = await client.call('threads.update', { threadId: thread.id, accountId: other.id });
-    expect(moved.accountId).toBe(other.id);
+    const fresh = await client.call('accounts.add', { providerId: 'echo', label: 'Fresh' });
+    const moved = await client.call('threads.update', { threadId: thread.id, accountId: fresh.id });
+    expect(moved.accountId).toBe(fresh.id);
     const turn = await client.call('turns.start', { threadId: thread.id, prompt: 'hello' });
     expect(turn.threadId).toBe(thread.id);
+    await harness.core.scheduler.stopAndWait(thread.id);
+  });
+
+  test('a thread whose account signed out runs its next turn on another signed-in account of its agent', async () => {
+    const client = await harness.connect();
+    const providerId = await addLoginProvider(harness, client);
+    const first = await signedIn(client, providerId, 'First');
+    const second = await signedIn(client, providerId, 'Second');
+    const project = await client.call('projects.add', { path: harness.dataDir });
+    const thread = await client.call('threads.create', { projectId: project.id, providerId, accountId: first.id });
+    rmSync(join(first.isolationDir ?? '', '.credentials.json'));
+    expect((await client.call('accounts.check', { accountId: first.id })).status).toBe('unauthenticated');
+
+    const turn = await client.call('turns.start', { threadId: thread.id, prompt: 'hello' });
+    expect(turn.execution?.accountId).toBe(second.id);
+    expect((await client.call('threads.get', { threadId: thread.id })).accountId).toBe(second.id);
     await harness.core.scheduler.stopAndWait(thread.id);
   });
 

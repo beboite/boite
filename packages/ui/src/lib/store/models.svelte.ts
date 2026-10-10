@@ -241,11 +241,8 @@ export class Models {
       offered.find((p) => s.accountsOf(p.id).length > 0) ??
       null;
     if (!provider) return null;
-    const accounts = s.accountsOf(provider.id);
-    const account =
-      accounts.find((a) => a.id === this.prefs.accountId) ??
-      accounts.find((a) => a.status === 'ok') ??
-      accounts[0];
+    // The remembered account while it can run, else one that can, else any to sign in again.
+    const account = s.usableAccountOf(provider.id, this.prefs.accountId) ?? s.accountsOf(provider.id)[0];
     if (!account) return null;
     const model = s.defaultModelOf(provider, account.id);
     const effort = s.defaultEffortOf(provider.id, account.id, model);

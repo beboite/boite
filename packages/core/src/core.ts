@@ -303,6 +303,7 @@ export class Core {
     });
     this.procs.applySettings(this.settings.get());
     this.accounts.ensureDefaults();
+    this.accounts.recheckSignedOut();
     this.#stopDeletionRetention = scheduleThreadDeletionRetention(this);
     this.#stopDoneRetention = scheduleDoneRetention(this);
     // The journal is open and no socket is accepted yet: whatever a dead core

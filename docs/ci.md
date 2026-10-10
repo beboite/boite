@@ -135,7 +135,7 @@ The tested installer becomes the release artifact.
 | UI entry chunk | 588,000 |
 | UI files, excluding `.br` and `.gz` copies | 4,405,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 3,715,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 3,710,000 |
 
 The total JavaScript measure excludes native binaries and source maps. On
 2026-10-03, fresh builds of `e1f00a3` measured 2,695,204 core bytes and 3,932,309
@@ -179,12 +179,20 @@ bootstrap, which the client chunk keeps because the fake client stores pages
 with them. The UI limit rises to 4,405,000 and the core JavaScript limit to
 3,690,000, leaving about 20 KB and 18 KB.
 
-Managed releases that follow their publisher, Claude's on Windows, measured
-3,696,543 emitted core JavaScript bytes on Linux on 2026-10-09, 7,130 above the
-3,689,413 that `main` at `24ef2968` measured built the same way: reading the
-version file and the manifest, the forward-only rule and the update joining an
-older download. The core JavaScript limit rises to 3,715,000, leaving about
-18 KB of headroom.
+On 2026-10-09 on Linux, `main` at `4f5a3f66` measured 3,689,568 emitted
+core JavaScript bytes, 432 below the 3,690,000 limit. Counting a thread's open
+asynchronous questions on its row adds 812 bytes: 3,690,380 with it. The core
+JavaScript limit rises to 3,710,000, leaving about 19 KB.
+
+A conversation following its agent to another account adds 1,233 core bytes,
+measured on Linux on 2026-10-09 against `main` at `a5646a7e` built the same
+way (3,690,646 against 3,689,413): the account fallback and the title model
+chosen by family. It fits under the same 3,710,000 limit.
+
+Managed releases that follow their publisher, Claude's on Windows, add about
+7 KB: reading the version file and the manifest, the forward-only rule and the
+update joining an older download. Merged with `main` at `2ffd95e0`, they measured
+3,703,464 bytes on Linux on 2026-10-10, under the same 3,710,000 limit.
 
 Recent's Done and Working groups measured 3,949,936 UI bytes on 2026-10-03
 before integrating these orchestration additions. The combined build measured

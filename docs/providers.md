@@ -519,9 +519,16 @@ descriptor uses additional fields available to other providers:
 - `session`, on an OS profile, replaces `auth.session` on that OS. An empty list
   says the login can live outside any file there: the `auth.session` files still
   read `ok` when present, and without them its accounts read `unknown` and turns
-  still start. Claude's macOS profile sets it: Claude Code keeps its login in the
-  Keychain there, and writes `.credentials.json` only when the Keychain is out
-  of reach.
+  still start. A CLI that is signed out reads `unknown` as well, so its default
+  account is adopted instead of leaving room for the guided sign-in. Claude's
+  macOS and Windows profiles set it. Claude Code keeps its login in the macOS
+  Keychain, and writes `.credentials.json` only when the Keychain is out of
+  reach. On Windows, Claude Code moves the login from `.credentials.json` into
+  Credential Manager once the `tengu_windows_credman` flag, cached in Claude
+  Code's config, turns that storage on; the move happens at the CLI's next
+  start. Without the empty list, an account that read `ok` would read
+  `unauthenticated` after that move and every turn would be refused, though the
+  CLI stayed signed in.
 - `seedFiles`, on the descriptor, maps a relative path to content written under
   the isolation directory before anything starts. Antigravity needs
   `antigravity-acp/settings.json` holding `{"auth":{"type":"oauth-personal"}}`.

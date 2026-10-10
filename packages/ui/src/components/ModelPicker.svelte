@@ -106,7 +106,7 @@
   let shownAccountId = $derived.by((): string | null => {
     if (!shown) return null;
     if (choice && choice.providerId === shown.id) return choice.accountId;
-    return store.accountsOf(shown.id)[0]?.id ?? null;
+    return (store.usableAccountOf(shown.id) ?? store.accountsOf(shown.id)[0])?.id ?? null;
   });
   let seats = $derived(shown ? store.accountsOf(shown.id) : []);
   /**
@@ -267,7 +267,7 @@
   function firstInstanceOf(providerId: string): { providerId: string; accountId: string } | null {
     const entry = store.providerOf(providerId);
     if (!entry || !entry.available || !store.providerOn(providerId)) return null;
-    const seat = store.accountsOf(providerId)[0];
+    const seat = store.usableAccountOf(providerId) ?? store.accountsOf(providerId)[0];
     return seat ? { providerId, accountId: seat.id } : null;
   }
 

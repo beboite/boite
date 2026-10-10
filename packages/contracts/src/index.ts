@@ -1012,6 +1012,12 @@ export interface ThreadSummary {
   moveNote?: MoveNotice | null;
   /** Answers accepted by the core, waiting for the running agent or the next turn. In memory only. */
   pendingAnswers?: string[];
+  /**
+   * Questions the agent asked without stopping (`boite ask`, Codex's own)
+   * that still wait for the user. The status stays `running` or `idle`, so a
+   * row reads this to say the thread needs the user. Missing on older cores.
+   */
+  openQuestions?: number;
   unread: boolean;
   archived: boolean;
   /** Kept above the other threads of its project in the sidebar, whatever runs. */
