@@ -9,6 +9,8 @@ import { work } from './lib/work-prefs.svelte';
 import { archiveThread } from './lib/archive';
 import { runCommand } from './lib/commands.svelte';
 import { undo } from './lib/undo.svelte';
+import { confirm } from './lib/confirm.svelte';
+import { deleteThread } from './lib/thread-removal';
 
 /**
  * The desktop behaviours the UX audit found broken, on the whole app over the
@@ -24,6 +26,7 @@ vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl }));
 let running: Record<string, unknown> | null = null;
 
 afterEach(() => {
+  confirm.answer(false);
   vi.restoreAllMocks();
   if (running) unmount(running, { outro: false });
   running = null;
@@ -33,6 +36,35 @@ afterEach(() => {
   work.load();
   workspace.view = 'projects';
   undo.dismiss();
+});
+
+test('deletion requires the exact name, supports Enter, and cancellation restores focus', async () => {
+  await mountOnFake();
+  const thread = store.threads.find(t => t.id === 't-trace')!;
+  const previous = query<HTMLButtonElement>('[data-testid=thread-title]');
+  previous.focus();
+  const cancelled = deleteThread(store, thread);
+  await waitFor(() => document.activeElement?.getAttribute('data-testid') === 'confirm-name');
+  expect(query<HTMLButtonElement>('[data-testid=confirm-ok]').disabled).toBe(true);
+  press(query('[data-testid=confirm-name]'), 'Escape');
+  expect(await cancelled).toBe(false);
+  await waitFor(() => document.activeElement === previous);
+  const deletion = deleteThread(store, thread);
+  await waitFor(() => document.activeElement?.getAttribute('data-testid') === 'confirm-name');
+  const field = query<HTMLInputElement>('[data-testid=confirm-name]');
+  field.value = thread.title + 'x';
+  field.dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+  press(field, 'Enter');
+  expect(confirm.current).not.toBeNull();
+  expect(query<HTMLButtonElement>('[data-testid=confirm-ok]').disabled).toBe(true);
+  field.value = thread.title;
+  field.dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+  expect(query<HTMLButtonElement>('[data-testid=confirm-ok]').disabled).toBe(false);
+  press(field, 'Enter');
+  expect(await deletion).toBe(true);
+  expect(store.threads.some(t => t.id === thread.id)).toBe(false);
 });
 
 async function waitFor(check: () => boolean, attempts = 2000): Promise<void> {

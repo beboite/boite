@@ -474,7 +474,13 @@ export const fr: Translation = {
     restore: 'Restaurer',
     close: 'Fermer',
     quitHold: 'Maintenez Ctrl+Q pour quitter',
-    quitHoldHint: 'ou appuyez deux fois'
+    quitHoldHint: 'ou appuyez deux fois',
+    quitTitle: 'Fermer Boite ?',
+    quitWorkingBody: '{count} agent(s) travaillent encore ou sont en attente. Êtes-vous sûr de vouloir fermer Boite ?',
+    quitUnknownBody: 'Le travail sur une machine déconnectée n’a pas pu être vérifié.',
+    quitResidentBody: 'Les moteurs résidents continuent de travailler après la fermeture. Ceux configurés pour s’arrêter avec l’application s’arrêteront.',
+    quitConfirm: 'Fermer Boite',
+    quitCancel: 'Garder ouvert'
   },
 
   serverUpdate: {
@@ -709,6 +715,9 @@ export const fr: Translation = {
     unpin: 'Désépingler',
     archive: 'Archiver',
     delete: 'Supprimer',
+    deleteTitle: 'Supprimer "{title}" ?',
+    deleteBody: 'Supprimer cette conversation arrête le travail de l’agent et masque son historique. Saisissez son nom exact pour confirmer.',
+    deleteName: 'Nom de la conversation de l’agent',
     deleteUnavailable: 'Mettez à jour Boite sur la machine qui héberge cette conversation pour la supprimer. La conversation a été conservée.',
     deletedToast: '« {title} » supprimée. Restauration possible dans les paramètres.',
     archivedToast: '« {title} » archivée',

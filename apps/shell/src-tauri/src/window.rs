@@ -367,6 +367,6 @@ pub(crate) fn install_macos_menu<R: Runtime>(app: &AppHandle<R>, channel: Channe
         &Item::minimize(app, None)?, &Item::maximize(app, None)?, &Item::separator(app)?, &Item::fullscreen(app, None)?,
     ])?;
     app.set_menu(Menu::with_items(app, &[&application, &edit, &window])?)?;
-    app.on_menu_event(|app, event| if event.id().as_ref() == MENU_QUIT { crate::tray::quit(app) });
+    app.on_menu_event(|app, event| if event.id().as_ref() == MENU_QUIT { crate::tray::request_quit(app) });
     Ok(())
 }

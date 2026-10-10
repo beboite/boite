@@ -473,7 +473,13 @@ export const strings = {
     restore: 'Restore',
     close: 'Close',
     quitHold: 'Hold Ctrl+Q to quit',
-    quitHoldHint: 'or press it twice'
+    quitHoldHint: 'or press it twice',
+    quitTitle: 'Close Boite?',
+    quitWorkingBody: '{count} agent(s) are still working or waiting. Are you sure you want to close Boite?',
+    quitUnknownBody: 'Work on a disconnected machine could not be checked.',
+    quitResidentBody: 'Resident engines keep working after the app closes. Engines configured to stop with the app will stop.',
+    quitConfirm: 'Close Boite',
+    quitCancel: 'Keep open'
   },
 
   serverUpdate: {
@@ -723,6 +729,9 @@ export const strings = {
     unpin: 'Unpin',
     archive: 'Archive',
     delete: 'Delete',
+    deleteTitle: 'Delete "{title}"?',
+    deleteBody: 'Deleting this agent conversation stops its work and hides its history. Type its name exactly to confirm.',
+    deleteName: 'Agent conversation name',
     deleteUnavailable: 'Update Boite on the machine hosting this conversation to delete it. The conversation has been kept.',
     deletedToast: 'Deleted "{title}". You can restore it from Settings.',
     /** The toast after an archive, with its way back: the button and Ctrl+Z. */

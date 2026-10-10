@@ -256,12 +256,21 @@ Shared project-directory threads never inherit that directory's current branch.
 
 Deletion is separate from archive. `threads.remove` stops the thread family and
 waits for processes before hiding it behind persistent markers.
+Every UI deletion entry point asks the user to type the conversation's exact
+name before enabling Delete. Escape, Back and Cancel keep the conversation.
 `threads.deleted` lists retained conversations and `threads.restore` restores
 history and prior archive flags. A paired phone may delete and undo from its
 thread menu; the deleted list and the retention period stay owner-only. Undo toasts last eight seconds.
 The default retention is 30 days; 0 disables purge. Restart and disconnection do
 not erase the markers. Files, branches, worktrees and native transcripts stay
 on disk; project removal purges that project's pending deletions.
+
+Closing the desktop window, the native Quit menu and Ctrl+Q share a confirmation
+when any connected machine has queued, running or waiting turns. The check reads
+fresh thread lists, including agent sessions and delegated children. Unreachable
+machines also require confirmation. Close to tray still hides the window without
+quitting. The warning distinguishes resident engines, which keep working, from
+engines configured to stop with the shell.
 
 ### Merged pull request archives
 

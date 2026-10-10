@@ -5,14 +5,24 @@ import { fill, strings } from './strings';
 import type { Store } from './store.svelte';
 import { undo } from './undo.svelte';
 import { workspace } from './workspace.svelte';
+import { confirm } from './confirm.svelte';
 
 export function canDeleteThread(thread: ThreadSummary): boolean {
   return !thread.parentThreadId && !thread.agentSessionId;
 }
 
-/** Delete immediately from every entry point; session undo remains available. */
+/** Every deletion entry point requires the conversation's exact name; undo remains available. */
 export async function deleteThread(store: Store, thread: ThreadSummary): Promise<boolean> {
   if (!canDeleteThread(thread)) return false;
+  if (!await confirm.ask({
+    title: fill(strings.sidebar.deleteTitle, { title: thread.title }),
+    body: strings.sidebar.deleteBody,
+    confirmLabel: strings.sidebar.delete,
+    cancelLabel: strings.common.cancel,
+    danger: true,
+    requiredText: thread.title,
+    inputLabel: strings.sidebar.deleteName,
+  })) return false;
   if (!(await store.removeThread(thread.id))) return false;
   // An incognito conversation is erased by the core: there is nothing to bring back.
   if (thread.incognito) { await tick(); focusComposer(); return true; }
