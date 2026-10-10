@@ -135,7 +135,7 @@ The tested installer becomes the release artifact.
 | UI entry chunk | 591,000 |
 | UI files, excluding `.br` and `.gz` copies | 4,430,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 3,710,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 3,714,000 |
 
 The total JavaScript measure excludes native binaries and source maps. On
 2026-10-03, fresh builds of `e1f00a3` measured 2,695,204 core bytes and 3,932,309
