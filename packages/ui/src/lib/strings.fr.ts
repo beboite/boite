@@ -2034,7 +2034,25 @@ export const fr: Translation = {
       ownerQrTitle: 'Donner le contrôle total à un téléphone ?',
       ownerQrBody: "Quiconque scanne ce QR code ou tape son code dans les 5 prochaines minutes pilote ce cœur comme vous : agents, fichiers, comptes et réglages. Ne le montrez qu'à votre propre téléphone, et révoquez l'appareil ci-dessous en cas de doute.",
       ownerQrConfirm: 'Afficher le code',
-      ownerScan: "Scannez-le depuis l'application Boite de votre téléphone, ou tapez-y le code. Il ne sert qu'une fois, dans les 5 minutes."
+      ownerScan: "Scannez-le depuis l'application Boite de votre téléphone, ou tapez-y le code. Il ne sert qu'une fois, dans les 5 minutes.",
+      reach: {
+        loopback: "Ce lien ne fonctionne que sur cet ordinateur : Boite n'écoute pas encore le réseau local.",
+        button: 'Rendre accessible sur le réseau local',
+        restarting: "Boite redémarre pour écouter le réseau local. Les agents en cours terminent leur étape et continuent.",
+        failed: "Boite n'est pas revenu sur le réseau local. Quittez-le depuis la zone de notification, rouvrez-le, puis ajoutez le téléphone."
+      },
+      firewall: {
+        blocked: 'Le pare-feu Windows bloque Boite sur ce réseau {networks} : un téléphone ne peut pas joindre cet ordinateur.',
+        unset: "Le pare-feu Windows n'a pas encore autorisé Boite sur ce réseau {networks} : un téléphone ne peut pas joindre cet ordinateur.",
+        allow: 'Autoriser dans le pare-feu Windows',
+        allowing: 'En attente de Windows',
+        allowed: 'Le pare-feu Windows laisse désormais les téléphones joindre Boite sur tous les réseaux.',
+        cancelled: "Rien n'a changé : Windows a besoin qu'un administrateur accepte sa demande.",
+        failed: 'Windows a refusé la modification. Autorisez boite-core.exe dans les paramètres du pare-feu Windows.',
+        unreadable: "Le pare-feu Windows n'a pas pu être lu. Si un téléphone ne se connecte pas, autorisez-y boite-core.exe.",
+        networks: { public: 'public', private: 'privé', domain: "d'entreprise" },
+        and: ' et '
+      }
     }
   },
 

@@ -105,21 +105,38 @@ test('the Tailscale switch serves the core, the links follow it, and 443 held by
   await desk.waitFor(`document.querySelector('${id('tailscale-access')}[data-state="off"]')`);
 }, 90_000);
 
-test('an owner link is drawn only once confirmed on the computer', async () => {
+test('an owner link is drawn only once confirmed on the computer, and a loopback link never is', async () => {
+  // This core listens on loopback: its link reaches nothing but this computer, so no QR code at all.
   await scrollTo(desk, id('pairing-card'));
-  await desk.click(id('pairing-owner'));
+  // The previous test leaves a loopback link on show: close it, so what follows is the new link's.
+  await desk.evaluate(`document.querySelector('${id('pairing-close')}')?.click()`);
+  await desk.waitFor(`!document.querySelector('${id('lan-reach')}')`);
   await desk.click(id('pairing-mint'));
-  await desk.waitFor(`document.querySelector('${id('pairing-owner-qr')}')`);
-  expect(await desk.evaluate(`!!document.querySelector('${id('pairing-qr')}')`)).toBe(false);
-  await desk.click(id('pairing-owner-qr'));
-  await desk.waitFor(`document.querySelector('${id('confirm-dialog')}')`);
-  await capture(desk, 'owner-qr-confirm-desktop.png');
-  await desk.click(id('confirm-ok'));
-  await desk.waitFor(`document.querySelector('${id('pairing-qr')}') && document.querySelector('${id('pairing-code')}')`);
-  await scrollTo(desk, id('pairing-card'));
-  await capture(desk, 'owner-qr-desktop.png');
-  await desk.click(id('pairing-owner'));
+  await desk.waitFor(`document.querySelector('${id('pairing-link')}')?.textContent.includes('127.0.0.1')`);
+  await desk.waitFor(`document.querySelector('${id('lan-reach')}')`);
+  expect(await desk.evaluate(`!document.querySelector('${id('pairing-qr')}') && !document.querySelector('${id('pairing-code')}')`)).toBe(true);
   await desk.click(id('pairing-close'));
+  // With a public address the link reaches a phone, and the owner's QR code waits for the confirmation.
+  const owner = await connect(core.url, core.token);
+  await owner.call('settings.set', { publicUrl: 'https://boite.example.com' });
+  try {
+    await desk.click(id('pairing-owner'));
+    await desk.click(id('pairing-mint'));
+    await desk.waitFor(`document.querySelector('${id('pairing-owner-qr')}')`);
+    expect(await desk.evaluate(`!!document.querySelector('${id('pairing-qr')}')`)).toBe(false);
+    await desk.click(id('pairing-owner-qr'));
+    await desk.waitFor(`document.querySelector('${id('confirm-dialog')}')`);
+    await capture(desk, 'owner-qr-confirm-desktop.png');
+    await desk.click(id('confirm-ok'));
+    await desk.waitFor(`document.querySelector('${id('pairing-qr')}') && document.querySelector('${id('pairing-code')}')`);
+    await scrollTo(desk, id('pairing-card'));
+    await capture(desk, 'owner-qr-desktop.png');
+    await desk.click(id('pairing-owner'));
+    await desk.click(id('pairing-close'));
+  } finally {
+    await owner.call('settings.set', { publicUrl: null });
+    owner.close();
+  }
 }, 60_000);
 
 test('the installed phone app pairs from a typed code, and a revoked one gets the recovery screen, narrow and wide', async () => {

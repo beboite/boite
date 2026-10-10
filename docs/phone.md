@@ -62,10 +62,49 @@ reads it at startup; enabling it binds `0.0.0.0`. Explicit `--host` or `--lan`
 flags take precedence. A running core never rebinds, so changing the switch
 requires a restart. The startup log names the address and its source.
 
+Closing the desktop app's window leaves its core running, so in the desktop app
+the switch restarts the core itself through `core.restart`, owner only: the
+restart an update makes, where each running turn ends its tool call and the next
+core resumes it ([restart handoff](restart-handoff.md)), and the shell starts
+that core again. A pairing link that names a loopback address gets no QR code
+and no code: on a phone it would name the phone. The card says so instead and
+offers Make it reachable on the local network, which saves the setting, asks
+for the firewall rule on Windows, restarts and shows the new link. A core the
+desktop app did not start keeps a sentence asking for a restart of Boite there
+(`LanReach.svelte`; `?fake=1&lan=off` mints loopback links).
+
 Without `--port`, the core reuses the port in `core.json`. If it is taken, the
 core chooses another and logs it; a phone then needs a new link. An explicit
 `--port` fails when occupied. A listener on all interfaces puts the machine's
 LAN address in pairing links, rather than loopback.
+
+### Windows Defender Firewall
+
+On Windows the core is Bun's own signed runtime renamed `boite-core.exe`
+([releasing](releasing.md)), so the first listener outside loopback makes
+Windows ask whether to let "Bun", published by "Oven", through. Windows creates
+inbound block rules for it before anyone answers, and they stay if the prompt is
+dismissed. An answer covers only the category of the network the machine was on,
+public or private, so the same network classified the other way later blocks the
+core again. In every case a phone gets a page that never loads.
+
+`firewall.status` reads the enabled inbound rules naming the core's executable
+and the category of each connected network, Tailscale's adapter aside since
+Tailscale opens it itself. A block wins over an allow, and a profile with the
+firewall off counts as allowed. `firewall.allow` runs one script as administrator
+through Windows' own prompt: it deletes every inbound rule naming the executable,
+then adds one named Boite that allows its TCP connections on every profile. A
+refused prompt answers `detail: 'cancelled'` and changes nothing. Both methods
+are owner only; elsewhere than Windows the status is `unsupported`.
+
+Turning on Reachable on the local network calls `firewall.allow` at once, while
+the owner is at the switch, so once the rule is in place Windows' own prompt
+never comes up; a refused or failed allow leaves it to come up at the next
+start. While the core
+listens on the network and Windows does not let it through, the pairing card says
+so above the paired devices, with Allow in Windows Firewall. `?fake=1&firewall=`
+`blocked` or `unset` shows that state; `refused` shows `blocked` with an
+administrator prompt nobody accepts.
 
 Two things guard the socket whatever it is bound to. The `Origin` header must be
 absent, one of the shell origins, or the core's own HTTP origin, and the first

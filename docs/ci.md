@@ -133,9 +133,9 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 591,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,460,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,466,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 3,740,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 3,744,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
@@ -220,6 +220,16 @@ adds 5,137 UI bytes: 4,430,694 against 4,425,557 for `main` at `19ef51b2`,
 measured on Linux on 2026-10-10. A machine icon in the picker cost another
 2,563 bytes through a chunk split and was left out. The UI limit rises from
 4,429,000 to 4,435,000, leaving about 4 KB.
+
+The Windows Defender Firewall check and its pairing-card notice add 3,866 UI
+bytes and 5,792 emitted core JavaScript bytes: 4,445,296 and 3,726,463 against
+4,441,430 and 3,720,671 for `main` at `64a0b6ad`, measured on Linux on
+2026-10-10. Merged with `main` at `ed68bd94` they measured 4,459,197 and
+3,739,869 bytes, within the 4,460,000 and 3,740,000 limits set there.
+Making the computer reachable from the pairing card, its restart and its
+sentences add 2,958 UI bytes and 175 core bytes on top: 4,462,155 and 3,740,044
+measured the same way. The UI limit rises to 4,466,000 and the core JavaScript
+limit to 3,744,000, leaving about 3.8 KB and 4 KB.
 
 Recent's Done and Working groups measured 3,949,936 UI bytes on 2026-10-03
 before integrating these orchestration additions. The combined build measured
