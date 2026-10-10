@@ -198,22 +198,29 @@
   /**
    * The page takes the size of this view by default, as a browser's page takes
    * its window's: on Show and whenever the view changes size, once it settles.
-   * A size picked by hand in Display stops that until Fit this screen.
+   * Once per size of this view: a preset the agent applies, or another
+   * viewer's fit, stands until this view itself changes size. A size picked by
+   * hand in Display stops that until Fit this screen.
    */
-  let fitted = $state(true), fitTimer: ReturnType<typeof setTimeout> | undefined;
+  let fitted = $state(true), fittedTo = '', fitTimer: ReturnType<typeof setTimeout> | undefined;
   const ready = $derived(usable);
   $effect(() => {
     const width = Math.round(areaWidth), height = Math.round(areaHeight);
     if (!fitted || !ready || zoom || width < 240 || height < 240) return;
+    const size = `${width}x${height}`;
+    if (size === fittedTo) return;
     clearTimeout(fitTimer);
     fitTimer = setTimeout(() => untrack(() => {
-      if (!fitted || !frame || (Math.abs(frame.width - width) <= 2 && Math.abs(frame.height - height) <= 2)) return;
+      if (!fitted || !frame) return;
+      fittedTo = size;
+      if (Math.abs(frame.width - width) <= 2 && Math.abs(frame.height - height) <= 2) return;
       void input({ kind: 'viewport', width: Math.min(3840, width), height: Math.min(3840, height) });
     }), 350);
     return () => clearTimeout(fitTimer);
   });
   function resize(width: number, height: number, fit = false) {
     fitted = fit;
+    fittedTo = fit ? `${Math.round(width)}x${Math.round(height)}` : '';
     viewportWidth = Math.max(240, Math.min(3840, Math.round(width)));
     viewportHeight = Math.max(240, Math.min(3840, Math.round(height)));
     zoom = 0;

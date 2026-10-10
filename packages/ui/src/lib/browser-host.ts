@@ -15,7 +15,7 @@
  *
  * No port is opened: WebView2 hands each webview's protocol to the app itself.
  */
-import { BROWSER_HOST_BATCH_MAX, DEFAULT_BROWSER_PROFILE, PRIVATE_BROWSER_PROFILE } from '@boite/contracts';
+import { BROWSER_HOST_BATCH_BYTES, BROWSER_HOST_BATCH_MAX, DEFAULT_BROWSER_PROFILE, PRIVATE_BROWSER_PROFILE } from '@boite/contracts';
 import type { BrowserEvent } from './browser-bridge';
 
 /** What the relay needs of the shell's webviews: `lib/browser-bridge-tauri.ts` on Windows. */
@@ -57,7 +57,7 @@ const message = (cause: unknown) => cause instanceof Error ? cause.message : Str
 export class BrowserHostRelay {
   #targets = new Map<string, Target>();
   #contexts = new Set<string>();
-  #outbox = new Map<string, string[]>();
+  #outbox = new Map<string, Array<{ text: string; bytes: number }>>();
   #sending = new Map<string, Promise<void>>();
   #offs: Array<() => void> = [];
   #stopped = false;
@@ -211,22 +211,46 @@ export class BrowserHostRelay {
     }
   }
 
-  /** Answers and events of one profile leave in order, as few calls as a burst allows. */
+  /**
+   * Answers and events of one profile leave in order, as few calls as a burst
+   * allows, each call under the RPC frame limit (`BROWSER_HOST_BATCH_BYTES`).
+   * An answer too large for any call becomes an error naming its size, so the
+   * core never waits for it; an event that large is dropped.
+   */
   #send(profile: string, value: Record<string, unknown>): void {
     if (this.#stopped) return;
+    let text = JSON.stringify(value), bytes = replyBytes(text);
+    if (bytes > BROWSER_HOST_BATCH_BYTES) {
+      if (typeof value.id !== 'number') return;
+      text = JSON.stringify({ id: value.id, ...(value.sessionId ? { sessionId: value.sessionId } : {}), error: { message: `the desktop app's answer weighs ${bytes} bytes, more than the ${BROWSER_HOST_BATCH_BYTES} a reply carries` } });
+      bytes = replyBytes(text);
+    }
     const queue = this.#outbox.get(profile);
-    const text = JSON.stringify(value);
-    if (queue) { queue.push(text); return; }
-    this.#outbox.set(profile, [text]);
+    if (queue) { queue.push({ text, bytes }); return; }
+    this.#outbox.set(profile, [{ text, bytes }]);
     const previous = this.#sending.get(profile) ?? Promise.resolve();
     const next = previous.then(async () => {
       await Promise.resolve();
       const batch = this.#outbox.get(profile) ?? [];
       this.#outbox.delete(profile);
-      for (let at = 0; at < batch.length; at += BROWSER_HOST_BATCH_MAX) {
-        await this.client.call('browser.hostReply', { profile, messages: batch.slice(at, at + BROWSER_HOST_BATCH_MAX) }).catch(() => {});
+      let messages: string[] = [], size = 0;
+      const flush = async () => {
+        if (messages.length) await this.client.call('browser.hostReply', { profile, messages }).catch(() => {});
+        messages = []; size = 0;
+      };
+      for (const entry of batch) {
+        if (messages.length === BROWSER_HOST_BATCH_MAX || size + entry.bytes > BROWSER_HOST_BATCH_BYTES) await flush();
+        messages.push(entry.text); size += entry.bytes;
       }
+      await flush();
     });
     this.#sending.set(profile, next);
   }
 }
+
+const encoder = new TextEncoder();
+/** What a message weighs inside a reply: a JSON string, its separator included. */
+function replyBytes(text: string): number {
+  return encoder.encode(JSON.stringify(text)).length + 1;
+}
+

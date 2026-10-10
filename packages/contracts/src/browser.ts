@@ -1,3 +1,4 @@
+import { RPC_MAX_FRAME_BYTES } from './attachment-limits';
 import type { RemoteBrowserFrame, RemoteBrowserInput, RemoteBrowserSelection, RemoteFrameOptions } from './browser-remote';
 /**
  * The agent's browser runs on the machine that runs its conversation: the core
@@ -175,9 +176,17 @@ export interface BrowserRpcEvents {
   'browser.hostMessage': { profile: string; message: string };
 }
 
-/** Messages one `browser.hostReply` carries, and the longest one: a recording frame stays far under it. */
+/** Messages one `browser.hostReply` carries. */
 export const BROWSER_HOST_BATCH_MAX = 256;
-export const BROWSER_HOST_MESSAGE_MAX = 16 * 1024 * 1024;
+/**
+ * The UTF-8 bytes one `browser.hostReply` may give its messages, each counted
+ * as written in the request (a JSON string, quotes escaped): the rest of the
+ * RPC frame (`RPC_MAX_FRAME_BYTES`) is left to the envelope. A recording frame
+ * stays far under it.
+ */
+export const BROWSER_HOST_BATCH_BYTES = RPC_MAX_FRAME_BYTES - 64 * 1024;
+/** The longest message the core takes, in characters: one alone in a reply still fits its frame. */
+export const BROWSER_HOST_MESSAGE_MAX = BROWSER_HOST_BATCH_BYTES;
 
 /** A cookie as the DevTools protocol exchanges it. Without `expires` it lasts as long as its browser session. */
 export interface BrowserCookie {

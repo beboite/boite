@@ -1,5 +1,6 @@
 import { expect, test, vi } from 'vitest';
 import type { BrowserEvent } from './browser-bridge';
+import { BROWSER_HOST_BATCH_BYTES } from '@boite/contracts';
 import { AGENT_VIEW_PREFIX, BrowserHostRelay, HOST_PAGE_EVENTS, type HostBridge, type HostClient } from './browser-host';
 
 /** The shell's webviews, as the relay sees them: what it created, asked and closed. */
@@ -120,5 +121,27 @@ test('a burst of answers leaves in one call per profile, in order', async () => 
   const batches = core.calls.filter(call => call.method === 'browser.hostReply');
   expect(batches).toHaveLength(1);
   expect(core.replies('default').map(reply => reply.id)).toEqual(ids);
+  relay.stop();
+});
+
+test('every reply fits an RPC frame: a burst splits by its size, and an answer too large for any becomes an error', async () => {
+  const shell = fakeBridge(), core = fakeClient();
+  const half = 'x'.repeat(Math.floor(BROWSER_HOST_BATCH_BYTES / 2) + 1000), whole = '"'.repeat(Math.floor(BROWSER_HOST_BATCH_BYTES / 2));
+  shell.protocol.mockImplementation(async (_id: string, method: string, params?: any) => (method === 'Runtime.evaluate' ? { result: { value: params?.expression === 'whole' ? whole : half } } : {}));
+  const relay = new BrowserHostRelay(core.client, shell.bridge);
+  await relay.start();
+  const { result: { targetId } } = await core.answer('work', core.send('work', 'Target.createTarget', { url: 'about:blank' }));
+  const before = core.calls.length;
+  // Two answers just over half the budget each, and one whose quotes double once escaped in the request.
+  const ids = [core.send('work', 'Runtime.evaluate', { expression: 'half' }, targetId), core.send('work', 'Runtime.evaluate', { expression: 'half' }, targetId), core.send('work', 'Runtime.evaluate', { expression: 'whole' }, targetId)];
+  for (const id of ids) await core.answer('work', id);
+  const sent = core.calls.slice(before).filter(call => call.method === 'browser.hostReply');
+  expect(sent.length).toBeGreaterThanOrEqual(2);
+  for (const call of sent) {
+    const bytes = (call.params as { messages: string[] }).messages.reduce((sum, text) => sum + new TextEncoder().encode(JSON.stringify(text)).length + 1, 0);
+    expect(bytes).toBeLessThanOrEqual(BROWSER_HOST_BATCH_BYTES);
+  }
+  expect((await core.answer('work', ids[0]!)).result.result.value).toBe(half);
+  expect((await core.answer('work', ids[2]!)).error.message).toContain('more than the');
   relay.stop();
 });
