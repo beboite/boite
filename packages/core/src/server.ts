@@ -109,11 +109,11 @@ export function isAllowedOrigin(origin: string | null, port: number, host: strin
     if (url.origin !== origin || Number(url.port || (url.protocol === 'https:' ? 443 : 80)) !== port) return false;
     const name = url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
     if (['127.0.0.1', 'localhost', '::1'].includes(name)) return true;
+    // A page this core served under a local name, `http://boite-pc.tail1234.ts.net:7337`
+    // say: the socket dials the same name the page was loaded from, whatever the core is bound to.
+    if (hostHeader !== null && hostHeader.trim().toLowerCase() === url.host && LOCAL_NAME.test(name)) return true;
     if (host !== '0.0.0.0' && host !== '::') return name === host.toLowerCase();
     if (name === hostname().toLowerCase()) return true;
-    // A page this core served under a local name, `http://boite-pc.tail1234.ts.net:7337`
-    // say: the socket dials the same name the page was loaded from.
-    if (hostHeader !== null && hostHeader.trim().toLowerCase() === url.host && LOCAL_NAME.test(name)) return true;
     return Object.values(networkInterfaces()).some((entries) => entries?.some((entry) => entry.address === name));
   } catch {
     return false;

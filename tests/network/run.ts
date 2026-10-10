@@ -30,6 +30,8 @@ async function startCore(ns: string, args: string[], port: number) {
     BOITE_UI_DIR: '', BOITE_DATA_DIR: dataDir, BOITE_DRAFTS_DIR: join(dataDir, 'Documents'), BOITE_ECHO: '1', BOITE_HOST_AGENTS: '0', BOITE_TELEMETRY_URL: '',
   });
   procs.push(proc);
+  // Read for as long as the core runs: a full stderr pipe would stall its logging.
+  void new Response(proc.stderr).text().catch(() => '');
   let text = '';
   const reader = proc.stdout.getReader();
   const decoder = new TextDecoder();
@@ -37,7 +39,7 @@ async function startCore(ns: string, args: string[], port: number) {
   while (!/boite-core ready/.test(text)) {
     if (Date.now() > deadline) throw new Error(`${ns} core never ready:\n${text}`);
     const chunk = await reader.read();
-    if (chunk.done) throw new Error(`${ns} core exited:\n${text}\n${await new Response(proc.stderr).text()}`);
+    if (chunk.done) throw new Error(`${ns} core exited:\n${text}`);
     text += decoder.decode(chunk.value, { stream: true });
   }
   void (async () => { for (;;) { const c = await reader.read(); if (c.done) return; } })();

@@ -2434,7 +2434,7 @@ export interface PairedSession {
  * leaves the machine. A grant that was used or that expired is refused by name.
  */
 export interface PairingGrant {
-  /** The link to show first: the group's address for this machine, the public HTTPS one, else the LAN one. */
+  /** The link to show first: the public HTTPS one when set, the group's address for this machine, else the LAN one. */
   url: string;
   grant: string;
   role: PairingRole;

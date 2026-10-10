@@ -435,6 +435,8 @@ describe('server', () => {
     expect(isAllowedOrigin('http://boite-pc.evil.example:4321', 4321, '0.0.0.0', 'boite-pc.evil.example:4321')).toBe(false);
     expect(isAllowedOrigin('http://boite-pc.tail1234.ts.net:4321', 4321, '0.0.0.0', '192.168.1.20:4321')).toBe(false);
     expect(isAllowedOrigin('http://boite-pc.tail1234.ts.net:4321', 4321, '0.0.0.0')).toBe(false);
+    // A core bound to one address takes the same page too.
+    expect(isAllowedOrigin('http://boite-pc.local:4321', 4321, '192.168.1.20', 'boite-pc.local:4321')).toBe(true);
   });
   test('health answers without auth', async () => {
     const response = await fetch(`${harness.url}/health`);
@@ -540,6 +542,8 @@ describe('server', () => {
     ]);
     // A Hyper-V external switch carries the LAN itself: the default route says which.
     expect(lanAddress({ 'vEthernet (External)': [iface('192.168.1.20')], 'vEthernet (Default Switch)': [iface('172.30.0.1')] }, '192.168.1.20')).toBe('192.168.1.20');
+    // A server whose route leaves from a public address has it first, named for what it is.
+    expect(reachableAddresses({ eth0: [iface('203.0.113.7')], docker0: [iface('172.17.0.1')] }, '203.0.113.7')).toEqual([{ address: '203.0.113.7', network: 'other', interface: 'eth0' }]);
     // Only virtual adapters: better one of them than no link at all.
     expect(lanAddress({ vmnet8: [iface('192.168.196.1')] })).toBe('192.168.196.1');
     const url = new URL(harness.core.sessions.pairingUrl('grant'));

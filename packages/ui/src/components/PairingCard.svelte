@@ -27,9 +27,15 @@
   // One grant, one link per address the core answers on: the home network for
   // a phone on the same Wi-Fi, a tailnet's for one away from home. The choice
   // of network outlives a new link, so a second phone gets the same kind.
-  let network = $state<PairingNetwork | null>(null);
+  // The adapter is part of the choice: Wi-Fi and Ethernet are two LAN addresses.
+  let chosen = $state<{ network: PairingNetwork; interface?: string } | null>(null);
   let links = $derived<PairingLink[]>(store.pairing ? (store.pairing.links ?? [{ url: store.pairing.url, network: 'lan' }]) : []);
-  let shown = $derived(links.find((link) => link.network === network) ?? links[0] ?? null);
+  let shown = $derived(
+    links.find((link) => link.network === chosen?.network && link.interface === chosen.interface)
+      ?? links.find((link) => link.network === chosen?.network)
+      ?? links[0]
+      ?? null
+  );
   function linkLabel(link: PairingLink): string {
     const name = strings.settings.pairing.networks[link.network];
     const twins = links.filter((other) => other.network === link.network).length > 1;
@@ -119,7 +125,7 @@
       <div class="networks" role="group" aria-label={strings.settings.pairing.network} data-testid="pairing-networks">
         {#each links as link (link.url)}
           <button type="button" class:on={link === shown} aria-pressed={link === shown} data-network={link.network} data-testid="pairing-network"
-            title={hostOf(link.url)} onclick={() => (network = link.network)}>
+            title={hostOf(link.url)} onclick={() => (chosen = { network: link.network, ...(link.interface === undefined ? {} : { interface: link.interface }) })}>
             {linkLabel(link)}
           </button>
         {/each}

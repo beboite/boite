@@ -30,7 +30,12 @@ async function step(name: string, run: () => Promise<string | void>): Promise<bo
 
 /** A real press at the element's centre: a JavaScript click() never moves the focus. */
 async function tap(selector: string): Promise<void> {
-  const point = await page!.evaluate<{ x: number; y: number }>(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  // Found through the DOM domain, so no selector is spliced into page code.
+  const { root } = (await page!.send('DOM.getDocument', { depth: 0 })) as { root: { nodeId: number } };
+  const { nodeId } = (await page!.send('DOM.querySelector', { nodeId: root.nodeId, selector })) as { nodeId: number };
+  const { model } = (await page!.send('DOM.getBoxModel', { nodeId })) as { model: { content: number[] } };
+  const [x1 = 0, y1 = 0, , , x3 = 0, y3 = 0] = model.content;
+  const point = { x: (x1 + x3) / 2, y: (y1 + y3) / 2 };
   for (const type of ['mousePressed', 'mouseReleased']) await page!.send('Input.dispatchMouseEvent', { type, button: 'left', clickCount: 1, ...point });
 }
 

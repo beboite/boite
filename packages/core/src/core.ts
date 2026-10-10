@@ -353,7 +353,7 @@ export class Core {
    */
   reachableLinks(routed: string | null = null): PairingLink[] {
     // A machine of a group gives the address the group gives for it first: its
-    // tailnet name when it has one, which a phone on the tailnet reaches from anywhere.
+    // HTTPS origin when it has one, else a literal address a phone can dial.
     const grouped = this.group.ownAddress();
     const found = this.#interfaceLinks(routed).filter((link) => link.url !== grouped);
     if (grouped === null) return found;

@@ -63,7 +63,8 @@ export function reachableAddresses(
     .filter((entry) => !seen.has(entry.address) && seen.add(entry.address))
     .map((entry) => ({
       address: entry.address,
-      network: entry.rank === 0 || entry.rank === 1 ? 'lan' : 'other',
+      // The route orders; the range names: a server whose route leaves from a public address is not on a LAN.
+      network: PRIVATE_V4.some((range) => range.test(entry.address)) ? 'lan' : 'other',
       interface: entry.name,
     }));
 }

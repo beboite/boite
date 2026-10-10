@@ -2561,7 +2561,7 @@ test('the desktop still has every one of them', async ({ app: _app }) => {
   for (const selector of OWNER_ONLY_IN_SETTINGS) expect(document.querySelector(selector)).not.toBeNull();
   // One grant, every address: a phone away from home takes the tailnet's.
   (query('[data-testid=pairing-mint]') as HTMLButtonElement).click();
-  await waitFor(() => document.querySelectorAll('[data-testid=pairing-network]').length === 2);
+  await waitFor(() => document.querySelectorAll('[data-testid=pairing-network]').length >= 2);
   expect(query('[data-testid=pairing-link]').textContent).toBe(store.pairing?.url);
   (query('[data-testid=pairing-network][data-network=tailscale]') as HTMLButtonElement).click();
   await waitFor(() => query('[data-testid=pairing-link]').textContent?.includes('100.101.102.103') === true);

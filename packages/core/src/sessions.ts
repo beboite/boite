@@ -175,7 +175,9 @@ export class SessionStore {
     const query = `/?${GRANT_QUERY_PARAM}=${grant}`;
     const publicUrl = this.core.settings.get().publicUrl;
     const found = this.core.reachableLinks(routed).map((link) => ({ ...link, url: `${link.url}${query}` }));
-    return publicUrl ? [{ url: `${publicUrl}${query}`, network: 'public' }, ...found] : found;
+    const links: PairingLink[] = publicUrl ? [{ url: `${publicUrl}${query}`, network: 'public' }, ...found] : found;
+    // The group's address for this machine is the public one once Tailscale serves it: one choice, not two.
+    return links.filter((link, index) => links.findIndex((other) => other.url === link.url) === index);
   }
 
   /**

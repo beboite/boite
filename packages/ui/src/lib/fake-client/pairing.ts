@@ -30,7 +30,8 @@ export function pairingMethods(ctx: FakeContext) {
         role,
         expiresAt,
         links: [
-          { url, network: ctx.settings.publicUrl ? 'public' : 'lan', ...(ctx.settings.publicUrl ? {} : { interface: 'Wi-Fi' }) },
+          ...(ctx.settings.publicUrl ? [{ url, network: 'public' as const }] : []),
+          { url: `http://192.168.1.20:8777/?grant=${grant}`, network: 'lan', interface: 'Wi-Fi' },
           { url: `http://100.101.102.103:8777/?grant=${grant}`, network: 'tailscale', interface: 'Tailscale' }
         ],
         ...(role === 'device' || short ? { code: `K7QM-${String(seq).padStart(4, '2')}`, codeExpiresAt: Math.min(expiresAt, ctx.now() + PAIRING_CODE_TTL_MS) } : {})
