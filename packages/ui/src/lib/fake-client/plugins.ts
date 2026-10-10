@@ -176,7 +176,7 @@ export class FakePlugins {
     const read: PluginPreview = { ...base, manifest, artifact: manifest.artifacts['win32-x64'] ?? null, commands: desktop ? appCommands(manifest.executable, manifest.id) : poolCommands(slug) };
     const existing = this.#plugins.find((entry) => entry.id === slug);
     if (existing?.origin === 'recommended') {
-      const expected = 'an id no recommended plugin uses (kebacc-switcher)';
+      const expected = `an id no recommended plugin uses (${this.#plugins.filter((entry) => entry.origin === 'recommended').map((entry) => entry.id).join(', ')})`;
       return { ...read, rejected: { file: 'boite-plugin.json', field: 'id', expected, message: `boite-plugin.json: id must be ${expected}, found "${slug}"` } };
     }
     if (existing !== undefined && existing.source !== null && existing.source.url !== source.url) {

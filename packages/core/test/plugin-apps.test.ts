@@ -9,11 +9,10 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
-import { PLUGIN_MANIFEST_FILE } from '@boite/contracts';
 import { connect } from '../src/client.ts';
 import { PluginStore } from '../src/plugins.ts';
 import { RELAUNCH_DELAYS_MS, appEnv, desktopProblem, type AppClock } from '../src/plugins/apps.ts';
-import { platformKey } from '../src/plugins/manifest.ts';
+import { parseManifest, platformKey } from '../src/plugins/manifest.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 
 let harness: TestCore | undefined;
@@ -37,14 +36,13 @@ function manifest(version = '0.1.0', bytes = new Uint8Array([1])): Record<string
   };
 }
 
-/** Writes an installed Bots, as a finished install leaves it. */
+/** Writes an installed Bots, as a finished install from the recommended list leaves it. */
 function installBots(dataDir: string): string {
   const dir = join(dataDir, 'plugins', 'bots');
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, `bots${EXE}`), 'fixture');
   writeFileSync(join(dir, 'installed.json'), JSON.stringify({
-    schema: 1, origin: 'url', installedAt: 1,
-    source: { url: 'https://plugins.example.invalid/bots', ref: 'HEAD', commit: 'c'.repeat(40) },
+    schema: 1, origin: 'recommended', installedAt: 1, source: null,
     manifest: manifest(),
   }));
   return dir;
@@ -249,14 +247,7 @@ describe('a desktop app', () => {
 
   test('an install launches it, an update stops it before replacing the binary and starts it after, uninstall kills it', async () => {
     harness = await startQuietCore(); const client = await harness.connect();
-    harness.core.plugins.allowLocalSources = true;
     const fake = fakeApp(harness); fake.mode('stay');
-    const repo = join(harness.dataDir, 'repos', 'bots');
-    mkdirSync(repo, { recursive: true });
-    const git = (...args: string[]) => {
-      const run = Bun.spawnSync({ cmd: ['git', ...args], cwd: repo, env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@boite.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@boite.invalid' }, stdout: 'pipe', stderr: 'pipe', windowsHide: true });
-      if (!run.success) throw new Error(run.stderr.toString());
-    };
     const v1 = new Uint8Array([1]); const v2 = new Uint8Array([2]);
     const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation((async (input: string | URL | Request) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
@@ -264,20 +255,19 @@ describe('a desktop app', () => {
       return bytes === null ? new Response('missing', { status: 404 }) : new Response(bytes, { headers: { 'content-length': String(bytes.length) } });
     }) as typeof fetch);
     restores.push(() => fetchSpy.mockRestore());
-    git('init', '-q');
-    writeFileSync(join(repo, PLUGIN_MANIFEST_FILE), JSON.stringify(manifest('0.1.0', v1)));
-    git('add', '-A'); git('commit', '-q', '-m', 'v1');
+    // Bots installs from the recommended list, as Settings > Plugins offers it first.
+    harness.core.plugins.recommended = [parseManifest(manifest('0.1.0', v1), 'recommended.json[0]')];
 
-    const preview = await client.call('plugins.inspect', { url: repo });
-    expect(preview.commands).toEqual(['bots', 'environment: BOITE_CORE_URL=<this core> BOITE_TOKEN=<the owner token> BOITE_PLUGIN_ID=bots']);
-    await client.call('plugins.add', { previewId: preview.previewId! });
+    const [listed] = await client.call('plugins.list', {});
+    expect(listed).toMatchObject({ id: 'bots', origin: 'recommended', status: 'not-installed', availableVersion: '0.1.0' });
+    expect(listed?.commands).toEqual(['bots', 'environment: BOITE_CORE_URL=<this core> BOITE_TOKEN=<the owner token> BOITE_PLUGIN_ID=bots']);
+    await client.call('plugins.install', { id: 'bots' });
     await waitFor(() => app().status === 'running');
     const first = app().pid!;
 
-    writeFileSync(join(repo, PLUGIN_MANIFEST_FILE), JSON.stringify(manifest('0.2.0', v2)));
-    git('commit', '-q', '-am', 'v2');
-    const update = await client.call('plugins.inspect', { url: repo });
-    await client.call('plugins.add', { previewId: update.previewId! });
+    // A Boite that recommends the next release updates it.
+    harness.core.plugins.recommended = [parseManifest(manifest('0.2.0', v2), 'recommended.json[0]')];
+    await client.call('plugins.install', { id: 'bots' });
     await waitFor(() => harness!.core.plugins.state('bots').status === 'installed' && app().status === 'running' && app().pid !== first);
     expect(alive(first)).toBe(false);
     expect(harness.core.plugins.state('bots').version).toBe('0.2.0');
@@ -288,7 +278,6 @@ describe('a desktop app', () => {
     expect(removed.status).toBe('not-installed');
     expect(alive(second)).toBe(false);
     expect(existsSync(join(harness.dataDir, 'plugins', 'bots'))).toBe(false);
-    rmSync(repo, { recursive: true, force: true });
   }, 30_000);
 });
 
