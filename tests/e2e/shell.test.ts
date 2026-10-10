@@ -500,7 +500,7 @@ shellTest('close exits by default; the persisted setting hides instead; the nati
     await ownPage.waitFor(TAURI_READY);
     expect(await ownPage.evaluate(`window.__TAURI_INTERNALS__.invoke('close_behavior')`)).toBe(true);
     await ownPage.evaluate(`window.__TAURI_INTERNALS__.invoke('close_behavior', {enabled:false})`);
-    await ownPage.waitFor(`document.querySelector('[data-testid="titlebar"] .close')`);
+    await ownPage.waitFor(`document.querySelector('.app.ready') && document.querySelector('[data-testid="titlebar"] .close')`);
     await ownPage.evaluate(`document.querySelector('[data-testid="titlebar"] .close').click()`);
     await waitUntil(() => !pidAlive(ownPid) && !pidAlive(ownCore!.pid), CORE_GONE_TIMEOUT_MS);
     expect(pidAlive(ownPid)).toBe(false); expect(pidAlive(ownCore.pid)).toBe(false);
