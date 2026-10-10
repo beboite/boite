@@ -2,6 +2,7 @@ import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp';
 import { startUi } from './lib/ui';
+import { confirmDeletion } from './lib/thread-removal';
 
 let server: { close(): Promise<void> };
 let url: string;
@@ -134,8 +135,10 @@ test('archive and delete leave a project draft on desktop and phone', async () =
           await globalThis.__boiteTest.workspace.select(s, row.id);
         })()`);
         await page.waitFor(`document.querySelector('${id('thread-menu-trigger')}')`);
+        const threadId = await page.evaluate<string>(`${state}.openThread.id`);
         await page.click(id('thread-menu-trigger'));
         await page.click(`${id('thread-menu-trigger-menu')} [data-value=${action}]`);
+        if (action === 'delete') await confirmDeletion(page, threadId);
         await page.waitFor(`${state}.openThread === null && ${state}.draft?.projectId === 'p-boite'`);
         expect(await page.evaluate(`!!document.querySelector('${id('composer-input')}')`)).toBe(true);
         expect(await page.evaluate(`${state}.openThread`)).toBeNull();

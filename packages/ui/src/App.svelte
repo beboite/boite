@@ -269,7 +269,7 @@
           else quitHint.hide();
         },
         onQuit: () => {
-          void requestQuit().catch(error => { store.error = String(error); });
+          void requestQuit().catch(error => { store.error = String(error); }).finally(() => { if (!quitting) quitHold?.reset(); });
         }
       })
     : null;

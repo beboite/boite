@@ -55,7 +55,7 @@ test('fresh thread state includes work absent from the visible list', async () =
   const quit = vi.fn(async () => {});
   const ask = vi.spyOn(confirm, 'ask').mockResolvedValue(true);
   await shellQuit(() => [owner], quit)();
-  expect(ask).toHaveBeenCalledWith(expect.objectContaining({ body: expect.stringContaining('1') }));
+  expect(ask).toHaveBeenCalledWith(expect.objectContaining({ body: expect.stringContaining(strings.titlebar.quitWorkingOne) }));
   expect(quit).toHaveBeenCalledOnce();
 });
 

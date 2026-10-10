@@ -182,6 +182,7 @@ pub(crate) fn build_main_window<R: Runtime>(
             // reload of the UI takes every child webview with it.
             .on_page_load(|window, payload| {
                 if matches!(payload.event(), tauri::webview::PageLoadEvent::Started) {
+                    crate::tray::reset_quit_guard(window.app_handle());
                     browser::close_all(window.app_handle());
                 }
             });

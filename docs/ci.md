@@ -132,13 +132,19 @@ The tested installer becomes the release artifact.
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 588,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,405,000 |
+| UI entry chunk | 590,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,414,000 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 3,710,000 |
 
 The total JavaScript measure excludes native binaries and source maps. On
-2026-10-03, fresh builds of `e1f00a3` measured 2,695,204 core bytes and 3,932,309
+2026-10-10, `bun run build:ui` with Bun 1.4.2 measured 4,407,959 UI bytes at
+`c30a17a5` and 4,412,538 with close confirmation and typed conversation deletion.
+The dialogs, input binding and English/French sentences add 4,579 bytes. The UI
+total limit increases by 5,000 bytes to 4,414,000, leaving 1,462 bytes; entry
+and core limits stay unchanged.
+
+On 2026-10-03, fresh builds of `e1f00a3` measured 2,695,204 core bytes and 3,932,309
 UI bytes. The orchestration additions measured 3,228,444 and 3,943,301 bytes:
 the core gains 533,240 bytes, mostly the official MCP SDK and its validation
 dependency, loaded only by `boite mcp`; the UI gains 10,992 bytes for recovery,

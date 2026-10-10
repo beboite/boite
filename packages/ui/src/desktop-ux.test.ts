@@ -52,6 +52,8 @@ test('deletion requires the exact name, supports Enter, and cancellation restore
   const deletion = deleteThread(store, thread);
   await waitFor(() => document.activeElement?.getAttribute('data-testid') === 'confirm-name');
   const field = query<HTMLInputElement>('[data-testid=confirm-name]');
+  expect(field.getAttribute('autocapitalize')).toBe('off');
+  expect(field.getAttribute('autocorrect')).toBe('off');
   field.value = thread.title + 'x';
   field.dispatchEvent(new Event('input', { bubbles: true }));
   flushSync();
@@ -62,6 +64,9 @@ test('deletion requires the exact name, supports Enter, and cancellation restore
   field.dispatchEvent(new Event('input', { bubbles: true }));
   flushSync();
   expect(query<HTMLButtonElement>('[data-testid=confirm-ok]').disabled).toBe(false);
+  field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true, cancelable: true }));
+  expect(confirm.current).not.toBeNull();
+  expect(store.threads.some(t => t.id === thread.id)).toBe(true);
   press(field, 'Enter');
   expect(await deletion).toBe(true);
   expect(store.threads.some(t => t.id === thread.id)).toBe(false);

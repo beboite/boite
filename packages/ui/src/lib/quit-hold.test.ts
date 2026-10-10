@@ -38,6 +38,21 @@ function harness(options: { holdMs?: number; doubleMs?: number } = {}) {
 }
 
 describe('QuitHold', () => {
+  test('a cancelled request can be rearmed for another hold or double press, but disposal is final', () => {
+    const { hold, advance, quits } = harness();
+    hold.press(); advance(100); hold.release(); advance(100); hold.press();
+    expect(quits).toEqual([200]);
+    hold.reset();
+    hold.press(); advance(100); hold.release();
+    expect(quits).toEqual([200]);
+    advance(100); hold.press();
+    expect(quits).toEqual([200, 400]);
+    hold.reset(); hold.press(); advance(1200);
+    expect(quits).toEqual([200, 400, 1600]);
+    hold.dispose(); hold.reset(); hold.press(); advance(1200);
+    expect(quits).toEqual([200, 400, 1600]);
+  });
+
   test('a single press shows the hint and quits nothing', () => {
     const { hold, advance, quits, holding } = harness();
     hold.press();

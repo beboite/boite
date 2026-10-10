@@ -2,6 +2,7 @@ import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp.ts';
 import { startUi } from './lib/ui.ts';
+import { confirmDeletion } from './lib/thread-removal';
 
 let server: { close(): Promise<void> };
 let page: BrowserPage;
@@ -376,6 +377,7 @@ test('a paired phone deletes a thread from its list and the toast offers undo', 
   await page.waitFor(`document.querySelector('[data-testid=mobile-thread-menu-${id}-menu] [data-value=delete]')`);
   await capture('mobile-paired-thread-delete-menu.png');
   await page.click(`[data-testid=mobile-thread-menu-${id}-menu] [data-value=delete]`);
+  await confirmDeletion(page, id);
   await page.waitFor(`!document.querySelector('[data-testid=mobile-thread-${id}]') && !__boiteTest.workspace.active.threads.some(t => t.id === ${JSON.stringify(id)})`);
   await capture('mobile-paired-thread-deleted.png');
   expect(await page.evaluate('__boiteTest.workspace.active.error')).toBeNull();

@@ -3,6 +3,7 @@ import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp.ts';
 import { startUi } from './lib/ui.ts';
+import { confirmDeletion } from './lib/thread-removal';
 
 let server: { close(): Promise<void> };
 let port: number;
@@ -52,7 +53,9 @@ for (const width of [1280, 390]) {
       expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
       if (width >= 720) {
         const drawer = '[data-testid=archived-list]';
+        const deletedId = await page.evaluate<string>(`document.querySelector('${drawer} [data-testid=archived-delete]').closest('li').dataset.threadId`);
         await page.click(`${drawer} [data-testid=archived-delete]`);
+        await confirmDeletion(page, deletedId);
         await page.waitFor(`document.querySelectorAll('${drawer} li').length === 6`);
         expect(await page.evaluate(`document.querySelector('[data-testid=confirm-dialog]') === null`)).toBe(true);
         await page.click('[data-testid=undo-action]');
@@ -88,6 +91,7 @@ for (const width of [1280, 390]) {
       await page.evaluate(`Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])`);
       await page.screenshot(join(import.meta.dir, '.artifacts', `thread-delete-menu-${width}.png`));
       await chooseDelete();
+      await confirmDeletion(page, id);
       await page.waitFor(`!globalThis.__boiteTest.workspace.active.threads.some(t => t.id === ${JSON.stringify(id)})`);
       expect(await page.evaluate(`document.querySelector('[data-testid=confirm-dialog]') === null`)).toBe(true);
       expect(await page.evaluate(`globalThis.__boiteTest.workspace.active.client.call('threads.list', { includeArchived: true }).then(rows => rows.some(t => t.id === ${JSON.stringify(id)}))`)).toBe(false);
@@ -96,6 +100,7 @@ for (const width of [1280, 390]) {
       await page.click('[data-testid=undo-action]');
       await page.waitFor(`globalThis.__boiteTest.workspace.active.openThread?.id === ${JSON.stringify(id)}`);
       await openMenu(); await chooseDelete();
+      await confirmDeletion(page, id);
       await page.waitFor(`!globalThis.__boiteTest.workspace.active.threads.some(t => t.id === ${JSON.stringify(id)})`);
       await page.waitFor(`document.querySelector('[data-testid=undo-toast]')`);
       await page.waitFor(`!document.querySelector('[data-testid=undo-toast]')`, 12_000);
@@ -119,7 +124,7 @@ for (const width of [1280, 390]) {
       await page.evaluate(`Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])`);
       await page.screenshot(join(import.meta.dir, '.artifacts', `thread-delete-archive-${width}.png`));
       await page.click('[data-testid=archived-delete]');
-      expect(await page.evaluate(`document.querySelector('[data-testid=confirm-dialog]') === null`)).toBe(true);
+      await confirmDeletion(page, archivedId);
       await page.waitFor(`!document.querySelector('[data-testid=archived-list] [data-thread-id="${archivedId}"]')`);
       expect(await page.evaluate(`globalThis.__boiteTest.workspace.active.client.call('threads.list', { includeArchived: true }).then(rows => rows.some(t => t.id === ${JSON.stringify(archivedId)}))`)).toBe(false);
       expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);

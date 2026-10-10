@@ -55,7 +55,7 @@
       return;
     }
     if (event.key === 'Tab') trap(event);
-    if (event.key === 'Enter' && event.target instanceof HTMLInputElement && card?.contains(event.target)) {
+    if (event.key === 'Enter' && !event.isComposing && event.target instanceof HTMLInputElement && card?.contains(event.target)) {
       event.preventDefault();
       event.stopPropagation();
       confirm.answer(true);
@@ -109,7 +109,7 @@
       {/if}
       {#if request.requiredText !== undefined}
         <label class="name-field" for="confirm-name">{request.inputLabel}
-          <input id="confirm-name" data-testid="confirm-name" bind:value={confirm.typed} autocomplete="off" spellcheck="false" />
+          <input id="confirm-name" data-testid="confirm-name" bind:value={confirm.typed} autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" />
         </label>
         <p class="required-name">{request.requiredText}</p>
       {/if}

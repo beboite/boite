@@ -206,3 +206,18 @@ test('deletion waits for the exact name and cancellation leaves the owning machi
   await undo.take();
   expect(store.threads.some(t => t.id === thread.id)).toBe(true);
 });
+
+test.each(['', '   '])('a blank title %j still requires typing the displayed untitled name', async title => {
+  const store = await ready();
+  const thread = { ...store.threads.find(t => t.id === 't-trace')!, title };
+  const remove = vi.spyOn(store, 'removeThread');
+  const deletion = deleteThread(store, thread);
+  expect(confirm.current?.requiredText).toBe(strings.usage.untitled);
+  expect(confirm.current?.title).toContain(strings.usage.untitled);
+  confirm.answer(true);
+  expect(remove).not.toHaveBeenCalled();
+  expect(confirm.current).not.toBeNull();
+  confirm.typed = strings.usage.untitled;
+  confirm.answer(true);
+  expect(await deletion).toBe(true);
+});

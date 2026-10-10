@@ -52,7 +52,7 @@ export function shellQuit(stores: () => Store[], quit: () => Promise<void>): () 
     const unknown = snapshots.some(s => s.unknown);
     if (count || unknown) {
       const words = strings.titlebar;
-      const body = [count ? fill(words.quitWorkingBody, { count: formatCount(count) }) : '', unknown ? words.quitUnknownBody : '', words.quitResidentBody].filter(Boolean).join('\n\n');
+      const body = [count ? count === 1 ? words.quitWorkingOne : fill(words.quitWorkingMany, { count: formatCount(count) }) : '', unknown ? words.quitUnknownBody : '', words.quitResidentBody].filter(Boolean).join('\n\n');
       if (!await confirm.ask({ title: words.quitTitle, body, confirmLabel: words.quitConfirm, cancelLabel: words.quitCancel, danger: true })) return;
     }
     await quit();

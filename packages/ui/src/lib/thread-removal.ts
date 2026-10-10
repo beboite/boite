@@ -14,13 +14,14 @@ export function canDeleteThread(thread: ThreadSummary): boolean {
 /** Every deletion entry point requires the conversation's exact name; undo remains available. */
 export async function deleteThread(store: Store, thread: ThreadSummary): Promise<boolean> {
   if (!canDeleteThread(thread)) return false;
+  const name = thread.title.trim() ? thread.title : strings.usage.untitled;
   if (!await confirm.ask({
-    title: fill(strings.sidebar.deleteTitle, { title: thread.title }),
+    title: fill(strings.sidebar.deleteTitle, { title: name }),
     body: strings.sidebar.deleteBody,
     confirmLabel: strings.sidebar.delete,
     cancelLabel: strings.common.cancel,
     danger: true,
-    requiredText: thread.title,
+    requiredText: name,
     inputLabel: strings.sidebar.deleteName,
   })) return false;
   if (!(await store.removeThread(thread.id))) return false;

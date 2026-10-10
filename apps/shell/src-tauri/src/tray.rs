@@ -16,6 +16,12 @@ use crate::window::{product_label, show_main};
 #[derive(Default)]
 pub(crate) struct QuitGuard(AtomicBool);
 
+pub(crate) fn reset_quit_guard<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(guard) = app.try_state::<QuitGuard>() {
+        guard.0.store(false, Ordering::Release);
+    }
+}
+
 /// Enabled only after the main UI has installed its confirmation listener.
 #[tauri::command]
 pub(crate) fn quit_guard(app: AppHandle, webview: Webview) -> Result<(), String> {
@@ -28,6 +34,8 @@ pub(crate) fn request_quit<R: Runtime>(app: &AppHandle<R>) {
     if app.state::<QuitGuard>().0.load(Ordering::Acquire) {
         if let Err(error) = app.emit_to("main", "boite:quit-requested", ()) {
             eprintln!("[shell] quit confirmation could not be requested: {error}");
+            quit(app);
+            return;
         }
         show_main(app);
     } else {

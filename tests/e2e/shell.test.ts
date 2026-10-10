@@ -321,7 +321,17 @@ shellTest('a resident core finishes agent work after shell exit, is adopted, and
     await ownPage.click('[data-testid=confirm-cancel]');
     expect(pidAlive(shellPid)).toBe(true);
     await ownPage.waitFor(`!document.querySelector('[data-testid=confirm-dialog]')`);
-    await ownPage.evaluate(`document.querySelector('[data-testid=titlebar] .close').click()`);
+    // Cancel a keyboard request too, then retry it: QuitHold must rearm.
+    const holdQuit = async () => {
+      await ownPage!.evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', { key:'q', ctrlKey:true, bubbles:true, cancelable:true }))`);
+      await ownPage!.waitFor(`document.querySelector('[data-testid=confirm-dialog]')`);
+      await ownPage!.evaluate(`window.dispatchEvent(new KeyboardEvent('keyup', { key:'q', ctrlKey:true, bubbles:true }))`);
+    };
+    await holdQuit();
+    await ownPage.click('[data-testid=confirm-cancel]');
+    await ownPage.waitFor(`!document.querySelector('[data-testid=confirm-dialog]')`);
+    expect(pidAlive(shellPid)).toBe(true);
+    await holdQuit();
     await ownPage.waitFor(`document.querySelector('[data-testid=confirm-ok]')`);
     await ownPage.click('[data-testid=confirm-ok]').catch(() => undefined);
     await waitUntil(() => !pidAlive(shellPid), CORE_GONE_TIMEOUT_MS);
