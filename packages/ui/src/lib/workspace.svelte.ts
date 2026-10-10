@@ -22,6 +22,7 @@ import {
   type StoredEnvironment
 } from './endpoint';
 import { strings } from './strings';
+import { onReveal, reveal } from './reveal';
 import { AutoSettingsSync } from './auto-settings-sync.svelte';
 import { GroupLinks, holdsBack } from './group-links.svelte';
 
@@ -745,3 +746,6 @@ export class Workspace {
 }
 
 export const workspace = new Workspace();
+
+// A desktop app's `ui.reveal`, answered by whichever machine's Store received it.
+onReveal((from, target) => reveal(workspace, from, target));

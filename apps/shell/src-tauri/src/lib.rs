@@ -158,6 +158,7 @@ pub fn run() {
             attachments::save_attachment,
             attachment_download::save_attachment_url,
             window::shell_ready,
+            window::show_window,
             whip::whip_window,
             tray::quit_shell,
             tray::quit_guard,

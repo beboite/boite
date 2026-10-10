@@ -107,6 +107,15 @@ pub(crate) fn shell_ready(app: AppHandle, webview: Webview) -> Result<(), String
     Ok(())
 }
 
+/// The main page asks to come forward, as the tray's Show brings it: a
+/// desktop app's `ui.reveal` reaches the page, which then opens what it named.
+#[tauri::command]
+pub(crate) fn show_window(app: AppHandle, webview: Webview) -> Result<(), String> {
+    browser::only_main(&webview)?;
+    show_main(&app);
+    Ok(())
+}
+
 /// What a nightly build calls itself in the window title and the tray. The
 /// installer keeps `productName` Boite: both tracks are one installation.
 const NIGHTLY_LABEL: &str = "boite (de nuit)";

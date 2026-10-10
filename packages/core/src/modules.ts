@@ -27,6 +27,7 @@ import { registerGroupMethods } from './group/rpc.ts';
 import { registerTerminalMethods } from './terminals.ts';
 import { registerWorkflowMethods } from './workflows.ts';
 import { registerWorktreeMethods } from './worktree-sweep.ts';
+import { reveal } from './reveal.ts';
 
 /** Adding a module is one file plus one line here. `hello` is the server's own. */
 export function registerModules(core: Core): void {
@@ -59,6 +60,8 @@ export function registerModules(core: Core): void {
   core.router.register('plugins.uninstall', (params) => core.plugins.uninstall(params.id));
   core.router.register('plugins.accounts', (params) => core.plugins.accounts(params.id, params.refresh));
   core.router.register('plugins.accountAction', (params) => core.plugins.accountAction(params));
+  core.router.register('plugins.app', (params) => core.plugins.app(params));
+  core.router.register('ui.reveal', (params) => reveal(core, params));
   registerProjectMethods(core);
   registerProviderMethods(core);
   const probe = registerProbeMethods(core);

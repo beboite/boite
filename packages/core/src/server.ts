@@ -545,6 +545,8 @@ export function startServer(options: ServerOptions): RunningServer {
     void core.providers.settle().finally(() => {
       if (!stopping) core.threads.handoff.resume();
     });
+    // Desktop-app plugins the owner left enabled, now that they have an address to reach.
+    core.plugins.startApps();
   }, 0);
   core.subscribers = {
     hasSubscribers(threadId: ThreadId): boolean {
@@ -565,6 +567,16 @@ export function startServer(options: ServerOptions): RunningServer {
           connection.close(RpcCloseCode.Unauthorized, 'thread archived or removed');
         }
       }
+    },
+    reveal(target): number {
+      // Owner windows only: a paired phone or an agent has no window of the owner's
+      // to raise, and a desktop-app plugin, often the caller itself, draws none of Boite's.
+      let delivered = 0;
+      for (const connection of connections) {
+        if (!connection.authenticated || connection.identity.principal !== 'owner' || connection.clientName === 'plugin') continue;
+        try { connection.sendEvent('ui.reveal', { target }); delivered += 1; } catch { /* closing */ }
+      }
+      return delivered;
     },
   };
 
