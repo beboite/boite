@@ -3246,6 +3246,8 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'journal.inspect': { params: { cursor?: JournalInspectionCursor | null; limit?: number }; result: JournalInspection };
   'core.logs': { params: CoreLogsQuery; result: CoreLogRecord[] };
   'core.shutdown': { params: Record<string, never>; result: { ok: true } };
+  /** Owner only. Stop the way an update does, each running turn ending its tool call first, for the next core to resume; the desktop shell starts that core again. */
+  'core.restart': { params: Record<string, never>; result: { ok: true } };
   'core.updateStatus': { params: { refresh?: boolean }; result: ServerUpdateStatus };
   /** Confirm the version shown to the owner so a stale dialog cannot install another release. */
   'core.updateInstall': { params: { version: string }; result: ServerUpdateStatus };

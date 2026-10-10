@@ -2130,6 +2130,13 @@ export const strings = {
       ownerQrConfirm: 'Show the code',
       ownerScan: 'Scan it from the Boite app on your phone, or type the code there. It works once, within 5 minutes.',
       /** Windows Defender Firewall between a phone and this core: `{networks}` lists network kinds. */
+      /** A link that names loopback, and the restart that makes the core listen on the network. */
+      reach: {
+        loopback: 'This link only works on this computer: Boite does not listen on the local network yet.',
+        button: 'Make it reachable on the local network',
+        restarting: 'Boite is restarting to listen on the local network. Running agents finish their current step and carry on.',
+        failed: 'Boite did not come back on the local network. Quit it from the tray, open it again, then add the phone.'
+      },
       firewall: {
         blocked: 'Windows Firewall blocks Boite on this {networks} network, so a phone cannot reach this computer.',
         unset: 'Windows Firewall has not allowed Boite on this {networks} network yet, so a phone cannot reach this computer.',

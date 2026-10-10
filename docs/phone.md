@@ -62,6 +62,17 @@ reads it at startup; enabling it binds `0.0.0.0`. Explicit `--host` or `--lan`
 flags take precedence. A running core never rebinds, so changing the switch
 requires a restart. The startup log names the address and its source.
 
+Closing the desktop app's window leaves its core running, so in the desktop app
+the switch restarts the core itself through `core.restart`, owner only: the
+restart an update makes, where each running turn ends its tool call and the next
+core resumes it ([restart handoff](restart-handoff.md)), and the shell starts
+that core again. A pairing link that names a loopback address gets no QR code
+and no code: on a phone it would name the phone. The card says so instead and
+offers Make it reachable on the local network, which saves the setting, asks
+for the firewall rule on Windows, restarts and shows the new link. A core the
+desktop app did not start keeps a sentence asking for a restart of Boite there
+(`LanReach.svelte`; `?fake=1&lan=off` mints loopback links).
+
 Without `--port`, the core reuses the port in `core.json`. If it is taken, the
 core chooses another and logs it; a phone then needs a new link. An explicit
 `--port` fails when occupied. A listener on all interfaces puts the machine's

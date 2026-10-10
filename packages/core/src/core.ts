@@ -304,6 +304,10 @@ export class Core {
       if (!this.requestShutdown()) throw new Error('This embedded core does not support process shutdown.');
       return { ok: true as const };
     });
+    this.router.register('core.restart', () => {
+      if (this.requestHandoffShutdown() === 'unsupported') throw new Error('This embedded core does not support process shutdown.');
+      return { ok: true as const };
+    });
     this.procs.applySettings(this.settings.get());
     this.accounts.ensureDefaults();
     this.accounts.recheckSignedOut();

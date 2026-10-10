@@ -359,6 +359,7 @@ export class FakeClient implements ObservableClient {
     const threads = threadMethods(ctx);
     const projects = projectMethods(ctx);
     const methods: FakeMethods = {
+      'core.restart': async () => ({ ok: true as const }),
       'core.shutdown': async () => { ctx.agents.close(); await Promise.all([...ctx.threads.keys()].map(id => ctx.stopTurn(id))); setTimeout(() => this.close(), 25); return { ok: true }; },
       'hello': async (params) => {
         return { core: ctx.core, principal: ctx.bus.principal };

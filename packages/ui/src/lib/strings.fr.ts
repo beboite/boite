@@ -2033,6 +2033,12 @@ export const fr: Translation = {
       ownerQrBody: "Quiconque scanne ce QR code ou tape son code dans les 5 prochaines minutes pilote ce cœur comme vous : agents, fichiers, comptes et réglages. Ne le montrez qu'à votre propre téléphone, et révoquez l'appareil ci-dessous en cas de doute.",
       ownerQrConfirm: 'Afficher le code',
       ownerScan: "Scannez-le depuis l'application Boite de votre téléphone, ou tapez-y le code. Il ne sert qu'une fois, dans les 5 minutes.",
+      reach: {
+        loopback: "Ce lien ne fonctionne que sur cet ordinateur : Boite n'écoute pas encore le réseau local.",
+        button: 'Rendre accessible sur le réseau local',
+        restarting: "Boite redémarre pour écouter le réseau local. Les agents en cours terminent leur étape et continuent.",
+        failed: "Boite n'est pas revenu sur le réseau local. Quittez-le depuis la zone de notification, rouvrez-le, puis ajoutez le téléphone."
+      },
       firewall: {
         blocked: 'Le pare-feu Windows bloque Boite sur ce réseau {networks} : un téléphone ne peut pas joindre cet ordinateur.',
         unset: "Le pare-feu Windows n'a pas encore autorisé Boite sur ce réseau {networks} : un téléphone ne peut pas joindre cet ordinateur.",
