@@ -1,3 +1,4 @@
+import { RELEASE_VERSION } from './release';
 import {
   PROTOCOL_VERSION,
   RPC_CHUNK_MARK,
@@ -331,7 +332,7 @@ export class WsClient implements ObservableClient {
       url: options.url,
       token: options.token,
       clientName: options.clientName ?? 'shell',
-      version: options.version ?? '2.0.0-beta.1',
+      version: options.version ?? RELEASE_VERSION,
       device: options.device ?? (() => null),
       socketFactory: options.socketFactory ?? browserSocket,
       reconnect: options.reconnect ?? true,

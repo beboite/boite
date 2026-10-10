@@ -1,3 +1,4 @@
+import { RELEASE_VERSION } from '../release';
 import { parseGroupRelayUrl, RpcErrorCode, type CoreInfo, type Principal, type ThreadId } from '@boite/contracts';
 import { RpcFailure, WsClient, type Client, type ClientState, type ObservableClient } from '../client';
 import { confirm } from '../confirm.svelte';
@@ -12,7 +13,11 @@ import { installStatesOf } from './accounts.svelte';
 import type { StoreContext } from './context';
 import { retainRows } from './snapshot-reads';
 
-export const UI_VERSION = '2.0.0-beta.1';
+/**
+ * The version a paired device reports in `hello` and Settings lists beside it.
+ * A literal here stayed at the last stable version on every nightly.
+ */
+export const UI_VERSION: string = RELEASE_VERSION;
 
 /**
  * How long the shell's own core may stay unreachable before the shell is asked

@@ -2,6 +2,8 @@
 /// <reference types="vite/client" />
 
 declare global {
+  /** The release this build belongs to, from the root package.json (`release-version.ts`). */
+  const __BOITE_VERSION__: string;
   interface Window {
     __TAURI_INTERNALS__?: unknown;
     /**
