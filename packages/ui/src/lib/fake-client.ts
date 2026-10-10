@@ -399,7 +399,7 @@ export class FakeClient implements ObservableClient {
       'ui.reveal': async (params) => {
         const { target } = params;
         if (target.kind === 'agent' && (target.agentId.length === 0 || target.agentId.length > 200)) {
-          throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'ui.reveal target must be { kind: "thread", threadId } or { kind: "agent", agentId }' });
+          throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'ui.reveal target must be { kind: "thread", threadId }, { kind: "agent", agentId } or { kind: "update" }' });
         }
         ctx.emit('ui.reveal', { target });
         return { delivered: 1 };

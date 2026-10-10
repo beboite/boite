@@ -1,9 +1,10 @@
 /*
  * `ui.reveal`: a desktop app started by a plugin (Bots, say) asks Boite to
- * come forward on a thread or on an agent's page. The core sends the event to
- * every owner connection; only the desktop shell answers it, and only for the
- * core it started on this computer, so a browser tab or a window following a
- * remote machine stays where it is.
+ * come forward on a thread, on an agent's page or on the app updates (a newer
+ * Boite the app noticed). The core sends the event to every owner connection;
+ * only the desktop shell answers it, and only for the core it started on this
+ * computer, so a browser tab or a window following a remote machine stays
+ * where it is.
  */
 import type { UiRevealTarget } from '@boite/contracts';
 import { setExperiment } from './experiments';
@@ -39,8 +40,9 @@ export function showAgentPage(store: { showAgents(agentId: string): void }, agen
 
 /**
  * The window comes back as the tray's Show brings it (unminimized, shown,
- * focused), then opens the thread, or the agent's page, on the machine whose
- * core asked. `show` is the shell command; a test hands in its own.
+ * focused), then opens the thread, the agent's page or the app updates (in
+ * Settings, Machines) on the machine whose core asked. `show` is the shell
+ * command; a test hands in its own.
  */
 export async function reveal(workspace: RevealWorkspace, from: Store, target: UiRevealTarget, show: () => Promise<void> = showWindow): Promise<void> {
   await show();
@@ -49,7 +51,9 @@ export async function reveal(workspace: RevealWorkspace, from: Store, target: Ui
     return;
   }
   await workspace.select(from);
-  if (workspace.active === from) showAgentPage(from, target.agentId);
+  if (workspace.active !== from) return;
+  if (target.kind === 'agent') showAgentPage(from, target.agentId);
+  else from.showSettings('machines', 'machines');
 }
 
 async function showWindow(): Promise<void> {

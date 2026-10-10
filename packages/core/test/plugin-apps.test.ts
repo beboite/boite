@@ -313,9 +313,10 @@ describe('ui.reveal', () => {
 
       expect(await owner.call('ui.reveal', { target: { kind: 'thread', threadId } })).toEqual({ delivered: 2 });
       expect(await plugin.call('ui.reveal', { target: { kind: 'agent', agentId: 'agent-1' } })).toEqual({ delivered: 2 });
-      await waitFor(() => heard.length === 4);
+      expect(await plugin.call('ui.reveal', { target: { kind: 'update' } })).toEqual({ delivered: 2 });
+      await waitFor(() => heard.length === 6);
       await Bun.sleep(50);
-      expect(heard.sort()).toEqual(['owner:agent', 'owner:thread', 'second:agent', 'second:thread']);
+      expect(heard.sort()).toEqual(['owner:agent', 'owner:thread', 'owner:update', 'second:agent', 'second:thread', 'second:update']);
 
       await expect(owner.call('ui.reveal', { target: { kind: 'thread', threadId: 'thr_missing' } })).rejects.toThrow('is not a thread of this core');
       await expect(owner.call('ui.reveal', { target: { kind: 'window' } as never })).rejects.toThrow('ui.reveal target must be');

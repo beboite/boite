@@ -215,16 +215,18 @@ announced by `plugins.updated`. The state is `PluginState.app`:
 ### Showing Boite
 
 An app that wants the owner to look at something calls
-`ui.reveal {target}`, where `target` is `{ "kind": "thread", "threadId": "…" }`
-or `{ "kind": "agent", "agentId": "…" }`. A thread must exist on the core; an
+`ui.reveal {target}`, where `target` is `{ "kind": "thread", "threadId": "…" }`,
+`{ "kind": "agent", "agentId": "…" }` or `{ "kind": "update" }`, the app updates
+a newer Boite is installed from. A thread must exist on the core; an
 agent id is 1 to 200 characters. The core sends the `ui.reveal` event to every
 owner connection except desktop-app plugins, the caller included, and answers
 `{delivered}`, the number of connections it reached.
 
 The desktop shell connected to the core it started on the same computer
-answers it: it unminimizes and focuses its window, then opens the thread, or the
+answers it: it unminimizes and focuses its window, then opens the thread, the
 Agents page on that agent (switching the Resident agents experiment on if it was
-off). Browser tabs, paired devices and windows following another machine do
+off), or the app updates in Settings, Machines. Browser tabs, paired devices and
+windows following another machine do
 nothing.
 
 `ui.reveal` is owner-only, as is the event: a paired device or an agent that
