@@ -197,6 +197,8 @@ export class GroupLinks {
     }
     // Remembered machines are still being added: one of them may be the member that looks missing.
     if (!this.workspace.settled) return;
+    // A machine that left the list leaves no clock behind: another one at its address starts afresh.
+    for (const id of [...this.#downSince.keys()]) if (!this.workspace.machines.some((machine) => machine.id === id)) this.#downSince.delete(id);
     // Moved first, so the pass below finds the member where it now answers.
     const stranded = this.workspace.machines.filter((machine) => this.#stranded(machine));
     const moved = new Set((await Promise.all(stranded.map(async (machine) => (await this.#rehome(machine)) ? machine.coreId : undefined))).filter((id) => id !== undefined));
@@ -282,16 +284,15 @@ export class GroupLinks {
     const coreId = machine.coreId!;
     const saved = readEnvironments().find((entry) => entry.url === machine.id);
     if (saved === undefined || saved.token === '' || machine.groupId === undefined) return false;
-    const anchors = this.workspace.machines.filter((other) => other.coreId === undefined && other.store.connection === 'ready' && other.store.group?.id === machine.groupId);
-    const own = machine.store.group?.id === machine.groupId ? machine.store.group.cores.find((core) => core.coreId === coreId) : undefined;
-    const listed = anchors.length > 0 ? this.#agreed(coreId, machine.groupId, anchors) : usableAddresses(own?.addresses ?? [], this.#secure());
-    const others = listed.filter((address) => address !== machine.id && !this.workspace.machines.some((other) => other.id === address) && !isDropped(address, machine.epoch));
+    const others = this.#permitted(machine).filter((address) => address !== machine.id && !this.workspace.machines.some((other) => other.id === address) && !isDropped(address, machine.epoch));
     if (others.length === 0) return false;
     this.#rehoming.add(machine.id);
     try {
       const url = await this.#reach(others);
       // Back at its own address meanwhile, or gone: nothing to move.
       if (url === null || machine.store.connection === 'ready' || !this.workspace.machines.includes(machine)) return false;
+      // The rosters may have changed while the addresses were tried: the key goes only where they still allow.
+      if (!this.#permitted(machine).includes(url)) return false;
       // The name it was saved under: the one on screen may carry the old address to tell twins apart.
       if (!(await this.workspace.readdress(machine, url, saved.token, saved.label || machine.label))) return false;
       this.#downSince.delete(machine.id);
@@ -305,6 +306,22 @@ export class GroupLinks {
       if (this.workspace.machines.includes(machine)) this.#downSince.set(machine.id, this.#now());
       else this.#downSince.delete(machine.id);
     }
+  }
+
+  /**
+   * Where a silent member may be moved with its key: what every connected
+   * hand-paired machine of its group allows, none once one of them no longer
+   * lists it; with none of them connected, the addresses the member itself
+   * gave in its roster.
+   */
+  #permitted(machine: Machine): string[] {
+    const coreId = machine.coreId, groupId = machine.groupId;
+    if (coreId === undefined || groupId === undefined) return [];
+    const anchors = this.workspace.machines.filter((other) => other.coreId === undefined && other.store.connection === 'ready'
+      && other.store.client !== null && other.store.groupKnown && other.store.group?.id === groupId);
+    if (anchors.length > 0) return this.#allowed(coreId, groupId);
+    const own = machine.store.group?.id === groupId ? machine.store.group.cores.find((core) => core.coreId === coreId) : undefined;
+    return usableAddresses(own?.addresses ?? [], this.#secure());
   }
 
   /**

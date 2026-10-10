@@ -194,6 +194,28 @@ describe('group links', () => {
     await links.reconcile();
     await settle();
     expect(reach).toHaveBeenCalledTimes(1);
+    now += 15_000;
+    await links.reconcile();
+    await settle();
+    expect(reach).toHaveBeenCalledTimes(2);
+  });
+
+  it('moves no key to a member a machine paired by hand no longer lists', async () => {
+    localStorage.setItem(ENVIRONMENTS_STORAGE_KEY, JSON.stringify([{ url: 'http://100.64.0.2:1', label: 'B', token: 'key', paired: true, coreId: 'b', groupId: 'grp' }]));
+    const a = machine('http://10.0.0.1:1', { group: group('a', members) });
+    // This one heard of the removal: its roster no longer has b.
+    const c = machine('http://10.0.0.3:1', { group: group('c', [members[0]!, core('c', ['http://10.0.0.3:1'])]) });
+    const b = machine('http://100.64.0.2:1', { connection: 'connecting', client: null, group: group('b', members) }, { coreId: 'b' });
+    const { workspace: ws, added } = workspace([a, c, b]);
+    let now = 1_000_000;
+    const reach = vi.fn(async (addresses: string[]) => addresses[0] ?? null);
+    const links = new GroupLinks(ws, { reach, secure: () => false, now: () => now });
+    await links.reconcile();
+    now += 15_000;
+    await links.reconcile();
+    await settle();
+    expect(reach).not.toHaveBeenCalled();
+    expect(added.filter((entry) => entry.endpoint.token === 'key')).toEqual([]);
   });
 
   it('never claims a machine paired by hand that sits at a member\'s address', async () => {

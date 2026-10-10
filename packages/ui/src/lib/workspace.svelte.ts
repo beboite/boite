@@ -668,37 +668,48 @@ export class Workspace {
   }
 
   /**
-   * The machine this window opened on is no longer one to send a key to: the
-   * key is forgotten and the window goes back to its own core. The entry
-   * follows the store, and a machine already listed at that address gives way.
-   */
-  /**
    * A machine the group brought, reached again at another address it gives,
-   * with the key it already holds. The window's main machine switches in
-   * place, keeping its place at the top; any other is listed anew. The old
-   * address is forgotten without marking it dropped: the machine only moved.
+   * with the key it already holds. The address passes the same check as one
+   * typed by hand: no credentials, query or fragment. The window's main machine
+   * switches in place and keeps its place at the top; any other is listed
+   * anew and stays on screen if it was. Prompts written while it was silent
+   * and drafts in progress follow it: the core is the same one. The old
+   * address is forgotten, without marking it dropped, only once the new one
+   * answered: a failed move leaves both, and the next pass can move back.
    */
   async readdress(machine: Machine, url: string, token: string, label: string): Promise<boolean> {
     if (machine.coreId === undefined || machine.groupId === undefined) return false;
+    const identity = endpointIdentity({ url, token });
+    if (!identity) return false;
     const brought = { coreId: machine.coreId, groupId: machine.groupId };
-    const endpoint = { url, token, paired: true, ...brought, ...(machine.epoch === undefined ? {} : { epoch: machine.epoch }) };
+    const endpoint = { url: identity.id, token, paired: true, ...brought, ...(machine.epoch === undefined ? {} : { epoch: machine.epoch }) };
+    const kept = Object.entries(machine.store.composerStates).filter(([, state]) => state.queued.length > 0 || state.text !== '');
     if (machine.store !== store) {
+      const wasActive = this.active === machine.store;
+      const openId = machine.store.openThread?.id;
       await this.remove(machine.id, false);
-      return this.add(endpoint, label, true);
+      const added = await this.add(endpoint, label, true);
+      const moved = this.machines.find((m) => m.id === identity.id);
+      if (moved && kept.length > 0) moved.store.composerStates = { ...moved.store.composerStates, ...Object.fromEntries(kept) };
+      if (moved && wasActive) await this.select(moved.store, openId);
+      return added;
     }
     ++this.#generation;
     upsertEnvironment({ ...endpoint, label });
     const old = machine.id;
-    // Prompts written while it was silent wait in the outbox: the switch would empty it, and the
-    // core is the same one, so they go out from the new address. Drafts in progress stay too.
-    const kept = Object.entries(store.composerStates).filter(([, state]) => state.queued.length > 0 || state.text !== '');
-    await store.switchEnvironment(url);
+    await store.switchEnvironment(identity.id);
     if (kept.length > 0) store.composerStates = { ...store.composerStates, ...Object.fromEntries(kept) };
-    store.environments = removeBrought(old, brought);
+    const answered = store.connection === 'ready';
+    store.environments = answered ? removeBrought(old, brought) : readEnvironments();
     this.machines = [this.#primaryMachine(readStoredEndpoint(), readEnvironments()), ...this.machines.filter((m) => m.store !== store)];
-    return store.connection === 'ready';
+    return answered;
   }
 
+  /**
+   * The machine this window opened on is no longer one to send a key to: the
+   * key is forgotten and the window goes back to its own core. The entry
+   * follows the store, and a machine already listed at that address gives way.
+   */
   async dropPrimary(id: string, dropped = false): Promise<void> {
     ++this.#generation;
     // A machine paired by hand first, never the address being dropped: a page that address

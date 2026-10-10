@@ -119,9 +119,10 @@ A member a client reached through the group stays at the address that answered
 first. When that address goes silent for 15 seconds, a laptop leaving home or
 turning Tailscale off, the client tries the member's other usable addresses and
 moves to the first that answers, with the key it already holds: the key is the
-member's own session and is good at any of its addresses. The addresses are the
-ones the machines paired by hand agree on, or with none of them connected, the
-ones the member gave in its own roster. The window's main machine switches in
+member's own session and is good at any address the member still gives. The
+addresses are the ones every connected machine paired by hand allows, none once
+one of them no longer lists the member, or with none of them connected, the
+ones the member gave in its own roster. They are checked again once one answers. The window's main machine switches in
 place and keeps its outbox, so prompts written while it was silent go out from
 the new address (`group-links.svelte.ts`, `workspace.readdress`). Before this,
 the client dialled the silent address until the network came back.

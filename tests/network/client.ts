@@ -154,25 +154,31 @@ try {
       // Reading the thread when the network goes; the next prompt is typed a few seconds later.
       Bun.spawnSync(['ip', 'link', 'set', dropped, 'down']);
       const started = Date.now();
-      await Bun.sleep(5_000);
-      const again = `${prompt} after leaving ${dropped}`;
-      await tap('[data-testid=composer-input]');
-      await page!.waitFor(`document.activeElement?.dataset.testid === 'composer-input'`, 5_000);
-      await page!.send('Input.insertText', { text: again });
-      await page!.waitFor(`!document.querySelector('[data-testid=composer-send]').disabled`, 15_000);
-      await page!.click('[data-testid=composer-send]');
+      let answered = 0;
+      let after = '';
       try {
-        await page!.waitFor(`[...document.querySelectorAll('[data-testid=message][data-role=assistant]')].some(m => m.textContent.includes(${JSON.stringify(again)}))`, 180_000);
+        await Bun.sleep(5_000);
+        const again = `${prompt} after leaving ${dropped}`;
+        await tap('[data-testid=composer-input]');
+        await page!.waitFor(`document.activeElement?.dataset.testid === 'composer-input'`, 5_000);
+        await page!.send('Input.insertText', { text: again });
+        await page!.waitFor(`!document.querySelector('[data-testid=composer-send]').disabled`, 15_000);
+        await page!.click('[data-testid=composer-send]');
+        try {
+          await page!.waitFor(`[...document.querySelectorAll('[data-testid=message][data-role=assistant]')].some(m => m.textContent.includes(${JSON.stringify(again)}))`, 180_000);
+        } finally {
+          await page!.screenshot(join(outDir, `${label}-switched.png`));
+        }
+        answered = Date.now() - started;
+        await page!.click('[data-testid=nav-settings]');
+        await page!.click('[data-testid=settings-tab-machines]');
+        after = await page!.evaluate<string>(machines);
+        await page!.click('[data-testid=settings-back]');
       } finally {
-        await page!.screenshot(join(outDir, `${label}-switched.png`));
+        // Back up whatever happened, so the next steps start from both networks.
+        Bun.spawnSync(['ip', 'link', 'set', dropped, 'up']);
+        if (dropped === 'tailscale0') Bun.spawnSync(['ip', 'route', 'replace', '100.64.0.0/10', 'dev', dropped]);
       }
-      const answered = Date.now() - started;
-      await page!.click('[data-testid=nav-settings]');
-      await page!.click('[data-testid=settings-tab-machines]');
-      const after = await page!.evaluate<string>(machines);
-      await page!.click('[data-testid=settings-back]');
-      Bun.spawnSync(['ip', 'link', 'set', dropped, 'up']);
-      if (dropped === 'tailscale0') Bun.spawnSync(['ip', 'route', 'replace', '100.64.0.0/10', 'dev', dropped]);
       if (!after.includes(other)) throw new Error(`answered, but not through ${other}: ${after}`);
       return `${dropped} down, answered through ${other} ${answered} ms later`;
     });

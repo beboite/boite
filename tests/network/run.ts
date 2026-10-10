@@ -31,15 +31,20 @@ async function startCore(ns: string, args: string[], port: number) {
   });
   procs.push(proc);
   // Read for as long as the core runs: a full stderr pipe would stall its logging.
-  void new Response(proc.stderr).text().catch(() => '');
+  const stderr = new Response(proc.stderr).text().catch(() => '');
   let text = '';
   const reader = proc.stdout.getReader();
   const decoder = new TextDecoder();
   const deadline = Date.now() + 30_000;
   while (!/boite-core ready/.test(text)) {
-    if (Date.now() > deadline) throw new Error(`${ns} core never ready:\n${text}`);
-    const chunk = await reader.read();
-    if (chunk.done) throw new Error(`${ns} core exited:\n${text}`);
+    const left = deadline - Date.now();
+    // A core that stays up but stops writing must not hold the read forever.
+    const chunk = await Promise.race([reader.read(), Bun.sleep(Math.max(left, 0)).then(() => null)]);
+    if (chunk === null) {
+      proc.kill();
+      throw new Error(`${ns} core never ready:\n${text}\n${await stderr}`);
+    }
+    if (chunk.done) throw new Error(`${ns} core exited:\n${text}\n${await stderr}`);
     text += decoder.decode(chunk.value, { stream: true });
   }
   void (async () => { for (;;) { const c = await reader.read(); if (c.done) return; } })();
