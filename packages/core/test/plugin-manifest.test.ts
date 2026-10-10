@@ -123,18 +123,18 @@ describe('the recommended list', () => {
     expect(RECOMMENDED.map((manifest) => manifest.id)).toEqual(['bots', 'kebacc-switcher']);
   });
 
-  test('Bots is a desktop app, from its v0.1.1 release assets and digests', () => {
+  test('Bots is a desktop app, from its v0.1.2 release assets and digests', () => {
     const bots = RECOMMENDED.find((manifest) => manifest.id === 'bots')!;
-    expect(bots.version).toBe('0.1.1');
+    expect(bots.version).toBe('0.1.2');
     expect(bots.executable).toBe('bots');
     expect(bots.provides).toEqual({ desktopApp: {} });
     expect(bots.artifacts['win32-x64']).toEqual({
-      url: 'https://github.com/beboite/bots/releases/download/v0.1.1/bots-x86_64-pc-windows-msvc.exe',
-      sha256: '0497ca8ba5c1830fbd5e21002690c7c9d00a5e87b1b8cef7fb8c9fa82108353d',
+      url: 'https://github.com/beboite/bots/releases/download/v0.1.2/bots-x86_64-pc-windows-msvc.exe',
+      sha256: 'a9a223bd8cbf06b43508cebc922da18c2d0b88c9f9c9d69a4e692a2cddf40efa',
     });
-    expect(bots.artifacts['linux-arm64']?.sha256).toBe('c1753b44908767c89813ed6f4ad9e9aeb70df473711f5ad8e06f1d691137092d');
+    expect(bots.artifacts['linux-arm64']?.sha256).toBe('bc588821858367ee4d5b86392aa4e6453d403c65eaa826133083bd33e4f90ecb');
     expect(Object.keys(bots.artifacts)).toHaveLength(6);
-    for (const artifact of Object.values(bots.artifacts)) expect(artifact?.url).toMatch(/^https:\/\/github\.com\/beboite\/bots\/releases\/download\/v0\.1\.1\/bots-/);
+    for (const artifact of Object.values(bots.artifacts)) expect(artifact?.url).toMatch(/^https:\/\/github\.com\/beboite\/bots\/releases\/download\/v0\.1\.2\/bots-/);
   });
 
   test('kebacc-switcher keeps the release assets and digests it always had', () => {
