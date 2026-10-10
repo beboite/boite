@@ -1,4 +1,4 @@
-import { createHash, ECDH } from 'node:crypto';
+import { createHash, ECDH, randomUUID } from 'node:crypto';
 import { lastAgentText, notifiesOnFinish, requestExcerpt } from '@boite/contracts';
 import type { CoordinationPeer, NotificationLabel, PushPayload, RpcEvents, RpcParams } from '@boite/contracts';
 import type { PushSubscription } from 'web-push';
@@ -13,14 +13,20 @@ const SUBSCRIPTIONS = 'web-push.subscriptions';
 const KEYS = 'web-push.keys';
 const LABELS: readonly NotificationLabel[] = ['done', 'failed', 'needsYou', 'connected'];
 
-/** What a member sends the home machine of a device: the push, without the id of the machine it is about, which the home adds. */
-type Forwarded = { device: string; push: Omit<PushPayload, 'core'> };
+/**
+ * What a member sends the home machine of a device: the push, without the id of
+ * the machine it is about, which the home adds. `id` is the same on every
+ * address the sender tries, so the home pushes once however many reach it.
+ */
+type Forwarded = { id: string; device: string; push: Omit<PushPayload, 'core'> };
+/** How long a forwarded push's id is remembered: past the minute a coordination request is accepted in. */
+const FORWARD_IDS_MS = 120_000;
 
 /** A push a member forwarded, read field by field: it lands on this machine's subscription and nowhere else. */
 function readForwarded(value: unknown): Forwarded {
   const bad = (field: string) => invalidParams(`group.push ${field} is malformed`, { field });
   if (typeof value !== 'object' || value === null) throw bad('payload');
-  const { device, push } = value as { device?: unknown; push?: Record<string, unknown> };
+  const { id, device, push } = value as { id?: unknown; device?: unknown; push?: Record<string, unknown> };
   if (typeof device !== 'string' || device.length > 300) throw bad('device');
   if (typeof push !== 'object' || push === null) throw bad('push');
   const string = (field: string, max: number): string => {
@@ -33,7 +39,9 @@ function readForwarded(value: unknown): Forwarded {
   if (label !== undefined && !LABELS.includes(label as NotificationLabel)) throw bad('push.label');
   const badge = push['badge'];
   if (badge !== undefined && (!Number.isSafeInteger(badge) || (badge as number) < 0 || (badge as number) > 100_000)) throw bad('push.badge');
+  if (typeof id !== 'string' || id.length === 0 || id.length > 64) throw bad('id');
   return {
+    id,
     device,
     push: {
       title: string('title', 300), body: string('body', 2000), threadId, tag: string('tag', 200),
@@ -73,6 +81,8 @@ export class PushStore {
   /** By tag, the pushes held back while their thread is watched (`notify`). */
   private readonly held = new Map<string, { threadId: string; text: Pick<PushPayload, 'body' | 'label'>; at: number }>();
   private heldTimer: ReturnType<typeof setTimeout> | undefined;
+  /** When each forwarded push arrived, by sender and id (`relayed`). */
+  private readonly forwards = new Map<string, number>();
   private readonly offAttention: () => void;
 
   constructor(private readonly core: Core) {
@@ -248,7 +258,7 @@ export class PushStore {
       if (target === null || forwarded.has(target.device)) continue;
       forwarded.add(target.device);
       // Cut to what the home machine reads (`readForwarded`), so a long title or reply still arrives.
-      const payload: Forwarded = { device: target.device, push: { title: title.slice(0, 300), body: text.body.slice(0, 2000),
+      const payload: Forwarded = { id: randomUUID(), device: target.device, push: { title: title.slice(0, 300), body: text.body.slice(0, 2000),
         ...(text.label === undefined ? {} : { label: text.label }), threadId: threadId.slice(0, 128), tag: tag.slice(0, 200), badge } };
       this.track(this.forward(target.home, payload).catch(() => {
         this.core.log('warn', `a notification for a device of ${target.home.name} did not reach that machine; the conversation remains available in Boite`);
@@ -267,9 +277,15 @@ export class PushStore {
    */
   relayed(from: CoordinationPeer, value: unknown): { delivered: boolean } {
     if (!this.core.group.peers().some((member) => member.coreId === from.coreId)) throw refused('only a machine of this group sends its devices notifications');
-    const { device, push } = readForwarded(value);
+    const { id, device, push } = readForwarded(value);
     const sessionId = ownDevice(this.core, device);
     if (sessionId === null) throw refused(`group.push device ${device} is not a device of this machine`);
+    // A slow first address makes the sender try the others, and two of them can lead here: one push.
+    const now = Date.now();
+    for (const [key, at] of this.forwards) if (now - at > FORWARD_IDS_MS) this.forwards.delete(key);
+    const key = `${from.coreId}:${id}`;
+    if (this.forwards.has(key)) return { delivered: true };
+    this.forwards.set(key, now);
     if (this.closed || !this.subscriptions()[sessionId]) return { delivered: false };
     // The icon counts the threads waiting here as well as there.
     const badge = (push.badge ?? 0) + this.badge();

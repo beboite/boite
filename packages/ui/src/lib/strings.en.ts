@@ -445,7 +445,7 @@ export const strings = {
     join: 'Join a group', joining: 'Joining', joinLabel: 'Invitation',
     joinHint: 'On a machine of the group, open Settings, Machines, Invite a machine, then paste the invitation here.',
     members: 'Machines of the group', self: 'This machine', connected: 'Connected', connecting: 'Connecting',
-    relayed: 'Connected through {machine}',
+    relayed: 'Connected through {machine}', through: 'Through {machine}',
     unreachable: 'Not reachable from here. It may be off, asleep or on another network.',
     insecure: 'That machine gives no address this device may send a key to, and no machine this device is paired with can carry it there. Give it a public HTTPS address.',
     loopback: 'This machine listens only on itself, so the others cannot reach it. Connect it to Tailscale, or turn on listening on the network.',

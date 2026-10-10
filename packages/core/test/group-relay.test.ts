@@ -200,11 +200,19 @@ test('a notification of another member reaches a phone through the machine it in
   b.core.bus.emit('question.asked', { id: 'long', threadId: longId, text: 'Which branch?' } as RpcEvents['question.asked']);
   await waitFor(() => onA.length === 2);
   expect(onA[1]?.title).toBe('T'.repeat(300));
+  // The same forward asked on two addresses that both lead to a: one notification.
+  const fromB = a.core.group.peers().find((peer) => peer.coreId === id(b))!;
+  const twice = { id: 'twice', device: `${id(a)}:${phone.session!.id}`, push: { title: 't', body: 'b', threadId: null, tag: 'twice' } };
+  expect(a.core.push.relayed(fromB, twice)).toEqual({ delivered: true });
+  expect(a.core.push.relayed(fromB, twice)).toEqual({ delivered: true });
+  await waitFor(() => onA.length === 3);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  expect(onA).toHaveLength(3);
 
   // A member cannot use a's push for anything but a device of a's.
-  await expect(b.core.coordination.request(b.core.group.peers()[0]!, 'group.push', { device: `${id(b)}:ses_x`, push: { title: 't', body: 'b', threadId: null, tag: 'x' } }))
+  await expect(b.core.coordination.request(b.core.group.peers()[0]!, 'group.push', { id: 'x', device: `${id(b)}:ses_x`, push: { title: 't', body: 'b', threadId: null, tag: 'x' } }))
     .rejects.toThrow('not a device of this machine');
-  await expect(b.core.coordination.request(b.core.group.peers()[0]!, 'group.push', { device: `${id(a)}:${phone.session!.id}`, push: { title: 't', body: 1, threadId: null, tag: 'x' } }))
+  await expect(b.core.coordination.request(b.core.group.peers()[0]!, 'group.push', { id: 'y', device: `${id(a)}:${phone.session!.id}`, push: { title: 't', body: 1, threadId: null, tag: 'x' } }))
     .rejects.toThrow('push.body');
 
   // Revoked on a: b drops its key and forwards nothing more.
@@ -212,7 +220,7 @@ test('a notification of another member reaches a phone through the machine it in
   await waitFor(() => b.core.sessions.list(null).length === 0);
   b.core.bus.emit('question.asked', { id: 'revoked', threadId, text: 'Which branch?' } as RpcEvents['question.asked']);
   await new Promise((resolve) => setTimeout(resolve, 200));
-  expect(onA).toHaveLength(2);
+  expect(onA).toHaveLength(3);
   owner.close();
   phone.close();
 });

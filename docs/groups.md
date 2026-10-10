@@ -165,14 +165,14 @@ a phone whose page came over HTTPS, and a machine on a network the client is
 not on but another member is.
 
 The client tries the member's own addresses first, those it may send a key
-to. When none is usable or none answers, it opens
-`<member>/group/relay/<core id>/rpc` on a machine it was paired with by hand
-that lists that member, the one that served the page first. Its `hello` names
-its key for the relaying machine in `relay`, beside the ticket or key for the
-member at the end. The relaying machine checks that key (a key it issued, or
-its owner's token; never an agent's), takes it out, opens a socket on the
-other member at one of its addresses and passes the rest of the hello on. From
-then on it forwards every frame unread, both ways. The member at the end
+to. When none is usable or none answers, it tries
+`<member>/group/relay/<core id>/rpc` at once on every machine it was paired
+with by hand that lists that member, and the first that answers carries it.
+Its `hello` names its key for the relaying machine in `relay`, beside the
+ticket or key for the member at the end. The relaying machine checks that key
+(a key it issued, or its owner's token; never an agent's), takes it out, opens
+a socket on the other member at one of its addresses and passes the rest of
+the hello on. From then on it forwards every frame unread, both ways. The member at the end
 authenticates the hello as it would any other. `/file/<ticket>` and
 `/view/<ticket>` under the same route are fetched from that member and
 streamed back with their headers and ranges, their tickets being what opens
@@ -187,10 +187,12 @@ group issued.
 The hop between the two members carries client traffic, so it follows the
 client's rule: the member's HTTPS address when it has one, otherwise one
 written as numbers. A member that gives neither, a MagicDNS name alone, is
-carried by nobody and shown as giving no usable address. When the machines a client was paired with by hand list
-different addresses for the member, nobody carries the client there until
-they agree, as for a direct ticket: one of them may hold an older roster and
-dial an address the member gave up.
+carried by nobody and shown as giving no usable address. When the machines a
+client was paired with by hand list different addresses for the member (their
+order does not count), nobody carries the client there until they agree, as
+for a direct ticket: one of them may hold an older roster and dial an address the
+member gave up. One of them that no longer lists the member stops every route
+to it, as it stops a direct ticket.
 
 On the socket, a refusal of the relay key (no key for the relaying machine, or
 a wrong one) is answered `Refused`, and a member it cannot reach `Unavailable`:
@@ -219,9 +221,11 @@ as private as the network between the two machines.
 A phone installs one machine's page and subscribes to Web Push there, with
 that machine's key. A member whose thread needs the user, or finished, also
 sends the news to the home machine of every device that holds a key it issued
-through the group and has no subscription of its own there. That machine pushes
-it to the device with its own key, once per device, as a sealed `group.push`
-request between members. Title, body and tag are cut to 300, 2,000 and 200
+through the group and has no subscription of its own there; such a key cannot
+subscribe there, the refusal naming its home. That machine pushes it to the
+device with its own key, once per device, as a sealed `group.push` request
+between members. The request carries an id the home remembers for two
+minutes: tried on two addresses that both reach it, it pushes once. Title, body and tag are cut to 300, 2,000 and 200
 characters on the way. The push carries the id of the machine the thread is
 on: the notification's tag is that machine's, and a tap opens the thread there
 once the group has connected it. The receiving machine pushes only to a device

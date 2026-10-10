@@ -448,7 +448,7 @@ export const fr: Translation = {
     join: 'Rejoindre un groupe', joining: 'Connexion', joinLabel: 'Invitation',
     joinHint: "Sur une machine du groupe, ouvrez Réglages, Machines, Inviter une machine, puis collez l'invitation ici.",
     members: 'Machines du groupe', self: 'Cette machine', connected: 'Connectée', connecting: 'Connexion',
-    relayed: 'Connectée via {machine}',
+    relayed: 'Connectée via {machine}', through: 'Via {machine}',
     unreachable: "Injoignable d'ici. Elle est peut-être éteinte, en veille ou sur un autre réseau.",
     insecure: "Cette machine ne donne aucune adresse à laquelle cet appareil peut envoyer une clé, et aucune machine appairée avec cet appareil ne peut l'y mener. Donnez-lui une adresse HTTPS publique.",
     loopback: "Cette machine n'écoute que sur elle-même : les autres ne peuvent pas la joindre. Connectez-la à Tailscale, ou activez l'écoute sur le réseau.",

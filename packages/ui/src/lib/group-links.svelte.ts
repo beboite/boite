@@ -1,7 +1,7 @@
 import { untrack } from 'svelte';
 import { groupRelayUrl, parseGroupRelayUrl, RPC_PATH, type Group, type GroupCore } from '@boite/contracts';
 import { WsClient } from './client';
-import { DROPPED_STORAGE_KEY, isDropped, isMemberDropped, keepDropped, readEnvironments, removeBrought, servesThisPage, type Endpoint, type StoredEnvironment } from './endpoint';
+import { DROPPED_STORAGE_KEY, isDropped, isMemberDropped, keepDropped, readEnvironments, removeBrought, type Endpoint, type StoredEnvironment } from './endpoint';
 import { usableAddresses } from './group-addresses';
 import type { Machine, Workspace } from './workspace.svelte';
 
@@ -48,13 +48,8 @@ interface Wanted {
   via: Machine;
   /** Its own addresses this client may send a key to. */
   addresses: string[];
-  /** Relay routes through hand-paired members that list it, the page's own first. */
+  /** Relay routes through hand-paired members that list it, tried all at once. */
   relays: string[];
-}
-
-/** Whether this page was served by that machine. */
-function servesPage(machine: Machine): boolean {
-  return machine.store.endpointUrl !== null && servesThisPage(machine.store.endpointUrl);
 }
 
 /** A key the group brought for a plain HTTP address: at start it waits for a hand-paired machine to have its say. */
@@ -275,19 +270,20 @@ export class GroupLinks {
   /**
    * Where a member that gives no address this client may use, or none that
    * answers, is reached instead: through a machine this client was paired
-   * with by hand that lists it, the one this page came from first, since the
-   * page could not have loaded without reaching it.
+   * with by hand that lists it. They are tried all at once and the first that
+   * answers carries it. None once one of those machines no longer lists it.
    */
   #relays(coreId: string, groupId: string, anchors: readonly Machine[]): string[] {
-    const listing = anchors.filter((machine) => machine.store.group?.id === groupId && machine.store.group.cores.some((listed) => listed.coreId === coreId));
+    const listing = anchors.filter((machine) => machine.store.group?.id === groupId);
+    // One that no longer lists it has the last word, as for a direct ticket (`#allowed`): the member may have just been removed.
+    if (listing.some((machine) => !machine.store.group!.cores.some((listed) => listed.coreId === coreId))) return [];
     // The member dials the addresses its own roster gives, with this client's key. Two that disagree on them:
     // one holds an older roster and may dial an address the machine gave up, so nobody carries the key until they agree.
-    // Compared on what a member dials for a client (HTTPS, else numbers; never a name), which is all a carrier may use.
-    const views = new Set(listing.map((machine) => usableAddresses(machine.store.group!.cores.find((listed) => listed.coreId === coreId)!.addresses, false).join(' ')));
+    // Compared on what a member dials for a client (HTTPS, else numbers; never a name), which is all a carrier may use, in any order.
+    const views = new Set(listing.map((machine) => usableAddresses(machine.store.group!.cores.find((listed) => listed.coreId === coreId)!.addresses, false).sort().join(' ')));
     // A member that gives none of those is out of a carrier's reach too: nobody is asked to try.
     if (views.size !== 1 || views.has('')) return [];
     const through = listing.filter((machine) => machine.store.endpointUrl !== null && parseGroupRelayUrl(machine.store.endpointUrl) === null);
-    through.sort((a, b) => Number(servesPage(b)) - Number(servesPage(a)));
     return through.map((machine) => groupRelayUrl(machine.store.endpointUrl!, coreId));
   }
 
