@@ -487,11 +487,11 @@ describe('server', () => {
     const warnings: string[] = [];
     const log = core.log.bind(core);
     core.log = (level, message) => { if (level === 'warn') warnings.push(message); log(level, message); };
-    // Two ports free a moment ago stand for the channel's preferred ones; a squatter holds a third.
+    // A squatter holds one port first, so the two freed below cannot be handed to it; they stand for the channel's preferred ones.
+    const squatter = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('mine') });
     const free = [Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('') }), Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('') })];
     const preferred = free.map((server) => server.port!);
     await Promise.all(free.map((server) => server.stop(true)));
-    const squatter = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('mine') });
     const sticky = (previousPort: number | null, preferredPorts: readonly number[], port = 0, explicitPort = false) =>
       startServerOnStickyPort({ core, host: '127.0.0.1', port, explicitPort, previousPort, preferredPorts });
     try {
@@ -511,10 +511,24 @@ describe('server', () => {
       expect(moved.port).toBe(preferred[1]!);
       expect(warnings.some((line) => line.includes(`port ${squatter.port} of the previous run is taken, listening on ${preferred[1]}`))).toBe(true);
       await moved.stop();
-      // Every candidate taken: any free port.
+      // Every candidate taken: any free port, with the refusal named.
       const any = sticky(squatter.port!, [squatter.port!]);
       expect(any.port).not.toBe(squatter.port!);
+      expect(warnings.some((line) => line.startsWith(`ports ${squatter.port} refused the server (`))).toBe(true);
       await any.stop();
+      // A core of the dev channel tries its own range by default, never the installed app's;
+      // a host nothing can bind fails each port and is named, not called taken.
+      const devDir = mkdtempSync(join(tmpdir(), 'boite-sticky-dev-'));
+      const dev = new Core({ dataDir: devDir, token: newToken(), channel: 'dev' });
+      const devWarnings: string[] = [];
+      dev.log = (level, message) => { if (level === 'warn') devWarnings.push(message); };
+      try {
+        expect(() => startServerOnStickyPort({ core: dev, host: '256.0.0.1', port: 0, explicitPort: false, previousPort: null })).toThrow();
+        expect(devWarnings.some((line) => line.startsWith(`ports ${PREFERRED_PORTS.dev.join(', ')} refused the server (`))).toBe(true);
+      } finally {
+        await dev.close();
+        await removeDir(devDir);
+      }
       // A port the operator named is never swapped for another.
       expect(() => sticky(preferred[0]!, preferred, squatter.port!, true)).toThrow();
     } finally {

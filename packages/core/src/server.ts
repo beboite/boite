@@ -353,19 +353,22 @@ export const PREFERRED_PORTS: Record<Channel, readonly number[]> = {
 export function startServerOnStickyPort(
   options: ServerOptions & { explicitPort: boolean; previousPort: number | null; preferredPorts?: readonly number[] },
 ): RunningServer {
-  const { explicitPort, previousPort, preferredPorts = PREFERRED_PORTS.stable, ...server } = options;
+  const { explicitPort, previousPort, preferredPorts = PREFERRED_PORTS[options.core.channel], ...server } = options;
   if (explicitPort) return startServer(server);
   const candidates = [...new Set([...(previousPort === null ? [] : [previousPort]), ...preferredPorts])];
+  let last: unknown = null;
   for (const port of candidates) {
     try {
       const started = startServer({ ...server, port });
       if (previousPort !== null && port !== previousPort) server.core.log('warn', `port ${previousPort} of the previous run is taken, listening on ${port}`);
       return started;
     } catch (error) {
+      last = error;
       if (port === previousPort) server.core.log('warn', `port ${previousPort} of the previous run is taken (${messageOf(error)})`);
     }
   }
-  server.core.log('warn', `ports ${candidates.join(', ')} are taken, listening on another`);
+  // The last refusal is named: a host that cannot be bound fails every port the same way, which "taken" would hide.
+  server.core.log('warn', `ports ${candidates.join(', ')} refused the server (${messageOf(last)}), listening on another`);
   return startServer({ ...server, port: 0 });
 }
 
