@@ -1739,11 +1739,12 @@ html[data-glass] #app {
 }
 
 /* The app's body row (App.svelte): a pane sliding in from the right edge
-   comes from past it, and the chat card's own left gap eases in step with the
-   sidebar folding (RailFrame.svelte). */
+   comes from past it, and while the sidebar folds (RailFrame.svelte marks the
+   row) the chat card's own left gap eases in step. */
 @media (min-width: 721px) {
-  .app > .body { overflow-x: clip; transition: padding-left var(--dur-slide) var(--ease-slide); }
-  .app > .body.sidebar-folded { transition-duration: var(--dur-slide-out); }
+  .app > .body { overflow-x: clip; }
+  .app > .body[data-rail-sliding] { transition: padding-left var(--dur-slide) var(--ease-slide); }
+  .app > .body.sidebar-folded[data-rail-sliding] { transition-duration: var(--dur-slide-out); }
 }
 
 /* Keyframes shared by the components. */

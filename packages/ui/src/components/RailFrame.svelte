@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Snippet } from 'svelte';
+  import { untrack, type Snippet } from 'svelte';
   import { Settings } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
   import { clampSidebar, SIDEBAR_DEFAULT } from '../lib/prefs';
@@ -52,6 +52,29 @@
     foot?: Snippet;
   } = $props();
 
+  let rail = $state<HTMLElement | undefined>(undefined);
+  let folded: boolean | undefined;
+  let sliding: ReturnType<typeof setTimeout> | undefined;
+
+  /**
+   * Marks the body row while the list folds or unfolds, so the chat card's own
+   * left gap eases in step (app.css); the boot and a page change move that gap
+   * at once. An attribute, since Svelte rewrites the row's class list. Before
+   * the DOM update, so the mark and the fold reach the same style pass.
+   */
+  $effect.pre(() => {
+    const now = store.sidebarCollapsed;
+    const was = folded;
+    folded = now;
+    const row = untrack(() => rail)?.parentElement;
+    if (was === undefined || was === now || !row) return;
+    row.dataset.railSliding = '';
+    clearTimeout(sliding);
+    sliding = setTimeout(() => { delete row.dataset.railSliding; }, 600);
+  });
+
+  $effect(() => () => clearTimeout(sliding));
+
   function startResize(event: PointerEvent) {
     if (event.button !== 0) return;
     event.preventDefault();
@@ -73,6 +96,7 @@
 </script>
 
 <aside
+  bind:this={rail}
   class="rail {kind}"
   class:drawer
   class:open={drawer && store.sidebarOpen}

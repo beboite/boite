@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { ChevronLeft, ChevronRight, Maximize2, Minimize2, Plus, X, GripHorizontal, PanelsTopLeft } from '@lucide/svelte';
   import { floatingPanel, RESIZE_DIRECTIONS } from '../lib/floating-panel';
   import { DEFAULT_BROWSER_PROFILE, PRIVATE_BROWSER_PROFILE } from '@boite/contracts';
@@ -66,6 +66,12 @@
     if (event.target === event.currentTarget && !closing) entered = true;
     onexit(event);
   }
+
+  // A floating panel, reduced motion past its frame, or a test environment has
+  // no entrance whose end could say so.
+  onMount(() => {
+    if (!root || typeof root.getAnimations !== 'function' || root.getAnimations().length === 0) entered = true;
+  });
 
   /**
    * `use:` on a tab or a surface: one created once the panel is in plays its
@@ -265,6 +271,7 @@
   class:floating={rightPanel.floating}
   class:dragging
   class:closing
+  class:entered
   style="--panel-width: {rightPanel.width}px"
   data-testid="right-panel"
   bind:this={root}
@@ -748,6 +755,9 @@
   /* A floating panel appears where it was left and fades away from there. */
   .panel.floating:not(.closing) { animation: none; }
   .panel.floating.closing { animation: fade-out var(--dur-2) var(--ease-out-quint); }
+  /* Once in, maximizing, docking or a narrower window changes the entrance
+     rule; without this the new one would play again on the open panel. */
+  .panel.entered:not(.closing) { animation: none; }
   .sheet-scrim.floating { display: none; }
   .panel.floating:not(.maximized) .strip { cursor: grab; touch-action: none; user-select: none; }
   .panel.floating:not(.maximized) .strip:active { cursor: grabbing; }

@@ -453,15 +453,19 @@ export class BrowserPage {
    * with their promises pending, and the wait hung until the call timed out.
    */
   async settleAnimations(): Promise<void> {
-    await this.evaluate(`new Promise((resolve) => {
+    // The page gives up first, so the frame pump never outlives the call.
+    const settled = await this.evaluate<boolean>(`new Promise((resolve) => {
       let live = true;
+      const done = (ok) => { if (!live) return; live = false; resolve(ok); };
       const frame = () => { if (live) requestAnimationFrame(frame); };
       requestAnimationFrame(frame);
+      setTimeout(() => done(false), ${CALL_TIMEOUT_MS - 5_000});
       Promise.all([document.fonts.ready, ...document.getAnimations()
         .filter((a) => a.effect?.getTiming().iterations !== Infinity)
         .filter((a) => !(a.effect instanceof KeyframeEffect) || a.effect.target?.checkVisibility?.({ contentVisibilityAuto: true }) !== false)
-        .map((a) => a.finished.catch(() => {}))]).then(() => { live = false; resolve(true); });
+        .map((a) => a.finished.catch(() => {}))]).then(() => done(true));
     })`);
+    if (!settled) throw new Error(`animations still running ${(CALL_TIMEOUT_MS - 5_000) / 1000} s after settleAnimations()`);
   }
 
   async screenshot(path: string): Promise<void> {
