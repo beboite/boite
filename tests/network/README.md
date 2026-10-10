@@ -19,6 +19,8 @@ unshare -rmnu --propagation private bash netns.sh bash -c 'hostname DESKTOP-W10S
   the home router and their default route.
 - `ts-phone` and `ts-desk` have a tailnet address and nothing else: they reach
   the server only through 100.64.0.0/10.
+- `both-desk` is a laptop at home that also runs Tailscale: one address on
+  each network.
 - `/etc/hosts` stands in for MagicDNS: `boite-srv` and
   `boite-srv.tail-fake.ts.net` name 100.80.1.10.
 
@@ -34,6 +36,9 @@ namespace:
   `tauri.conf.json`. Its own core joins the server's group with an invitation,
   as Settings, Machines does, then it opens a picture from the server's
   folder in the panel.
+
+`both-desk` also drops the network the server first answered on and sends a
+prompt: it has to go out through the other network.
 
 Each client sends a prompt and waits for the answer, reloads, loses its link for
 20 seconds while reading the thread (a phone also while on its list), and sends again.
