@@ -9,6 +9,7 @@ import type {
   ProviderDescriptor,
   ProviderHookSource,
   ProviderInstall,
+  ProviderInstallLatest,
   ProviderSelfUpdate,
   ProviderIsolation,
   ProviderLogin,
@@ -20,6 +21,7 @@ import type {
 import { expandDescriptor, OS_KEYS } from './expand.ts';
 import { isNpmSpec } from './npm.ts';
 import { NPM_ROOT } from './resolve.ts';
+import { PLAIN_VERSION, SHA256_HEX } from './install-latest.ts';
 
 const PROTOCOLS: readonly Protocol[] = ['claude-sdk', 'codex-appserver', 'muse', 'pi', 'acp', 'agy', 'echo'];
 const AUTH_KINDS: readonly ProviderAuth['kind'][] = ['oauth-cli', 'api-key', 'none'];
@@ -160,7 +162,7 @@ function checkStringMap(value: unknown, file: string, field: string): Record<str
  */
 function checkInstall(value: unknown, file: string, field: string): ProviderInstall {
   const obj = asObject(value, file, field);
-  checkKeys(obj, ['version', 'url', 'sha256', 'archiveBytes', 'files', 'arch', 'format'], file, field);
+  checkKeys(obj, ['version', 'url', 'sha256', 'archiveBytes', 'files', 'arch', 'format', 'latest'], file, field);
   const arch = obj['arch'];
   if (arch !== undefined && arch !== 'x64' && arch !== 'arm64') {
     reject(file, `${field}.arch`, 'x64 or arm64', `${field}.arch must be x64 or arm64`);
@@ -175,7 +177,7 @@ function checkInstall(value: unknown, file: string, field: string): ProviderInst
     reject(file, `${field}.url`, 'an http or https url', `${field}.url must be an http or https url`);
   }
   const sha256 = asString(obj['sha256'], file, `${field}.sha256`);
-  if (!/^[a-fA-F0-9]{64}$/.test(sha256)) {
+  if (!SHA256_HEX.test(sha256)) {
     reject(file, `${field}.sha256`, '64 hexadecimal characters', `${field}.sha256 is not a sha256 digest`);
   }
   const archiveBytes = asPositiveInteger(obj['archiveBytes'], file, `${field}.archiveBytes`);
@@ -205,12 +207,42 @@ function checkInstall(value: unknown, file: string, field: string): ProviderInst
   }
   // The version names a directory the installer deletes on failure, so it is one plain path segment.
   const version = asString(obj['version'], file, `${field}.version`);
-  if (!/^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/.test(version)) {
+  if (!PLAIN_VERSION.test(version)) {
     reject(file, `${field}.version`, 'letters, digits and . _ + -, starting with a letter or digit', `${field}.version is not a plain version: ${version}`);
+  }
+  let latest: ProviderInstallLatest | undefined;
+  if (obj['latest'] !== undefined) {
+    // A manifest names one binary and its size: a zip's members could not be checked.
+    if (format !== 'binary') {
+      reject(file, `${field}.latest`, 'format "binary"', `${field}.latest needs format "binary": a manifest describes one binary`);
+    }
+    latest = checkInstallLatest(obj['latest'], file, `${field}.latest`);
   }
   return { version, url, sha256, archiveBytes, files,
     ...(arch === undefined ? {} : { arch: arch as 'x64' | 'arm64' }),
-    ...(format === 'zip' || format === 'binary' ? { format } : {}) };
+    ...(format === 'zip' || format === 'binary' ? { format } : {}),
+    ...(latest === undefined ? {} : { latest }) };
+}
+
+function checkInstallLatest(value: unknown, file: string, field: string): ProviderInstallLatest {
+  const obj = asObject(value, file, field);
+  checkKeys(obj, ['versionUrl', 'manifest', 'platform', 'url'], file, field);
+  // What these name is trusted for a digest, so only https.
+  const https = (key: string, templated: boolean): string => {
+    const url = asString(obj[key], file, `${field}.${key}`);
+    if (!url.startsWith('https://')) reject(file, `${field}.${key}`, 'an https url', `${field}.${key} must be an https url`);
+    // The version file is read before any version is known, so it cannot name one.
+    if (templated !== url.includes('{version}')) {
+      const expected = templated ? 'a url containing {version}' : 'a url without {version}';
+      reject(file, `${field}.${key}`, expected, `${field}.${key} must be ${expected}`);
+    }
+    return url;
+  };
+  const platform = asString(obj['platform'], file, `${field}.platform`);
+  if (!/^[A-Za-z0-9._-]+$/.test(platform)) {
+    reject(file, `${field}.platform`, 'a manifest platform key such as win32-x64', `${field}.platform is not a platform key: ${platform}`);
+  }
+  return { versionUrl: https('versionUrl', false), manifest: https('manifest', true), platform, url: https('url', true) };
 }
 
 function checkUpdate(value: unknown, file: string, field: string): ProviderSelfUpdate {
