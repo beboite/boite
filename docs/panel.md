@@ -72,7 +72,7 @@ it, and the menu's last row, Choose the buttons, leads back to the switches.
 | Surface  | Tab      | What it shows                                                                 |
 | -------- | -------- | ----------------------------------------------------------------------------- |
 | Browser  | many     | the user's own pages, in a shell child webview with persistent cookies; test fixtures use an iframe |
-| Agent browser | one | the agent's tabs on the conversation's machine, covered until Show, then live; see [browser.md](browser.md) |
+| Agent browser | one | the conversation's browser tabs on its machine, live in the desktop app on its own core, covered until Show elsewhere except a tab the owner opens there; see [browser.md](browser.md) |
 | Changes  | one      | `git.status` of the working directory, a file's diff on click                 |
 | Files    | one      | the working directory as a tree, `files.list` one directory at a time         |
 | File     | per path | a text editor with save, an image viewer with zoom and pan, a video or audio player |

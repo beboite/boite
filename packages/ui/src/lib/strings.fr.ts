@@ -36,8 +36,8 @@ export const fr: Translation = {
   },
   remoteBrowser: {
     display: 'Affichage', resolution: 'Résolution de la page', fitPhone: 'Adapter à cet écran', phone: 'Téléphone', tablet: 'Tablette', rotate: 'Pivoter', width: 'Largeur', height: 'Hauteur', apply: 'Appliquer', sharedSize: 'La résolution change aussi la page que voit l’agent.', restoreSize: 'Revenir à la taille par défaut', previewZoom: 'Zoom de l’aperçu (cet appareil seulement)', fit: 'Ajuster', panHint: 'Glissez pour déplacer l’aperçu. Utilisez les flèches pour défiler dans la page.',
-    address: 'Adresse', go: 'Aller', back: 'Précédent', forward: 'Suivant', reload: 'Recharger', badAddress: 'Saisissez une adresse web (http ou https).',
-    title: 'Navigateur de l’agent', waiting: 'En attente de la page', live: 'En direct', paused: 'En pause', reconnecting: 'Reconnexion', pause: 'Pause', resume: 'Reprendre',
+    address: 'Adresse', addressPlaceholder: 'Saisir une adresse', back: 'Précédent', forward: 'Suivant', reload: 'Recharger', badAddress: 'Saisissez une adresse web (http ou https).',
+    title: 'Navigateur de l’agent', waiting: 'En attente de la page', paused: 'En pause', reconnecting: 'Reconnexion', pause: 'Pause', resume: 'Reprendre',
     interact: 'Toucher ou faire défiler la page partagée', interactDesk: 'La page partagée : cliquez dessus, puis écrivez',
     deskHint: 'Cliquez dans la page, puis écrivez. Glissez pour sélectionner, double-cliquez un mot, défilez à la molette. Copier, couper et coller passent par le clavier.',
     copy: 'Copier le texte sélectionné', copied: 'Copié.', nothingSelected: 'Rien n’est sélectionné dans la page. Touchez deux fois un mot d’abord.', copyCut: 'La sélection était trop longue : son début a été copié.', image: 'Vue en direct du navigateur de l’agent', scrollUp: 'Défiler vers le haut', scrollDown: 'Défiler vers le bas',
@@ -47,7 +47,8 @@ export const fr: Translation = {
     cover: 'Cet agent contrôle un navigateur sur {machine}', coverHint: 'Rien n’est diffusé vers cet appareil avant que vous l’affichiez.',
     show: 'Afficher', hide: 'Masquer', hideHint: 'Arrêter de regarder et recouvrir la vue',
     none: 'L’agent n’a pas de navigateur ouvert', noneHint: 'Il apparaît ici quand l’agent ouvre une page.',
-    unavailable: 'Pas de navigateur d’agent sur {machine}', tabs: 'Onglets de l’agent', untitled: 'Page sans titre'
+    unavailable: 'Pas de navigateur d’agent sur {machine}', tabs: 'Onglets de l’agent', untitled: 'Page sans titre',
+    newTab: 'Nouvel onglet', closeTab: 'Fermer {name}', newTabHint: 'Ouvrez une page dans le navigateur de cette conversation sur {machine}. L’agent la voit et peut s’en servir.', open: 'Ouvrir'
   },
   devicePanel: {
     cover: 'Cet agent contrôle un appareil sur {machine}', coverHint: 'Rien n’est diffusé vers cet appareil avant que vous l’affichiez.',

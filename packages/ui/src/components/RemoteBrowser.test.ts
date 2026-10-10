@@ -150,9 +150,9 @@ test('the watched tab reaches every frame request; a refused frame says why, bac
 test('the address bar, Return and erase on an empty field reach the page', async () => {
   client = new FakeClient({ delayMs: 0, principal: 'session' }); store = new Store(); store.attach(client); await store.connect();
   const original = client.call.bind(client), inputs: unknown[] = [];
-  let n = 0;
+  let n = 0, url = 'https://example.test/';
   vi.spyOn(client, 'call').mockImplementation(((method: string, params: any) => {
-    if (method === 'browser.remoteFrame') return Promise.resolve(frameAt(`f${++n}`));
+    if (method === 'browser.remoteFrame') return Promise.resolve(frameAt(`f${++n}`, { url }));
     if (method === 'browser.remoteInput') { inputs.push(params.input); return Promise.resolve({ ok: true }); }
     return original(method as never, params as never);
   }) as typeof client.call);
@@ -160,10 +160,21 @@ test('the address bar, Return and erase on an empty field reach the page', async
   app = mount(RemoteBrowser, { target: document.body, props: { store, threadId: 't-trace' } }); await settle();
   await vi.advanceTimersByTimeAsync(1); await settle();
   const address = document.querySelector<HTMLInputElement>('[data-testid=remote-browser-address]')!;
+  // An https page carries the lock.
+  expect(document.querySelector('.omnibox.secure')).not.toBeNull();
   address.value = 'example.org/docs'; address.dispatchEvent(new Event('input', { bubbles: true })); await settle();
   document.querySelector<HTMLFormElement>('[data-testid=remote-browser-nav]')!.requestSubmit(); await settle();
   expect(inputs).toEqual([{ kind: 'navigate', url: 'https://example.org/docs' }]);
+  // The page is on its way until the next frame: a loading bar, not a faded page.
+  expect(document.querySelector('.loading')).not.toBeNull();
   await vi.advanceTimersByTimeAsync(400); await settle();
+  expect(document.querySelector('.loading')).toBeNull();
+  // Plain http, or an https without its slashes, has no lock.
+  for (const next of ['http://example.test/', 'https:example.test']) {
+    url = next; await vi.advanceTimersByTimeAsync(400); await settle();
+    expect(document.querySelector('.omnibox.secure')).toBeNull();
+  }
+  url = 'https://example.test/'; await vi.advanceTimersByTimeAsync(400); await settle();
   for (const label of ['Back', 'Forward', 'Reload']) {
     document.querySelector<HTMLButtonElement>(`[data-testid=remote-browser-nav] button[aria-label=${label}]`)!.click(); await settle();
     await vi.advanceTimersByTimeAsync(400); await settle();
@@ -255,7 +266,9 @@ test('a computer drives the page itself: keys in order, the wheel, a paste and a
     app = mount(RemoteBrowser, { target: document.body, props: { store, threadId: 't-trace' } }); await settle();
     await new Promise(resolve => setTimeout(resolve, 20)); await settle();
     expect(document.querySelector('[data-testid=remote-browser-text]')).toBeNull();
-    expect(document.querySelector('[data-testid=remote-browser-note]')!.textContent).toContain('Click the page');
+    // The help is the page's tooltip: nothing sits under a computer's page.
+    expect(document.querySelector('[data-testid=remote-browser-note]')).toBeNull();
+    expect(document.querySelector('[data-testid=remote-browser-frame]')!.closest<HTMLElement>('.screen-area')!.title).toContain('Click the page');
     const key = (name: string, more: KeyboardEventInit = {}) => { const event = new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true, ...more }); document.body.dispatchEvent(event); return event.defaultPrevented; };
     // Until the page is clicked the keyboard is the app's.
     expect(key('h')).toBe(false);
