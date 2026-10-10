@@ -76,3 +76,41 @@ test('isLoopback names the links that only reach the computer opening them', () 
   expect(['http://127.0.0.1:7337/?grant=a', 'http://localhost:7337/', 'http://[::1]:7337/'].every(isLoopback)).toBe(true);
   expect(['http://192.168.1.52:7337/?grant=a', 'https://boite.example.com/', 'not a url'].some(isLoopback)).toBe(false);
 });
+
+test('turning the network off with an owner link on show restarts, keeps the owner role and settles on loopback, through a failed mint', async () => {
+  let listening = true;
+  let failOnce = true;
+  const roles: string[] = [];
+  const ownerGrant = (host: string): PairingGrant => ({ ...grant(host), role: 'owner' });
+  const store = $state({
+    owner: true, principal: 'owner', connection: 'ready', localCore: true, sessions: [],
+    pairing: ownerGrant('192.168.1.52') as PairingGrant | null,
+    settings: { listenOnLan: true, publicUrl: null },
+    core: { endpoint: { host: '0.0.0.0', port: 7337 } },
+    client: { call: vi.fn(async (method: string) => { if (method === 'core.restart') listening = store.settings.listenOnLan; return ready; }) },
+    loadSessions: vi.fn(async () => {}),
+    mintPairing: vi.fn(async (role: string) => {
+      roles.push(role);
+      if (failOnce) { failOnce = false; throw new Error('connection lost'); }
+      store.pairing = ownerGrant(listening ? '192.168.1.52' : '127.0.0.1');
+    }),
+    saveSettings: vi.fn(async (patch: { listenOnLan?: boolean }) => { store.settings = { ...store.settings, ...patch }; return true; }),
+  });
+  mounted = mount(PairingCard, { target: document.body, props: { store: store as unknown as Store } });
+  await settle();
+  (document.querySelector('[data-testid=pairing-options]') as HTMLDetailsElement).open = true;
+  const lan = document.querySelector<HTMLInputElement>('[data-testid=setting-listen-on-lan]')!;
+  lan.click();
+  await settle();
+  expect(store.settings.listenOnLan).toBe(false);
+  // A second flip while the core restarts would be saved and never applied.
+  expect(lan.disabled).toBe(true);
+  await vi.advanceTimersByTimeAsync(1600);
+  await settle();
+  await vi.advanceTimersByTimeAsync(1600);
+  await settle();
+  expect(roles).toEqual(['owner', 'owner']);
+  expect(store.pairing?.url.startsWith('http://127.0.0.1:')).toBe(true);
+  expect(document.querySelector('[data-testid=lan-reach]')?.getAttribute('data-phase')).toBe('idle');
+  expect(lan.disabled).toBe(false);
+});

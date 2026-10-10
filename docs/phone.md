@@ -101,7 +101,8 @@ Turning on Reachable on the local network calls `firewall.allow` at once, while
 the owner is at the switch, so Windows' own prompt never comes up. While the core
 listens on the network and Windows does not let it through, the pairing card says
 so above the paired devices, with Allow in Windows Firewall. `?fake=1&firewall=`
-`blocked`, `unset` or `refused` shows each state.
+`blocked` or `unset` shows that state; `refused` shows `blocked` with an
+administrator prompt nobody accepts.
 
 Two things guard the socket whatever it is bound to. The `Origin` header must be
 absent, one of the shell origins, or the core's own HTTP origin, and the first

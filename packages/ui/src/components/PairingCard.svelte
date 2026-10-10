@@ -50,6 +50,8 @@
 
   let firewall: FirewallNotice | undefined = $state();
   let reach: LanReach | undefined = $state();
+  /** A second flip during a restart would be saved and never applied: the switch waits. */
+  let restarting = $state(false);
   /** A link naming loopback reaches nothing but this computer: no QR code for it. */
   const loopback = $derived(!!store.pairing && isLoopback(store.pairing.url));
 
@@ -138,7 +140,7 @@
         </div>
       </div>
     {/if}
-    <LanReach {store} {loopback} {firewall} bind:this={reach} />
+    <LanReach {store} {loopback} {firewall} bind:this={reach} bind:restarting />
     <FirewallNotice {store} bind:this={firewall} />
   {:else}
     <p class="hint">{strings.settings.pairing.paired}</p>
@@ -172,7 +174,7 @@
           <span class="ui-label" id="{uid}-listen-on-lan-name">{strings.settings.listenOnLan}</span><InfoTip topic={strings.settings.listenOnLan} text={strings.settings.listenOnLanHint} />
         </span>
         <input id="{uid}-listen-on-lan" aria-labelledby="{uid}-listen-on-lan-name" type="checkbox" role="switch" data-testid="setting-listen-on-lan"
-          checked={store.settings?.listenOnLan ?? false} disabled={!store.settings}
+          checked={store.settings?.listenOnLan ?? false} disabled={!store.settings || restarting}
           onchange={(event) => void toggleLan(event.currentTarget)} />
       </label>
       <label for="{uid}-pairing-owner" class="switch-row">

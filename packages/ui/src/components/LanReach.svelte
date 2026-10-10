@@ -11,17 +11,20 @@
    * the core the way an update does: running turns end their tool call and the
    * next core resumes them; the shell starts that core again.
    */
-  let { store, loopback, firewall }: {
+  let { store, loopback, firewall, restarting = $bindable(false) }: {
     store: Store;
     /** The link on show names a loopback address. */
     loopback: boolean;
     firewall?: { allow(): Promise<void> };
+    /** True while a restart is under way, for the switch to wait for it. */
+    restarting?: boolean;
   } = $props();
   const text = strings.settings.pairing.reach;
 
   /** Only the desktop app brings a stopped core of its own back. */
   const canRestart = $derived(store.localCore && typeof window !== 'undefined' && window.__TAURI_INTERNALS__ !== undefined);
   let phase = $state<'idle' | 'restarting' | 'failed'>('idle');
+  $effect(() => { restarting = phase === 'restarting'; });
 
   /** Turns the network on, asks the firewall, restarts, and shows the phone's new link. */
   async function reach(): Promise<void> {
@@ -33,12 +36,16 @@
 
   /**
    * Restarts the core so it listens as the setting now says. With `mint`, it
-   * waits for a link that no longer names loopback: the old core keeps
-   * answering through its grace, so the first links can still be loopback ones.
+   * draws the link on show again, for the same role, until its address agrees
+   * with the setting: the old core keeps answering through its grace, so the
+   * first links can still name the address it listened on.
    */
   export async function restart(mint = false): Promise<void> {
     if (!canRestart || phase === 'restarting') return;
     phase = 'restarting';
+    const shown = store.pairing;
+    const role = shown?.role ?? 'device';
+    const short = role === 'owner' && !!shown?.code;
     try {
       await store.client?.call('core.restart', {});
     } catch {
@@ -46,17 +53,24 @@
       return;
     }
     const deadline = Date.now() + 90_000;
-    while (Date.now() < deadline) {
+    let settled = false;
+    while (!settled && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 1500));
       if (store.connection !== 'ready') continue;
+      const lan = store.settings?.listenOnLan === true;
       if (!mint) {
-        if (store.core?.endpoint.host !== '127.0.0.1' || !store.settings?.listenOnLan) break;
+        settled = (store.core?.endpoint.host !== '127.0.0.1') === lan;
         continue;
       }
-      await store.mintPairing('device');
-      if (store.pairing && !isLoopback(store.pairing.url)) break;
+      try {
+        await store.mintPairing(role, short);
+      } catch {
+        // The core is still coming back; the next round asks again.
+        continue;
+      }
+      settled = !!store.pairing && isLoopback(store.pairing.url) !== lan;
     }
-    phase = Date.now() < deadline ? 'idle' : 'failed';
+    phase = settled ? 'idle' : 'failed';
   }
 </script>
 
