@@ -779,6 +779,17 @@ Function .onInstSuccess
     ${GetOptions} $CMDLINE "/R" $R0
     ${IfNot} ${Errors}
       ${GetOptions} $CMDLINE "/ARGS" $R0
+      ; The updater passes the shell's own arguments, `--autostart` included
+      ; when the login entry started it. `--after-update` tells the new shell
+      ; that the user asked for this restart: its window shows
+      ; (src/autostart.rs). A shell started by an earlier update already
+      ; carries it.
+      ${If} $UpdateMode = 1
+        ${StrLoc} $R1 $R0 "--after-update" ">"
+        ${If} $R1 == ""
+          StrCpy $R0 "$R0 --after-update"
+        ${EndIf}
+      ${EndIf}
       nsis_tauri_utils::RunAsUser "$INSTDIR\${MAINBINARYNAME}.exe" "$R0"
     ${EndIf}
   ${EndIf}
