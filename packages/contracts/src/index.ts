@@ -2521,8 +2521,8 @@ export type NetworkCategory = 'public' | 'private' | 'domain';
  * Whether Windows Defender Firewall lets a phone reach this core. Only Windows
  * answers anything but `unsupported`. `ready`: every network this machine is
  * on allows the core's inbound connections. `unset`: one of them has no rule
- * for it, so Windows asks, or quietly blocks once its prompt was dismissed.
- * `blocked`: a rule blocks it there, which wins over any rule that allows it.
+ * for it, so Windows asks. `blocked`: a rule blocks it there, which wins over
+ * any rule that allows it, the block rules a dismissed prompt leaves included.
  * `error`: Windows could not be read, `detail` says why.
  */
 export type FirewallState = 'unsupported' | 'ready' | 'unset' | 'blocked' | 'error';
