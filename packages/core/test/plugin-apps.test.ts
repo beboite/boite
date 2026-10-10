@@ -6,7 +6,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { PLUGIN_MANIFEST_FILE } from '@boite/contracts';
@@ -128,7 +128,8 @@ describe('a desktop app', () => {
     expect(app()).toMatchObject({ enabled: true, status: 'stopped', exitCode: 0, error: null });
     const seen = JSON.parse(readFileSync(join(fake.home, 'seen.json'), 'utf8')) as { args: string[]; cwd: string; env: Record<string, string | null> };
     expect(seen.args).toEqual([]);
-    expect(seen.cwd.toLowerCase()).toBe(dir.toLowerCase());
+    // macOS reaches the temporary directory through /private/var, which /var links to.
+    expect(realpathSync(seen.cwd).toLowerCase()).toBe(realpathSync(dir).toLowerCase());
     expect(seen.env).toEqual({ BOITE_CORE_URL: harness.core.baseUrl(), BOITE_TOKEN: harness.core.token, BOITE_PLUGIN_ID: 'bots', BOITE_THREAD_ID: null, BOITE_AGENT_TOKEN: null });
   });
 
