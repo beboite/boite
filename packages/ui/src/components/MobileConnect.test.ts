@@ -184,7 +184,7 @@ test('a revoked response queued by the old client cannot mark its replacement as
   sockets[1]!.close();
   await second;
   expect(store.pairingRequired).toBe(false);
-  expect(store.error).toBe('socket error');
+  expect(store.error).toBe('could not open a connection to second.example');
 });
 
 test('the installed app pairs from a typed code, and says to scan from here rather than the camera', async () => {
