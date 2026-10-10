@@ -179,7 +179,7 @@ export class ClaudeSession {
       this.orphans = [];
       for (const message of replay) {
         if (!adopted && message.type === 'result') continue;
-        this.receive(message);
+        this.receive(message, true);
       }
       if (adopted) return;
       // The CLI's own run is still going: its result is not this turn's.
@@ -449,7 +449,8 @@ export class ClaudeSession {
     }
   }
 
-  private receive(message: SDKMessage): void {
+  /** `replayed` is an adopted message handed to the turn that opened for it: already diagnosed when it came. */
+  private receive(message: SDKMessage, replayed = false): void {
     const authFailure = authenticationFailureOf(message);
     if (authFailure !== null) {
       this.loginRejected = true;
@@ -459,7 +460,7 @@ export class ClaudeSession {
     const sessionId = (message as { session_id?: string }).session_id;
     if (typeof sessionId === 'string' && sessionId.length > 0) this.sessionId = sessionId;
     if (message.type === 'system') this.noteTasks(message);
-    noteClaudeMessage(this.head()?.ctx ?? this.ctx, message, this.spawnedAt);
+    if (!replayed) noteClaudeMessage(this.head()?.ctx ?? this.ctx, message, this.spawnedAt);
     if (message.type === 'system' && message.subtype === 'init') this.spawnedAt = null;
     if (message.type === 'system' && message.subtype === 'init') {
       for (const report of this.fastReports.splice(0)) report(message.fast_mode_state);

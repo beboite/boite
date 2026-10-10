@@ -435,8 +435,11 @@ export class AcpSession {
     });
     this.canLoad = init.agentCapabilities?.loadSession === true;
     this.imagesSupported = init.agentCapabilities?.promptCapabilities?.image === true;
-    ctx.diagnostic?.('info', `${ctx.provider.id} answered initialize as ${init.agentInfo?.name ?? 'an unnamed agent'} ${init.agentInfo?.version ?? ''}, ACP protocol ${init.protocolVersion}`.trim(), {
-      event: 'driver.initialized', data: { agent: init.agentInfo?.name ?? null, version: init.agentInfo?.version ?? null, protocol: init.protocolVersion, loadSession: this.canLoad },
+    // The agent binary fills these: only text and numbers reach the log.
+    const scalar = (value: unknown): string | null => typeof value === 'string' ? value : typeof value === 'number' ? String(value) : null;
+    const agentName = scalar(init.agentInfo?.name), agentVersion = scalar(init.agentInfo?.version), protocol = scalar(init.protocolVersion);
+    ctx.diagnostic?.('info', `${ctx.provider.id} answered initialize as ${agentName ?? 'an unnamed agent'} ${agentVersion ?? ''}, ACP protocol ${protocol ?? 'unknown'}`.replace(/ {2,}/g, ' '), {
+      event: 'driver.initialized', data: { agent: agentName, version: agentVersion, protocol, loadSession: this.canLoad },
     });
 
     if (ctx.sessionId !== null && this.canLoad) {

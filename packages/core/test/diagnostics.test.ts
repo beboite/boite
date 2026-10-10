@@ -1,11 +1,12 @@
 import { expect, test } from 'bun:test';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createLogAnonymizer, formatLogLine, parseLogRecord, RpcErrorCode } from '@boite/contracts';
+import { createLogAnonymizer, formatLogDuration, formatLogLine, parseLogRecord, RpcErrorCode } from '@boite/contracts';
 import { connect } from '../src/client.ts';
 import { runCli } from '../src/cli.ts';
-import { renderIssueBody } from '../src/diagnostics.ts';
+import type { Core } from '../src/core.ts';
+import { Diagnostics, renderIssueBody } from '../src/diagnostics.ts';
 import { echoThread, startTestCore } from './harness.ts';
 
 test('the anonymizer replaces paths, names, addresses and private hosts and keeps ids and public services', () => {
@@ -38,6 +39,17 @@ test('the anonymizer replaces paths, names, addresses and private hosts and keep
   expect(createLogAnonymizer({ salt: 'other-salt' }).project('/home/meetsu/projects/secret-game')).not.toBe(placeholders[0]!);
 });
 
+test('a thread folder beside a project, sharing only its name prefix, gets its own placeholder', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'boite-anon-'));
+  try {
+    const core = {
+      dataDir: join(dir, 'data'), logs: { directory: join(dir, 'logs'), warn() {} }, accounts: { list: () => [] },
+      projects: { list: () => [{ path: '/srv/proj', name: 'proj' }] }, journal: { listThreads: () => [{ cwd: '/srv/proj2/secret-client' }] },
+    } as unknown as Core;
+    expect(new Diagnostics(core).anonymizer().text('opened /srv/proj2/secret-client/notes.md')).not.toContain('secret-client');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('a stored line from any origin parses, bounds its fields and formats on one readable line', () => {
   const line = JSON.stringify({ id: 'r:1', runId: 'r', at: Date.UTC(2026, 9, 10, 14, 3, 22, 120), level: 'error', origin: 'shell', source: 'watchdog', event: 'shell.main-thread.blocked',
     message: 'The main thread has not answered for 6.2 s', threadId: 'thr_a', providerId: 'claude', model: 'claude-opus-5-5', parentThreadId: 'thr_p', durationMs: 6200,
@@ -45,6 +57,9 @@ test('a stored line from any origin parses, bounds its fields and formats on one
   const record = parseLogRecord(line)!;
   expect(record.data).toEqual({ command: 'notify', blockedMs: 6200 });
   expect(formatLogLine(record)).toBe('2026-10-10 14:03:22.120Z ERROR shell watchdog/shell.main-thread.blocked [thr_a claude/claude-opus-5-5 <thr_p] (6.2 s) The main thread has not answered for 6.2 s {command=notify, blockedMs=6200}');
+  // Seconds that round up carry into the minutes.
+  expect(formatLogDuration(119_500)).toBe('2 min 0 s');
+  expect(formatLogDuration(61_000)).toBe('1 min 1 s');
   expect(parseLogRecord('{"id":1}')).toBeNull();
   expect(parseLogRecord('{"broken')).toBeNull();
   expect(parseLogRecord(JSON.stringify({ id: 'a', runId: 'r', at: 1, level: 'info', source: 's', event: 'e', message: 'm' }))!.origin).toBe('core');
@@ -162,7 +177,10 @@ test('clients report their own errors as ui records, bounded per connection, and
     const { grant } = await owner.call('pairing.grant', {});
     const phone = await connect(harness.url, '', { grant });
     try {
-      expect(await phone.call('diagnostics.report', { records: [{ level: 'info', at: Date.now(), source: 'socket', event: 'ui.reconnected', message: 'Reconnected after 4 s' }] })).toEqual({ accepted: 1 });
+      // A wrong phone clock does not sort its record ahead of every real one.
+      expect(await phone.call('diagnostics.report', { records: [{ level: 'info', at: 1e15, source: 'socket', event: 'ui.reconnected', message: 'Reconnected after 4 s' }] })).toEqual({ accepted: 1 });
+      const [reconnected] = await owner.call('core.logs', { origin: 'ui', search: 'ui.reconnected', limit: 1 });
+      expect(reconnected!.at).toBeLessThanOrEqual(Date.now());
       try { await phone.call('diagnostics.summary', {}); throw new Error('accepted'); }
       catch (error) { expect((error as { rpc?: { code: number } }).rpc?.code).toBe(RpcErrorCode.Refused); }
     } finally { phone.close(); }

@@ -626,16 +626,19 @@ export class PiSession {
         turn.noteOutcome(assistant.stopReason === 'error' ? (assistant.errorMessage ?? 'the pi agent failed the turn') : null);
         break;
       }
-      case 'auto_retry_start':
+      case 'auto_retry_start': {
         turn.ctx.reportProgress?.('retrying', `${String(message['attempt'])}/${String(message['maxAttempts'])}`);
-        turn.ctx.diagnostic?.('warn', `pi request failed, retry ${String(message['attempt'])} of ${String(message['maxAttempts'])} in ${String(message['delayMs'])} ms: ${textOf(message['errorMessage'])}`, {
-          event: 'driver.api.retry', data: { attempt: typeof message['attempt'] === 'number' ? message['attempt'] : null, maxAttempts: typeof message['maxAttempts'] === 'number' ? message['maxAttempts'] : null, retryAfterMs: typeof message['delayMs'] === 'number' ? message['delayMs'] : null },
+        const count = (value: unknown): number | null => typeof value === 'number' ? value : null;
+        const attempt = count(message['attempt']), maxAttempts = count(message['maxAttempts']), retryAfterMs = count(message['delayMs']);
+        turn.ctx.diagnostic?.('warn', `pi request failed, retry ${attempt ?? '?'} of ${maxAttempts ?? '?'} in ${retryAfterMs ?? '?'} ms: ${textOf(message['errorMessage'])}`, {
+          event: 'driver.api.retry', data: { attempt, maxAttempts, retryAfterMs },
         });
         turn.ctx.log(
           'info',
           `pi: retrying the request (attempt ${String(message['attempt'])} of ${String(message['maxAttempts'])}, in ${String(message['delayMs'])} ms): ${textOf(message['errorMessage'])}`,
         );
         break;
+      }
       case 'auto_retry_end':
         turn.ctx.reportProgress?.('working');
         turn.ctx.diagnostic?.(message['success'] === false ? 'warn' : 'info', message['success'] === false ? `pi gave up retrying: ${textOf(message['finalError'])}` : 'pi retry succeeded', { event: 'driver.api.retry-ended', data: { success: message['success'] !== false } });

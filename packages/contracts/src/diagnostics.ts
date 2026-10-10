@@ -422,8 +422,8 @@ export function formatLogTime(at: number): string {
 export function formatLogDuration(ms: number): string {
   if (ms < 1000) return `${Math.round(ms)} ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`;
-  const minutes = Math.floor(ms / 60_000);
-  return `${minutes} min ${Math.round((ms % 60_000) / 1000)} s`;
+  const seconds = Math.round(ms / 1000);
+  return `${Math.floor(seconds / 60)} min ${seconds % 60} s`;
 }
 
 /**

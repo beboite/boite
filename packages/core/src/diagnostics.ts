@@ -56,7 +56,7 @@ export class Diagnostics {
     try { user = userInfo().username; } catch { user = process.env.USER ?? process.env.USERNAME ?? null; }
     const projects = this.core.projects.list().map(project => ({ path: project.path, name: project.name }));
     // Worktrees and thread folders outside a project still name the user's layout.
-    const known = (path: string): boolean => path.startsWith(this.core.dataDir) || projects.some(project => path.startsWith(project.path));
+    const known = (path: string): boolean => inside(path, this.core.dataDir) || projects.some(project => project.path.length > 0 && inside(path, project.path));
     const folders = new Set<string>();
     for (const thread of this.core.journal.listThreads()) if (thread.cwd && !known(thread.cwd) && folders.size < 1000) folders.add(thread.cwd);
     for (const path of folders) projects.push({ path, name: '' });
@@ -222,10 +222,13 @@ export class Diagnostics {
       await mkdir(join(this.core.logs.directory, 'exports'), { recursive: true, mode: 0o700 });
       await writeFile(path, text, { mode: 0o600 });
       await chmod(path, 0o600);
-      await this.pruneExports();
     } catch (error) {
       this.core.logs.warn(`the diagnostic export could not be saved: ${messageOf(error)}`, { source: 'diagnostics', event: 'diagnostics.export-failed' });
       path = null;
+    }
+    // The file is written: a failed cleanup of older ones does not hide it.
+    if (path !== null) {
+      await this.pruneExports().catch(error => this.core.logs.warn(`older diagnostic exports could not be removed: ${messageOf(error)}`, { source: 'diagnostics', event: 'diagnostics.prune-failed' }));
     }
     this.core.logs.info(`Diagnostics exported: ${records.length} records since ${formatLogTime(since)}`, {
       source: 'diagnostics', event: 'diagnostics.exported', ...(connection?.identity.threadId ? { threadId: connection.identity.threadId } : {}),
@@ -354,6 +357,11 @@ export class Diagnostics {
     }
     return { accepted: accepted.length };
   }
+}
+
+/** `path` is `dir` or below it: `/proj2` is not inside `/proj`. */
+function inside(path: string, dir: string): boolean {
+  return path === dir || (path.startsWith(dir) && (path[dir.length] === '/' || path[dir.length] === '\\' || /[\\/]$/.test(dir)));
 }
 
 /** A record about no thread, or about one of the threads in reach. */

@@ -33,12 +33,14 @@ fn running_child(state: &CoreState) -> Option<Arc<AtomicBool>> {
 
 /// The `shell.core.exited` record: exit status, and the core's last lines
 /// under `stderrTail`, which stays on this machine and is withheld from every
-/// anonymized view.
+/// anonymized view. A clean exit (an update, "Stop this core") is lifecycle,
+/// not a problem.
 fn log_exit(spawned: &super::spawn::Spawned, status: std::process::ExitStatus, when: &str) {
     spawned.settle();
     let tail = spawned.output.tail().join(" | ");
     let cut = tail.char_indices().rev().nth(299).map_or(tail.as_str(), |(index, _)| &tail[index..]);
-    shell_log::error("core", "shell.core.exited", format!("the core pid {} exited ({status}) {when}", spawned.child.id()),
+    let level = if status.success() { Level::Info } else { Level::Error };
+    shell_log::log(level, "core", "shell.core.exited", format!("the core pid {} exited ({status}) {when}", spawned.child.id()), None,
         json!({ "pid": spawned.child.id(), "exitCode": status.code(), "stderrTail": if cut.is_empty() { None } else { Some(cut) } }));
 }
 

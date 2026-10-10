@@ -184,11 +184,14 @@ impl Watch {
         Verdict::Blocked(waited, blame)
     }
 
-    /// The watchdog itself slept far past its tick: the machine was suspended,
-    /// and a ping in flight across the suspend says nothing about the main thread.
-    fn rebase(&mut self, now: Instant) {
-        if self.episode.is_none() {
-            if let Some((_, posted)) = self.posted.as_mut() { *posted = now; }
+    /// The watchdog itself slept `slept` past its tick: the machine was
+    /// suspended, and a ping in flight across the suspend says nothing about
+    /// the main thread. An episode already reported moves its start forward
+    /// by the same time, so its recovery does not count the suspend.
+    fn rebase(&mut self, now: Instant, slept: Duration) {
+        match self.episode.as_mut() {
+            Some(episode) => episode.since = (episode.since + slept).min(now),
+            None => if let Some((_, posted)) = self.posted.as_mut() { *posted = now; },
         }
     }
 
@@ -212,7 +215,8 @@ pub(crate) fn start<R: Runtime>(app: AppHandle<R>, hung: fn() -> Option<bool>) {
         loop {
             std::thread::sleep(PING_EVERY);
             let now = Instant::now();
-            if now.saturating_duration_since(last_tick) > PING_EVERY * 3 { watch.rebase(now); }
+            let gap = now.saturating_duration_since(last_tick);
+            if gap > PING_EVERY * 3 { watch.rebase(now, gap - PING_EVERY); }
             last_tick = now;
             let seq = ANSWERED_SEQ.load(Ordering::Acquire);
             let at = start + Duration::from_millis(ANSWERED_AT.load(Ordering::Acquire));
@@ -290,9 +294,17 @@ mod tests {
         let t0 = Instant::now();
         assert_eq!(watch.next_ping(t0), Some(1));
         let resumed = t0 + Duration::from_secs(600);
-        watch.rebase(resumed);
+        watch.rebase(resumed, Duration::from_secs(599));
         assert!(matches!(watch.tick(resumed + Duration::from_secs(1), (0, None), idle), Verdict::Nothing));
         assert!(matches!(watch.tick(resumed + Duration::from_secs(5), (0, None), idle), Verdict::Blocked(..)));
+        // Still blocked across a second suspend: the recovery leaves the suspend out.
+        let asleep = resumed + Duration::from_secs(6);
+        let woke = asleep + Duration::from_secs(300);
+        watch.rebase(woke, Duration::from_secs(300));
+        match watch.tick(woke + Duration::from_secs(2), (1, Some(woke + Duration::from_secs(1))), idle) {
+            Verdict::Recovered(total, _) => assert_eq!(total, Duration::from_secs(7)),
+            _ => panic!("expected a recovery"),
+        }
     }
 
     #[test]
