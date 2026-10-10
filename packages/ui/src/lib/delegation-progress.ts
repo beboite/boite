@@ -24,3 +24,38 @@ export function teamProgress(agents: DelegatedAgent[]) {
       ? Math.max(...states.map(state => state.finishedAt!)) : null
   };
 }
+
+export interface TeamLaunch {
+  /** The timeline row's id: the message the launch followed, or the thread's start. */
+  id: string;
+  createdAt: number;
+  agents: DelegatedAgent[];
+}
+
+/**
+ * The subagents a timeline shows, one card per launch: the children started
+ * after the same message share a card, placed where the first of them started,
+ * and it stays there once they finish. A child older than every held message
+ * belongs to history not loaded yet (`olderUnloaded`); it shows when that page
+ * arrives, never at the top of the newer one.
+ */
+export function teamLaunches(agents: readonly DelegatedAgent[], messages: readonly { id: string; createdAt: number }[], olderUnloaded: boolean): TeamLaunch[] {
+  const launches = new Map<string, TeamLaunch>();
+  for (const agent of [...agents].sort((a, b) => a.thread.createdAt - b.thread.createdAt)) {
+    const at = agent.thread.createdAt;
+    let low = 0;
+    let high = messages.length;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if (messages[middle]!.createdAt <= at) low = middle + 1;
+      else high = middle;
+    }
+    const anchor = messages[low - 1];
+    if (!anchor && olderUnloaded) continue;
+    const id = `delegation:${anchor?.id ?? 'start'}`;
+    const launch = launches.get(id);
+    if (launch) launch.agents.push(agent);
+    else launches.set(id, { id, createdAt: at, agents: [agent] });
+  }
+  return [...launches.values()];
+}
