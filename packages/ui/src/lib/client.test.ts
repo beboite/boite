@@ -572,6 +572,57 @@ describe('WsClient', () => {
     client.close();
   });
 
+  test('through another member, its key goes on the hello that opens each socket, read anew, and on no other frame', async () => {
+    const sockets: FakeSocket[] = [];
+    const urls: string[] = [];
+    let relayKey: string | null = 'key-for-m2';
+    const client = new WsClient({
+      url: 'https://m2.example/group/relay/' + 'f'.repeat(64),
+      token: 'key-for-pc',
+      relay: () => relayKey,
+      backoff: () => 0,
+      socketFactory: (target) => {
+        urls.push(target);
+        const socket = new FakeSocket();
+        sockets.push(socket);
+        return socket;
+      }
+    });
+    const connecting = client.connect();
+    const first = take(sockets, 0);
+    // The socket opens under the relay route.
+    expect(urls[0]).toBe('wss://m2.example/group/relay/' + 'f'.repeat(64) + '/rpc');
+    first.open();
+    expect(first.frame(0).params).toMatchObject({ token: 'key-for-pc', relay: 'key-for-m2' });
+    first.receive({ id: first.frame(0).id, result: { core: CORE, principal: 'session' } });
+    await connecting;
+    // A liveness hello on the open socket goes to the machine at the end: no key of m2's on it.
+    void client.resume().catch(() => undefined);
+    expect(first.frame(1).method).toBe('hello');
+    expect(first.frame(1).params?.['relay']).toBeUndefined();
+    first.receive({ id: first.frame(1).id, result: { core: CORE, principal: 'session' } });
+    // The next socket reads the key as it stands then.
+    relayKey = 'renewed';
+    first.close(1006);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const second = take(sockets, 1);
+    second.open();
+    expect(second.frame(0).params).toMatchObject({ relay: 'renewed' });
+    second.receive({ id: second.frame(0).id, result: { core: CORE, principal: 'session' } });
+    // No longer paired with m2: the hello, which carries the key for the machine at the end, goes nowhere, and no socket follows.
+    relayKey = null;
+    second.close(1006);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const third = take(sockets, 2);
+    third.open();
+    expect(third.sent).toEqual([]);
+    expect(third.closed).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(sockets).toHaveLength(3);
+    expect(client.state).toBe('closed');
+    client.close();
+  });
+
   test('a key the caller refuses is not used: the client closes instead of going on with it', async () => {
     const sockets: FakeSocket[] = [];
     const client = new WsClient({

@@ -16,7 +16,11 @@ import {
   removeEnvironment,
   resolveEndpoint,
   storeEndpoint,
-  upsertEnvironment
+  upsertEnvironment,
+  coreHref,
+  relayKeyFor,
+  servesThisPage,
+  takeNotificationTarget
 } from './endpoint';
 import { refreshLocalEnvironment } from './endpoint';
 
@@ -27,6 +31,39 @@ test('a restarted shell replaces generated local addresses and preserves the pai
   upsertEnvironment({ url: 'http://remote.test:3773', token: 'remote', paired: true, label: 'Server' });
   const entries = refreshLocalEnvironment({ url: 'http://127.0.0.1:41003', token: 'new' });
   expect(entries.map(e => e.url)).toEqual(['http://remote.test:3773']);
+});
+
+test('a machine reached through the page\'s own core is not that core, and its relay key is the one held for the core', () => {
+  localStorage.clear();
+  const page = window.location.origin;
+  const relayed = `${page}/group/relay/${'f'.repeat(64)}`;
+  expect(servesThisPage(page)).toBe(true);
+  expect(servesThisPage(relayed)).toBe(false);
+  // A path the core answers keeps the relay route in front of it.
+  expect(coreHref(relayed, '/file/abc')).toBe(`${relayed}/file/abc`);
+  expect(coreHref(`${page}/`, '/view/x')).toBe(`${page}/view/x`);
+  expect(relayKeyFor(relayed)).toBeNull();
+  storeEndpoint({ url: page, token: 'page-key', paired: true });
+  expect(relayKeyFor(relayed)).toBe('page-key');
+  // Not a relay: no key for one.
+  expect(relayKeyFor(page)).toBeNull();
+  localStorage.clear();
+  upsertEnvironment({ url: page, token: 'remembered', paired: true, label: 'm2' });
+  expect(relayKeyFor(relayed)).toBe('remembered');
+});
+
+test('a tapped notification names its thread, and the member it is on only as a machine id beside a thread', () => {
+  const member = 'a'.repeat(64);
+  window.history.replaceState(null, '', `/?thread=t1&member=${member}&keep=1`);
+  expect(takeNotificationTarget()).toEqual({ thread: 't1', member });
+  // Both are taken off the address, and nothing else.
+  expect(window.location.search).toBe('?keep=1');
+  window.history.replaceState(null, '', '/?thread=t1&member=https://evil.test');
+  expect(takeNotificationTarget()).toEqual({ thread: 't1', member: null });
+  window.history.replaceState(null, '', `/?member=${member}`);
+  expect(takeNotificationTarget()).toEqual({ thread: null, member: null });
+  expect(window.location.search).toBe('');
+  window.history.replaceState(null, '', '/');
 });
 
 function at(path: string): void {

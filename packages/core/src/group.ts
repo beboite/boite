@@ -215,9 +215,9 @@ export class GroupStore {
     return this.roster !== null && liveCores(this.roster).some((core) => core.addresses.includes(origin));
   }
 
-  /** The session was handed out through the group, not through a pairing link made here. */
-  owns(sessionId: string): boolean {
-    return this.sessions[sessionId] !== undefined;
+  /** Who a session handed out through the group stands for (`core:<id>`, `device:<id>`); undefined for a pairing link's. */
+  issuedFor(sessionId: string): string | undefined {
+    return this.sessions[sessionId];
   }
   // -- Sealing: what this core says to another member, and hears from one.
 

@@ -261,7 +261,7 @@ test('signed peer errors expose validation messages but hide unexpected implemen
   };
   const invalid = await request('invalid');
   expect(invalid.status).toBe(400);
-  expect(await invalid.json()).toMatchObject({ error: 'operation: expected directory, deliver, receipt, search, read or group.sync' });
+  expect(await invalid.json()).toMatchObject({ error: 'operation: expected directory, deliver, receipt, search, read, group.sync or group.push' });
   const failure = spyOn(two.h.core.journal, 'listThreads').mockImplementation(() => { throw new Error('database failure at /private/workspace/journal.sqlite'); });
   try {
     const response = await request('directory');
