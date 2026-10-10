@@ -17,3 +17,8 @@ test('nightly build stamps the core and installer without changing the stable co
     expect(() => setNightlyVersion('2.0.0', root)).toThrow('invalid nightly version');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test('the UI build defines the version it reports from the root package.json the stamp writes', async () => {
+  const { default: config } = await import('../../packages/ui/vite.config.ts');
+  expect((config as { define?: Record<string, string> }).define?.['__BOITE_VERSION__']).toBe(JSON.stringify(releaseVersion()));
+});
