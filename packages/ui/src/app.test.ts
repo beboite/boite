@@ -439,9 +439,22 @@ test('a draft names its project in the heading and the dropdown moves it to anot
   typeQuery('BOI');
   expect(shownValues().map((value) => JSON.parse(value!)[1])).toEqual(['p-boite']);
 
+  // Enter that confirms an input method's candidate picks nothing.
+  search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true }));
+  flushSync();
+  expect(document.querySelector('[data-testid=draft-project-menu]')).not.toBeNull();
+  expect(store.draft?.projectId).toBe('p-notes');
+
   store.editComposerText('draft', 'Move me along');
   search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
   await waitFor(() => store.draft?.projectId === 'p-boite');
+  await waitFor(() => document.querySelector('[data-testid=draft-project-menu]') === null);
+
+  // Focus back on the trigger, Escape still closes the list.
+  const trigger = query<HTMLButtonElement>('[data-testid=draft-project]');
+  trigger.click();
+  await waitFor(() => document.querySelector('[data-testid=draft-project-menu]') !== null);
+  trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   await waitFor(() => document.querySelector('[data-testid=draft-project-menu]') === null);
   await waitFor(() => (query('[data-testid=draft-empty]').textContent ?? '').includes('boite'));
   // The draft row moved with it, and the composer took the keyboard back.

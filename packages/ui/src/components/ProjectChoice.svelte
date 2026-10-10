@@ -33,6 +33,8 @@
   }
 
   interface Group {
+    /** The machine's id: two machines can carry the same label. */
+    id: string;
     label: string;
     rows: Row[];
   }
@@ -81,7 +83,7 @@
             name: fold(projectName(entry))
           }))
       ];
-      return { label: place, rows };
+      return { id: machine.id, label: place, rows };
     });
   });
 
@@ -96,6 +98,7 @@
     const rank = (row: Row) => (row.name.startsWith(whole) ? 0 : row.name.includes(whole) ? 1 : 2);
     return groups
       .map((group) => ({
+        id: group.id,
         label: group.label,
         rows: group.rows
           .filter((row) => words.every((word) => row.haystack.includes(word)))
@@ -126,6 +129,15 @@
       const at = order.findIndex((id) => shown.some((group) => group.rows.some((row) => row.id === id && row.active)));
       if (at >= 0) move(at);
     });
+    // A viewport that shrinks afterwards, a phone's keyboard or a shorter
+    // window, lowers the cap `floating` sets: the frozen height gives way to it.
+    const release = () => panel?.style.removeProperty('min-height');
+    window.addEventListener('resize', release);
+    window.visualViewport?.addEventListener('resize', release);
+    return () => {
+      window.removeEventListener('resize', release);
+      window.visualViewport?.removeEventListener('resize', release);
+    };
   });
 
   function open() {
@@ -165,6 +177,11 @@
   }
 
   function onTriggerKeydown(event: KeyboardEvent) {
+    if (popover.open && event.key === 'Escape') {
+      event.stopPropagation();
+      popover.hide();
+      return;
+    }
     if (popover.open || event.key !== 'ArrowDown') return;
     event.preventDefault();
     open();
@@ -179,6 +196,8 @@
       return;
     }
     if (event.key === 'Enter') {
+      // Enter also confirms an input method's candidate: that one is not a pick.
+      if (event.isComposing || event.keyCode === 229) return;
       const id = order[highlight];
       if (!id) return;
       event.preventDefault();
@@ -250,7 +269,7 @@
       </label>
 
       <div class="rows" role="listbox" id={listId} aria-label={strings.thread.changeProject} bind:this={list} data-testid="{testid}-list">
-        {#each shown as group (group.label)}
+        {#each shown as group (group.id)}
           {#if group.label}<div class="group ui-label" role="presentation">{group.label}</div>{/if}
           {#each group.rows as row (row.id)}
             <button
