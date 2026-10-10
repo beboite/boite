@@ -695,6 +695,41 @@ export class Workspace {
     this.machines = [entry, ...this.machines.filter((m) => m.store !== store && m !== twin)];
   }
 
+  /**
+   * A notification another machine of the group sent through the core of this
+   * page: the thread is on that machine, which the group may still be
+   * connecting. False when it is not connected within `patience`.
+   */
+  async openMemberThread(coreId: string, threadId: string, patience = 30_000): Promise<boolean> {
+    const lifecycle = this.#lifecycle;
+    const deadline = Date.now() + patience;
+    for (;;) {
+      const machine = this.machines.find((entry) => GroupLinks.coreOf(entry) === coreId && entry.store.connection === 'ready');
+      if (machine !== undefined) {
+        await this.select(machine.store, threadId);
+        return true;
+      }
+      if (Date.now() >= deadline || !this.#current(lifecycle)) return false;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
+
+  /** A notification the worker reports tapped: its thread on the machine it names, else on the core that served the page. */
+  async openFromWorker(threadId: string, member?: unknown): Promise<void> {
+    if (typeof member === 'string' && /^[0-9a-f]{64}$/.test(member)) {
+      await this.openMemberThread(member, threadId);
+      return;
+    }
+    const machine = this.machines.find((entry) => entry.store.endpointUrl !== null && servesThisPage(entry.store.endpointUrl));
+    if (machine) await this.select(machine.store, threadId);
+  }
+
+  /** The boot, on the thread a notification tapped with no window open named, on whichever machine it is. */
+  async bootAt(tapped: { thread: string | null; member: string | null }): Promise<void> {
+    await this.boot(tapped.member === null ? tapped.thread : null);
+    if (tapped.member !== null && tapped.thread !== null) await this.openMemberThread(tapped.member, tapped.thread);
+  }
+
   async openNotification(key: string): Promise<void> {
     let machineId: string | null = null,
       threadId = key;

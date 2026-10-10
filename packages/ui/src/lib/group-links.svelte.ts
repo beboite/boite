@@ -1,7 +1,7 @@
 import { untrack } from 'svelte';
-import { RPC_PATH, type Group, type GroupCore } from '@boite/contracts';
+import { groupRelayUrl, parseGroupRelayUrl, RPC_PATH, type Group, type GroupCore } from '@boite/contracts';
 import { WsClient } from './client';
-import { DROPPED_STORAGE_KEY, isDropped, isMemberDropped, keepDropped, readEnvironments, removeBrought, type Endpoint, type StoredEnvironment } from './endpoint';
+import { DROPPED_STORAGE_KEY, isDropped, isMemberDropped, keepDropped, readEnvironments, removeBrought, servesThisPage, type Endpoint, type StoredEnvironment } from './endpoint';
 import { usableAddresses } from './group-addresses';
 import type { Machine, Workspace } from './workspace.svelte';
 
@@ -41,6 +41,21 @@ function askGroup(endpoint: Endpoint, patience: number): Promise<Group | null | 
 }
 
 export { usableAddresses };
+
+/** A member of the group this client means to reach, the machine that told it so, and the routes it may take. */
+interface Wanted {
+  core: GroupCore;
+  via: Machine;
+  /** Its own addresses this client may send a key to. */
+  addresses: string[];
+  /** Relay routes through hand-paired members that list it, the page's own first. */
+  relays: string[];
+}
+
+/** Whether this page was served by that machine. */
+function servesPage(machine: Machine): boolean {
+  return machine.store.endpointUrl !== null && servesThisPage(machine.store.endpointUrl);
+}
 
 /** A key the group brought for a plain HTTP address: at start it waits for a hand-paired machine to have its say. */
 export function holdsBack(entry: StoredEnvironment): boolean {
@@ -129,9 +144,11 @@ export class GroupLinks {
     return held.filter((entry) => {
       const voices = answers.filter((answer): answer is Group => answer != null && answer.id === entry.groupId);
       if (voices.length === 0) return true;
+      // A machine reached through a member stands while the group lists it: the member, not the address, is what the key went through.
+      const relayed = parseGroupRelayUrl(entry.url) !== null;
       const stands = voices.every((voice) => {
         const core = voice.cores.find((listed) => listed.coreId === entry.coreId);
-        return core !== undefined && usableAddresses(core.addresses, this.#secure()).includes(entry.url);
+        return core !== undefined && (relayed || usableAddresses(core.addresses, this.#secure()).includes(entry.url));
       });
       // Forgotten only while it is still the group's entry: the owner may have paired that machine by hand meanwhile.
       // No longer listed, the machine was dropped and its address is marked; listed elsewhere, it only moved.
@@ -174,6 +191,12 @@ export class GroupLinks {
     };
   }
 
+  /** The machine of this window that carries `machine` to its member, when it is reached through one (`groupRelayUrl`). */
+  static carrier(machine: Machine, machines: readonly Machine[]): Machine | undefined {
+    const relay = parseGroupRelayUrl(machine.id);
+    return relay === null ? undefined : machines.find((candidate) => candidate.store.endpointUrl === relay.member);
+  }
+
   /** The member of the group this machine is: what it says itself, or what the group said when it brought it. */
   static coreOf(machine: Machine): string | undefined {
     return machine.store.group?.self ?? machine.coreId;
@@ -196,7 +219,7 @@ export class GroupLinks {
     const anchors = informed.filter((machine) => machine.coreId === undefined);
     await this.#prune(informed, anchors);
 
-    const wanted = new Map<string, { core: GroupCore; via: Machine; addresses: string[] }>();
+    const wanted = new Map<string, Wanted>();
     for (const via of anchors) {
       const group = via.store.group;
       // The fake core has no address to dial and stands for itself.
@@ -209,32 +232,61 @@ export class GroupLinks {
         if (anchors.some((other) => other.store.group?.id === group.id && !other.store.group.cores.some((listed) => listed.coreId === core.coreId))) continue;
         // An address the group dropped that machine at is not dialled on the word of a member still listing
         // the admission that was dropped: only a later admission, the machine having come back, opens it again.
-        wanted.set(core.coreId, { core, via, addresses: this.#agreed(core.coreId, group.id, anchors).filter((address) => !isDropped(address, core.epoch)) });
+        wanted.set(core.coreId, {
+          core, via,
+          addresses: this.#agreed(core.coreId, group.id, anchors).filter((address) => !isDropped(address, core.epoch)),
+          relays: this.#relays(core.coreId, group.id, anchors),
+        });
       }
     }
 
     const states: Record<string, GroupLinkState> = {};
-    const starting: { core: GroupCore; via: Machine; addresses: string[] }[] = [];
+    const starting: (Wanted & { upgrade?: Machine })[] = [];
     for (const [coreId, state] of Object.entries(this.states)) if (wanted.has(coreId)) states[coreId] = state;
-    for (const [coreId, { core, via, addresses }] of wanted) {
+    for (const [coreId, want] of wanted) {
+      const { addresses, relays } = want;
       let existing = this.workspace.machines.find((machine) => GroupLinks.coreOf(machine) === coreId);
       // A key the group handed out for an address the machine no longer gives, or no longer
       // allows now that it has HTTPS, is not sent there again: the machine is reached anew.
-      if (existing?.coreId !== undefined && !addresses.includes(existing.id)) {
+      // Through a member, the route stands while that member is one this client was paired with and lists the machine.
+      if (existing?.coreId !== undefined && !addresses.includes(existing.id) && !relays.includes(existing.id)) {
         await this.#drop(existing, false);
         existing = undefined;
       }
       if (existing !== undefined && (existing.store.connection !== 'closed' || this.#holdsKey(existing))) {
         delete states[coreId];
+        // Carried by a member while the machine gives an address this client may use: tried directly
+        // once a minute, and the member's route given up the moment one answers.
+        if (relays.includes(existing.id) && addresses.length > 0 && !this.#running.has(coreId)
+          && this.#now() - (this.#attempts.get(coreId) ?? -RETRY_MS) >= RETRY_MS) {
+          starting.push({ ...want, relays: [], upgrade: existing });
+        }
         continue;
       }
       if (this.#running.has(coreId) || this.#now() - (this.#attempts.get(coreId) ?? -RETRY_MS) < RETRY_MS) continue;
       states[coreId] = 'connecting';
-      starting.push({ core, via, addresses });
+      starting.push(want);
     }
     // Written before any attempt starts: one that ends at once writes its own state after this.
     this.states = states;
-    for (const { core, via, addresses } of starting) void this.#connect(core, via, addresses);
+    for (const want of starting) void this.#connect(want);
+  }
+
+  /**
+   * Where a member that gives no address this client may use, or none that
+   * answers, is reached instead: through a machine this client was paired
+   * with by hand that lists it, the one this page came from first, since the
+   * page could not have loaded without reaching it.
+   */
+  #relays(coreId: string, groupId: string, anchors: readonly Machine[]): string[] {
+    const listing = anchors.filter((machine) => machine.store.group?.id === groupId && machine.store.group.cores.some((listed) => listed.coreId === coreId));
+    // The member dials the addresses its own roster gives, with this client's key. Two that disagree on them:
+    // one holds an older roster and may dial an address the machine gave up, so nobody carries the key until they agree.
+    const views = new Set(listing.map((machine) => usableAddresses(machine.store.group!.cores.find((listed) => listed.coreId === coreId)!.addresses, false).join(' ')));
+    if (views.size > 1) return [];
+    const through = listing.filter((machine) => machine.store.endpointUrl !== null && parseGroupRelayUrl(machine.store.endpointUrl) === null);
+    through.sort((a, b) => Number(servesPage(b)) - Number(servesPage(a)));
+    return through.map((machine) => groupRelayUrl(machine.store.endpointUrl!, coreId));
   }
 
   /**
@@ -286,31 +338,41 @@ export class GroupLinks {
     return readEnvironments().some((env) => env.url === machine.id && env.token !== '');
   }
 
+  /** The hand-paired machines of a group that are connected and have said what their group lists. */
+  #anchors(groupId: string): Machine[] {
+    return this.workspace.machines.filter((machine) => machine.coreId === undefined && machine.store.connection === 'ready'
+      && machine.store.client !== null && machine.store.groupKnown && machine.store.group?.id === groupId);
+  }
+
   /** The agreed addresses of a member as the rosters stand now: none once a hand-paired machine of that group no longer lists it. */
   #allowed(coreId: string, groupId: string): string[] {
-    const anchors = this.workspace.machines.filter((machine) => machine.coreId === undefined && machine.store.connection === 'ready'
-      && machine.store.client !== null && machine.store.groupKnown && machine.store.group?.id === groupId);
+    const anchors = this.#anchors(groupId);
     if (anchors.some((machine) => !machine.store.group!.cores.some((listed) => listed.coreId === coreId))) return [];
     return this.#agreed(coreId, groupId, anchors);
   }
 
-  async #connect(core: GroupCore, via: Machine, addresses: string[]): Promise<void> {
+  async #connect({ core, via: anchor, addresses, relays, upgrade }: Wanted & { upgrade?: Machine }): Promise<void> {
     const coreId = core.coreId;
     this.#running.add(coreId);
     this.#attempts.set(coreId, this.#now());
-    let state: GroupLinkState | null = 'unreachable';
+    let state: GroupLinkState | null = upgrade === undefined ? 'unreachable' : null;
     let moved = false;
     try {
-      if (addresses.length === 0) {
-        state = 'insecure';
+      // Directly when an address answers, else through the first member that does.
+      const direct = addresses.length === 0 ? null : await this.#reach(addresses);
+      const relay = direct !== null || relays.length === 0 ? null : await this.#reach(relays);
+      const url = direct ?? relay;
+      if (url === null) {
+        if (addresses.length === 0 && relays.length === 0 && upgrade === undefined) state = 'insecure';
         return;
       }
-      const url = await this.#reach(addresses);
+      // The ticket comes from the member that carries the client, which is one of the anchors.
+      const via = relay === null ? anchor : this.workspace.machines.find((machine) => groupRelayUrl(machine.store.endpointUrl ?? '', coreId) === relay) ?? anchor;
       const client = via.store.client;
       const groupId = via.store.group?.id;
-      if (url === null || client === null || groupId === undefined) return;
+      if (client === null || groupId === undefined) return;
       // The rosters may have changed while the address was tried: it must still be one every hand-paired machine allows.
-      if (!this.#allowed(coreId, groupId).includes(url)) {
+      if (relay === null ? !this.#allowed(coreId, groupId).includes(url) : !this.#relays(coreId, groupId, this.#anchors(groupId)).includes(url)) {
         moved = true;
         return;
       }
@@ -321,12 +383,15 @@ export class GroupLinks {
       }
       // Asked for last: a ticket is good for a minute and for one socket.
       // The ticket names this address: the member refuses one made for an address it no longer gives.
-      const { ticket } = await client.call('group.ticket', { coreId, url });
+      // Through a member, the ticket names an address of the machine that member reaches it at, which it chooses.
+      const { ticket } = await client.call('group.ticket', relay === null ? { coreId, url } : { coreId });
       // Asked again now that the ticket is here: the next line sends it.
-      if (!this.#allowed(coreId, groupId).includes(url)) {
+      if (relay === null ? !this.#allowed(coreId, groupId).includes(url) : !this.#relays(coreId, groupId, this.#anchors(groupId)).includes(url)) {
         moved = true;
         return;
       }
+      // A direct route found for a machine a member carried: the carried one goes first, so the list holds the machine once.
+      if (upgrade !== undefined) await this.#drop(upgrade, false);
       if (await this.workspace.add({ url, token: '', ticket, coreId, groupId, epoch: core.epoch }, core.name, true)) state = null;
     } catch {
       // The machine that vouches went away, or the member refused: the next pass asks again.

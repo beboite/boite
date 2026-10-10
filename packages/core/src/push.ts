@@ -1,15 +1,47 @@
 import { createHash, ECDH } from 'node:crypto';
 import { lastAgentText, notifiesOnFinish, requestExcerpt } from '@boite/contracts';
-import type { PushPayload, RpcEvents, RpcParams } from '@boite/contracts';
+import type { CoordinationPeer, NotificationLabel, PushPayload, RpcEvents, RpcParams } from '@boite/contracts';
 import type { PushSubscription } from 'web-push';
 import type { Core } from './core.ts';
 import { invalidParams, refused } from './errors.ts';
 import type { AttentionReport } from './threads/focus.ts';
+import { deviceElsewhere, ownDevice } from './group/devices.ts';
 
 type Subscription = RpcParams<'push.subscribe'>;
 type Keys = { publicKey: string; privateKey: string };
 const SUBSCRIPTIONS = 'web-push.subscriptions';
 const KEYS = 'web-push.keys';
+const LABELS: readonly NotificationLabel[] = ['done', 'failed', 'needsYou', 'connected'];
+
+/** What a member sends the home machine of a device: the push, without the id of the machine it is about, which the home adds. */
+type Forwarded = { device: string; push: Omit<PushPayload, 'core'> };
+
+/** A push a member forwarded, read field by field: it lands on this machine's subscription and nowhere else. */
+function readForwarded(value: unknown): Forwarded {
+  const bad = (field: string) => invalidParams(`group.push ${field} is malformed`, { field });
+  if (typeof value !== 'object' || value === null) throw bad('payload');
+  const { device, push } = value as { device?: unknown; push?: Record<string, unknown> };
+  if (typeof device !== 'string' || device.length > 300) throw bad('device');
+  if (typeof push !== 'object' || push === null) throw bad('push');
+  const string = (field: string, max: number): string => {
+    const text = push[field];
+    if (typeof text !== 'string' || text.length > max) throw bad(`push.${field}`);
+    return text;
+  };
+  const threadId = push['threadId'] === null ? null : string('threadId', 128);
+  const label = push['label'];
+  if (label !== undefined && !LABELS.includes(label as NotificationLabel)) throw bad('push.label');
+  const badge = push['badge'];
+  if (badge !== undefined && (!Number.isSafeInteger(badge) || (badge as number) < 0 || (badge as number) > 100_000)) throw bad('push.badge');
+  return {
+    device,
+    push: {
+      title: string('title', 300), body: string('body', 2000), threadId, tag: string('tag', 200),
+      ...(label === undefined ? {} : { label: label as NotificationLabel }),
+      ...(badge === undefined ? {} : { badge: badge as number }),
+    },
+  };
+}
 
 /** An authenticated phone cannot turn push delivery into a request to a local service. */
 export function validateSubscription(value: Subscription): Subscription {
@@ -198,11 +230,50 @@ export class PushStore {
   private deliverAll(threadId: string, text: Pick<PushPayload, 'body' | 'label'>, tag: string) {
     const title = this.core.journal.getThread(threadId)?.title ?? 'Boite';
     const badge = this.badge(threadId);
-    for (const sessionId of Object.keys(this.subscriptions())) {
+    const subscriptions = this.subscriptions();
+    for (const sessionId of Object.keys(subscriptions)) {
       this.track(this.deliver(sessionId, { title, ...text, threadId, tag, badge }).catch(() => {
         this.core.log('warn', 'Web Push delivery failed; the conversation remains available in Boite');
       }));
     }
+    // A device paired with another member of the group installed that member's page, and its push
+    // subscription is there: the news goes through that machine, once per device.
+    const forwarded = new Set<string>();
+    for (const session of this.core.journal.listSessions()) {
+      if (subscriptions[session.id]) continue;
+      const target = deviceElsewhere(this.core, session.id);
+      if (target === null || forwarded.has(target.device)) continue;
+      forwarded.add(target.device);
+      const payload: Forwarded = { device: target.device, push: { title, ...text, threadId, tag, badge } };
+      this.track(this.forward(target.home, payload).catch(() => {
+        this.core.log('warn', `a notification for a device of ${target.home.name} did not reach that machine; the conversation remains available in Boite`);
+      }));
+    }
+  }
+
+  /** Overridden in tests that count what crosses without a second machine's push service. */
+  forward = (home: CoordinationPeer, payload: Forwarded): Promise<unknown> => this.core.coordination.request(home, 'group.push', payload);
+
+  /**
+   * A push another member of the group sends a device of this machine. It goes
+   * to that device's subscription here, marked with the machine the thread is
+   * on so a tap opens it there. Accepted only for a device the roster lists as
+   * this machine's: a member cannot push to anything else through it.
+   */
+  relayed(from: CoordinationPeer, value: unknown): { delivered: boolean } {
+    if (!this.core.group.peers().some((member) => member.coreId === from.coreId)) throw refused('only a machine of this group sends its devices notifications');
+    const { device, push } = readForwarded(value);
+    const sessionId = ownDevice(this.core, device);
+    if (sessionId === null) throw refused(`group.push device ${device} is not a device of this machine`);
+    if (this.closed || !this.subscriptions()[sessionId]) return { delivered: false };
+    // The icon counts the threads waiting here as well as there.
+    const badge = (push.badge ?? 0) + this.badge();
+    // A tag of that machine's never replaces a notification of this one's.
+    const tag = `${from.coreId.slice(0, 16)}:${push.tag}`;
+    this.track(this.deliver(sessionId, { ...push, tag, badge, core: from.coreId }).catch(() => {
+      this.core.log('warn', `Web Push delivery of a notification from ${from.name} failed`);
+    }));
+    return { delivered: true };
   }
 
   private track<T>(task: Promise<T>): Promise<T> {

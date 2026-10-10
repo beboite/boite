@@ -165,6 +165,7 @@
         {@const coreId = GroupLinks.coreOf(machine)}
         {@const state = updates(machine)}
         {@const open = detailed(machine)}
+        {@const carrier = GroupLinks.carrier(machine, workspace.machines)}
         <section data-core-id={coreId} class="machine-card" data-testid="machine-card" data-group-member={coreId && owner.group?.cores.some(core => core.coreId === coreId) ? "true" : undefined} data-machine-id={machine.id}>
           <div class="main">
             <button
@@ -179,7 +180,7 @@
               <input class="machine-name" data-testid="machine-rename" aria-label={strings.machines.label} value={machine.label} maxlength="80" onchange={(event) => { workspace.customize(machine.id, event.currentTarget.value, machine.icon); event.currentTarget.value = machine.label; }} />
               <span class="meta">
                 <span class="dot" class:ready={machine.store.connection === 'ready'} aria-hidden="true"></span>
-                <span class="status ui-label" class:ready={machine.store.connection === 'ready'}>{machine.store.pairingRequired ? strings.mobile.pairingRequired : strings.connection[machine.store.connection]}</span>
+                <span class="status ui-label" class:ready={machine.store.connection === 'ready'} data-testid="machine-card-status">{machine.store.pairingRequired ? strings.mobile.pairingRequired : carrier !== undefined && machine.store.connection === 'ready' ? fill(strings.group.relayed, { machine: carrier.label }) : strings.connection[machine.store.connection]}</span>
                 {#if state}<span class="updates ui-label" data-testid="machine-updates-state" data-state={state}>{updateLabels[state]}</span>{/if}
               </span>
             </div>
@@ -212,7 +213,7 @@
           <div class="reveal" class:open inert={!open} id="{uid}-details-{machine.id}">
             <div>
               <div class="details" data-testid="machine-updates-card" data-machine-id={machine.id}>
-                <p class="address"><span class="ui-label">{strings.machines.address}</span><span class="value">{machine.store.localCore ? strings.machines.local : machine.id}</span></p>
+                <p class="address"><span class="ui-label">{strings.machines.address}</span><span class="value">{machine.store.localCore ? strings.machines.local : carrier !== undefined ? fill(strings.group.relayed, { machine: carrier.label }) : machine.id}</span></p>
                 {#if !machine.store.localCore}<ServerUpdateCard store={machine.store} label={machine.label} />{/if}
                 {#if machine.store.owner}<HarnessUpdatesCard store={machine.store} />{/if}
                 <div class="detail-actions">

@@ -1,4 +1,4 @@
-import { GRANT_QUERY_PARAM, PAIR_QUERY_PARAM } from '@boite/contracts';
+import { GRANT_QUERY_PARAM, PAIR_QUERY_PARAM, parseGroupRelayUrl } from '@boite/contracts';
 
 export interface Endpoint {
   url: string;
@@ -532,9 +532,56 @@ export function insideTauri(): boolean {
   return window.__TAURI_INTERNALS__ !== undefined;
 }
 
-/** Whether a core at this address served the page, the only core a notification's `?thread=` link can mean. */
+/**
+ * Whether a core at this address served the page, the only core a
+ * notification's `?thread=` link can mean. A machine reached through this
+ * page's core (`groupRelayUrl`) shares its origin and is not it.
+ */
 export function servesThisPage(url: string): boolean {
+  if (parseGroupRelayUrl(url) !== null) return false;
   try { return new URL(url).origin === window.location.origin; } catch { return false; }
+}
+
+/**
+ * What a tapped notification put in the address: `?thread=`, and `?member=`
+ * when another machine of the group sent it through this page's core
+ * (`member`, since `?core=` is a pairing link's address of a core). Taken off
+ * at once, so a reload during the boot does not jump there again.
+ */
+export function takeNotificationTarget(): { thread: string | null; member: string | null } {
+  const query = new URLSearchParams(window.location.search);
+  const thread = query.get('thread');
+  const member = query.get('member');
+  if (thread !== null || member !== null) {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('thread');
+    url.searchParams.delete('member');
+    window.history.replaceState(window.history.state, '', url);
+  }
+  return { thread: thread || null, member: thread && member !== null && /^[0-9a-f]{64}$/.test(member) ? member : null };
+}
+
+/**
+ * A path the core answers on its own HTTP server (`/file/...`, `/view/...`),
+ * as an address of the core at `endpointUrl`. Joined, not resolved: a core
+ * reached through a relay route answers under that route's path.
+ */
+export function coreHref(endpointUrl: string, path: string): string {
+  return `${endpointUrl.replace(/\/+$/, '')}${path}`;
+}
+
+/**
+ * For a machine reached through another member's relay route, this device's
+ * key for that member, where it keeps it: the core it opens on, or the
+ * remembered ones. Null for an address that is no relay, or a member it holds
+ * no key for.
+ */
+export function relayKeyFor(url: string): string | null {
+  const relay = parseGroupRelayUrl(url);
+  if (relay === null) return null;
+  const stored = readStoredEndpoint();
+  if (stored?.url === relay.member && stored.token !== '') return stored.token;
+  return readEnvironments().find((env) => env.url === relay.member && env.token !== '')?.token ?? null;
 }
 
 let shellRefusal: string | null = null;
