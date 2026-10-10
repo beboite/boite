@@ -98,6 +98,11 @@ function manualClock(): AppClock & { pending: { run: () => void; ms: number }[];
 
 const alive = (pid: number): boolean => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const app = () => harness!.core.plugins.state('bots').app!;
+/**
+ * A test core whose own start pass, a 0 ms timer, has run and found no plugin.
+ * Left for later, it could launch a second copy of a crashing app mid-test.
+ */
+const startQuietCore = async (): Promise<TestCore> => { const core = await startTestCore(); await Bun.sleep(10); return core; };
 
 test('the environment drops every agent variable and carries the owner token', () => {
   const env = appEnv({ PATH: '/bin', BOITE_THREAD_ID: 'thr', BOITE_AGENT_TOKEN: 'agent', BOITE_AGENT_SOMETHING: 'x', BOITE_CORE_URL: 'http://old' },
@@ -134,7 +139,7 @@ describe('a desktop app', () => {
   });
 
   test('crashes relaunch after 2, 10 and 30 seconds, and a fourth within five minutes leaves it crashed', async () => {
-    harness = await startTestCore();
+    harness = await startQuietCore();
     installBots(harness.dataDir);
     const fake = fakeApp(harness); fake.mode('crash');
     const clock = manualClock(); harness.core.plugins.apps.clock = clock;
@@ -165,7 +170,7 @@ describe('a desktop app', () => {
   }, 20_000);
 
   test('a relaunch that finds the binary gone leaves it stopped, not starting for good', async () => {
-    harness = await startTestCore();
+    harness = await startQuietCore();
     const dir = installBots(harness.dataDir);
     const fake = fakeApp(harness); fake.mode('crash');
     const clock = manualClock(); harness.core.plugins.apps.clock = clock;
