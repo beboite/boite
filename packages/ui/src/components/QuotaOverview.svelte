@@ -7,6 +7,7 @@
   import { fill, strings } from '../lib/strings';
   import { creditBalance, exactTime, quotaResetTime, quotaWindowName, tenth } from '../lib/format';
   import { quotaAccountName, quotaCredits } from '../lib/quota-reader.svelte';
+  import { shownWindows } from '../lib/quota-display';
 
   let { rows, loading = false, completed = [], connect, order = [], onreorder }: {
     rows: AccountQuota[]; loading?: boolean; completed?: string[]; connect: () => void;
@@ -146,27 +147,31 @@
       <button class="small" onclick={connect}><span class="ui-label">{strings.settings.connectProvider}</span></button>
     </div>
   {/if}
+  <!-- The headline is the primary window, never the lowest one; credits still take over once any window runs dry. -->
   {#each ordered as row (row.accountId)}
     {@const name = quotaAccountName(row)}
-    {@const used = row.windows.length ? Math.max(...row.windows.map((limit) => limit.usedPercent)) : null}
+    {@const shown = shownWindows(row)}
+    {@const windows = shown.primary ? [shown.primary, ...shown.others] : []}
+    {@const used = shown.primary?.usedPercent ?? null}
+    {@const drained = row.windows.some((limit) => limit.usedPercent >= 100)}
     {@const stale = row.status === 'unavailable'}
-    {@const resets = row.windows.flatMap((limit) => limit.resetsAt === null ? [] : [limit.resetsAt])}
+    {@const reset = shown.primary?.resetsAt ?? null}
     {@const credits = quotaCredits(row)}
-    {@const paid = credits !== null && used !== null && used >= 100}
+    {@const paid = credits !== null && drained}
     {@const percent = credits?.kind === 'budget' ? Math.max(0, Math.min(100, credits.remaining! / credits.limit! * 100)) : null}
     <article data-testid="quota-provider" data-provider={row.providerId} data-account-id={row.accountId} class:expanded={expanded === row.accountId} class:dragging={dragging === row.accountId}>
       <div class="account-heading">
         <button class="summary ghost" class:reorderable={!!onreorder && !saving} data-testid={onreorder ? 'quota-reorder' : undefined}
           aria-expanded={expanded === row.accountId} aria-controls={`usage-${row.accountId}`} aria-keyshortcuts={onreorder ? 'ArrowUp ArrowDown Home End' : undefined}
-          title={onreorder ? fill(strings.quotas.reorder, { name }) : undefined} disabled={saving || (row.windows.length === 0 && !onreorder)}
+          title={onreorder ? fill(strings.quotas.reorder, { name }) : undefined} disabled={saving || (windows.length === 0 && !onreorder)}
           onpointerdown={(event) => start(event, row.accountId)} onkeydown={(event) => keyboard(event, row.accountId)}
-          onclick={() => { if (row.windows.length) expanded = expanded === row.accountId ? null : row.accountId; }}>
+          onclick={() => { if (windows.length) expanded = expanded === row.accountId ? null : row.accountId; }}>
           <span class="logo" title={row.providerName}><ProviderLogo providerId={row.providerId} size={20} /></span>
           <span class="summary-content">
             <span class="headline">
               <span class="name ui-label" title={name}>{name}</span>
-              {#if !paid}<span class="amount ui-label" class:low={used !== null && used >= 80}>{used === null ? strings.quotas.noReading : `${Math.round(remaining(used))}%`}</span>{/if}
-              {#if row.windows.length}<ChevronDown size={12} />{/if}
+              {#if !paid}<span class="amount ui-label" class:low={used !== null && used >= 80} title={shown.primary ? quotaWindowName(shown.primary.label) : undefined} data-testid="quota-headline">{used === null ? strings.quotas.noReading : `${Math.round(remaining(used))}%`}</span>{/if}
+              {#if windows.length}<ChevronDown size={12} />{/if}
             </span>
             {#if paid && credits}
               <span class="paid" data-testid="quota-credits">
@@ -174,10 +179,10 @@
                 <strong class="paid-amount ui-label">{credits.kind === 'balance' ? fill(strings.quotas.creditBalance, { count: creditBalance(credits.remaining!) }) : percent! < 0.1 ? `<${tenth(0.1)}%` : `${tenth(percent!)}%`}</strong>
                 {#if percent !== null}<span class="track" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} aria-busy={loading && !completed.includes(row.accountId)} aria-label={strings.quotas.budgetRemaining}><span class="fill" style:width="{percent}%"></span></span>{/if}
               </span>
-            {:else if row.windows.length && expanded !== row.accountId}
+            {:else if windows.length && expanded !== row.accountId}
               <span class="meters" class:stale>
-                {#each row.windows as limit (limit.id)}
-                  <span class="mini-window" title={`${quotaWindowName(limit.label)}: ${left(limit.usedPercent)}`}>
+                {#each windows as limit, index (limit.id)}
+                  <span class="mini-window" class:lead={index === 0 && windows.length > 1} title={`${quotaWindowName(limit.label)}: ${left(limit.usedPercent)}`}>
                     <span class="mini-label ui-label">{miniName(limit.label)}</span>
                     <span class="track" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={remaining(limit.usedPercent)} aria-busy={loading && !completed.includes(row.accountId)} class:low={limit.usedPercent >= 80} class:drained={limit.usedPercent >= 100} aria-label={`${name} ${quotaWindowName(limit.label)}: ${left(limit.usedPercent)}`}><span class="fill" style:width="{remaining(limit.usedPercent)}%"></span></span>
                   </span>
@@ -185,8 +190,8 @@
               </span>
             {/if}
             {#if stale}<span class="caption">{strings.quotas.stale}</span>
-            {:else if resets.length && expanded !== row.accountId}
-              <span class="caption reset" title={fill(strings.quotas.resets, { time: exactTime(Math.min(...resets)) })}><RotateCcw size={12} aria-hidden="true" /><span class="ui-label">{quotaResetTime(Math.min(...resets))}</span></span>
+            {:else if reset !== null && expanded !== row.accountId}
+              <span class="caption reset" title={fill(strings.quotas.resets, { time: exactTime(reset) })}><RotateCcw size={12} aria-hidden="true" /><span class="ui-label">{quotaResetTime(reset)}</span></span>
             {/if}
           </span>
         </button>
@@ -196,7 +201,7 @@
       {#if row.error}<p class="error" role="status">{row.error}</p>{/if}
       {#if expanded === row.accountId}
         <div class="details" id={`usage-${row.accountId}`}>
-          {#each row.windows as limit (limit.id)}
+          {#each windows as limit (limit.id)}
             <div class="window" class:low={limit.usedPercent >= 80}>
               <span class="window-name">{quotaWindowName(limit.label)}</span>
               <span class="window-left">{left(limit.usedPercent)}</span>
@@ -231,8 +236,10 @@
   .dragging .summary { cursor: grabbing; }
   .meters { display: flex; flex-wrap: wrap; gap: 3px 8px; }
   .mini-window { flex: 1 1 84px; min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 5px; align-items: center; }
-  .mini-label { max-width: 48px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-muted-foreground); font-size: var(--text-xs); font-weight: 400; }
+  .mini-label { max-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-muted-foreground); font-size: var(--text-xs); font-weight: 400; }
   .meters.stale { opacity: 0.45; }
+  /* The window the headline reads. */
+  .mini-window.lead .mini-label { color: var(--color-foreground); font-weight: 500; }
   .track { display: block; width: 100%; min-width: 0; height: 7px; border-radius: var(--radius-sm); overflow: hidden; background: var(--color-surface-3); filter: saturate(1); transition: filter var(--dur-3) var(--ease-out-quint); }
   .fill { display: block; height: 100%; background: var(--color-success); border-radius: var(--radius-sm); transition: width var(--dur-3) var(--ease-out-quint), background-color var(--dur-3) var(--ease-out-quint); }
   .track.low .fill { background: var(--color-live); }

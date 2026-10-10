@@ -21,6 +21,9 @@ Local changes preserve pinned shortcuts during updates:
 - The install and uninstall sections skip `CheckIfAppIsRunning`, which finds
   and kills processes by file name, when `hooks.nsh` defines
   `BOITE_HOOKS_CLOSE_SHELL`: the hooks close this install's shell by its path.
+- `.onInstSuccess` adds `--after-update` to the arguments of the shell it
+  restarts after an update, so a shell first started by the login entry
+  (`--autostart`) comes back with its window shown.
 
 When updating the Tauri CLI, compare this file with the new upstream template
 and reapply these changes. Keep its MIT notice. Run `bun run build:shell` and

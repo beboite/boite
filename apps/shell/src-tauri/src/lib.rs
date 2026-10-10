@@ -126,7 +126,11 @@ pub fn run() {
         "arch": std::env::consts::ARCH, "pid": std::process::id(), "hidden": hidden(),
     }));
     phase("context", launched);
-    let restarted = std::env::var_os(RESTARTED_AFTER_UPDATE).is_some();
+    // Linux and macOS restart through `app.restart()`, which sets the
+    // variable; on Windows the installer starts the new shell and says so in
+    // its arguments.
+    let restarted = std::env::var_os(RESTARTED_AFTER_UPDATE).is_some()
+        || autostart::restarted_by_installer(std::env::args_os());
     std::env::remove_var(RESTARTED_AFTER_UPDATE);
     // Started by the login entry: the core starts, the window waits in the tray.
     let at_login = autostart::launched_at_login(std::env::args_os(), restarted);

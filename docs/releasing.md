@@ -298,7 +298,9 @@ quoted `Run` value named after the product under
 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, an XDG
 `<identifier>.desktop` (the `$APPIMAGE` file for an AppImage) or a LaunchAgent
 `<identifier>.plist`. That start runs the core and keeps the window in the tray;
-with no tray, or after an update restart, the window shows. The switch reads
+with no tray, or after an update restart, the window shows. On Windows the
+installer restarts the shell with its old arguments, `--autostart` included,
+and adds `--after-update`, which shows the window. The switch reads
 off when the entry names another executable or Task Manager disabled it, and
 switching it on rewrites both. The NSIS uninstaller deletes the `Run` value;
 updates keep it. Hidden test shells refuse to change it
