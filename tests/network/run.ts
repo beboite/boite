@@ -56,7 +56,7 @@ async function phone(ns: string, label: string, url: string) {
   results.push({ url, ...JSON.parse(line) });
   console.error(`[bench] ${label}: ${JSON.parse(line).ok ? 'OK' : 'FAIL'}`);
 }
-async function desktop(ns: string, label: string, ownerLink: string, localPort: number) {
+async function desktop(ns: string, label: string, localPort: number) {
   if (!wanted(label)) return;
   const local = await startCore(ns, [], localPort);
   const env = { ...devOf(ns), BENCH_RESOLVER_RULES: `MAP tauri.localhost 127.0.0.1:${localPort}` };
@@ -65,10 +65,11 @@ async function desktop(ns: string, label: string, ownerLink: string, localPort: 
     for (let i = 0; i < 600 && !(await Bun.file(marker).exists()); i++) await Bun.sleep(100);
     await rpc('srv', srvDataDir, 'panel.open', { threadId, surface: { kind: 'file', path: join(srvDataDir, 'capture.png') } });
   })().catch((e) => console.error(`[bench] panel.open: ${e}`));
-  const line = await run(ns, ['bun', join(here, 'client.ts'), 'desktop', label, outDir, threadId, 'http://tauri.localhost', local.token, ownerLink], env)
+  const { invite } = await rpc('srv', srvDataDir, 'group.invite');
+  const line = await run(ns, ['bun', join(here, 'client.ts'), 'desktop', label, outDir, threadId, 'http://tauri.localhost', local.token, invite], env)
     .catch((e) => JSON.stringify({ label, ok: false, error: String(e) }));
   await watcher;
-  results.push({ ownerLink, ...JSON.parse(line) });
+  results.push(JSON.parse(line));
   console.error(`[bench] ${label}: ${JSON.parse(line).ok ? 'OK' : 'FAIL'}`);
 }
 
@@ -97,9 +98,9 @@ try {
   await phone('ts-phone', 'phone-ts-offered', await offered('tailscale'));
   await phone('ts-phone', 'phone-ts-magicdns', withHost((await grant()).url, 'boite-srv.tail-fake.ts.net'));
   await phone('ts-phone', 'phone-ts-shortname', withHost((await grant()).url, 'boite-srv'));
-  await desktop('lan-desk', 'desktop-lan-as-shown', (await grant('owner')).url, 7400);
-  await desktop('ts-desk', 'desktop-ts-offered', await offered('tailscale', 'owner'), 7402);
-  await desktop('ts-desk', 'desktop-ts-magicdns', withHost((await grant('owner')).url, 'boite-srv.tail-fake.ts.net'), 7403);
+  await rpc('srv', srv.dataDir, 'group.create', { name: 'Maison' });
+  await desktop('lan-desk', 'desktop-lan', 7400);
+  await desktop('ts-desk', 'desktop-ts', 7402);
 } finally {
   for (const p of procs) p.kill();
   await Promise.all(procs.map((p) => p.exited));

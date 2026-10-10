@@ -1,6 +1,5 @@
 import { createSocket } from 'node:dgram';
 import { networkInterfaces, type NetworkInterfaceInfo } from 'node:os';
-import type { PairingNetwork } from '@boite/contracts';
 
 const PRIVATE_V4 = [/^10\./, /^192\.168\./, /^172\.(1[6-9]|2\d|3[01])\./];
 
@@ -14,24 +13,26 @@ const PRIVATE_V4 = [/^10\./, /^192\.168\./, /^172\.(1[6-9]|2\d|3[01])\./];
 const VIRTUAL_ADAPTER =
   /vmware|vmnet|virtualbox|vbox|vethernet|hyper-v|\bwsl\b|docker|podman|^br-|^veth|^virbr|^lxcbr|^lxdbr|^incusbr|^cni|^flannel|^kube|^vmenet|^bridge\d|parallels|^tun|^tap|^wg|zerotier|^zt|npcap|bluetooth/i;
 
-/** 100.64.0.0/10, the shared range Tailscale and Headscale give every node. */
-export function isTailnetAddress(address: string): boolean {
+/** 100.64.0.0/10: a tailnet's range, or a carrier's. Neither is the LAN a phone shares. */
+function isSharedRange(address: string): boolean {
   const match = /^100\.(\d+)\./.exec(address);
   return match !== null && Number(match[1]) >= 64 && Number(match[1]) <= 127;
 }
 
 export interface ReachableAddress {
   address: string;
-  network: Exclude<PairingNetwork, 'public'>;
+  /** `lan` for a private address, `other` for anything else a phone may still reach. */
+  network: 'lan' | 'other';
   interface: string;
 }
 
 /**
- * Every IPv4 address another device may dial to reach this machine, best
+ * Every LAN address another device may dial to reach this machine, best
  * first: the one the default route leaves from, then private addresses of
- * real adapters, then a tailnet's. Virtual adapters only count when nothing
- * else exists. Link-local (169.254/16) is what Windows gives an adapter that
- * got no DHCP answer, and never counts.
+ * real adapters, then any other, then 100.64.0.0/10, a tailnet's or a
+ * carrier's (`group/addresses.ts` tells the tailnet apart). Virtual adapters
+ * only count when nothing else exists. Link-local (169.254/16) is what Windows
+ * gives an adapter that got no DHCP answer, and never counts.
  */
 export function reachableAddresses(
   interfaces: NodeJS.Dict<NetworkInterfaceInfo[]> = networkInterfaces(),
@@ -44,12 +45,12 @@ export function reachableAddresses(
       .map((entry) => ({ name, address: entry.address })),
   );
   const rank = ({ name, address }: { name: string; address: string }): number => {
-    if (isTailnetAddress(address)) return 3;
     // A Hyper-V external switch carries the real LAN under a vEthernet name: the route says so.
     if (address === routed) return 0;
     const virtual = VIRTUAL_ADAPTER.test(name);
     const private_ = PRIVATE_V4.some((range) => range.test(address));
     if (virtual) return 5;
+    if (isSharedRange(address)) return 4;
     return private_ ? 1 : 2;
   };
   const ranked = all
@@ -62,22 +63,20 @@ export function reachableAddresses(
     .filter((entry) => !seen.has(entry.address) && seen.add(entry.address))
     .map((entry) => ({
       address: entry.address,
-      network: entry.rank === 3 ? 'tailscale' : entry.rank === 2 ? 'other' : 'lan',
+      network: entry.rank === 0 || entry.rank === 1 ? 'lan' : 'other',
       interface: entry.name,
     }));
 }
 
 /**
  * The IPv4 address a phone on the same network dials to reach this machine:
- * the first of `reachableAddresses` outside a tailnet, else the tailnet's.
- * Null when the machine has no external IPv4 address at all.
+ * the first of `reachableAddresses`. Null when the machine has none.
  */
 export function lanAddress(
   interfaces: NodeJS.Dict<NetworkInterfaceInfo[]> = networkInterfaces(),
   routed: string | null = null,
 ): string | null {
-  const addresses = reachableAddresses(interfaces, routed);
-  return (addresses.find((entry) => entry.network !== 'tailscale') ?? addresses[0])?.address ?? null;
+  return reachableAddresses(interfaces, routed)[0]?.address ?? null;
 }
 
 /**
@@ -97,7 +96,7 @@ export function routedAddress(): Promise<string | null> {
         /* already closed */
       }
       socket = null;
-      resolve(address !== null && address !== '0.0.0.0' && !isTailnetAddress(address) ? address : null);
+      resolve(address !== null && address !== '0.0.0.0' && !isSharedRange(address) ? address : null);
     };
     const timer = setTimeout(() => finish(null), 500);
     try {

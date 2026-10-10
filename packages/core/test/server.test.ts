@@ -535,7 +535,8 @@ describe('server', () => {
     expect(lanAddress(windows)).toBe('192.168.1.20');
     expect(reachableAddresses(windows)).toEqual([
       { address: '192.168.1.20', network: 'lan', interface: 'Wi-Fi' },
-      { address: '100.80.1.10', network: 'tailscale', interface: 'Tailscale' },
+      // The tailnet's address comes last; `tailnetAddress` names it a tailnet.
+      { address: '100.80.1.10', network: 'other', interface: 'Tailscale' },
     ]);
     // A Hyper-V external switch carries the LAN itself: the default route says which.
     expect(lanAddress({ 'vEthernet (External)': [iface('192.168.1.20')], 'vEthernet (Default Switch)': [iface('172.30.0.1')] }, '192.168.1.20')).toBe('192.168.1.20');

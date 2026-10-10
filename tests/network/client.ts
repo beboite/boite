@@ -1,7 +1,7 @@
 // One client in one namespace: a phone opening a pairing link, or a desktop
-// shell adding a machine from an owner link. Prints one JSON line of results.
+// shell joining the server's group with an invitation. Prints one JSON line of results.
 //   bun client.ts phone <label> <outDir> <threadId> <pairingUrl>
-//   bun client.ts desktop <label> <outDir> <threadId> <localCoreUrl> <localToken> <ownerLink>
+//   bun client.ts desktop <label> <outDir> <threadId> <localCoreUrl> <localToken> <groupInvite>
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { BrowserPage } from '../e2e/lib/cdp.ts';
@@ -51,7 +51,7 @@ try {
     : `(document.querySelector('[data-testid="mobile-thread-${title}"]') || (document.querySelector('[data-testid=mobile-back]') ?? document.querySelector('[data-testid=mobile-conversations]'))?.click(), !!document.querySelector('[data-testid="mobile-thread-${title}"]'))`;
 
   if (desktop) {
-    const [localUrl, localToken, ownerLink] = rest as [string, string, string];
+    const [localUrl, localToken, invite] = rest as [string, string, string];
     // The shell's own Content-Security-Policy, read from its config: WebView2
     // enforces it on every page of the desktop app, Chrome here through a meta tag.
     const conf = JSON.parse(await Bun.file(join(import.meta.dir, '../../apps/shell/src-tauri/tauri.conf.json')).text());
@@ -70,14 +70,13 @@ try {
       await page!.navigate(`${localUrl}/?token=${encodeURIComponent(localToken)}`);
       await page!.waitFor(`document.querySelector('[data-testid=nav-settings]')`, 30_000);
     });
-    await step('add-machine', async () => {
+    await step('join-group', async () => {
+      // The server made a group and an invitation; this computer joins it, as Settings, Machines does.
       await page!.click('[data-testid=nav-settings]');
       await page!.click('[data-testid=settings-tab-machines]');
-      await page!.click('[data-testid=machine-add-open]');
-      await page!.type('[data-testid=machine-name]', 'Serveur');
-      await page!.type('[data-testid=machine-link]', ownerLink);
-      await page!.click('[data-testid=machine-add]');
-      await page!.waitFor(`document.querySelectorAll('[data-testid=machine-card]').length === 2 && [...document.querySelectorAll('[data-testid=machine-card] .status')].every(s => s.textContent === 'Connected')`, 30_000);
+      await page!.type('[data-testid=group-join-input]', invite);
+      await page!.click('[data-testid=group-join]');
+      await page!.waitFor(`document.querySelectorAll('[data-testid=machine-card][data-group-member=true]').length >= 2 && document.querySelectorAll('[data-testid=machine-card] .status.ready').length >= 2`, 45_000);
       await page!.screenshot(join(outDir, `${label}-machines.png`));
       return await page!.evaluate<string>(`[...document.querySelectorAll('[data-testid=machine-card]')].map(c => c.innerText.replace(/\\s+/g, ' ')).join(' || ')`);
     });

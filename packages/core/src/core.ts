@@ -21,7 +21,8 @@ import { KeybindingStore } from './keybindings.ts';
 import { DiagnosticLogs } from './logs.ts';
 import { registerModules } from './modules.ts';
 import { currentOs } from './paths.ts';
-import { isTailnetAddress, reachableAddresses } from './server/lan.ts';
+import { reachableAddresses } from './server/lan.ts';
+import { tailnetAddress } from './group/addresses.ts';
 import { ProcRegistry } from './procs.ts';
 import { withLoad } from './threads/records.ts';
 import { ProjectStore } from './projects.ts';
@@ -357,7 +358,7 @@ export class Core {
     const found = this.#interfaceLinks(routed).filter((link) => link.url !== grouped);
     if (grouped === null) return found;
     const host = new URL(grouped).hostname;
-    const network: PairingNetwork = isTailnetAddress(host) || host.endsWith('.ts.net') ? 'tailscale' : grouped.startsWith('https://') ? 'public' : 'lan';
+    const network: PairingNetwork = host === tailnetAddress() || host.endsWith('.ts.net') ? 'tailscale' : grouped.startsWith('https://') ? 'public' : 'lan';
     return [{ url: grouped, network }, ...found];
   }
 
@@ -366,14 +367,15 @@ export class Core {
     const everywhere = host === '0.0.0.0' || host === '::';
     if (!everywhere) {
       const loopback = ['127.0.0.1', 'localhost', '::1'].includes(host);
-      const network: PairingNetwork = loopback ? 'local' : isTailnetAddress(host) ? 'tailscale' : 'lan';
+      const network: PairingNetwork = loopback ? 'local' : host === tailnetAddress() ? 'tailscale' : 'lan';
       return [{ url: this.baseUrl(), network }];
     }
-    const links: PairingLink[] = reachableAddresses(undefined, routed).map((entry) => ({
-      url: `http://${entry.address}:${port}`,
-      network: entry.network,
-      interface: entry.interface,
-    }));
+    // Tailscale's own interface, told apart from a carrier's 100.64.0.0/10 the way a group does.
+    const tailnet = tailnetAddress();
+    const links: PairingLink[] = reachableAddresses(undefined, routed)
+      .filter((entry) => entry.address !== tailnet)
+      .map((entry) => ({ url: `http://${entry.address}:${port}`, network: entry.network, interface: entry.interface }));
+    if (tailnet !== null) links.push({ url: `http://${tailnet}:${port}`, network: 'tailscale' });
     return links.length > 0 ? links : [{ url: this.baseUrl(), network: 'local' }];
   }
 
