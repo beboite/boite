@@ -312,6 +312,11 @@ export class RelayPipe {
     };
     upstream.onclose = (event) => this.close(SENDABLE(event.code) ? event.code : 1011, event.reason || 'the other machine closed the connection');
     upstream.onerror = () => this.close(1011, 'the other machine dropped the connection');
+    // Closed before its handlers were in place: nothing would ever say so.
+    if (upstream.readyState !== WebSocket.OPEN) {
+      this.close(1011, 'the other machine dropped the connection');
+      return;
+    }
     try {
       upstream.send(JSON.stringify({ ...frame, params: rest }));
       for (const queued of this.queue) upstream.send(queued);
