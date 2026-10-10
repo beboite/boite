@@ -12,7 +12,12 @@ import { installStatesOf } from './accounts.svelte';
 import type { StoreContext } from './context';
 import { retainRows } from './snapshot-reads';
 
-export const UI_VERSION = '2.0.0-beta.1';
+/**
+ * The version a paired device reports in `hello` and Settings lists beside it.
+ * The build defines it from the root package.json, which the nightly build
+ * stamps; a literal here stayed at the last stable version on every nightly.
+ */
+export const UI_VERSION: string = __BOITE_VERSION__;
 
 /**
  * How long the shell's own core may stay unreachable before the shell is asked

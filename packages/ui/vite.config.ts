@@ -10,6 +10,7 @@ import { localePreloadScript } from './src/lib/locale-preload.ts';
 import { colorsBootScript } from './src/lib/theme-colors.ts';
 import { lucideGlyph } from './icon-plugin.ts';
 import { prepaintMinify } from './prepaint.ts';
+import { releaseVersion } from './release-version.ts';
 
 const COMPRESSIBLE = /\.(?:html|js|css|svg|json|webmanifest)$/;
 
@@ -136,6 +137,7 @@ function localePreload(): Plugin {
 export default defineConfig({
   plugins: [lucideGlyph(), svelte(), { name: 'boite-colors-prepaint', transformIndexHtml: () => [{ tag: 'script', children: colorsBootScript(), injectTo: 'head' }] }, browserFloor(), dropFakeClient(), localePreload(), prepaintMinify(), precompress()],
   base: './',
+  define: { __BOITE_VERSION__: JSON.stringify(releaseVersion()) },
   // AudioWorklet modules must be same-origin files, never data URLs under the shell CSP.
   build: { outDir: 'dist', emptyOutDir: true, target: 'es2022', assetsInlineLimit: (file) => file.endsWith('speech-worklet.js') ? false : undefined },
   server: { port: 5173, strictPort: true }
