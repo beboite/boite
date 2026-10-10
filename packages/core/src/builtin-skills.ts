@@ -100,11 +100,11 @@ export function ensureBuiltinSkills(dataDir: string, onError: (message: string) 
   return listed;
 }
 
-const written = new Map<string, { name: string; description: string; path: string }[]>();
-
-/** `ensureBuiltinSkills` once per data directory and process: the guide is built every new session. */
+/**
+ * `ensureBuiltinSkills` on every guide build, never from a cache: an agent runs
+ * as the same user and could rewrite the file, and the next session must get
+ * Boite's text again, not what one thread left there. One read per skill.
+ */
 export function builtinSkills(dataDir: string, onError?: (message: string) => void): { name: string; description: string; path: string }[] {
-  let listed = written.get(dataDir);
-  if (listed === undefined) { listed = ensureBuiltinSkills(dataDir, onError); written.set(dataDir, listed); }
-  return listed;
+  return ensureBuiltinSkills(dataDir, onError);
 }

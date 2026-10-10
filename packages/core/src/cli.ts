@@ -282,7 +282,7 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
   };
 
   // An agent's token reads the anonymized view; the owner's terminal reads its own records.
-  const agentCaller = Boolean(io.env[AGENT_ENV.token] && io.env[AGENT_ENV.threadId]);
+  const agentCaller = Boolean(io.env[AGENT_ENV.coreUrl] && io.env[AGENT_ENV.token] && io.env[AGENT_ENV.threadId]);
   const commands: Record<string, () => Promise<void>> = {
     'journal-check': async () => {
       if (rest.length !== 0 && rest.length !== 2) throw new Usage('journal-check expects no arguments or a cursor table and rowid');

@@ -112,26 +112,40 @@ export class Diagnostics {
     return family;
   }
 
+  /**
+   * The threads a caller reads, null for all of them. An agent is held to its
+   * own thread and the threads it started, as every agent call is: it still
+   * sees the records about no thread (the shell, the core, the clients), which
+   * is what tells it whether Boite itself failed. The owner reads everything,
+   * or one thread's family when it asks.
+   */
+  private reach(agent: boolean, threadId: string | undefined, focus: boolean): Set<string> | null {
+    if (threadId === undefined || (!agent && !focus)) return null;
+    return this.family(threadId, this.core.journal.listThreads());
+  }
+
   async logs(raw: unknown, connection?: Connection): Promise<CoreLogRecord[]> {
     let query: ReturnType<typeof validateDiagnosticsLogsQuery>;
     try { query = validateDiagnosticsLogsQuery(raw); } catch (error) { throw invalidParams((error as Error).message); }
-    this.gate(connection, query.threadId);
-    const family = query.scope === 'thread' && query.threadId !== undefined ? this.family(query.threadId, this.core.journal.listThreads()) : null;
+    const agent = this.gate(connection, query.threadId);
+    const family = this.reach(agent, query.threadId, query.scope === 'thread');
+    // `scope: 'thread'` leaves out the records about no thread too.
     const keep = (record: CoreLogRecord): boolean => logMatches(record, { minLevel: query.minLevel, origin: query.origin, since: query.since, search: query.search })
-      && (family === null || record.threadId === undefined || family.has(record.threadId));
+      && (family === null || (record.threadId === undefined ? query.scope !== 'thread' : family.has(record.threadId)));
     const anonymizer = this.anonymizer();
     return (await this.core.logs.select(keep, query.limit)).map(record => anonymizer.record(record));
   }
 
   async summary(params: { threadId?: string; since?: number }, connection?: Connection): Promise<DiagnosticSummary> {
-    this.gate(connection, params.threadId);
+    const agent = this.gate(connection, params.threadId);
     const since = typeof params.since === 'number' && Number.isFinite(params.since) ? params.since : Date.now() - DAY_MS;
+    const family = this.reach(agent, params.threadId, false);
     const anonymizer = this.anonymizer();
-    const records = (await this.core.logs.select(record => record.at >= since, EXPORT_LIMIT)).map(record => anonymizer.record(record));
-    return this.summarize(records, since, anonymizer);
+    const records = (await this.core.logs.select(record => record.at >= since && within(record, family), EXPORT_LIMIT)).map(record => anonymizer.record(record));
+    return this.summarize(records, since, anonymizer, family);
   }
 
-  private async summarize(records: readonly CoreLogRecord[], since: number, anonymizer: LogAnonymizer): Promise<DiagnosticSummary> {
+  private async summarize(records: readonly CoreLogRecord[], since: number, anonymizer: LogAnonymizer, family: Set<string> | null): Promise<DiagnosticSummary> {
     const counts: Record<CoreLogLevel, number> = { debug: 0, info: 0, warn: 0, error: 0 };
     const problems = new Map<string, DiagnosticProblem>();
     const perThread = new Map<string, { warnings: number; errors: number; lastError: { at: number; message: string } | null }>();
@@ -160,7 +174,7 @@ export class Diagnostics {
     }
     const all = this.core.journal.listThreads();
     const mentioned = new Set(records.flatMap(record => [record.threadId, record.parentThreadId].filter((id): id is string => id !== undefined)));
-    const threads: DiagnosticThread[] = all.filter(thread => mentioned.has(thread.id) || (!thread.archived && thread.updatedAt >= since)).map(thread => {
+    const threads: DiagnosticThread[] = all.filter(thread => (family === null || family.has(thread.id)) && (mentioned.has(thread.id) || (!thread.archived && thread.updatedAt >= since))).map(thread => {
       const seen = perThread.get(thread.id);
       return {
         threadId: thread.id, providerId: thread.providerId, model: thread.model, effort: thread.effort, status: thread.status,
@@ -187,19 +201,22 @@ export class Diagnostics {
 
   async export(params: DiagnosticsExportParams, connection?: Connection): Promise<DiagnosticsExport> {
     if (params === null || typeof params !== 'object') throw invalidParams('diagnostics.export params: expected an object');
-    this.gate(connection, params.threadId);
+    const agent = this.gate(connection, params.threadId);
     const since = typeof params.since === 'number' && Number.isFinite(params.since) && params.since >= 0 ? params.since : Date.now() - DAY_MS;
     const limit = params.limit === undefined ? EXPORT_LIMIT : params.limit;
     if (!Number.isInteger(limit) || limit < 1 || limit > EXPORT_LIMIT) throw invalidParams(`diagnostics.export limit: expected an integer from 1 to ${EXPORT_LIMIT}`);
-    const family = params.focusThreadId ? this.family(params.focusThreadId, this.core.journal.listThreads()) : null;
+    // An agent exports its own family whatever it names; the owner may focus on one.
+    const family = agent ? this.reach(true, params.threadId, false) : params.focusThreadId ? this.family(params.focusThreadId, this.core.journal.listThreads()) : null;
     const anonymizer = this.anonymizer();
-    const records = (await this.core.logs.select(record => record.at >= since && (family === null || record.threadId === undefined || family.has(record.threadId)), limit))
+    const records = (await this.core.logs.select(record => record.at >= since && within(record, family), limit))
       .map(record => anonymizer.record(record));
-    const summary = await this.summarize(records, since, anonymizer);
-    const tails = await this.tails(anonymizer);
+    const summary = await this.summarize(records, since, anonymizer, family);
+    // The raw console of the core can name any conversation: the owner's export only.
+    const tails = agent ? [] : await this.tails(anonymizer);
     const text = renderExport(summary, records, tails);
     const stamp = formatLogTime(Date.now()).replace(/[-:]/g, '').replace(' ', '-').replace(/\.\d+Z$/, '');
-    const name = `boite-diagnostics-${stamp}.txt`;
+    // Two exports in one second (an issue and a manual export) must not share a file.
+    const name = `boite-diagnostics-${stamp}-${String(++this.#sequence).padStart(3, '0')}.txt`;
     let path: string | null = join(this.core.logs.directory, 'exports', name);
     try {
       await mkdir(join(this.core.logs.directory, 'exports'), { recursive: true, mode: 0o700 });
@@ -337,6 +354,11 @@ export class Diagnostics {
     }
     return { accepted: accepted.length };
   }
+}
+
+/** A record about no thread, or about one of the threads in reach. */
+function within(record: CoreLogRecord, family: Set<string> | null): boolean {
+  return family === null || record.threadId === undefined || family.has(record.threadId);
 }
 
 function formatBytes(bytes: number): string {

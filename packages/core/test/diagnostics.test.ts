@@ -61,15 +61,16 @@ test('agents read anonymized diagnostics of the app and their own family, until 
     harness.core.logs.warn('theirs', { source: 'test', event: 'test.theirs', threadId: other });
     const agent = await connect(harness.url, harness.core.agents.tokenFor(threadId));
     try {
+      // The records about no thread and its own, never another conversation's.
       const app = await agent.call('diagnostics.logs', { threadId, minLevel: 'warn' });
-      expect(app.map(record => record.event)).toEqual(expect.arrayContaining(['test.app', 'test.mine', 'test.theirs']));
+      expect(app.map(record => record.event)).toEqual(expect.arrayContaining(['test.app', 'test.mine']));
+      expect(app.map(record => record.event)).not.toContain('test.theirs');
       expect(JSON.stringify(app)).not.toContain(harness.dataDir);
       const mineRecord = app.find(record => record.event === 'test.mine')!;
       expect(mineRecord).toMatchObject({ providerId: 'echo', threadId });
       expect(String(mineRecord.data?.where)).toMatch(/^<project:[0-9a-f]{6}>/);
       const family = await agent.call('diagnostics.logs', { threadId, scope: 'thread', minLevel: 'warn' });
-      expect(family.map(record => record.event)).toContain('test.mine');
-      expect(family.map(record => record.event)).not.toContain('test.theirs');
+      expect(family.map(record => record.event)).toEqual(['test.mine']);
       // An agent speaks for its own thread only, and core.logs stays the owner's.
       for (const [method, params] of [['diagnostics.logs', { threadId: other }], ['diagnostics.logs', {}], ['core.logs', { threadId }]] as const) {
         try { await agent.call(method, params as never); throw new Error(`${method} accepted`); }
@@ -77,7 +78,14 @@ test('agents read anonymized diagnostics of the app and their own family, until 
       }
       const summary = await agent.call('diagnostics.summary', { threadId });
       expect(summary.problems.find(problem => problem.event === 'test.app')).toMatchObject({ level: 'error', count: 1 });
-      expect(summary.threads.map(thread => thread.threadId)).toEqual(expect.arrayContaining([threadId, other]));
+      expect(summary.threads.map(thread => thread.threadId)).toEqual([threadId]);
+      expect(JSON.stringify(summary)).not.toContain(other);
+      const exported = await agent.call('diagnostics.export', { threadId });
+      // Its own refused call may name the other thread; that thread's records and listing stay out.
+      expect(exported.text).not.toContain('test.theirs');
+      expect(exported.text).not.toMatch(new RegExp(`^${other} `, 'm'));
+      expect(exported.text).not.toContain('## core-output.log');
+      expect((await owner.call('diagnostics.summary', {})).threads.map(thread => thread.threadId)).toEqual(expect.arrayContaining([threadId, other]));
       expect(summary.environment.providers.some(provider => provider.id === 'echo')).toBe(true);
       await owner.call('settings.set', { agentLogAccess: false });
       try { await agent.call('diagnostics.logs', { threadId }); throw new Error('accepted while off'); }
@@ -95,7 +103,7 @@ test('the export is one readable anonymized file with environment, problems, thr
     harness.core.logs.error('provider exited with code 3', { source: 'echo', event: 'provider.exited', threadId, durationMs: 1500, data: { exitCode: 3 } });
     harness.core.logs.error('provider exited with code 3', { source: 'echo', event: 'provider.exited', threadId, data: { exitCode: 3 } });
     const result = await owner.call('diagnostics.export', {});
-    expect(result.name).toMatch(/^boite-diagnostics-\d{8}-\d{6}\.txt$/);
+    expect(result.name).toMatch(/^boite-diagnostics-\d{8}-\d{6}-\d{3}\.txt$/);
     expect(result.path).not.toBeNull();
     expect(readFileSync(result.path!, 'utf8')).toBe(result.text);
     for (const section of ['## Environment', '## Agents', '## Settings', '## Problems', '## Threads', '## Log files', '## core-output.log', '## Timeline']) expect(result.text).toContain(section);

@@ -196,11 +196,17 @@ records. Invalid fields, filters and levels are refused.
 `diagnostics.logs`, `diagnostics.summary`, `diagnostics.export` and
 `diagnostics.issue` return the anonymized view. The owner calls them freely;
 an agent names its own thread and is refused while the `agentLogAccess`
-setting is off (Settings > Diagnostics). `diagnostics.logs` reads the whole
-app by default and, with `scope: 'thread'`, the thread and every thread it
-started. `diagnostics.summary` groups warnings and errors by origin, source,
-event and level, and lists each thread the window touched with its agent,
-status, parent, project placeholder and error count.
+setting is off (Settings > Diagnostics). An agent is held to its own thread,
+like every agent call: it reads the records about no thread (the core, the
+shell, the clients), which say whether Boite itself failed, plus those of its
+thread and of every thread it started, never another conversation's. With
+`scope: 'thread'` it leaves the records about no thread out. The owner reads
+everything, or one thread's family with `scope: 'thread'`.
+`diagnostics.summary` groups warnings and errors by origin, source, event and
+level, and lists each thread in reach that the window touched with its agent,
+status, parent, project placeholder and error count. An agent's export covers
+the same reach and leaves out the raw `core-output.log` and `shell-error.log`
+tails, which can name any conversation.
 
 `diagnostics.export` writes one text file a developer reads top to bottom:
 environment (version, channel, OS build, CPUs, memory, uptime, trace mode),

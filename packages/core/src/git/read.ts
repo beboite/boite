@@ -66,23 +66,29 @@ export async function git(core: Core, threadId: ThreadId, cwd: string, args: str
     new Response(spawned.proc.stdout).text(),
     new Response(spawned.proc.stderr).text(),
     spawned.exited,
-  ]), timeoutMs).catch((error: unknown) => {
-    core.logs.warn(`git ${gitSubcommand(args)} gave no answer within ${timeoutMs / 1000} s and was stopped`, { source: 'git', event: 'git.timeout', durationMs: performance.now() - at, data: { subcommand: gitSubcommand(args), timeoutMs } });
-    throw error;
-  });
+  ]), timeoutMs).catch((error: unknown) => { logGitTimeout(core, threadId, args, timeoutMs, at); throw error; });
   logGit(core, threadId, args, code, performance.now() - at, stderr);
   return { code, stdout, stderr };
+}
+
+/** A git read stopped at its deadline, under the same thread rule as `logGit`. */
+function logGitTimeout(core: Core, threadId: ThreadId, args: readonly string[], timeoutMs: number, at: number): void {
+  core.logs.warn(`git ${gitSubcommand(args)} gave no answer within ${timeoutMs / 1000} s and was stopped`, {
+    source: 'git', event: 'git.timeout', ...(threadId.includes(':') ? {} : { threadId }), durationMs: performance.now() - at, data: { subcommand: gitSubcommand(args), timeoutMs },
+  });
 }
 
 /** The same, for a blob: `git show` hands back bytes, and whether they are text is the question. */
 async function gitBytes(core: Core, threadId: ThreadId, cwd: string, args: string[]): Promise<{ code: number; data: Uint8Array }> {
   const spawned = spawnRead(core, threadId, cwd, args, 'reading a file at a ref');
+  const at = performance.now();
   // Drained with the rest, so a git that has something to say never blocks on a full pipe.
-  const [buffer, , code] = await bounded(spawned, cwd, args, Promise.all([
+  const [buffer, stderr, code] = await bounded(spawned, cwd, args, Promise.all([
     new Response(spawned.proc.stdout).arrayBuffer(),
     new Response(spawned.proc.stderr).text(),
     spawned.exited,
-  ]));
+  ])).catch((error: unknown) => { logGitTimeout(core, threadId, args, GIT_READ_TIMEOUT_MS, at); throw error; });
+  logGit(core, threadId, args, code, performance.now() - at, stderr);
   return { code, data: new Uint8Array(buffer) };
 }
 

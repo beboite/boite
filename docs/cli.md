@@ -481,7 +481,9 @@ boite logs help
 Filters: `--limit` (default 100), `--min-level` (default `info`), `--since`
 (`30m`, `2h`, `1d` or a date), `--origin core|shell|ui`, `--search`. Owner
 only: `--level` (exact), `--turn`, `--thread` and `--anonymize`. Agent only:
-`--mine`, the thread and the threads it started. `--json` keeps the records.
+`--mine`, the thread and the threads it started without the records about no
+thread; by default an agent reads those records plus its own family, never
+another conversation's. `--json` keeps the records.
 
 From a terminal outside a thread, the CLI reads the owner credential from that
 core's `core.json` (`--data-dir` picks another) and prints the stored records,

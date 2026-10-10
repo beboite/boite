@@ -204,7 +204,7 @@ export class AgySession {
   }
 
   private start(ctx: TurnContext): Promise<void> {
-    if (this.starting === null) this.starting = noteReady(ctx, 'agy', () => this.open(ctx));
+    if (this.starting === null) this.starting = noteReady(ctx, 'agy', () => this.open(ctx), () => (this.child === null ? { abandoned: true } : {}));
     return this.starting;
   }
 

@@ -60,7 +60,8 @@ The page is for the owner, on the desktop and on a phone connected as owner
 - Agents can read anonymized logs: the `agentLogAccess` setting, on unless the
   owner turns it off. Agents then read through `boite logs` and draft through
   `boite issue`. They get the anonymized view only, and each call names the
-  agent's own thread.
+  agent's own thread: it sees the records about no thread and those of its own
+  thread and the threads it started, never another conversation's.
 
 ## What a client reports
 
@@ -89,7 +90,7 @@ keeps at most 300 records a minute per connection and stores them with
 | Method | Who | What |
 | --- | --- | --- |
 | `core.logs` | owner | raw redacted records, newest first, up to 1000, filtered by thread, turn, level, minimum level, origin, source, time, text; `anonymize` on request |
-| `diagnostics.logs` | owner, agents | anonymized records of the app or of one thread and its children |
+| `diagnostics.logs` | owner, agents | anonymized records about no thread, plus every thread for the owner or the agent's own family |
 | `diagnostics.summary` | owner, agents | environment, grouped problems, threads, log files, counts |
 | `diagnostics.export` | owner, agents | the anonymized export text and where it was saved |
 | `diagnostics.issue` | owner, agents | an issue draft, created through `gh` only with `submit: true` |

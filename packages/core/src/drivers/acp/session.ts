@@ -387,6 +387,7 @@ export class AcpSession {
       this.starting = noteReady(ctx, `${ctx.provider.id} ACP`, () => this.open(ctx), () => ({
         text: this.loaded ? ', loaded the saved session' : this.replaces !== null ? ', a new one replacing a session it cannot load' : '',
         data: { loaded: this.loaded, canLoad: this.canLoad, replaced: this.replaces !== null, images: this.imagesSupported },
+        ...(this.replaces !== null ? { resumed: false } : {}),
       }));
     }
     return this.starting;

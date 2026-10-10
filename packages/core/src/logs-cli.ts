@@ -24,7 +24,8 @@ export const LOGS_HELP = `boite logs: Boite's own diagnostics (the app, its shel
     --origin core|shell|ui       one process
     --search <text>              text in the message, source, event or data
     --turn <turn-id>             one turn (owner)
-    --mine                       agent: only this thread and the threads it started
+    --mine                       agent: only this thread and the threads it started,
+                                 without the records about no thread (the app itself)
     --anonymize                  owner: placeholders for paths, names and addresses
   logs problems [--since 24h]    warnings and errors grouped, and the threads they touched
   logs export [--out <file>] [--since 24h] [--focus <thread-id>]

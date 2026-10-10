@@ -319,9 +319,15 @@ export class AgentBrowser {
     }
   }
 
+  /** Engines whose end is already in the log: the exit, the closed socket and a shutdown all call `#lost`. */
+  readonly #ended = new WeakSet<Engine>();
+
   /** The process ended or dropped its connection: its tabs are gone. */
   #lost(engine: Engine): void {
-    this.#core.logs.info(`Agent browser for profile ${engine.profile} ended with ${engine.tabs.size} tabs open`, { source: 'browser', event: 'browser.ended', data: { profile: engine.profile, tabs: engine.tabs.size, hosted: engine.hosted } });
+    if (!this.#ended.has(engine)) {
+      this.#ended.add(engine);
+      this.#core.logs.info(`Agent browser for profile ${engine.profile} ended with ${engine.tabs.size} tabs open`, { source: 'browser', event: 'browser.ended', data: { profile: engine.profile, tabs: engine.tabs.size, hosted: engine.hosted } });
+    }
     const current = this.#engines.get(engine.key);
     void current?.then(value => { if (value === engine) this.#engines.delete(engine.key); }, () => {});
     this.#stopTimers(engine);

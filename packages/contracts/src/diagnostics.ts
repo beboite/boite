@@ -458,11 +458,15 @@ export function parseLogRecord(line: string, fallbackOrigin: LogOrigin = 'core')
   return record;
 }
 
-/** The scope of an agent's read: its own thread and the threads it started, or the whole app. */
+/** What a read covers. An agent never reaches another conversation's records, whatever it asks. */
 export interface DiagnosticsLogsQuery {
   /** An agent names its own thread; the owner may name any thread or none. */
   threadId?: ThreadId;
-  /** `app` (default) is every record; `thread` is the thread and its delegated children. */
+  /**
+   * `app` (default): the records about no thread plus, for an agent, its own
+   * thread and the threads it started, for the owner every thread. `thread`:
+   * only the thread and its delegated children.
+   */
   scope?: 'thread' | 'app';
   /** 1 to 500, default 100. */
   limit?: number;

@@ -132,8 +132,8 @@ export class MobileDevices {
     const open = this.#sessions.get(threadId) ?? new Map<string, MobileDeviceSession>();
     const existing = open.get(device.id);
     if (existing && existing.state !== 'failed') return { session: { ...existing } };
-    this.#core.logs.info(`Opening the ${device.platform} ${device.kind} device ${device.id} in the Device panel${existing ? ' again after a failure' : ''}`, { source: 'devices', event: 'device.opening', threadId, data: { deviceId: device.id, platform: device.platform, kind: device.kind, retry: existing !== undefined } });
     if (!existing && open.size >= SESSIONS_MAX) throw refused(`a conversation shows at most ${SESSIONS_MAX} devices; close one first`, { threadId });
+    this.#core.logs.info(`Opening the ${device.platform} ${device.kind} device ${device.id} in the Device panel${existing ? ' again after a failure' : ''}`, { source: 'devices', event: 'device.opening', threadId, data: { deviceId: device.id, platform: device.platform, kind: device.kind, retry: existing !== undefined } });
     const session: MobileDeviceSession = {
       deviceId: device.id,
       hostId: LOCAL_DEVICE_HOST,

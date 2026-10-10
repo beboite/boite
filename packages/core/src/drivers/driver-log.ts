@@ -50,7 +50,7 @@ export function noteReady<T>(
   ctx: Pick<SessionContext, 'diagnostic' | 'sessionId'>,
   agent: string,
   opening: () => Promise<T>,
-  details: () => { text?: string; data?: Record<string, string | number | boolean | null> } = () => ({}),
+  details: () => { text?: string; data?: Record<string, string | number | boolean | null>; resumed?: boolean; abandoned?: boolean } = () => ({}),
 ): Promise<T> {
   const at = Date.now();
   const resume = ctx.sessionId !== null;
@@ -62,7 +62,14 @@ export function noteReady<T>(
   try { started = opening(); } catch (error) { return Promise.reject(error).catch(failed); }
   return started.then((value) => {
     const extra = details();
-    ctx.diagnostic?.('info', `${agent} session ready in ${Date.now() - at} ms, ${resume ? 'resumed' : 'new'}${extra.text ?? ''}`, { event: 'driver.session.ready', durationMs: Date.now() - at, data: { resume, ...extra.data } });
+    // Stopped before a process ever started: nothing became ready.
+    if (extra.abandoned) {
+      ctx.diagnostic?.('debug', `${agent} session open was abandoned after ${Date.now() - at} ms: the thread stopped before a process started`, { event: 'driver.session.open-abandoned', durationMs: Date.now() - at, data: { resume } });
+      return value;
+    }
+    // A session asked to resume can still come back new, when the agent could not load it.
+    const resumed = extra.resumed ?? resume;
+    ctx.diagnostic?.('info', `${agent} session ready in ${Date.now() - at} ms, ${resumed ? 'resumed' : 'new'}${extra.text ?? ''}`, { event: 'driver.session.ready', durationMs: Date.now() - at, data: { ...extra.data, resume: resumed } });
     return value;
   }, failed);
 }
