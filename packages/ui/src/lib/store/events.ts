@@ -3,6 +3,7 @@ import type { Client, EventHandler } from '../client';
 import { noteThisComputer } from '../device';
 import { finishNotifies } from '../notify';
 import { resetPullRequestSupport } from '../pull-request';
+import { revealRequested } from '../reveal';
 import { rightPanel } from '../right-panel.svelte';
 import { undo } from '../undo.svelte';
 import { lastIndexById } from '../thread-rows';
@@ -333,6 +334,7 @@ export function listen(ctx: StoreContext, client: Client): void {
     ctx.projectReads.change(projectId, null);
     void ctx.projects.dropProject(projectId);
   });
+  on('ui.reveal', ({ target }) => revealRequested(s, target));
   on('core.log', (entry) => {
     if (entry.level !== 'error') return;
     s.error = entry.threadId

@@ -1,5 +1,6 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
+import type { PluginState } from '@boite/contracts';
 import PluginsPage from './PluginsPage.svelte';
 import type { Store } from '../lib/store.svelte';
 import { FakeClient } from '../lib/fake-client';
@@ -16,9 +17,17 @@ afterEach(() => {
 const q = (selector: string) => document.querySelector<HTMLElement>(selector);
 const row = (id: string) => q(`[data-testid="plugin-row"][data-plugin="${id}"]`);
 
-async function open(): Promise<void> {
+async function open(edit?: (rows: PluginState[]) => void): Promise<void> {
   client = new FakeClient({ delayMs: 0 });
   await client.connect();
+  if (edit) {
+    const call = client.call.bind(client);
+    vi.spyOn(client, 'call').mockImplementation((async (method: string, params: unknown) => {
+      const result = await call(method as never, params as never);
+      if (method === 'plugins.list') edit(result as PluginState[]);
+      return result;
+    }) as never);
+  }
   const store = { client, providers: [] } as unknown as Store;
   mounted = mount(PluginsPage, { target: document.body, props: { store } });
   await vi.waitFor(() => expect(row('kebacc-switcher')).not.toBeNull());
@@ -35,7 +44,7 @@ test('each section holds its plugins, every state drawn with what the owner can 
   await open();
   const installed = q('[data-testid="plugins-installed"]')!;
   const recommended = q('[data-testid="plugins-recommended"]')!;
-  expect([...installed.querySelectorAll('[data-testid="plugin-row"]')].map((el) => el.getAttribute('data-plugin'))).toEqual(['grok-seats', 'pool-legacy', 'seat-pool']);
+  expect([...installed.querySelectorAll('[data-testid="plugin-row"]')].map((el) => el.getAttribute('data-plugin'))).toEqual(['bots', 'grok-seats', 'pool-legacy', 'seat-pool']);
   expect([...recommended.querySelectorAll('[data-testid="plugin-row"]')].map((el) => el.getAttribute('data-plugin'))).toEqual(['kebacc-switcher']);
 
   expect(row('kebacc-switcher')?.querySelector('[data-testid="plugin-install"]')).not.toBeNull();
@@ -51,6 +60,62 @@ test('each section holds its plugins, every state drawn with what the owner can 
   expect(refused?.textContent).toContain('installed.json');
   expect(row('pool-legacy')?.querySelector('[data-testid="plugin-retry"]')).toBeNull();
   expect(row('pool-legacy')?.querySelector('[data-testid="plugin-uninstall"]')).not.toBeNull();
+  // Only a desktop app has the app strip.
+  expect(row('seat-pool')?.querySelector('[data-testid="plugin-app"]')).toBeNull();
+});
+
+const app = (id: string) => row(id)?.querySelector<HTMLElement>('[data-testid="plugin-app"]') ?? null;
+const appButton = (id: string, name: 'start' | 'stop' | 'restart') => app(id)?.querySelector<HTMLButtonElement>(`[data-testid="plugin-app-${name}"]`) ?? null;
+
+test('a running desktop app can be stopped, then started again, its state following each step', async () => {
+  await open();
+  expect(app('bots')?.getAttribute('data-app-status')).toBe('running');
+  expect(app('bots')?.textContent).toContain('Desktop app');
+  expect(app('bots')?.textContent).toContain('Running');
+  expect(appButton('bots', 'start')).toBeNull();
+  expect(appButton('bots', 'restart')).not.toBeNull();
+
+  appButton('bots', 'stop')!.click();
+  await vi.waitFor(() => expect(app('bots')?.getAttribute('data-app-status')).toBe('stopped'));
+  expect(app('bots')?.textContent).toContain('Stopped · starts again only when you start it');
+  expect(appButton('bots', 'stop')).toBeNull();
+
+  appButton('bots', 'start')!.click();
+  await vi.waitFor(() => expect(app('bots')?.getAttribute('data-app-status')).toBe('running'));
+  appButton('bots', 'restart')!.click();
+  await vi.waitFor(() => expect(appButton('bots', 'restart')?.disabled).toBe(false));
+  expect(app('bots')?.getAttribute('data-app-status')).toBe('running');
+});
+
+test('a crashed desktop app shows its exit code and why, and one with no desktop cannot start', async () => {
+  const reason = 'This core has no desktop to show a window on: neither DISPLAY nor WAYLAND_DISPLAY is set.';
+  await open((rows) => {
+    const bots = rows.find((plugin) => plugin.id === 'bots')!;
+    bots.app = { enabled: true, status: 'crashed', pid: null, exitCode: 3, error: 'bots exited with code 3 4 times in 5 minutes; start it again from Settings > Plugins.', startedAt: null };
+    rows.push({ ...structuredClone(bots), id: 'headless', name: 'Headless', app: { enabled: true, status: 'unavailable', pid: null, exitCode: null, error: reason, startedAt: null } });
+  });
+  await vi.waitFor(() => expect(app('headless')).not.toBeNull());
+  expect(app('bots')?.textContent).toContain('Crashed with exit code 3');
+  expect(app('bots')?.querySelector('[data-testid="plugin-app-error"]')?.textContent).toContain('4 times in 5 minutes');
+  expect(appButton('bots', 'start')?.disabled).toBe(false);
+
+  expect(app('headless')?.textContent).toContain('Unavailable');
+  expect(app('headless')?.querySelector('[data-testid="plugin-app-error"]')?.textContent).toBe(reason);
+  expect(appButton('headless', 'start')?.disabled).toBe(true);
+});
+
+test('a desktop app\'s preview says it opens its own window and holds the owner token', async () => {
+  await open();
+  type('[data-testid="plugin-url"]', 'https://github.com/example/desktop-pets');
+  q('[data-testid="plugin-inspect"]')!.click();
+  await vi.waitFor(() => expect(q('[data-testid="plugin-preview"]')).not.toBeNull());
+  const preview = q('[data-testid="plugin-preview"]')!;
+  expect(q('[data-testid="plugin-preview-app"]')?.textContent).toContain('Opens a window of its own and gets full access to Boite through the owner token');
+  expect(preview.textContent).toContain('BOITE_TOKEN=<the owner token>');
+  expect(preview.textContent).not.toContain('Account pools');
+
+  q('[data-testid="plugin-add"]')!.click();
+  await vi.waitFor(() => expect(app('desktop-pets')?.getAttribute('data-app-status')).toBe('running'), { timeout: 3000 });
 });
 
 test('a URL is read first, shown with what it downloads and runs, and installs only on confirm', async () => {

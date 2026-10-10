@@ -635,11 +635,38 @@ export interface PluginArtifact {
   sha256: string;
 }
 
-/** What Boite does with the executable. Account pools are the one feature today. */
+/** What Boite does with the executable: account pools, a desktop app, or both. */
 export interface PluginProvides {
   /** The executable answers the account pool commands for these providers. */
   accountPools?: { providers: ProviderId[] };
+  /**
+   * The executable is a desktop app the core starts with no arguments and
+   * keeps running. It reaches the core with `BOITE_CORE_URL` and the owner
+   * token in `BOITE_TOKEN`. No fields today.
+   */
+  desktopApp?: Record<string, never>;
 }
+
+/** Where a desktop-app plugin stands. Null on a plugin that provides no desktop app. */
+export interface PluginAppState {
+  /** Whether the core starts the app. True after a first install, kept across restarts and updates. */
+  enabled: boolean;
+  /**
+   * `stopped`: not running, after a stop, a clean exit or before the first start.
+   * `crashed`: it failed four times in five minutes; it waits for the owner.
+   * `unavailable`: this core cannot show a window; `error` says why.
+   */
+  status: 'stopped' | 'starting' | 'running' | 'crashed' | 'unavailable';
+  pid: number | null;
+  /** The last exit code, set after the app exits. */
+  exitCode: number | null;
+  /** Why the app is not running, when Boite knows. Never the app's own output. */
+  error: string | null;
+  startedAt: Timestamp | null;
+}
+
+/** What `ui.reveal` shows in the owner's desktop window. `agentId` is 1 to 200 characters. */
+export type UiRevealTarget = { kind: 'thread'; threadId: ThreadId } | { kind: 'agent'; agentId: string };
 
 export interface PluginManifest {
   schema: 1;
@@ -699,6 +726,8 @@ export interface PluginState {
   pools: ProviderId[];
   /** Set exactly when `status` is `rejected`. */
   rejected: PluginRejected | null;
+  /** The desktop app the plugin provides, null when it provides none. */
+  app: PluginAppState | null;
 }
 
 /** What `plugins.inspect` read, shown to the owner before anything is downloaded. */
@@ -3336,6 +3365,17 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
     result: PluginPool[];
   };
   /**
+   * Controls a desktop-app plugin. `start` enables and launches it, `stop`
+   * disables and kills it, `restart` kills and launches it again.
+   */
+  'plugins.app': { params: { id: string; action: 'start' | 'stop' | 'restart' }; result: PluginState };
+  /**
+   * Asks the owner's desktop windows to show a thread or an agent's page.
+   * Emits `ui.reveal` to owner connections only, desktop-app plugins left
+   * out; `delivered` counts them.
+   */
+  'ui.reveal': { params: { target: UiRevealTarget }; result: { delivered: number } };
+  /**
    * The first frame. `token` is the core token or a session token; `grant` is
    * a pairing grant, exchanged here for a session whose token comes back in
    * `session` and is what this client says hello with from then on. One of the
@@ -4062,6 +4102,8 @@ export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents, BrowserR
   'subscriptionProxy.quotasUpdated': SubscriptionProxyQuotas;
   /** One plugin after any change. A `url` plugin that comes back `not-installed` is gone from the list. */
   'plugins.updated': PluginState;
+  /** Owner connections only: show this thread or agent in the desktop window. */
+  'ui.reveal': { target: UiRevealTarget };
   /** A project `projects.add` created. A known path returns its project without one. */
   'project.added': Project;
   /** A project `projects.remove` deleted, after the `thread.removed` of each of its threads. */
@@ -4297,7 +4339,13 @@ export function normalizePairingCode(text: string): string | null {
   return code;
 }
 
-export const CLIENT_NAMES = ['shell', 'pwa', 'cli', 'test', 'bench'] as const;
+/**
+ * What a client says it is in its `hello`. `plugin` is a desktop-app plugin
+ * (`provides.desktopApp`) talking to the core that started it: it signs in
+ * with the owner token but is neither Boite's desktop app nor its web app, so
+ * its prompts carry no origin note and it cannot host the agent browser.
+ */
+export const CLIENT_NAMES = ['shell', 'pwa', 'cli', 'plugin', 'test', 'bench'] as const;
 export type ClientName = (typeof CLIENT_NAMES)[number];
 
 export { attachmentError, answerAttachmentError } from './attachment-validation.ts';

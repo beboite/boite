@@ -17,6 +17,7 @@ let sink: ProcessEventSink;
 let guards: GuardEventSink;
 let bus: Bus;
 let added: number[];
+let unguarded: number[];
 let removed: number[];
 let created: Map<number, number>;
 let sampled: { pid: number; bytes: number }[];
@@ -26,6 +27,7 @@ beforeEach(async () => {
   harness = await startTestCore();
   bus = new Bus();
   added = [];
+  unguarded = [];
   removed = [];
   created = new Map();
   sampled = [];
@@ -40,7 +42,7 @@ beforeEach(async () => {
     },
     startedAt: (pid) => created.get(pid) ?? null,
     runningSince: (pid) => created.get(pid) ?? null,
-    pidAdded: (_threadId, pid) => { added.push(pid); },
+    pidAdded: (_threadId, pid, guarded) => { added.push(pid); if (!guarded) unguarded.push(pid); },
     pidRemoved: (_threadId, pid) => { removed.push(pid); },
     sample: () => ({ processes: sampled.length, cpuPercent: 0, memoryBytes: sampled.reduce((sum, process) => sum + process.bytes, 0), workingSets: sampled }),
     machineMemory: () => ({ totalBytes: 32 * 1024 ** 3, availableBytes: 24 * 1024 ** 3 }),
@@ -148,6 +150,16 @@ test('a short direct child is not resurrected by its delayed native start', asyn
   expect(procs.liveCount(threadId)).toBe(0);
   expect(added).toEqual([child.record.pid]);
   expect(harness.core.journal.listProcesses(threadId, 10)).toHaveLength(1);
+});
+
+test('a shown app and the processes its job reports stay clear of the focus and audio guards', async () => {
+  const threadId = 'plugin:bots:app';
+  const app = procs.spawn(threadId, process.execPath, ['-e', ''], { showWindow: true });
+  sink.started(threadId, 9301, { exe: 'webview', commandLine: null, parentPid: app.record.pid, startedAt: 1, incarnation: '1' });
+  const tool = procs.spawn('plugin:tool:1', process.execPath, ['-e', '']);
+  await Promise.all([app.exited, tool.exited]);
+  expect(added).toEqual([app.record.pid, 9301, tool.record.pid]);
+  expect(unguarded).toEqual([app.record.pid, 9301]);
 });
 
 test('process diagnostics carry correlation without copying window titles or platform output', () => {

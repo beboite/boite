@@ -395,6 +395,15 @@ export class FakeClient implements ObservableClient {
       ...devicesMethods(ctx),
       ...pullRequestMethods(ctx),
       ...worktreeMethods(ctx),
+      // The one owner connection is this client: the event comes back to it, as the core's reaches each owner.
+      'ui.reveal': async (params) => {
+        const { target } = params;
+        if (target.kind === 'agent' && (target.agentId.length === 0 || target.agentId.length > 200)) {
+          throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'ui.reveal target must be { kind: "thread", threadId } or { kind: "agent", agentId }' });
+        }
+        ctx.emit('ui.reveal', { target });
+        return { delivered: 1 };
+      },
     };
     return methods;
   }

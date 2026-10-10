@@ -38,8 +38,8 @@ export const platform: ProcessPlatform = {
   },
   sample: jobs.sampleThreadJob,
   machineMemory,
-  pidAdded: guard.guardPidAdded,
-  pidRemoved: guard.guardPidRemoved,
+  pidAdded: (threadId, pid, guarded) => { if (guarded) guard.guardPidAdded(threadId, pid); },
+  pidRemoved: (threadId, pid, guarded) => { if (guarded) guard.guardPidRemoved(threadId, pid); },
   warm() {
     jobs.warmJobs();
     guard.warmGuard();
