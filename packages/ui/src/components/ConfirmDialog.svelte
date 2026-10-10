@@ -34,7 +34,7 @@
     held = current;
     overlay.show();
     void tick().then(() => {
-      const target = card?.querySelector<HTMLButtonElement>(current.danger ? '[data-cancel]' : '[data-confirm]');
+      const target = card?.querySelector<HTMLElement>(current.requiredText !== undefined ? '[data-testid=confirm-name]' : current.danger ? '[data-cancel]' : '[data-confirm]');
       target?.focus({ preventScroll: true });
     });
   });
@@ -55,6 +55,11 @@
       return;
     }
     if (event.key === 'Tab') trap(event);
+    if (event.key === 'Enter' && !event.isComposing && event.target instanceof HTMLInputElement && card?.contains(event.target)) {
+      event.preventDefault();
+      event.stopPropagation();
+      confirm.answer(true);
+    }
   }
 
   /** While the dialog is up the keyboard cannot leave it. */
@@ -102,12 +107,18 @@
       {#if request.body}
         <p id="confirm-body" class="muted">{request.body}</p>
       {/if}
+      {#if request.requiredText !== undefined}
+        <label class="name-field" for="confirm-name">{request.inputLabel}
+          <input id="confirm-name" data-testid="confirm-name" bind:value={confirm.typed} autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" />
+        </label>
+        <p class="required-name">{request.requiredText}</p>
+      {/if}
       <div class="actions">
         <button type="button" class="ghost" data-cancel data-testid="confirm-cancel" onclick={() => confirm.answer(false)}>
           <span class="ui-label">{request.cancelLabel}</span>
         </button>
         {#if request.altLabel}
-          <button type="button" data-testid="confirm-alt" onclick={() => confirm.answer('alt')}><span class="ui-label">{request.altLabel}</span></button>
+          <button type="button" data-testid="confirm-alt" disabled={request.requiredText !== undefined && confirm.typed !== request.requiredText} onclick={() => confirm.answer('alt')}><span class="ui-label">{request.altLabel}</span></button>
         {/if}
         <button
           type="button"
@@ -115,6 +126,7 @@
           class:destructive={request.danger}
           data-confirm
           data-testid="confirm-ok"
+          disabled={request.requiredText !== undefined && confirm.typed !== request.requiredText}
           onclick={() => confirm.answer(true)}
         >
           <span class="ui-label">{request.confirmLabel}</span>
@@ -163,7 +175,13 @@
 
   p {
     margin-bottom: 4px;
+    white-space: pre-line;
+    overflow-wrap: anywhere;
   }
+
+  .name-field { display: grid; gap: 6px; margin-top: 12px; }
+  .name-field input { width: 100%; min-width: 0; }
+  .required-name { margin-top: 6px; font-weight: var(--weight-medium); }
 
   .actions {
     display: flex;

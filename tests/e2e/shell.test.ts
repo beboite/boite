@@ -309,11 +309,31 @@ shellTest('a resident core finishes agent work after shell exit, is adopted, and
     const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
     const agent = await client.call('agents.profile.save', { value: { name: 'Background worker', domain: '', instructions: '', avatar: '', status: 'active', tools: ['messages'], accountIntegration: 'provider', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' } } });
     ownPage = await BrowserPage.attach(port); await ownPage.waitFor(TAURI_READY);
+    await ownPage.waitFor(`document.querySelector('.app.ready') && document.querySelector('[data-testid=titlebar] .close')`);
     const started = client.next('turn.started', () => true, 10000);
-    const finished = client.next('turn.finished', () => true, 15000);
-    await client.call('agents.message.send', { scope: { kind: 'agent', id: agent.id }, text: '[sleep:1500] finish after closing the window', recipientIds: [agent.id], requestId: 'resident_message_001' });
+    const finished = client.next('turn.finished', () => true, 30000);
+    await client.call('agents.message.send', { scope: { kind: 'agent', id: agent.id }, text: '[sleep:12000] finish after closing the window', recipientIds: [agent.id], requestId: 'resident_message_001' });
     await started;
-    await ownPage.evaluate(`window.__TAURI_INTERNALS__.invoke('quit_shell')`).catch(() => undefined);
+    await ownPage.waitFor(`document.querySelector('[data-testid=titlebar] .close')`);
+    await ownPage.evaluate(`document.querySelector('[data-testid=titlebar] .close').click()`);
+    await ownPage.waitFor(`document.querySelector('[data-testid=confirm-dialog]')`);
+    expect(pidAlive(shellPid)).toBe(true);
+    await ownPage.click('[data-testid=confirm-cancel]');
+    expect(pidAlive(shellPid)).toBe(true);
+    await ownPage.waitFor(`!document.querySelector('[data-testid=confirm-dialog]')`);
+    // Cancel a keyboard request too, then retry it: QuitHold must rearm.
+    const holdQuit = async () => {
+      await ownPage!.evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', { key:'q', ctrlKey:true, bubbles:true, cancelable:true }))`);
+      await ownPage!.waitFor(`document.querySelector('[data-testid=confirm-dialog]')`);
+      await ownPage!.evaluate(`window.dispatchEvent(new KeyboardEvent('keyup', { key:'q', ctrlKey:true, bubbles:true }))`);
+    };
+    await holdQuit();
+    await ownPage.click('[data-testid=confirm-cancel]');
+    await ownPage.waitFor(`!document.querySelector('[data-testid=confirm-dialog]')`);
+    expect(pidAlive(shellPid)).toBe(true);
+    await holdQuit();
+    await ownPage.waitFor(`document.querySelector('[data-testid=confirm-ok]')`);
+    await ownPage.click('[data-testid=confirm-ok]').catch(() => undefined);
     await waitUntil(() => !pidAlive(shellPid), CORE_GONE_TIMEOUT_MS);
     expect(pidAlive(shellPid)).toBe(false);
     expect(await healthy(found.port)).toBe(true);
@@ -360,7 +380,9 @@ shellTest('close exits by default; the persisted setting hides instead; the nati
     expect(Math.abs(main.dx), JSON.stringify(main)).toBeLessThanOrEqual(16);
     expect(Math.abs(main.dy), JSON.stringify(main)).toBeLessThanOrEqual(16);
     expect(await ownPage.evaluate(`window.__TAURI_INTERNALS__.invoke('close_behavior')`)).toBe(false);
-    await ownPage.waitFor(`document.querySelector('[data-testid="titlebar"] .close')`);
+    // Before connection readiness, closing must ask about unverifiable work.
+    // This scenario checks a known idle engine, which closes without asking.
+    await ownPage.waitFor(`document.querySelector('.app.ready') && document.querySelector('[data-testid="titlebar"] .close')`);
     await ownPage.evaluate(`document.querySelector('[data-testid="titlebar"] .close').click()`);
     await waitUntil(() => !pidAlive(ownPid) && !pidAlive(ownCore!.pid), CORE_GONE_TIMEOUT_MS);
     expect(pidAlive(ownPid)).toBe(false); expect(pidAlive(ownCore.pid)).toBe(false);
@@ -478,7 +500,7 @@ shellTest('close exits by default; the persisted setting hides instead; the nati
     await ownPage.waitFor(TAURI_READY);
     expect(await ownPage.evaluate(`window.__TAURI_INTERNALS__.invoke('close_behavior')`)).toBe(true);
     await ownPage.evaluate(`window.__TAURI_INTERNALS__.invoke('close_behavior', {enabled:false})`);
-    await ownPage.waitFor(`document.querySelector('[data-testid="titlebar"] .close')`);
+    await ownPage.waitFor(`document.querySelector('.app.ready') && document.querySelector('[data-testid="titlebar"] .close')`);
     await ownPage.evaluate(`document.querySelector('[data-testid="titlebar"] .close').click()`);
     await waitUntil(() => !pidAlive(ownPid) && !pidAlive(ownCore!.pid), CORE_GONE_TIMEOUT_MS);
     expect(pidAlive(ownPid)).toBe(false); expect(pidAlive(ownCore.pid)).toBe(false);

@@ -101,6 +101,7 @@ export const strings = {
     mode: 'Who responds', mentions: 'Selected recipients', round: 'One response per member', autonomous: 'Take turns automatically',
     maxTurns: 'Maximum turns', perAgent: 'Turns per agent', modeHint: 'Each new message starts an allowance. Replies keep the same allowance. Automatic exchanges stop at either limit.',
     paused: 'Paused', pause: 'Pause', resume: 'Resume', archive: 'Archive', active: 'Active', archived: 'Archived',
+    archiveTitle: 'Archive "{name}"?', archiveBody: 'Archiving stops this agent’s work and removes it from the active list. Its profile and history remain available through search. Type its current name exactly to confirm.', archiveName: 'Agent name',
     objective: 'Objective', expectedResult: 'Expected result', minutes: 'Total execution minutes', tokens: 'Token limit, blank for none',
     finishMission: 'Finish mission', reopenMission: 'Reopen mission',
     conversation: 'Chat', activity: 'Activity', send: 'Send', message: 'Write a message', recipients: 'Recipients', everyone: 'Let the group rule choose',
@@ -476,7 +477,14 @@ export const strings = {
     restore: 'Restore',
     close: 'Close',
     quitHold: 'Hold Ctrl+Q to quit',
-    quitHoldHint: 'or press it twice'
+    quitHoldHint: 'or press it twice',
+    quitTitle: 'Close Boite?',
+    quitWorkingOne: '1 agent is still working or waiting. Are you sure you want to close Boite?',
+    quitWorkingMany: '{count} agents are still working or waiting. Are you sure you want to close Boite?',
+    quitUnknownBody: 'Work on a disconnected machine could not be checked.',
+    quitResidentBody: 'Resident engines keep working after the app closes. Engines configured to stop with the app will stop.',
+    quitConfirm: 'Close Boite',
+    quitCancel: 'Keep open'
   },
 
   serverUpdate: {

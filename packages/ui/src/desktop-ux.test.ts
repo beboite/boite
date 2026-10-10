@@ -9,6 +9,7 @@ import { work } from './lib/work-prefs.svelte';
 import { archiveThread } from './lib/archive';
 import { runCommand } from './lib/commands.svelte';
 import { undo } from './lib/undo.svelte';
+import { confirm } from './lib/confirm.svelte';
 
 /**
  * The desktop behaviours the UX audit found broken, on the whole app over the
@@ -24,6 +25,7 @@ vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl }));
 let running: Record<string, unknown> | null = null;
 
 afterEach(() => {
+  confirm.answer(false);
   vi.restoreAllMocks();
   if (running) unmount(running, { outro: false });
   running = null;
@@ -33,6 +35,38 @@ afterEach(() => {
   work.load();
   workspace.view = 'projects';
   undo.dismiss();
+});
+
+test('typed confirmation supports Enter and cancellation restores focus', async () => {
+  await mountOnFake();
+  const request = { title: 'Archive Mira?', confirmLabel: 'Archive', cancelLabel: 'Cancel', danger: true, requiredText: 'Mira', inputLabel: 'Agent name' };
+  const previous = query<HTMLButtonElement>('[data-testid=thread-title]');
+  previous.focus();
+  const cancelled = confirm.ask(request);
+  await waitFor(() => document.activeElement?.getAttribute('data-testid') === 'confirm-name');
+  expect(query<HTMLButtonElement>('[data-testid=confirm-ok]').disabled).toBe(true);
+  press(query('[data-testid=confirm-name]'), 'Escape');
+  expect(await cancelled).toBe(false);
+  await waitFor(() => document.activeElement === previous);
+  const deletion = confirm.ask(request);
+  await waitFor(() => document.activeElement?.getAttribute('data-testid') === 'confirm-name');
+  const field = query<HTMLInputElement>('[data-testid=confirm-name]');
+  expect(field.getAttribute('autocapitalize')).toBe('off');
+  expect(field.getAttribute('autocorrect')).toBe('off');
+  field.value = 'Mirax';
+  field.dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+  press(field, 'Enter');
+  expect(confirm.current).not.toBeNull();
+  expect(query<HTMLButtonElement>('[data-testid=confirm-ok]').disabled).toBe(true);
+  field.value = 'Mira';
+  field.dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+  expect(query<HTMLButtonElement>('[data-testid=confirm-ok]').disabled).toBe(false);
+  field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true, cancelable: true }));
+  expect(confirm.current).not.toBeNull();
+  press(field, 'Enter');
+  expect(await deletion).toBe(true);
 });
 
 async function waitFor(check: () => boolean, attempts = 2000): Promise<void> {

@@ -3,14 +3,45 @@
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
-    AppHandle, Manager, Runtime, Webview,
+    AppHandle, Emitter, Manager, Runtime, Webview,
 };
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::browser;
 use crate::channel::Channel;
 use crate::local_core::CoreState;
 use crate::quota_window;
 use crate::window::{product_label, show_main};
+
+#[derive(Default)]
+pub(crate) struct QuitGuard(AtomicBool);
+
+pub(crate) fn reset_quit_guard<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(guard) = app.try_state::<QuitGuard>() {
+        guard.0.store(false, Ordering::Release);
+    }
+}
+
+/// Enabled only after the main UI has installed its confirmation listener.
+#[tauri::command]
+pub(crate) fn quit_guard(app: AppHandle, webview: Webview) -> Result<(), String> {
+    browser::only_main(&webview)?;
+    app.state::<QuitGuard>().0.store(true, Ordering::Release);
+    Ok(())
+}
+
+pub(crate) fn request_quit<R: Runtime>(app: &AppHandle<R>) {
+    if app.state::<QuitGuard>().0.load(Ordering::Acquire) {
+        if let Err(error) = app.emit_to("main", "boite:quit-requested", ()) {
+            eprintln!("[shell] quit confirmation could not be requested: {error}");
+            quit(app);
+            return;
+        }
+        show_main(app);
+    } else {
+        quit(app);
+    }
+}
 
 /// Quits the client. The resident engine has a separate authenticated stop action.
 /// `tests/e2e/shell.test.ts` invokes this.
@@ -73,7 +104,7 @@ pub(crate) fn build_tray<R: Runtime>(app: &AppHandle<R>, channel: Channel) -> ta
         })
         .on_menu_event(|app, event| match event.id().as_ref() {
             "show" => show_main(app),
-            "quit" => quit(app),
+            "quit" => request_quit(app),
             _ => {}
         });
     if let Some(icon) = app.default_window_icon().cloned() {

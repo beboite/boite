@@ -108,6 +108,7 @@ export const fr: Translation = {
     mode: 'Qui répond', mentions: 'Destinataires choisis', round: 'Une réponse par membre', autonomous: 'Prendre la parole à tour de rôle',
     maxTurns: 'Nombre maximum de tours', perAgent: 'Tours par agent', modeHint: 'Chaque nouveau message ouvre un budget. Ses réponses partagent ce budget. Les échanges automatiques cessent à la première limite atteinte.',
     paused: 'En pause', pause: 'Suspendre', resume: 'Reprendre', archive: 'Archiver', active: 'Actif', archived: 'Archivé',
+    archiveTitle: 'Archiver "{name}" ?', archiveBody: 'L’archivage arrête le travail de cet agent et le retire de la liste active. Son profil et son historique restent accessibles par la recherche. Saisissez son nom actuel exactement pour confirmer.', archiveName: 'Nom de l’agent',
     objective: 'Objectif', expectedResult: 'Résultat attendu', minutes: 'Minutes totales de travail', tokens: 'Limite de jetons, vide si aucune',
     finishMission: 'Terminer la mission', reopenMission: 'Rouvrir la mission',
     conversation: 'Discussion', activity: 'Activité', send: 'Envoyer', message: 'Écrire un message', recipients: 'Destinataires', everyone: 'Suivre la règle du groupe',
@@ -477,7 +478,14 @@ export const fr: Translation = {
     restore: 'Restaurer',
     close: 'Fermer',
     quitHold: 'Maintenez Ctrl+Q pour quitter',
-    quitHoldHint: 'ou appuyez deux fois'
+    quitHoldHint: 'ou appuyez deux fois',
+    quitTitle: 'Fermer Boite ?',
+    quitWorkingOne: '1 agent travaille encore ou est en attente. Êtes-vous sûr de vouloir fermer Boite ?',
+    quitWorkingMany: '{count} agents travaillent encore ou sont en attente. Êtes-vous sûr de vouloir fermer Boite ?',
+    quitUnknownBody: 'Le travail sur une machine déconnectée n’a pas pu être vérifié.',
+    quitResidentBody: 'Les moteurs résidents continuent de travailler après la fermeture. Ceux configurés pour s’arrêter avec l’application s’arrêteront.',
+    quitConfirm: 'Fermer Boite',
+    quitCancel: 'Garder ouvert'
   },
 
   serverUpdate: {
