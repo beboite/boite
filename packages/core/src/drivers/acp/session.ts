@@ -396,7 +396,7 @@ export class AcpSession {
   private async open(ctx: TurnContext): Promise<void> {
     const sdk = await this.deps.loadSdk();
     // A stop while the SDK loaded: nothing may be spawned for a session that is over.
-    if (this.ended) throw new Error('the acp session was closed before it started');
+    if (this.ended) throw Object.assign(new Error('the acp session was closed before it started'), { abandoned: true });
     const profile = profileFor(ctx.provider);
     const executable = profile === undefined ? null : resolveExecutable(profile);
     if (executable === null) {

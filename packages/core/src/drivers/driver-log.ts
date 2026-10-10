@@ -54,7 +54,12 @@ export function noteReady<T>(
 ): Promise<T> {
   const at = Date.now();
   const resume = ctx.sessionId !== null;
+  const abandoned = (): void => {
+    ctx.diagnostic?.('debug', `${agent} session open was abandoned after ${Date.now() - at} ms: the thread stopped before a process started`, { event: 'driver.session.open-abandoned', durationMs: Date.now() - at, data: { resume } });
+  };
   const failed = (error: unknown): never => {
+    // A driver that must throw on a stop marks the error, so a normal stop is no warning.
+    if ((error as { abandoned?: unknown } | null)?.abandoned === true) { abandoned(); throw error; }
     ctx.diagnostic?.('warn', `${agent} session failed to open after ${Date.now() - at} ms: ${error instanceof Error ? error.message : String(error)}`, { event: 'driver.session.open-failed', durationMs: Date.now() - at, data: { resume, code: errorCodeOf((error as { code?: unknown } | null)?.code) } });
     throw error;
   };
@@ -63,10 +68,7 @@ export function noteReady<T>(
   return started.then((value) => {
     const extra = details();
     // Stopped before a process ever started: nothing became ready.
-    if (extra.abandoned) {
-      ctx.diagnostic?.('debug', `${agent} session open was abandoned after ${Date.now() - at} ms: the thread stopped before a process started`, { event: 'driver.session.open-abandoned', durationMs: Date.now() - at, data: { resume } });
-      return value;
-    }
+    if (extra.abandoned) { abandoned(); return value; }
     // A session asked to resume can still come back new, when the agent could not load it.
     const resumed = extra.resumed ?? resume;
     ctx.diagnostic?.('info', `${agent} session ready in ${Date.now() - at} ms, ${resumed ? 'resumed' : 'new'}${extra.text ?? ''}`, { event: 'driver.session.ready', durationMs: Date.now() - at, data: { ...extra.data, resume: resumed } });

@@ -216,7 +216,7 @@ export class DiagnosticLogs {
   private observeTurn(name: 'turn.started' | 'turn.finished', turn: RpcEvents['turn.started']): void {
     if (name === 'turn.started') {
       this.activeTurns.set(turn.threadId, { turnId: turn.id, startedAt: turn.startedAt ?? Date.now() });
-      const waited = turn.startedAt !== null && turn.queuedAt ? turn.startedAt - turn.queuedAt : null;
+      const waited = typeof turn.startedAt === 'number' && typeof turn.queuedAt === 'number' ? turn.startedAt - turn.queuedAt : null;
       this.record('info', waited !== null && waited >= 1000 ? `Turn started after ${Math.round(waited / 100) / 10} s in the queue` : 'Turn started',
         { source: 'turns', event: name, threadId: turn.threadId, turnId: turn.id, ...turnAgent(turn), data: { ...(waited !== null ? { queuedMs: waited } : {}), ...(turn.execution?.effort ? { effort: turn.execution.effort } : {}), ...(turn.execution?.accountId ? { accountId: turn.execution.accountId } : {}) } }, turn.startedAt ?? Date.now());
       return;

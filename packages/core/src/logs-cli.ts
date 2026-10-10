@@ -32,8 +32,8 @@ export const LOGS_HELP = `boite logs: Boite's own diagnostics (the app, its shel
                                  the anonymized file a developer reads; prints where it is
   issue draft --title <title> --description <text>|--description-file <file> [--no-logs]
                                  the GitHub issue for beboite/boite, printed, not sent
-  issue submit (same flags)      create it with gh when signed in, else print the
-                                 prefilled link the user opens; show the user the draft first
+  issue submit (same flags)      owner: create it with gh when signed in, else print the
+                                 prefilled link; an agent gets the link, the user submits it
 
 Each line: time (UTC), level, origin, source/event, [thread provider/model <parent turn=],
 (duration), message, {data}. Ids are real and grep-able across lines.`;

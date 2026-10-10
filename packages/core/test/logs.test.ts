@@ -28,7 +28,7 @@ describe('bounded persistent diagnostics', () => {
     }
     const known = 'a-known-credential-crossing-the-limit';
     expect(normalizeCoreLogText('x'.repeat(4080) + known, [known])).not.toContain(known.slice(0, 16));
-    for (const input of ['service-api-key=synthetic-private-value', 'user_api_key={"value":"synthetic-private-value"}', 'payload_content="synthetic-private-value"']) {
+    for (const input of ['service-api-key=synthetic-private-value', 'user_api_key={"value":"synthetic-private-value"}', 'payload_content="synthetic-private-value"', 'prompts: "synthetic-private-value"']) {
       expect(normalizeCoreLogText(input)).not.toContain('synthetic-private-value');
     }
   });

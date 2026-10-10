@@ -161,7 +161,7 @@ export function normalizeCoreLogText(text: string, secrets: readonly string[] = 
     .replace(/((?:^|[^\w-])["']?[\w-]*(?:token|grant|secret|password|api[_-]?key|prompts?|attachments?|commandLine|arguments|params|content|messages|text|input|output)["']?\s*[:=]\s*)[\[{](?!redacted\])[\s\S]*/gi, `$1${REDACTED}`)
     .replace(/\b(?:Authorization\s*[:=]\s*)?(?:Bearer|Basic)\s+[^\s,;"'<>]+/gi, REDACTED)
     .replace(/\bAuthorization\s*[:=]\s*[^\r\n]+/gi, `Authorization: ${REDACTED}`)
-    .replace(/((?:^|[^\w-])["']?[\w-]*(?:token|grant|secret|password|api[_-]?key|prompt|attachments?|commandLine|arguments|params|content|messages|text|input|output)["']?\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;&}]+)/gi, `$1${REDACTED}`)
+    .replace(/((?:^|[^\w-])["']?[\w-]*(?:token|grant|secret|password|api[_-]?key|prompts?|attachments?|commandLine|arguments|params|content|messages|text|input|output)["']?\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;&}]+)/gi, `$1${REDACTED}`)
     .replace(/\b(?:sk-[a-zA-Z0-9_-]{8,}|(?:ghp|gho|ghu|ghs|github_pat)_[a-zA-Z0-9_]{8,}|xox[abprs]-[a-zA-Z0-9-]{8,}|AKIA[0-9A-Z]{16}|eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,})/g, REDACTED)
     .replace(/(^|[^a-z0-9+.-])([a-z][a-z0-9+.-]*:\/\/[^\s<>"']+)/gi, (_match, prefix: string, raw: string) => prefix + raw
       .replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/?#@]*@/i, `$1${REDACTED}@`)
@@ -587,6 +587,8 @@ export interface DiagnosticsExport {
 }
 
 export const ISSUE_REPOSITORY = 'beboite/boite';
+/** Why an agent's submit publishes nothing: an injected or wrong agent must not post publicly as the owner. */
+export const AGENT_SUBMIT_REFUSED = 'an agent cannot publish the issue: the user opens the prefilled link and submits it with their GitHub account, or submits it from Settings > Diagnostics';
 
 export interface DiagnosticsIssueParams {
   threadId?: ThreadId;

@@ -12,7 +12,7 @@ export interface BuiltinSkill { name: string; description: string; body: string 
 
 export const REPORT_ISSUE_SKILL: BuiltinSkill = {
   name: 'boite-report-issue',
-  description: 'Check whether Boite itself failed (a turn, a tool, the window, the shell, a phone) from its own logs, explain it, and with the user\'s yes report it on GitHub with an anonymized export.',
+  description: 'Check whether Boite itself failed (a turn, a tool, the window, the shell, a phone) from its own logs, explain it, and draft a GitHub issue with an anonymized export that the user publishes.',
   body: `# Diagnose and report a Boite problem
 
 Use this when the user says Boite froze, crashed, lost or duplicated a message,
@@ -46,7 +46,7 @@ lines. Say whether it looks like a Boite bug, a provider outage, a network or
 login problem, or the machine running out of memory or CPU. Only a Boite bug
 goes to GitHub.
 
-## 3. Draft, show, then submit only on the user's yes
+## 3. Draft, show, and let the user publish it
 
 Write the description to a file: what the user did, what they expected, what
 happened, when (UTC) and how often, and the lines that show it. Never paste
@@ -57,22 +57,18 @@ boite issue draft --title "<symptom in a few words>" --description-file <file>
 \`\`\`
 
 Show the user the printed draft. It is anonymized but the issue is public on
-github.com/beboite/boite; let them change anything. On their explicit yes:
-
-\`\`\`sh
-boite issue submit --title "<same>" --description-file <file>
-\`\`\`
-
-\`gh: ready\` creates it with the user's own GitHub login and prints the URL.
-Otherwise the output has a link that opens GitHub with the issue filled in:
-give it to the user (\`boite browse <link>\` opens it in the panel), since
-they need to be signed in to a GitHub account. In both cases give the path
-of the full anonymized export, which they can drag into the issue.
+github.com/beboite/boite; let them change anything. An agent never publishes
+it: the issue goes out under the user's own GitHub account, by their hand.
+The draft prints a link that opens GitHub with the issue filled in; give it
+to the user (\`boite browse <link>\` opens it in the panel) so they submit it
+there, signed in to their GitHub account, or from Settings > Diagnostics,
+which creates it with \`gh\` when it is signed in. Give the path of the full
+anonymized export too, which they can drag into the issue.
 
 With \`gh: ready\`, look for an existing report first:
-\`gh issue list --repo beboite/boite --search "<words>" --state all\`. Add a
-comment to a matching issue instead of opening a duplicate, again only on the
-user's yes.
+\`gh issue list --repo beboite/boite --search "<words>" --state all\`, and
+give the user the matching issue so they comment there instead of opening a
+duplicate.
 `,
 };
 

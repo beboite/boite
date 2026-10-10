@@ -293,9 +293,10 @@ export class AccountStore {
   /** The native agent rejected this login, including during session preparation. */
   authenticationFailed(accountId: AccountId): void {
     if (this.core.journal.isClosed() || this.removing.has(accountId) || !this.core.journal.getAccount(accountId)) return;
+    const current = this.require(accountId);
     this.core.journal.setSetting(`account-auth-rejected:${accountId}`, true);
-    this.core.logs.warn(`The agent rejected the login of account ${accountId}; it is marked signed out`, { source: 'accounts', event: 'account.auth-rejected', data: { accountId, providerId: this.require(accountId).providerId } });
-    this.saveCheck(accountId, { status: 'unauthenticated', identity: this.require(accountId).identity });
+    this.core.logs.warn(`The agent rejected the login of account ${accountId}; it is marked signed out`, { source: 'accounts', event: 'account.auth-rejected', data: { accountId, providerId: current.providerId } });
+    this.saveCheck(accountId, { status: 'unauthenticated', identity: current.identity });
   }
 
   /**

@@ -4,7 +4,7 @@ import { chmod, mkdir, open, readdir, unlink, writeFile } from 'node:fs/promises
 import { arch, cpus, freemem, homedir, hostname, platform, release, totalmem, userInfo, version as osVersion } from 'node:os';
 import { join } from 'node:path';
 import {
-  createLogAnonymizer, formatLogDuration, formatLogLine, formatLogTime, ISSUE_REPOSITORY, logLevelAtLeast, logMatches, validateDiagnosticReport, validateDiagnosticsLogsQuery,
+  AGENT_SUBMIT_REFUSED, createLogAnonymizer, formatLogDuration, formatLogLine, formatLogTime, ISSUE_REPOSITORY, logLevelAtLeast, logMatches, validateDiagnosticReport, validateDiagnosticsLogsQuery,
   type CoreLogLevel, type CoreLogRecord, type DiagnosticEnvironment, type DiagnosticProblem, type DiagnosticReportRecord, type DiagnosticsExport, type DiagnosticsExportParams,
   type DiagnosticsIssue, type DiagnosticsIssueParams, type DiagnosticsLogsQuery, type DiagnosticSummary, type DiagnosticThread, type LogAnonymizer, type LogData, type ThreadSummary,
 } from '@boite/contracts';
@@ -173,12 +173,13 @@ export class Diagnostics {
       }
     }
     const all = this.core.journal.listThreads();
+    const projectPaths = new Map(this.core.projects.list().map(project => [project.id, project.path]));
     const mentioned = new Set(records.flatMap(record => [record.threadId, record.parentThreadId].filter((id): id is string => id !== undefined)));
     const threads: DiagnosticThread[] = all.filter(thread => (family === null || family.has(thread.id)) && (mentioned.has(thread.id) || (!thread.archived && thread.updatedAt >= since))).map(thread => {
       const seen = perThread.get(thread.id);
       return {
         threadId: thread.id, providerId: thread.providerId, model: thread.model, effort: thread.effort, status: thread.status,
-        parentThreadId: thread.parentThreadId ?? null, project: anonymizer.project(this.core.projects.list().find(project => project.id === thread.projectId)?.path ?? null),
+        parentThreadId: thread.parentThreadId ?? null, project: anonymizer.project(projectPaths.get(thread.projectId ?? '') ?? null),
         archived: thread.archived, createdAt: thread.createdAt, updatedAt: thread.updatedAt,
         warnings: seen?.warnings ?? 0, errors: seen?.errors ?? 0, lastError: seen?.lastError?.message ?? null,
       };
@@ -285,7 +286,9 @@ export class Diagnostics {
     const gh = await this.ghStatus();
     let url: string | null = null;
     let error: string | null = null;
-    if (params.submit === true) {
+    // An agent drafts; publishing under the owner's GitHub login is the owner's act, from the link or Settings.
+    if (params.submit === true && connection?.identity.principal === 'agent') error = AGENT_SUBMIT_REFUSED;
+    else if (params.submit === true) {
       if (gh !== 'ready') error = gh === 'missing' ? 'GitHub CLI (gh) is not installed on this machine' : 'GitHub CLI (gh) is not signed in: run gh auth login';
       else {
         try { url = await this.createIssue(safeTitle, body); }

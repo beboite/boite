@@ -221,6 +221,11 @@ as fit. With `submit: true` it runs `gh issue create` under the core's own
 `gh` login and returns the issue URL; without a signed-in `gh` it returns a
 prefilled `issues/new` link the user opens in a browser signed in to GitHub.
 Either way the saved export path is returned so the full file can be attached.
+Only the owner's `submit: true` runs `gh`: an agent's returns the draft, the
+link and an error saying the user publishes it, because the issue is public and
+signed by the owner's GitHub login.
+
+A reported `threadId` is kept only when that thread exists.
 
 `diagnostics.report` takes up to 50 records from a client, owner or paired
 device, stored with `origin: "ui"`, the client kind and whether it is remote.

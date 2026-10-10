@@ -111,6 +111,10 @@ test('a session open that throws before its first await is logged as a failure, 
   await expect(noteReady(ctx, 'pi', () => { throw new Error('no pi executable on this machine'); })).rejects.toThrow('no pi executable');
   expect(notes).toMatchObject([{ level: 'warn', event: 'driver.session.open-failed' }]);
   notes.length = 0;
+  // A stop that a driver can only report by throwing is an abandoned open, not a failure.
+  await expect(noteReady(ctx, 'acp', () => Promise.reject(Object.assign(new Error('closed before it started'), { abandoned: true })))).rejects.toThrow('closed before');
+  expect(notes).toMatchObject([{ level: 'debug', event: 'driver.session.open-abandoned' }]);
+  notes.length = 0;
   await noteReady(ctx, 'pi', () => { const until = Date.now() + 30; while (Date.now() < until) { /* synchronous setup */ } return Promise.resolve(); }, () => ({ text: ', on gpt', data: { model: 'gpt' } }));
   expect(notes[0]).toMatchObject({ level: 'info', event: 'driver.session.ready' });
   expect(notes[0]!.durationMs).toBeGreaterThanOrEqual(25);

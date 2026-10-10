@@ -238,7 +238,7 @@ export class AgentBrowser {
     const key = this.#host.attached ? `host:${profile}` : profile;
     let engine = this.#engines.get(key);
     if (!engine) {
-      engine = this.#host.attached ? this.#launchHosted(profile) : this.#launch(profile);
+      engine = this.#launch(profile, true, this.#host.attached);
       this.#engines.set(key, engine);
       engine.then(started => {
         void started.exited.then(() => this.#lost(started));
@@ -277,15 +277,15 @@ export class AgentBrowser {
     return startChromium((cmd, args, options) => this.#core.procs.spawn(SCOPE, cmd, args, options), path, dir, START_TIMEOUT_MS, userAgent);
   }
 
-  /** `identify` false starts the browser as it is: a page check (`probe`) visits no site. */
-  async #launch(profile: string, identify = true): Promise<Engine> {
+  /** `identify` false starts the browser as it is: a page check (`probe`) visits no site. `hosted` opens it in the desktop app. */
+  async #launch(profile: string, identify = true, hosted = false): Promise<Engine> {
     const at = performance.now();
     try {
-      const engine = await this.#launchLocal(profile, identify);
-      this.#core.logs.info(`Agent browser started for profile ${profile} in ${Math.round(performance.now() - at)} ms`, { source: 'browser', event: 'browser.started', durationMs: performance.now() - at, data: { profile, program: this.findBrowser().path?.split(/[\\/]/).pop() ?? null } });
+      const engine = await (hosted ? this.#launchHosted(profile) : this.#launchLocal(profile, identify));
+      this.#core.logs.info(`Agent browser started for profile ${profile} in ${Math.round(performance.now() - at)} ms`, { source: 'browser', event: 'browser.started', durationMs: performance.now() - at, data: { profile, hosted, program: hosted ? 'desktop app' : this.findBrowser().path?.split(/[\\/]/).pop() ?? null } });
       return engine;
     } catch (error) {
-      this.#core.logs.warn(`Agent browser for profile ${profile} did not start after ${Math.round(performance.now() - at)} ms: ${error instanceof Error ? error.message : String(error)}`, { source: 'browser', event: 'browser.start-failed', durationMs: performance.now() - at, data: { profile } });
+      this.#core.logs.warn(`Agent browser for profile ${profile} did not start after ${Math.round(performance.now() - at)} ms: ${error instanceof Error ? error.message : String(error)}`, { source: 'browser', event: 'browser.start-failed', durationMs: performance.now() - at, data: { profile, hosted } });
       throw error;
     }
   }

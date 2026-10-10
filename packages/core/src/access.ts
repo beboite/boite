@@ -141,7 +141,7 @@ export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMeth
   ['diagnostics.logs', 'anonymized app records so it can tell whether Boite itself failed; paths, names and addresses are placeholders'],
   ['diagnostics.summary', 'the anonymized environment and grouped recent problems'],
   ['diagnostics.export', 'the anonymized export a developer reads, the same file the owner would send'],
-  ['diagnostics.issue', 'a GitHub issue draft about Boite; it is created only when the agent submits it with the owner signed in to gh'],
+  ['diagnostics.issue', 'a GitHub issue draft about Boite and its prefilled link; only the owner publishes it, so an agent never posts publicly under their login'],
 ]);
 
 export function isAgentMethod(method: RpcMethodName): boolean {

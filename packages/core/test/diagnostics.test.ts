@@ -152,6 +152,15 @@ test('an issue is a draft until submitted, and without gh the user gets a prefil
     expect(submitted.url).toBeNull();
     expect(submitted.error).toContain('not installed');
     expect(submitted.body).not.toContain('### Environment');
+    // An agent drafts; it never publishes under the owner's GitHub login, even with gh ready.
+    harness.core.diagnostics.ghCommand = 'gh-must-not-run';
+    const { threadId } = await echoThread(harness, owner);
+    const agent = await connect(harness.url, harness.core.agents.tokenFor(threadId));
+    try {
+      const refused = await agent.call('diagnostics.issue', { threadId, title: 'Window froze', description: 'x', includeLogs: false, submit: true });
+      expect(refused).toMatchObject({ url: null, error: expect.stringContaining('an agent cannot publish') });
+      expect(refused.prefillUrl).toStartWith('https://github.com/beboite/boite/issues/new?');
+    } finally { agent.close(); }
     for (const params of [{ title: 'no', description: 'x' }, { title: 'Valid title', description: '' }, { title: 'two\nlines', description: 'x' }]) {
       try { await owner.call('diagnostics.issue', params); throw new Error('accepted'); }
       catch (error) { expect((error as { rpc?: { code: number } }).rpc?.code).toBe(RpcErrorCode.InvalidParams); }

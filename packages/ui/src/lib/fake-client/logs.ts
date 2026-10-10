@@ -1,5 +1,5 @@
 import {
-  createLogAnonymizer, formatLogLine, formatLogTime, ISSUE_REPOSITORY, logLevelAtLeast, logMatches, normalizeCoreLogText, normalizeLogData, validateCoreLogsQuery, validateDiagnosticReport,
+  AGENT_SUBMIT_REFUSED, createLogAnonymizer, formatLogLine, formatLogTime, ISSUE_REPOSITORY, logLevelAtLeast, logMatches, normalizeCoreLogText, normalizeLogData, validateCoreLogsQuery, validateDiagnosticReport,
   validateDiagnosticsLogsQuery, RpcErrorCode,
   type CoreLogLevel, type CoreLogRecord, type DiagnosticProblem, type DiagnosticsExport, type DiagnosticSummary, type DiagnosticThread, type LogAnonymizer, type RpcEventName, type RpcEvents,
 } from '@boite/contracts';
@@ -181,7 +181,7 @@ export function logMethods(ctx: FakeContext): Pick<FakeMethods, DiagnosticMethod
       const prefillUrl = `https://github.com/${ISSUE_REPOSITORY}/issues/new?${new URLSearchParams({ title: safeTitle, body: body.slice(0, PREFILL_BODY_CHARS) }).toString()}`;
       return {
         repository: ISSUE_REPOSITORY, title: safeTitle, body, url: null, prefillUrl, gh: 'missing',
-        error: params.submit === true ? 'GitHub CLI (gh) is not installed on this machine' : null, exportPath: exported?.path ?? null,
+        error: params.submit !== true ? null : ctx.bus.principal === 'agent' ? AGENT_SUBMIT_REFUSED : 'GitHub CLI (gh) is not installed on this machine', exportPath: exported?.path ?? null,
       };
     },
     'diagnostics.report': async raw => {

@@ -463,7 +463,7 @@ and the results come back as one message when the run ends.
 clients. Lines are oldest first, one record each:
 
 ```text
-2026-10-10 14:03:22.120Z ERROR shell watchdog/shell.main-thread.blocked (6.2 s) The main thread has not answered for 6.2 s while notify ran {command=notify}
+2026-10-10 14:03:22.120Z ERROR shell main-thread/shell.main-thread.blocked main thread blocked for 6.2 s, command notify started 6.2 s ago and has not returned {blockedMs=6200, command=notify, commandRunningMs=6200}
 2026-10-10 14:03:25.002Z INFO  core  turns/turn.finished [thr_x claude/claude-opus-5-5 <thr_parent turn=trn_y] (41.3 s) Turn finished: done {status=done, outputTokens=812}
 ```
 
@@ -493,9 +493,13 @@ agent access on. Changing a data-directory flag does not change that.
 
 `logs export` prints where the core saved the file (`<dataDir>/logs/exports/`)
 and, with `--out`, also writes it relative to the working directory.
-`issue draft` prints the issue body without sending anything. `issue submit`
-creates it on `beboite/boite` with `gh` when `gh` is signed in, or prints a
-prefilled GitHub link and the export to attach. [Trace](trace.md#structured-diagnostics)
+`issue draft` prints the issue body and a prefilled GitHub link without
+sending anything. From the owner's terminal, `issue submit` creates it on
+`beboite/boite` with `gh` when `gh` is signed in, or prints that link and the
+export to attach. Inside a thread, `issue submit` publishes nothing: the
+issue would be public and signed by the owner's GitHub login, so the agent
+gives the user the link and the user submits it, or submits it from
+Settings > Diagnostics. [Trace](trace.md#structured-diagnostics)
 owns the record format, rotation, anonymization and query bounds.
 
 ## Where the command lives
