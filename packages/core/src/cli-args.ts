@@ -61,8 +61,8 @@ export function parse(argv: string[]): Parsed {
     if (parsed.positional[0] === 'browser' && parsed.positional.length > 1 && !['--json', '--thread', '--data-dir', '--core', '--channel'].includes(arg)) { parsed.positional.push(arg); continue; }
     // `boite logs` and `boite issue` parse their own filters (logs-cli.ts).
     if ((parsed.positional[0] === 'logs' || parsed.positional[0] === 'issue') && !['--json', '--thread', '--data-dir', '--core', '--channel', '--help', '-h'].includes(arg)) {
+      // A value comes next and is passed the same way; a global flag after it stays global.
       parsed.positional.push(arg);
-      if (arg.startsWith('--') && !['--mine', '--anonymize', '--no-logs'].includes(arg) && argv[index + 1] !== undefined) { parsed.positional.push(argv[index + 1]!); index += 1; }
       continue;
     }
     const boolean = BOOLEAN_OPTIONS.find(key => arg === `--${key}`);

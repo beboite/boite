@@ -4,6 +4,7 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createLogAnonymizer, formatLogDuration, formatLogLine, parseLogRecord, RpcErrorCode } from '@boite/contracts';
 import { connect } from '../src/client.ts';
+import { parse } from '../src/cli-args.ts';
 import { runCli } from '../src/cli.ts';
 import type { Core } from '../src/core.ts';
 import { Diagnostics, renderIssueBody } from '../src/diagnostics.ts';
@@ -181,6 +182,10 @@ test('clients report their own errors as ui records, bounded per connection, and
       expect(await phone.call('diagnostics.report', { records: [{ level: 'info', at: 1e15, source: 'socket', event: 'ui.reconnected', message: 'Reconnected after 4 s' }] })).toEqual({ accepted: 1 });
       const [reconnected] = await owner.call('core.logs', { origin: 'ui', search: 'ui.reconnected', limit: 1 });
       expect(reconnected!.at).toBeLessThanOrEqual(Date.now());
+      // Nor can it file a record under a thread that does not exist.
+      await phone.call('diagnostics.report', { records: [{ level: 'error', at: Date.now(), source: 'socket', event: 'ui.invented', message: 'blame', threadId: 'thr_invented' }] });
+      const [invented] = await owner.call('core.logs', { origin: 'ui', search: 'ui.invented', limit: 1 });
+      expect(invented?.threadId).toBeUndefined();
       try { await phone.call('diagnostics.summary', {}); throw new Error('accepted'); }
       catch (error) { expect((error as { rpc?: { code: number } }).rpc?.code).toBe(RpcErrorCode.Refused); }
     } finally { phone.close(); }
@@ -203,6 +208,9 @@ test('the CLI prints records oldest first, filters by time and level, and export
       expect({ code, errors }).toEqual({ code: 0, errors: '' });
       return output;
     };
+    // A global flag right after one of the logs filters stays global.
+    expect(parse(['logs', '--since', '--json'])).toMatchObject({ positional: ['logs', '--since'], json: true });
+    expect(parse(['logs', '--search', 'timeout', '--json'])).toMatchObject({ positional: ['logs', '--search', 'timeout'], json: true });
     const owned = (await run(['logs', '--data-dir', harness.dataDir, '--min-level', 'warn', '--since', '10m'])).trim().split('\n');
     expect(owned.at(-2)).toContain('test/test.first');
     expect(owned.at(-1)).toContain('ERROR core  test/test.second');
@@ -228,6 +236,10 @@ test('records about a thread name its agent, and a guide session lists the built
     const { builtinSkills } = await import('../src/builtin-skills.ts');
     const [skill] = builtinSkills(harness.dataDir);
     expect(skill?.name).toBe('boite-report-issue');
+    expect(readFileSync(skill!.path, 'utf8')).toStartWith('---\nname: boite-report-issue\n');
+    // A folder an agent left where the file goes does not drop the skill from later sessions.
+    rmSync(skill!.path); mkdirSync(join(skill!.path, 'inside'), { recursive: true });
+    expect(builtinSkills(harness.dataDir)[0]?.name).toBe('boite-report-issue');
     expect(readFileSync(skill!.path, 'utf8')).toStartWith('---\nname: boite-report-issue\n');
   } finally { await harness.stop(); }
 });

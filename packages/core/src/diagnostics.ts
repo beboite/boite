@@ -339,15 +339,22 @@ export class Diagnostics {
     const used = budget?.minute === minute ? budget.count : 0;
     const room = Math.max(0, REPORTS_PER_MINUTE - used);
     const accepted = records.slice(0, room);
+    // Moved to the end on every report, so the first entry is the one that reported least recently.
+    this.#reports.delete(connection.id);
     this.#reports.set(connection.id, { minute, count: used + accepted.length });
-    if (this.#reports.size > 256) this.#reports.delete(this.#reports.keys().next().value!);
+    if (this.#reports.size > 256) {
+      const stale = [...this.#reports].find(([, entry]) => entry.minute !== minute)?.[0];
+      this.#reports.delete(stale ?? this.#reports.keys().next().value!);
+    }
     const client = connection.sentFrom ? `${connection.sentFrom.client}${connection.sentFrom.device ? ` ${connection.sentFrom.device}` : ''}` : connection.identity.principal;
     const now = Date.now();
     for (const record of accepted) {
       // A client clock can be wrong; keep its time only when it is near ours.
       const at = Math.abs(record.at - now) < 10 * 60_000 ? record.at : now;
+      // A reporter names a thread; only one that exists is kept, so no client can file problems under an invented one.
+      const threadId = record.threadId && this.core.journal.getThread(record.threadId) ? record.threadId : undefined;
       this.core.logs.record(record.level, record.message, {
-        origin: 'ui', source: record.source, event: record.event, ...(record.threadId ? { threadId: record.threadId } : {}),
+        origin: 'ui', source: record.source, event: record.event, ...(threadId ? { threadId } : {}),
         ...(record.durationMs === undefined ? {} : { durationMs: record.durationMs }),
         data: { ...(record.data ?? {}), client, remote: connection.remote !== false },
       }, at);

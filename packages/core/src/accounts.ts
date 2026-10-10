@@ -217,6 +217,7 @@ export class AccountStore {
     // A session file cannot overrule an authentication refusal from the agent.
     if (status !== 'error' && this.core.journal.getSetting(`account-auth-rejected:${accountId}`) === true) status = 'unauthenticated';
     if (!announce && status === account.status) return account;
+    if (status !== account.status) logAccountStatus(this.core, account, status);
     const next: Account = { ...account, status };
     this.core.journal.append({ type: 'account.checked', threadId: null, version: 1, payload: next }, () => {
       this.core.journal.putAccount(next);

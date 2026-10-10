@@ -27,14 +27,11 @@ export function noteClaudeMessage(ctx: Diagnosable, message: SDKMessage, session
       });
     } else if (system.subtype === 'api_retry') {
       const status = typeof system.error_status === 'number' ? system.error_status : null;
-      note('warn', `Claude API request failed (${status === null ? 'no HTTP response' : `HTTP ${status}`}, ${String(system.error)}); retry ${String(system.attempt)} of ${String(system.max_retries)} in ${String(system.retry_delay_ms)} ms`, {
-        event: 'driver.api.retry',
-        data: { status, error: str(system.error), attempt: num(system.attempt), maxRetries: num(system.max_retries), retryAfterMs: num(system.retry_delay_ms) },
-      });
+      const data = { status, error: str(system.error), attempt: num(system.attempt), maxRetries: num(system.max_retries), retryAfterMs: num(system.retry_delay_ms) };
+      note('warn', `Claude API request failed (${status === null ? 'no HTTP response' : `HTTP ${status}`}, ${data.error ?? 'no error text'}); retry ${data.attempt ?? '?'} of ${data.maxRetries ?? '?'} in ${data.retryAfterMs ?? '?'} ms`, { event: 'driver.api.retry', data });
     } else if (system.subtype === 'model_refusal_fallback') {
-      note('warn', `Claude fell back from ${String(system.original_model)} to ${String(system.fallback_model)} after a refusal (${String(system.direction)}, scope ${String(system.scope ?? 'session')})`, {
-        event: 'driver.model.fallback', data: { from: str(system.original_model), to: str(system.fallback_model), direction: str(system.direction), scope: str(system.scope) ?? 'session' },
-      });
+      const data = { from: str(system.original_model), to: str(system.fallback_model), direction: str(system.direction), scope: str(system.scope) ?? 'session' };
+      note('warn', `Claude fell back from ${data.from ?? 'unknown'} to ${data.to ?? 'unknown'} after a refusal (${data.direction ?? 'unknown'}, scope ${data.scope})`, { event: 'driver.model.fallback', data });
     }
     return;
   }

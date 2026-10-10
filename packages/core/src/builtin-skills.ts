@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
@@ -82,6 +82,10 @@ function render(skill: BuiltinSkill): string {
   return `---\nname: ${skill.name}\ndescription: ${JSON.stringify(skill.description)}\n---\n\n${skill.body}`;
 }
 
+function kind(path: string, wanted: 'file' | 'directory'): boolean {
+  try { const stat = lstatSync(path); return wanted === 'file' ? stat.isFile() : stat.isDirectory(); } catch { return false; }
+}
+
 /** Writes each skill when missing or different, and returns where each lives. A write that fails leaves that skill out. */
 export function ensureBuiltinSkills(dataDir: string, onError: (message: string) => void = () => {}): { name: string; description: string; path: string }[] {
   const listed: { name: string; description: string; path: string }[] = [];
@@ -90,7 +94,10 @@ export function ensureBuiltinSkills(dataDir: string, onError: (message: string) 
     const path = join(directory, 'SKILL.md');
     const text = render(skill);
     try {
-      if (!existsSync(path) || readFileSync(path, 'utf8') !== text) {
+      // Anything but a plain folder and file there (a link, a folder named SKILL.md) is replaced.
+      if (!kind(directory, 'directory')) rmSync(directory, { recursive: true, force: true });
+      if (!kind(path, 'file')) rmSync(path, { recursive: true, force: true });
+      if (!kind(path, 'file') || readFileSync(path, 'utf8') !== text) {
         mkdirSync(directory, { recursive: true });
         writeFileSync(path, text);
       }

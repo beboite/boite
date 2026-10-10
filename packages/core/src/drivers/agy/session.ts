@@ -98,6 +98,9 @@ export class AgySession {
     private readonly onEnded: (session: AgySession, gone: Promise<void>) => void,
   ) {}
 
+  /** The agy conversation this process continues. */
+  get conversationId(): string | null { return this.sessionId; }
+
   usable(key: string, warmMs: number, sessionId: string | null): boolean {
     return !this.ended && !this.closing && this.key === key && warmMs > 0 && this.warmMs > 0 && this.sessionId === sessionId;
   }

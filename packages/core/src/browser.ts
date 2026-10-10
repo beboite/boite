@@ -319,14 +319,17 @@ export class AgentBrowser {
     }
   }
 
-  /** Engines whose end is already in the log: the exit, the closed socket and a shutdown all call `#lost`. */
-  readonly #ended = new WeakSet<Engine>();
+  /** Engines whose end is already in the log (the exit, the closed socket and a shutdown all call `#lost`), and those the core is closing. */
+  readonly #ended = new WeakSet<Engine>(); readonly #closing = new WeakSet<Engine>();
 
   /** The process ended or dropped its connection: its tabs are gone. */
   #lost(engine: Engine): void {
     if (!this.#ended.has(engine)) {
       this.#ended.add(engine);
-      this.#core.logs.info(`Agent browser for profile ${engine.profile} ended with ${engine.tabs.size} tabs open`, { source: 'browser', event: 'browser.ended', data: { profile: engine.profile, tabs: engine.tabs.size, hosted: engine.hosted } });
+      // Closed by the core, or with the desktop app hosting it, or with no tab: no crash.
+      const expected = this.#closing.has(engine) || engine.hosted || engine.tabs.size === 0;
+      this.#core.logs.record(expected ? 'info' : 'warn', `Agent browser for profile ${engine.profile} ended${expected ? '' : ' on its own'} with ${engine.tabs.size} tabs open`, {
+        source: 'browser', event: expected ? 'browser.ended' : 'browser.lost', data: { profile: engine.profile, tabs: engine.tabs.size, hosted: engine.hosted } });
     }
     const current = this.#engines.get(engine.key);
     void current?.then(value => { if (value === engine) this.#engines.delete(engine.key); }, () => {});
@@ -337,6 +340,7 @@ export class AgentBrowser {
   }
 
   async #shut(engine: Engine): Promise<void> {
+    this.#closing.add(engine);
     if (this.#engines.has(engine.key)) {
       const current = await this.#engines.get(engine.key)!.catch(() => null);
       if (current === engine) this.#engines.delete(engine.key);
