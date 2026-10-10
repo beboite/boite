@@ -40,6 +40,8 @@ export interface BrowserBridge {
   /** Whether this bridge paints anything at all. False keeps the slot's muted line. */
   readonly paints: boolean;
   protocol?(id: string, method: string, params: Record<string, unknown>): Promise<unknown>;
+  /** A webview's own DevTools events, for the agent browser this app hosts. Only the Windows shell has any. */
+  events?(id: string, names: readonly string[], listener: (method: string, params: Record<string, unknown>) => void): Promise<() => void>;
   /** Streams the page's frames as JPEG bytes, at most `frameRate` a second, until the returned stop runs. */
   screencast?(id: string, frameRate: number, frame: (jpeg: ArrayBuffer) => void): Promise<() => Promise<void>>;
   viewport?(id: string): { width: number; height: number } | null;
@@ -49,7 +51,9 @@ export interface BrowserBridge {
   /** Erases a profile's cookies, storage and sign-ins on this computer. Only the shell has any. */
   deleteProfile?(profile: string): Promise<void>;
   /** Every cookie the profile holds on this computer, as the DevTools protocol lists them. Only the Windows shell reads any. */
-  cookies?(profile: string): Promise<unknown[]>;
+  cookies?(profile: string, view?: string): Promise<unknown[]>;
+  /** Writes DevTools cookies into the profile: the agent browser this app hosts, restoring what its core saved. */
+  setCookies?(profile: string, cookies: unknown[], view?: string): Promise<void>;
   navigate(id: string, url: string): void;
   back(id: string): void;
   forward(id: string): void;

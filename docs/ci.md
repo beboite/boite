@@ -132,8 +132,8 @@ The tested installer becomes the release artifact.
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 590,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,415,000 |
+| UI entry chunk | 591,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,430,000 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 3,710,000 |
 
@@ -197,8 +197,9 @@ update joining an older download. Merged with `main` at `2ffd95e0`, they measure
 Choosing the machine a new agent runs on, with the form's labelled rows,
 adds 5,122 UI bytes: 4,413,081 against 4,407,959 for `main` at `c30a17a5`,
 measured on Linux on 2026-10-10. A machine icon in the picker cost another
-2,563 bytes through a chunk split and was left out. The UI limit rises from
-4,409,000 to 4,415,000, leaving about 1.9 KB.
+2,563 bytes through a chunk split and was left out. Merged with `main` at
+`feeb393b`, whose limit is 4,424,000, the build measured 4,425,815 UI bytes.
+The UI limit rises to 4,430,000, leaving about 4 KB.
 
 Recent's Done and Working groups measured 3,949,936 UI bytes on 2026-10-03
 before integrating these orchestration additions. The combined build measured

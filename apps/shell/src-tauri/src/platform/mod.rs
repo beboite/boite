@@ -38,6 +38,8 @@ pub(crate) mod browser_control;
 #[cfg(windows)]
 pub(crate) mod browser_diagnostics;
 #[cfg(windows)]
+pub(crate) mod browser_events;
+#[cfg(windows)]
 pub(crate) mod browser_page;
 #[cfg(windows)]
 pub(crate) mod browser_screencast;

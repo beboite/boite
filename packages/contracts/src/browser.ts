@@ -1,3 +1,4 @@
+import { RPC_MAX_FRAME_BYTES } from './attachment-limits';
 import type { RemoteBrowserFrame, RemoteBrowserInput, RemoteBrowserSelection, RemoteFrameOptions } from './browser-remote';
 /**
  * The agent's browser runs on the machine that runs its conversation: the core
@@ -121,8 +122,12 @@ export function browserPresetSize(preset: BrowserPreset, orientation?: 'portrait
   const short = Math.min(width, height), long = Math.max(width, height);
   return orientation === 'portrait' ? { width: short, height: long } : { width: long, height: short };
 }
-/** One tab of a conversation's agent browser, as its viewers list it. */
-export interface AgentBrowserTab { tabId: string; url: string; title: string; profile: string; active: boolean }
+/**
+ * One tab of a conversation's agent browser, as its viewers list it. `view` is
+ * set when the desktop app of this machine hosts the tab in a webview of its
+ * own (`browser.hostAttach`): that app shows the page itself, by this id.
+ */
+export interface AgentBrowserTab { tabId: string; url: string; title: string; profile: string; active: boolean; view?: string }
 /**
  * What a viewer shows for a conversation: whether its agent has a browser open
  * (`live`), the tabs, and whether this machine can run one at all. `reason`
@@ -152,11 +157,36 @@ export interface BrowserRpcMethods {
    * holds for that profile; nothing is read from this machine.
    */
   'browser.importCookies': { params: { profile: { id: string; name?: string }; cookies: BrowserCookie[] }; result: { imported: number; profile: string } };
+  /**
+   * Owner only, from the desktop app on this machine's loopback: its webviews
+   * host the agent's new tabs from now on, so the page shows natively there
+   * instead of as frames. The core speaks the DevTools protocol to them through
+   * this connection (`browser.hostMessage` out, `browser.hostReply` back) until
+   * it detaches or closes; their tabs close with it.
+   */
+  'browser.hostAttach': { params: Record<string, never>; result: { ok: true } };
+  'browser.hostDetach': { params: Record<string, never>; result: { ok: true } };
+  /** DevTools messages (answers and events) from the host's webviews of one profile, in order. */
+  'browser.hostReply': { params: { profile: string; messages: string[] }; result: { ok: true } };
 }
 export interface BrowserRpcEvents {
   /** For the clients subscribed to the conversation: its agent's tabs changed, opened, navigated or closed. */
   'browser.remoteChanged': { threadId: string; live: boolean; tabs: AgentBrowserTab[] };
+  /** To the attached host only: one DevTools message for its webviews of `profile`. */
+  'browser.hostMessage': { profile: string; message: string };
 }
+
+/** Messages one `browser.hostReply` carries. */
+export const BROWSER_HOST_BATCH_MAX = 256;
+/**
+ * The UTF-8 bytes one `browser.hostReply` may give its messages, each counted
+ * as written in the request (a JSON string, quotes escaped): the rest of the
+ * RPC frame (`RPC_MAX_FRAME_BYTES`) is left to the envelope. A recording frame
+ * stays far under it.
+ */
+export const BROWSER_HOST_BATCH_BYTES = RPC_MAX_FRAME_BYTES - 64 * 1024;
+/** The longest message the core takes, in characters: one alone in a reply still fits its frame. */
+export const BROWSER_HOST_MESSAGE_MAX = BROWSER_HOST_BATCH_BYTES;
 
 /** A cookie as the DevTools protocol exchanges it. Without `expires` it lasts as long as its browser session. */
 export interface BrowserCookie {

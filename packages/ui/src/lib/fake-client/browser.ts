@@ -3,7 +3,7 @@ import { refusal } from './shared';
 import { fakeBrowserScreen, type FakePage } from './browser-screen';
 import type { FakeContext, FakeMethods } from './context';
 
-type Methods = 'browser.command' | 'browser.importCookies' | 'browser.remoteFrame' | 'browser.remoteInput' | 'browser.remoteSelection' | 'browser.remoteStatus';
+type Methods = 'browser.command' | 'browser.importCookies' | 'browser.remoteFrame' | 'browser.remoteInput' | 'browser.remoteSelection' | 'browser.remoteStatus' | 'browser.hostAttach' | 'browser.hostDetach' | 'browser.hostReply';
 
 /** `selected`: the typed text is selected, by a double click or select-all, until the next click or key. */
 interface Tab extends FakePage { tabId: string; profile: string; history: string[]; historyIndex: number; at: number; selected?: boolean }
@@ -124,6 +124,10 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
 
   return {
     'browser.command': command,
+    // The demo core has no desktop app on its machine to host tabs: they stay its own, shown as frames.
+    'browser.hostAttach': async () => { throw refusal('only the desktop app on this machine, signed in as the owner, can host the agent browser'); },
+    'browser.hostDetach': async () => ({ ok: true as const }),
+    'browser.hostReply': async () => { throw refusal('this connection does not host the agent browser: call browser.hostAttach first'); },
     // The profile is made here as the core makes it; the cookies themselves are counted, not kept: fake pages have no sign-in.
     'browser.importCookies': async ({ profile, cookies }) => {
       const problem = browserCookiesError(cookies);
