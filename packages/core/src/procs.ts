@@ -24,6 +24,12 @@ export interface SpawnOptions {
    * DevTools protocol over two of them instead of a port anyone could reach.
    */
   extraPipes?: number;
+  /**
+   * `spawn` only: let the child show its windows. Windows applies `windowsHide`
+   * to a GUI program's first window too, so a desktop app spawned hidden never
+   * appears. Everything else stays hidden.
+   */
+  showWindow?: boolean;
 }
 
 export type ChildProcess = Bun.Subprocess<'ignore', 'pipe', 'pipe'>;
@@ -276,7 +282,7 @@ export class ProcRegistry {
       ...(extra
         ? { stdio: ['ignore', 'pipe', 'pipe', ...Array.from({ length: extra }, () => 'pipe' as const)] as ['ignore', 'pipe', 'pipe'] }
         : { stdin: 'ignore' as const, stdout: 'pipe' as const, stderr: 'pipe' as const }),
-      windowsHide: true,
+      windowsHide: opts.showWindow !== true,
       detached: OWN_GROUP,
     }) as ChildProcess;
     const fds = extra ? (proc.stdio as unknown[]).slice(3).map(Number) : undefined;
