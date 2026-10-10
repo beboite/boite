@@ -1,4 +1,4 @@
-import { GRANT_QUERY_PARAM, PAIR_QUERY_PARAM, parseGroupRelayUrl } from '@boite/contracts';
+import { GRANT_QUERY_PARAM, PAIR_QUERY_PARAM, parseGroupRelayUrl, withoutTrailingSlashes } from '@boite/contracts';
 
 export interface Endpoint {
   url: string;
@@ -567,7 +567,7 @@ export function takeNotificationTarget(): { thread: string | null; member: strin
  * reached through a relay route answers under that route's path.
  */
 export function coreHref(endpointUrl: string, path: string): string {
-  return `${endpointUrl.replace(/\/+$/, '')}${path}`;
+  return `${withoutTrailingSlashes(endpointUrl)}${path}`;
 }
 
 /**

@@ -216,7 +216,7 @@ export class GroupStore {
   }
 
   /** Who a session handed out through the group stands for (`core:<id>`, `device:<id>`); undefined for a pairing link's. */
-  owns(sessionId: string): string | undefined {
+  issuedFor(sessionId: string): string | undefined {
     return this.sessions[sessionId];
   }
   // -- Sealing: what this core says to another member, and hears from one.

@@ -364,6 +364,8 @@ export function startServer(options: ServerOptions): RunningServer {
   const peers = new Map<ServerConnection, string>();
   function* waitingPeers(): Generator<string> {
     for (const [connection, peer] of peers) if (!connection.authenticated) yield peer;
+    // A relayed socket waits for its hello under the same bounds.
+    yield* relays.waitingPeers();
   }
   const frames = new Set<Promise<void>>();
   const incoming = new FrameQueue((connection, raw) => handleFrame(core, connection, raw));
@@ -372,8 +374,8 @@ export function startServer(options: ServerOptions): RunningServer {
   // A client of this machine carried to another member of its group: its key here, never an agent's, opens the way.
   const relays = new RelayHub(core, (token) => {
     const identity = authenticateToken(core, token);
-    return identity !== null && identity.principal !== 'agent';
-  }, helloTimeoutMs);
+    return identity === null || identity.principal === 'agent' ? null : { sessionId: identity.sessionId };
+  }, { helloTimeoutMs, helloMaxBytes: PREAUTH_FRAME_MAX_BYTES });
   core.relays = relays;
   let stopping = false;
 
@@ -441,7 +443,13 @@ export function startServer(options: ServerOptions): RunningServer {
             core.log('warn', `refused a relayed websocket from origin ${origin ?? '(none)'}`);
             return new Response('forbidden origin', { status: 403 });
           }
-          const pipe = relays.pipe(relayed.coreId);
+          const peer = preauthPeer(self.requestIP(request)?.address ?? null, request.headers.get('host'));
+          const refusal = peer === null ? null : preauthRefusal(waitingPeers(), peer);
+          if (refusal !== null) {
+            core.log('warn', `refused a relayed websocket: ${refusal}`);
+            return new Response('too many connections waiting for hello', { status: 503 });
+          }
+          const pipe = relays.pipe(relayed.coreId, peer);
           if (self.upgrade(request, { data: { relay: pipe } })) return undefined;
           pipe.close(1000);
           return new Response('expected a websocket upgrade', { status: 400 });
@@ -600,6 +608,7 @@ export function startServer(options: ServerOptions): RunningServer {
       for (const connection of connections) {
         if (connection.identity.sessionId === sessionId) connection.close(RpcCloseCode.Unauthorized, 'session revoked');
       }
+      relays.closeSession(sessionId);
     },
     closeAgents(threadId: ThreadId): void {
       for (const connection of connections) {

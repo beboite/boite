@@ -2835,9 +2835,16 @@ export const GROUP_MAX_CORES = 32;
  */
 export const GROUP_RELAY_ROUTE = '/group/relay';
 
+/** `url` without its trailing slashes; a loop, since `/\/+$/` backtracks quadratically on a long run of them. */
+export function withoutTrailingSlashes(url: string): string {
+  let end = url.length;
+  while (end > 0 && url.charCodeAt(end - 1) === 47) end -= 1;
+  return url.slice(0, end);
+}
+
 /** The address a client reaches `coreId` at through the member at `memberUrl`. */
 export function groupRelayUrl(memberUrl: string, coreId: string): string {
-  return `${memberUrl.replace(/\/+$/, '')}${GROUP_RELAY_ROUTE}/${coreId}`;
+  return `${withoutTrailingSlashes(memberUrl)}${GROUP_RELAY_ROUTE}/${coreId}`;
 }
 
 /** The member and the machine a relay address names, or null for an address that is no relay. */

@@ -131,6 +131,8 @@ export class Workspace {
    */
   main = $state<MainMachine | null>(readMainMachine());
   #generation = 0;
+  /** The latest notification tap waiting for the machine its thread is on. */
+  #memberTap = 0;
   #lifecycle = 0;
 
   #current(lifecycle: number): boolean {
@@ -700,16 +702,22 @@ export class Workspace {
    * page: the thread is on that machine, which the group may still be
    * connecting. False when it is not connected within `patience`.
    */
-  async openMemberThread(coreId: string, threadId: string, patience = 30_000): Promise<boolean> {
+  async openMemberThread(coreId: string, threadId: string, patience = 90_000): Promise<boolean> {
     const lifecycle = this.#lifecycle;
+    // A newer tap takes over, and so does the user opening something else meanwhile.
+    const tap = ++this.#memberTap;
+    const active = this.active;
+    const navigation = active.navigationGeneration;
+    // Longer than the group's own wait between two attempts at a machine (a minute), so one retry fits.
     const deadline = Date.now() + patience;
     for (;;) {
+      if (tap !== this.#memberTap || !this.#current(lifecycle) || this.active !== active || active.navigationGeneration !== navigation) return false;
       const machine = this.machines.find((entry) => GroupLinks.coreOf(entry) === coreId && entry.store.connection === 'ready');
       if (machine !== undefined) {
         await this.select(machine.store, threadId);
         return true;
       }
-      if (Date.now() >= deadline || !this.#current(lifecycle)) return false;
+      if (Date.now() >= deadline) return false;
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
   }

@@ -193,6 +193,11 @@ test('a notification of another member reaches a phone through the machine it in
   expect(onA[0]).toMatchObject({ title: 'on b', body: 'Which branch?', threadId, core: id(b), tag: `${id(b).slice(0, 16)}:request-after` });
   // b has no subscription of its own for the phone: nothing went out from there.
   expect(onB).toEqual([]);
+  // A title longer than what a's reads is cut on the way, not dropped there.
+  const { threadId: longId } = await echoThread(b, owner, 'T'.repeat(400));
+  b.core.bus.emit('question.asked', { id: 'long', threadId: longId, text: 'Which branch?' } as RpcEvents['question.asked']);
+  await waitFor(() => onA.length === 2);
+  expect(onA[1]?.title).toBe('T'.repeat(300));
 
   // A member cannot use a's push for anything but a device of a's.
   await expect(b.core.coordination.request(b.core.group.peers()[0]!, 'group.push', { device: `${id(b)}:ses_x`, push: { title: 't', body: 'b', threadId: null, tag: 'x' } }))
@@ -205,7 +210,45 @@ test('a notification of another member reaches a phone through the machine it in
   await waitFor(() => b.core.sessions.list(null).length === 0);
   b.core.bus.emit('question.asked', { id: 'revoked', threadId, text: 'Which branch?' } as RpcEvents['question.asked']);
   await new Promise((resolve) => setTimeout(resolve, 200));
-  expect(onA).toHaveLength(1);
+  expect(onA).toHaveLength(2);
   owner.close();
+  phone.close();
+});
+
+test('a relayed socket is held to the bounds of one waiting for its hello, and goes with the key it came in with', async () => {
+  const { a, b, phone } = await home();
+  const relay = groupRelayUrl(a.url, id(b));
+  const socketUrl = `${relay.replace(/^http/, 'ws')}/rpc`;
+  const opened = (headers?: Record<string, string>) => new Promise<WebSocket>((resolve, reject) => {
+    const socket = headers === undefined ? new WebSocket(socketUrl) : new WebSocket(socketUrl, { headers } as unknown as string[]);
+    socket.onopen = () => resolve(socket);
+    socket.onerror = () => reject(new Error('refused'));
+  });
+  const closed = (socket: WebSocket) => new Promise<string>((resolve) => { socket.onclose = (event) => resolve(`${event.code} ${event.reason}`); });
+
+  // No first frame larger than a hello is read: refused before it is parsed.
+  const large = await opened();
+  const ended = closed(large);
+  large.send(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'hello', params: { pad: 'x'.repeat(70 * 1024) } }));
+  expect(await ended).toBe('4001 hello frame too large');
+
+  // Sockets that say nothing count against the places for sockets waiting for their hello, as direct ones do.
+  // A Host that is not loopback makes them a remote peer's, as behind a reverse proxy.
+  const waiting: WebSocket[] = [];
+  let refusedAt = -1;
+  for (let index = 0; index < 40 && refusedAt < 0; index++) {
+    try { waiting.push(await opened({ host: 'phone.example' })); } catch { refusedAt = index; }
+  }
+  expect(refusedAt).toBe(32);
+  for (const socket of waiting) socket.close();
+  await waitFor(() => a.core.relays.size === 0);
+
+  // Revoked on the machine that carries it: the carried socket closes at once.
+  const { ticket } = await phone.call('group.ticket', { coreId: id(b) });
+  const onB = await connect(relay, '', { ticket, relay: phone.session!.token, client: { name: 'pwa', version: '1' } });
+  expect(a.core.relays.size).toBe(1);
+  a.core.sessions.revoke(phone.session!.id);
+  await waitFor(() => a.core.relays.size === 0);
+  await expect(onB.call('group.get', {})).rejects.toThrow();
   phone.close();
 });

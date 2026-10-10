@@ -191,10 +191,15 @@ different addresses for the member, nobody carries the client there until
 they agree, as for a direct ticket: one of them may hold an older roster and
 dial an address the member gave up.
 
-A refusal by the relaying machine (no key for it, or a wrong one) is answered
-`Refused`, and a member it cannot reach `Unavailable`: never `Unauthorized`,
-which the client would take for its key on the member being revoked. Its
-sockets to a machine that leaves the group are closed within fifteen seconds.
+On the socket, a refusal by the relaying machine (no key for it, or a wrong
+one) is answered `Refused`, and a member it cannot reach `Unavailable`: never
+`Unauthorized`, which the client would take for its key on the member being
+revoked. A file or a view answers 404 for a machine that is not another member
+and 502 when that member does not answer. Until its key is checked, a relayed
+socket counts against the same bounds as a direct one: five seconds and 64 KB
+for its hello, and the places for sockets waiting on one. Revoking the key it
+came in with closes it, and its sockets to a machine that leaves the group are
+closed within fifteen seconds.
 
 While a member is reached through another, the client tries its own addresses
 once a minute and moves to the first that answers, so a phone back on the
@@ -214,7 +219,8 @@ that machine's key. A member whose thread needs the user, or finished, also
 sends the news to the home machine of every device that holds a key it issued
 through the group and has no subscription of its own there. That machine pushes
 it to the device with its own key, once per device, as a sealed `group.push`
-request between members. The push carries the id of the machine the thread is
+request between members. Title, body and tag are cut to 300, 2,000 and 200
+characters on the way. The push carries the id of the machine the thread is
 on: the notification's tag is that machine's, and a tap opens the thread there
 once the group has connected it. The receiving machine pushes only to a device
 the roster lists as its own, and the badge counts the threads waiting on both.

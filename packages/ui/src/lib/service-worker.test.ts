@@ -60,9 +60,11 @@ test('a push another machine sent through this one opens its thread on that mach
   sw.matchAll.mockResolvedValue([]);
   await sw.emit('notificationclick', { notification: { close, data: { threadId: 't1', core } } });
   expect(sw.openWindow).toHaveBeenCalledWith(`https://boite.test/?thread=t1&member=${core}`);
-  // Anything else in that field is no machine id.
+  // Anything else in that field is no machine id, at the push and at the tap.
   await sw.emit('push', { data: { json: () => ({ title: 'x', body: 'y', threadId: 't2', tag: 'z', core: 'https://evil.test' }) } });
   expect(sw.notification).toHaveBeenLastCalledWith('x', expect.objectContaining({ tag: 'thread-t2', data: { threadId: 't2' } }));
+  await sw.emit('notificationclick', { notification: { close, data: { threadId: 't3', core: 'https://evil.test' } } });
+  expect(sw.openWindow).toHaveBeenLastCalledWith('https://boite.test/?thread=t3');
 });
 
 test('a push sets the icon badge to the count it carries, clears it at zero and leaves it without one', async () => {

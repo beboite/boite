@@ -162,7 +162,8 @@ async function setBadge(count) {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const threadId = event.notification.data?.threadId;
-  const core = event.notification.data?.core;
+  // Read as the push handler wrote it: a machine id, or nothing.
+  const core = /^[0-9a-f]{64}$/.test(String(event.notification.data?.core ?? '')) ? event.notification.data.core : null;
   const url = new URL('/', self.location.origin);
   if (typeof threadId === 'string') url.searchParams.set('thread', threadId);
   if (typeof threadId === 'string' && typeof core === 'string') url.searchParams.set('member', core);

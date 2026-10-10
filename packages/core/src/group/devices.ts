@@ -13,11 +13,11 @@ import { homeOf } from './roster.ts';
  * installed, and its push subscription, are on that member.
  */
 export function deviceElsewhere(core: Core, sessionId: string): { home: CoordinationPeer; device: string } | null {
-  const member = core.group.owns(sessionId);
+  const member = core.group.issuedFor(sessionId);
   if (member === undefined || !member.startsWith('device:')) return null;
   const device = member.slice('device:'.length);
-  // Listed live: a revoked device is out, whichever member revoked it.
-  if (!core.group.view('owner')?.devices.some((entry) => entry.id === device)) return null;
+  // The roster that lists the device can arrive after its ticket did: the key existing is enough here, since a
+  // revocation this machine heard of took the key away, and the home machine pushes only to a device it lists live.
   const home = core.group.peers().find((peer) => peer.coreId === homeOf(device));
   return home === undefined ? null : { home, device };
 }

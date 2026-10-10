@@ -76,8 +76,12 @@ export interface RelaySocketData {
 
 type Upstream = WebSocket;
 
-/** Who may be carried: a key this machine issued, or its own owner's token. Never an agent's. */
-export type RelayAuthenticator = (token: string) => boolean;
+/**
+ * Who may be carried: a key this machine issued, or its own owner's token,
+ * never an agent's. The session the key belongs to, null for the owner's
+ * token; null altogether for anything else.
+ */
+export type RelayAuthenticator = (token: string) => { sessionId: string | null } | null;
 
 /** What the core sees of the server's relay: how many sockets it carries, and a way to drop those to former members. */
 export interface RelaySink {
@@ -85,11 +89,18 @@ export interface RelaySink {
   sweep(): void;
 }
 
+/** The bounds a relayed socket shares with the server's own before its hello is checked. */
+export interface RelayBounds {
+  helloTimeoutMs: number;
+  /** The largest first frame read from a socket nobody has authenticated. */
+  helloMaxBytes: number;
+}
+
 export class RelayHub implements RelaySink {
   private readonly pipes = new Set<RelayPipe>();
   private timer: ReturnType<typeof setInterval> | null = null;
 
-  constructor(private readonly core: Core, private readonly authenticate: RelayAuthenticator, private readonly helloTimeoutMs: number) {}
+  constructor(private readonly core: Core, private readonly authenticate: RelayAuthenticator, private readonly bounds: RelayBounds) {}
 
   /**
    * The addresses this machine reaches `coreId` at for a client, the one that
@@ -142,12 +153,22 @@ export class RelayHub implements RelaySink {
     return new Response('that machine does not answer', { status: 502 });
   }
 
-  /** A pipe for a socket the server is about to upgrade. */
-  pipe(coreId: string): RelayPipe {
+  /** A pipe for a socket the server is about to upgrade; `peer` is the address its hello wait counts under, as for the server's own. */
+  pipe(coreId: string, peer: string | null): RelayPipe {
     this.arm();
-    const pipe = new RelayPipe(this.core, this, coreId, this.authenticate, this.helloTimeoutMs);
+    const pipe = new RelayPipe(this.core, this, coreId, peer, this.authenticate, this.bounds);
     this.pipes.add(pipe);
     return pipe;
+  }
+
+  /** The counted peers of the relayed sockets whose key for this machine is not checked yet. */
+  *waitingPeers(): Generator<string> {
+    for (const pipe of this.pipes) if (!pipe.authenticated && pipe.peer !== null) yield pipe.peer;
+  }
+
+  /** A session revoked here carries nobody any more: its relayed sockets close with it. */
+  closeSession(sessionId: string): void {
+    for (const pipe of [...this.pipes]) if (pipe.sessionId === sessionId) pipe.close(1008, 'session revoked');
   }
 
   ended(pipe: RelayPipe): void {
@@ -194,28 +215,37 @@ export class RelayPipe {
   private helloSeen = false;
   private closed = false;
   private helloTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The client's key for this machine was checked: from then on it no longer counts as waiting for its hello. */
+  authenticated = false;
+  /** The session that key belongs to, null for the owner's token: revoking it closes this pipe. */
+  sessionId: string | null = null;
 
   constructor(
     private readonly core: Core,
     private readonly hub: RelayHub,
     readonly coreId: string,
+    readonly peer: string | null,
     private readonly authenticate: RelayAuthenticator,
-    private readonly helloTimeoutMs: number,
+    private readonly bounds: RelayBounds,
   ) {}
 
   attach(socket: ServerWebSocket<RelaySocketData>): void {
     this.socket = socket;
     this.helloTimer = setTimeout(() => {
-      if (!this.helloSeen) this.close(4001, 'hello timed out');
-    }, this.helloTimeoutMs);
+      if (!this.authenticated) this.close(4001, 'hello timed out');
+    }, this.bounds.helloTimeoutMs);
   }
 
   receive(raw: string | Buffer): void {
     if (this.closed) return;
+    // Nothing larger than a hello is read from a socket nobody has authenticated, as on the server's own.
+    if (!this.helloSeen && (typeof raw === 'string' ? Buffer.byteLength(raw) : raw.length) > this.bounds.helloMaxBytes) {
+      this.close(4001, 'hello frame too large');
+      return;
+    }
     const text = typeof raw === 'string' ? raw : raw.toString();
     if (!this.helloSeen) {
       this.helloSeen = true;
-      if (this.helloTimer !== null) clearTimeout(this.helloTimer);
       void this.open(text);
       return;
     }
@@ -223,7 +253,7 @@ export class RelayPipe {
       this.upstream.send(text);
       return;
     }
-    this.queued += text.length;
+    this.queued += Buffer.byteLength(text);
     if (this.queued > QUEUE_MAX_BYTES) {
       this.close(1009, 'too much sent before the other machine answered');
       return;
@@ -247,10 +277,14 @@ export class RelayPipe {
     }
     const { relay, ...rest } = frame.params;
     // A failure here is this machine's, not the other member's: never Unauthorized, which the client would take for its key there being revoked.
-    if (typeof relay !== 'string' || relay.length === 0 || relay.length > 512 || !this.authenticate(relay)) {
+    const holder = typeof relay === 'string' && relay.length > 0 && relay.length <= 512 ? this.authenticate(relay) : null;
+    if (holder === null) {
       this.refuse(id, RpcErrorCode.Refused, `${this.name()} carries to the other machines of its group only a client paired with it: hello relay must be this client's key for ${this.name()}`, 1008);
       return;
     }
+    this.authenticated = true;
+    this.sessionId = holder.sessionId;
+    if (this.helloTimer !== null) clearTimeout(this.helloTimer);
     if (rest['protocolVersion'] !== PROTOCOL_VERSION) {
       // Said by the machine the client is talking to, so the client stops as it would there.
       this.refuse(id, RpcErrorCode.InvalidParams, `protocolVersion must be ${PROTOCOL_VERSION}`, 4010);
@@ -278,8 +312,13 @@ export class RelayPipe {
     };
     upstream.onclose = (event) => this.close(SENDABLE(event.code) ? event.code : 1011, event.reason || 'the other machine closed the connection');
     upstream.onerror = () => this.close(1011, 'the other machine dropped the connection');
-    upstream.send(JSON.stringify({ ...frame, params: rest }));
-    for (const queued of this.queue) upstream.send(queued);
+    try {
+      upstream.send(JSON.stringify({ ...frame, params: rest }));
+      for (const queued of this.queue) upstream.send(queued);
+    } catch {
+      this.close(1011, 'the other machine dropped the connection');
+      return;
+    }
     this.queue = [];
     this.queued = 0;
   }

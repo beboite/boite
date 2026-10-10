@@ -80,7 +80,9 @@ test('a phone that cannot reach a machine of its group reaches it through the ma
 
     // The desk gives a plain-HTTP address only, as a desktop on a tailnet without certificates does:
     // the secure page sends it no key. The machine the phone pairs with still reaches it.
-    expect(joined.cores.find((core) => core.coreId === joined.self)?.addresses.every((address) => address.startsWith('http://'))).toBe(true);
+    const deskAddresses = joined.cores.find((core) => core.coreId === joined.self)?.addresses ?? [];
+    expect(deskAddresses.length).toBeGreaterThan(0);
+    expect(deskAddresses.every((address) => address.startsWith('http://'))).toBe(true);
     await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
     await page.evaluate('localStorage.clear()');
     const grant = await a.call('pairing.grant', { role: 'device' });
@@ -131,7 +133,7 @@ test('a phone that cannot reach a machine of its group reaches it through the ma
     // Never dialled directly from the secure page: the only machines it holds are the one it paired with and the route through it.
     expect(await page.evaluate<string[]>(`globalThis.__boiteTest.workspace.machines.map(machine => machine.id).sort()`)).toEqual([home.url, relay].sort());
     // A reload reconnects through the same route with the key it kept: no new ticket, no second device key.
-    await page.evaluate('location.reload()');
+    await page.reload();
     await page.waitFor(relayed, 30_000);
     expect((await b.call('sessions.list', {})).filter((session) => session.role === 'device')).toHaveLength(1);
     await page.send('Emulation.clearDeviceMetricsOverride', {});

@@ -244,7 +244,9 @@ export class PushStore {
       const target = deviceElsewhere(this.core, session.id);
       if (target === null || forwarded.has(target.device)) continue;
       forwarded.add(target.device);
-      const payload: Forwarded = { device: target.device, push: { title, ...text, threadId, tag, badge } };
+      // Cut to what the home machine reads (`readForwarded`), so a long title or reply still arrives.
+      const payload: Forwarded = { device: target.device, push: { title: title.slice(0, 300), body: text.body.slice(0, 2000),
+        ...(text.label === undefined ? {} : { label: text.label }), threadId: threadId.slice(0, 128), tag: tag.slice(0, 200), badge } };
       this.track(this.forward(target.home, payload).catch(() => {
         this.core.log('warn', `a notification for a device of ${target.home.name} did not reach that machine; the conversation remains available in Boite`);
       }));
