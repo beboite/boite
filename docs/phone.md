@@ -87,7 +87,9 @@ refused prompt answers `detail: 'cancelled'` and changes nothing. Both methods
 are owner only; elsewhere than Windows the status is `unsupported`.
 
 Turning on Reachable on the local network calls `firewall.allow` at once, while
-the owner is at the switch, so Windows' own prompt never comes up. While the core
+the owner is at the switch, so once the rule is in place Windows' own prompt
+never comes up; a refused or failed allow leaves it to come up at the next
+start. While the core
 listens on the network and Windows does not let it through, the pairing card says
 so above the paired devices, with Allow in Windows Firewall. `?fake=1&firewall=`
 `blocked`, `unset` or `refused` shows each state.
