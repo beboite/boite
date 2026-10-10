@@ -129,7 +129,8 @@ on the same port, beside the address it was started on. It stops when the
 machine leaves. Nothing else is opened: a core that listens on itself stays
 closed to the LAN. `--host` or `--lan` on the command line names the only
 address a core answers on, and such a core opens no other. On Windows the
-first listener outside loopback raises the firewall prompt for the core.
+first listener outside loopback raises the firewall prompt for the core, unless
+the rule Boite asks for is already there ([phone](phone.md#windows-defender-firewall)).
 
 A machine that only listens on itself and has no tailnet gives a loopback
 address, which reaches it from the same computer and nowhere else. The group

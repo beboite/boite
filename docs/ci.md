@@ -206,6 +206,12 @@ measured on Linux on 2026-10-10. A machine icon in the picker cost another
 2,563 bytes through a chunk split and was left out. The UI limit rises from
 4,429,000 to 4,435,000, leaving about 4 KB.
 
+The Windows Defender Firewall check and its pairing-card notice add 3,866 UI
+bytes and 5,792 emitted core JavaScript bytes: 4,445,296 and 3,726,463 against
+4,441,430 and 3,720,671 for `main` at `64a0b6ad`, measured on Linux on
+2026-10-10. The UI limit rises to 4,450,000 and the core JavaScript limit to
+3,732,000, leaving about 4.6 KB and 5.4 KB.
+
 Recent's Done and Working groups measured 3,949,936 UI bytes on 2026-10-03
 before integrating these orchestration additions. The combined build measured
 3,961,330 UI bytes and 3,239,585 emitted core JavaScript bytes on the same day.
