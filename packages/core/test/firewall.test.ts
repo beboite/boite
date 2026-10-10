@@ -73,9 +73,16 @@ describe('the firewall methods', () => {
     expect((await access().status()).state).toBe('ready');
   });
 
-  test('an unreadable answer is an error, not a verdict', async () => {
+  test('an unreadable answer is an error, not a verdict, and allow then asks nothing', async () => {
     writeFileSync(state, 'not json');
     expect(await access().status()).toEqual({ state: 'error', networks: [], allowed: [], blocked: [], detail: 'unknown' });
+    let asked = 0;
+    const unread = new FirewallAccess(harness.core, {
+      program: 'C:\\Boite\\boite-core.exe',
+      commands: { query: () => [process.execPath, FAKE, state, 'query'], allow: () => { asked += 1; return [process.execPath, FAKE, state, 'allow']; } },
+    });
+    expect(await unread.allow()).toEqual({ state: 'error', networks: [], allowed: [], blocked: [], detail: 'unknown' });
+    expect(asked).toBe(0);
   });
 
   test('the owner reads it, unsupported off Windows; a paired phone is refused both', async () => {

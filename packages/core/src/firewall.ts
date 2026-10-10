@@ -103,10 +103,14 @@ export class FirewallAccess {
     return reading === null ? { ...UNSUPPORTED, state: 'error', detail: 'unknown' } : judge(reading);
   }
 
-  /** Allow the core on every profile, unless it already is; Windows asks an administrator first. */
+  /**
+   * Allow the core on every profile, unless it already is; Windows asks an
+   * administrator first. A state that could not be read asks nothing: the
+   * prompt would be for a need nobody knows, on a result nobody could check.
+   */
   async allow(): Promise<FirewallStatus> {
     const before = await this.status();
-    if (before.state === 'unsupported' || before.state === 'ready') return before;
+    if (before.state === 'unsupported' || before.state === 'ready' || before.state === 'error') return before;
     const commands = this.commands()!;
     const run = await this.run(commands.allow(this.program()), ALLOW_TIMEOUT_MS);
     const after = await this.status();
@@ -114,6 +118,8 @@ export class FirewallAccess {
       this.core.log('info', 'Windows Defender Firewall now allows Boite on every network');
       return after;
     }
+    // The rule may be in place; what failed is reading it back, and that reason is the one to show.
+    if (after.state === 'error') return after;
     const detail = run.timedOut ? 'timeout' : run.code === FIREWALL_PROMPT_REFUSED ? 'cancelled' : 'unknown';
     if (detail === 'unknown') this.core.log('warn', `allowing Boite in Windows Defender Firewall failed with exit code ${run.code}`);
     return { ...after, detail };
