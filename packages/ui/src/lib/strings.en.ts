@@ -143,6 +143,9 @@ export const strings = {
     messageTo: 'Message {name}', sayHello: 'Say hello to {name}, or plan a task it will do on its own.',
     liveWorking: '{name} is working', liveWaiting: '{name} needs you', seeThread: 'Open its thread',
     welcomeHint: 'An agent keeps its name, its memory and its tasks. Talk to it, or plan work it does on its own.',
+    runsHeading: 'Where it runs', runsHint: 'Its conversations, memory and planned tasks stay on this machine. The models come from that machine’s accounts.',
+    machine: 'Machine', modelLabel: 'Model', machineOffline: 'Offline', machineNotOwner: 'Owner access needed',
+    whatItDoesHint: 'Its standing instructions. You can change them later in its settings.',
     namePlaceholder: 'Mira, Scout, Pixel', whatItDoes: 'What it does', instructionsPlaceholder: 'For example: every morning, read the new issues and sum them up in five lines.',
     ownedBy: '{name} runs this thread', ownedHint: 'Talk to {name} in its conversation. This thread shows what it does.', openAgent: 'Open {name}',
     robot: {

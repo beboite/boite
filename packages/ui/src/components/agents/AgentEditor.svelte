@@ -1,9 +1,15 @@
 <script lang="ts">
   import { secureId } from '../../lib/secure-id';
   import { untrack } from 'svelte';
-  import type { AgentEntities, AgentProfile, AgentGroup, AgentTeam, AgentMission, AgentSelection as ExecutionSelection } from '@boite/contracts';
+  import { Dices, Palette } from '@lucide/svelte';
+  import type { AgentEntities, AgentProfile, AgentGroup, AgentTeam, AgentMission, AgentSelection as ExecutionSelection, RpcParams } from '@boite/contracts';
   import { strings } from '../../lib/strings';
   import type { AgentEntryKind, AgentsView, AgentSelection } from '../../lib/agents.svelte';
+  import type { Store } from '../../lib/store.svelte';
+  import type { MenuItem } from '../../lib/menu';
+  import { workspace } from '../../lib/workspace.svelte';
+  import { machineGlyph } from '../../lib/machine-glyph';
+  import MachineIcon from '../MachineIcon.svelte';
   import ModelPicker from '../ModelPicker.svelte';
   import EffortSlider from '../EffortSlider.svelte';
   import Menu from '../Menu.svelte';
@@ -33,8 +39,12 @@
   const group = initial.kind === 'group' ? initial.record as AgentGroup | null : null;
   const team = initial.kind === 'team' ? initial.record as AgentTeam | null : null;
   const mission = initial.kind === 'mission' ? initial.record as AgentMission | null : null;
-  const defaultAccount = untrack(() => view.store.accounts.find(a => view.store.providerOf(a.providerId)?.available));
-  const defaultModels = untrack(() => defaultAccount ? view.store.modelsOf(defaultAccount.providerId, defaultAccount.id) : []);
+  /** A new agent starts on the first available account of the machine it will run on, with that account's default model. */
+  function defaultSelection(on: Store, permissionMode: ExecutionSelection['permissionMode'] = 'default'): ExecutionSelection {
+    const account = on.accounts.find(a => on.providerOf(a.providerId)?.available);
+    const models = account ? on.modelsOf(account.providerId, account.id) : [];
+    return { providerId: account?.providerId ?? '', accountId: account?.id ?? '', model: models.find(m => m.default)?.id ?? models[0]?.id ?? null, effort: null, permissionMode };
+  }
   const TOOLS = ['messages', 'missions', 'memory', 'artifacts', 'decisions', 'routines'] as const;
   const PERMISSIONS = ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'yolo', 'dontAsk'] as const;
 
@@ -42,7 +52,14 @@
   let domain = $state(profile?.domain ?? '');
   let instructions = $state(profile?.instructions ?? '');
   let description = $state(team?.description ?? '');
-  let selection = $state<ExecutionSelection>({ ...(profile?.selection ?? { providerId: defaultAccount?.providerId ?? '', accountId: defaultAccount?.id ?? '', model: defaultModels.find(m => m.default)?.id ?? defaultModels[0]?.id ?? null, effort: null, permissionMode: 'default' }) });
+  /**
+   * The machine a new agent lives on. Agents belong to one core: its accounts, memory and planned
+   * tasks stay there. It starts as the machine this page shows; another one creates the agent on
+   * that core and then opens it there.
+   */
+  let host = $state<Store>(untrack(() => view.store));
+  let moving = $state(false);
+  let selection = $state<ExecutionSelection>({ ...(profile?.selection ?? untrack(() => defaultSelection(view.store))) });
   let tools = $state<string[]>(profile?.tools ?? [...TOOLS]);
   /** A new agent gets a robot of its own at once; an existing one shows the robot it wears. */
   let robot = $state(robotOf(profile?.id ?? '', profile?.avatar ?? '') ?? seededRobot(profile?.id ?? secureId()));
@@ -71,8 +88,40 @@
   const resourceOptions = $derived(view.snapshot?.resources.filter(r => r.scope.kind === 'mission' && r.scope.id === mission?.id || r.scope.kind === 'team' && r.scope.id === teamId || r.scope.kind === 'project' && r.scope.id === projectId) ?? []);
   const agentOptions = $derived(view.snapshot?.profiles.filter(a => a.status !== 'archived' && (!teamId || kind !== 'mission' || view.snapshot?.teams.find(t => t.id === teamId)?.members.some(m => m.agentId === a.id))) ?? []);
   const permissionLabels = $derived<Record<ExecutionSelection['permissionMode'], string>>({ default: labels.ask, acceptEdits: labels.edits, plan: labels.plan, bypassPermissions: labels.full, yolo: strings.permissionMode.yolo, dontAsk: labels.deny });
-  const provider = $derived(view.store.providerOf(selection.providerId));
-  const effort = $derived(view.store.modelOf(selection)?.effort);
+  const provider = $derived(host.providerOf(selection.providerId));
+  const effort = $derived(host.modelOf(selection)?.effort);
+  const hostMachine = $derived(workspace.machines.find(m => m.store === host));
+  const hostItems = $derived<MenuItem[]>(workspace.machines.map(m => {
+    const offline = m.store.connection !== 'ready';
+    const usable = !offline && m.store.owner;
+    return { id: m.id, label: m.label, glyph: machineGlyph(m.icon, m.store.core?.os), active: m.store === host, disabled: !usable, ...(usable ? {} : { hint: offline ? labels.machineOffline : labels.machineNotOwner }) };
+  }));
+  const busy = $derived(view.pending || moving);
+
+  function pickHost(id: string) {
+    const next = workspace.machines.find(m => m.id === id)?.store;
+    if (!next || next === host) return;
+    host = next;
+    selection = defaultSelection(next, selection.permissionMode);
+  }
+
+  /** Creates the agent on another machine's core, then shows it there. */
+  async function createOn(target: Store, value: RpcParams<'agents.profile.save'>['value']) {
+    if (moving) return;
+    moving = true; view.error = '';
+    let created: AgentProfile;
+    try {
+      if (!target.client) throw new Error(strings.agents.offline);
+      created = await target.client.call('agents.profile.save', { value: $state.snapshot(value) as typeof value });
+    } catch (error) {
+      view.error = error instanceof Error ? error.message : String(error);
+      moving = false;
+      return;
+    }
+    // Showing the other machine replaces this page, form and all: nothing here is touched after it.
+    await workspace.select(target);
+    target.showAgents(created.id);
+  }
 
   function toggle(values: string[], id: string): string[] { return values.includes(id) ? values.filter(v => v !== id) : [...values, id]; }
 
@@ -93,7 +142,11 @@
     const rebase = kind === 'profile' && latest && profile && edited(latest as AgentProfile) === edited(profile);
     const version = initial.record ? { id: initial.record.id, expectedRevision: (rebase ? latest : initial.record).revision } : {};
     let result: AgentEntities[AgentEntryKind] | null = null;
-    if (kind === 'profile') result = await view.call('agents.profile.save', { ...version, value: { name, domain, instructions, avatar: robotTouched ? encodeRobot(robot) : profile?.avatar ?? '', selection: creating || !rebase ? selection : (latest as AgentProfile).selection, status, tools, accountIntegration } });
+    if (kind === 'profile') {
+      const value = { name, domain, instructions, avatar: robotTouched ? encodeRobot(robot) : profile?.avatar ?? '', selection: creating || !rebase ? selection : (latest as AgentProfile).selection, status, tools, accountIntegration };
+      if (creating && host !== view.store) return createOn(host, value);
+      result = await view.call('agents.profile.save', { ...version, value });
+    }
     if (kind === 'group') result = await view.call('agents.group.save', { ...version, value: { name, memberIds, mode, maxTurns, maxTurnsPerAgent: perAgent, paused } });
     if (kind === 'team') result = await view.call('agents.team.save', { ...version, value: { name, description, members: memberIds.map(agentId => ({ agentId, responsibility: responsibilities[agentId] ?? '' })), groupId, projectIds, paused } });
     if (kind === 'mission') result = await view.call('agents.mission.save', { ...version, value: { title: name, objective, expectedResult, agentIds: memberIds, teamId, projectId, status: (latest as AgentMission | undefined)?.status ?? mission?.status ?? 'open', maxTurns, maxDurationMs: Math.round(minutes * 60000), maxTokens: tokens || null, resourceIds: resourceIds.filter(id => resourceOptions.some(r => r.id === id)) } });
@@ -103,7 +156,7 @@
 
 {#snippet actions()}
   <div class="agent-form-actions">
-    <button class="primary" type="submit" disabled={view.pending || !name.trim() || kind === 'profile' && creating && (!selection.accountId || !selection.model)} data-testid="agent-save"><span class="ui-label">{creating ? labels.createAction : labels.save}</span></button>
+    <button class="primary" type="submit" disabled={busy || !name.trim() || kind === 'profile' && creating && (!selection.accountId || !selection.model)} data-testid="agent-save"><span class="ui-label">{creating ? labels.createAction : labels.save}</span></button>
     {#if creating}<button type="button" class="ghost" onclick={oncancel}><span class="ui-label">{labels.cancel}</span></button>{/if}
   </div>
 {/snippet}
@@ -129,24 +182,30 @@
   <section class="card">
     {#if embedded}<h2>{heading ?? labels.identity}</h2>{/if}
     {#if kind === 'profile'}
-      {#if dressing}
-        <RobotPicker {robot} onpick={next => { robot = next; robotTouched = true; }} />
-        <button type="button" class="ghost small agent-add" onclick={() => { dressing = false; }}>{labels.robot.done}</button>
-      {:else}
+      <!-- The robot and the name read as one identity: the picture beside the field that names it. -->
+      <div class="agent-identity">
         <div class="agent-portrait">
-          <AgentAvatar kind="profile" id={profile?.id ?? ''} {name} avatar={robotTouched ? encodeRobot(robot) : profile?.avatar ?? ''} size={64} />
-          <div class="agent-actions">
-            <button type="button" class="small" onclick={() => { robot = seededRobot(secureId(), robot.family); robotTouched = true; }} data-testid="robot-shuffle">{labels.robot.shuffle}</button>
-            <button type="button" class="ghost small" onclick={() => { dressing = true; }} data-testid="robot-customize">{labels.robot.customize}</button>
+          <AgentAvatar kind="profile" id={profile?.id ?? ''} {name} avatar={robotTouched ? encodeRobot(robot) : profile?.avatar ?? ''} size={72} />
+          <div class="agent-portrait-tools">
+            <button type="button" class="ghost icon small" title={labels.robot.shuffle} aria-label={labels.robot.shuffle} onclick={() => { robot = seededRobot(secureId(), robot.family); robotTouched = true; }} data-testid="robot-shuffle"><Dices size={15} strokeWidth={1.75} /></button>
+            <button type="button" class="ghost icon small" class:active={dressing} aria-pressed={dressing} title={labels.robot.customize} aria-label={labels.robot.customize} onclick={() => { dressing = !dressing; }} data-testid="robot-customize"><Palette size={15} strokeWidth={1.75} /></button>
           </div>
         </div>
+        <label class="agent-field agent-identity-name">{labels.name}<input required maxlength="200" bind:value={name} placeholder={labels.namePlaceholder} data-testid="agent-name" /></label>
+      </div>
+      {#if dressing}
+        <div class="agent-dressing">
+          <RobotPicker {robot} onpick={next => { robot = next; robotTouched = true; }} />
+          <button type="button" class="ghost small agent-add" onclick={() => { dressing = false; }}>{labels.robot.done}</button>
+        </div>
       {/if}
+    {:else}
+      <label class="agent-field">{labels.name}<input required maxlength="200" bind:value={name} data-testid="agent-name" /></label>
     {/if}
-    <label class="agent-field">{labels.name}<input required maxlength="200" bind:value={name} placeholder={kind === 'profile' ? labels.namePlaceholder : ''} data-testid="agent-name" /></label>
 
     {#if kind === 'profile'}
       {#if embedded}<label class="agent-field">{labels.domain}<input bind:value={domain} maxlength="500" placeholder={labels.rolePlaceholder} /></label>{/if}
-      <label class="agent-field">{creating ? labels.whatItDoes : labels.instructions}<textarea bind:value={instructions} rows="5" maxlength="32000" placeholder={labels.instructionsPlaceholder} data-testid="agent-instructions"></textarea></label>
+      <label class="agent-field"><span>{creating ? labels.whatItDoes : labels.instructions}{#if creating}<span class="hint">{labels.whatItDoesHint}</span>{/if}</span><textarea bind:value={instructions} rows="4" maxlength="32000" placeholder={labels.instructionsPlaceholder} data-testid="agent-instructions"></textarea></label>
       {#if embedded}
         <div class="agent-field"><span>{labels.status}</span>
           <Menu placement="bottom" label={labels.status} items={(['active', 'paused', 'archived'] as const).map(id => ({ id, label: labels[id], active: status === id }))} onpick={id => { status = id as AgentProfile['status']; }}><span class="ui-label">{labels[status]}</span></Menu>
@@ -182,17 +241,42 @@
   </section>
 
   {#if kind === 'profile' && creating}
-    <section class="card">
-      <h2>{labels.model}</h2>
-      <p class="hint">{labels.identityHint}</p>
-      {#if selection.accountId}
-        <div class="agent-inline">
-          <ModelPicker store={view.store} choice={selection} onpick={patch => { selection = { ...selection, effort: null, ...patch }; }} />
-          {#if effort?.levels.length}<EffortSlider levels={effort.levels} active={selection.effort ?? effort.default} onpick={id => { selection.effort = id; }} />{/if}
-          <Menu placement="bottom" label={labels.permissions} items={PERMISSIONS.map(id => ({ id, label: permissionLabels[id], active: selection.permissionMode === id }))} onpick={id => { selection.permissionMode = id as ExecutionSelection['permissionMode']; }}><span class="ui-label">{permissionLabels[selection.permissionMode]}</span></Menu>
+    <section class="card" data-testid="agent-runtime">
+      <h2>{labels.runsHeading}</h2>
+      <p class="hint">{labels.runsHint}</p>
+      <div class="agent-rows">
+        <div class="agent-row-field">
+          <span class="agent-row-label">{labels.machine}</span>
+          <div class="agent-row-value">
+            {#if workspace.machines.length > 1}
+              <Menu placement="bottom" label={labels.machine} items={hostItems} onpick={pickHost} testid="agent-machine">
+                <MachineIcon icon={hostMachine?.icon} os={host.core?.os} size={14} /><span class="ui-label">{hostMachine?.label ?? strings.machines.local}</span>
+              </Menu>
+            {:else}
+              <span class="agent-machine" data-testid="agent-machine"><MachineIcon icon={hostMachine?.icon} os={host.core?.os} size={14} />{hostMachine?.label ?? strings.machines.local}</span>
+            {/if}
+          </div>
         </div>
-        {#if provider?.capabilities.approvals === false}<p class="hint">{labels.noApprovals}</p>{/if}
-      {:else}<p class="hint">{labels.noAccount}</p>{/if}
+        {#if selection.accountId}
+          <div class="agent-row-field">
+            <span class="agent-row-label">{labels.modelLabel}</span>
+            <div class="agent-row-value">
+              <div class="agent-inline">
+                {#key host}<ModelPicker store={host} choice={selection} onpick={patch => { selection = { ...selection, effort: null, ...patch }; }} />{/key}
+                {#if effort?.levels.length}<EffortSlider levels={effort.levels} active={selection.effort ?? effort.default} onpick={id => { selection.effort = id; }} />{/if}
+              </div>
+              <span class="hint">{labels.identityHint}</span>
+            </div>
+          </div>
+          <div class="agent-row-field">
+            <span class="agent-row-label">{labels.permissions}</span>
+            <div class="agent-row-value">
+              <Menu placement="bottom" label={labels.permissions} items={PERMISSIONS.map(id => ({ id, label: permissionLabels[id], active: selection.permissionMode === id }))} onpick={id => { selection.permissionMode = id as ExecutionSelection['permissionMode']; }}><span class="ui-label">{permissionLabels[selection.permissionMode]}</span></Menu>
+              {#if provider?.capabilities.approvals === false}<span class="hint">{labels.noApprovals}</span>{/if}
+            </div>
+          </div>
+        {:else}<p class="hint">{labels.noAccount}</p>{/if}
+      </div>
     </section>
   {/if}
 
