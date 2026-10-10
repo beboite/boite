@@ -1,3 +1,4 @@
+import type { ServerWebSocket } from 'bun';
 import type { RpcEventName, RpcEvents, ThreadId } from '@boite/contracts';
 import { FILE_ROUTE, RPC_MAX_FRAME_BYTES, RPC_PATH, RpcCloseCode, VIEW_CONTENT_POLICY, VIEW_ROUTE, VIEW_SANDBOX } from '@boite/contracts';
 import { timingSafeEqual } from 'node:crypto';
@@ -9,10 +10,12 @@ import { mayReceiveEvent } from './access.ts';
 import type { Core } from './core.ts';
 import { messageOf } from './errors.ts';
 import { JOIN_ROUTE } from './group.ts';
+import { parseRelayPath, RelayHub, type RelaySocketData } from './group/relay.ts';
 import type { Connection } from './router.ts';
 import type { SocketData } from './server/connection.ts';
 import { ServerConnection } from './server/connection.ts';
 import { handleFrame } from './server/frame.ts';
+import { authenticateToken } from './server/hello.ts';
 import { FrameQueue } from './server/frame-queue.ts';
 import { Refusals } from './server/refusals.ts';
 import { fdResponse } from './server/file-response.ts';
@@ -80,7 +83,7 @@ export interface RunningServer {
   host: string;
   port: number;
   url: string;
-  /** Sockets open now, the ones still saying hello included. */
+  /** Sockets open now, relayed ones and the ones still saying hello included. */
   connections(): number;
   stop(): Promise<void>;
 }
@@ -361,16 +364,24 @@ export function startServer(options: ServerOptions): RunningServer {
   const peers = new Map<ServerConnection, string>();
   function* waitingPeers(): Generator<string> {
     for (const [connection, peer] of peers) if (!connection.authenticated) yield peer;
+    // A relayed socket waits for its hello under the same bounds.
+    yield* relays.waitingPeers();
   }
   const frames = new Set<Promise<void>>();
   const incoming = new FrameQueue((connection, raw) => handleFrame(core, connection, raw));
   const peerRequests = new Set<Promise<Response>>();
   const refusals = new Refusals();
+  // A client of this machine carried to another member of its group: its key here, never an agent's, opens the way.
+  const relays = new RelayHub(core, (token) => {
+    const identity = authenticateToken(core, token);
+    return identity === null || identity.principal === 'agent' ? null : { sessionId: identity.sessionId };
+  }, { helloTimeoutMs, helloMaxBytes: PREAUTH_FRAME_MAX_BYTES });
+  core.relays = relays;
   let stopping = false;
 
   // One set of handlers for every address the core answers on: the sockets,
   // the hello bounds and the broadcast are the core's, not a listener's.
-  const serve = (hostname: string, bind: number) => Bun.serve<SocketData>({
+  const serve = (hostname: string, bind: number) => Bun.serve<SocketData | RelaySocketData>({
     hostname,
     port: bind,
     // HTTP only: the websocket block below keeps Bun's own 120 s and its pings.
@@ -418,10 +429,36 @@ export function startServer(options: ServerOptions): RunningServer {
         return viewPage(core, url.pathname.slice(VIEW_ROUTE.length + 1));
       }
 
+      // A page served by one machine of the group opens its socket on the others.
+      const allowedOrigin = (origin: string | null): boolean => isAllowedOrigin(origin, self.port ?? 0, hostname)
+        || (origin !== null && (core.settings.get().browserOrigins?.includes(origin) === true || origin === core.settings.get().publicUrl || core.group.allowsOrigin(origin)));
+
+      const relayed = parseRelayPath(url.pathname);
+      if (relayed !== null) {
+        if (core.stopping) return new Response('core stopping', { status: 503 });
+        return relays.http(request, relayed).then((answer) => {
+          if (answer !== null) return answer;
+          const origin = request.headers.get('origin');
+          if (!allowedOrigin(origin)) {
+            core.log('warn', `refused a relayed websocket from origin ${origin ?? '(none)'}`);
+            return new Response('forbidden origin', { status: 403 });
+          }
+          const peer = preauthPeer(self.requestIP(request)?.address ?? null, request.headers.get('host'));
+          const refusal = peer === null ? null : preauthRefusal(waitingPeers(), peer);
+          if (refusal !== null) {
+            core.log('warn', `refused a relayed websocket: ${refusal}`);
+            return new Response('too many connections waiting for hello', { status: 503 });
+          }
+          const pipe = relays.pipe(relayed.coreId, peer);
+          if (self.upgrade(request, { data: { relay: pipe } })) return undefined;
+          pipe.close(1000);
+          return new Response('expected a websocket upgrade', { status: 400 });
+        });
+      }
+
       if (url.pathname === RPC_PATH) {
         const origin = request.headers.get('origin');
-        // A page served by one machine of the group opens its socket on the others.
-        if (!isAllowedOrigin(origin, self.port ?? 0, hostname) && !(origin !== null && (core.settings.get().browserOrigins?.includes(origin) || origin === core.settings.get().publicUrl || core.group.allowsOrigin(origin)))) {
+        if (!allowedOrigin(origin)) {
           core.log('warn', `refused a websocket from origin ${origin ?? '(none)'}`);
           return new Response('forbidden origin', { status: 403 });
         }
@@ -459,8 +496,12 @@ export function startServer(options: ServerOptions): RunningServer {
       maxPayloadLength: RPC_MAX_FRAME_BYTES,
 
       open(socket) {
+        if ('relay' in socket.data) {
+          socket.data.relay.attach(socket as ServerWebSocket<RelaySocketData>);
+          return;
+        }
         const connection = socket.data.connection;
-        connection.attach(socket);
+        connection.attach(socket as ServerWebSocket<SocketData>);
         connections.add(connection);
         if (socket.data.peer !== null) peers.set(connection, socket.data.peer);
         helloTimers.set(connection, setTimeout(() => {
@@ -472,6 +513,10 @@ export function startServer(options: ServerOptions): RunningServer {
 
       message(socket, raw) {
         if (stopping) return;
+        if ('relay' in socket.data) {
+          socket.data.relay.receive(raw);
+          return;
+        }
         const connection = socket.data.connection;
         if (!connection.authenticated && raw.length > PREAUTH_FRAME_MAX_BYTES) {
           connection.close(RpcCloseCode.Unauthorized, 'hello frame too large');
@@ -484,9 +529,13 @@ export function startServer(options: ServerOptions): RunningServer {
         void frame.catch((error: unknown) => core.log('error', messageOf(error))).finally(() => frames.delete(frame));
       },
 
-      drain(socket) { socket.data.connection.drain(); },
+      drain(socket) { if (!('relay' in socket.data)) socket.data.connection.drain(); },
 
       close(socket) {
+        if ('relay' in socket.data) {
+          socket.data.relay.close(1000, 'client closed');
+          return;
+        }
         core.procs.unwatchResources(socket.data.connection.id);
         core.coordination.bridge.disconnect(socket.data.connection.id);
         core.browser.disconnect(socket.data.connection.id);
@@ -559,6 +608,7 @@ export function startServer(options: ServerOptions): RunningServer {
       for (const connection of connections) {
         if (connection.identity.sessionId === sessionId) connection.close(RpcCloseCode.Unauthorized, 'session revoked');
       }
+      relays.closeSession(sessionId);
     },
     closeAgents(threadId: ThreadId): void {
       for (const connection of connections) {
@@ -634,7 +684,8 @@ export function startServer(options: ServerOptions): RunningServer {
     host,
     port,
     url: core.baseUrl(),
-    connections: () => connections.size,
+    // Relayed sockets too, those still waiting for their hello included.
+    connections: () => connections.size + relays.size,
     async stop(): Promise<void> {
       stopping = true;
       incoming.close();
@@ -646,6 +697,7 @@ export function startServer(options: ServerOptions): RunningServer {
       helloTimers.clear();
       for (const connection of connections) connection.close(1001, 'core stopping');
       connections.clear();
+      relays.closeAll();
       peers.clear();
       // Bun 1.3.11 never resolves server.stop() once a socket has been upgraded,
       // so the listener is closed without waiting on that promise.

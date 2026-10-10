@@ -52,7 +52,11 @@
   function status(core: GroupCore): { label: string | null; hint: string | null; ready: boolean } {
     if (core.coreId === group?.self) return { label: strings.group.self, hint: null, ready: true };
     const machine = workspace.machines.find((candidate) => GroupLinks.coreOf(candidate) === core.coreId);
-    if (machine?.store.connection === 'ready') return { label: strings.group.connected, hint: null, ready: true };
+    if (machine?.store.connection === 'ready') {
+      // Carried by another machine of the group: which one is said, since that one being off cuts this one off too.
+      const through = GroupLinks.carrier(machine, workspace.machines);
+      return { label: through === undefined ? strings.group.connected : fill(strings.group.relayed, { machine: through.label }), hint: null, ready: true };
+    }
     const state = workspace.groups.states[core.coreId];
     if (state === 'unreachable' || state === 'insecure') return { label: null, hint: strings.group[state], ready: false };
     return { label: strings.group.connecting, hint: null, ready: false };

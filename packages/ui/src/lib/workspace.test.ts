@@ -763,3 +763,35 @@ test('a paired phone can follow an agent link without owner-only identity RPC ac
   expect(b.openThread?.id).toBe(id);
   expect(b.owner).toBe(false);
 });
+
+test('a notification another machine sent opens its thread there once connected, unless a newer tap or the user moved on', async () => {
+  const { w, a, b } = await setup();
+  const remote = w.machines.find((machine) => machine.store === b)!;
+  const pc = 'c'.repeat(64);
+  await w.select(a, 't-scheduler');
+  // The machine is not connected as that member yet: the tap waits for it.
+  const waiting = w.openMemberThread(pc, 't-descriptors', 3000);
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  remote.coreId = pc;
+  expect(await waiting).toBe(true);
+  expect(w.active).toBe(b);
+  expect(b.openThread?.id).toBe('t-descriptors');
+
+  // The user opens another conversation meanwhile: the tap no longer takes them anywhere.
+  await w.select(a, 't-scheduler');
+  remote.coreId = undefined;
+  const stale = w.openMemberThread(pc, 't-descriptors', 3000);
+  await a.open(a.threads.find((thread) => thread.id !== 't-scheduler')!.id);
+  remote.coreId = pc;
+  expect(await stale).toBe(false);
+  expect(w.active).toBe(a);
+
+  // A newer tap takes over from an older one still waiting for the same machine: only the newer opens it.
+  remote.coreId = undefined;
+  const older = w.openMemberThread(pc, 't-descriptors', 3000);
+  const newer = w.openMemberThread(pc, 't-descriptors', 3000);
+  remote.coreId = pc;
+  expect(await older).toBe(false);
+  expect(await newer).toBe(true);
+  expect(w.active).toBe(b);
+});
