@@ -217,7 +217,8 @@ test('quotas expose banked resets, a confirmed budget and Codex credit balances 
   await page.click('[data-testid=limits-glance] [data-provider=claude] .summary');
   await page.waitFor(`document.querySelector('[data-testid=limits-glance] [data-provider=claude] .details')`);
   expect(await count('[data-testid=limits-glance] [data-provider=claude] .details [role=meter]')).toBe(3);
-  expect(await page.text('[data-testid=limits-glance] [data-provider=claude] .details .window-name')).toBe('5 hours');
+  // The weekly window leads the account, ahead of the five-hour one.
+  expect(await page.text('[data-testid=limits-glance] [data-provider=claude] .details .window-name')).toBe('Weekly');
   expect(await count('[data-testid=limits-glance] [data-testid=quota-banked-resets]')).toBe(0);
   await capture('quota-extras-glance-expanded.png');
   await page.click('[data-testid=limits-glance] [data-provider=codex] .summary');
