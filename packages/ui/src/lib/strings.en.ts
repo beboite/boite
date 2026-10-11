@@ -2130,7 +2130,20 @@ export const strings = {
       ownerQrTitle: 'Give a phone full control?',
       ownerQrBody: 'Whoever scans this QR code or types its code in the next 5 minutes drives this core as you do: agents, files, accounts and settings. Show it only to your own phone, and revoke the device below if in doubt.',
       ownerQrConfirm: 'Show the code',
-      ownerScan: 'Scan it from the Boite app on your phone, or type the code there. It works once, within 5 minutes.'
+      ownerScan: 'Scan it from the Boite app on your phone, or type the code there. It works once, within 5 minutes.',
+      /** Windows Defender Firewall between a phone and this core: `{networks}` lists network kinds. */
+      firewall: {
+        blocked: 'Windows Firewall blocks Boite on this {networks} network, so a phone cannot reach this computer.',
+        unset: 'Windows Firewall has not allowed Boite on this {networks} network yet, so a phone cannot reach this computer.',
+        allow: 'Allow in Windows Firewall',
+        allowing: 'Waiting for Windows',
+        allowed: 'Windows Firewall now lets phones reach Boite on every network.',
+        cancelled: 'Nothing changed: Windows needs an administrator to accept its prompt.',
+        failed: 'Windows refused the change. Allow boite-core.exe in Windows Firewall settings.',
+        unreadable: 'Windows Firewall could not be read. If a phone cannot connect, allow boite-core.exe there.',
+        networks: { public: 'public', private: 'private', domain: 'work' },
+        and: ' and '
+      }
     }
   },
 

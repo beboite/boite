@@ -2514,6 +2514,31 @@ export interface TailscaleStatus {
   actionUrl?: string;
 }
 
+/** A Windows network category, as the firewall profiles name them. */
+export type NetworkCategory = 'public' | 'private' | 'domain';
+
+/**
+ * Whether Windows Defender Firewall lets a phone reach this core. Only Windows
+ * answers anything but `unsupported`. `ready`: every network this machine is
+ * on allows the core's inbound connections. `unset`: one of them has no rule
+ * for it, so Windows asks. `blocked`: a rule blocks it there, which wins over
+ * any rule that allows it, the block rules a dismissed prompt leaves included.
+ * `error`: Windows could not be read, `detail` says why.
+ */
+export type FirewallState = 'unsupported' | 'ready' | 'unset' | 'blocked' | 'error';
+
+export interface FirewallStatus {
+  state: FirewallState;
+  /** The categories of the networks this machine is on now. Tailscale's own adapter is left out: Tailscale opens it itself. */
+  networks: NetworkCategory[];
+  /** Of `networks`, those where the core's inbound connections are allowed. */
+  allowed: NetworkCategory[];
+  /** Of `networks`, those where a rule blocks them. */
+  blocked: NetworkCategory[];
+  /** `cancelled`: nobody accepted Windows' administrator prompt. */
+  detail?: 'cancelled' | 'timeout' | 'unknown';
+}
+
 // ---------------------------------------------------------------------------
 // RPC surface. `hello` must be the first frame on every connection.
 // ---------------------------------------------------------------------------
@@ -3558,6 +3583,10 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'tailscale.enable': { params: { replace?: boolean }; result: TailscaleStatus };
   /** Stop serving this core through Tailscale and clear the public URL it set. Owner only. */
   'tailscale.disable': { params: Record<string, never>; result: TailscaleStatus };
+  /** Whether Windows Defender Firewall lets other devices reach this core. Owner only. */
+  'firewall.status': { params: Record<string, never>; result: FirewallStatus };
+  /** Allow this core through Windows Defender Firewall on every network, after Windows' administrator prompt. Owner only. */
+  'firewall.allow': { params: Record<string, never>; result: FirewallStatus };
   /** Every paired client still able to connect. */
   'sessions.list': { params: Record<string, never>; result: PairedSession[] };
   /** Forget a paired client: its sockets close and its token opens nothing any more. Owner only. */
