@@ -147,13 +147,16 @@ export async function logsCommand(args: string[], client: CoreClient, threadId: 
     if (options.out) {
       written = isAbsolute(options.out) ? options.out : resolve(cwd, options.out);
       // One descriptor: a folder fails at open and is never touched, and an existing file is
-      // made private through the same descriptor before the export goes into it.
-      const fd = openSync(written, 'w', 0o600);
-      try {
-        // Unix modes only: Windows has none to set, and Bun 1.4.2 crashed in fchmodSync there.
-        if (process.platform !== 'win32') fchmodSync(fd, 0o600);
-        writeFileSync(fd, result.text);
-      } finally { closeSync(fd); }
+      // made private through the same descriptor before the export goes into it. Windows has
+      // no Unix modes and Bun 1.4.2 crashed there writing through a descriptor: it writes by path.
+      if (process.platform === 'win32') writeFileSync(written, result.text);
+      else {
+        const fd = openSync(written, 'w', 0o600);
+        try {
+          fchmodSync(fd, 0o600);
+          writeFileSync(fd, result.text);
+        } finally { closeSync(fd); }
+      }
     }
     const { text: _text, ...rest } = result;
     print([

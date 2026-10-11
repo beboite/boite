@@ -276,7 +276,7 @@ pub(crate) fn build_main_window<R: Runtime>(
     } else {
         let transparent = supported_materials(build).contains(&"mica");
         crate::shell_log::info("window", "shell.window.material",
-            format!("the main window opens {} on Windows build {build}", if transparent { "transparent, without a material until the UI sets mica" } else { "solid" }),
+            format!("the main window opens {} on Windows build {build}", if transparent { "transparent, without a material until the UI applies the chosen one" } else { "solid" }),
             serde_json::json!({ "material": if transparent { "none" } else { "solid" }, "transparent": transparent, "shadow": undecorated_shadow(build), "build": build }));
     }
     Ok(window)

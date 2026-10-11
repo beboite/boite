@@ -217,11 +217,12 @@ export class AccountStore {
     // A session file cannot overrule an authentication refusal from the agent.
     if (status !== 'error' && this.core.journal.getSetting(`account-auth-rejected:${accountId}`) === true) status = 'unauthenticated';
     if (!announce && status === account.status) return account;
-    if (status !== account.status) logAccountStatus(this.core, account, status);
     const next: Account = { ...account, status };
     this.core.journal.append({ type: 'account.checked', threadId: null, version: 1, payload: next }, () => {
       this.core.journal.putAccount(next);
     });
+    // Logged once stored, so the log never shows a change the journal refused.
+    if (status !== account.status) logAccountStatus(this.core, account, status);
     this.core.bus.emit('accounts.updated', next);
     return next;
   }
@@ -284,8 +285,8 @@ export class AccountStore {
     if (result.status === 'ok') this.core.journal.deleteSetting(`account-auth-rejected:${accountId}`);
     if (current.status === result.status && current.identity === result.identity) return current;
     const next = { ...current, ...result };
-    if (current.status !== result.status) logAccountStatus(this.core, current, result.status);
     this.core.journal.append({ type: 'account.checked', threadId: null, version: 1, payload: next }, () => this.core.journal.putAccount(next));
+    if (current.status !== result.status) logAccountStatus(this.core, current, result.status);
     this.core.bus.emit('accounts.updated', next);
     return next;
   }
@@ -751,7 +752,7 @@ export class AccountStore {
     exitCode: number | null = null,
   ): void {
     if (this.core.journal.isClosed()) return;
-    logLoginState(this.core, this.core.journal.getAccount(accountId), state, output, exitCode);
+    logLoginState(this.core, this.core.journal.getAccount(accountId), state, output, exitCode, run.cancelled === true);
     this.core.bus.emit('account.login', { accountId, state, output, url: run.url, exitCode });
   }
 

@@ -40,22 +40,32 @@ export function noteClaudeMessage(ctx: Diagnosable, message: SDKMessage, session
     const info = message.rate_limit_info as typeof message.rate_limit_info | undefined | null;
     if (info === undefined || info === null || info.status === 'allowed') return;
     const resets = isoTime(info.resetsAt);
-    note(info.status === 'rejected' ? 'warn' : 'info', `Claude rate limit ${info.status === 'rejected' ? 'reached' : 'warning'}${info.rateLimitType ? ` on the ${info.rateLimitType} window` : ''}${typeof info.utilization === 'number' ? `, ${Math.round(info.utilization * 100)}% used` : ''}${resets ? `, resets ${resets}` : ''}`, {
+    const span = str(info.rateLimitType);
+    const utilization = num(info.utilization);
+    note(info.status === 'rejected' ? 'warn' : 'info', `Claude rate limit ${info.status === 'rejected' ? 'reached' : 'warning'}${span ? ` on the ${span} window` : ''}${utilization !== null ? `, ${Math.round(utilization * 100)}% used` : ''}${resets ? `, resets ${resets}` : ''}`, {
       event: 'driver.rate-limit',
-      data: { status: info.status, window: info.rateLimitType ?? null, utilization: info.utilization ?? null, resetsAt: resets, overage: info.overageStatus ?? null, overageDisabled: info.overageDisabledReason ?? null },
+      data: { status: str(info.status), window: span, utilization, resetsAt: resets, overage: str(info.overageStatus), overageDisabled: str(info.overageDisabledReason) },
     });
     return;
   }
   if (message.type === 'assistant' && message.error !== undefined && message.parent_tool_use_id === null) {
-    note('warn', `Claude answered with API error ${message.error}`, { event: 'driver.api.error', data: { error: message.error } });
+    const error = str(message.error) ?? 'of an unknown kind';
+    note('warn', `Claude answered with API error ${error}`, { event: 'driver.api.error', data: { error } });
     return;
   }
   if (message.type === 'result' && (message.subtype !== 'success' || message.is_error)) {
     // A subtype the SDK types do not know yet may carry no list: this runs inside the receive loop.
     const errors = (message as { errors?: unknown }).errors;
-    note('warn', `Claude ended the turn with result ${message.subtype}${message.is_error ? ' marked as an error' : ''} after ${message.num_turns} model turns, ${message.duration_api_ms} ms of API time`, {
-      event: 'driver.result.error', durationMs: message.duration_ms,
-      data: { subtype: message.subtype, isError: message.is_error, numTurns: message.num_turns, apiMs: message.duration_api_ms, errors: Array.isArray(errors) ? errors.length : 0, stopReason: message.stop_reason ?? null },
+    // Every field is the SDK's: one it reshapes logs as null, never as undefined or [object Object].
+    const result = message as unknown as Record<string, unknown>;
+    const subtype = str(result.subtype) ?? 'unknown';
+    const isError = result.is_error === true;
+    const numTurns = num(result.num_turns);
+    const apiMs = num(result.duration_api_ms);
+    const durationMs = num(result.duration_ms);
+    note('warn', `Claude ended the turn with result ${subtype}${isError ? ' marked as an error' : ''} after ${numTurns ?? '?'} model turns, ${apiMs ?? '?'} ms of API time`, {
+      event: 'driver.result.error', ...(durationMs === null ? {} : { durationMs }),
+      data: { subtype, isError, numTurns, apiMs, errors: Array.isArray(errors) ? errors.length : 0, stopReason: str(result.stop_reason) },
     });
   }
 }

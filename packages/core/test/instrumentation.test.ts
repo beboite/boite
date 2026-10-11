@@ -204,6 +204,14 @@ test('a failed Claude result without an error list is logged, not thrown into th
   // A rate-limit event without its info is skipped too.
   noteClaudeMessage(ctx, { type: 'rate_limit_event' } as never, null);
   expect(notes).toHaveLength(1);
+  // Reshaped fields log as null, never as an object or undefined.
+  const messages: string[] = [];
+  const shaped = { diagnostic: (level: string, message: string, context: { event: string; data?: Record<string, unknown> }) => { messages.push(message); notes.push({ level, ...context }); } };
+  noteClaudeMessage(shaped, { type: 'result', subtype: 'error_during_execution', is_error: 'yes', num_turns: { n: 2 }, duration_ms: 'x' } as never, null);
+  noteClaudeMessage(shaped, { type: 'rate_limit_event', rate_limit_info: { status: 'rejected', rateLimitType: { kind: 'five_hour' }, utilization: '90%' } } as never, null);
+  expect(notes.slice(1)).toMatchObject([{ data: { isError: false, numTurns: null, apiMs: null } }, { data: { window: null, utilization: null } }]);
+  expect(notes[1]).not.toHaveProperty('durationMs');
+  expect(messages.join(' ')).not.toMatch(/undefined|\[object Object\]/);
 });
 
 test('two cores in one process time their own logins, even for the same account id', () => {
@@ -221,9 +229,12 @@ test('two cores in one process time their own logins, even for the same account 
   const failed = first.records.find(record => record.context.event === 'account.login.failed');
   expect(failed?.message).toContain('Open https://claude.ai/<redacted> to sign in');
   expect(JSON.stringify(failed)).not.toContain('ABCD-1234');
-  // A sign-in the user cancelled is lifecycle, not a failure.
-  logLoginState(second.core, account, 'failed', 'Sign-in cancelled', 1);
+  // A sign-in the user cancelled is lifecycle, not a failure, whatever the login printed last;
+  // a provider that prints the same words on its own failure is still a failure.
+  logLoginState(second.core, account, 'failed', 'Waiting for the browser', 1, true);
   expect(second.records.at(-1)).toMatchObject({ level: 'info', context: { event: 'account.login.cancelled' } });
+  logLoginState(second.core, account, 'failed', 'Sign-in cancelled', 1);
+  expect(second.records.at(-1)).toMatchObject({ level: 'warn', context: { event: 'account.login.failed' } });
 });
 
 test('a method name the client chose cannot forge a line in a refused or slow RPC record', () => {

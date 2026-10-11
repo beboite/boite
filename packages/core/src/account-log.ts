@@ -17,7 +17,7 @@ export function logAccountStatus(core: Core, account: Account, status: Account['
  * when it ends, with how long it took and the last line the login printed on
  * a failure. The lines in between reach the live log only.
  */
-export function logLoginState(core: Core, account: Account | null, state: 'running' | 'done' | 'failed', output: string, exitCode: number | null): void {
+export function logLoginState(core: Core, account: Account | null, state: 'running' | 'done' | 'failed', output: string, exitCode: number | null, cancelled = false): void {
   if (account === null) return;
   const base = { source: 'accounts', data: { accountId: account.id, providerId: account.providerId } };
   let loginsStarted = loginsByCore.get(core);
@@ -37,8 +37,8 @@ export function logLoginState(core: Core, account: Account | null, state: 'runni
   }
   // A login line often carries its sign-in link with device or OAuth parameters: only the site stays.
   const reason = output.trim().slice(0, 300).replace(/(https?:\/\/[^\s/?#]+)\S*/g, '$1/<redacted>') || 'no reason printed';
-  // The user stopped it: lifecycle, not a problem to group.
-  if (reason === 'Sign-in cancelled') {
+  // The user stopped it: lifecycle, not a problem to group. The run says so, whatever the login printed last.
+  if (cancelled) {
     core.logs.info(`Login cancelled for account ${account.id} of ${account.providerId}`, { ...base, event: 'account.login.cancelled', ...(durationMs === undefined ? {} : { durationMs }) });
     return;
   }

@@ -260,8 +260,9 @@ export class Diagnostics {
         const size = (await handle.stat()).size;
         const length = Math.min(size, TAIL_BYTES);
         const buffer = Buffer.alloc(length);
-        await handle.read(buffer, 0, length, size - length);
-        const text = buffer.toString('utf8').split('\n').slice(size > length ? 1 : 0).map(line => anonymizer.text(this.redact(line))).join('\n');
+        // A file cut meanwhile reads short: only what was read, never the zeroed rest.
+        const { bytesRead } = await handle.read(buffer, 0, length, size - length);
+        const text = buffer.subarray(0, bytesRead).toString('utf8').split('\n').slice(size > length ? 1 : 0).map(line => anonymizer.text(this.redact(line))).join('\n');
         tails.push({ name: `${name} (last ${formatBytes(length)} of ${formatBytes(size)})`, text });
       } catch (error) {
         tails.push({ name, text: `unreadable: ${messageOf(error)}` });
@@ -310,10 +311,13 @@ export class Diagnostics {
     let spawned;
     try { spawned = this.core.procs.spawn(scope, this.ghCommand, args, { agentRoot: false, env: { GH_PROMPT_DISABLED: '1', GH_NO_UPDATE_NOTIFIER: '1', NO_COLOR: '1' } }); }
     catch (error) { if (/ENOENT|not found|No such file/i.test(messageOf(error))) return { code: null, stdout: '', stderr: 'missing' }; throw error; }
-    const timer = setTimeout(() => { try { this.core.procs.killTree(scope); } catch { /* The exit below still settles. */ } }, timeoutMs);
+    // A grandchild holding the pipes keeps the reads open after the kill: the timeout settles the call itself.
+    let onTimeout: () => void = () => undefined;
+    const timedOut = new Promise<never>((_, reject) => { onTimeout = () => reject(new Error(`gh did not answer in ${Math.round(timeoutMs / 1000)} s`)); });
+    const timer = setTimeout(() => { try { this.core.procs.killTree(scope); } catch { /* The timeout still settles. */ } onTimeout(); }, timeoutMs);
     timer.unref?.();
     try {
-      const [stdout, stderr, code] = await Promise.all([new Response(spawned.proc.stdout).text(), new Response(spawned.proc.stderr).text(), spawned.exited]);
+      const [stdout, stderr, code] = await Promise.race([Promise.all([new Response(spawned.proc.stdout).text(), new Response(spawned.proc.stderr).text(), spawned.exited]), timedOut]);
       return { code, stdout: stdout.slice(0, 64 * 1024), stderr: stderr.slice(0, 64 * 1024) };
     } finally { clearTimeout(timer); }
   }
