@@ -60,8 +60,8 @@
         if (key === 'working') recentPreferences.setGroupWorking(!recentPreferences.groupWorking);
         if (key === 'other') recentPreferences.setGroupOtherProjects(!recentPreferences.groupOtherProjects);
         if (key === mergedKey && target) void targetOwner.setProjectAutoArchiveMergedPr(target.id, !target.autoArchiveMergedPr);
-      }} label={strings.sidebar.groupingOptions} placement="bottom" align="end" variant="ghost" switches testid={`${prefix}grouping-options`}><SlidersHorizontal size={15} /></Menu>
-      <button class="ghost icon small" title={`${strings.sidebar.search}${store.keyHint('palette')}`} aria-label={strings.sidebar.search} data-testid={`${prefix}sidebar-search-open`} onclick={() => store.paletteOpen = true}><Search size={15} /></button>
+      }} label={strings.sidebar.groupingOptions} placement="bottom" align="end" variant="ghost" switches testid={`${prefix}grouping-options`}><SlidersHorizontal size={16} /></Menu>
+      <button class="ghost icon small" title={`${strings.sidebar.search}${store.keyHint('palette')}`} aria-label={strings.sidebar.search} data-testid={`${prefix}sidebar-search-open`} onclick={() => store.paletteOpen = true}><Search size={16} /></button>
       {#if !prefix}<button class="ghost icon small" title={`${newLabel}${store.keyHint('new-thread')}`} aria-label={newLabel} data-testid="new-thread" onclick={create}><Plus size={16} /></button>{/if}
     {/if}
   {/snippet}

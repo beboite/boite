@@ -171,20 +171,26 @@
     flex: 1;
     min-height: 0;
     overflow: auto;
-    padding: 8px 6px;
+    /* No rule above or below the rows: they fade out under the head and the
+       foot. The fade is exactly the padding, so at rest it covers nothing; a
+       mask, not a scroll-driven animation, because tests and closing elements
+       wait on every running animation and that one would never end. */
+    --fade: 10px;
+    padding: var(--fade) 6px;
     display: flex;
     flex-direction: column;
+    mask-image: linear-gradient(to bottom, transparent, black var(--fade), black calc(100% - var(--fade)), transparent);
   }
   .scroll > :global(*) { flex-shrink: 0; }
   .foot {
     display: flex;
     align-items: center;
-    gap: 6px;
-    min-height: 41px;
+    /* The head's spacing, so the foot's buttons line up under its own. */
+    gap: 2px;
+    min-height: 40px;
     box-sizing: border-box;
-    margin: 0 8px;
+    margin: 0 10px;
     padding: 6px 0;
-    border-top: 1px solid var(--color-border);
   }
   .grow { flex: 1; }
   .control {

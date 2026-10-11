@@ -41,7 +41,7 @@
 <div class="machines" class:problem={issues > 0} class:filtered={chosen !== null} data-testid="status-connection" data-state={store.connection} aria-live="polite">
   {#if shown}
     <Menu {items} onpick={pick} {label} variant="ghost" testid="machine-status">
-      {#if issues}<TriangleAlert size={15} />{:else}<Monitor size={15} />{/if}
+      {#if issues}<TriangleAlert size={16} />{:else}<Monitor size={16} />{/if}
       {#if chosen}<span class="name ui-label">{chosen.label}</span>{/if}
     </Menu>
   {/if}

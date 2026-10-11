@@ -27,7 +27,8 @@
 </div>
 
 <style>
-  .rail-head { container-type: inline-size; min-width: 0; padding: 8px 0 6px; border-bottom: 1px solid var(--color-border); }
+  /* No rule under it: the rows fade out beneath it instead (RailFrame.svelte). */
+  .rail-head { container-type: inline-size; min-width: 0; padding: 8px 0 6px; }
   .tools { display: flex; align-items: center; gap: 6px; min-height: var(--control-sm); }
   /* Under the Threads and Agents switch, when the Agents experiment draws it. */
   .tools:not(:first-child) { margin-top: 5px; }
@@ -35,6 +36,7 @@
   .actions :global(button.icon) { flex: none; }
   .actions :global(button.icon.active) { background: var(--color-active); color: var(--color-foreground); }
   @media (max-width: 720px) {
-    .actions :global(button.icon), .actions :global(.menu .trigger.ghost) { width: var(--control-touch); height: var(--control-touch); }
+    /* `button.icon` grows to the touch target on a phone; a menu's ghost trigger has to match it. */
+    .actions :global(button.icon), .actions :global(.menu .trigger.ghost) { width: var(--touch-target); height: var(--touch-target); }
   }
 </style>
