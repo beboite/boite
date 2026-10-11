@@ -57,8 +57,12 @@
     busy = true;
     error = '';
     try {
-      const result = await client.call('diagnostics.issue', { title: title.trim(), description: description.trim(), includeLogs, submit });
+      const requested = { title: title.trim(), description: description.trim(), includeLogs };
+      const result = await client.call('diagnostics.issue', { ...requested, submit });
       if (store.client !== client) return;
+      // A preview of fields edited since it was asked would open a stale GitHub link; a created issue still shows.
+      const changed = title.trim() !== requested.title || description.trim() !== requested.description || includeLogs !== requested.includeLogs;
+      if (changed && !submit) return;
       draft = result;
       if (submit) {
         if (result.url) created = result.url;

@@ -13,7 +13,8 @@ import { detectionLogger } from '../src/providers/install-log.ts';
 import { logLoginState } from '../src/account-log.ts';
 import type { ProviderSummary } from '@boite/contracts';
 import { abnormalExit, programName, watchProviderProcess } from '../src/threads/provider-process-log.ts';
-import { gitSubcommand } from '../src/git/git-log.ts';
+import { gitSubcommand, logGit } from '../src/git/git-log.ts';
+import { logUpdate } from '../src/providers/install-log.ts';
 import { startTestCore } from './harness.ts';
 
 /** A core whose log store only collects what the code under test records. */
@@ -90,6 +91,15 @@ test('a stop the core asked for is no crash, and old stderr does not describe a 
   expect(errorCodeOf({ code: 1, message: 'x' })).toBeNull();
   expect(gitSubcommand(['-c', 'core.fsmonitor=', 'worktree', 'add', '-b', 'branch', '/path'])).toBe('worktree add');
   expect(gitSubcommand(['status', '--porcelain=v1'])).toBe('status');
+  // A probe that answers no is detail; a content read that fails is a warning.
+  const git = recordingCore();
+  logGit(git.core, null, ['cat-file', '-e', 'abc'], 1, 3, '');
+  logGit(git.core, null, ['cat-file', 'blob', 'abc'], 128, 3, 'fatal: bad object abc');
+  logGit(git.core, null, ['diff', '--quiet'], 1, 3, '');
+  logGit(git.core, null, ['diff', 'HEAD'], 128, 3, 'fatal: bad revision');
+  expect(git.records.map(record => record.level)).toEqual(['debug', 'warn', 'debug', 'warn']);
+  logUpdate(git.core, 'codex', 'finished', { state: 'idle', to: '1.2.3' });
+  expect(git.records.at(-1)?.message).toBe('Update of codex succeeded, now at 1.2.3');
 });
 
 test('slow RPC thresholds: debug from 1 s, warn from 10 s except for methods that hold their answer on purpose', () => {
@@ -221,7 +231,7 @@ test('a method name the client chose cannot forge a line in a refused or slow RP
   logRpcTiming(core, connection, 'slow\u2028forged', 'r2', 12_000, null);
   // A refusal echoing the client's value, and the client's own name at hello.
   logRpcTiming(core, connection, 'push.subscribe', 'r3', 3, { code: -32602, message: 'home.name: bad\n2026-10-10 ERROR core forged' } as never);
-  logHelloRefused(core, { id: 'c1', remote: false } as never, 'bad token', 'app\n2026-10-10 ERROR core forged');
+  logHelloRefused(core, { id: 'c1', remote: false } as never, 'bad ticket: x\n2026-10-10 ERROR core forged', 'app\n2026-10-10 ERROR core forged');
   expect(describeConnection({ authenticated: false, remote: false, clientName: 'app\u2028forged' } as never).client).toBe('appforged');
   for (const record of records) expect(`${record.message}${JSON.stringify(record.context.data)}`).not.toMatch(/[\n\u2028]/);
   expect(records.map(record => record.context.event)).toEqual(['rpc.refused', 'rpc.slow', 'rpc.refused', 'connection.hello-refused']);

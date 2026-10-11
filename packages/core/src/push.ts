@@ -246,7 +246,8 @@ export class PushStore {
     const subscriptions = this.subscriptions();
     for (const sessionId of Object.keys(subscriptions)) {
       this.track(this.deliver(sessionId, { title, ...text, threadId, tag, badge }).catch(() => {
-        this.core.log('warn', 'Web Push delivery failed; the conversation remains available in Boite');
+        // `deliver` already wrote the warning with its cause: this one is detail.
+        this.core.logs.debug('Web Push delivery failed; the conversation remains available in Boite', { source: 'push', event: 'push.delivery-failed' });
       }));
     }
     // A device paired with another member of the group installed that member's page, and its push
@@ -292,7 +293,7 @@ export class PushStore {
     // A tag of that machine's never replaces a notification of this one's.
     const tag = `${from.coreId.slice(0, 16)}:${push.tag}`;
     this.track(this.deliver(sessionId, { ...push, tag, badge, core: from.coreId }).catch(() => {
-      this.core.log('warn', `Web Push delivery of a notification from ${from.name} failed`);
+      this.core.logs.debug(`Web Push delivery of a notification from ${from.name} failed`, { source: 'push', event: 'push.delivery-failed' });
     }));
     return { delivered: true };
   }

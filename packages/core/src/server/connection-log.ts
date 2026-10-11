@@ -56,7 +56,7 @@ export function logHelloAccepted(core: Core, connection: ServerConnection, clien
 
 export function logHelloRefused(core: Core, connection: ServerConnection, reason: string, rawClientName: string): void {
   const clientName = clientField(rawClientName, 100);
-  core.logs.warn(`Connection ${connection.id} from ${clientName}${connection.remote ? ' over the network' : ' on this machine'} was refused at hello: ${reason}`, {
+  core.logs.warn(`Connection ${connection.id} from ${clientName}${connection.remote ? ' over the network' : ' on this machine'} was refused at hello: ${clientField(reason, 300)}`, {
     source: 'connections', event: 'connection.hello-refused', data: { connectionId: connection.id, reason, client: clientName, remote: connection.remote },
   });
 }

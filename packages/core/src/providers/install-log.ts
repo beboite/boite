@@ -70,7 +70,7 @@ export function logUpdate(core: Core, providerId: string, step: 'waiting' | 'sta
   const now = performance.now();
   const message = step === 'waiting' ? `Update of ${providerId} waits for ${data.running} running turns to pause or end`
     : step === 'started' ? `Updating ${providerId} from ${data.from ?? 'unknown'}`
-      : `Update of ${providerId} ended ${data.state ?? 'unknown'}, now at ${data.to ?? 'unknown'}`;
+      : `Update of ${providerId} ${data.state === 'failed' ? 'failed' : 'succeeded'}, now at ${data.to ?? 'unknown'}`;
   core.logs.record(step === 'finished' && data.state === 'failed' ? 'warn' : 'info', message, {
     source: 'updates', event: `provider.update.${step}`, ...(startedAt === undefined ? {} : { durationMs: now - startedAt }), data: { providerId, ...data },
   });

@@ -2,7 +2,7 @@
   import { tick, untrack } from 'svelte';
   import { SvelteSet } from 'svelte/reactivity';
   import { ChevronDown, ChevronRight, FileDown, Bug } from '@lucide/svelte';
-  import { formatLogDuration, logLevelAtLeast, LOG_LEVELS, type CoreLogLevel, type CoreLogRecord, type CoreLogsQuery, type DiagnosticSummary, type LogOrigin } from '@boite/contracts';
+  import { formatLogDuration, LOG_LEVELS, type CoreLogLevel, type CoreLogRecord, type CoreLogsQuery, type DiagnosticSummary, type LogOrigin } from '@boite/contracts';
   import InfoTip from './InfoTip.svelte';
   import Menu from './Menu.svelte';
   import DiagnosticsReport from './DiagnosticsReport.svelte';

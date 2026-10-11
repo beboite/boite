@@ -190,6 +190,7 @@ export async function issueCommand(args: string[], client: CoreClient, threadId:
   if (positional.length > 1) throw new Usage(`issue ${action} takes flags only; boite logs help lists them`);
   only(`issue ${action}`, options, ['title', 'description', 'descriptionFile', 'noLogs']);
   if (!options.title) throw new Usage('issue needs --title');
+  if (options.description !== undefined && options.descriptionFile !== undefined) throw new Usage('issue takes --description or --description-file, not both');
   let description = options.description;
   if (options.descriptionFile) {
     try { description = readFileSync(isAbsolute(options.descriptionFile) ? options.descriptionFile : resolve(cwd, options.descriptionFile), 'utf8'); }

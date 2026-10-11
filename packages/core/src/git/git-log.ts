@@ -1,7 +1,13 @@
 import type { Core } from '../core.ts';
 
 /** Subcommands whose non-zero exit is an answer ("no such ref"), not a failure. */
-const PROBES = new Set(['rev-parse', 'symbolic-ref', 'cat-file', 'show-ref', 'merge-base', 'ls-files', 'check-ignore', 'diff']);
+const PROBES = new Set(['rev-parse', 'symbolic-ref', 'show-ref', 'merge-base', 'check-ignore']);
+/** These answer only when asked to: `cat-file -e`/`-s`, `diff --quiet`, `ls-files --error-unmatch`; a content read that fails is a failure. */
+const PROBE_FLAGS: Record<string, readonly string[]> = { 'cat-file': ['-e', '-s'], diff: ['--quiet', '--exit-code'], 'ls-files': ['--error-unmatch'] };
+
+function probes(subcommand: string, args: readonly string[]): boolean {
+  return PROBES.has(subcommand) || (PROBE_FLAGS[subcommand]?.some(flag => args.includes(flag)) ?? false);
+}
 const SLOW_GIT_MS = 5_000;
 
 /** The git subcommand, `worktree add` style for the two-word ones; never the arguments. */
@@ -24,7 +30,7 @@ export function logGit(core: Core, threadId: string | null, args: readonly strin
   const cause = stderr.split(/\r?\n/).map(line => line.trim()).find(line => line.length > 0)?.slice(0, 300) ?? null;
   if (code !== 0) {
     // A folder that is no repository is a state the panel shows, asked again on every refresh.
-    const level = PROBES.has(subcommand.split(' ')[0]!) || /not a git repository/i.test(cause ?? '') ? 'debug' : 'warn';
+    const level = probes(subcommand.split(' ')[0]!, args) || /not a git repository/i.test(cause ?? '') ? 'debug' : 'warn';
     core.logs.record(level, `git ${subcommand} exited with code ${code} after ${Math.round(ms)} ms${cause ? `: ${cause}` : ''}`, { ...base, event: 'git.failed', data: { subcommand, exitCode: code, stderr: cause } });
     return;
   }

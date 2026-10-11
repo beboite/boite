@@ -24,7 +24,8 @@ import { setThreadStatus, withLoad } from './records.ts';
 
 /** Tool name, decision, who decided and how long it waited: never the tool input or the question text. */
 function logCard(core: Core, request: PermissionRequest | QuestionRequest, event: string, message: string, data: Record<string, string | number | boolean>): void {
-  const waited = Date.now() - request.createdAt;
+  // A clock stepped back would make the wait negative.
+  const waited = Math.max(0, Date.now() - request.createdAt);
   core.logs.record(waited >= 60_000 ? 'info' : 'debug', `${message} after ${Math.round(waited / 1000)} s`, {
     source: 'permissions', event, threadId: request.threadId, turnId: request.turnId, requestId: request.id, durationMs: waited,
     data: { ...('toolName' in request ? { tool: request.toolName } : {}), ...data },
