@@ -3,12 +3,14 @@
   import Menu from './Menu.svelte';
   import type { MenuItem } from '../lib/menu';
   import { strings } from '../lib/strings';
+  import { insideTauri } from '../lib/endpoint';
   import { workspace } from '../lib/workspace.svelte';
 
   /**
    * The machine this device opens on at every start, chosen among the ones it
    * is connected to. The choice stays on the device: a phone picks its own.
-   * With one machine there is nothing to choose.
+   * With one machine there is nothing to choose. The desktop app has no such
+   * choice: it opens on the machine shown last.
    */
   const LAST = 'last';
   const s = strings.machines;
@@ -23,7 +25,7 @@
   }
 </script>
 
-{#if workspace.machines.length > 1}
+{#if !insideTauri() && workspace.machines.length > 1}
   <section class="card" data-testid="main-machine">
     <div class="switch-row">
       <span class="text">

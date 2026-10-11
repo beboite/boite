@@ -41,7 +41,9 @@ A start opens on the machine shown last. A device can name its main machine
 instead, under Machines and updates in Settings, once it reaches more than one:
 every start then opens on that machine, whichever one was shown since. The
 choice is made on the device and kept there (`boite.main` in its storage), so a
-phone and a computer each have their own. It gives the machine nothing: its
+phone and a browser each have their own. The desktop app has no such row: it
+always opens on the machine shown last, and ignores a choice an earlier version
+saved. It gives the machine nothing: its
 key, its role and what a [group](groups.md) may do with it stay as they were. A
 main machine that is off gives way like any other, after the same two seconds
 at every start, and is asked first again at the next one. A machine the group
