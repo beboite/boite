@@ -37,9 +37,10 @@ export function describeConnection(connection: ServerConnection): { principal: s
 /**
  * Normal closes from a person's app are lifecycle; anything abnormal is a
  * warning. A refused hello already has its own warning, so its close is detail.
+ * Only the core's own hello timeout counts: a client sending those words is not one.
  */
-export function closeLevel(code: number, reason: string, authenticated: boolean, principal: string): 'debug' | 'info' | 'warn' {
-  const abnormal = code === 1006 || code === 1009 || code === 1011 || code === 1013 || (code === RpcCloseCode.Unauthorized && reason === 'hello timed out');
+export function closeLevel(code: number, reason: string, authenticated: boolean, principal: string, byCore = false): 'debug' | 'info' | 'warn' {
+  const abnormal = code === 1006 || code === 1009 || code === 1011 || code === 1013 || (byCore && code === RpcCloseCode.Unauthorized && reason === 'hello timed out');
   if (abnormal) return 'warn';
   // Every `boite` call from an agent opens and closes a socket: that is detail.
   return principal === 'agent' || !authenticated ? 'debug' : 'info';
@@ -67,7 +68,7 @@ export function logConnectionClosed(core: Core, connection: ServerConnection, co
   const by = connection.closedBy;
   // The peer picks its close reason, before hello too: never raw in a line.
   const clientReason = reason ? clientField(reason, 120, '') : '';
-  const level = closeLevel(by?.code ?? code, by !== null ? by.reason : clientReason, connection.authenticated, who.principal);
+  const level = closeLevel(by?.code ?? code, by !== null ? by.reason : clientReason, connection.authenticated, who.principal, by !== null);
   const cause = by !== null ? `the core closed it with ${by.code}${by.reason ? ` (${by.reason})` : ''}` : `the client closed it with ${code}${clientReason ? ` (${clientReason})` : ''}`;
   core.logs.record(level, `Connection ${connection.id} of ${who.principal} from ${who.client} closed after ${formatSeconds(lifetime)}: ${cause}`, {
     source: 'connections', event: 'connection.closed', durationMs: lifetime, threadId: connection.identity.threadId ?? undefined,

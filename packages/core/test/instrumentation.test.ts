@@ -72,6 +72,11 @@ test('a stop the core asked for is no crash, and old stderr does not describe a 
   noteStderr('thr_old', 'from an hour ago', Date.now() - 60 * 60_000);
   expect(stderrTail('thr_old')).toBeNull();
   forgetStderr('thr_old');
+  // A failed turn reads only what was printed since it started.
+  noteStderr('thr_retry', 'the previous turn', Date.now() - 5_000);
+  noteStderr('thr_retry', 'this turn');
+  expect(stderrTail('thr_retry', undefined, undefined, Date.now() - 1_000)).toBe('this turn');
+  forgetStderr('thr_retry');
   // The thread that keeps printing outlives quieter ones once 256 threads are kept.
   const crowd = Array.from({ length: 255 }, (_, index) => `thr_crowd_${index}`);
   noteStderr('thr_busy', 'first');
@@ -114,7 +119,9 @@ test('slow RPC thresholds: debug from 1 s, warn from 10 s except for methods tha
   expect(closeLevel(1006, '', true, 'owner')).toBe('warn');
   expect(closeLevel(1000, '', true, 'owner')).toBe('info');
   expect(closeLevel(1000, '', true, 'agent')).toBe('debug');
-  expect(closeLevel(4001, 'hello timed out', false, 'unauthenticated')).toBe('warn');
+  expect(closeLevel(4001, 'hello timed out', false, 'unauthenticated', true)).toBe('warn');
+  // A client that closes with the core's words is a normal close.
+  expect(closeLevel(4001, 'hello timed out', false, 'unauthenticated')).toBe('debug');
 });
 
 test('a connection logs who it was, how long it lived and who closed it; a refused hello says why', async () => {

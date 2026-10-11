@@ -279,8 +279,11 @@ test('real logs queries enforce strict validation, newest-first filters and owne
       expect(phoneLogs).toEqual([]);
       // Even a long output stays usable and bounded for its owner, while retention stays fixed.
       const known = harness.token;
-      harness.core.bus.emit('core.log', { level: 'warn', at: 4, message: 'x'.repeat(4090) + known + 'y'.repeat(8000), kind: 'provider-output' });
-      expect((await owner.call('core.logs', { limit: 1 }))[0]?.message).toBe('[provider output omitted]');
+      // Newer than the record above, and about no thread, so `limit: 1` reads this one.
+      harness.core.bus.emit('core.log', { level: 'warn', at: Date.now() + 4000, message: 'x'.repeat(4090) + known + 'y'.repeat(8000), kind: 'provider-output' });
+      const [long] = await owner.call('core.logs', { limit: 1 });
+      expect(long).toMatchObject({ message: '[provider output omitted]' });
+      expect(long?.threadId).toBeUndefined();
       expect(live.at(-1)?.message.length).toBe(LOG_MESSAGE_CHARS);
       expect(live.at(-1)?.message).not.toContain(known.slice(0, 12));
     } finally { agent.close(); phone.close(); }

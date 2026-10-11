@@ -110,14 +110,28 @@
       reading = true;
       try {
         const newest = untrack(() => records.at(-1)?.at) ?? Date.now() - PERIODS[untrack(() => period)];
-        const page = await client.call('core.logs', { ...filters, since: newest, limit: PAGE });
-        if (!active || page.length === 0) return;
         const known = new Set(untrack(() => records).map(record => record.id));
-        const fresh = page.filter(record => !known.has(record.id)).reverse();
+        // Newest first. A burst past one page is read back page by page down to the newest row
+        // shown (`until` is inclusive, ids already read are dropped), up to what the page keeps.
+        const fresh: CoreLogRecord[] = [];
+        let until: number | undefined;
+        for (let pages = 0; pages < KEPT / PAGE; pages += 1) {
+          const page = await client.call('core.logs', { ...filters, since: newest, ...(until === undefined ? {} : { until }), limit: PAGE });
+          if (!active) return;
+          const added = page.filter(record => !known.has(record.id));
+          for (const record of added) known.add(record.id);
+          fresh.push(...added);
+          if (page.length < PAGE || added.length === 0) break;
+          until = page.at(-1)!.at;
+        }
         if (fresh.length === 0) return;
+        fresh.reverse();
         const element = list;
         const atBottom = element ? element.scrollHeight - element.scrollTop - element.clientHeight < 24 : true;
-        records = [...untrack(() => records), ...fresh].slice(-KEPT);
+        const next = [...untrack(() => records), ...fresh];
+        // Rows dropped from the top are still in the files: Load older brings them back.
+        if (next.length > KEPT) older = true;
+        records = next.slice(-KEPT);
         if (atBottom) void tick().then(() => { if (element) element.scrollTop = element.scrollHeight; });
       } catch { /* The next read tries again; the page keeps what it shows. */ }
       finally { reading = false; }

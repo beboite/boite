@@ -28,9 +28,12 @@ export function noteStderr(threadId: string, line: string, at = Date.now()): voi
   if (lines.length > LINES_KEPT) lines.splice(0, lines.length - LINES_KEPT);
 }
 
-/** The newest lines, oldest first, joined by ` | ` and cut to `max` characters from the end; null when there are none. */
-export function stderrTail(threadId: string, max = STDERR_TAIL_CHARS, now = Date.now()): string | null {
-  const lines = tails.get(threadId)?.filter(line => now - line.at <= TAIL_AGE_MS);
+/**
+ * The newest lines, oldest first, joined by ` | ` and cut to `max` characters from the end; null when there are none.
+ * `since` leaves out what was printed before, such as an earlier turn's output.
+ */
+export function stderrTail(threadId: string, max = STDERR_TAIL_CHARS, now = Date.now(), since = 0): string | null {
+  const lines = tails.get(threadId)?.filter(line => now - line.at <= TAIL_AGE_MS && line.at >= since);
   if (lines === undefined || lines.length === 0) return null;
   const joined = lines.map(line => line.text).join(' | ');
   return joined.length <= max ? joined : `...${joined.slice(joined.length - max + 3)}`;

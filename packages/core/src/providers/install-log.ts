@@ -22,7 +22,7 @@ export function installLogger(core: Core): (payload: ProviderInstallState & { pr
     const base = { source: 'updates', event: `provider.install.${payload.state}`, durationMs, data: { providerId: payload.providerId, version: payload.version, step: payload.state } };
     if (payload.state === 'downloading') core.logs.info(`Installing ${payload.providerId} ${payload.version}: downloading ${Math.round(payload.totalBytes / 1048576)} MiB`, { ...base, data: { ...base.data, totalBytes: payload.totalBytes } });
     else if (payload.state === 'failed') core.logs.warn(`Installing ${payload.providerId} ${payload.version} failed after ${Math.round(durationMs / 1000)} s: ${payload.message}`, { ...base, data: { ...base.data, reason: payload.message } });
-    else if (payload.state === 'absent') core.logs.info(`Installing ${payload.providerId} ${payload.version} was cancelled`, { ...base, event: 'provider.install.cancelled' });
+    else if (payload.state === 'absent') core.logs.info(`Installing ${payload.providerId} ${payload.version} was cancelled`, { ...base, event: 'provider.install.cancelled', data: { ...base.data, step: 'cancelled' } });
     else core.logs.info(`Installing ${payload.providerId} ${payload.version}: ${payload.state}`, base);
   };
 }
