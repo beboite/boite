@@ -37,6 +37,7 @@ for (const width of [1280, 390]) {
       const option = async (key: string) => {
         if (await page.evaluate(`document.querySelector('${id(`${prefix}grouping-options`)}').getAttribute('aria-expanded') !== 'true'`)) await page.click(id(`${prefix}grouping-options`));
         const selector = `${menu} [data-value=${key}]`;
+        await page.waitFor(`document.querySelector('${selector}')`);
         const checked = await page.evaluate(`document.querySelector('${selector}').getAttribute('aria-checked')`);
         await page.click(selector);
         await page.waitFor(`document.querySelector('${selector}')?.getAttribute('aria-checked') === '${checked === 'true' ? 'false' : 'true'}'`);

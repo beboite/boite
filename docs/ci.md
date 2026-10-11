@@ -133,7 +133,7 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 591,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,475,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,500,000 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 3,760,000 |
 
@@ -162,6 +162,16 @@ for that same branch, 6,033 more than Linux. Merged with `b8dc6c21`, whose
 limits were 4,466,000 and 3,744,000, the branch measured 4,469,022 and
 3,749,375 on Linux, about 3,755,400 core bytes on Windows. The limits rise to
 4,475,000 and 3,760,000.
+
+On 2026-10-11 on Linux with Bun 1.4.2, `main` at `4762402b` measured 4,471,508
+UI bytes with a 581,473-byte entry chunk. Several drafts per project, the
+composer's own undo history and image-carrying copy, the work counts on the
+Threads/Agents switch, the merged project fold, thread-like done rows with long
+press and their English/French sentences measured 4,493,255 and 590,779: 21,747
+bytes in all, 9,306 of them in the entry chunk. The display options panel loads
+on its own (6,646 bytes of JavaScript, 3,613 of CSS) to keep the entry chunk
+under its unchanged 591,000. The Windows job measured the same UI total. The UI
+limit rises to 4,500,000.
 
 On 2026-10-10, `bun run build:ui` with Bun 1.4.2 measured 4,420,649 UI bytes at
 `feeb393b` and 4,425,557 with close confirmation and typed agent archival.
