@@ -122,6 +122,8 @@ export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMeth
   ['devices.input', 'taps, swipes, text and keys on a device open in its own conversation, as adb input would'],
   ['devices.close', 'removing a device from its own panel; powering it off closes it in every conversation, as the emulator\'s own window would'],
   ['questions.ask','a question card on its own thread that it does not wait on; the answer comes back as a message'],
+  ['agent.settings', 'the settings it may ask the user about, with their values and pages; credentials, accounts and browser profiles are not among them'],
+  ['settings.request', 'a settings card on its own thread proposing a change or pointing at a page; only the owner applies it, through settings.set'],
   ['artifacts.publish', 'explicitly sharing a bounded snapshot from its own working directory in its own conversation'],
   ['artifacts.read', 'reading back only a published snapshot belonging to its own conversation'],
   ['artifacts.view', 'showing one HTML page of its own working directory in its own conversation, embedded whole, on an opaque origin that loads and calls nothing'],

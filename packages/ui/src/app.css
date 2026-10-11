@@ -382,6 +382,8 @@
      100 ms before it moved. */
   --dur-slide: 300ms;
   --dur-slide-out: 200ms;
+  /* How long a Settings card a conversation pointed at stays ringed. */
+  --dur-flash: 1800ms;
   --ease-slide: cubic-bezier(0.2, 0, 0, 1);
   --z-whip: 100;
   --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
@@ -671,6 +673,10 @@
 .typing > span { width: 5px; height: 5px; border-radius: var(--radius-full); background: currentColor; animation: typing var(--dur-typing) ease-in-out infinite; animation-play-state: var(--typing-state, running); }
 .typing > span:nth-child(2) { animation-delay: var(--dur-typing-step); }
 .typing > span:nth-child(3) { animation-delay: calc(var(--dur-typing-step) * 2); }
+/* A Settings card a settings card in a conversation pointed at: one accent ring
+   that fades. No movement, so reduced motion keeps it. */
+.settings-flash { animation: settings-flash var(--dur-flash) var(--ease-out-quint); }
+@keyframes settings-flash { 0%, 40% { outline: 2px solid var(--color-accent); outline-offset: 3px; } 100% { outline: 2px solid transparent; outline-offset: 3px; } }
 @keyframes typing { 0%, 60%, 100% { opacity: .4; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
 @media (prefers-reduced-motion: reduce) { .typing > span { animation: none; } }
 html[data-motion='reduced'] .typing > span { animation: none; }

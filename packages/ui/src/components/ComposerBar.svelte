@@ -416,6 +416,9 @@
   }
 
   .send:not(:disabled):active { transform: scale(.92); }
+  /* No chips to fill the row: the tools sit beside the send button on the right. */
+  .answering { justify-content: flex-end; }
+  .answering .stop, .answering .send { margin-left: 0; }
   .answering .send { width: auto; padding-inline: 12px; border-radius: var(--radius-md); }
   .answering .attach { display: inline-flex; }
 
@@ -432,7 +435,6 @@
     .chips :global(.picker > .trigger > .label) { min-width: 0; max-width: none; }
     .chips :global(.picker > .trigger.connect) { padding: 0 12px; border-radius: var(--radius-md); background: var(--color-accent-soft); color: var(--color-accent); }
     .send, .stop { margin-left: 2px; }
-    .answering .send { margin-left: auto; }
     /* The composer carries `dictating` while a dictation runs. */
     :global(.dictating) .send { display: none; }
   }

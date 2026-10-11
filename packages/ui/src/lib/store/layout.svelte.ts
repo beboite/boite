@@ -31,7 +31,8 @@ export class Layout {
   page = $state<Page>('chat');
   settingsTab = $state<SettingsTab>('home');
   /** A settings card requested before its lazy page exists, with a fresh key for repeated asks. */
-  settingsSection = $state<{ id: string; request: number } | null>(null);
+  /** The card Settings scrolls to; `flash` lights it up once, for a settings card that pointed at it. */
+  settingsSection = $state<{ id: string; request: number; flash?: boolean } | null>(null);
   /** The phone drawer. */
   sidebarOpen = $state(false);
   /** The desktop sidebar's remembered folded state. */
@@ -75,12 +76,12 @@ export class Layout {
   // Navigation
   // -------------------------------------------------------------------------
 
-  showSettings(tab: SettingsTab = 'home', section: string | null = null): void {
+  showSettings(tab: SettingsTab = 'home', section: string | null = null, options: { flash?: boolean } = {}): void {
     this.ctx.threads.invalidateNavigation();
     this.settingsTab = tab;
     this.settingsSection = section === null
       ? null
-      : { id: section, request: (this.settingsSection?.request ?? 0) + 1 };
+      : { id: section, request: (this.settingsSection?.request ?? 0) + 1, ...(options.flash ? { flash: true } : {}) };
     this.page = 'settings';
     if (tab === 'resources') void this.ctx.store.refreshResources();
   }

@@ -118,7 +118,7 @@ test('actual CLI stdio negotiates, lists schemas, reads scoped tools and rejects
     expect(initialized.result.serverInfo.name).toBe('boite');
     transport.notify('notifications/initialized');
     const listed = await transport.rpc('tools/list', {});
-    expect(listed.result.tools.length).toBe(18);
+    expect(listed.result.tools.length).toBe(20);
     expect(listed.result.tools.find((tool: any) => tool.name === 'boite_where').inputSchema).toMatchObject({ type: 'object', additionalProperties: false });
     const where = await transport.rpc('tools/call', { name: 'boite_where', arguments: {} });
     expect(where.result.structuredContent.result.threadId).toBe(threadId);
@@ -126,6 +126,8 @@ test('actual CLI stdio negotiates, lists schemas, reads scoped tools and rejects
     expect(capabilities.result.structuredContent.result.threadId).toBe(threadId);
     const projects = await transport.rpc('tools/call', { name: 'boite_projects', arguments: { limit: 1 } });
     expect(projects.result.structuredContent.result.items).toHaveLength(1);
+    const settings = await transport.rpc('tools/call', { name: 'boite_settings', arguments: {} });
+    expect(settings.result.structuredContent.result.find((reading: any) => reading.key === 'agentCpuCapPercent')).toMatchObject({ value: 75, page: 'resources' });
     const settled = await transport.rpc('tools/call', { name: 'boite_delegate_wait', arguments: { timeoutMs: 0 } });
     expect(settled.result.structuredContent.result.state).toBe('settled');
     for (const [name, args] of [

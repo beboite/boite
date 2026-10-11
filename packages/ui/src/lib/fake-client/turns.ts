@@ -2,11 +2,11 @@
 import { previewPrompt, RpcErrorCode, type AgentLetter, type Attachment, type Message, type MessagePart, type PreviewReference, type Thread, type ThreadId, type Turn, type TurnInFlightData, type Usage } from '@boite/contracts';
 import { decodedBytes } from '../attachments';
 import { RpcFailure } from '../client';
-import { DIFF_NEW, DIFF_OLD, DIFF_PATH, DOC_TEXT, DOC_TITLE, IMAGE_BASE64, ASYNC_QUESTION_OPTIONS, ASYNC_QUESTION_TEXT, SPAWN_MARKER } from './conversation';
+import { DIFF_NEW, DIFF_OLD, DIFF_PATH, DOC_TEXT, DOC_TITLE, IMAGE_BASE64, ASYNC_QUESTION_OPTIONS, ASYNC_QUESTION_TEXT, SETTING_MARKERS, SPAWN_MARKER } from './conversation';
 import { FAKE_CONTEXT_FLOOR, FAKE_CONTEXT_PER_TURN, FAKE_CONTEXT_WINDOW } from './providers';
 import { addUsage, chunkText, ECHO_COMMANDS, emptyUsage, SHOUT, toSummary } from './shared';
 import { pauseActivity } from './activity';
-import { askPermission, askQuestion, askAsync } from './requests';
+import { askPermission, askQuestion, askAsync, requestSetting } from './requests';
 import { backgroundShell, streamToolInput, runTool, documentTool, spawnProcess, toolBurst } from './turn-tools';
 import { delegationConfig, pumpDelegation } from './delegation';
 import { applyWaitingMove } from './thread-move';
@@ -224,6 +224,11 @@ async function stream(
   // `boite ask`: a card the agent does not wait on, answered into the next prompt.
   if (!record.cancelled && prompt.includes('[ask]')) {
     askAsync(ctx, thread, turn, message, ASYNC_QUESTION_TEXT, ASYNC_QUESTION_OPTIONS, false);
+  }
+  // `boite settings request|open`: settings cards the user applies, refuses or follows.
+  for (const [marker, params] of SETTING_MARKERS) {
+    if (record.cancelled || !prompt.includes(marker)) continue;
+    try { requestSetting(ctx, thread, turn, { threadId: thread.id, ...params }); } catch { /* already set, or already asked */ }
   }
   if (!record.cancelled && prompt.includes('[background]')) {
     await backgroundShell(ctx, thread, message);

@@ -132,10 +132,10 @@ The tested installer becomes the release artifact.
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 591,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,525,000 |
+| UI entry chunk | 593,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,550,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 3,760,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 3,772,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
@@ -181,6 +181,25 @@ limit to 4,500,000 on their own, the Windows job measured 591,322 and
 or after the list has drawn (7,250 bytes of JavaScript, 3,406 of CSS): on Linux
 the entry chunk measured 585,204, under its unchanged 591,000, and the UI
 4,511,041. The UI limit rises to 4,525,000.
+
+Later on 2026-10-11 on Linux with Bun 1.4.2, `main` at `5dd77e39` measured
+4,472,003 UI bytes and 3,749,519 core bytes, and settings cards (`boite
+settings`) on top of it 4,495,656 and 3,760,802; the Windows job measured
+3,760,540 core bytes for an earlier head of that branch. The core gains 11,283
+bytes for the card checks, the CLI and MCP commands; the UI 23,653 for the
+card, which loads outside the entry chunk, its English and French sentences
+and the shared checks in contracts. The entry chunk grows 5,016 bytes, to
+586,462. The limits rise to 4,499,000 and 3,767,000. `main` at `da347f40`,
+whose agent mail had raised the UI limit to 4,500,000 without this table,
+measured 4,485,829 UI bytes, a 585,698-byte entry chunk and 3,754,727 core
+bytes; merged with settings cards, 4,509,505, 590,714 and 3,766,024. The
+limits rise to 4,515,000, 593,000 and 3,772,000, the core keeping room for the
+Windows job's larger build.
+
+Several drafts per project, merged with settings cards at `87fca361`, measured
+4,536,091 UI bytes and a 590,215-byte entry chunk on Linux: the done rows and
+the project fold's rows load outside the entry chunk, which stays under 593,000.
+The UI limit rises to 4,550,000.
 
 On 2026-10-10, `bun run build:ui` with Bun 1.4.2 measured 4,420,649 UI bytes at
 `feeb393b` and 4,425,557 with close confirmation and typed agent archival.
