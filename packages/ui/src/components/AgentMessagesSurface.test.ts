@@ -25,7 +25,8 @@ test('the tab lists one discussion per conversation, opens its back and forth li
   const store = new Store();
   store.coordination = { self, config: { mode: 'brief', resources: '', remote: true, paused: false }, messages: letters, sent: 1, sendLimit: null, wakes: 0, wakeLimit: null };
   const panel = new RightPanelStore().for('messages-test');
-  panel.openMessages();
+  // The tab remembers a discussion the core has since pruned: it lands on the list.
+  panel.openMessages('here/pruned-thread');
   const context = {
     get coordination() { return store.coordination; }, delegation: null, threads: [], projects: [],
     openThread: { id: self.threadId }, loadCoordination: vi.fn()

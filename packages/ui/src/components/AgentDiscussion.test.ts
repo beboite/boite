@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'vitest';
-import { flushSync, mount, unmount } from 'svelte';
+import { flushSync, mount, tick, unmount } from 'svelte';
 import type { AgentLetter } from '@boite/contracts';
 import AgentDiscussion from './AgentDiscussion.svelte';
 import { agentMailFor, discussionsOf } from '../lib/agent-mail';
@@ -17,11 +17,11 @@ function letter(id: string, minute: number, incoming: boolean, extra: Partial<Ag
   return { id, from: incoming ? contact : mine, to: incoming ? self : peer, toTitle: incoming ? 'Current agent' : 'Deployment agent',
     text: `Text ${id}`, replyTo: null, createdAt: minute * MIN, expiresAt: Number.MAX_SAFE_INTEGER, status: 'delivered', error: null, ...extra };
 }
-function show(letters: AgentLetter[]): HTMLElement {
+function show(letters: AgentLetter[], letterId?: string): HTMLElement {
   const store = { coordination: { self, config: { mode: 'brief', resources: '', remote: true, paused: false }, messages: letters, sent: 0, sendLimit: null, wakes: 0, wakeLimit: null },
     delegation: null, threads: [], projects: [] } as unknown as Store;
   const [discussion] = discussionsOf(agentMailFor(store, self.threadId), store);
-  component = mount(AgentDiscussion, { target: document.body, props: { store, discussion: discussion!, onback: () => {} } });
+  component = mount(AgentDiscussion, { target: document.body, props: { store, discussion: discussion!, letterId, onback: () => {} } });
   flushSync();
   return document.querySelector<HTMLElement>('[data-testid=agent-discussion-view]')!;
 }
@@ -66,11 +66,15 @@ test('the back and forth groups each side, stamps long silences, quotes an earli
   expect(view.querySelector('.tally')?.textContent).toBe('2 sent, 3 received');
 });
 
-test('a steward letter reads as the steward\'s, never on the user\'s side, and a notice is a quiet line', () => {
+test('a steward letter reads as the steward\'s, never on the user\'s side, and a notice is a quiet line', async () => {
+  // Opened from the timeline's notice line: the notice is the letter it lands on.
   const view = show([
     letter('steer', 0, true, { origin: 'steward', text: 'Open the pull request.' }),
     letter('notice', 1, true, { origin: 'notice', text: 'Turn done in "Deployment agent".' })
-  ]);
+  ], 'notice');
+  await tick();
+  flushSync();
+  expect(message(view, 'notice').classList.contains('flash')).toBe(true);
   const steer = message(view, 'steer');
   expect(steer.classList.contains('steward')).toBe(true);
   expect(steer.classList.contains('right')).toBe(false);
