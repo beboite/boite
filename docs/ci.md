@@ -135,7 +135,7 @@ The tested installer becomes the release artifact.
 | UI entry chunk | 591,000 |
 | UI files, excluding `.br` and `.gz` copies | 4,532,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 3,860,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 3,864,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
@@ -177,7 +177,10 @@ branch measured 4,516,117 and 3,851,614 on Linux on 2026-10-11, and its limits
 take the same increase: 4,526,000 and 3,856,000. Merged with `b8dc6c21`, whose pairing
 card raised `main`'s limits by the same 6,000 and 4,000 bytes again, the
 branch measured about 4,519,200 and 3,851,600 the same day, and its limits
-become 4,532,000 and 3,860,000.
+become 4,532,000 and 3,860,000. The review fixes that followed (redaction
+before bounding, strict diagnostics parameters, safer file writes) brought the
+core to about 3,859,000 bytes on Linux on 2026-10-11, under 1 KB from its
+limit, so the core JavaScript limit rises by 4,000 to 3,864,000.
 
 On 2026-10-03, fresh builds of `e1f00a3` measured 2,695,204 core bytes and 3,932,309
 UI bytes. The orchestration additions measured 3,228,444 and 3,943,301 bytes:

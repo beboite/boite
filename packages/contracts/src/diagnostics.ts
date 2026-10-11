@@ -363,7 +363,8 @@ export function createLogAnonymizer(context: LogAnonymizeContext): LogAnonymizer
   const words: { body: string; key: string; value: string }[] = [];
   const addWord = (word: string, value: string): void => { if (wordUsable(word)) words.push({ body: escapeRegExp(word), key: word.toLowerCase(), value }); };
   for (const project of projects) addWord(project.name, projectLabel(project.path));
-  if (context.user) addWord(context.user, '<user>');
+  // A name with a space (`John Doe`) is also replaced word by word: a path cut at the space keeps the rest.
+  if (context.user) { addWord(context.user, '<user>'); for (const part of context.user.split(/\s+/)) if (part !== context.user) addWord(part, '<user>'); }
   if (context.hostname) for (const name of new Set([context.hostname, context.hostname.split('.')[0] ?? context.hostname])) addWord(name, '<host>');
   const extras: { body: string; key: string; value: string }[] = [];
   for (const extra of context.extra ?? []) if (wordUsable(extra)) extras.push({ body: escapeRegExp(extra), key: extra.toLowerCase(), value: `<private:${shortHash(context.salt, extra.toLowerCase())}>` });

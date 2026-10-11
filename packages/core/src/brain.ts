@@ -334,6 +334,8 @@ export class BrainStore {
       this.core.logs.info(`Brain ${push ? 'synchronized' : 'pulled'}: ${state.behind} commits pulled${push ? `, ${state.ahead} pushed` : ''}`, { source: 'brain', event: 'brain.synced', durationMs: performance.now() - at, data: { ...counts, push } });
       return await this.status();
     } catch (cause) {
+      // Stopped by the core shutting down: no failure to report.
+      if (this.closed) throw cause;
       this.core.logs.warn(`Brain ${push ? 'synchronization' : 'automatic pull'} failed: ${messageOf(cause)}`, { source: 'brain', event: 'brain.sync-failed', durationMs: performance.now() - at, data: { ...counts, push } });
       throw cause;
     } finally { this.busy = false; }

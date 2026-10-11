@@ -181,7 +181,8 @@ name `<host>`, account labels `<private:xxxxxx>`, e-mail addresses `<email>`,
 non-loopback IPv4, IPv6 and MAC addresses `<ip>`, `<ip6>` and `<mac>`. A URL
 keeps its host and path only for public services (provider APIs, GitHub,
 package registries); any other host becomes `<host:xxxxxx>/<path>`, and a
-GitHub owner other than Boite's own `<owner:xxxxxx>`. `xxxxxx` is a hash
+GitHub owner and repository other than Boite's own `<owner:xxxxxx>` and
+`<repo:xxxxxx>`. `xxxxxx` is a hash
 salted with `<dataDir>/logs/anonymize.salt`, so one machine's exports agree
 with each other and differ from another machine's. Thread, turn and run ids,
 versions, times and loopback addresses stay readable.

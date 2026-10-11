@@ -58,6 +58,8 @@ test('the anonymizer replaces paths, names, addresses and private hosts and keep
 test('a name equal to a placeholder word leaves the placeholders whole', () => {
   const anonymizer = createLogAnonymizer({ salt: 'fixed-salt', user: 'email', hostname: 'host.lan' });
   expect(anonymizer.text('mail me@example.com from host.lan')).toBe('mail <email> from <host>');
+  // A user name with a space, its path cut at the end of the line: no part survives.
+  expect(createLogAnonymizer({ salt: 'fixed-salt', user: 'John Doe' }).text('home C:\\Users\\John Doe')).not.toMatch(/John|Doe/);
   // An account label is a whole word too: `ann` leaves `banner` alone.
   expect(createLogAnonymizer({ salt: 'fixed-salt', extra: ['ann'] }).text('banner by ann')).toMatch(/^banner by <private:[0-9a-f]{6}>$/);
 });

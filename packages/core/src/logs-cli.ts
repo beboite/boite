@@ -150,7 +150,8 @@ export async function logsCommand(args: string[], client: CoreClient, threadId: 
       // made private through the same descriptor before the export goes into it.
       const fd = openSync(written, 'w', 0o600);
       try {
-        fchmodSync(fd, 0o600);
+        // Unix modes only: Windows has none to set, and Bun 1.4.2 crashed in fchmodSync there.
+        if (process.platform !== 'win32') fchmodSync(fd, 0o600);
         writeFileSync(fd, result.text);
       } finally { closeSync(fd); }
     }
