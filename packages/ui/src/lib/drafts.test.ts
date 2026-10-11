@@ -501,6 +501,15 @@ test('a project holds several drafts: each reopens by id and a new Store restore
   expect(restored.composerStates.draft?.text).toBe('One, longer');
   restored.startDraft(undefined, { draftId: two });
   expect(restored.composerStates.draft?.text).toBe('Two');
+  // The older draft, set aside last, is the one the project resumes after another reload.
+  restored.startDraft(undefined, { draftId: one });
+  restored.startDraft(null);
+  expect(await restored.flushDrafts()).toBe(true);
+  vi.mocked(readDraftJournal).mockResolvedValue(vi.mocked(writeDraftJournal).mock.lastCall![1]);
+  const again = await ready('several');
+  again.startDraft(null);
+  again.startDraft(a!.id);
+  expect(again.draft?.id).toBe(one);
 });
 
 test('a fresh draft keeps an empty open draft of the same project and parks a written one', async () => {
@@ -585,6 +594,11 @@ test('a draft row that outlived its draft opens an empty draft, never another pa
   store.startDraft('p-boite', { fresh: true });
   store.editComposerText('draft', 'The draft about to go');
   const gone = store.draft!.id!;
+  // The open draft's own row, chosen from a phone's list, leaves it open as it is.
+  store.setDraftWorktree(true);
+  store.startDraft('p-boite', { draftId: gone });
+  expect(store.draft).toMatchObject({ id: gone, worktree: true });
+  expect(store.composerStates.draft?.text).toBe('The draft about to go');
   store.discardDraft(gone);
   store.startDraft('p-boite', { draftId: gone });
   expect(store.composerStates.draft?.text ?? '').toBe('');

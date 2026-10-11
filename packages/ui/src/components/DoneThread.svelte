@@ -98,6 +98,8 @@
       {/if}
       <span class="provider" title={agent} aria-label={agent}><ProviderLogo providerId={thread.providerId} size={12} /></span>
       <span class="title ui-label">{thread.title}</span>
+      <!-- The project shows below, outside the button: named here too, so two same-titled threads read apart. -->
+      {#if showProject}<span class="visually-hidden">{projectName(entry.project)}</span>{/if}
       <time datetime={new Date(thread.updatedAt).toISOString()} title={exactTime(thread.updatedAt)}>{ago(thread.updatedAt, now)}</time>
     </span>
   </button>
@@ -158,6 +160,7 @@
   .done-thread:hover .title, .done-thread:focus-within .title, .done-thread.open .title { color: var(--color-foreground); }
   .done-thread:hover .provider, .done-thread:focus-within .provider { opacity: 1; }
   time { flex: none; color: var(--color-subtle); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
+  .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .metadata {
     position: absolute;
     left: 10px;

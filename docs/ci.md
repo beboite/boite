@@ -171,7 +171,11 @@ press and their English/French sentences measured 4,493,255 and 590,779: 21,747
 bytes in all, 9,306 of them in the entry chunk. The display options panel loads
 on its own (6,646 bytes of JavaScript, 3,613 of CSS) to keep the entry chunk
 under its unchanged 591,000. The Windows job measured the same UI total. The UI
-limit rises to 4,500,000.
+limit rises to 4,500,000. Merged with `5dd77e39` and its review fixes, the
+Windows job measured a 591,007-byte entry chunk at `b294a3da`, and the next
+fixes 591,270 on Linux. A done row now loads with the first done rows (5,167
+bytes of JavaScript, 3,113 of CSS): the entry chunk measured 587,071 and the UI
+4,496,036, both under their limits.
 
 On 2026-10-10, `bun run build:ui` with Bun 1.4.2 measured 4,420,649 UI bytes at
 `feeb393b` and 4,425,557 with close confirmation and typed agent archival.

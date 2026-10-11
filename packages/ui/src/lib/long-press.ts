@@ -12,15 +12,20 @@ const SLOP_PX = 10;
  */
 export function longPress(node: HTMLElement): { destroy: () => void } {
   let timer: ReturnType<typeof setTimeout> | undefined;
+  /** The finger holding the row: a second finger neither starts nor ends its press. */
+  let pointer: number | null = null;
   let start: { x: number; y: number } | null = null;
   let fired = false;
   let ours = false;
 
-  const cancel = () => { clearTimeout(timer); timer = undefined; start = null; };
+  const cancel = () => { clearTimeout(timer); timer = undefined; start = null; pointer = null; };
   const down = (event: PointerEvent) => {
-    if (event.pointerType === 'mouse' || !event.isPrimary) return;
+    // A mouse press ends whatever a touch left behind, so its right click is never taken for that touch's.
+    if (event.pointerType === 'mouse') { fired = false; return; }
+    if (!event.isPrimary) return;
     cancel();
     fired = false;
+    pointer = event.pointerId;
     start = { x: event.clientX, y: event.clientY };
     const target = event.target instanceof Element ? event.target : node;
     timer = setTimeout(() => {
@@ -33,8 +38,9 @@ export function longPress(node: HTMLElement): { destroy: () => void } {
     }, LONG_PRESS_MS);
   };
   const move = (event: PointerEvent) => {
-    if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > SLOP_PX) cancel();
+    if (event.pointerId === pointer && start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > SLOP_PX) cancel();
   };
+  const end = (event: PointerEvent) => { if (event.pointerId === pointer) cancel(); };
   // The platform's own long press got there first: it opens the menu and the timer stops. One arriving
   // after ours is the same press: it goes no further, so the menu does not open twice.
   const native = (event: Event) => {
@@ -51,9 +57,9 @@ export function longPress(node: HTMLElement): { destroy: () => void } {
 
   node.addEventListener('pointerdown', down);
   node.addEventListener('pointermove', move);
-  node.addEventListener('pointerup', cancel);
-  node.addEventListener('pointercancel', cancel);
-  node.addEventListener('pointerleave', cancel);
+  node.addEventListener('pointerup', end);
+  node.addEventListener('pointercancel', end);
+  node.addEventListener('pointerleave', end);
   node.addEventListener('contextmenu', native, true);
   node.addEventListener('click', click, true);
   return {
@@ -61,9 +67,9 @@ export function longPress(node: HTMLElement): { destroy: () => void } {
       cancel();
       node.removeEventListener('pointerdown', down);
       node.removeEventListener('pointermove', move);
-      node.removeEventListener('pointerup', cancel);
-      node.removeEventListener('pointercancel', cancel);
-      node.removeEventListener('pointerleave', cancel);
+      node.removeEventListener('pointerup', end);
+      node.removeEventListener('pointercancel', end);
+      node.removeEventListener('pointerleave', end);
       node.removeEventListener('contextmenu', native, true);
       node.removeEventListener('click', click, true);
     }

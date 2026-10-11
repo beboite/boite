@@ -209,8 +209,9 @@ families with pending work or input, and uses the recoverable deletion flow belo
 Settings > General > Conversations offers Group working threads,
 stored on this device; phone settings offer the same switch under device
 preferences. The sidebar's Display options panel (`DisplayOptions.svelte`) offers the
-same switches under the view and project order choices, each scope behind its "i",
-and stays open while adjusting multiple options.
+view choice and this switch, each scope behind its "i". In Projects it adds the
+project order choice, once there is a project to order, and the idle-projects switch.
+It stays open while adjusting multiple options.
 It moves running, queued and background work to a collapsed section above Done
 in Recent and behind each project's working counter in Projects. Turning it
 off keeps those conversations in the main list in both views.
@@ -786,9 +787,9 @@ The core validates bytes and writes sanitized, content-addressed copies under
 by archive or project removal. Timeline cards download those copies. Composer
 `[Image N]` references follow attachment order, preview inline and renumber after
 removal. Copying or cutting a reference carries its picture
-(`lib/composer-clipboard.ts`): pasted into another composer, on any machine, the
-picture joins that prompt and the reference takes its number there; pasted back
-into the same composer, only the text goes in. A new image accepted during send
+(`lib/composer-clipboard.ts`): pasted where those numbers name other pictures, on
+any machine, the pictures join that prompt and the references take their numbers
+there; pasted where every number still names the same picture, only the text goes in. A new image accepted during send
 belongs to the next draft. Refused sends retain input, attachments and edits made
 while sending.
 

@@ -3,12 +3,14 @@ import { flushSync, mount, unmount } from 'svelte';
 import { FakeClient } from '../lib/fake-client';
 import { Store } from '../lib/store.svelte';
 import type { ProjectEntry } from '../lib/project-view.svelte';
+import { projectName } from '../lib/format';
 import type { ThreadSummary } from '@boite/contracts';
 import RecentDone from './RecentDone.svelte';
 
 let mounted: ReturnType<typeof mount> | undefined;
 const sources: { client: FakeClient; store: Store; id: string }[] = [];
-const settle = async () => { for (let i = 0; i < 30; i++) { await Promise.resolve(); flushSync(); } };
+// The row component loads on its own with the first rows: loaded once here, later imports resolve in the same turn.
+const settle = async () => { await import('./DoneThread.svelte'); for (let i = 0; i < 30; i++) { await Promise.resolve(); flushSync(); } };
 afterEach(async () => {
   if (mounted) await unmount(mounted); mounted = undefined;
   for (const source of sources.splice(0)) { source.store.detach(); source.client.close(); }
@@ -37,6 +39,9 @@ test('Done loads only when expanded and restores the owning machine when thread 
   for (const call of calls) expect(call.mock.calls.filter(([method]) => method === 'threads.list')).toHaveLength(0);
   click('[data-testid=recent-done-toggle]'); await settle();
   expect(document.querySelectorAll('[data-testid=done-thread]')).toHaveLength(2);
+  // The project shows beside the row, and the row's button names it too, for a screen reader moving between buttons.
+  const project = projectName(entries()[0]!.project);
+  expect(document.querySelector('[data-machine-id=first][data-thread-id=t-trace] [data-testid=done-thread-open]')?.textContent).toContain(project);
   click('[data-machine-id=first][data-thread-id=t-trace] [data-testid=done-thread-restore]'); await settle();
   expect((await first.client.call('threads.get', { threadId: 't-trace' })).archived).toBe(false);
   expect((await second.client.call('threads.get', { threadId: 't-trace' })).archived).toBe(true);

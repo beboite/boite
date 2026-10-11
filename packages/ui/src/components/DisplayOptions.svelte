@@ -21,7 +21,7 @@
   let Panel = $state.raw<typeof import('./DisplayOptionsPanel.svelte').default>();
   let loading: Promise<void> | undefined;
   function load(): Promise<void> {
-    loading ??= import('./DisplayOptionsPanel.svelte').then((module) => { Panel = module.default; }).catch(() => { loading = undefined; });
+    loading ??= import('./DisplayOptionsPanel.svelte').then((module) => { Panel = module.default; }).catch(() => { loading = undefined; popover.hide(); });
     return loading;
   }
   $effect(() => {

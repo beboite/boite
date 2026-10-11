@@ -37,7 +37,7 @@
   const projects = $derived(workspace.view === 'projects');
   /** The merged-PR switch is the project's, on cores that know it, for a repository the owner controls. */
   const merged = $derived(target && owner.owner && target.autoArchiveMergedPr !== undefined && target.repository !== false && target.kind !== 'drafts' ? target : null);
-  // Bound to the project and connection on screen when the panel drew, so a stale press cannot reach another one.
+  // Both follow the project on screen: the section's heading names the project a press writes to, and a lost connection disables it.
   const mergedBusy = $derived(merged ? owner.connection !== 'ready' || owner.projectAutoArchiveMergedPrBusy(merged.id) : true);
 
   $effect(() => {
