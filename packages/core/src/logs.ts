@@ -308,7 +308,11 @@ export class DiagnosticLogs {
     // Serialize the bounded history read with rotation, so a query cannot miss a renamed file.
     this.writing = this.writing.then(async () => {
       const records = new Map<string, CoreLogRecord>();
-      for (const record of fromMemory()) records.set(record.id, record);
+      // Larger is newer everywhere, for records of the same millisecond: a later line of a file,
+      // a newer file, memory last. Insertion order alone is newest file first, oldest line first.
+      const rank = new Map<string, number>();
+      const place = (record: CoreLogRecord, value: number): void => { records.set(record.id, record); rank.set(record.id, value); };
+      fromMemory().forEach((record, line) => place(record, (LOG_FILE_COUNT + 1) * LINES_PER_FILE + line));
       for (let index = 0; index < LOG_FILE_COUNT; index += 1) {
         // A record's time can be earlier than its write (a turn logs when it was queued), so file
         // order says nothing about `at`. A file's modification time does bound what it holds:
@@ -321,10 +325,10 @@ export class DiagnosticLogs {
           const limitTh = [...records.values()].map(record => record.at).sort((a, b) => b - a)[limit - 1]!;
           if (limitTh > modified + CLOCK_SKEW_MS) break;
         }
-        for (const record of await this.read(this.path(index), 'core', keep)) if (!records.has(record.id)) records.set(record.id, record);
+        (await this.read(this.path(index), 'core', keep)).forEach((record, line) => { if (!records.has(record.id)) place(record, (LOG_FILE_COUNT - index) * LINES_PER_FILE + line); });
       }
-      for (let index = 0; index < SHELL_LOG_FILE_COUNT; index += 1) for (const record of await this.read(this.shellPath(index), 'shell', keep)) records.set(record.id, record);
-      result = sortNewest([...records.values()]).slice(0, limit);
+      for (let index = 0; index < SHELL_LOG_FILE_COUNT; index += 1) (await this.read(this.shellPath(index), 'shell', keep)).forEach((record, line) => place(record, (SHELL_LOG_FILE_COUNT - index) * LINES_PER_FILE + line));
+      result = sortNewest([...records.values()], record => rank.get(record.id) ?? 0).slice(0, limit);
     }).catch(error => { this.failure(error); result = sortNewest(fromMemory()).slice(0, limit); });
     await this.writing;
     return result;
@@ -375,8 +379,12 @@ function turnAgent(turn: RpcEvents['turn.started']): Pick<LogContext, 'providerI
 function validDuration(value: unknown): value is number { return typeof value === 'number' && Number.isFinite(value) && value >= 0; }
 
 /** Newest first; records of one instant keep their write order. */
-function sortNewest(records: CoreLogRecord[]): CoreLogRecord[] {
-  return records.map((record, index) => ({ record, index })).sort((a, b) => b.record.at - a.record.at || b.index - a.index).map(entry => entry.record);
+/** Above the lines any file can hold, so a file's rank never reaches the next one's. */
+const LINES_PER_FILE = 10_000_000;
+
+/** Newest first; `order` breaks a tie of the same millisecond, larger being newer (by default, the later in the list). */
+function sortNewest(records: CoreLogRecord[], order: (record: CoreLogRecord, index: number) => number = (_record, index) => index): CoreLogRecord[] {
+  return records.map((record, index) => ({ record, rank: order(record, index) })).sort((a, b) => b.record.at - a.record.at || b.rank - a.rank).map(entry => entry.record);
 }
 
 /** The program's file name, without its folder: which tool ran, never where the user keeps it. */

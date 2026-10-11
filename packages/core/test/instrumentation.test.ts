@@ -195,6 +195,9 @@ test('two cores in one process time their own logins, even for the same account 
   const failed = first.records.find(record => record.context.event === 'account.login.failed');
   expect(failed?.message).toContain('Open https://claude.ai/<redacted> to sign in');
   expect(JSON.stringify(failed)).not.toContain('ABCD-1234');
+  // A sign-in the user cancelled is lifecycle, not a failure.
+  logLoginState(second.core, account, 'failed', 'Sign-in cancelled', 1);
+  expect(second.records.at(-1)).toMatchObject({ level: 'info', context: { event: 'account.login.cancelled' } });
 });
 
 test('a method name the client chose cannot forge a line in a refused or slow RPC record', () => {

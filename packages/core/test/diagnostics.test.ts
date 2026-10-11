@@ -26,6 +26,7 @@ test('the anonymizer replaces paths, names, addresses and private hosts and keep
     'loaded file:///D:/Dev/Factory/assets/logo.png',
     'GET https://api.github.com/repos/acme/hidden-repo/pulls 404',
     'kept meetsu-notes.txt and secret-game-backup',
+    'profile C:\\Users\\John Doe\\AppData and /users/bobby/x',
   ].join('\n'));
   expect(text).toMatch(/kept <user>-notes\.txt and <project:[0-9a-f]{6}>-backup$/m);
   // An API path names the owner and repository one segment later.
@@ -33,7 +34,7 @@ test('the anonymizer replaces paths, names, addresses and private hosts and keep
   expect(text).toMatch(/opened file:\/\/<project:[0-9a-f]{6}>\/index\.html\.$/m);
   // A drive path keeps all three slashes, and its prefix is still found.
   expect(text).toMatch(/loaded file:\/\/\/<project:[0-9a-f]{6}>\/assets\/logo\.png$/m);
-  for (const personal of ['meetsu', 'secret-game', 'Factory', 'nuno-x870', 'example.com', 'Work Account', 'tasbem', 'klNuno', '192.168.1.39', '100.64.0.15', 'other', 'C:\\Users\\nuno', 'aa:bb:cc', 'fe80']) {
+  for (const personal of ['Doe', 'bobby', 'meetsu', 'secret-game', 'Factory', 'nuno-x870', 'example.com', 'Work Account', 'tasbem', 'klNuno', '192.168.1.39', '100.64.0.15', 'other', 'C:\\Users\\nuno', 'aa:bb:cc', 'fe80']) {
     expect(text).not.toContain(personal);
   }
   for (const kept of ['https://api.anthropic.com/v1/messages', 'beboite/boite/issues/9', '127.0.0.1:3773', '10.0.19045.4529', 'v1.2.3', '14:03:22', 'thr_yrbzgyt5xjtjbq334d7m', 'trn_1f992a9ph60nzwzzp8sv', '<data>/logs', '~/.claude', '<user>', '<host>', '<email>', '<ip>']) {
@@ -87,6 +88,7 @@ test('a stored line from any origin parses, bounds its fields and formats on one
   const long = parseLogRecord(JSON.stringify({ id: 'a', runId: 'r', at: 1, level: 'warn', source: 's', event: 'e', message: `${'x'.repeat(4090)} straddling-secret-value` }), 'shell', ['straddling-secret-value'])!;
   expect(long.message).not.toContain('stra');
   expect(parseLogRecord('{"id":1}')).toBeNull();
+  expect(parseLogRecord(JSON.stringify({ id: '', runId: 'r', at: 1, level: 'info', source: 's', event: 'e', message: 'm' }))).toBeNull();
   expect(parseLogRecord(JSON.stringify({ id: 'a', runId: 'r', at: -5, level: 'info', source: 's', event: 'e', message: 'm' }))).toBeNull();
   expect(parseLogRecord('{"broken')).toBeNull();
   expect(parseLogRecord(JSON.stringify({ id: 'a', runId: 'r', at: 1, level: 'info', source: 's', event: 'e', message: 'm' }))!.origin).toBe('core');
@@ -262,7 +264,7 @@ test('the CLI prints records oldest first, filters by time and level, and export
     expect(await runCli(['logs', '--data-dir', harness.dataDir, '--mine'], { env: {}, cwd: harness.dataDir, out: () => undefined, err: value => { refusedMine += value; } })).not.toBe(0);
     expect(refusedMine).toContain('--mine is the agent');
     // Every subcommand refuses an extra word, and an unreadable description file is a usage error.
-    for (const [args, expected] of [[['logs', 'problems', 'extra'], 'logs problems takes flags only'], [['issue', 'draft', '--title', 'The window froze', '--description-file', 'missing.md'], '--description-file missing.md cannot be read: ENOENT']] as const) {
+    for (const [args, expected] of [[['logs', 'problems', 'extra'], 'logs problems takes flags only'], [['logs', 'problems', '--search', 'timeout'], '--search does not apply to it'], [['issue', 'draft', '--title', 'The window froze', '--description-file', 'missing.md'], '--description-file missing.md cannot be read: ENOENT']] as const) {
       let refused = '';
       expect(await runCli(['--data-dir', harness.dataDir, ...args], { env: {}, cwd: harness.dataDir, out: () => undefined, err: value => { refused += value; } })).not.toBe(0);
       expect(refused).toContain(expected);

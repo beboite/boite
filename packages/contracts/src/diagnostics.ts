@@ -379,8 +379,9 @@ export function createLogAnonymizer(context: LogAnonymizeContext): LogAnonymizer
     let value = replacePaths(raw);
     // Other accounts' homes and profiles.
     value = value
-      .replace(/([a-z]:[\\/]+Users[\\/]+)(?!Public\b|Default\b|<)[^\\/\s"'<>:]+/gi, '$1<user>')
-      .replace(/(\/(?:home|Users)\/)(?!<)[^/\s"'<>:]+/g, '$1<user>');
+      // A Windows name can hold spaces (`John Doe`): words up to the next separator are all of it.
+      .replace(/([a-z]:[\\/]+Users[\\/]+)(?!Public\b|Default\b|<)(?:[^\\/\s"'<>:]+(?: [^\\/\s"'<>:]+)*(?=[\\/])|[^\\/\s"'<>:]+)/gi, '$1<user>')
+      .replace(/(\/(?:home|Users)\/)(?!<)[^/\s"'<>:]+/gi, '$1<user>');
     value = value.replace(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi, '<email>');
     value = value.replace(/\b([a-z][a-z0-9+.-]*:\/\/)(\[[0-9a-f:]+\]|[^\s/?#<>"':]+)(:\d+)?(\/[^\s<>"']*)?/gi, (match, scheme: string, host: string, port: string | undefined, path: string | undefined) => {
       if (publicHost(host)) {
@@ -455,7 +456,7 @@ export function parseLogRecord(line: string, fallbackOrigin: LogOrigin = 'core',
   if (line.length === 0) return null;
   let raw: Record<string, unknown>;
   try { raw = JSON.parse(line) as Record<string, unknown>; } catch { return null; }
-  if (!raw || typeof raw !== 'object' || typeof raw.id !== 'string' || typeof raw.runId !== 'string' || typeof raw.at !== 'number' || !Number.isFinite(raw.at) || raw.at < 0
+  if (!raw || typeof raw !== 'object' || typeof raw.id !== 'string' || raw.id.length === 0 || typeof raw.runId !== 'string' || raw.runId.length === 0 || typeof raw.at !== 'number' || !Number.isFinite(raw.at) || raw.at < 0
     || !LOG_LEVELS.includes(raw.level as CoreLogLevel) || typeof raw.message !== 'string' || typeof raw.source !== 'string' || typeof raw.event !== 'string') return null;
   const bounded = (value: unknown): string | undefined => typeof value === 'string' && value.length > 0 ? value.replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, LOG_CONTEXT_CHARS) : undefined;
   const record: CoreLogRecord = {

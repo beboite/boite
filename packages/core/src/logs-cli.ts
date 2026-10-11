@@ -57,6 +57,17 @@ export function parseSince(raw: string, now = Date.now()): number {
   return at;
 }
 
+const FLAG_NAMES: Record<keyof LogFlags, string> = {
+  limit: '--limit', level: '--level', minLevel: '--min-level', since: '--since', origin: '--origin', search: '--search', turn: '--turn',
+  mine: '--mine', anonymize: '--anonymize', out: '--out', focus: '--focus', title: '--title', description: '--description', descriptionFile: '--description-file', noLogs: '--no-logs',
+};
+
+/** A filter the subcommand would not apply is refused rather than ignored. */
+function only(action: string, options: LogFlags, allowed: readonly (keyof LogFlags)[]): void {
+  const extra = (Object.keys(options) as (keyof LogFlags)[]).filter(key => !allowed.includes(key) && options[key] !== undefined && options[key] !== false);
+  if (extra.length > 0) throw new Usage(`logs ${action} takes ${allowed.map(key => FLAG_NAMES[key]).join(', ')}; ${extra.map(key => FLAG_NAMES[key]).join(', ')} does not apply to it`);
+}
+
 function flags(args: string[]): { positional: string[]; flags: LogFlags } {
   const result: LogFlags = { mine: false, anonymize: false, noLogs: false };
   const positional: string[] = [];
@@ -113,7 +124,7 @@ function problemLines(summary: DiagnosticSummary): string[] {
   for (const problem of summary.problems) out.push(`${problem.count}x ${problem.level} ${problem.origin}/${problem.source}/${problem.event} last ${formatLogTime(problem.lastAt)}${problem.threadIds.length ? ` threads ${problem.threadIds.join(' ')}` : ''}: ${problem.message.replace(/[\r\n]+/g, ' ')}`);
   const troubled = summary.threads.filter(thread => thread.errors > 0 || thread.warnings > 0);
   if (troubled.length) out.push('threads with problems:');
-  for (const thread of troubled) out.push(`  ${thread.threadId} ${thread.providerId}/${thread.model ?? 'default'} ${thread.status}${thread.parentThreadId ? ` parent ${thread.parentThreadId}` : ''}: ${thread.errors} errors, ${thread.warnings} warnings${thread.lastError ? `; last: ${thread.lastError}` : ''}`);
+  for (const thread of troubled) out.push(`  ${thread.threadId} ${thread.providerId}/${thread.model ?? 'default'} ${thread.status}${thread.parentThreadId ? ` parent ${thread.parentThreadId}` : ''}: ${thread.errors} errors, ${thread.warnings} warnings${thread.lastError ? `; last: ${thread.lastError.replace(/[\r\n]+/g, ' ')}` : ''}`);
   return out;
 }
 
@@ -124,11 +135,13 @@ export async function logsCommand(args: string[], client: CoreClient, threadId: 
   if (action === 'help') { print([LOGS_HELP], { help: LOGS_HELP }); return; }
   if (positional.length > 1) throw new Usage(`logs ${action} takes flags only; boite logs help lists them`);
   if (action === 'problems') {
+    only('problems', options, ['since']);
     const summary = await client.call('diagnostics.summary', { ...own, ...(options.since === undefined ? {} : { since: options.since }) });
     print(problemLines(summary), summary);
     return;
   }
   if (action === 'export') {
+    only('export', options, ['since', 'focus', 'out']);
     const result = await client.call('diagnostics.export', { ...own, ...(options.since === undefined ? {} : { since: options.since }), ...(options.focus ? { focusThreadId: options.focus } : {}) });
     let written: string | null = null;
     if (options.out) {

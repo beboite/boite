@@ -507,15 +507,26 @@ export function registerProviderMethods(core: Core): void {
   // A program that just reported its version may be what a provider was
   // waiting for: it is listed as installed from now on, and a login it already
   // has is adopted before the clients hear of it.
+  // Every list the clients hear of is logged where it changed, whichever path emitted it
+  // (a reload, an install, an agent update); the first one once the version reads settle,
+  // so a program not read yet is not logged missing before it is found.
   const logDetection = detectionLogger(core);
+  core.bus.onAny((name, payload) => {
+    if (name !== 'providers.updated') return;
+    const result = payload as ProviderLoadResult;
+    logDetection(result.loaded, result.rejected.length);
+  });
+  void core.providers.settle().then(() => {
+    if (core.stopping || core.journal.isClosed()) return;
+    const first = core.providers.list();
+    logDetection(first.loaded, first.rejected.length);
+  }, () => {});
   let listed = fingerprint(core.providers.list());
-  { const first = core.providers.list(); logDetection(first.loaded, first.rejected.length); }
-  /** Logs a list that differs from the last one logged; true when it did. Every path that changes the list goes through here. */
+  /** True when the list differs from the last one announced. */
   const noteListed = (result: ProviderLoadResult): boolean => {
     const now = fingerprint(result);
     if (now === listed) return false;
     listed = now;
-    logDetection(result.loaded, result.rejected.length);
     return true;
   };
   // One fingerprint for every change found behind a list, so the next one is not announced twice.

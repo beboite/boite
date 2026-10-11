@@ -182,6 +182,20 @@ describe('bounded persistent diagnostics', () => {
     } finally { await reader.close(); rmSync(directory, { recursive: true, force: true }); }
   });
 
+  test('records of the same millisecond across files come newest first', async () => {
+    const directory = temporary();
+    const at = Date.now();
+    const writer = new DiagnosticLogs(directory, [], undefined, 1024);
+    try {
+      for (let index = 0; index < 20; index += 1) writer.record('info', `same ${index} ${'x'.repeat(150)}`, { source: 'test', event: 'same' }, at);
+    } finally { await writer.close(); }
+    const reader = new DiagnosticLogs(directory, [], undefined, 1024);
+    try {
+      const newest = await reader.query({ limit: 8 });
+      expect(newest.map(record => record.message.split(' ').slice(0, 2).join(' '))).toEqual(['same 19', 'same 18', 'same 17', 'same 16', 'same 15', 'same 14', 'same 13', 'same 12']);
+    } finally { await reader.close(); rmSync(directory, { recursive: true, force: true }); }
+  });
+
   test('a missing file between rotated ones does not hide the older files behind it', async () => {
     const directory = temporary();
     const now = Date.now();
