@@ -250,14 +250,15 @@ test('agent exchange summaries retain chronology without exposing their letters 
   const rows = articles().map(node => node.textContent ?? '');
   expect(rows).toHaveLength(4);
   expect(rows[0]).toContain('Before coordination');
-  expect(rows[1]).toContain('Received 1 message');
+  // Each exchange stays where it happened, as a row of the discussion with its last words.
+  expect(rows[1]).toContain('Deployment agent');
+  expect(rows[1]).toContain('Wait before restart.');
   expect(rows[2]).toContain('After coordination');
-  expect(rows[3]).toContain('Forwarded 1 message');
+  expect(rows[3]).toContain('Deployment agent');
+  expect(rows[3]).toContain('Restart postponed.');
+  expect([...document.querySelectorAll<HTMLElement>('[data-testid=agent-discussion-row]')].map(node => node.dataset.peer)).toEqual(['core-build/t-deploy', 'core-build/t-deploy']);
   expect(document.body.textContent).not.toContain('Boite agent coordination');
   expect(document.body.textContent).not.toContain('Awaiting provider turn');
-  expect(document.body.textContent).not.toContain('Wait before restart.');
-  expect(document.body.textContent).not.toContain('Restart postponed.');
-  expect(document.querySelectorAll('[data-testid=forwarded-agent-message]')).toHaveLength(0);
 });
 
 test('a completed mail-only turn keeps its footer below received and forwarded messages', async ({ createStore }) => {
@@ -292,9 +293,11 @@ test('a completed mail-only turn keeps its footer below received and forwarded m
   const groups = [...document.querySelectorAll('[data-testid=agent-message-group]')];
   expect(groups).toHaveLength(2);
   const group = groups[0]!;
-  expect(group.textContent).toContain('Received 2 messages');
-  expect(group.textContent).toContain('Forwarded 1 message');
-  expect([...group.querySelectorAll('[data-testid=agent-message-who]')].map(node => node.textContent)).toEqual([thread.title, 'Peer']);
+  const discussion = group.querySelector<HTMLElement>('[data-testid=agent-discussion-row]')!;
+  expect(group.querySelectorAll('[data-testid=agent-discussion-row]')).toHaveLength(1);
+  expect(discussion.dataset).toMatchObject({ peer: 'core-peer/peer', count: '3' });
+  expect(discussion.querySelector('[data-testid=agent-discussion-title]')?.textContent).toBe('Peer');
+  expect(discussion.querySelector('.counts')?.textContent?.replace(/\s/g, '')).toBe('12');
   expect(group.compareDocumentPosition(footers[1]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(groups[1]!.compareDocumentPosition(footers[2]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(document.body.textContent).not.toContain('Boite agent coordination');
@@ -351,22 +354,26 @@ test('delegation mail opens its messages tab with local family identity, without
 
   running = mount(MessageList, { target: document.body, props: { store: coordinated, threadId: 't-short', messages: [] } });
   flushSync();
-  expect(document.querySelectorAll('[data-testid=agent-message-summary]')).toHaveLength(1);
-  const summary = document.querySelector<HTMLButtonElement>('[data-testid=agent-message-summary]')!;
-  expect(summary.textContent).toContain('Forwarded 1 message');
-  summary.click();
-  expect(coordinated.panel.active).toMatchObject({ kind: 'messages', mailDirection: 'outgoing', letterId: letter.id });
+  expect(document.querySelectorAll('[data-testid=agent-discussion-row]')).toHaveLength(1);
+  const discussion = document.querySelector<HTMLButtonElement>('[data-testid=agent-discussion-row]')!;
+  expect(discussion.dataset.peer).toBe('here/t-child');
+  expect(discussion.querySelector('[data-testid=agent-discussion-title]')?.textContent).toBe('Reviewer');
+  expect(discussion.querySelector('[data-testid=agent-discussion-preview]')?.textContent).toContain('Check the parser.');
+  discussion.click();
+  expect(coordinated.panel.active).toMatchObject({ kind: 'messages', peer: 'here/t-child', letterId: letter.id });
   await unmount(running); running = null;
   running = mount(AgentMessagesSurface, { target: document.body, props: { store: coordinated, surface: coordinated.panel.active!, panel: coordinated.panel } });
   flushSync();
   const row = document.querySelector('[data-letter-id="delegation-user"]');
   expect(row?.getAttribute('data-direction')).toBe('outgoing');
-  expect(row?.textContent).toContain('You sent to');
-  expect(row?.querySelector('[data-testid=agent-letter-project]')?.textContent).toBe('Review project');
+  // The user typed it: the user's side, under the user's name.
+  expect(row?.classList.contains('right')).toBe(true);
+  expect(row?.querySelector('.label')?.textContent).toBe('You');
+  expect(document.querySelector('[data-testid=agent-discussion-where]')?.textContent).toBe('Review project');
   expect(row?.querySelector('[data-testid=agent-letter-status] svg.lucide-check-check')).not.toBeNull();
   const open = vi.spyOn(workspace, 'openAgentThread').mockResolvedValue();
   try {
-    row?.querySelector<HTMLButtonElement>('[data-testid=agent-letter-open]')?.click();
+    document.querySelector<HTMLButtonElement>('[data-testid=agent-letter-open]')?.click();
     expect(open).toHaveBeenCalledWith(coordinated, { coreId: 'local', threadId: 't-short' }, letter.to);
   } finally { open.mockRestore(); }
 });
@@ -392,26 +399,32 @@ test('a burst of 33 agent messages stays in two counters as new mail arrives, an
   running = mount(MessageList, { target: document.body, props: { store: owner, threadId: thread.id, messages: thread.messages } });
   flushSync();
   const group = document.querySelector('[data-testid=agent-message-group]')!;
-  expect(group.textContent).toContain('Forwarded 13 messages');
-  expect(group.textContent).toContain('Received 20 messages');
-  expect([...group.querySelectorAll('[data-testid=agent-message-who]')].map(node => node.textContent)).toEqual(['Agent', 'Agent']);
+  // Both directions with one agent are one discussion: its counts, its last words.
+  const row = () => group.querySelector<HTMLElement>('[data-testid=agent-discussion-row]')!;
+  expect(group.querySelectorAll('[data-testid=agent-discussion-row]')).toHaveLength(1);
+  expect(row().dataset).toMatchObject({ peer: 'core-remote/remote-agent', count: '33' });
+  expect(row().querySelector('.counts')?.textContent?.replace(/\s/g, '')).toBe('1320');
+  expect(row().querySelector('[data-testid=agent-discussion-title]')?.textContent).toBe('Agent');
+  expect(row().querySelector('[data-testid=agent-discussion-preview]')?.textContent).toContain('Private exchange 32');
   expect(group.textContent).not.toContain('attention');
-  expect(document.body.textContent).not.toContain('Private exchange');
+  expect(document.body.textContent).not.toContain('Private exchange 31');
   expect(document.querySelectorAll('[data-testid=agent-message-group]')).toHaveLength(1);
   expect(articles()).toHaveLength(3);
   owner.coordination!.messages.push({ ...letters[32]!, id: 'extra', createdAt: 24 });
   flushSync();
   expect(document.querySelector('[data-testid=agent-message-group]')).toBe(group);
-  expect(group.textContent).toContain('Received 21 messages');
-  group.querySelector<HTMLButtonElement>('[data-direction=incoming]')!.click();
-  expect(owner.panel.active).toMatchObject({ kind: 'messages', mailDirection: 'incoming', letterId: 'burst-13' });
+  expect(row().dataset.count).toBe('34');
+  expect(row().querySelector('.counts')?.textContent?.replace(/\s/g, '')).toBe('1321');
+  row().click();
+  expect(owner.panel.active).toMatchObject({ kind: 'messages', peer: 'core-remote/remote-agent', letterId: 'burst-0' });
   owner.coordination!.messages.push({ ...letters[32]!, id: 'after-prompt', createdAt: 60 });
   flushSync();
   expect(document.querySelectorAll('[data-testid=agent-message-group]')).toHaveLength(2);
   expect(articles().map(article => article.textContent)).toEqual([
-    expect.stringContaining('Work begins.'), expect.stringContaining('Received 21 messages'),
-    expect.stringContaining('Continue with the deployment.'), expect.stringContaining('Received 1 message')
+    expect.stringContaining('Work begins.'), expect.stringContaining('Agent'),
+    expect.stringContaining('Continue with the deployment.'), expect.stringContaining('Agent')
   ]);
+  expect([...document.querySelectorAll<HTMLElement>('[data-testid=agent-discussion-row]')].map(node => node.dataset.count)).toEqual(['34', '1']);
 });
 
 test('a steward\'s thread and the thread its agent started keep their mail and prompt apart from the user\'s', async ({ ready }) => {
@@ -431,9 +444,10 @@ test('a steward\'s thread and the thread its agent started keep their mail and p
   expect(prompt.querySelector('[data-testid=spawn-marker][data-direction=from]')?.textContent).toContain('Sent by the agent of');
   expect(prompt.querySelector('[data-testid=spawn-marker-open]')?.textContent).toBe(steward.title);
   expect(document.querySelectorAll('[data-testid=agent-prompt]')).toHaveLength(1);
-  const row = document.querySelector<HTMLButtonElement>('[data-testid=agent-message-summary][data-kind=steward]');
-  expect(row?.textContent).toContain('1 message from the steward');
-  expect(row?.dataset.direction).toBe('incoming');
+  const row = document.querySelector<HTMLButtonElement>('[data-testid=agent-discussion-row]');
+  expect(row?.classList.contains('steward')).toBe(true);
+  expect(row?.querySelector('[data-testid=agent-discussion-title]')?.textContent).toBe(steward.title);
+  expect(row?.querySelector('.tag')?.textContent).toBe('Steward');
   await unmount(running!); running = null;
 
   await owner.open(steward.id);
@@ -441,9 +455,12 @@ test('a steward\'s thread and the thread its agent started keep their mail and p
   thread = owner.openThread!;
   running = mount(MessageList, { target: document.body, props: { store: owner, threadId: thread.id, messages: thread.messages } });
   flushSync();
-  expect([...document.querySelectorAll<HTMLElement>('[data-testid=agent-message-summary]')].map(node => [node.dataset.kind,
-    node.querySelector('[data-testid=agent-message-label]')?.textContent, node.querySelector('[data-testid=agent-message-who]')?.textContent]))
-    .toEqual([['outgoing', 'Forwarded 1 message', steer.toTitle], ['notice', '1 thread notice', undefined]]);
+  // The steward started that thread: the tag says so, and its notices stay one quiet line.
+  const rows = [...document.querySelectorAll<HTMLElement>('[data-testid=agent-discussion-row]')];
+  expect(rows.map(node => [node.querySelector('[data-testid=agent-discussion-title]')?.textContent, node.querySelector('.tag')?.getAttribute('data-relation')]))
+    .toEqual([[steer.toTitle, 'started']]);
+  expect([...document.querySelectorAll<HTMLElement>('[data-testid=agent-message-summary]')].map(node => [node.dataset.kind, node.textContent?.trim()]))
+    .toEqual([['notice', '1 thread notice']]);
 });
 
 /** A store whose thread still has older messages behind the window. */

@@ -32,149 +32,143 @@ beforeAll(async () => {
     const [localIdentity, remoteIdentity] = await Promise.all([local.call('collaboration.identity', {}), remote.call('collaboration.identity', {})]);
     await local.call('collaboration.trust', { peer: remoteIdentity });
     await remote.call('collaboration.trust', { peer: localIdentity });
-    const incoming = await remote.call('collaboration.send', {
-      threadId: 't-bench', to: { coreId: localIdentity.coreId, threadId: 't-trace' },
-      text: 'Wait before restart. The deployment is still using the build machine.', requestId: 'incoming-deployment'
-    });
-    const outgoing = await local.call('collaboration.send', {
-      threadId: 't-trace', to: { coreId: remoteIdentity.coreId, threadId: 't-bench' },
-      text: 'Restart postponed until deployment confirms it is clear.', replyTo: incoming.id, requestId: 'outgoing-reply'
-    });
-    for (let index = 1; index < 13; index++) await local.call('collaboration.send', {
-      threadId: 't-trace', to: { coreId: remoteIdentity.coreId, threadId: 't-bench' },
-      text: 'Deployment status update ' + index, requestId: 'outgoing-' + index
-    });
-    for (let index = 1; index < 20; index++) await remote.call('collaboration.send', {
-      threadId: 't-bench', to: { coreId: localIdentity.coreId, threadId: 't-trace' },
-      text: 'Received deployment update ' + index, requestId: 'incoming-' + index
-    });
-    workspace.active.openThread.messages.push({
-      id: 'exchange-divider', threadId: 't-trace', turnId: 'exchange-divider', role: 'assistant',
-      state: 'complete', createdAt: incoming.createdAt + 1, parts: [{ type: 'text', text: 'Deployment coordination continues.' }]
-    });
+    const here = { coreId: localIdentity.coreId, threadId: 't-trace' };
+    const there = { coreId: remoteIdentity.coreId, threadId: 't-bench' };
+    const incoming = await remote.call('collaboration.send', { threadId: 't-bench', to: here,
+      text: 'Wait before restart. The deployment is still using the build machine.', requestId: 'incoming-deployment' });
+    const outgoing = await local.call('collaboration.send', { threadId: 't-trace', to: there,
+      text: 'Restart postponed until you say the build machine is clear.', replyTo: incoming.id, requestId: 'outgoing-reply' });
+    // Short updates both ways, the way the agents are told to write.
+    const said = [
+      ['in', 'Deploy 2.4.1 at 62%. About 4 min left.'],
+      ['in', 'Smoke tests running on staging.'],
+      ['out', 'OK. I keep the trace tab work local until then.'],
+      ['in', 'Done. Build machine is free, restart is yours.'],
+      ['out', 'Restarting the build machine now. Back in 2 min.'],
+      ['out', 'Back up. Trace capture passes on the new image.'],
+      ['in', 'Thanks. Closing the deployment.']
+    ];
+    for (const [index, [side, text]] of said.entries()) await (side === 'in'
+      ? remote.call('collaboration.send', { threadId: 't-bench', to: here, text, requestId: 'said-' + index })
+      : local.call('collaboration.send', { threadId: 't-trace', to: there, text, requestId: 'said-' + index }));
+    // A thread this one started reports back: its discussion carries that tie.
+    const notes = await local.call('agent.spawn', { threadId: 't-trace', project: 'notes', prompt: 'Write the 2.4.1 release notes from the merged pull requests.', title: 'Release notes 2.4.1', requestId: 'spawn-notes' });
+    window.__notes = notes.thread.id;
+    await local.call('collaboration.send', { threadId: notes.thread.id, to: here, text: 'Draft ready: 14 changes, 2 breaking. Want the migration note first?', requestId: 'notes-draft' });
     // An owner-authored delegation prompt stays on the user side even when it is outgoing.
     const delegation = await local.call('delegation.get', { threadId: 't-trace' });
     workspace.active.delegation = { ...delegation, messages: [{
-      ...outgoing, id: 'user-delegation', origin: 'user', text: 'Please check deployment.',
-      createdAt: Date.now() - 120_000,
-      from: { ...outgoing.from, coreId: 'local' }, to: { ...outgoing.to, coreId: 'local' }
+      ...outgoing, id: 'user-delegation', origin: 'user', text: 'Please check the benchmark against legacy.', replyTo: null,
+      createdAt: incoming.createdAt - 1,
+      from: { ...outgoing.from, coreId: 'local' }, to: { coreId: 'local', threadId: 't-bench' }, toTitle: 'Bench against legacy'
     }] };
   })()`);
-  await page.waitFor(`document.querySelector('[data-testid="agent-message-summary"][data-direction="incoming"][data-count="20"]')`);
+  await page.waitFor(`document.querySelector('[data-testid="agent-discussion-row"][data-peer="core-build-pc/t-bench"][data-count="9"]')`);
   await page.waitFor(`document.querySelector('[data-testid="thread-menu-trigger"]')`);
 }, 60_000);
 
 afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
 
-test('agent bursts open a dedicated messages tab at desktop and phone widths', async () => {
-  const receivedSummary = '[data-testid="agent-message-summary"][data-direction="incoming"][data-count="20"]';
-  const forwardedSummary = '[data-testid="agent-message-summary"][data-direction="outgoing"][data-count="13"]';
-  expect(await page.text(receivedSummary)).toContain('Received 20 messages');
-  expect(await page.text(forwardedSummary)).toContain('Forwarded 13 messages');
-  expect(await page.evaluate(`document.querySelectorAll('[data-testid="timeline"] [data-testid="forwarded-agent-message"]').length`)).toBe(0);
-  expect(await page.text('[data-testid=timeline]')).not.toContain('Wait before restart');
-  await page.evaluate(`document.querySelector(${JSON.stringify(receivedSummary)}).scrollIntoView({ block: 'center' })`);
+test('the chat shows one row per discussion, and the panel lists discussions and opens their back and forth at desktop and phone widths', async () => {
+  const deployment = '[data-testid="agent-discussion-row"][data-peer="core-build-pc/t-bench"][data-count="9"]';
+  const notesId = await page.evaluate<string>('window.__notes');
+  const notesRow = `[data-testid="agent-discussion-row"][data-peer="here/${notesId}"]`;
+  // One row per conversation of a burst, in the order they started, with its last words; the started thread's report comes after the line that started it.
+  expect(await page.evaluate(`[...document.querySelectorAll('[data-testid=timeline] [data-testid=agent-message-group]')].map(group => [...group.querySelectorAll('[data-testid=agent-discussion-row]')].map(node => node.dataset.peer + ':' + node.dataset.count))`))
+    .toEqual([['here/t-bench:1', 'core-build-pc/t-bench:9'], [`here/${notesId}:1`]]);
+  expect(await page.text(deployment)).toContain('Deployment agent');
+  expect(await page.text(deployment)).toContain('Thanks. Closing the deployment.');
+  expect(await page.text(notesRow)).toContain('Started from here');
+  expect(await page.text(notesRow)).toContain('notes');
+  expect(await page.evaluate(`document.querySelectorAll('[data-testid="timeline"] [data-testid="agent-discussion-message"]').length`)).toBe(0);
+  expect(await page.text('[data-testid=timeline]')).not.toContain('Deploy 2.4.1 at 62%');
+  await page.evaluate(`document.querySelector(${JSON.stringify(deployment)}).scrollIntoView({ block: 'center' })`);
   await settled();
-  await page.screenshot(join(import.meta.dir, '.artifacts', 'agent-message-groups-desktop.png'));
-  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
-  await settled();
-  expect(await page.evaluate(`(() => { const button = document.querySelector(${JSON.stringify(receivedSummary)}).getBoundingClientRect(); return button.height >= 44 && button.left >= 0 && button.right <= innerWidth; })()`)).toBe(true);
-  await page.screenshot(join(import.meta.dir, '.artifacts', 'agent-message-groups-phone.png'));
-  await page.click(receivedSummary);
-  await page.waitFor(`document.querySelector('[data-testid=agent-messages-surface]')`);
-  await page.waitFor(`document.querySelectorAll('[data-testid=forwarded-agent-message]').length === 20`);
-  await settled();
-  await page.screenshot(join(import.meta.dir, '.artifacts', 'agent-messages-received-phone.png'));
-  await page.click('[data-testid=panel-close]');
-  await page.waitFor(`!document.querySelector('[data-testid=right-panel]')`);
-  await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
-  await page.click(forwardedSummary);
-  await page.waitFor(`document.querySelectorAll('[data-testid=forwarded-agent-message]').length === 14`);
-  await page.click('[data-testid=agent-messages-filter][data-direction=all]');
-  await page.waitFor(`document.querySelectorAll('[data-testid=forwarded-agent-message]').length === 34`);
-  expect(await page.evaluate(`document.querySelectorAll('[data-testid=panel-tab][data-kind=messages]').length`)).toBe(1);
-  await settled();
-  expect(await page.evaluate(`document.querySelector('[data-letter-id="incoming-deployment"]')?.textContent ?? ''`)).toContain('Deployment agent');
-  expect(await page.evaluate(`document.querySelector('[data-letter-id="incoming-deployment"]')?.textContent ?? ''`)).toContain('Build PC');
-  expect(await page.evaluate(`document.querySelector('[data-letter-id="incoming-deployment"]')?.textContent ?? ''`)).toContain('Wait before restart');
-  expect(await page.evaluate(`document.querySelector('[data-letter-id="outgoing-reply"]')?.dataset.direction`)).toBe('outgoing');
-  const checkDirection = async () => {
-    const bubbles = await page.evaluate<any>(`(() => {
-      const incoming = document.querySelector('[data-letter-id="incoming-deployment"]');
-      const outgoing = document.querySelector('[data-letter-id="outgoing-reply"]');
-      const user = document.querySelector('[data-letter-id="user-delegation"]');
-      const prompt = document.querySelector('[data-role="user"] .bubble');
-      return { incoming: incoming.textContent, outgoing: outgoing.textContent,
-        user: user.textContent, userDirection: user.dataset.direction,
-        incomingLeft: incoming.getBoundingClientRect().left, outgoingLeft: outgoing.getBoundingClientRect().left,
-        incomingRight: incoming.getBoundingClientRect().right, outgoingRight: outgoing.getBoundingClientRect().right,
-        userLeft: user.getBoundingClientRect().left, userRight: user.getBoundingClientRect().right,
-        incomingColor: getComputedStyle(incoming).backgroundColor, outgoingColor: getComputedStyle(outgoing).backgroundColor,
-        userColor: getComputedStyle(user).backgroundColor, promptColor: getComputedStyle(prompt).backgroundColor };
-    })()`);
-    expect(bubbles.incoming).toContain('Received from');
-    expect(bubbles.outgoing).toContain('Your agent sent to');
-    expect(bubbles.outgoing).toContain('Deployment agent');
-    expect(bubbles.incomingLeft).toBeGreaterThan(bubbles.outgoingLeft);
-    expect(bubbles.incomingRight).toBeGreaterThan(bubbles.outgoingRight);
-    expect(bubbles.incomingColor).toBe(bubbles.promptColor);
-    expect(bubbles.outgoingColor).not.toBe(bubbles.incomingColor);
-    expect(bubbles.user).toContain('You sent to');
-    expect(bubbles.userDirection).toBe('outgoing');
-    expect(bubbles.userLeft).toBeGreaterThan(bubbles.outgoingLeft);
-    expect(bubbles.userRight).toBe(bubbles.incomingRight);
-    expect(bubbles.userColor).toBe(bubbles.promptColor);
-  };
-  const checkTimestamps = async (userAge: string) => {
-    const stamps = await page.evaluate<any[]>(`Array.from(document.querySelectorAll('[data-testid="forwarded-agent-message"]'), card => {
-      const stamp = card.querySelector('[data-testid="agent-letter-age"]');
-      const bounds = card.getBoundingClientRect();
-      const age = stamp.getBoundingClientRect();
-      const source = card.querySelector('[data-testid="agent-letter-open"]').getBoundingClientRect();
-      return { id: card.dataset.letterId, text: stamp.textContent, date: stamp.dateTime, title: stamp.title,
-        top: age.top - bounds.top, right: bounds.right - age.right, gap: age.left - source.right };
-    })`);
-    expect(stamps).toHaveLength(34);
-    for (const stamp of stamps) {
-      expect(Number.isFinite(Date.parse(stamp.date))).toBe(true);
-      expect(stamp.title.length).toBeGreaterThan(0);
-      expect(stamp.top).toBeGreaterThan(0);
-      expect(stamp.top).toBeLessThan(20);
-      expect(stamp.right).toBeGreaterThan(0);
-      expect(stamp.right).toBeLessThan(20);
-      expect(stamp.gap).toBeGreaterThanOrEqual(10);
-    }
-    expect(stamps.find(stamp => stamp.id === 'user-delegation')?.text.replace(/\s/g, ' ')).toBe(userAge);
-  };
-  await checkDirection();
-  await checkTimestamps('2 min. ago');
-  expect(await page.evaluate(`document.querySelector('[data-testid="timeline"]')?.textContent ?? ''`)).not.toContain('Boite agent coordination');
-  expect(await page.evaluate(`document.querySelector('[data-testid="coordination-panel"]') === null`)).toBe(true);
-  await page.evaluate(`document.querySelector('[data-letter-id="incoming-deployment"]').scrollIntoView({ block: 'center' })`);
-  await settled();
-  await page.screenshot(join(import.meta.dir, '.artifacts', 'agent-messages-desktop.png'));
+  await page.screenshot(join(import.meta.dir, '.artifacts', 'agent-discussions-chat-desktop.png'));
 
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
-  await page.evaluate(`document.querySelector('[data-letter-id="user-delegation"]').scrollIntoView({ block: 'end' })`);
+  await page.evaluate(`document.querySelector(${JSON.stringify(deployment)}).scrollIntoView({ block: 'center' })`);
   await settled();
+  expect(await page.evaluate(`[...document.querySelectorAll('[data-testid=agent-discussion-row]')].every(node => { const box = node.getBoundingClientRect(); return box.height >= 44 && box.left >= 0 && box.right <= innerWidth; })`)).toBe(true);
   expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
-  await checkDirection();
-  await checkTimestamps('2 min. ago');
-  await page.screenshot(join(import.meta.dir, '.artifacts', 'agent-messages-phone.png'));
+  await page.screenshot(join(import.meta.dir, '.artifacts', 'agent-discussions-chat-phone.png'));
+
+  // A row opens its discussion on the burst's first letter, in a sheet on a phone.
+  await page.click(deployment);
+  await page.waitFor(`document.querySelector('[data-testid=agent-discussion-view][data-peer="core-build-pc/t-bench"]')`);
+  await page.waitFor(`document.querySelectorAll('[data-testid=agent-discussion-view] [data-testid=agent-discussion-message]').length === 9`);
+  // The burst's first letter flashes once; the captures wait for it to settle.
+  await page.waitFor(`!document.querySelector('[data-testid=agent-discussion-message].flash')`);
+  await settled();
+  const checkSides = async () => {
+    const sides = await page.evaluate<any>(`(() => {
+      const view = document.querySelector('[data-testid=agent-discussion-view]');
+      const incoming = view.querySelector('[data-letter-id="incoming-deployment"]');
+      const outgoing = view.querySelector('[data-letter-id="outgoing-reply"]');
+      const prompt = document.querySelector('[data-role="user"] .bubble');
+      return { incomingRight: incoming.getBoundingClientRect().right, outgoingRight: outgoing.getBoundingClientRect().right,
+        incomingLeft: incoming.getBoundingClientRect().left, outgoingLeft: outgoing.getBoundingClientRect().left,
+        incomingColor: getComputedStyle(incoming.querySelector('.bubble')).backgroundColor,
+        outgoingColor: getComputedStyle(outgoing.querySelector('.bubble')).backgroundColor,
+        promptColor: prompt && getComputedStyle(prompt).backgroundColor,
+        quote: outgoing.querySelector('[data-testid=agent-discussion-quote]')?.textContent ?? null,
+        heading: view.querySelector('[data-testid=agent-discussion-heading]').textContent,
+        where: view.querySelector('[data-testid=agent-discussion-where]').textContent,
+        about: view.querySelector('.about')?.textContent ?? '' };
+    })()`);
+    // What reaches this agent sits on the user's side, in the user's prompt color; its own words on the agent's side.
+    expect(sides.incomingRight).toBeGreaterThan(sides.outgoingRight);
+    expect(sides.incomingLeft).toBeGreaterThan(sides.outgoingLeft);
+    if (sides.promptColor) expect(sides.incomingColor).toBe(sides.promptColor);
+    expect(sides.outgoingColor).not.toBe(sides.incomingColor);
+    // The reply follows the message it answers: no quote needed.
+    expect(sides.quote).toBeNull();
+    expect(sides.heading).toBe('Deployment agent');
+    expect(sides.where).toContain('Build PC');
+    expect(sides.about).toContain('Owns deployment and restart sequencing');
+  };
+  await checkSides();
+  expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
+  await page.screenshot(join(import.meta.dir, '.artifacts', 'agent-discussion-phone.png'));
 
   await page.evaluate(`window.__boiteTest.setTheme('light')`);
   await settled();
-  await checkDirection();
-  await page.screenshot(join(import.meta.dir, '.artifacts', 'agent-messages-phone-light.png'));
+  await checkSides();
+  await page.screenshot(join(import.meta.dir, '.artifacts', 'agent-discussion-phone-light.png'));
+  await page.evaluate(`window.__boiteTest.setTheme('dark')`);
 
   await page.evaluate(`import('/src/lib/i18n.svelte.ts').then(module => module.setLocaleSetting('fr'))`);
+  await page.click('[data-testid=agent-discussion-back]');
+  await page.waitFor(`document.querySelectorAll('[data-testid=agent-discussion]').length === 3`);
   await settled();
-  await checkTimestamps('il y a 2 min');
+  expect(await page.text(`[data-testid=agent-discussion][data-peer="here/${notesId}"]`)).toContain('Lancée d\'ici');
   expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
-  await page.screenshot(join(import.meta.dir, '.artifacts', 'agent-messages-phone-fr.png'));
+  await page.screenshot(join(import.meta.dir, '.artifacts', 'agent-discussions-list-phone-fr.png'));
   await page.evaluate(`import('/src/lib/i18n.svelte.ts').then(module => module.setLocaleSetting('en'))`);
   await page.click('[data-testid=panel-close]');
   await page.waitFor(`!document.querySelector('[data-testid=right-panel]')`);
+
+  // On a desktop, the list and the open discussion sit side by side once the panel is wide.
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  await page.click(deployment);
+  await page.waitFor(`document.querySelector('[data-testid=agent-discussion-view]') && !document.querySelector('[data-testid=agent-discussion-message].flash')`);
+  expect(await page.evaluate(`document.querySelectorAll('[data-testid=panel-tab][data-kind=messages]').length`)).toBe(1);
+  await settled();
+  await checkSides();
+  await page.screenshot(join(import.meta.dir, '.artifacts', 'agent-discussion-desktop.png'));
+  await page.click('[data-testid=panel-maximize]');
+  await page.waitFor(`getComputedStyle(document.querySelector('[data-testid=agent-discussions]')).display !== 'none' && document.querySelector('[data-testid=agent-discussion-view]') !== null`);
+  await settled();
+  expect(await page.evaluate(`(() => { const list = document.querySelector('[data-testid=agent-discussions]').getBoundingClientRect(); const view = document.querySelector('[data-testid=agent-discussion-view]').getBoundingClientRect(); return list.right <= view.left + 1 && list.width > 200; })()`)).toBe(true);
+  await page.screenshot(join(import.meta.dir, '.artifacts', 'agent-discussion-desktop-wide.png'));
+  await page.click('[data-testid=panel-maximize]');
+  await page.click(`[data-testid=agent-discussion][data-peer="here/t-bench"]`);
+  await page.waitFor(`document.querySelector('[data-testid=agent-discussion-view][data-peer="here/t-bench"]')`);
+  expect(await page.evaluate(`(() => { const user = document.querySelector('[data-letter-id="user-delegation"]'); return [user.classList.contains('right'), user.querySelector('.label')?.textContent]; })()`)).toEqual([true, 'You']);
+  expect(await page.text('[data-testid=timeline]')).not.toContain('Boite agent coordination');
+  await page.click('[data-testid=panel-close]');
+  await page.waitFor(`!document.querySelector('[data-testid=right-panel]')`);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
 
   // The same title menu exposes settings on phones and desktops.
   await page.click('[data-testid="thread-menu-trigger"]');
@@ -253,10 +247,11 @@ test('exchanges remain between answers and mail-only turns retain their completi
     await page.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: width < 720 });
     await page.evaluate(`document.querySelector('[data-testid=timeline]').scrollTop = 0`);
     await settled();
-    const bounds = await page.evaluate<any[]>(`[...document.querySelectorAll('[data-testid=agent-message-summary]')].map(node => {
+    const bounds = await page.evaluate<any[]>(`[...document.querySelectorAll('[data-testid=agent-discussion-row]')].map(node => {
       const box = node.getBoundingClientRect(); return { left: box.left, right: box.right, height: box.height };
     })`);
-    expect(bounds).toHaveLength(4);
+    // Each turn's exchange with the one peer is one row.
+    expect(bounds).toHaveLength(2);
     for (const box of bounds) { expect(box.left).toBeGreaterThanOrEqual(0); expect(box.right).toBeLessThanOrEqual(width); }
     if (width < 720) for (const box of bounds) expect(box.height).toBeGreaterThanOrEqual(44);
     await page.screenshot(join(import.meta.dir, '.artifacts', 'agent-mail-chronology-' + name + '.png'));
