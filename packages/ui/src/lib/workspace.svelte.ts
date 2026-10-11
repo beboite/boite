@@ -210,7 +210,8 @@ export class Workspace {
   async #vet(saved: StoredEnvironment[]): Promise<StoredEnvironment[]> {
     const held = saved.filter(holdsBack);
     if (held.length === 0) return [];
-    const anchors: Endpoint[] = saved.filter((e) => e.coreId === undefined && e.token !== '').map((e) => ({ url: e.url, token: e.token, paired: e.paired }));
+    const anchors: Endpoint[] = saved.filter((e) => e.coreId === undefined && opens(e))
+      .map((e) => ({ url: e.url, token: e.token, paired: e.paired, ...(e.signs === undefined ? {} : { signs: e.signs }) }));
     const local = window.__TAURI_INTERNALS__ ? await fromTauri().catch(() => null) : null;
     if (local && !anchors.some((e) => e.url === local.url)) anchors.push(local);
     return this.groups.vet(held, anchors);

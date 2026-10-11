@@ -89,9 +89,10 @@ async function greet(core: Core, connection: ServerConnection, id: number | stri
         identity = { principal: principalOf(done.role), sessionId: done.sessionId, threadId: null };
       }
     } catch (error) {
-      // Only a removal is Unauthorized: a device not heard of yet, or a clock that is off, is said with its own code.
-      const code = error instanceof RpcFailure && grant === null ? error.code : RpcErrorCode.Unauthorized;
-      connection.sendResponse({ jsonrpc: '2.0', id, error: { code, message: messageOf(error) } });
+      // Only a removal is Unauthorized: a device not heard of yet, a clock that is off, a full group or a malformed
+      // key keeps its own code and field, so the app drops its key for none of them.
+      const failure = error instanceof RpcFailure ? error.toError() : { code: RpcErrorCode.Unauthorized, message: messageOf(error) };
+      connection.sendResponse({ jsonrpc: '2.0', id, error: failure });
       connection.close(RpcCloseCode.Unauthorized, grant === null ? 'bad device signature' : 'bad grant');
       return;
     }

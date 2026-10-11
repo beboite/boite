@@ -193,7 +193,7 @@
       {/each}
     </ul>
     {#if group.devices.length > 0}
-      <ul class="members devices" aria-label={strings.group.members} data-testid="group-devices">
+      <ul class="members devices" aria-label={strings.group.devicesList} data-testid="group-devices">
         {#each group.devices as device (device.id)}
           {@const Icon = deviceIcon(device)}
           {@const note = addedOn(device)}

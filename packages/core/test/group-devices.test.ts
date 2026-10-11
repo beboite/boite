@@ -155,3 +155,19 @@ test('a member trusts the origins the others are served from, learned from their
   // An origin nobody of the group is served from stays out.
   await expect(connect(b.url, '', { headers: { origin: 'https://elsewhere.example' }, device: helloFor(phone, cross.device!, id(b)) })).rejects.toThrow();
 });
+
+test('a device redeeming its code again after a lost answer is answered until the grant expires, and a malformed key keeps its own refusal', async () => {
+  const a = await machine();
+  await a.core.group.create('Home');
+  const { code } = await a.core.group.clients.addDevice();
+  const now = Date.now();
+  expect(a.core.sessions.redeem(code, 'f'.repeat(64), null, now)).toBe('device');
+  // Past the code's five minutes, inside the grant's ten: the same device asking again gets the same answer.
+  expect(a.core.sessions.redeem(code, 'f'.repeat(64), null, now + 6 * 60_000)).toBe('device');
+  expect(() => a.core.sessions.redeem(code, 'e'.repeat(64), null, now + 6 * 60_000)).toThrow('already used');
+  // A key that is no key is invalid, said so with its field: never taken for a removal.
+  const fresh = await a.core.group.clients.addDevice();
+  const grant = new URL(fresh.url).searchParams.get('grant')!;
+  const refusal = await connect(a.url, '', { grant, device: { publicKey: 'not-a-key', sig: 'x' } }).catch((error: { rpc?: { code: number; data?: { field?: string } } }) => error);
+  expect((refusal as { rpc?: { code: number; data?: { field?: string } } }).rpc).toMatchObject({ code: -32602, data: { field: 'device.publicKey' } });
+});

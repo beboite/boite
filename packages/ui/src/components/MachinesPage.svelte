@@ -100,9 +100,13 @@
   });
 
   /** Sign-ins happen on the machine that keeps them: its own Providers page. */
+  /** The form already on the page takes it; a second one is drawn only when none is. */
+  const topForm = $derived(window.__TAURI_INTERNALS__ === undefined && groupStore.principal !== 'owner' && !workspace.machines.some(machine => machine.store.connection === 'ready'));
   async function repair() {
-    memberRepair = true;
-    await tick();
+    if (!topForm) {
+      memberRepair = true;
+      await tick();
+    }
     pairingForm?.startAdding();
   }
 
@@ -157,7 +161,7 @@
   {/if}
 
     <!-- A device of a group has nothing to add: its group brings every machine. One that reaches none adds itself here. -->
-    {#if window.__TAURI_INTERNALS__ === undefined && groupStore.principal !== 'owner' && !workspace.machines.some(machine => machine.store.connection === 'ready')}<PairMachine {mobile} bind:this={pairingForm} />{/if}
+    {#if topForm}<PairMachine {mobile} bind:this={pairingForm} />{/if}
     {#each groupStores as owner (owner.group?.id ?? 'ungrouped')}
     <GroupCard store={owner} {mobile} migration={owner === groupStores[0] ? migration : undefined}>
     <div class="machines">

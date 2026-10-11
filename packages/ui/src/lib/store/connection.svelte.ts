@@ -290,7 +290,7 @@ export class Connection {
         if (this.ctx.client !== client) return;
         // Only the key this connection presented is dead: another window may have paired this machine anew meanwhile.
         // A device key a machine of its group refuses was removed from that group: the app makes a new one when it is added again.
-        if (endpoint.signs !== undefined || admitting) dropDeviceKey();
+        if (client.deviceId !== null) dropDeviceKey(client.deviceId);
         const stored = readStoredEndpoint();
         if (rememberActive && stored?.url === url && stored.token === key) clearStoredEndpoint();
         this.environments = removeEnvironment(url, key);
@@ -453,7 +453,14 @@ export class Connection {
       return;
     }
     storeEndpoint(env);
-    await this.#switchTo({ url: env.url, token: env.token, ...(env.paired ? { paired: true } : {}) });
+    // What opens it travels with it: the device key's machine, and the group's marks of a machine it brought.
+    await this.#switchTo({
+      url: env.url, token: env.token, ...(env.paired ? { paired: true } : {}),
+      ...(env.signs === undefined ? {} : { signs: env.signs }),
+      ...(env.coreId === undefined ? {} : { coreId: env.coreId }),
+      ...(env.groupId === undefined ? {} : { groupId: env.groupId }),
+      ...(env.epoch === undefined ? {} : { epoch: env.epoch })
+    });
   }
 
   /**

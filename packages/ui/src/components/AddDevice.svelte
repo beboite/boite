@@ -15,6 +15,7 @@
    * so it gets no QR code and offers the local network instead.
    */
   let { store }: { store: Store } = $props();
+  const uid = $props.id();
   const invite = $derived(store.deviceInvite);
   const loopback = $derived(!!invite && isLoopback(invite.url));
 
@@ -34,11 +35,18 @@
   let copied = $state(false);
   let timer: ReturnType<typeof setTimeout> | undefined;
   onDestroy(() => clearTimeout(timer));
+  let linkInput = $state<HTMLInputElement>();
+  /**
+   * A page served over plain HTTP has no clipboard API: the link is selected
+   * in its field and copied the older way, and stays selected to copy by hand.
+   */
   async function copy() {
     try {
       await navigator.clipboard.writeText(invite?.url ?? '');
     } catch {
-      return;
+      linkInput?.focus();
+      linkInput?.select();
+      if (!document.execCommand?.('copy')) return;
     }
     copied = true;
     clearTimeout(timer);
@@ -59,6 +67,9 @@
         <p class="hint">{strings.group.addHint}</p>
         <p class="hint">{fill(strings.group.expires, { time: time(invite.codeExpiresAt) })}</p>
       {/if}
+      <label class="link-label" for="{uid}-link">{strings.group.link}</label>
+      <input id="{uid}-link" class="mono link" data-testid="add-device-link" readonly spellcheck="false" autocomplete="off" bind:this={linkInput}
+        value={invite.url} onfocus={(event) => event.currentTarget.select()} />
       <div class="buttons">
         <button type="button" data-testid="add-device-copy" onclick={() => void copy()}>
           {#if copied}<Check size={14} />{strings.group.copied}{:else}<Copy size={14} />{strings.group.copyLink}{/if}
@@ -105,7 +116,9 @@
     user-select: all;
   }
   .hint { margin: 0; }
-  .buttons { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+  .buttons { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+  .link-label { margin-top: 8px; font-size: var(--text-xs); color: var(--color-muted-foreground); }
+  .link { width: 100%; min-width: 0; font-size: var(--text-xs); }
   .icon-only { width: var(--control); padding: 0; color: var(--color-muted-foreground); }
   @keyframes rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
   @media (prefers-reduced-motion: reduce) { .add-device { animation: none; } }

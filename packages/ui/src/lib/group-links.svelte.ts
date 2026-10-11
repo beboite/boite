@@ -1,6 +1,7 @@
 import { untrack } from 'svelte';
 import { groupRelayUrl, parseGroupRelayUrl, RPC_PATH, type Group, type GroupCore } from '@boite/contracts';
 import { WsClient } from './client';
+import { deviceKey } from './device-key';
 import { DROPPED_STORAGE_KEY, isDropped, isMemberDropped, keepDropped, readEnvironments, rememberGroupAddresses, removeBrought, signsFor, type Endpoint, type StoredEnvironment } from './endpoint';
 import { usableAddresses } from './group-addresses';
 import type { Machine, Workspace } from './workspace.svelte';
@@ -33,7 +34,11 @@ export interface GroupLinkOptions {
 
 /** One question to a machine paired by hand, on a socket made for it and closed with the answer. */
 function askGroup(endpoint: Endpoint, patience: number): Promise<Group | null | undefined> {
-  const client = new WsClient({ url: endpoint.url, token: endpoint.token, paired: endpoint.paired === true, reconnect: false });
+  const client = new WsClient({
+    url: endpoint.url, token: endpoint.token, paired: endpoint.paired === true || endpoint.signs !== undefined, reconnect: false,
+    // A machine this device's key opens answers a signed hello.
+    ...(endpoint.signs === undefined ? {} : { signer: { key: deviceKey, coreId: endpoint.signs } })
+  });
   return Promise.race([
     client.connect().then(() => client.call('group.get', {})).catch(() => undefined),
     new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), patience))
@@ -217,7 +222,8 @@ export class GroupLinks {
     await this.#pruneSigned(anchors);
     // A link to one of these later asks nothing: they are this device's own group.
     const listed = anchors.flatMap((machine) => signsFor(machine.id) === undefined ? [] : machine.store.group?.cores.flatMap((core) => core.addresses) ?? []);
-    if (listed.length > 0) rememberGroupAddresses(listed);
+    // Written even empty: a device out of every group follows no link on the word of an old roster.
+    rememberGroupAddresses(listed);
 
     const wanted = new Map<string, Wanted>();
     for (const via of anchors) {

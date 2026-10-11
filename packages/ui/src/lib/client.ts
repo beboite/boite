@@ -376,6 +376,11 @@ export class WsClient implements ObservableClient {
     return this.#principal;
   }
 
+  /** The id of the device key this client signs with, once loaded; null for a client with no device key. */
+  get deviceId(): string | null {
+    return this.#signer?.key?.id ?? null;
+  }
+
   get core(): CoreInfo | null {
     return this.#core;
   }
@@ -602,6 +607,7 @@ export class WsClient implements ObservableClient {
             // A device key the core just let into its group: from here on every hello is signed for that machine.
             if (result.device && grant !== null && this.#signer !== null && result.core.coreId) {
               this.#grant = null;
+              this.#ticket = null;
               this.#paired = true;
               this.#signer.coreId = result.core.coreId;
               if (this.#onDevice?.(result.device, result.core.coreId) === false) {

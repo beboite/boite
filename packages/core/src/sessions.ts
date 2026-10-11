@@ -225,7 +225,8 @@ export class SessionStore {
       throw unauthorized('the pairing link was already used, expired, or never issued');
     }
     this.grants.delete(grant);
-    for (const [code, entry] of this.codes) if (entry.grant === grant) this.redeemedCodes.set(code, entry);
+    // A retry by code stays answerable as long as one by the grant would.
+    for (const [code, entry] of this.codes) if (entry.grant === grant) this.redeemedCodes.set(code, { grant, expiresAt: known.expiresAt });
     this.dropCodes(grant);
     this.redeemed.set(grant, { deviceId, role: known.role, expiresAt: known.expiresAt });
     return known.role;

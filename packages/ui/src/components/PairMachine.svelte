@@ -20,7 +20,8 @@
   async function startScanning() {
     workspace.error = null;
     try { QrScanner ??= (await import('./QrScanner.svelte')).default; scanning = true; }
-    catch { workspace.error = strings.phone.dialogOffline; adding = true; }
+    // The camera's code did not load: the letters are the other way in, opened in its place on a phone.
+    catch { workspace.error = strings.phone.dialogOffline; if (mobile && codeOrigin) codeOpen = true; else adding = true; }
   }
   /** A code that reads as a link to add a device connects at once; the machine names itself and the card renames it. */
   async function scanned(text: string) {

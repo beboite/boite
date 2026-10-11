@@ -108,22 +108,33 @@ export function heldDeviceKey(): DeviceKey | null {
   return current;
 }
 
-/** This device's key, made and kept on first use. */
-export async function deviceKey(): Promise<DeviceKey> {
-  const ed = await loadSigner();
-  const held = heldDeviceKey();
-  if (held !== null) return held;
-  const secret = ed.utils.randomSecretKey();
-  localStorage.setItem(DEVICE_STORAGE_KEY, JSON.stringify({ secret: b64url(secret) }));
-  current = build(ed, secret);
-  return current;
+let making: Promise<DeviceKey> | null = null;
+
+/**
+ * This device's key, made and kept on first use. Machines connecting at once
+ * all ask: one key is made, and every one of them gets it.
+ */
+export function deviceKey(): Promise<DeviceKey> {
+  making ??= loadSigner().then((ed) => {
+    const held = heldDeviceKey();
+    if (held !== null) return held;
+    const secret = ed.utils.randomSecretKey();
+    localStorage.setItem(DEVICE_STORAGE_KEY, JSON.stringify({ secret: b64url(secret) }));
+    current = build(ed, secret);
+    return current;
+  }).finally(() => { making = null; });
+  return making;
 }
 
 /**
  * The group removed this device: its key opens nothing any more and is never
  * admitted again, so it goes, and the next admission makes a new one.
  */
-export function dropDeviceKey(): void {
+export function dropDeviceKey(revoked: string): void {
+  current = null;
+  // Read again from storage: another window may have made a new key since, which this refusal is not about.
+  const stored = heldDeviceKey();
+  if (stored === null || stored.id !== revoked) return;
   try { localStorage.removeItem(DEVICE_STORAGE_KEY); } catch { /* storage refused */ }
   current = null;
 }

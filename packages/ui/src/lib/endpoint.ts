@@ -625,7 +625,8 @@ export function relayKeyFor(url: string): string | DeviceHello | null {
   const stored = readStoredEndpoint();
   const held = [stored?.url === relay.member ? stored : undefined, readEnvironments().find((env) => env.url === relay.member)].filter((place) => place !== undefined);
   const signs = held.find((place) => place.signs !== undefined)?.signs;
-  if (signs !== undefined) return heldDeviceKey()?.hello(signs) ?? null;
+  const hello = signs === undefined ? undefined : heldDeviceKey()?.hello(signs);
+  if (hello !== undefined) return hello;
   return held.find((place) => place.token !== '')?.token ?? null;
 }
 
