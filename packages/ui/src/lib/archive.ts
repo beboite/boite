@@ -1,5 +1,5 @@
 import { tick } from 'svelte';
-import { closed } from './archive-history';
+import { closed, forgetArchivedThread } from './archive-history';
 import type { ProjectId, ThreadId, ThreadSummary } from '@boite/contracts';
 import { focusComposer } from './focus';
 import { fill, strings } from './strings';
@@ -35,38 +35,53 @@ export async function archiveThread(store: Store, threadId: ThreadId): Promise<b
 
 /**
  * Brings back the thread archived last and opens it, like a browser reopens
- * the tab just closed. Those archived from this window come first, newest
- * first, skipping one already restored elsewhere; past them, or after a
- * reload, the machine's most recently archived thread. False when there is
- * none.
+ * the tab just closed. "Last" is the core's archive time, so a thread put away
+ * from another computer, the phone or an agent counts as much as one archived
+ * in this window. The machines this window archived on are asked too, and the
+ * newest of them wins. False when there is none.
  */
 export async function reopenLastArchived(store: Store): Promise<boolean> {
-  let target: { store: Store; threadId: ThreadId } | undefined;
-  while ((target = closed.pop())) {
-    const summary = target.store.threads.find((t) => t.id === target!.threadId);
-    if (!summary || summary.archived) break;
-  }
-  if (!target) {
-    const [newest] = await archivedThreads(store);
-    if (!newest) return false;
-    target = { store, threadId: newest.id };
-  }
+  const stores = [...new Set([store, ...closed.map((entry) => entry.store)])];
+  const lists = await Promise.all(stores.map(async (owner) => {
+    // A machine that cannot answer, the active one included, has nothing to bring back.
+    const threads = await archivedThreads(owner).catch((error: unknown) => {
+      if (owner === store) store.error = error instanceof Error ? error.message : String(error);
+      return [];
+    });
+    return threads.map((thread) => ({ store: owner, thread }));
+  }));
+  // Two archives in the same millisecond: the one made later in this window wins.
+  const order = (c: Archived) => closed.findLastIndex((entry) => entry.store === c.store && entry.threadId === c.thread.id);
+  const newer = (a: Archived, b: Archived) =>
+    archivedTime(a.thread) !== archivedTime(b.thread) ? archivedTime(a.thread) > archivedTime(b.thread) : order(a) > order(b);
+  let target: Archived | undefined;
+  for (const candidate of lists.flat()) if (!target || newer(candidate, target)) target = candidate;
+  if (!target) return false;
+  // Back in the sidebar, its Undo toast and its place in this window's history go.
+  forgetArchivedThread(target.store, target.thread.id);
   try {
-    await restoreThread(target.store, target.threadId);
+    await restoreThread(target.store, target.thread.id);
   } catch (error) {
     target.store.error = error instanceof Error ? error.message : String(error);
     return false;
   }
-  await workspace.select(target.store, target.threadId);
+  await workspace.select(target.store, target.thread.id);
   return true;
 }
 
-/** The archived threads of this machine, or of one project, read when asked for and never at startup. */
+type Archived = { store: Store; thread: ThreadSummary };
+
+/** When a thread was put away; a thread archived by an older core only has its last change. */
+function archivedTime(thread: ThreadSummary): number {
+  return thread.archivedAt ?? thread.updatedAt;
+}
+
+/** The archived threads of this machine, or of one project, newest archived first, read when asked for and never at startup. */
 export async function archivedThreads(store: Store, projectId?: ProjectId): Promise<ThreadSummary[]> {
   const client = store.client;
   if (!client) return [];
   const all = await client.call('threads.list', projectId ? { projectId, includeArchived: true } : { includeArchived: true });
-  return all.filter((t) => t.archived && !t.parentThreadId).sort((a, b) => b.updatedAt - a.updatedAt);
+  return all.filter((t) => t.archived && !t.parentThreadId).sort((a, b) => archivedTime(b) - archivedTime(a));
 }
 
 /** Takes a thread out of the archive; its row comes back in the sidebar. */

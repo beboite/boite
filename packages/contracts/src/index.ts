@@ -682,6 +682,12 @@ export interface ThreadSummary {
   pendingAnswers?: string[];
   unread: boolean;
   archived: boolean;
+  /**
+   * When the core last archived it, the order Ctrl+Shift+T and the archived
+   * list follow on every client. Null once restored; missing on threads
+   * archived by an older core, which fall back to `updatedAt`.
+   */
+  archivedAt?: Timestamp | null;
   /** Kept above the other threads of its project in the sidebar, whatever runs. */
   pinned: boolean;
   /** Provider session id once the first turn has run; used to resume. */

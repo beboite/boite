@@ -461,7 +461,9 @@ export class ThreadStore {
       void this.core.terminals.close(threadTerminalId(threadId));
     }
     const thread = this.require(threadId);
-    const saved = this.save({ ...thread, archived }, 'thread.archived');
+    // Archiving an archived thread again keeps its time: nothing new was put away.
+    const archivedAt = archived ? (thread.archived ? (thread.archivedAt ?? null) : Date.now()) : null;
+    const saved = this.save({ ...thread, archived, archivedAt }, 'thread.archived');
     // The sidebar counts a project's archived threads; a sub-thread is not one of them.
     if (thread.archived !== archived && !thread.parentThreadId && thread.projectId !== null) this.core.projects.announce(thread.projectId);
     return saved;

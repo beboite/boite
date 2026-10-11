@@ -106,7 +106,8 @@ export class Delegation {
     this.core.journal.db.transaction(() => {
       for (const child of children.filter(t => !t.archived)) {
         this.core.threads.releaseAgent(child.id);
-        const archived = { ...child, archived: true, updatedAt: Date.now() };
+        const now = Date.now();
+        const archived = { ...child, archived: true, archivedAt: now, updatedAt: now };
         this.core.journal.putThread(archived);
         this.core.bus.emit('thread.updated', archived);
       }

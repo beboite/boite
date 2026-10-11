@@ -39,6 +39,7 @@ export interface ThreadRow {
   status: string;
   unread: number;
   archived: number;
+  archived_at?: number | null;
   pinned: number;
   session_id: string | null;
   session_generation: number;
@@ -130,6 +131,7 @@ export function toThread(row: ThreadRow): ThreadSummary {
     status: row.status as ThreadSummary['status'],
     unread: row.unread !== 0,
     archived: row.archived !== 0,
+    ...(row.archived !== 0 && row.archived_at ? { archivedAt: row.archived_at } : {}),
     pinned: row.pinned !== 0,
     sessionId: row.session_id,
     ...(row.session_resume_at ? { sessionResumeAt: row.session_resume_at } : {}),

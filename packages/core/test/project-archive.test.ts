@@ -54,14 +54,22 @@ test('a project counts its archived threads, and each archive or restore announc
   client.on('project.updated', (payload) => heard.push(payload));
   expect((await client.call('projects.list', {})).find((p) => p.id === project.id)?.archivedThreads).toBeUndefined();
 
-  await client.call('threads.archive', { threadId });
+  const before = Date.now();
+  const archived = await client.call('threads.archive', { threadId });
   await waitFor(() => heard.length === 1);
   expect(heard[0]).toMatchObject({ id: project.id, archivedThreads: 1 });
   expect((await client.call('projects.list', {})).find((p) => p.id === project.id)?.archivedThreads).toBe(1);
+  // Every client orders "archived last" by the core's time, kept when archived again.
+  expect(archived.archivedAt).toBeGreaterThanOrEqual(before);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  expect((await client.call('threads.archive', { threadId })).archivedAt).toBe(archived.archivedAt!);
+  expect(harness.core.journal.getThread(threadId)?.archivedAt).toBe(archived.archivedAt!);
 
-  await client.call('threads.archive', { threadId, archived: false });
+  const restored = await client.call('threads.archive', { threadId, archived: false });
   await waitFor(() => heard.length === 2);
   expect(heard[1]?.archivedThreads).toBeUndefined();
+  expect(restored.archivedAt).toBeNull();
+  expect(harness.core.journal.getThread(threadId)?.archivedAt).toBeUndefined();
 });
 
 test('a thread started in an archived project brings the project back', async () => {

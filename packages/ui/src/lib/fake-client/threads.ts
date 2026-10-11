@@ -237,6 +237,7 @@ export function threadMethods(ctx: FakeContext) {
       if (params.archived === false && removing.has(thread.id)) throw refusal('threadId: this conversation is being deleted', { threadId: thread.id, field: 'threadId', expected: 'a conversation not being deleted' });
       const was = thread.archived;
       thread.archived = params.archived ?? true;
+      thread.archivedAt = thread.archived ? (was ? (thread.archivedAt ?? null) : Date.now()) : null;
       if (thread.archived) await putAway(ctx, thread);
       const summary = ctx.touch(thread);
       if (was !== thread.archived && !thread.parentThreadId && thread.projectId !== null) announceProject(ctx, thread.projectId);

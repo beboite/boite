@@ -1,6 +1,6 @@
 import type { Database } from 'bun:sqlite';
 
-export const SCHEMA_VERSION = 25;
+export const SCHEMA_VERSION = 26;
 
 /** Raised when the journal was written by a newer core than this one. */
 export class JournalTooNewError extends Error {
@@ -360,6 +360,11 @@ export function migrate(db: Database, file: string): void {
   if (!db.query("SELECT 1 FROM pragma_table_info('projects') WHERE name = 'worktree_default'").get()) {
     db.exec('ALTER TABLE projects ADD COLUMN worktree_default INTEGER NOT NULL DEFAULT 0');
     version = 25;
+  }
+  // When a thread was archived: the last one put away is the one brought back.
+  if (!db.query("SELECT 1 FROM pragma_table_info('threads') WHERE name = 'archived_at'").get()) {
+    db.exec('ALTER TABLE threads ADD COLUMN archived_at INTEGER');
+    version = 26;
   }
   version = Math.max(version, SCHEMA_VERSION);
   db.exec(`PRAGMA user_version = ${version}`);
