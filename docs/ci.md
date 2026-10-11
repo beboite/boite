@@ -191,6 +191,10 @@ become 4,532,000 and 3,860,000. The review fixes that followed (redaction
 before bounding, strict diagnostics parameters, safer file writes) brought the
 core to about 3,859,000 bytes on Linux on 2026-10-11, under 1 KB from its
 limit, so the core JavaScript limit rises by 4,000 to 3,864,000.
+Merged with `0b13bd40` and `957768a8`, whose reviewed goals raised `main`'s
+limits by 9,000 and 16,000 bytes, the branch measured about 4,524,600 and
+3,868,100 on Linux on 2026-10-11, and its limits take the same increase:
+4,541,000 and 3,880,000.
 
 On 2026-10-03, fresh builds of `e1f00a3` measured 2,695,204 core bytes and 3,932,309
 UI bytes. The orchestration additions measured 3,228,444 and 3,943,301 bytes:
