@@ -179,3 +179,36 @@ test('uninstalling a URL plugin takes its row away; the recommended one goes bac
     ask.mockRestore();
   }
 });
+
+test('a recommended plugin with an update source says what it last found, and a check offers the newer release', async () => {
+  await open((rows) => {
+    const bots = rows.find((plugin) => plugin.id === 'bots')!;
+    bots.updates = { ...bots.updates!, checkedAt: Date.now() - 3 * 3_600_000 };
+  });
+  const bots = () => row('bots')!;
+  const line = () => bots().querySelector('[data-testid="plugin-updates-line"]')?.textContent ?? '';
+  expect(line()).toBe('Up to date · checked 3 hr. ago');
+  expect(bots().querySelector('[data-testid="plugin-update"]')).toBeNull();
+  // Not installed, nothing is checked by itself: no line.
+  expect(row('kebacc-switcher')?.querySelector('[data-testid="plugin-updates"]')).toBeNull();
+
+  (bots().querySelector('[data-testid="plugin-check-updates"]') as HTMLElement).click();
+  await vi.waitFor(() => expect(bots().querySelector('[data-testid="plugin-update"]')?.textContent).toBe('Update to v0.1.10'));
+  expect(line()).toBe('Found at github.com/beboite/bots, main at 6b2e4d8 · checked now');
+  expect(bots().textContent).toContain('Installed · v0.1.10 available');
+
+  (bots().querySelector('[data-testid="plugin-update"]') as HTMLElement).click();
+  await vi.waitFor(() => expect(bots().getAttribute('data-status')).toBe('installed'), { timeout: 3000 });
+  await vi.waitFor(() => expect(bots().querySelector('h3')?.textContent).toContain('v0.1.10'), { timeout: 3000 });
+  expect(bots().querySelector('[data-testid="plugin-update"]')).toBeNull();
+});
+
+test('an ignored release and a failed check read as quiet notes, never alarms', async () => {
+  await open((rows) => {
+    const bots = rows.find((plugin) => plugin.id === 'bots')!;
+    bots.updates = { ...bots.updates!, ignored: '0.1.8 found there, older than 0.1.9; Boite never goes back.' };
+  });
+  const updates = row('bots')!.querySelector('[data-testid="plugin-updates"]')!;
+  expect(updates.textContent).toContain('Not offered: 0.1.8 found there, older than 0.1.9; Boite never goes back.');
+  expect(updates.querySelector('[role="alert"], .bad')).toBeNull();
+});

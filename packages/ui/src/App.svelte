@@ -8,6 +8,7 @@
   import TerminalDrawer from './components/TerminalDrawer.svelte';
   import UndoToast from './components/UndoToast.svelte';
   import NotificationCard from './components/NotificationCard.svelte';
+  import PluginUpdateNotice from './components/PluginUpdateNotice.svelte';
   import ChatView from './components/ChatView.svelte';
 
   import ConfirmDialog from './components/ConfirmDialog.svelte';
@@ -678,7 +679,6 @@
     </div>
   {/if}
 
-
   {#if toast.shown}
     <div
       class="toast"
@@ -704,7 +704,7 @@
 
 <ContextMenu />
 <DragGhost />
-{#if tour && deferred.Onboarding}{@const Onboarding = deferred.Onboarding}<Onboarding {store} />{/if}
+{#if tour && deferred.Onboarding}{@const Onboarding = deferred.Onboarding}<Onboarding {store} />{:else}<PluginUpdateNotice />{/if}
 {#if deferred.ProjectPicker}{@const ProjectPicker = deferred.ProjectPicker}<ProjectPicker {store} />{/if}
 <ConfirmDialog />
 {#if deferred.ImportDialog}{@const ImportDialog = deferred.ImportDialog}<ImportDialog {store} />{/if}

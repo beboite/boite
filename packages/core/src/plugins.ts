@@ -9,6 +9,10 @@
  * `installed.json`, which records the manifest it came from, the commit a URL
  * resolved to and when. That directory is all an install writes, so uninstall
  * deletes it and nothing else. docs/plugins.md is the authoring guide.
+ *
+ * A recommended entry may name an update source; plugins/updates.ts reads it
+ * and the newest of the pinned entry, the release found there and the install
+ * is what Install and Update bring.
  */
 
 import { createHash } from 'node:crypto';
@@ -36,6 +40,7 @@ import {
 } from './plugins/manifest.ts';
 import { PluginApps } from './plugins/apps.ts';
 import { checkRef, fetchManifest, normalizeSourceUrl } from './plugins/source.ts';
+import { PluginUpdateChecks, compareVersions, parseRecommendedEntry, type UpdateSource } from './plugins/updates.ts';
 import recommendedList from './plugins/recommended.json';
 
 const INSTALLED_FILE = 'installed.json';
@@ -49,8 +54,11 @@ const PREVIEW_TTL_MS = 10 * 60_000;
 const PREVIEW_MAX = 16;
 
 /** The recommended plugins, read when the core loads. A bad entry fails the core's own tests. */
-export const RECOMMENDED: readonly PluginManifest[] = (recommendedList as unknown[]).map((raw, index) =>
-  parseManifest(raw, `recommended.json[${index}]`));
+const RECOMMENDED_ENTRIES = (recommendedList as unknown[]).map((raw, index) => parseRecommendedEntry(raw, `recommended.json[${index}]`));
+export const RECOMMENDED: readonly PluginManifest[] = RECOMMENDED_ENTRIES.map((entry) => entry.manifest);
+/** Where an entry's newer releases are published, by id, for the entries that name one. */
+export const RECOMMENDED_UPDATES: Readonly<Record<string, UpdateSource>> = Object.fromEntries(
+  RECOMMENDED_ENTRIES.flatMap((entry) => (entry.updates === null ? [] : [[entry.manifest.id, entry.updates]])));
 
 export function verifyPluginDownload(bytes: Uint8Array, digest: string, name = 'plugin'): void {
   if (createHash('sha256').update(bytes).digest('hex') !== digest) {
@@ -149,8 +157,13 @@ async function removeTree(path: string): Promise<void> {
 export class PluginStore {
   /** The manifests `plugins.list` offers. Tests swap an entry to point an install at a fixture. */
   recommended: PluginManifest[] = [...RECOMMENDED];
+  /** The update source of each recommended entry that names one. Tests swap it like `recommended`. */
+  updateSources: Record<string, UpdateSource> = { ...RECOMMENDED_UPDATES };
   /** Lets `plugins.inspect` read a repository by its path on disk. Tests only; no client can set it. */
   allowLocalSources = false;
+  /** Test seam: how an update source is read. The git path of `plugins.inspect` otherwise. */
+  readUpdateSource = (source: UpdateSource): Promise<{ commit: string; text: string | null }> =>
+    fetchManifest(this.core, source.url, source.ref, { allowLocal: this.allowLocalSources, signal: this.shutdown.signal });
 
   private jobs = new Map<string, Job>();
   private failures = new Map<string, string>();
@@ -171,8 +184,26 @@ export class PluginStore {
 
   /** The desktop apps plugins provide: started, stopped and relaunched here. */
   readonly apps: PluginApps;
+  /** Newer releases of recommended plugins, read from the update sources the list names. */
+  readonly updates: PluginUpdateChecks;
 
   constructor(private core: Core) {
+    this.updates = new PluginUpdateChecks({
+      source: (id) => (this.recommendedManifest(id) === null ? null : this.updateSources[id] ?? null),
+      ids: () => this.recommended.map((manifest) => manifest.id).filter((id) => this.updateSources[id] !== undefined),
+      pinned: (id) => this.recommendedManifest(id),
+      installed: (id) => {
+        try {
+          const disk = this.onDisk(id);
+          return disk.kind === 'installed' ? disk.installed.version : null;
+        } catch {
+          return null;
+        }
+      },
+      read: (source) => this.readUpdateSource(source),
+      changed: (id) => this.emit(id),
+      log: (level, message) => core.log(level, message),
+    });
     this.apps = new PluginApps({
       procs: core.procs,
       coreUrl: () => core.baseUrl(),
@@ -205,6 +236,22 @@ export class PluginStore {
 
   private recommendedManifest(id: string): PluginManifest | null {
     return this.recommended.find((manifest) => manifest.id === id) ?? null;
+  }
+
+  /**
+   * What installing a recommended plugin brings: the newest of the pinned
+   * entry, a release its update source offers and the manifest installed.
+   * The installed one only wins a tie, so a retry reinstalls it rather than
+   * going back to an older pinned entry.
+   */
+  private recommendedTarget(id: string, installed: Installed | null): PluginManifest | null {
+    const pinned = this.recommendedManifest(id);
+    if (pinned === null) return null;
+    let best = installed?.origin === 'recommended' && installed.manifest.id === id ? installed.manifest : pinned;
+    for (const candidate of [pinned, this.updates.offered(id)?.manifest ?? null]) {
+      if (candidate !== null && compareVersions(candidate.version, best.version) > 0) best = candidate;
+    }
+    return best;
   }
 
   /** The id, when it names a recommended plugin or one this core has anything of. */
@@ -258,7 +305,7 @@ export class PluginStore {
     const pending = this.pending.get(id);
     const installed = disk.kind === 'installed' ? disk.installed : null;
     // What an install brings; the recommended list wins, then a URL add in progress.
-    const target = recommended ?? pending?.manifest ?? installed?.manifest ?? null;
+    const target = this.recommendedTarget(id, installed) ?? pending?.manifest ?? installed?.manifest ?? null;
     const running = installed?.manifest ?? target;
     const failure = this.failures.get(id) ?? (disk.kind === 'error' ? disk.message : null);
     return {
@@ -279,6 +326,7 @@ export class PluginStore {
       pools: running ? poolsOf(running) : [],
       rejected: disk.kind === 'rejected' ? disk.rejected : null,
       app: running !== null && providesApp(running) ? this.apps.state(id, this.directory(id)) : null,
+      updates: recommended !== null ? this.updates.state(id) : null,
     };
   }
 
@@ -319,7 +367,10 @@ export class PluginStore {
     this.known(id);
     if (this.jobs.has(id)) return this.state(id);
     const recommended = this.recommendedManifest(id);
-    if (recommended !== null) return this.start(id, recommended, null, 'recommended');
+    if (recommended !== null) {
+      const disk = this.onDisk(id);
+      return this.start(id, this.recommendedTarget(id, disk.kind === 'installed' ? disk.installed : null) ?? recommended, null, 'recommended');
+    }
     const pending = this.pending.get(id);
     if (pending !== undefined) return this.start(id, pending.manifest, pending.source, 'url');
     const disk = this.onDisk(id);
@@ -690,10 +741,30 @@ export class PluginStore {
     return this.state(id);
   }
 
+  /** At core start: the update checks of the recommended plugins that name a source. */
+  startUpdateChecks(): void {
+    if (!this.closing) this.updates.start();
+  }
+
+  /** `plugins.checkUpdates`: reads the update sources now and answers with the states they leave. */
+  async checkUpdates(params: RpcParams<'plugins.checkUpdates'>): Promise<PluginState[]> {
+    if (this.closing) throw refused('Boite is shutting down.');
+    const sourced = this.recommended.map((manifest) => manifest.id).filter((id) => this.updateSources[id] !== undefined);
+    let ids = sourced;
+    if (params?.id !== undefined) {
+      const expected = `a recommended plugin that names an update source: ${sourced.join(', ') || 'none'}`;
+      if (!sourced.includes(params.id)) throw invalidParams(`plugin ${String(params.id)} has no update source; expected ${expected}`, { field: 'id', expected });
+      ids = [params.id];
+    }
+    await this.updates.check(ids);
+    return ids.map((id) => this.state(id));
+  }
+
   async close(): Promise<void> {
     this.closing = true;
     const apps = this.apps.close();
     this.shutdown.abort();
+    const checks = this.updates.close();
     const jobs = [...this.jobs.values()];
     for (const job of jobs) job.controller.abort();
     await Promise.all(jobs.map((job) => job.promise));
@@ -701,5 +772,6 @@ export class PluginStore {
     await Promise.all(this.exits);
     await Promise.all([...this.listings.values(), ...this.inspecting].map((pending) => pending.catch(() => undefined)));
     await apps;
+    await checks;
   }
 }

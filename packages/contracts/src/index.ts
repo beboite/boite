@@ -731,6 +731,33 @@ export interface PluginState {
   rejected: PluginRejected | null;
   /** The desktop app the plugin provides, null when it provides none. */
   app: PluginAppState | null;
+  /**
+   * Where Boite looks for this recommended plugin's newer releases, and what
+   * it last found there. Null when its entry names no update source. Absent
+   * from cores older than update sources.
+   */
+  updates?: PluginUpdates | null;
+}
+
+/**
+ * A recommended plugin's update source and its last check. The source is the
+ * reviewed list's, never the plugin's own: docs/plugins.md, Updating.
+ */
+export interface PluginUpdates {
+  /** The https repository and the ref whose `boite-plugin.json` is read. */
+  source: { url: string; ref: string };
+  /** A check is running now. */
+  checking: boolean;
+  /** When the last check finished, successful or not. */
+  checkedAt: Timestamp | null;
+  /** When the core checks again by itself, null when it does not. */
+  nextCheckAt: Timestamp | null;
+  /** A newer release the last check found and accepted; `availableVersion` then names it. */
+  available: { version: string; commit: string; checkedAt: Timestamp } | null;
+  /** Why the manifest read there was not offered: not newer, another id, no artifact here. Not an error. */
+  ignored: string | null;
+  /** Why the last check could not read the source. Checks back off after one. */
+  error: string | null;
 }
 
 /** What `plugins.inspect` read, shown to the owner before anything is downloaded. */
@@ -3486,6 +3513,12 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * disables and kills it, `restart` kills and launches it again.
    */
   'plugins.app': { params: { id: string; action: 'start' | 'stop' | 'restart' }; result: PluginState };
+  /**
+   * Reads the update source of one recommended plugin, or of every one that
+   * names a source, now. Answers once the reads finish; each changed state is
+   * also announced by `plugins.updated`. Installs nothing.
+   */
+  'plugins.checkUpdates': { params: { id?: string }; result: PluginState[] };
   /**
    * Asks the owner's desktop windows to show a thread or an agent's page.
    * Emits `ui.reveal` to owner connections only, desktop-app plugins left

@@ -6,7 +6,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { ManifestRefused, POOL_PROVIDERS, commandsOf, parseManifest, parseManifestText } from '../src/plugins/manifest.ts';
 import { checkRef, normalizeSourceUrl } from '../src/plugins/source.ts';
-import { RECOMMENDED } from '../src/plugins.ts';
+import { RECOMMENDED, RECOMMENDED_UPDATES } from '../src/plugins.ts';
 import { startTestCore, type TestCore } from './harness.ts';
 
 const SHA = 'a'.repeat(64);
@@ -123,18 +123,22 @@ describe('the recommended list', () => {
     expect(RECOMMENDED.map((manifest) => manifest.id)).toEqual(['bots', 'kebacc-switcher']);
   });
 
-  test('Bots is a desktop app, from its v0.1.4 release assets and digests', () => {
+  test('Bots is a desktop app, from its v0.1.9 release assets and digests', () => {
     const bots = RECOMMENDED.find((manifest) => manifest.id === 'bots')!;
-    expect(bots.version).toBe('0.1.4');
+    expect(bots.version).toBe('0.1.9');
     expect(bots.executable).toBe('bots');
     expect(bots.provides).toEqual({ desktopApp: {} });
     expect(bots.artifacts['win32-x64']).toEqual({
-      url: 'https://github.com/beboite/bots/releases/download/v0.1.4/bots-x86_64-pc-windows-msvc.exe',
-      sha256: 'd39d6aa1883f45d6a96d89e6032fd75e466001313a5da336b1764c6254cb0553',
+      url: 'https://github.com/beboite/bots/releases/download/v0.1.9/bots-x86_64-pc-windows-msvc.exe',
+      sha256: 'b21ad5a3d248f8653808944021e4b84293eb0653abb1b65a76a265aaa3de5820',
     });
-    expect(bots.artifacts['linux-arm64']?.sha256).toBe('f7416340b2e700c5be1a2be0d8e660dd85eae3ed24ad9f83dbc2428f5690f054');
+    expect(bots.artifacts['linux-arm64']?.sha256).toBe('d360f186de4acdd5c10584bc3f973098cc40fdeef637de80a6ceb12b18005dcd');
     expect(Object.keys(bots.artifacts)).toHaveLength(6);
-    for (const artifact of Object.values(bots.artifacts)) expect(artifact?.url).toMatch(/^https:\/\/github\.com\/beboite\/bots\/releases\/download\/v0\.1\.4\/bots-/);
+    for (const artifact of Object.values(bots.artifacts)) expect(artifact?.url).toMatch(/^https:\/\/github\.com\/beboite\/bots\/releases\/download\/v0\.1\.9\/bots-/);
+  });
+
+  test('Bots finds its newer releases on its own repository, and kebacc-switcher names no source', () => {
+    expect(RECOMMENDED_UPDATES).toEqual({ bots: { url: 'https://github.com/beboite/bots', ref: 'main' } });
   });
 
   test('kebacc-switcher keeps the release assets and digests it always had', () => {
