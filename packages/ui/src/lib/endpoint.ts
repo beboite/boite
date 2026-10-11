@@ -196,6 +196,11 @@ function brought(from: { coreId?: unknown; groupId?: unknown; epoch?: unknown })
   };
 }
 
+/** Whether this device holds something that opens the machine saved here: a key of its own for it, or its device key. */
+export function opens(entry: { token: string; signs?: string }): boolean {
+  return entry.token !== '' || entry.signs !== undefined;
+}
+
 /** The machine a device key signs for, kept beside the address. */
 function signsOf(from: { signs?: unknown }): { signs?: string } {
   return typeof from.signs === 'string' && /^[0-9a-f]{64}$/.test(from.signs) ? { signs: from.signs } : {};
@@ -471,7 +476,7 @@ export function storeMainMachine(main: MainMachine | null): void {
 /** The key this device holds for the chosen machine: at its address, or wherever the group has brought that machine since. */
 function mainEnvironment(main: MainMachine): StoredEnvironment | undefined {
   if ('local' in main) return undefined;
-  const keyed = readEnvironments().filter((env) => env.token !== '');
+  const keyed = readEnvironments().filter(opens);
   return keyed.find((env) => env.url === main.url)
     ?? (main.coreId === undefined ? undefined : keyed.find((env) => env.coreId === main.coreId && env.groupId === main.groupId));
 }
@@ -488,7 +493,7 @@ export function openOnMainMachine(): void {
   if (main === null) return;
   // With no stored core, a start falls back on the app's own: the shell's, or the origin of the page.
   // In a browser that machine may need the key held for it, a phone's page being served by the machine it paired with.
-  const env = 'local' in main ? readEnvironments().find((entry) => entry.token !== '' && servesThisPage(entry.url)) : mainEnvironment(main);
+  const env = 'local' in main ? readEnvironments().find((entry) => opens(entry) && servesThisPage(entry.url)) : mainEnvironment(main);
   if (env) storeEndpoint(env);
   else if ('local' in main) clearStoredEndpoint();
 }
