@@ -459,7 +459,8 @@ export class ThreadStore {
     if (!thread || thread.updatedAt !== expected.updatedAt || thread.cwd !== expected.cwd || thread.branch !== expected.branch || thread.projectId !== expected.projectId || state.generation !== generation || state.dismissed?.includes(proof.url) || !this.core.mergedPrArchive.eligible(thread)) return null;
     const archivedThread = this.core.bus.afterCommit(() => this.core.journal.db.transaction(() => {
       this.core.journal.setSetting(archiveStateKey(thread.id), { ...state, binding: proof, reason: { type: 'pr-merged', number: proof.number, url: proof.url, archivedAt: Date.now() } });
-      const saved = this.save({ ...thread, archived: true, doneAt: Date.now() }, 'thread.archived');
+      const now = Date.now();
+      const saved = this.save({ ...thread, archived: true, doneAt: now, archivedAt: now }, 'thread.archived');
       if (thread.projectId !== null) this.core.projects.announce(thread.projectId);
       return saved;
     })());
@@ -515,7 +516,9 @@ export class ThreadStore {
       }
       // Keep deletion retryable until staging commits its tombstone and clears this date.
       const doneAt = archived && (onlyIfIdle || this.removing.has(threadId)) ? thread.doneAt ?? (onlyIfIdle ? Date.now() : null) : null;
-      const saved = this.save({ ...thread, archived, doneAt }, 'thread.archived');
+      // Archiving an archived thread again keeps its time: nothing new was put away.
+      const archivedAt = archived ? (thread.archived ? thread.archivedAt ?? null : Date.now()) : null;
+      const saved = this.save({ ...thread, archived, doneAt, archivedAt }, 'thread.archived');
       if (thread.archived !== archived && !thread.parentThreadId && thread.projectId !== null) this.core.projects.announce(thread.projectId);
       return saved;
     })());

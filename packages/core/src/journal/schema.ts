@@ -5,7 +5,7 @@ import { nativeAgentPartSql } from './native-agent-parts.ts';
 import { createPartBlobs } from './part-blobs.ts';
 import { parseJson } from './rows.ts';
 
-export const SCHEMA_VERSION = 32;
+export const SCHEMA_VERSION = 33;
 
 /** Raised when the journal was written by a newer core than this one. */
 export class JournalTooNewError extends Error {
@@ -408,6 +408,11 @@ export function migrate(db: Database, file: string): void {
         PRIMARY KEY (message_id, part_index)) WITHOUT ROWID;
       CREATE INDEX IF NOT EXISTS media_displays_thread ON media_displays (thread_id);`);
     version = 32;
+  }
+  // When a thread was archived: the last one put away is the one brought back.
+  if (!hasColumn('threads', 'archived_at')) {
+    db.exec('ALTER TABLE threads ADD COLUMN archived_at INTEGER');
+    version = 33;
   }
   version = Math.max(version, SCHEMA_VERSION);
   if (row?.user_version !== version) db.exec(`PRAGMA user_version = ${version}`);

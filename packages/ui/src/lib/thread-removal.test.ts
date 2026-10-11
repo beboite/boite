@@ -6,7 +6,7 @@ import { UNDO_MS, undo } from './undo.svelte';
 import { confirm } from './confirm.svelte';
 import { deleteThread } from './thread-removal';
 import { RpcFailure } from './client';
-import { RpcErrorCode } from '@boite/contracts';
+import { RpcErrorCode, type ThreadSummary } from '@boite/contracts';
 import { strings } from './strings';
 import { closed } from './archive-history';
 
@@ -178,4 +178,20 @@ test('a paired phone deletes a conversation and undo brings it back', async () =
   await undo.take();
   expect(store.threads.some(t => t.id === 't-trace')).toBe(true);
   expect(store.error).toBeNull();
+});
+
+test('reopening skips a thread the core archived itself after its PR merged', async () => {
+  const store = await ready();
+  expect(await archiveThread(store, 't-trace')).toBe(true);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await store.client!.call('threads.archive', { threadId: 't-descriptors' });
+  const call = store.client!.call.bind(store.client!);
+  vi.spyOn(store.client!, 'call').mockImplementation((async (method: string, params: unknown) => {
+    const result = await call(method as never, params as never);
+    if (method !== 'threads.list') return result;
+    const reason = { type: 'pr-merged', number: 1, url: 'https://github.com/o/r/pull/1', archivedAt: Date.now() };
+    return (result as ThreadSummary[]).map((t) => (t.id === 't-descriptors' ? { ...t, archiveReason: reason } : t));
+  }) as never);
+  expect(await reopenLastArchived(store)).toBe(true);
+  expect(store.openThread?.id).toBe('t-trace');
 });
