@@ -51,7 +51,7 @@
 <div class="display-options" bind:this={root}>
   <button type="button" class="ghost icon small trigger" bind:this={trigger} aria-haspopup="dialog" aria-expanded={popover.open}
     aria-label={strings.sidebar.groupingOptions} title={strings.sidebar.groupingOptions} data-testid={`${prefix}grouping-options`} onclick={toggle}>
-    <SlidersHorizontal size={15} />
+    <SlidersHorizontal size={16} />
   </button>
   {#if popover.shown && Panel}
     <Panel {popover} anchor={() => trigger ?? null} onclose={close} {entries} {target} {owner} {prefix} />
@@ -61,7 +61,4 @@
 <style>
   .display-options { position: relative; display: inline-flex; }
   .trigger[aria-expanded='true'] { background: var(--color-surface-3); color: var(--color-foreground); }
-  @media (max-width: 720px) {
-    .trigger { width: var(--control-touch); height: var(--control-touch); }
-  }
 </style>

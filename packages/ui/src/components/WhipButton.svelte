@@ -18,8 +18,8 @@
   title={whip.held ? strings.experiments.whip.drop : strings.experiments.whip.action}
   aria-label={whip.held ? strings.experiments.whip.drop : strings.experiments.whip.action}
   aria-pressed={whip.held} onclick={toggle}>
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-    stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
     <path d="m3 20 5-5 3 3-5 5zM10 16c-3-5-1-12 4-12 6 0 8 7 3 8-3 1-5-2-2-4 3-2 7 1 6 5" />
   </svg>
 </button>

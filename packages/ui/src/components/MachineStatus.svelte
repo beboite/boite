@@ -47,7 +47,7 @@
 <div class="machines" class:problem={issues > 0} class:filtered={chosen !== null && !pick} class:named data-testid={pick ? 'agents-machine-status' : 'status-connection'} data-state={store.connection} aria-live="polite">
   {#if shown}
     <Menu {items} onpick={choose} {label} variant="ghost" testid={pick ? 'agents-machine' : 'machine-status'}>
-      {#if issues}<TriangleAlert size={15} />{:else}<Monitor size={15} />{/if}
+      {#if issues}<TriangleAlert size={16} />{:else}<Monitor size={16} />{/if}
       {#if named && chosen}<span class="name ui-label">{chosen.label}</span>{/if}
     </Menu>
   {/if}
@@ -60,7 +60,9 @@
   .filtered :global(.trigger) { width: auto; max-width: 160px; padding: 0 8px; gap: 6px; background: var(--color-active); color: var(--color-foreground); }
   /* The Agents list names its machine without the filter's fill: nothing is hidden, it is where the list is. */
   .named:not(.filtered) :global(.trigger) { width: auto; max-width: 160px; padding: 0 8px; gap: 6px; color: var(--color-foreground); }
-  .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* min-width: a flex item never shrinks below its text otherwise, and a long
+     name ran out of the button instead of ending in an ellipsis. */
+  .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .problem { color: var(--color-live); }
   .problem :global(.trigger) { color: var(--color-live); }
 </style>

@@ -97,11 +97,11 @@ export class BottomEdge {
     this.#top = box.scrollTop;
   }
 
-  /** Whether `box` stands higher than at its last scroll event or follow. Call it on every scroll event. */
-  rose(box: HTMLElement): boolean {
-    const rose = box.scrollTop < this.#top - 1;
+  /** How far `box` moved since its last scroll event or follow, negative when it rose. Call it on every scroll event. */
+  moved(box: HTMLElement): number {
+    const moved = box.scrollTop - this.#top;
     this.#top = box.scrollTop;
-    return rose;
+    return moved;
   }
 }
 
