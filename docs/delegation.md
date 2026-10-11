@@ -93,10 +93,12 @@ reconstructed from its journal.
 
 ## Follow and steer
 
-The parent chat keeps a "Started N agents" row at the first launch. It shows
-successful completions out of the team total, failed or stopped tasks, and
-elapsed time. Click it to open every agent's model, task, status and result in
-the right panel. The timer runs locally while work is active and freezes when
+The parent chat keeps one "Started N agents" row per launch: the children
+started after the same message share a row, placed where the first of them
+started, and it stays once they finish. A launch older than the loaded history
+shows when that page loads. Each row shows successful completions out of its
+agents, failed or stopped tasks, and elapsed time, in hours past an hour. Click
+it to open every agent's model, task, status and result in the right panel. The timer runs locally while work is active and freezes when
 all agents settle. Sending a follow-up to a child resumes its status and timer.
 
 One button above the composer shows the number of active subagents and running

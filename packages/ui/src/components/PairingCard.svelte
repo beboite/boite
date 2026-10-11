@@ -1,5 +1,7 @@
 <script lang="ts">
+  import FirewallNotice from './FirewallNotice.svelte';
   import InfoTip from './InfoTip.svelte';
+  import LanReach, { isLoopback } from './LanReach.svelte';
   import type { PairedSession } from '@boite/contracts';
   import { confirm } from '../lib/confirm.svelte';
   import { ago, exactTime, time } from '../lib/format';
@@ -46,10 +48,28 @@
     return name === 'pwa' ? strings.settings.pairing.clients.pwa : name === 'shell' ? strings.settings.pairing.clients.shell : name;
   }
 
-  /** A switch saves when it flips, as every other switch in Settings does; a refusal puts it back. */
+  let firewall: FirewallNotice | undefined = $state();
+  let reach: LanReach | undefined = $state();
+  /** A second flip during a restart would be saved and never applied: the switch waits. */
+  let restarting = $state(false);
+  /** A link naming loopback reaches nothing but this computer: no QR code for it. */
+  const loopback = $derived(!!store.pairing && isLoopback(store.pairing.url));
+
+  /**
+   * A switch saves when it flips, as every other switch in Settings does; a
+   * refusal puts it back. Turning the network on asks Windows for its firewall
+   * rule at once, while the owner is looking, so its own prompt naming the
+   * core's runtime never comes up. The core reads the setting when it starts,
+   * so the desktop app restarts it either way.
+   */
   async function toggleLan(input: HTMLInputElement) {
     const ok = await store.saveSettings({ listenOnLan: input.checked });
-    if (!ok) input.checked = store.settings?.listenOnLan ?? !input.checked;
+    if (!ok) {
+      input.checked = store.settings?.listenOnLan ?? !input.checked;
+      return;
+    }
+    if (input.checked) await firewall?.allow();
+    await reach?.restart(store.pairing !== null);
   }
 
   async function revoke(session: PairedSession) {
@@ -101,26 +121,27 @@
         <!-- A computer takes the link pasted, so its QR code would only be
              a camera away from the wrong device: an owner link is drawn only
              once confirmed for a phone, which gives it a code. -->
-        {#if qr && (store.pairing.role !== 'owner' || store.pairing.code)}
+        {#if qr && !loopback && (store.pairing.role !== 'owner' || store.pairing.code)}
           <div class="qr" data-testid="pairing-qr" aria-label={strings.settings.pairing.qr}>{@html qr}</div>
         {/if}
         <div class="minted-text">
           <p class="mono link" data-testid="pairing-link">{store.pairing.url}</p>
-          <p class="hint">{store.pairing.role !== 'owner' ? strings.settings.pairing.scan : store.pairing.code ? strings.settings.pairing.ownerScan : strings.settings.pairing.pasteOwner}</p>
+          {#if !loopback}
+            <p class="hint">{store.pairing.role !== 'owner' ? strings.settings.pairing.scan : store.pairing.code ? strings.settings.pairing.ownerScan : strings.settings.pairing.pasteOwner}</p>
+          {/if}
           <p class="hint">{fill(strings.settings.pairing.expires, { time: time(store.pairing.expiresAt) })}</p>
-          {#if store.pairing.code}
+          {#if store.pairing.code && !loopback}
             <div class="code-row">
               <span class="hint">{strings.settings.pairing.code}</span>
               <span class="mono code" data-testid="pairing-code">{store.pairing.code}</span>
             </div>
             {#if store.pairing.codeExpiresAt}<p class="hint">{fill(strings.settings.pairing.codeExpires, { time: time(store.pairing.codeExpiresAt) })}</p>{/if}
           {/if}
-          {#if store.pairing.role !== 'owner' && store.settings && !store.settings.listenOnLan && !store.settings.publicUrl}
-            <p class="hint warn" data-testid="pairing-lan-hint">{strings.settings.pairing.lanHint}</p>
-          {/if}
         </div>
       </div>
     {/if}
+    <LanReach {store} {loopback} {firewall} bind:this={reach} bind:restarting />
+    <FirewallNotice {store} bind:this={firewall} />
   {:else}
     <p class="hint">{strings.settings.pairing.paired}</p>
   {/if}
@@ -153,7 +174,7 @@
           <span class="ui-label" id="{uid}-listen-on-lan-name">{strings.settings.listenOnLan}</span><InfoTip topic={strings.settings.listenOnLan} text={strings.settings.listenOnLanHint} />
         </span>
         <input id="{uid}-listen-on-lan" aria-labelledby="{uid}-listen-on-lan-name" type="checkbox" role="switch" data-testid="setting-listen-on-lan"
-          checked={store.settings?.listenOnLan ?? false} disabled={!store.settings}
+          checked={store.settings?.listenOnLan ?? false} disabled={!store.settings || restarting}
           onchange={(event) => void toggleLan(event.currentTarget)} />
       </label>
       <label for="{uid}-pairing-owner" class="switch-row">
@@ -206,7 +227,6 @@
     letter-spacing: 1.5px;
     user-select: all;
   }
-  .warn { color: var(--color-live); }
   h3 { font-size: var(--text-sm); font-weight: 600; color: var(--color-muted-foreground); margin: 20px 0 8px; }
   .devices { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
   .devices li {

@@ -133,7 +133,7 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 591,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,472,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,475,000 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 3,760,000 |
 
@@ -154,13 +154,14 @@ to 4,460,000, the UI measured 4,455,331 bytes, within it, and the core
 meanwhile. The core limit rises to 3,740,000.
 
 On 2026-10-11 on Linux with Bun 1.4.2, `26d9f7be` measured 4,455,331 UI bytes
-and 3,734,556 core bytes. Reviewed goals (`/goal2`) add 5,951 and 8,797: the
-reviewer loop and its prompts in the core, the goal bar's verdicts, the fake
-core's reviewer and the English/French sentences in the UI. `main` at
-`e18ce9d6` alone measured 3,740,628 core bytes, already past its limit, and
-merged with `ffd433a4` the branch measured 4,465,883 and 3,749,425. The Windows
-job emits about 6,000 more core bytes than Linux: it measured 3,749,386 for
-the branch alone. The limits rise to 4,472,000 and 3,760,000.
+and 3,734,556 core bytes, and reviewed goals (`/goal2`) on top of it 4,461,282
+and 3,743,353: 5,951 UI bytes for the goal bar's verdicts, the fake core's
+reviewer and the English/French sentences, and 8,797 core bytes for the
+reviewer loop and its prompts. The Windows job measured 3,749,386 core bytes
+for that same branch, 6,033 more than Linux. Merged with `b8dc6c21`, whose
+limits were 4,466,000 and 3,744,000, the branch measured 4,469,022 and
+3,749,375 on Linux, about 3,755,400 core bytes on Windows. The limits rise to
+4,475,000 and 3,760,000.
 
 On 2026-10-10, `bun run build:ui` with Bun 1.4.2 measured 4,420,649 UI bytes at
 `feeb393b` and 4,425,557 with close confirmation and typed agent archival.
@@ -229,6 +230,16 @@ adds 5,137 UI bytes: 4,430,694 against 4,425,557 for `main` at `19ef51b2`,
 measured on Linux on 2026-10-10. A machine icon in the picker cost another
 2,563 bytes through a chunk split and was left out. The UI limit rises from
 4,429,000 to 4,435,000, leaving about 4 KB.
+
+The Windows Defender Firewall check and its pairing-card notice add 3,866 UI
+bytes and 5,792 emitted core JavaScript bytes: 4,445,296 and 3,726,463 against
+4,441,430 and 3,720,671 for `main` at `64a0b6ad`, measured on Linux on
+2026-10-10. Merged with `main` at `ed68bd94` they measured 4,459,197 and
+3,739,869 bytes, within the 4,460,000 and 3,740,000 limits set there.
+Making the computer reachable from the pairing card, its restart and its
+sentences add 2,958 UI bytes and 175 core bytes on top: 4,462,155 and 3,740,044
+measured the same way. The UI limit rises to 4,466,000 and the core JavaScript
+limit to 3,744,000, leaving about 3.8 KB and 4 KB.
 
 Recent's Done and Working groups measured 3,949,936 UI bytes on 2026-10-03
 before integrating these orchestration additions. The combined build measured
