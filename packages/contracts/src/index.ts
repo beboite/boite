@@ -2732,7 +2732,21 @@ export interface AgentLetter {
   expiresAt: Timestamp;
   status: 'queued' | 'received' | 'delivered' | 'uncertain' | 'expired' | 'rejected';
   error: string | null;
+  /**
+   * How the other end relates to the thread whose view lists this letter.
+   * The core sets it when it reads the letter out, never stores it; missing on
+   * older cores and on another machine's word.
+   */
+  relation?: AgentRelation;
 }
+/**
+ * The other end of a letter, from one thread's side. `starter` started this
+ * thread with `boite thread new` and `started` is a thread this one started;
+ * `parent` delegated this thread and `child` is one of its subagents;
+ * `steward` looks after this thread's project and `stewarded` is a thread this
+ * steward looks after. The rest say only where it is.
+ */
+export type AgentRelation = 'starter' | 'started' | 'parent' | 'child' | 'steward' | 'stewarded' | 'project' | 'other-project' | 'machine';
 /**
  * What a steward may do to the threads of the projects it looks after.
  * Reading them, their state and their requests comes with any grant.
