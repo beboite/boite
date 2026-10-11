@@ -95,6 +95,9 @@ test('a phone added on one member says hello on every member with one key, and o
   b.core.group.clients.revokeDevice(deviceId);
   await waitFor(() => a.core.group.view('owner')?.devices.length === 0);
   await waitFor(() => a.core.journal.listSessions().length === 0);
+  // The revocation closed the phone's sockets on both machines: let them finish before the next one opens.
+  await settled(a, 0);
+  await settled(b, 0);
   await refused(a, open(a.url, { device: helloFor(phone, deviceId, id(a)) }), 'removed from the group');
   await refused(b, open(b.url, { device: helloFor(phone, deviceId, id(b)) }), 'removed from the group');
   // A device a machine never heard of is told to come back, never that it was removed.
@@ -130,6 +133,7 @@ test('a phone paired the older way hands over its key and keeps both until revok
   clients.push(await connect(b.url, '', { device: helloFor(phone, enrolled.id, id(b)) }));
   // Revoked on b: the older pairing it took over is revoked with it.
   b.core.group.clients.revokeDevice(enrolled.id);
+  await settled(b, 0);
   await refused(b, connect(b.url, '', { device: helloFor(phone, enrolled.id, id(b)) }), 'removed from the group');
 });
 
