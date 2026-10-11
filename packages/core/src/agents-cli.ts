@@ -4,7 +4,7 @@
  * they can be: a thread id alone, `<machine>/<thread-id>` or a core id
  * prefix, resolved against the directory.
  */
-import type { AgentAddress, AgentContact, AgentLetter, AgentMatch, CoordinationView } from '@boite/contracts';
+import type { AgentAddress, AgentContact, AgentLetter, AgentMatch, AgentRelation, CoordinationView } from '@boite/contracts';
 import { COORDINATION_RECENT_COMPLETION_MS } from '@boite/contracts';
 import type { CoreClient } from './client.ts';
 
@@ -74,9 +74,18 @@ export function resolveAgent(target: string, contacts: AgentContact[], selfCore:
   throw new Error(`agent ${target}: ${found.length} agents share this thread id; name the machine: ${found.map(contact => shortAddress(contact, '')).join(', ')}`);
 }
 
+/** How the other end relates to this thread, in the words `boite agents` prints. */
+const RELATION: Record<AgentRelation, string> = {
+  starter: 'started this thread', started: 'you started it', parent: 'your parent', child: 'your subagent',
+  steward: 'steward of your project', stewarded: 'you are its steward', project: 'same project', 'other-project': 'other project', machine: 'other machine',
+};
+/** Past this, `send` and `reply` remind the agent that a message is read best short. */
+export const COMPACT_CHARS = 600;
+
 function letterLine(letter: AgentLetter, self: AgentAddress): string {
   const incoming = letter.to.coreId === self.coreId && letter.to.threadId === self.threadId;
-  const other = incoming ? `from ${letter.from.threadId} ${JSON.stringify(letter.from.title)} on ${letter.from.machine}` : `to ${letter.to.threadId} ${JSON.stringify(letter.toTitle)}`;
+  const where = [letter.from.project, letter.from.coreId === self.coreId ? undefined : `on ${letter.from.machine}`, letter.relation ? RELATION[letter.relation] : undefined].filter(Boolean).join(', ');
+  const other = incoming ? `from ${letter.from.threadId} ${JSON.stringify(letter.from.title)}${where ? ` (${where})` : ''}` : `to ${letter.to.threadId} ${JSON.stringify(letter.toTitle)}${letter.relation ? ` (${RELATION[letter.relation]})` : ''}`;
   const state = letter.status === 'delivered' || letter.status === 'received' ? '' : ` [${letter.status}${letter.error ? `: ${letter.error}` : ''}]`;
   return `${clock(letter.createdAt)} ${incoming ? '<-' : '->'} ${other} (id ${letter.id})${state}\n    ${letter.text.replace(/\n/g, '\n    ')}`;
 }
@@ -152,7 +161,8 @@ export async function agentsCommand(client: CoreClient, threadId: string, rest: 
     } else ({ to, self, contact } = await resolve(target));
     const letter = await client.call('collaboration.send', { threadId, to, text: body, requestId: options.requestId ?? crypto.randomUUID(), ...(action === 'reply' ? { replyTo: target } : {}) });
     const recipient = contact ? contactLine(contact, self.coreId) : 'warning: recipient activity is unknown; sending or replying may wake an inactive thread and restore its archived project. Check agents list or read before contacting it.';
-    const lines = [recipient, `id: ${letter.id}`, `status: ${letter.status}`, ...(letter.error ? [`error: ${letter.error}`] : [])];
+    const lines = [recipient, `id: ${letter.id}`, `status: ${letter.status}`, ...(letter.error ? [`error: ${letter.error}`] : []),
+      ...(body.length > COMPACT_CHARS ? [`note: ${body.length} characters. Keep agent messages to one to three short lines; the recipient already sees your thread, project and task.`] : [])];
     if (options.wait && letter.status !== 'rejected') lines.push(...await waitFor(to, self));
     else lines.push('Delivery is not consent. Wait for an explicit reply before a disruptive action.');
     print(lines, letter);

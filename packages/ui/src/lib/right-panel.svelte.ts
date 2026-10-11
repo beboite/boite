@@ -65,8 +65,9 @@ export interface Surface {
   line?: number;
   /** The workflow run the subagents tab is on; absent means its list. */
   runId?: string;
-  /** The messages tab's filter and the letter a timeline summary opens on. */
-  mailDirection?: 'incoming' | 'outgoing';
+  /** The discussion the messages tab shows (`discussionKey`); absent means the list of discussions. */
+  peer?: string;
+  /** The letter a timeline row opens the discussion on. */
   letterId?: string;
 }
 
@@ -136,7 +137,7 @@ function parse(raw: string): Record<string, PanelState> {
     const surfaces: Surface[] = [];
     for (const surface of raws) {
       if (typeof surface !== 'object' || surface === null) continue;
-      const { title, url, profile, zoom, path, line, runId, mailDirection, letterId } = surface as Surface;
+      const { title, url, profile, zoom, path, line, runId, peer, letterId } = surface as Surface;
       // A layout stored while workflows had a tab of their own: that tab is the subagents tab now.
       const merged = (surface as { kind?: unknown }).kind === 'workflow';
       const kind = merged ? 'agents' : (surface as Surface).kind;
@@ -159,8 +160,9 @@ function parse(raw: string): Record<string, PanelState> {
         ...(typeof path === 'string' ? { path } : {}),
         ...(typeof line === 'number' && Number.isFinite(line) ? { line } : {}),
         ...(typeof runId === 'string' ? { runId } : {}),
-        ...(mailDirection === 'incoming' || mailDirection === 'outgoing' ? { mailDirection } : {}),
-        ...(typeof letterId === 'string' ? { letterId } : {})
+        // A letter only means something inside its discussion: a tab stored before discussions comes back on the list.
+        ...(typeof peer === 'string' ? { peer } : {}),
+        ...(typeof peer === 'string' && typeof letterId === 'string' ? { letterId } : {})
       });
     }
     const stored = (value as PanelState).activeSurfaceId;
@@ -456,10 +458,10 @@ export class BoundPanel {
     return this.open('tasks');
   }
 
-  /** One messages tab per conversation, opened on the direction and burst clicked. */
-  openMessages(letterId: string, direction: 'incoming' | 'outgoing'): Surface {
+  /** One messages tab per conversation: on one discussion and the letter clicked, or on the list of discussions. */
+  openMessages(peer?: string, letterId?: string): Surface {
     const opened = this.open('messages');
-    this.update(opened.id, { letterId, mailDirection: direction });
+    this.update(opened.id, { peer, letterId });
     return this.active!;
   }
 
