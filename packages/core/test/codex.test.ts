@@ -1668,6 +1668,13 @@ describe('native Codex fork', () => {
     expect((await finished).status).toBe('done');
     return (await client.call('threads.get', { threadId })).messages.at(-1)!;
   }
+  // A cold source tears its agent process down after the turn finishes, and
+  // the child's exit releases its install lease later. Wait for both, so a
+  // lease left after a fork is the fork's own.
+  async function sourceIdle(threadId: string) {
+    await waitFor(() => harness!.core.procs.liveCount(threadId) === 0
+      && harness!.core.providers.installs.leaseCount('codex-fake') === 0);
+  }
   test('native boundary uses the recorded native turn, independent target session and runtime settings', async () => {
     const client = await startCore();
     const threadId = await codexThread(client);
@@ -1722,6 +1729,7 @@ describe('native Codex fork', () => {
   test('source selection changes during native preparation discard only the new session', async () => {
     const client = await startCore(); const threadId = await codexThread(client);
     const reply = await completed(client, threadId, 'First');
+    await sourceIdle(threadId);
     const before = harness!.core.threads.require(threadId);
     const count = harness!.core.journal.db.query('SELECT COUNT(*) AS count FROM threads').get();
     const driver = getDriver('codex-appserver');
@@ -1744,6 +1752,7 @@ describe('native Codex fork', () => {
     const client = await startCore(); const threadId = await codexThread(client);
     const reply = await completed(client, threadId, 'First');
     await completed(client, threadId, 'Later secret');
+    await sourceIdle(threadId);
     const source = harness!.core.threads.require(threadId);
     const count = harness!.core.journal.db.query('SELECT COUNT(*) AS count FROM threads').get();
     process.env[flag] = '1';
@@ -1797,6 +1806,7 @@ describe('native Codex fork', () => {
   test('a server returning the source session id is rejected without archiving source', async () => {
     const client = await startCore(); const threadId = await codexThread(client);
     const reply = await completed(client, threadId, 'First');
+    await sourceIdle(threadId);
     const source = harness!.core.threads.require(threadId);
     process.env['CODEX_FAKE_FORK_SAME'] = '1';
     try { await expect(harness!.core.threads.fork(threadId, reply.id, false)).rejects.toThrow('distinct from the source'); }
