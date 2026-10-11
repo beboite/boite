@@ -26,6 +26,8 @@ export async function pinWhile<T>(targets: ({ pinned?: boolean } | null | undefi
   if (!key) return send();
   const state = pins.get(key) ?? { confirmed: key.pinned, newest: 0, out: 0, queue: Promise.resolve() };
   pins.set(key, state);
+  // Idle, the row holds what the core last said, another client's pin included.
+  if (state.out === 0) state.confirmed = key.pinned;
   const token = ++state.newest;
   for (const target of shown) target.pinned = pinned;
   // Nothing out for this row: it leaves now, not a microtask later.

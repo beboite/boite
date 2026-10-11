@@ -79,6 +79,21 @@ test('a pin shows before the core answers and is taken back on a refusal', async
   } finally { store.detach(); client.close(); }
 });
 
+test('a refused pin goes back to a pin another client made since the last one', async () => {
+  const { store, client } = await ready();
+  try {
+    await store.open('t-trace');
+    await store.pin('t-trace', true);
+    await FakeClient.prototype.call.call(client, 'threads.pin', { threadId: 't-trace', pinned: false });
+    await vi.waitFor(() => expect(store.threads.find((t) => t.id === 't-trace')?.pinned).toBe(false));
+    const { held } = hold(client, 'threads.pin');
+    const pinning = store.pin('t-trace', true);
+    held[0]!.reject(refused());
+    await pinning.catch(() => undefined);
+    expect(store.threads.find((t) => t.id === 't-trace')?.pinned).toBe(false);
+  } finally { store.detach(); client.close(); }
+});
+
 test('pin then unpin, both refused in their order, ends where it started', async () => {
   const { store, client } = await ready();
   try {
@@ -170,5 +185,30 @@ test('clearing the agent selection for an open of that agent keeps its subscript
     await store.open('t-team-running');
     expect(store.openThread?.id).toBe('t-team-running');
     expect(called).not.toHaveBeenCalledWith('threads.unsubscribe', { threadId: 't-team-running' });
+  } finally { store.detach(); client.close(); }
+});
+
+test('an agent opened while its selection is still subscribing keeps its subscription', async () => {
+  const { store, client } = await ready(true);
+  try {
+    await store.open('t-trace');
+    const { held } = hold(client, 'threads.subscribe', 't-team-running');
+    const selecting = store.selectDelegatedAgent('t-team-running');
+    await vi.waitFor(() => expect(held).toHaveLength(1));
+    // The open's own reads stay out too, so its subscription is not yet recorded.
+    const reads = hold(client, 'threads.get', 't-team-running');
+    void store.selectDelegatedAgent(null, 't-team-running');
+    const opening = store.open('t-team-running');
+    await vi.waitFor(() => expect(store.openThread?.id).toBe('t-team-running'));
+    const sent: string[] = [];
+    reads.spy.mockImplementation(((name: string, params: { threadId?: string }) => {
+      sent.push(`${name} ${params.threadId}`);
+      return FakeClient.prototype.call.call(client, name as never, params as never);
+    }) as typeof client.call);
+    held[0]!.real();
+    await selecting;
+    for (const call of [...held.slice(1), ...reads.held]) call.real();
+    await opening;
+    expect(sent).not.toContain('threads.unsubscribe t-team-running');
   } finally { store.detach(); client.close(); }
 });
