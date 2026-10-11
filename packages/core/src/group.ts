@@ -254,11 +254,13 @@ export class GroupStore {
    */
   servedFrom(origin: string): void {
     if (this.served.at(-1) === origin) return;
-    this.served = [...this.served.filter((known) => known !== origin), origin].slice(-SERVED_ORIGINS_MAX);
     const roster = this.roster;
-    if (roster === null || this.closed) return;
     const self = this.selfId();
-    const mine = roster.cores.find((core) => core.coreId === self);
+    const mine = roster?.cores.find((core) => core.coreId === self);
+    // An address it already gives says nothing new, and would push a real one out of the few kept.
+    if (mine?.addresses.includes(origin)) return;
+    this.served = [...this.served.filter((known) => known !== origin), origin].slice(-SERVED_ORIGINS_MAX);
+    if (roster === null || this.closed) return;
     const list = this.served.filter((known) => !mine?.addresses.includes(known)).sort();
     const known = roster.origins?.[self];
     if (JSON.stringify(known?.list ?? []) === JSON.stringify(list)) return;

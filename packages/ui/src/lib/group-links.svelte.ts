@@ -337,13 +337,17 @@ export class GroupLinks {
    * listed again.
    */
   async #pruneSigned(anchors: readonly Machine[]): Promise<void> {
+    const signed = anchors.filter((other) => signsFor(other.id) !== undefined && other.store.group != null);
     for (const machine of [...this.workspace.machines]) {
       const signs = signsFor(machine.id);
       if (signs === undefined) continue;
-      const witnesses = anchors.filter((other) => other !== machine && signsFor(other.id) !== undefined && other.store.group?.id !== undefined
-        && (machine.store.group?.id === undefined || other.store.group.id === machine.store.group.id));
-      if (witnesses.length === 0 || !witnesses.some((other) => !other.store.group!.cores.some((core) => core.coreId === signs))) continue;
-      await this.#drop(machine, false);
+      const groupId = machine.store.group?.id;
+      const listedBy = (other: Machine): boolean => other.store.group!.cores.some((core) => core.coreId === signs);
+      // Its own group, as another machine of it says; or, refused there with the group it was in unknown, none of the device's groups lists it.
+      const delisted = groupId !== undefined
+        ? signed.some((other) => other !== machine && other.store.group!.id === groupId && !listedBy(other))
+        : machine.store.pairingRequired && signed.length > 0 && !signed.some((other) => other !== machine && listedBy(other));
+      if (delisted) await this.#drop(machine, false);
     }
   }
 

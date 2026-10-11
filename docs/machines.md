@@ -61,10 +61,10 @@ removed during startup. Paired remote connections are retained. The sidebar
 counter and project picker use the workspace's connected machine list.
 
 The machine list shows connection errors and lets you reopen a host or remove
-it. Remove machine asks first, then closes that host's socket and forgets its
-saved address and key, so connecting it again needs a new pairing link. It does
-not stop agents, remove files or revoke the key on the remote host. Use the remote
-core's paired-device list to revoke it. The primary core stays attached.
+it. Remove machine asks first, then closes that host's socket and forgets it on
+this device. It does not stop agents, remove files or take this device out of
+the group: **Remove from the group** on the device's row does that, on every
+machine. The primary core stays attached.
 
 If a machine goes offline, its known rows remain visible and its machine badge
 shows the disconnected state. Other hosts remain usable. WebSocket reconnection
