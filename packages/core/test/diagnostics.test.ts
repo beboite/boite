@@ -212,6 +212,9 @@ test('an issue is a draft until submitted, and without gh the user gets a prefil
 test('clients report their own errors as ui records, bounded per connection, and a phone may too', async () => {
   const harness = await startTestCore();
   try {
+    // The budget is per clock minute: start well inside one, or crossing it mid-test refills the budget.
+    const left = 60_000 - (Date.now() % 60_000);
+    if (left < 15_000) await Bun.sleep(left + 50);
     const owner = await harness.connect();
     const accepted = await owner.call('diagnostics.report', { records: [{ level: 'error', at: Date.now(), source: 'render', event: 'ui.error', message: 'TypeError: x is undefined', data: { stack: 'at App.svelte:3' } }] });
     expect(accepted).toEqual({ accepted: 1 });
@@ -242,7 +245,7 @@ test('clients report their own errors as ui records, bounded per connection, and
     try { await owner.call('diagnostics.report', { records: [] }); throw new Error('accepted'); }
     catch (error) { expect((error as { rpc?: { code: number } }).rpc?.code).toBe(RpcErrorCode.InvalidParams); }
   } finally { await harness.stop(); }
-});
+}, 30_000);
 
 test('the CLI prints records oldest first, filters by time and level, and exports to a file', async () => {
   const harness = await startTestCore();
