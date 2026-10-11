@@ -141,11 +141,21 @@ export function subscriptionProxyCodexArgs(args: string[], env: Record<string, s
 /**
  * The agent's native list first, as a subscription shows it, then the models
  * only the gateway routes. Without a native list the gateway's stands alone.
+ * A gateway can name a model after the subscription that serves it
+ * (`codex/gpt-5.4`): behind a vendor's route that is the agent's own model
+ * again, already listed with its speeds, so it is not offered twice. Another
+ * route to the same name (`antigravity/claude-sonnet-5`) is another pool and
+ * stays.
  */
 export function mergeProxyModels(native: ModelInfo[], proxy: ModelInfo[]): ModelInfo[] {
   if (!native.length) return proxy;
   const ids = new Set(native.map(model => model.id));
-  return [...native, ...proxy.filter(model => !ids.has(model.id)).map(model => ({ ...model, default: false }))];
+  const listed = (id: string): boolean => {
+    if (ids.has(id)) return true;
+    const slash = id.indexOf('/');
+    return slash > 0 && ROUTE_FAMILIES[id.slice(0, slash).toLowerCase()] !== undefined && ids.has(id.slice(slash + 1));
+  };
+  return [...native, ...proxy.filter(model => !listed(model.id)).map(model => ({ ...model, default: false }))];
 }
 
 /** Effort controls come from explicit gateway capabilities, including Codex's native metadata. */
