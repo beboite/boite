@@ -31,13 +31,15 @@ function startReview(ctx: FakeContext, thread: Thread, review: GoalReview): void
   ctx.publishActivity(thread);
   const timer = setTimeout(() => {
     running.delete(thread.id);
+    // A task list or a loop replaces `thread.activity` with a copy meanwhile: read the goal again.
     const goal = thread.activity?.goal;
-    if (goal?.review !== review || review.reviewerThreadId !== reviewer) return;
-    const verdict = review.verdicts.length === 0 ? 'fail' as const : 'pass' as const;
+    const current = goal?.review;
+    if (!goal || current?.reviewerThreadId !== reviewer) return;
+    const verdict = current.verdicts.length === 0 ? 'fail' as const : 'pass' as const;
     const summary = verdict === 'fail' ? FAKE_FINDING : 'The label is updated and the list test passes.';
     workflowAnswer(ctx, reviewer, `${summary}\nVERDICT: ${verdict.toUpperCase()}`, true);
-    review.verdicts.push({ round, verdict, summary, threadId: reviewer, finishedAt: ctx.now() });
-    Object.assign(review, { phase: 'working', reviewerThreadId: null });
+    current.verdicts.push({ round, verdict, summary, threadId: reviewer, finishedAt: ctx.now() });
+    Object.assign(current, { phase: 'working', reviewerThreadId: null });
     if (verdict === 'pass') goal.status = 'complete';
     ctx.publishActivity(thread);
     scheduleActivity(ctx, thread.id, 250);

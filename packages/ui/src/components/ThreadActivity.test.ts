@@ -135,3 +135,9 @@ test('a reviewed goal shows one dot per verdict, the running review, and opens a
   expect(toggle().textContent).toContain('Reviews');
   expect(document.querySelector('[data-testid=activity-reviews]')!.textContent).toContain('- The parser test fails');
 });
+
+test('a reviewed goal past its five reviews counts the extra round in the total', () => {
+  const verdicts = Array.from({ length: 6 }, (_, i) => ({ round: i + 1, verdict: 'partial' as const, summary: '', threadId: `reviewer-${i + 1}`, finishedAt: i }));
+  render({ tasks: [], loop: null, goal: { objective: 'Fix it', status: 'paused', blocked: true, iterations: 6, error: null, review: { phase: 'working', maxRounds: 5, reviewerThreadId: null, claimTurnId: null, delivered: 5, verdicts } } });
+  expect(document.querySelector('[data-testid=activity-goal-reviews]')!.textContent).toContain('Review 6 of 6 · Partial');
+});

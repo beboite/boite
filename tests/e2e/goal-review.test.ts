@@ -15,6 +15,7 @@ async function size(phone: boolean) {
   await page.send('Emulation.setDeviceMetricsOverride', {
     width: phone ? 390 : 1280, height: phone ? 844 : 900, deviceScaleFactor: 1, mobile: phone
   });
+  await page.waitFor(`innerWidth === ${phone ? 390 : 1280} && innerHeight === ${phone ? 844 : 900}`);
 }
 async function capture(name: string) {
   await page.evaluate(`Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])`);
@@ -26,9 +27,7 @@ const verdicts = () => page.evaluate<string[]>(`Array.from(document.querySelecto
 beforeAll(async () => {
   const port = await freePort();
   server = await startDevUi(port);
-  page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&open=recent` });
-  await page.waitFor(`document.querySelector('${id('new-thread')}')`);
-  await page.evaluate(`localStorage.setItem('boite.experiments', JSON.stringify(['goal2'])); location.reload()`);
+  page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&open=recent`, experiments: ['goal2'] });
   await page.waitFor(`document.querySelector('${id('composer-input')}')`);
 }, 60_000);
 afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
@@ -39,20 +38,21 @@ test.each([['desktop', false], ['phone', true]] as const)('a reviewed goal shows
   await page.evaluate(`document.querySelector('${id('composer-input')}').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))`);
   await page.waitFor(`document.querySelector('${id('activity-goal')}')?.textContent.includes('Reviewed goal')`);
   await page.waitFor(`document.querySelector('${dots}[data-verdict="fail"]') && document.querySelector('${dots}[data-verdict="running"]')`, 20_000);
-  expect(await page.evaluate<string>(`document.querySelector('${id('activity-goal')}').textContent`)).toContain('Reviewing');
+  expect(await page.text(id('activity-goal'))).toContain('Reviewing');
   await capture(`goal2-reviewing-${name}`);
   await page.waitFor(`document.querySelector('${dots}[data-verdict="pass"]')`, 20_000);
   expect(await verdicts()).toEqual(['fail', 'pass']);
   await page.click(id('activity-tasks-toggle'));
   await page.waitFor(`document.querySelector('${id('activity-tasks-toggle')}').getAttribute('aria-expanded') === 'true'`);
-  expect(await page.evaluate<string>(`document.querySelector('${id('activity-reviews')}').textContent`)).toContain('The empty state still shows the old label');
+  expect(await page.text(id('activity-reviews'))).toContain('The empty state still shows the old label');
   await capture(`goal2-passed-${name}`);
   await page.click(id('activity-tasks-toggle'));
   // A dot opens that review's own conversation, a child the header leads back from.
   await page.click(`${dots}[data-verdict="fail"]`);
   await page.waitFor(`document.querySelector('${id('delegation-back-parent')}')`);
-  expect(await page.evaluate<string>('document.body.textContent')).toContain('VERDICT: FAIL');
+  expect(await page.text('body')).toContain('VERDICT: FAIL');
   await capture(`goal2-reviewer-${name}`);
   await page.click(id('delegation-back-parent'));
   await page.waitFor(`document.querySelector('${id('activity-goal')}')`);
+  expect(page.errors()).toEqual([]);
 }, 60_000);

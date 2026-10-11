@@ -75,7 +75,8 @@
     if (!review) return '';
     if (review.reviewerThreadId) return fill(strings.activity.reviewInProgress, { round: String(review.verdicts.length + 1) });
     const last = review.verdicts.at(-1);
-    return last ? `${fill(strings.activity.reviewRoundOf, { round: String(last.round), total: String(review.maxRounds) })} · ${strings.activity[last.verdict]}` : '';
+    // Each reply after the five-review stop allows one more, so the round can pass the total.
+    return last ? `${fill(strings.activity.reviewRoundOf, { round: String(last.round), total: String(Math.max(review.maxRounds, last.round)) })} · ${strings.activity[last.verdict]}` : '';
   });
   const detailsId = $props.id();
 

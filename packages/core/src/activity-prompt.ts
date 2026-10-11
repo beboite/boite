@@ -34,11 +34,11 @@ VERDICT: FAIL
 PASS only when the objective is fully met and you verified it. PARTIAL when part of it is met. FAIL when it is not met or a check fails.`;
 }
 
-/** The last `VERDICT:` line decides; what comes before it is the summary. */
+/** The last line holding only a verdict (markdown and punctuation aside) decides; what comes before it is the summary. */
 export function parseVerdict(text: string): Pick<GoalVerdict, 'verdict' | 'summary'> {
   const lines = text.split(/\r?\n/);
   for (let i = lines.length - 1; i >= 0; i--) {
-    const match = /^\W{0,4}VERDICT\W{0,4}:?\W{0,4}(PASS|PARTIAL|FAIL)\b/i.exec(lines[i]!.trim());
+    const match = /^\W{0,4}VERDICT\W{0,4}:?\W{0,4}(PASS|PARTIAL|FAIL)\W*$/i.exec(lines[i]!.trim());
     if (!match) continue;
     const verdict = match[1]!.toLowerCase() as 'pass' | 'partial' | 'fail';
     return { verdict, summary: bounded(lines.slice(0, i).join('\n').trim()) };

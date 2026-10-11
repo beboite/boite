@@ -909,6 +909,9 @@ test('a fake reviewed goal fails its first review, works on the finding and pass
   const client = await createClient({ delayMs: 1 });
   const { id: threadId } = await newThread(client);
   await client.call('threads.activity.set', { threadId, goal: { objective: 'Rename the empty state', review: true } });
+  for (let i = 0; i < 100 && !(await client.call('threads.get', { threadId })).activity?.goal?.review?.reviewerThreadId; i++) await vi.advanceTimersByTimeAsync(50);
+  // A task list replaces the activity with a copy while the reviewer works; its verdict still lands.
+  await client.call('threads.tasks.set', { threadId, tasks: [{ id: '1', text: 'Rename', status: 'in_progress' }] });
   await vi.runAllTimersAsync();
   const thread = await client.call('threads.get', { threadId });
   const review = thread.activity!.goal!.review!;

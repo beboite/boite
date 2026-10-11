@@ -3,7 +3,7 @@ import { strings } from './strings';
 
 export type ActivityCommand = { goal: { objective: string; review?: true } } | { loop: { prompt: string; intervalMs: number; maxIterations?: number } };
 
-/** `/goal2` is Boite's only while the Reviewed goals experiment is on; otherwise it goes to the agent as typed. */
+/** `/goal2` is a Boite command only while the Reviewed goals experiment is on; otherwise it goes to the agent as typed. */
 function commandPattern(): RegExp {
   return isExperimentEnabled('goal2') ? /^\/(goal2|goal|loop)(?:\s+([\s\S]*))?$/ : /^\/(goal|loop)(?:\s+([\s\S]*))?$/;
 }

@@ -31,6 +31,7 @@ test.each([
   ['bold markdown', '- Missing test\n**VERDICT: PARTIAL**', 'partial', '- Missing test'],
   ['last line wins', 'VERDICT: PASS was my first guess.\n- The build fails\nVERDICT: FAIL', 'fail', 'VERDICT: PASS was my first guess.\n- The build fails'],
   ['no verdict', 'I looked around.', 'missing', 'The reviewer ended without a VERDICT line.\nI looked around.'],
+  ['prose after the word', '- One gap\nVERDICT: PASS would need more tests', 'missing', 'The reviewer ended without a VERDICT line.\n- One gap\nVERDICT: PASS would need more tests'],
 ] as const)('verdict: %s', (_name, text, verdict, summary) => {
   expect(parseVerdict(text)).toEqual({ verdict, summary });
 });
