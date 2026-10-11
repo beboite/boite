@@ -3,7 +3,7 @@
   import { tick } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import type { PermissionMode, ProviderSummary } from '@boite/contracts';
-  import { tokens as formatTokens } from '../lib/format';
+  import { formatTokens, providerName } from '../lib/format';
   import { confirm } from '../lib/confirm.svelte';
   import { switchDropsHistory, switchResetsCache, type CacheKey } from '../lib/switch-warning';
   import { modeHint, modeIcon, modeLabel, modesFor, shownMode } from '../lib/permission-modes';
@@ -146,8 +146,8 @@
       picking = true;
       try {
         if (switchDropsHistory(thread, target.accountId)) {
-          const from = store.providers.find((entry) => entry.id === thread.providerId)?.name ?? thread.providerId;
-          const to = store.providers.find((entry) => entry.id === target.providerId)?.name ?? target.providerId;
+          const from = providerName(store, thread.providerId);
+          const to = providerName(store, target.providerId);
           const go = await confirm.ask({
             title: fill(strings.composer.switchTitle, { tokens: formatTokens(thread.context?.tokens ?? 0), provider: to }),
             body: fill(strings.composer.switchBody, { provider: to }),

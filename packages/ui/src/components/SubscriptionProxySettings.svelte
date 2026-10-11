@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import { untrack } from 'svelte';
   import { checkSettingsPatch, type SubscriptionProxy } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
@@ -37,7 +38,7 @@
       });
       key = ''; clearKey = false;
       result = strings.subscriptionProxy.saved;
-    } catch (error) { failed = true; result = error instanceof Error ? error.message : String(error); }
+    } catch (error) { failed = true; result = errorText(error); }
     finally { busy = false; }
   }
 </script>

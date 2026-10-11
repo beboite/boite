@@ -2,6 +2,7 @@
   import { ArrowUp, SquareArrowOutUpRight } from '@lucide/svelte';
   import type { AgentWork } from '@boite/contracts';
   import type { AgentsView } from '../../lib/agents.svelte';
+  import { providerName } from '../../lib/format';
   import { fill, strings } from '../../lib/strings';
   import AgentAvatar from './AgentAvatar.svelte';
   /**
@@ -61,7 +62,7 @@
   <p class="agent-work-prompt">{work.prompt.slice(0, 220)}</p>
   {#if work.error}<p class="agent-error"><span class="ui-label">{work.error}</span></p>{/if}
   {#if run}
-    <p class="muted">{strings.agents.requested}: {view.store.providerOf(run.execution.providerId)?.name ?? run.execution.providerId} · {run.execution.model ?? strings.agents.model}
+    <p class="muted">{strings.agents.requested}: {providerName(view.store, run.execution.providerId)} · {run.execution.model ?? strings.agents.model}
       {#if run.actualExecution?.model && run.actualExecution.model !== run.execution.model}<br />{strings.agents.executed}: {run.actualExecution.model}{/if}
     </p>
   {/if}

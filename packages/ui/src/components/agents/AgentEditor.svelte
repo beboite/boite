@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../../lib/errors';
   import { secureId } from '../../lib/secure-id';
   import { untrack } from 'svelte';
   import { Dices, Palette } from '@lucide/svelte';
@@ -116,7 +117,7 @@
       if (!target.client || target.connection !== 'ready') throw new Error(fill(strings.agents.machineUnreachable, { name: workspace.machines.find(m => m.store === target)?.label ?? strings.machines.local }));
       created = await target.client.call('agents.profile.save', { value: $state.snapshot(value) as typeof value });
     } catch (error) {
-      view.error = error instanceof Error ? error.message : String(error);
+      view.error = errorText(error);
       moving = false;
       return;
     }

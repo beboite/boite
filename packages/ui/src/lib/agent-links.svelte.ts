@@ -4,6 +4,7 @@
  * without a click, once per pair until one of them reconnects. A pair the user
  * unlinked in an earlier version stays unlinked.
  */
+import { errorText } from './errors';
 import { untrack } from 'svelte';
 import type { CoordinationPeer } from '@boite/contracts';
 import { workspace, type Machine } from './workspace.svelte';
@@ -72,12 +73,12 @@ async function linkMachines(a: Machine, b: Machine): Promise<void> {
     await Promise.all([a.store.checkCoordinationPeer(bIdentity.coreId), b.store.checkCoordinationPeer(aIdentity.coreId)]);
   } catch (cause) {
     forgetBridge(a, b);
-    let message = cause instanceof Error ? cause.message : String(cause);
+    let message = errorText(cause);
     const rollbacks = await Promise.allSettled([
       (async () => { if (trustedA && bIdentity) { if (previousA) await a.store.trustCoordinationPeer(previousA); else await a.store.untrustCoordinationPeer(bIdentity.coreId); } })(),
       (async () => { if (trustedB && aIdentity) { if (previousB) await b.store.trustCoordinationPeer(previousB); else await b.store.untrustCoordinationPeer(aIdentity.coreId); } })(),
     ]);
-    for (const rollback of rollbacks) if (rollback.status === 'rejected') message += ` ${rollback.reason instanceof Error ? rollback.reason.message : String(rollback.reason)}`;
+    for (const rollback of rollbacks) if (rollback.status === 'rejected') message += ` ${errorText(rollback.reason)}`;
     throw new Error(message);
   }
 }

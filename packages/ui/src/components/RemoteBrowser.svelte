@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import { onMount, untrack } from 'svelte';
   import { Pause, Play, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Copy, Globe, Lock, MonitorSmartphone, RotateCw, Send } from '@lucide/svelte';
   import { REMOTE_PRESS_MAX, REMOTE_TEXT_MAX, type RemoteBrowserFrame, type RemoteBrowserInput } from '@boite/contracts';
@@ -41,7 +42,6 @@
   const previewScale = $derived(frame ? (zoom || Math.min(areaWidth / frame.width, areaHeight / frame.height)) : 1);
   const validSize = $derived([viewportWidth, viewportHeight].every(n => typeof n === 'number' && Number.isInteger(n) && n >= 240 && n <= 3840));
   const usable = $derived(!!frame && frameClient === store.client && !paused && !busy && !error && store.connection === 'ready');
-  const message = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
   function stop() { generation++; clearTimeout(timer); }
   async function decoded(base64: string): Promise<void> {
     const image = new Image();
@@ -70,7 +70,7 @@
       else { frame = null; frameClient = null; error = strings.remoteBrowser.reconnecting; }
     } catch (cause) {
       if (alive && run === generation) {
-        const reason = message(cause);
+        const reason = errorText(cause);
         // The core spaces frame requests; a refusal for asking early is not a failure.
         if (/wait before requesting/.test(reason)) retry = true;
         else { failures++; error = reason; }
@@ -124,7 +124,7 @@
       if (moving) fresh = false;
       return true;
     }
-    catch (cause) { if (alive && run === generation && client === store.client) error = message(cause); return false; }
+    catch (cause) { if (alive && run === generation && client === store.client) error = errorText(cause); return false; }
     finally {
       busy = false;
       if (resizing && alive && run === generation) { frame = null; frameClient = null; resume(); }
@@ -145,7 +145,7 @@
       // What cannot land on the page the user saw is dropped, never replayed on another.
       if (!alive || !client || frameClient !== client || !target || paused || store.connection !== 'ready' || old(target)) { queue = []; return; }
       try { await client.call('browser.remoteInput', { threadId, frameId: target.id, input: value }); }
-      catch (cause) { queue = []; if (alive && client === store.client) error = message(cause); return; }
+      catch (cause) { queue = []; if (alive && client === store.client) error = errorText(cause); return; }
       finally { if (alive) kick(); }
     }
   }
@@ -162,7 +162,7 @@
   /** The Copy button, for a screen with no Control+C. */
   async function copySelection() {
     try { say(await writeClipboardLater(selection()) ? strings.remoteBrowser.copied : strings.remoteBrowser.nothingSelected); }
-    catch (cause) { say(message(cause)); }
+    catch (cause) { say(errorText(cause)); }
   }
   onMount(() => {
     const live = liveInput(() => area, {

@@ -2,10 +2,9 @@
   import { page } from '../lib/page-hidden.svelte';
   import { Check, LoaderCircle, Square, CircleAlert } from '@lucide/svelte';
   import type { BackgroundTask, ThreadProgress, Turn } from '@boite/contracts';
-  import { clockTime, elapsed } from '../lib/format';
-  import { formatTokens } from '../lib/tokens';
+  import { clockTime, elapsed, exactTime, formatTokens } from '../lib/format';
+  import { totalTokens } from '../lib/usage';
   import { fill, strings } from '../lib/strings';
-  import { formatLocale } from '../lib/i18n.svelte';
   import { backgroundLabel } from '../lib/background';
   import type { Snippet } from 'svelte';
   let { turn, requestStartedAt = null, progress, waiting = false, activeTool = false, activeContent = false, background = [], stop, pointed = false, actions }: {
@@ -52,7 +51,7 @@
   const ownLabel = $derived(own !== null && spent !== null && spent - own >= 1000 ? fill(strings.chat.turnOwnTime, { time: elapsed(own) }) : undefined);
   const elapsedLabel = $derived(compactOperation ? turn.status === 'done' ? strings.chat.compactedFor : strings.chat.compactionElapsed : running ? strings.chat.workingFor : strings.chat.workedFor);
   const usage = $derived(turn.usage);
-  const total = $derived(usage === null ? 0 : usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheWriteTokens);
+  const total = $derived(usage === null ? 0 : totalTokens(usage));
   const breakdown = $derived(usage === null ? '' : [
     fill(strings.chat.inputTokens, { count: formatTokens(usage.inputTokens) }),
     fill(strings.chat.outputTokens, { count: formatTokens(usage.outputTokens) }),
@@ -109,7 +108,7 @@
       {/if}
     {/if}
     {#if turn.finishedAt !== null}
-      {@render metric('turn-finished-at', fill(strings.chat.finishedAt, { time: clockTime(turn.finishedAt) }), new Date(turn.finishedAt).toLocaleString(formatLocale()))}
+      {@render metric('turn-finished-at', fill(strings.chat.finishedAt, { time: clockTime(turn.finishedAt) }), exactTime(turn.finishedAt))}
     {/if}
     {#if total > 0}
       {@render metric('turn-tokens', `${formatTokens(total)} ${strings.units.tokens}`, breakdown)}

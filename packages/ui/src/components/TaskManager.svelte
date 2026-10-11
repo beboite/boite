@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import { ArrowDown, ArrowUp, ChevronDown, Cpu, HardDrive, MemoryStick, Network, Search } from '@lucide/svelte';
   import type { AgentResourceSnapshot, AgentResourceUsage, ResourceByteUsage } from '@boite/contracts';
   import { RpcErrorCode } from '@boite/contracts';
@@ -57,7 +58,7 @@
       } catch (reason) {
         if (current() && revision === readRevision) {
           unsupported = reason instanceof RpcFailure && reason.code === RpcErrorCode.MethodNotFound;
-          error = unsupported ? strings.taskManager.unsupported : reason instanceof Error ? reason.message : String(reason);
+          error = unsupported ? strings.taskManager.unsupported : errorText(reason);
         }
       } finally {
         busy = false;
@@ -94,7 +95,7 @@
       const result = await client.call('resources.usage', { watch: true });
       if (visit === generation && store.client === client && revision === readRevision) snapshot = result;
     } catch (reason) {
-      if (visit === generation && store.client === client) error = reason instanceof Error ? reason.message : String(reason);
+      if (visit === generation && store.client === client) error = errorText(reason);
     } finally { if (visit === generation && store.client === client) stopping = null; }
   }
 </script>

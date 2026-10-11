@@ -1,11 +1,12 @@
 <script lang="ts">
   import { ArrowLeft, Pause, Play, Plus, Settings, Square, Trash2, UsersRound, Workflow } from '@lucide/svelte';
   import { onDestroy } from 'svelte';
-  import { DEFAULT_DELEGATION_CONFIG, type DelegationConfig, type DelegationProfile } from '@boite/contracts';
+  import { DEFAULT_DELEGATION_CONFIG, threadActive, type DelegationConfig, type DelegationProfile } from '@boite/contracts';
   import type { BoundPanel, Surface } from '../lib/right-panel.svelte';
   import { fill, strings } from '../lib/strings';
   import type { Choice, PickPatch, Store } from '../lib/store.svelte';
-  import { formatTokens } from '../lib/tokens';
+  import { effortName, formatTokens, providerName } from '../lib/format';
+  import { totalTokens } from '../lib/usage';
   import { modelLogoId, modelMakerName } from '../lib/provider-logos';
   import { isLive, runProgress } from '../lib/workflow-view';
   import EffortSlider from './EffortSlider.svelte';
@@ -41,7 +42,7 @@
   let doneAgents = $derived(agents.filter(agent => !agentProgress(agent).active).sort((a, b) => endOf(b) - endOf(a)));
   let liveRuns = $derived(runs.filter(isLive));
   let doneRuns = $derived(runs.filter(entry => !isLive(entry)));
-  let busy = $derived(agents.some(agent => ['queued', 'running', 'waiting'].includes(agent.thread.status)) || runs.some(isLive));
+  let busy = $derived(agents.some(agent => threadActive(agent.thread.status)) || runs.some(isLive));
 
   $effect(() => {
     const threadId = openThreadId;
@@ -107,16 +108,16 @@
   function routeOf(agent: Agent) {
     const thread = agent.thread;
     const model = store.modelOf({ providerId: thread.providerId, accountId: thread.accountId, model: thread.model, effort: thread.effort, permissionMode: 'default', speed: null });
-    const provider = store.providerOf(thread.providerId)?.name ?? thread.providerId;
+    const provider = providerName(store, thread.providerId);
     const name = model?.name ?? thread.model ?? strings.thread.defaultModel;
-    const effort = thread.effort ? model?.effort?.levels.find(level => level.id === thread.effort)?.label ?? thread.effort : null;
+    const effort = thread.effort ? effortName(model, thread.effort) : null;
     const logo = modelLogoId(thread.providerId, thread.model ?? model?.id);
     return { provider, maker: modelMakerName(logo, thread.providerId) ?? provider, name, effort, logo, label: [provider, name, effort].filter(Boolean).join(' · ') };
   }
 
   function tokensOf(agent: Agent): number | null {
     const usage = agent.lastTurn?.usage;
-    return usage ? usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheWriteTokens : null;
+    return usage ? totalTokens(usage) : null;
   }
 
   /** Completed goes without saying under Finished; a stop or a failure does not. */
@@ -252,7 +253,7 @@
               <button type="button" class="ghost small icon back" aria-label={strings.delegation.backToTeam} onclick={() => void store.selectDelegatedAgent(null)}><ArrowLeft size={15} /></button>
               <div><strong>{selected.thread.title}</strong><small>{routeOf(selected).label}</small></div>
               <button type="button" class="quiet small" data-testid="delegation-open-thread" onclick={() => void openChild()}><span class="ui-label">{strings.delegation.openThread}</span></button>
-              {#if ['queued', 'running', 'waiting'].includes(selected.thread.status)}<button type="button" class="danger small" onclick={() => void store.stopDelegatedAgent(selected.thread.id)}><Square size={11} fill="currentColor" /><span class="ui-label">{strings.delegation.stop}</span></button>{/if}
+              {#if threadActive(selected.thread.status)}<button type="button" class="danger small" onclick={() => void store.stopDelegatedAgent(selected.thread.id)}><Square size={11} fill="currentColor" /><span class="ui-label">{strings.delegation.stop}</span></button>{/if}
             </header>
             {#if store.delegationThread}
               <div class="transcript"><DelegationTranscript messages={store.delegationThread.messages} /></div>

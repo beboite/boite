@@ -1,4 +1,4 @@
-import type { ProjectId, ThreadId, ThreadSummary } from '@boite/contracts';
+import { threadActive, type ProjectId, type ThreadId, type ThreadSummary } from '@boite/contracts';
 import { confirm } from './confirm.svelte';
 import { contextMenu } from './context-menu.svelte';
 import { projectName } from './format';
@@ -6,7 +6,6 @@ import type { MenuItem } from './menu';
 import { startPointerDrag, type DragGrip } from './pointer-drag';
 import { fill, strings } from './strings';
 import type { Store } from './store.svelte';
-import { workingThread } from './thread-rows';
 
 /** What a thread row carries while it is dragged: the machine it lives on, so a drop elsewhere is ignored. */
 export interface ThreadDrag {
@@ -131,7 +130,7 @@ export async function moveThread(store: Store, threadId: ThreadId, projectId: Pr
   }
   const target = store.projects.find((p) => p.id === projectId);
   const names = { folder: thread.cwd, project: target ? projectName(target) : projectId };
-  const running = workingThread(thread.status);
+  const running = threadActive(thread.status);
   const kinds = [thread, ...store.threads.filter((t) => t.parentThreadId === threadId)].flatMap((t) => t.backgroundWork?.kinds ?? []);
   let stopBackground: boolean | undefined;
   if (kinds.length > 0) {

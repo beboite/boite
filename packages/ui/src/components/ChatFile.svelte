@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import { onMount, tick } from 'svelte';
   import { Check, Download, FileText, Image, Film, Music2, Maximize2, RefreshCw, X } from '@lucide/svelte';
   import { ATTACHMENT_MAX_BYTES, FILE_TICKET_TTL_MS, imageSize, type MessagePart } from '@boite/contracts';
@@ -96,7 +97,7 @@
     if (!directory || !path || opening) return;
     opening = true;
     try { await openLocalFile(directory, path); }
-    catch (reason) { error = reason instanceof Error ? reason.message : String(reason); }
+    catch (reason) { error = errorText(reason); }
     finally { opening = false; }
   }
 
@@ -113,7 +114,7 @@
       if (file?.type === 'artifact') await loadArtifact();
       saved = (body ? await saveAttachment(name, body, andOpen) : await saveAttachmentUrl(name, url, andOpen))?.path ?? '';
       error = '';
-    } catch (reason) { error = reason instanceof Error ? reason.message : String(reason); }
+    } catch (reason) { error = errorText(reason); }
     finally { saving = false; }
     return true;
   }

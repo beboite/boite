@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import InfoTip from './InfoTip.svelte';
   import TailscaleAccess from './TailscaleAccess.svelte';
   import { untrack } from 'svelte';
@@ -66,7 +67,7 @@
       subscribed = true;
       localStorage.setItem(PUSH_ENABLED_KEY, 'on');
       message = strings.phone.enabled;
-    } catch (reason) { error = reason instanceof Error ? reason.message : String(reason); }
+    } catch (reason) { error = errorText(reason); }
     finally { busy = false; }
   }
   async function disable() {
@@ -78,13 +79,13 @@
       localStorage.removeItem(PUSH_ENABLED_KEY);
       const registration = await navigator.serviceWorker.getRegistration('/');
       await (await registration?.pushManager.getSubscription())?.unsubscribe();
-    } catch (reason) { error = reason instanceof Error ? reason.message : String(reason); }
+    } catch (reason) { error = errorText(reason); }
     finally { busy = false; }
   }
   async function testPush() {
     busy = true; error = ''; message = '';
     try { await store.client?.call('push.test', {}); message = strings.phone.testSent; }
-    catch (reason) { error = reason instanceof Error ? reason.message : String(reason); }
+    catch (reason) { error = errorText(reason); }
     finally { busy = false; }
   }
 </script>

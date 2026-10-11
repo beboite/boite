@@ -4,8 +4,9 @@
   import { confirm } from '../lib/confirm.svelte';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
-  import { formatTokens } from '../lib/tokens';
-  import { isLive, retryable, runProgress, runTokens } from '../lib/workflow-view';
+  import { formatTokens } from '../lib/format';
+  import { totalTokens } from '../lib/usage';
+  import { isLive, retryable, runProgress } from '../lib/workflow-view';
   import AgentElapsed from './AgentElapsed.svelte';
   import WorkflowDetail from './WorkflowDetail.svelte';
   import WorkflowGraph from './WorkflowGraph.svelte';
@@ -18,7 +19,7 @@
   let node = $derived(run.nodes.find(entry => entry.id === selectedId) ?? null);
   let profiles = $derived(store.delegation?.config.profiles ?? []);
   let progress = $derived(runProgress(run));
-  let tokens = $derived(runTokens(run));
+  let tokens = $derived(totalTokens(run.usage));
 
   // A reload hands a new object per run; only the id says it is another run.
   let runId = $derived(run.id);

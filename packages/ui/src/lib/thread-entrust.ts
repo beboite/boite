@@ -1,3 +1,4 @@
+import { errorText } from './errors';
 import { Bot, Handshake } from '@lucide/svelte';
 import type { ThreadSummary } from '@boite/contracts';
 import { agentDirectory } from './agent-directory.svelte';
@@ -50,6 +51,6 @@ export async function entrust(store: Store, threadId: string, agentId: string | 
     await client.call('agents.entrust', { threadId, agentId });
     agentDirectory(store).reload();
   } catch (error) {
-    store.error = error instanceof Error ? error.message : String(error);
+    store.error = errorText(error);
   }
 }

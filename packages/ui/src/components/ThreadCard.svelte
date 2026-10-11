@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import { tick, untrack } from 'svelte';
   import { Check, Ellipsis, Folder, FolderInput, GitBranch, GitPullRequest, PencilLine, Pin } from '@lucide/svelte';
   import type { Project, ThreadSummary } from '@boite/contracts';
@@ -84,7 +85,7 @@
       if (!result.supported && manual) requestedOwner.error = strings.errors.pullRequestUnsupported;
     } catch (error) {
       // A lookup the user did not ask for fails quietly: no gh, no network, no banner.
-      if (revision === prRevision && manual) requestedOwner.error = error instanceof Error ? error.message : String(error);
+      if (revision === prRevision && manual) requestedOwner.error = errorText(error);
     } finally {
       if (revision === prRevision) prLoading = false;
     }

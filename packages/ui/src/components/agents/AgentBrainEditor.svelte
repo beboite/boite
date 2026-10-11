@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../../lib/errors';
   import { secureId } from '../../lib/secure-id';
   import { onMount } from 'svelte';
   import type { AgentBrain } from '@boite/contracts';
@@ -12,7 +13,7 @@
   async function save() { if (brain) { const saved = await view.call('agents.brain.save', { agentId, expectedRevision: brain.revision, instructions: brain.instructions, memory: brain.memory }); if (saved) brain = saved; } }
   async function compact(sessionId: string) {
     try { await view.call('agents.context.compact', { sessionId, requestId: secureId() }); }
-    catch (error) { view.error = error instanceof Error ? error.message : String(error); }
+    catch (error) { view.error = errorText(error); }
   }
   function scopeName(kind: string, id: string): string {
     const s = view.snapshot;

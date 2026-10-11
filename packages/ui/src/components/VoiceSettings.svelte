@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import InfoTip from './InfoTip.svelte';
   import VoiceInputSettings from './VoiceInputSettings.svelte';
   import { AlertTriangle, Check, Download, LoaderCircle, Trash2 } from '@lucide/svelte';
@@ -18,7 +19,7 @@
   let unsupported = $state(false);
   let savedTimer: ReturnType<typeof setTimeout> | undefined;
 
-  const message = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause));
+  const message = (cause: unknown): string => (errorText(cause));
   const missing = (cause: unknown): boolean => cause instanceof RpcFailure && cause.code === RpcErrorCode.MethodNotFound;
   const machine = $derived(store.core?.hostname ?? strings.app.name);
 

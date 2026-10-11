@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import { ChevronDown, FolderOpen } from '@lucide/svelte';
   import { checkSettingsPatch, type WorktreeStorage } from '@boite/contracts';
   import Menu from './Menu.svelte';
@@ -50,7 +51,7 @@
       const picked = await open({ directory: true, multiple: false, defaultPath: current.directory || undefined });
       if (store === owner && owner.client === client && typeof picked === 'string') edit({ directory: picked });
     } catch (cause) {
-      if (store === owner) error = cause instanceof Error ? cause.message : String(cause);
+      if (store === owner) error = errorText(cause);
     } finally { busy = false; }
   }
 </script>

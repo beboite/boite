@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../../lib/errors';
   import { secureId } from '../../lib/secure-id';
   import { CalendarClock, Pause, Pencil, Play, SquareArrowOutUpRight } from '@lucide/svelte';
   import type { AgentRoutine } from '@boite/contracts';
@@ -29,7 +30,7 @@
   }
   async function runNow() {
     try { await view.call('agents.routine.run', { routineId: routine.id, requestId: secureId() }); }
-    catch (error) { view.error = error instanceof Error ? error.message : String(error); }
+    catch (error) { view.error = errorText(error); }
   }
 </script>
 

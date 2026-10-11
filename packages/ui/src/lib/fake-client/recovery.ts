@@ -1,4 +1,4 @@
-import type { Attachment, RpcParams, Turn } from '@boite/contracts';
+import { threadActive, type Attachment, type RpcParams, type Turn } from '@boite/contracts';
 import type { FakeContext } from './context';
 import { checkRunnable } from './checks';
 import { refusal } from './shared';
@@ -7,7 +7,7 @@ import { requireFakeCwd } from './worktrees';
 /** A fixture for an accepted prompt whose core stopped before its provider ran. */
 export function holdAfterRestart(ctx: FakeContext, threadId: string, prompt: string): Turn {
   const thread = ctx.thread(threadId);
-  if (['running', 'waiting', 'queued'].includes(thread.status)) throw refusal('this thread already has an in-flight turn');
+  if (threadActive(thread.status)) throw refusal('this thread already has an in-flight turn');
   const now = ctx.now();
   const turn: Turn = {
     id: `turn-${++ctx.seq}`, threadId, status: 'queued', queuedAt: now, startedAt: null, finishedAt: null, usage: null, error: null,

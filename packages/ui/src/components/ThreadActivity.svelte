@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import { Check, ChevronDown, ChevronLeft, ChevronRight, Circle, CircleCheck, CircleDot, Hand, ListTodo, MessageCircleQuestionMark, Pause, Play, Repeat, Reply, Target, X } from '@lucide/svelte';
   import { focusComposer } from '../lib/focus';
   import type { Store } from '../lib/store.svelte';
@@ -138,7 +139,7 @@
       const value = await store.client.call('threads.activity.control', { threadId: thread.id, kind, action });
       if (store.openThread?.id === thread.id) store.openThread.activity = value;
     } catch (error) {
-      store.error = error instanceof Error ? error.message : String(error);
+      store.error = errorText(error);
     } finally { saving = false; }
   }
 </script>

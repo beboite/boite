@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import InfoTip from './InfoTip.svelte';
   import { onMount } from 'svelte';
   import { Download, Play, Puzzle, RefreshCw, RotateCw, ShieldAlert, Square, TriangleAlert } from '@lucide/svelte';
@@ -29,7 +30,7 @@
   let installed = $derived(plugins.filter((plugin) => plugin.origin === 'url' || plugin.version !== null));
   let recommended = $derived(plugins.filter((plugin) => plugin.origin === 'recommended' && plugin.version === null));
 
-  const messageOf = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
+  const messageOf = (cause: unknown) => (errorText(cause));
   const short = (commit: string) => commit.slice(0, 7);
   const bare = (address: string) => address.replace(/^https:\/\//, '');
   const providerName = (id: string) => store.providers.find((provider) => provider.id === id)?.name ?? id;

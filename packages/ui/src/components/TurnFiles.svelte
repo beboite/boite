@@ -3,6 +3,7 @@
   // file in the side panel, which already reads text, shows pictures and offers
   // a download for the rest. "Show in folder" hands the path to the system file
   // manager, only in the shell on its own core, and never opens the file itself.
+  import { errorText } from '../lib/errors';
   import { ChevronRight, ChevronsDownUp, ChevronsUpDown, FileDiff, FilePenLine, FilePlus2, FileMinus2, Folder, FolderOpen, GitCompareArrows } from '@lucide/svelte';
   import { revealFile } from '../lib/links';
   import { fill, strings } from '../lib/strings';
@@ -37,7 +38,7 @@
     attempted = key;
     loadError = null;
     loading = true;
-    void loadDiffs().catch(reason => { loadError = reason instanceof Error ? reason.message : String(reason); }).finally(() => { loading = false; });
+    void loadDiffs().catch(reason => { loadError = errorText(reason); }).finally(() => { loading = false; });
   });
 
   function toggleAll(): void {
@@ -61,7 +62,7 @@
     try {
       await revealFile(file.absolute);
     } catch (error) {
-      store.reportError(fill(strings.chat.revealFailed, { reason: error instanceof Error ? error.message : String(error) }), 'minor');
+      store.reportError(fill(strings.chat.revealFailed, { reason: errorText(error) }), 'minor');
     }
   }
 </script>

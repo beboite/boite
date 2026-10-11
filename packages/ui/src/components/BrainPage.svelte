@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import { ArrowUp, Brain, Check, ChevronRight, FileText, Folder, GitBranch, Puzzle, RefreshCw, Sparkles } from '@lucide/svelte';
   import { RpcErrorCode, type BrainConfig, type BrainStatus, type RpcResult } from '@boite/contracts';
   import { RpcFailure } from '../lib/client';
@@ -6,7 +7,7 @@
   import InfoTip from './InfoTip.svelte';
   import type { Store } from '../lib/store.svelte';
   import { strings } from '../lib/strings';
-  import { formatLocale } from '../lib/i18n.svelte';
+  import { exactTime } from '../lib/format';
 
   let { store }: { store: Store } = $props();
   let status = $state.raw<BrainStatus | null>(null);
@@ -23,7 +24,7 @@
   let entries = $derived(status?.entries.filter(entry => entry.kind === selected) ?? []);
   let folderName = $derived(status?.config.path?.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? '');
   let autoPull = $derived(status?.config.autoPull ?? { onStartup: false, intervalMinutes: 0 });
-  const failure = (cause: unknown) => cause instanceof RpcFailure && cause.code === RpcErrorCode.MethodNotFound ? t.missing : cause instanceof Error ? cause.message : String(cause);
+  const failure = (cause: unknown) => cause instanceof RpcFailure && cause.code === RpcErrorCode.MethodNotFound ? t.missing : errorText(cause);
 
   $effect(() => {
     const client = store.client;
@@ -116,7 +117,7 @@
         {:else if !status.git}<span class="ui-label">{t.noGit}</span>
         {:else if !status.git.upstream}<span class="ui-label">{t.noUpstream}</span>
         {:else if status.git.ahead || status.git.behind}<span class="ui-label">{t.counts.replace('{ahead}', String(status.git.ahead)).replace('{behind}', String(status.git.behind))}</span>
-        {:else}<Check size={14} /><span class="ui-label">{status.lastSync ? `${t.lastSync} ${new Date(status.lastSync).toLocaleString(formatLocale())}` : t.never}</span>{/if}
+        {:else}<Check size={14} /><span class="ui-label">{status.lastSync ? `${t.lastSync} ${exactTime(status.lastSync)}` : t.never}</span>{/if}
       </div>
       <div class="connection-bottom">
         <label class="sharing"><input type="checkbox" role="switch" checked={status.config.enabled} onchange={event => { event.currentTarget.checked = status!.config.enabled; void run('toggle'); }} disabled={busy} data-testid="brain-enabled" /><span class="ui-label">{t.enabled}</span></label>

@@ -1,7 +1,6 @@
 import type { Usage, UsageHistory, UsageHistoryThread } from '@boite/contracts';
 import { strings } from './strings';
-import { formatTokens } from './tokens';
-import { count } from './format';
+import { count, formatTokens } from './format';
 import { formatLocale } from './i18n.svelte';
 
 export type UsageMetric = 'tokens' | 'cost' | 'turns';
@@ -58,13 +57,6 @@ export function niceScale(peak: number, count = 4, minStep = 0): { max: number; 
   return { max: ticks[ticks.length - 1]!, ticks };
 }
 
-/** The context meter's `84k` and `1.2M`, carried on to billions for a long range. */
-function tokenCount(value: number): string {
-  if (value < 1_000_000_000) return formatTokens(value);
-  const billions = value / 1_000_000_000;
-  return `${billions < 10 ? billions.toFixed(1) : Math.round(billions)}B`;
-}
-
 /*
  * Money in dollars, written the way the language the app speaks writes it:
  * `$113.23` in English, `113,23 $US` in French. `k` follows the last digit.
@@ -84,7 +76,7 @@ function dollars(value: number, least: number, most: number, thousands = false):
 
 export function formatMetric(metric: UsageMetric, value: number): string {
   if (metric === 'turns') return count(value);
-  if (metric === 'tokens') return tokenCount(value);
+  if (metric === 'tokens') return formatTokens(value);
   if (value >= 10_000) return dollars(value, 0, 1, true);
   if (value >= 1000) return dollars(value, 0, 0);
   if (value > 0 && value < 0.01) return dollars(value, 3, 3);
@@ -100,9 +92,8 @@ export function reportedValue(metric: UsageMetric, value: number, coverage: { tu
   return formatMetric(metric, value);
 }
 
-/** A shorter label for an axis: `2M` rather than `2.0M`, `$2.5`, `$1.5k`. */
+/** A shorter label for an axis: `$2.5`, `$1.5k`. Token counts already drop a `.0`. */
 export function formatTick(metric: UsageMetric, value: number): string {
-  if (metric === 'tokens') return formatMetric(metric, value).replace(/\.0(?=[kMB]$)/, '');
   if (metric !== 'cost') return formatMetric(metric, value);
   if (value >= 1000) return dollars(value, 0, 1, true);
   return dollars(value, 0, 3);

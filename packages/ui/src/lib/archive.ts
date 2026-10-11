@@ -1,3 +1,4 @@
+import { errorText } from './errors';
 import { tick } from 'svelte';
 import { closed } from './archive-history';
 import type { ProjectId, ThreadId, ThreadSummary } from '@boite/contracts';
@@ -62,7 +63,7 @@ export async function reopenLastArchived(store: Store): Promise<boolean> {
     return true;
   } catch (error) {
     if (current()) {
-      owner.error = error instanceof Error ? error.message : String(error);
+      owner.error = errorText(error);
       if (target) closed.push({ ...target, undoId: target.undoId ?? 0 });
     }
     return false;

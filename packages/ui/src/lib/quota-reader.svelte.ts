@@ -1,3 +1,5 @@
+import { secureId } from './secure-id';
+import { errorText } from './errors';
 import { RpcErrorCode, providerEnabled, type Account, type AccountQuota, type ProviderSummary, type SubscriptionProxyQuotas } from '@boite/contracts';
 import { RpcFailure, type Client } from './client';
 import { fill, strings } from './strings';
@@ -130,8 +132,7 @@ export class QuotaReader {
   /** Only the newest read writes, so a slow first read never lands over a refresh asked meanwhile. */
   async read(client: Client, refresh = false): Promise<void> {
     const request = ++this.#latest;
-    // getRandomValues also works on a plain HTTP connection to a LAN core.
-    const requestId = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, '0')).join('');
+    const requestId = secureId();
     this.completed = [];
     this.loading = true;
     if (refresh) {
@@ -157,7 +158,7 @@ export class QuotaReader {
     } catch (error) {
       if (request === this.#latest) {
         this.rows ??= [];
-        this.error = error instanceof Error ? error.message : String(error);
+        this.error = errorText(error);
         throw error;
       }
     } finally {

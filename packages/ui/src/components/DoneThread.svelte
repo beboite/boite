@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import { ArchiveRestore, Ellipsis } from '@lucide/svelte';
   import type { ThreadSummary } from '@boite/contracts';
   import type { ProjectEntry } from '../lib/project-view.svelte';
@@ -25,7 +26,7 @@
     const owner = entry.machine.store;
     restoring = true;
     try { await restoreThread(owner, entry.thread.id); }
-    catch (error) { owner.error = error instanceof Error ? error.message : String(error); }
+    catch (error) { owner.error = errorText(error); }
     finally { restoring = false; }
   }
   /**
@@ -38,7 +39,7 @@
     deleting = true;
     let removed = false;
     try { removed = await deleteThread(owner, entry.thread); }
-    catch (error) { owner.error = error instanceof Error ? error.message : String(error); }
+    catch (error) { owner.error = errorText(error); }
     finally { if (!removed) deleting = false; }
   }
   function open(): void {

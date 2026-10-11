@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import { onMount, untrack } from 'svelte';
   import { Camera, Circle, CornerDownLeft, Delete, EyeOff, Pause, Play, Plus, Power, RefreshCw, RotateCw, Send, Smartphone, Square, Triangle, X } from '@lucide/svelte';
   import { MOBILE_TEXT_MAX, type MobileDevice, type MobileDeviceFrame, type MobileDeviceInput, type MobileDeviceList, type MobileDeviceSession } from '@boite/contracts';
@@ -34,7 +35,6 @@
   const machine = $derived(machineName(store));
   const showing = $derived(session?.state === 'ready' && revealed ? session : null);
   const usable = $derived(!!showing && !!frame && frame.deviceId === showing.deviceId && !paused && !busy && store.connection === 'ready');
-  const message = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
 
   function stop() { generation++; clearTimeout(timer); }
   async function decoded(base64: string): Promise<void> {
@@ -58,7 +58,7 @@
       unchanged = frame && next.base64 === frame.base64 ? unchanged + 1 : 0;
       frame = next; error = '';
     } catch (cause) {
-      if (alive && run === generation) { failures++; error = message(cause); }
+      if (alive && run === generation) { failures++; error = errorText(cause); }
     } finally { pending = false; }
     if (alive && run === generation) timer = setTimeout(() => void poll(run), nextPollDelay({ roundTrip, unchanged, failures }));
   }
@@ -83,13 +83,13 @@
     if (!client) return;
     loading = true;
     try { list = await client.call('devices.list', { threadId }); sessions = list.sessions; error = ''; }
-    catch (cause) { error = message(cause); }
+    catch (cause) { error = errorText(cause); }
     finally { loading = false; }
   }
   async function act<T>(run: () => Promise<T>): Promise<T | undefined> {
     busy = true;
     try { const value = await run(); error = ''; return value; }
-    catch (cause) { error = message(cause); return undefined; }
+    catch (cause) { error = errorText(cause); return undefined; }
     finally { busy = false; kick(); }
   }
   async function open(deviceId: string): Promise<void> {
@@ -120,7 +120,7 @@
       const value = typed.shift()!, client = store.client, target = showing;
       if (!alive || !client || !target?.input || paused || store.connection !== 'ready') { typed = []; return; }
       try { await client.call('devices.input', { threadId, deviceId: target.deviceId, input: value }); error = ''; }
-      catch (cause) { typed = []; if (alive) error = message(cause); return; }
+      catch (cause) { typed = []; if (alive) error = errorText(cause); return; }
       finally { if (alive) kick(); }
     }
   }
@@ -177,7 +177,7 @@
     void client?.call('devices.sessions', { threadId }).then(result => {
       sessions = result.sessions;
       if (result.sessions.length === 0) void refresh();
-    }, cause => { error = message(cause); });
+    }, cause => { error = errorText(cause); });
     const live = liveInput(() => viewer, {
       key(event) {
         if (!showing?.input || !frame || paused) return false;

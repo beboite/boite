@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../../lib/errors';
   import { secureId } from '../../lib/secure-id';
   import { onMount } from 'svelte';
   import { X } from '@lucide/svelte';
@@ -24,7 +25,7 @@
     try {
       const route: DelegationProfile = { ...config.defaultRoute, id: secureId(), name: child ? labels.subagents : labels.model, model: config.defaultRoute.model! };
       if (child) config.subagents.profiles.push(route); else config.allowedRoutes.push(route);
-    } catch (error) { view.error = error instanceof Error ? error.message : String(error); }
+    } catch (error) { view.error = errorText(error); }
   }
   function remove(child: boolean, id: string) {
     if (!config) return;
@@ -46,7 +47,7 @@
         config.allowedRoutes.push({ id: secureId(), name: view.store.modelOf(d)?.name ?? d.model, providerId: d.providerId, accountId: d.accountId, model: d.model, effort: d.effort });
       }
       await view.call('agents.runtime.configure', { agentId: agent.id, expectedRevision: agent.revision, config });
-    } catch (error) { view.error = error instanceof Error ? error.message : String(error); }
+    } catch (error) { view.error = errorText(error); }
   }
 </script>
 

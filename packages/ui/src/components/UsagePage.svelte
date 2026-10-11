@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import { untrack } from 'svelte';
   import { ChevronDown, RefreshCw } from '@lucide/svelte';
   import type { UsageHistory, UsageHistoryThread } from '@boite/contracts';
@@ -98,7 +99,7 @@
       const answered = results.flatMap((result) => result.status === 'fulfilled' ? [result.value] : []);
       failures = results.flatMap((result, index) => {
         if (result.status === 'fulfilled') return [];
-        const message = result.reason instanceof Error ? result.reason.message : String(result.reason);
+        const message = errorText(result.reason);
         return [named ? `${from[index]!.label}: ${message}` : message];
       });
       if (answered.length === 0) {

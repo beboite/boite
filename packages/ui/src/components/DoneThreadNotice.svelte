@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import { ArchiveRestore } from '@lucide/svelte';
   import type { ThreadId } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
@@ -15,7 +16,7 @@
     try {
       const summary = await restoreThread(owner, id);
       if (owner.openThread?.id === id) Object.assign(owner.openThread, summary);
-    } catch (error) { owner.error = error instanceof Error ? error.message : String(error); }
+    } catch (error) { owner.error = errorText(error); }
     finally { restoring = false; }
   }
 </script>

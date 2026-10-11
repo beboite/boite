@@ -990,7 +990,7 @@ test('the composer wears the context meter, a compaction is a divider, and a tur
   await waitFor(() => document.querySelector('[data-testid=context-popup]') !== null);
   expect(query('[data-testid=context-popup]').textContent).toContain(count(31000));
   expect(query('[data-testid=compaction-part]').textContent?.replace(/\s+/g, ' ').trim()).toBe(
-    'Context compacted, 184k to 31k tokens'
+    'Context compacted, 184K to 31K tokens'
   );
 
   const input = query<HTMLTextAreaElement>('[data-testid=composer-input]');

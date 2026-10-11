@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import { tick, untrack } from 'svelte';
   import { ArrowUp, ChevronDown, ChevronRight, Folder, FolderOpen, Monitor, X } from '@lucide/svelte';
   import { Closing } from '../lib/closing.svelte';
@@ -49,7 +50,7 @@
       if (!current()) return;
       path = result.path; parent = result.parent; directories = result.directories;
     } catch (failure) {
-      if (current()) error = failure instanceof Error ? failure.message : String(failure);
+      if (current()) error = errorText(failure);
     } finally { if (current()) busy = false; }
   }
   $effect(() => { if (overlay.open) return mobileOverlay(close); });
@@ -88,7 +89,7 @@
       if (project) { close(); await workspace.select(owner, undefined, project.id); }
       else if (!native) error = owner.error ?? strings.connection.unavailable;
     } catch (failure) {
-      if (current()) error = failure instanceof Error ? failure.message : String(failure);
+      if (current()) error = errorText(failure);
     } finally { if (current()) busy = false; }
   }
   function keydown(event: KeyboardEvent) {

@@ -5,8 +5,7 @@
   import type { Account, MemoryEvent, Message } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
-  import { formatTokens } from '../lib/tokens';
-  import { count } from '../lib/format';
+  import { count, formatTokens, providerName } from '../lib/format';
   import { isNamedModel } from '../lib/model-order';
   import { planOf } from '../lib/plan';
   import PermissionCard from './PermissionCard.svelte';
@@ -76,7 +75,7 @@
 {#if showModel && message.role === 'assistant' && execution}
   {@const model = store.modelsOf(execution.providerId, execution.accountId).find((model) => model.id === execution.model)}
   <div class="model-attribution" data-testid="message-model">
-    {execution.model && isNamedModel(model ?? { id: execution.model, name: execution.model }) ? model?.name ?? execution.model : store.providerOf(execution.providerId)?.name}
+    {execution.model && isNamedModel(model ?? { id: execution.model, name: execution.model }) ? model?.name ?? execution.model : providerName(store, execution.providerId)}
   </div>
 {/if}
 {#if message.role === 'system' && from === 0}

@@ -16,6 +16,7 @@
  * than raced. Nothing is imported from `@tauri-apps/api` until then: outside
  * the shell this module is a class nobody constructs.
  */
+import { errorText } from './errors';
 import type { BrowserBridge, BrowserEvent, SurfaceRect } from './browser-bridge';
 import { DEFAULT_BROWSER_PROFILE, type PreviewReference } from '@boite/contracts';
 import { currentZoom } from './zoom';
@@ -25,12 +26,6 @@ import { fitBrowserViewport } from './browser-viewport';
 const EVENT = 'browser://event';
 
 type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
-
-function reasonOf(error: unknown): string {
-  if (typeof error === 'string') return error;
-  if (error instanceof Error) return error.message;
-  return String(error);
-}
 
 /** CSS pixels to the window's logical pixels, under an interface zoom of `factor`. */
 export function scaleRect(rect: SurfaceRect | null, factor: number): SurfaceRect | null {
@@ -287,10 +282,10 @@ export class TauriBridge implements BrowserBridge {
       })
       .catch((error: unknown) => {
         if (command === 'browser_highlight' && typeof args.requestId === 'string') {
-          this.#emit({ type: 'highlight-result', id, requestId: args.requestId, error: reasonOf(error) });
+          this.#emit({ type: 'highlight-result', id, requestId: args.requestId, error: errorText(error) });
         } else if (command === 'browser_annotate' && typeof args.requestId === 'string') {
-          this.#emit({ type: 'selection-failed', id, requestId: args.requestId, reason: reasonOf(error) });
-        } else this.#emit({ type: 'failed', id, reason: reasonOf(error) });
+          this.#emit({ type: 'selection-failed', id, requestId: args.requestId, reason: errorText(error) });
+        } else this.#emit({ type: 'failed', id, reason: errorText(error) });
       });
     this.#queues.set(id, next);
     void next.then(() => {

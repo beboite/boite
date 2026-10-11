@@ -1,3 +1,4 @@
+import { errorText } from './errors';
 import { strings } from './strings';
 import type { Store } from './store.svelte';
 
@@ -44,7 +45,7 @@ export class ComposerSide {
       pending = false;
       off();
       // Navigation and dismissal unsubscribe this request, so late failures cannot replace another answer.
-      if (active && this.current) this.current.error = reason instanceof Error ? reason.message : String(reason);
+      if (active && this.current) this.current.error = errorText(reason);
     });
     return true;
   }

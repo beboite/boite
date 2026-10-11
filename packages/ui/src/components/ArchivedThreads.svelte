@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import DoneRetentionSetting from './DoneRetentionSetting.svelte';
   import { RotateCcw, Trash2 } from '@lucide/svelte';
   import { DEFAULT_THREAD_DONE_RETENTION_DAYS, type ThreadId, type ThreadSummary } from '@boite/contracts';
@@ -81,7 +82,7 @@
   });
 
   function fail(error: unknown) {
-    store.error = error instanceof Error ? error.message : String(error);
+    store.error = errorText(error);
   }
 
   async function load() {

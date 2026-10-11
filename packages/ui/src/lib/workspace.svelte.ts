@@ -1,5 +1,5 @@
 import { Store, store } from './store.svelte';
-import { threadActive, type AgentAddress, type GroupCore } from '@boite/contracts';
+import { threadActive, withoutTrailingSlashes, type AgentAddress, type GroupCore } from '@boite/contracts';
 import {
   clearStoredEndpoint,
   forgetGroupOf,
@@ -93,7 +93,7 @@ function endpointIdentity(endpoint: Endpoint): { id: string; host: string } | nu
   try {
     const url = new URL(endpoint.url);
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) return null;
-    return { id: url.toString().replace(/\/+$/, ''), host: url.host };
+    return { id: withoutTrailingSlashes(url.toString()), host: url.host };
   } catch {
     return null;
   }

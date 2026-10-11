@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import { untrack } from 'svelte';
   import { DEFAULT_THREAD_DELETION_RETENTION_DAYS, type DeletedThreadSummary, type ThreadId, type ThreadSummary } from '@boite/contracts';
   import { exactTime, projectName } from '../lib/format';
@@ -51,7 +52,7 @@
       const rows = await client.call('threads.deleted', {});
       if (current === generation && client === store.client) threads = rows;
     } catch (error) {
-      if (current === generation) store.error = error instanceof Error ? error.message : String(error);
+      if (current === generation) store.error = errorText(error);
     } finally { if (current === generation) loading = false; }
   }
 

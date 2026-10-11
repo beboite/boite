@@ -1,11 +1,12 @@
 <script lang="ts">
+  import { errorText } from '../../lib/errors';
   import { secureId } from '../../lib/secure-id';
   import { tick, untrack } from 'svelte';
   import { ArrowUp, CalendarClock, CircleCheck, CircleQuestionMark, CircleStop, Handshake, SquareArrowOutUpRight } from '@lucide/svelte';
   import type { AgentConversationMessage, AgentScope, ThreadSummary } from '@boite/contracts';
   import { chatKey, type AgentsView } from '../../lib/agents.svelte';
   import { fill, strings } from '../../lib/strings';
-  import { formatLocale } from '../../lib/i18n.svelte';
+  import { dayClock, longDay } from '../../lib/format';
   import Prose from '../Prose.svelte';
   import AgentAvatar from './AgentAvatar.svelte';
   import AgentWorkCard from './AgentWorkCard.svelte';
@@ -74,8 +75,6 @@
     if (!work || work.messageId !== null || work.taskId !== null || work.purpose === 'compaction') return null;
     return view.snapshot?.routines.find(r => r.lastWorkId === work.id)?.name ?? '';
   }
-  const time = (at: number) => new Date(at).toLocaleTimeString(formatLocale(), { hour: '2-digit', minute: '2-digit' });
-  const day = (at: number) => new Date(at).toLocaleDateString(formatLocale(), { weekday: 'long', day: 'numeric', month: 'long' });
   const placeholder = $derived(agent ? fill(labels.messageTo, { name: agent.name }) : group ? fill(labels.messageTo, { name: group.name }) : labels.message);
 
   async function send() {
@@ -86,7 +85,7 @@
       if (!request || request.text !== text || request.recipients !== signature) request = { text, recipients: signature, id: secureId() };
       const sent = await view.call('agents.message.send', { scope, text, recipientIds, requestId: request.id });
       if (sent) { text = ''; request = null; }
-    } catch (error) { view.error = error instanceof Error ? error.message : String(error); }
+    } catch (error) { view.error = errorText(error); }
   }
   function onkeydown(event: KeyboardEvent) {
     if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
@@ -103,10 +102,10 @@
         {@const previous = messages[index - 1]}
         {@const next = messages[index + 1]}
         {@const mine = message.senderId === null}
-        {@const newDay = !previous || day(previous.createdAt) !== day(message.createdAt)}
+        {@const newDay = !previous || longDay(previous.createdAt) !== longDay(message.createdAt)}
         {@const first = newDay || previous.senderId !== message.senderId}
-        {@const lastOfRun = !next || next.senderId !== message.senderId || day(next.createdAt) !== day(message.createdAt)}
-        {#if newDay}<p class="agent-day"><span>{day(message.createdAt)}</span></p>{/if}
+        {@const lastOfRun = !next || next.senderId !== message.senderId || longDay(next.createdAt) !== longDay(message.createdAt)}
+        {#if newDay}<p class="agent-day"><span>{longDay(message.createdAt)}</span></p>{/if}
         {#if mine}
           {@const failed = view.seen.deliveries.filter(d => d.messageId === message.id && (d.status === 'failed' || d.status === 'limited'))}
           <article class="agent-message from-user" class:first>
@@ -114,7 +113,7 @@
             <div class="bubble"><p class="user-text">{message.text}</p></div>
             {#if lastOfRun || failed.length}
               <footer>
-                {#if lastOfRun}<time datetime={new Date(message.createdAt).toISOString()}>{time(message.createdAt)}</time>{/if}
+                {#if lastOfRun}<time datetime={new Date(message.createdAt).toISOString()}>{dayClock(message.createdAt)}</time>{/if}
                 {#each failed as delivery (delivery.id)}<span class="failed">{fill(labels.deliveryFailed, { name: nameOf(delivery.agentId) })}</span>{/each}
               </footer>
             {/if}
@@ -151,7 +150,7 @@
               </button>
             {:else if planned !== null}<p class="planned-label" data-testid="agent-planned-result"><CalendarClock size={13} strokeWidth={1.75} /><span>{planned || labels.plannedResult}</span></p>{/if}
             {#if message.text.trim()}<div class="answer"><Prose text={message.text} store={view.store} bubble /></div>{/if}
-            {#if lastOfRun}<footer><time datetime={new Date(message.createdAt).toISOString()}>{time(message.createdAt)}</time></footer>{/if}
+            {#if lastOfRun}<footer><time datetime={new Date(message.createdAt).toISOString()}>{dayClock(message.createdAt)}</time></footer>{/if}
           </article>
         {/if}
       {:else}

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from './lib/errors';
   import { onMount, untrack } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import { takeNotificationTarget } from './lib/endpoint';
@@ -500,7 +501,7 @@
     if (zoom !== null && !(event.target instanceof Element && event.target.closest('[data-testid=browser-surface]'))) {
       event.preventDefault();
       void setZoom(zoom === 0 ? ZOOM_DEFAULT : stepZoom(wantedZoom(), zoom)).catch((error: unknown) => {
-        store.error = error instanceof Error ? error.message : String(error);
+        store.error = errorText(error);
       });
       return;
     }
@@ -696,9 +697,9 @@
       />
     </div>
   {/if}
-  <UndoToast onerror={(error) => (store.error = error instanceof Error ? error.message : String(error))} />
+  <UndoToast onerror={(error) => (store.error = errorText(error))} />
   {#if store.booted && experimentOn('whip') && WhipOverlay}
-    <WhipOverlay onerror={(error) => (store.error = error instanceof Error ? error.message : String(error))} />
+    <WhipOverlay onerror={(error) => (store.error = errorText(error))} />
   {/if}
 </div>
 

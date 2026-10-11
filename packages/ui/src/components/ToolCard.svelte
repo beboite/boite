@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import { page } from '../lib/page-hidden.svelte';
   import { Bot, ChevronRight, FilePen, FileText, Globe, Search, SquareTerminal, Wrench, X } from '@lucide/svelte';
   import type { ToolDocument, ToolStatus } from '@boite/contracts';
@@ -161,7 +162,7 @@
     if (!shown || !deferred || !loadOutput || attempted) return;
     attempted = true;
     loading = true;
-    void loadOutput().catch(reason => { loadError = reason instanceof Error ? reason.message : String(reason); }).finally(() => { loading = false; });
+    void loadOutput().catch(reason => { loadError = errorText(reason); }).finally(() => { loading = false; });
   });
 </script>
 

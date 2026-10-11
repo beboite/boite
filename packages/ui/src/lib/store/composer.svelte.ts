@@ -1,4 +1,4 @@
-import { RpcErrorCode, PREVIEW_REFERENCES_PER_TURN, previewReferencesError, type PreviewReference } from '@boite/contracts';
+import { RpcErrorCode, PREVIEW_REFERENCES_PER_TURN, previewReferencesError, threadActive, type PreviewReference } from '@boite/contracts';
 import { untrack } from 'svelte';
 import type { Attachment, Message, MessageId, MessagePart, ThreadId, ThreadSummary, Turn, TurnInFlightData } from '@boite/contracts';
 import { drainQueue, SENDING_PREFIX, sentPrompt } from '../composer-queue';
@@ -626,7 +626,7 @@ export class Composer {
     const s = this.ctx.store;
     // The core refused because a turn is in flight, even when its row has not
     // moved off idle yet: waiting is what the composer must do.
-    const row: ThreadSummary = ['queued', 'running', 'waiting'].includes(thread.status) ? thread : { ...thread, status: 'running' };
+    const row: ThreadSummary = threadActive(thread.status) ? thread : { ...thread, status: 'running' };
     this.ctx.threads.upsertThread(row);
     if (s.openThread?.id === row.id) Object.assign(s.openThread, row);
     this.composerStates[row.id] ??= { text: '', attachments: [], queued: [], sending: false, paused: false };

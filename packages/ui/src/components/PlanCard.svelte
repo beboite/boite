@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import { Check, Copy, Download, FolderDown, NotebookPen } from '@lucide/svelte';
   import { planFileName } from '../lib/plan';
   import type { Store } from '../lib/store.svelte';
@@ -49,7 +50,7 @@
       await client.call('files.write', { threadId, path: name, text: plan });
       saved = name;
     } catch (error) {
-      store.error = error instanceof Error ? error.message : String(error);
+      store.error = errorText(error);
     } finally {
       saving = false;
     }

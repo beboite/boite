@@ -1,9 +1,10 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import { untrack } from 'svelte';
   import { ChevronRight, CircleAlert, RefreshCw } from '@lucide/svelte';
   import { RpcErrorCode, type HookRun, type HooksStatus, type ProviderHooks } from '@boite/contracts';
   import { RpcFailure } from '../lib/client';
-  import { clockTime, count as figure, exactTime } from '../lib/format';
+  import { clockTime, count as figure, exactTime, providerName } from '../lib/format';
   import { formatLocale } from '../lib/i18n.svelte';
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
@@ -44,7 +45,7 @@
       if (current !== revision) return;
       // An older core has no `hooks.status`: that is a version to update, not a failure.
       if (cause instanceof RpcFailure && cause.code === RpcErrorCode.MethodNotFound) missing = true;
-      else error = cause instanceof Error ? cause.message : String(cause);
+      else error = errorText(cause);
     } finally {
       if (current === revision) loading = false;
     }
@@ -113,7 +114,7 @@
 
   /** Agent, event, hook. `PreToolUse:Bash` already names its event; a file name does not. */
   function runParts(run: HookRun): string[] {
-    const agent = names.get(run.providerId) ?? store.providerOf(run.providerId)?.name ?? run.providerId;
+    const agent = names.get(run.providerId) ?? providerName(store, run.providerId);
     if (!run.name || run.name === run.event || run.name.startsWith(`${run.event}:`)) return [agent, run.name || run.event];
     return [agent, run.event, run.name];
   }

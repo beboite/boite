@@ -1,3 +1,4 @@
+import { errorText } from './errors';
 import { RpcErrorCode } from '@boite/contracts';
 import { RpcFailure, type Client } from './client';
 import type { Machine } from './workspace.svelte';
@@ -26,7 +27,7 @@ async function route(source: Machine, target: Machine, fromCoreId: string, toCor
           || source.store.connection !== 'ready' || target.store.connection !== 'ready') throw new Error('destination owner connection is unavailable');
         response = await targetClient.call('collaboration.bridge.forward', { coreId: fromCoreId, body: request.body, signature: request.signature });
       } catch (error) {
-        response = { status: 503, body: error instanceof Error ? error.message : String(error), signature: '' };
+        response = { status: 503, body: errorText(error), signature: '' };
       }
       // An expired request or a disconnected source needs no replay. The source reports its failure to its caller.
       await sourceClient.call('collaboration.bridge.reply', { requestId: request.requestId, response }).catch(() => undefined);
