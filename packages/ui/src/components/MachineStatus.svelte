@@ -52,7 +52,9 @@
   .machines :global(.trigger) { font-size: var(--text-xs); }
   /* A filter hides threads, so while one is on the button says which machine. */
   .filtered :global(.trigger) { width: auto; max-width: 160px; padding: 0 8px; gap: 6px; background: var(--color-active); color: var(--color-foreground); }
-  .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* min-width: a flex item never shrinks below its text otherwise, and a long
+     name ran out of the button instead of ending in an ellipsis. */
+  .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .problem { color: var(--color-live); }
   .problem :global(.trigger) { color: var(--color-live); }
 </style>

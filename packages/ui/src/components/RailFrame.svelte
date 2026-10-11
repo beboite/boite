@@ -122,7 +122,6 @@
   </div>
   <div class="foot">
     {@render lead?.()}
-    <span class="grow"></span>
     {@render foot?.()}
     {#if work.shows('sidebar.limits')}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -185,26 +184,32 @@
   .foot {
     display: flex;
     align-items: center;
-    /* The head's spacing, so the foot's buttons line up under its own. */
-    gap: 2px;
-    min-height: 40px;
+    /* One row of equal buttons across the whole width, a dock rather than two
+       clumps around a gap: each takes its share, so the targets grow with the
+       column instead of leaving its middle empty. */
+    gap: 4px;
+    min-height: 44px;
     box-sizing: border-box;
     margin: 0 10px;
     padding: 6px 0;
   }
-  .grow { flex: 1; }
   .control {
     display: contents;
   }
-  .foot :global(button.icon) {
-    flex: none;
-    width: var(--control-sm);
-    height: var(--control-sm);
+  .foot :global(button.icon),
+  .foot :global(.machines:has(.trigger)) {
+    /* A basis, not 0: a button's border counts in its base size and a bare
+       wrapper has none, so a 0 basis left the machine button 2 px short. */
+    flex: 1 1 var(--control-sm);
+    min-width: var(--control-sm);
+    height: var(--control-lg);
   }
-  /* The thread list's machine button sits alone on the left. */
-  .foot :global(.machines) { min-width: var(--control-sm); }
+  .foot :global(button.icon) { width: auto; }
   .foot :global(.machines .menu),
-  .foot :global(.machines .trigger) { max-width: 100%; }
+  .foot :global(.machines .trigger) { width: 100%; height: 100%; }
+  /* A machine filter names the machine: that button keeps its text's width. */
+  .foot :global(.machines.filtered) { flex: 0 1 auto; }
+  .foot :global(.machines.filtered .trigger) { width: auto; max-width: 100%; }
   .foot :global(button.icon.active) { background: var(--color-active); color: var(--color-foreground); }
 
   /* Centred in the frame's gap between the list and the card beside it. */
