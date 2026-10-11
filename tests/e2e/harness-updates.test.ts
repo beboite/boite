@@ -51,9 +51,9 @@ test('agent updates stay in Machines and Update and Skip target their own machin
   await capture('harness-updates-folded');
   await unfold();
   await capture('harness-updates-desktop');
-  // The page ends before the phones card can reach the top: it is brought into view, and the list scrolls away.
-  await page.click('[data-settings-section="devices"]');
-  await page.waitFor(`document.getElementById('settings-devices').getBoundingClientRect().top < innerHeight - 200 && document.getElementById('settings-machines').getBoundingClientRect().top < 0`);
+  // The page ends before the phone app card can reach the top: it is brought into view, and the list scrolls away.
+  await page.click('[data-settings-section="phone"]');
+  await page.waitFor(`document.getElementById('settings-phone').getBoundingClientRect().top < innerHeight - 200 && document.getElementById('settings-machines').getBoundingClientRect().top < 0`);
   await page.click('[data-settings-section="machines"]');
   await page.waitFor(`document.getElementById('settings-machines').getBoundingClientRect().top > 0 && document.getElementById('settings-machines').getBoundingClientRect().top < 250`);
 
@@ -68,7 +68,7 @@ test('agent updates stay in Machines and Update and Skip target their own machin
   expect(await page.evaluate(`document.querySelector('${local} ${id('setting-auto-update-harnesses')}').checked`)).toBe(false);
 
   const active = await page.evaluate('window.__boiteTest.workspace.active.machineId');
-  for (const navigation of [id('settings-tab-machines'), '[data-settings-section="devices"]']) {
+  for (const navigation of [id('settings-tab-machines'), '[data-settings-section="phone"]']) {
     await page.click('[data-settings-section="machines"]');
     await page.click(`${id('machine-card')}[data-machine-id="http://builder.test"] ${id('machine-settings-open')}`);
     await page.waitFor(`document.querySelector('${id('machine-settings')}')`);
