@@ -1,5 +1,5 @@
 import type { ServerWebSocket } from 'bun';
-import type { RpcEventName, RpcEvents, ThreadId } from '@boite/contracts';
+import type { Channel, RpcEventName, RpcEvents, ThreadId } from '@boite/contracts';
 import { FILE_ROUTE, RPC_MAX_FRAME_BYTES, RPC_PATH, RpcCloseCode, VIEW_CONTENT_POLICY, VIEW_ROUTE, VIEW_SANDBOX } from '@boite/contracts';
 import { timingSafeEqual } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -335,23 +335,44 @@ export function shutdownResponse(core: Core, request: Request, mode: 'now' | 'id
 }
 
 /**
+ * The ports a core with none of its own tries first, ten per channel so an
+ * installed app and a development core sit side by side. They are below
+ * 49152: Windows lends 49152 to 65535 to outgoing connections and Hyper-V
+ * reserves blocks of it at boot, so a random port from there can be taken by
+ * the next start, and every phone paired with the old one is lost.
+ */
+export const PREFERRED_PORTS: Record<Channel, readonly number[]> = {
+  stable: Array.from({ length: 10 }, (_, index) => 7337 + index),
+  dev: Array.from({ length: 10 }, (_, index) => 7347 + index),
+};
+
+/**
  * The server of a core started from `main.ts`. A `--port` the operator named is
  * the only one tried, and a taken one is a loud error: a reverse proxy points
  * at it. Otherwise the port the previous run of this data directory bound, so a
- * paired phone and an installed PWA keep their origin across a restart; when
- * another program took it meanwhile, a random one, said in the log.
+ * paired phone and an installed PWA keep their origin across a restart, then
+ * the channel's preferred ports, then a random one; a move is said in the log.
  */
 export function startServerOnStickyPort(
-  options: ServerOptions & { explicitPort: boolean; previousPort: number | null },
+  options: ServerOptions & { explicitPort: boolean; previousPort: number | null; preferredPorts?: readonly number[] },
 ): RunningServer {
-  const { explicitPort, previousPort, ...server } = options;
-  if (explicitPort || previousPort === null) return startServer(server);
-  try {
-    return startServer({ ...server, port: previousPort });
-  } catch (error) {
-    server.core.log('warn', `port ${previousPort} of the previous run is taken (${messageOf(error)}), listening on another`);
-    return startServer({ ...server, port: 0 });
+  const { explicitPort, previousPort, preferredPorts = PREFERRED_PORTS[options.core.channel], ...server } = options;
+  if (explicitPort) return startServer(server);
+  const candidates = [...new Set([...(previousPort === null ? [] : [previousPort]), ...preferredPorts])];
+  let last: unknown = null;
+  for (const port of candidates) {
+    try {
+      const started = startServer({ ...server, port });
+      if (previousPort !== null && port !== previousPort) server.core.log('warn', `port ${previousPort} of the previous run is taken, listening on ${port}`);
+      return started;
+    } catch (error) {
+      last = error;
+      if (port === previousPort) server.core.log('warn', `port ${previousPort} of the previous run is taken (${messageOf(error)})`);
+    }
   }
+  // The last refusal is named: a host that cannot be bound fails every port the same way, which "taken" would hide.
+  server.core.log('warn', `ports ${candidates.join(', ')} refused the server (${messageOf(last)}), listening on another`);
+  return startServer({ ...server, port: 0 });
 }
 
 export function startServer(options: ServerOptions): RunningServer {

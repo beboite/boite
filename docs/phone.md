@@ -62,9 +62,13 @@ reads it at startup; enabling it binds `0.0.0.0`. Explicit `--host` or `--lan`
 flags take precedence. A running core never rebinds, so changing the switch
 requires a restart. The startup log names the address and its source.
 
-Without `--port`, the core reuses the port in `core.json`. If it is taken, the
-core chooses another and logs it; a phone then needs a new link. An explicit
-`--port` fails when occupied. A listener on all interfaces puts the machine's
+Without `--port`, the core reuses the port in `core.json`. A first run, or one
+whose port another program took, tries 7337 to 7346 (7347 to 7356 for
+`--channel dev`, `PREFERRED_PORTS` in `server.ts`), then any free port, and logs
+the move; a phone then needs a new link. The fixed ports sit below 49152:
+Windows lends 49152 to 65535 to outgoing connections and Hyper-V reserves blocks
+of it at boot, so a random port from there could be gone at the next start. An
+explicit `--port` fails when occupied. A listener on all interfaces puts the machine's
 LAN address in pairing links, rather than loopback.
 
 Two things guard the socket whatever it is bound to. The `Origin` header must be
