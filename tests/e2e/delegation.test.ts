@@ -41,7 +41,8 @@ test('inspect and stop a real delegated thread from the panel, which launches no
   expect(await page.evaluate('!!document.querySelector("[data-testid=delegation-activity] [data-testid=agent-elapsed]")')).toBe(true);
   await page.click('[data-testid="delegation-activity"]');
   await page.waitFor('!!document.querySelector("[data-testid=delegation-member]")');
-  expect(await page.text('[data-testid="delegation-member"]')).toContain('Echo · Echo');
+  expect(await page.evaluate('document.querySelector("[data-testid=delegation-member-route]").title')).toContain('Echo · Echo');
+  expect(await page.evaluate('!!document.querySelector("[data-testid=delegation-active] [data-testid=delegation-member]")')).toBe(true);
   await page.click('[data-testid="delegation-member"]');
   await page.waitFor('!!document.querySelector("[data-testid=delegation-detail]")');
   expect(await page.evaluate('document.querySelectorAll("[data-testid=delegation-surface] :is(textarea, input)").length')).toBe(0);

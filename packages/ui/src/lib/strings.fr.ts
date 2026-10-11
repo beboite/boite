@@ -1254,7 +1254,10 @@ export const fr: Translation = {
     elapsed: 'Temps écoulé',
     showTeam: 'Voir les sous-agents',
     doneStatus: 'Terminé',
-    stoppedStatus: 'Arrêté'
+    stoppedStatus: 'Arrêté',
+    failedStatus: 'Échec',
+    activeSection: 'En cours',
+    finishedSection: 'Terminés'
   },
 
   workflow: {

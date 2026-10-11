@@ -1330,7 +1330,10 @@ export const strings = {
     elapsed: 'Elapsed time',
     showTeam: 'View subagents',
     doneStatus: 'Completed',
-    stoppedStatus: 'Stopped'
+    stoppedStatus: 'Stopped',
+    failedStatus: 'Failed',
+    activeSection: 'Active',
+    finishedSection: 'Finished'
   },
 
   workflow: {

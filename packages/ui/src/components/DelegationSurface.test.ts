@@ -68,10 +68,20 @@ test('one list holds the workflow runs and the subagents, and a run opens its gr
     const run = store.workflowsOf('t-trace')[0]!;
     const agents = store.delegation!.agents;
     expect(agents.length).toBeGreaterThan(0);
-    expect([...document.querySelectorAll<HTMLElement>('[data-testid=delegation-member]')].map(row => row.dataset.agentId)).toEqual(agents.map(agent => agent.thread.id));
-    // Each row names its harness and model the way the composer does.
-    const route = document.querySelector('[data-testid=delegation-member-route]')!.textContent!;
-    expect(route).toContain(store.providerOf(agents[0]!.thread.providerId)!.name);
+    // Working subagents and finished ones sit in separate groups, every one of them once.
+    const ids = (group: string) => [...document.querySelectorAll<HTMLElement>(`[data-testid=${group}] [data-testid=delegation-member]`)].map(row => row.dataset.agentId);
+    const active = agents.filter(agent => ['queued', 'running', 'waiting'].includes(agent.thread.status)).map(agent => agent.thread.id);
+    expect(active.length).toBeGreaterThan(0);
+    expect(ids('delegation-active')).toEqual(active);
+    expect(ids('delegation-finished')).toContain('t-team-done');
+    expect(ids('delegation-active').length + ids('delegation-finished').length).toBe(agents.length);
+    // A row leads with the model's mark and name; the task it was given is not repeated there.
+    const done = document.querySelector<HTMLElement>('[data-agent-id=t-team-done]')!;
+    expect(done.querySelector('[data-logo]')!.getAttribute('data-logo')).toBe('codex');
+    expect(done.querySelector('.model')!.textContent).toBe(store.modelOf({ providerId: 'codex', accountId: 'a-codex', model: 'gpt-6.1-sol', effort: null, permissionMode: 'default', speed: null })?.name ?? 'gpt-6.1-sol');
+    expect(done.textContent).not.toContain('Review the panel wording');
+    const route = done.querySelector('[data-testid=delegation-member-route]')!.getAttribute('title')!;
+    expect(route).toContain(store.providerOf('codex')!.name);
     expect(route.split(' · ').length).toBeGreaterThanOrEqual(2);
     const rows = document.querySelectorAll<HTMLButtonElement>('[data-testid=delegation-run]');
     expect(rows).toHaveLength(1);

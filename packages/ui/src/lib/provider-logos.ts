@@ -134,3 +134,18 @@ const sameMark: Record<string, string> = { 'opencode-v2': 'opencode' };
 export function providerLogoOf(providerId: string): ProviderLogo | null {
   return providerLogos[providerId] ?? providerLogos[sameMark[providerId] ?? gatewayNames[providerId] ?? ''] ?? null;
 }
+
+/**
+ * The mark of the company behind a model, whatever harness runs it: OpenCode
+ * running `anthropic/claude-opus-5-5` shows Claude's mark, Claude Code running
+ * a GPT model shows OpenAI's. A model nothing here recognises keeps the
+ * harness's mark.
+ */
+export function modelLogoId(providerId: string, model: string | null | undefined): string {
+  const id = (model ?? '').toLowerCase();
+  if (/claude|anthropic|opus|sonnet|haiku/.test(id)) return 'claude';
+  if (/(^|[/:])(gpt|o\d|codex|openai)|gpt-/.test(id)) return 'codex';
+  if (/grok|x-?ai\//.test(id)) return 'grok';
+  if (/llama|muse|meta\//.test(id)) return 'muse';
+  return providerId;
+}
