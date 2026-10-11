@@ -1227,7 +1227,6 @@ export const strings = {
     heading: 'Discussions',
     open: 'Open the discussion', back: 'All discussions', openThread: 'Open this conversation',
     empty: 'No discussion with another agent yet.',
-    one: '1 message', many: '{count} messages',
     /** The two halves of a discussion's count, for screen readers and hover. */
     sentReceived: '{sent} sent, {received} received',
     /** A letter of this thread's own agent, in a preview. */

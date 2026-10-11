@@ -39,6 +39,8 @@ test('the tab lists one discussion per conversation, opens its back and forth li
   expect(rows()[0]!.querySelector('.tag')?.textContent).toBe('Started from here');
   expect(rows()[0]!.textContent).toContain('Draft ready.');
   expect(rows()[1]!.querySelector('.where')?.textContent).toBe('Release tools · Build PC');
+  // Another machine is said by its place, not by a tag.
+  expect(rows()[1]!.querySelector('.tag')).toBeNull();
   expect(rows()[1]!.querySelector('.count')?.textContent).toBe('2');
   expect(document.querySelector('[data-testid=agent-discussion-view]')).toBeNull();
 

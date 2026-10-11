@@ -95,10 +95,13 @@
     if (letterId && !discussion.entries.some(entry => entry.letter.id === letterId)) return;
     landed = target;
     seen = size;
+    // Another discussion starts at its end; where the reader was in the last one says nothing about it.
+    atEnd = true;
     void tick().then(() => {
       if (!list) return;
       if (letterId) show(letterId);
       else list.scrollTop = list.scrollHeight;
+      scrolled();
     });
   });
   // New mail follows the end when the reader is there.

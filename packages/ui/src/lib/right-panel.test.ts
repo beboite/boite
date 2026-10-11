@@ -98,6 +98,8 @@ describe('the right panel', () => {
     // The list of discussions: no discussion, no letter.
     bound.openMessages();
     expect(bound.active).toMatchObject({ kind: 'messages', peer: undefined, letterId: undefined });
+    const reloaded = new RightPanelStore().for('t-1').active!;
+    expect([reloaded.kind, reloaded.peer, reloaded.letterId]).toEqual(['messages', undefined, undefined]);
     bound.close('messages');
     expect(bound.active?.kind).toBe('files');
     expect(bound.surfaces.some(surface => surface.kind === 'messages')).toBe(false);

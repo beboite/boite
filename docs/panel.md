@@ -77,7 +77,7 @@ it, and the menu's last row, Choose the buttons, leads back to the switches.
 | Files    | one      | the working directory as a tree, `files.list` one directory at a time         |
 | File     | per path | a text editor with save, an image viewer with zoom and pan, a video or audio player |
 | Tasks    | one      | goal and loop, the agent's tasks, the project's todo list                     |
-| Messages | one      | agent exchanges, filtered to all, sent or received; a chat count opens its burst |
+| Discussions | one   | agent exchanges grouped by discussion, then one discussion's back and forth; a chat row opens it on its burst |
 | Subagents | one     | the thread's workflow runs and subagents in one list, a run's graph, a subagent's conversation, see [delegation.md](delegation.md) and [workflows.md](workflows.md) |
 | Trace    | one      | the thread's processes, see [trace.md](trace.md)                              |
 | Device   | one      | the simulators and emulators open in the thread, covered until Show, see [devices.md](devices.md) |

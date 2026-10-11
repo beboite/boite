@@ -1155,7 +1155,6 @@ export const fr: Translation = {
     heading: 'Discussions',
     open: 'Ouvrir la discussion', back: 'Toutes les discussions', openThread: 'Ouvrir cette conversation',
     empty: 'Aucune discussion avec un autre agent pour le moment.',
-    one: '1 message', many: '{count} messages',
     sentReceived: '{sent} envoyés, {received} reçus',
     mine: 'Cet agent',
     you: 'Vous',

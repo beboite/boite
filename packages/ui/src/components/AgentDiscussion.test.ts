@@ -32,7 +32,7 @@ test('the back and forth groups each side, stamps long silences, quotes an earli
     letter('ask', 0, true),
     letter('ask-more', 1, true),
     letter('answer', 2, false, { replyTo: 'ask', status: 'received' }),
-    letter('later', 40, false, { status: 'rejected', error: 'The recipient revoked coordination.' }),
+    letter('later', 40, false, { replyTo: 'answer', status: 'rejected', error: 'The recipient revoked coordination.' }),
     letter('again', 41, true, { replyTo: 'answer' })
   ]);
   expect(view.querySelector('[data-testid=agent-discussion-heading]')?.textContent).toBe('Deployment agent');
@@ -50,6 +50,7 @@ test('the back and forth groups each side, stamps long silences, quotes an earli
   expect(message(view, 'ask-more').querySelector('[data-testid=agent-letter-age]')).not.toBeNull();
   expect(view.querySelectorAll('.stretch')).toHaveLength(2);
   // A reply to the message just before it needs no quote; one to an earlier message shows it.
+  expect(message(view, 'later').querySelector('[data-testid=agent-discussion-quote]')).toBeNull();
   expect(message(view, 'answer').querySelector('[data-testid=agent-discussion-quote]')?.textContent).toContain('Text ask');
   expect(message(view, 'again').querySelector('[data-testid=agent-discussion-quote]')?.textContent).toContain('Text answer');
   const acknowledged = message(view, 'answer').querySelector('[data-testid=agent-letter-status]')!;
