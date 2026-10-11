@@ -7,6 +7,7 @@ import { checkMatchExtras, checkTranscript, searchContacts, searchWords, transcr
 import { CoordinationBridge } from './coordination-bridge.ts';
 import { dropGroupRead, groupPeers, migrateGroupPeer } from './coordination-group.ts';
 import { address, coordinationGuide, coordinationUrl, LETTER_TTL_MS, letterPrompt, same, STEWARD_LETTER_TTL_MS, text } from './coordination-letter.ts';
+import { senderContext, withRelations } from './coordination-relation.ts';
 import { boundedBody, firstAnswer, MAX_BODY, PeerGone, PeerRefusal, post, ROUTE, settle, type Answer } from './coordination-wire.ts';
 import { pack, SEALED, sealResponse, unpack, type Sealing } from './group/seal.ts';
 import type { Core } from './core.ts';
@@ -218,7 +219,7 @@ export class Coordination {
     const config = this.config(threadId);
     return {
       self: this.self(threadId), config,
-      messages: this.rows('thread_id = ? ORDER BY created_at DESC LIMIT 100', threadId).map(r => this.withProjects(JSON.parse(r.data) as AgentLetter)).reverse(),
+      messages: withRelations(this.core, this.self('').coreId, threadId, this.rows('thread_id = ? ORDER BY created_at DESC LIMIT 100', threadId).map(r => this.withProjects(JSON.parse(r.data) as AgentLetter)).reverse()),
       sent: this.count(threadId, 'out'), sendLimit: null,
       wakes: (this.core.journal.db.query('SELECT count(*) AS n FROM coordination_wakes WHERE thread_id = ? AND at > ?').get(threadId, Date.now() - HOUR) as { n: number }).n,
       wakeLimit: null,
@@ -416,7 +417,7 @@ export class Coordination {
       .filter(letter => letter.expiresAt > Date.now() && this.mayReceive(letter) && (from === null || same(letter.from, from)));
     if (letters.length > 0) this.restoreProject(threadId);
     for (const letter of letters) this.update(letter, 'delivered');
-    return letters.map(letter => ({ ...letter, status: 'delivered' as const }));
+    return withRelations(this.core, this.self('').coreId, threadId, letters.map(letter => ({ ...letter, status: 'delivered' as const })));
   }
   /** A waiting agent takes the letter that just arrived; true when one did. */
   private handToWaiter(letter: AgentLetter): boolean {
@@ -551,7 +552,7 @@ export class Coordination {
     const letters = this.inbox(threadId);
     if (!letters.length) return null;
     this.restoreProject(threadId);
-    const prompt = letterPrompt(letters);
+    const prompt = letterPrompt(letters, senderContext(this.core, this.self('').coreId, threadId));
     this.core.threads.noteCoordination(threadId, turnId, prompt);
     for (const letter of letters) this.update(letter, 'delivered');
     return prompt;
@@ -617,7 +618,7 @@ export class Coordination {
     if (!letters.length) return;
     this.delivering.add(threadId);
     try {
-      const prompt = letterPrompt(letters);
+      const prompt = letterPrompt(letters, senderContext(this.core, this.self('').coreId, threadId));
       if (thread.status === 'running') {
         if (!this.core.threads.canSteer(threadId)) return;
         this.restoreProject(threadId);

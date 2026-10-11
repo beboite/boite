@@ -97,11 +97,11 @@ export class BottomEdge {
     this.#top = box.scrollTop;
   }
 
-  /** Whether `box` stands higher than at its last scroll event or follow. Call it on every scroll event. */
-  rose(box: HTMLElement): boolean {
-    const rose = box.scrollTop < this.#top - 1;
+  /** How far `box` moved since its last scroll event or follow, negative when it rose. Call it on every scroll event. */
+  moved(box: HTMLElement): number {
+    const moved = box.scrollTop - this.#top;
     this.#top = box.scrollTop;
-    return rose;
+    return moved;
   }
 }
 
@@ -143,4 +143,13 @@ export class BottomGlide {
     cancelAnimationFrame(this.#frame);
     clearTimeout(this.#timer);
   }
+}
+
+/**
+ * The turn of the answer under the pointer, or null off every answer. A Claude
+ * turn is many messages and only the last one carries the summary with the
+ * time it finished: the list shows that summary while any of them is pointed at.
+ */
+export function pointedTurn(event: Event): string | null {
+  return (event.target as Element | null)?.closest?.('article.message:not(.user)')?.getAttribute('data-turn') ?? null;
 }

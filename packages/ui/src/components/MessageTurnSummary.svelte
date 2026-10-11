@@ -4,7 +4,7 @@
   import type { Store } from '../lib/store.svelte';
   import TurnSummary from './TurnSummary.svelte';
 
-  let { store, threadId, turn, turns = [], message, messages, actions }: {
+  let { store, threadId, turn, turns = [], message, messages, pointed = false, actions }: {
     store: Store;
     threadId: string;
     turn: Turn;
@@ -12,6 +12,8 @@
     turns?: Turn[];
     message: Message;
     messages: Message[];
+    /** The pointer is on one of the turn's answers, maybe not the one this summary closes. */
+    pointed?: boolean;
     actions?: Snippet;
   } = $props();
 
@@ -35,5 +37,6 @@
   waiting={store.openThread?.status === 'waiting' && turn.status === 'running'}
   background={store.openThread?.turns.at(-1)?.id === turn.id ? store.openThread?.background ?? [] : []}
   stop={() => void store.stop()}
+  {pointed}
   {actions}
 />

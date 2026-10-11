@@ -8,7 +8,7 @@
   import { formatLocale } from '../lib/i18n.svelte';
   import { backgroundLabel } from '../lib/background';
   import type { Snippet } from 'svelte';
-  let { turn, requestStartedAt = null, progress, waiting = false, activeTool = false, activeContent = false, background = [], stop, actions }: {
+  let { turn, requestStartedAt = null, progress, waiting = false, activeTool = false, activeContent = false, background = [], stop, pointed = false, actions }: {
     turn: Turn;
     /**
      * When the user's request this turn belongs to started, earlier than the
@@ -26,6 +26,8 @@
     background?: BackgroundTask[];
     /** Ends the agent process and its background work. */
     stop?: () => void;
+    /** The pointer is on another message of this turn: the settled summary shows as if its own message were pointed at. */
+    pointed?: boolean;
     /** The turn's own buttons (copy, retry, fork), at the end of the line. */
     actions?: Snippet;
   } = $props();
@@ -77,7 +79,7 @@
   <span class="ui-label" class:quiet data-testid={id} {title}>{text}</span>
 {/snippet}
 {#if turn.status !== 'queued' && !(running && activeTool && !waiting && background.length === 0 && !observed && !compacting)}
-  <div class="summary" class:compacting class:settled class:paused={hidden || waiting} data-testid="turn-summary" data-status={turn.status} role="status" aria-label={label} title={label}>
+  <div class="summary" class:compacting class:settled class:pointed class:paused={hidden || waiting} data-testid="turn-summary" data-status={turn.status} role="status" aria-label={label} title={label}>
     {#if compacting}
       <LoaderCircle size={18} class="spinner compaction-icon" aria-hidden="true" />
       <div class="compaction-copy">
@@ -133,7 +135,9 @@
   .summary[data-status='running'] { color: var(--color-muted-foreground); }
   /* Read on demand: the message under the pointer or the keyboard shows it, a finger always does. */
   .summary.settled { opacity: 0; transition: opacity var(--dur-2); }
-  :global(.message:hover) .summary.settled, .summary.settled:focus-within, .summary.settled:not(:has(button)) { opacity: 1; }
+  :global(.message:hover) .summary.settled, .summary.settled.pointed, .summary.settled:focus-within, .summary.settled:not(:has(button)) { opacity: 1; }
+  /* Pointed from another message of the turn, its buttons show with it. */
+  .summary.settled.pointed :global(.act) { opacity: 1; }
   @media (hover: none) { .summary.settled { opacity: 1; } }
   .summary[data-status='error'] { color: var(--color-danger); }
   .summary.compacting { align-self: flex-start; align-items: flex-start; flex-wrap: nowrap; gap: 10px; max-width: 520px; box-sizing: border-box; padding: 12px 14px; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-2); }

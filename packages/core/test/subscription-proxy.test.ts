@@ -310,6 +310,13 @@ test('native discovery describes the models and the gateway adds only what it ro
   expect(mergeProxyModels([], proxy)).toBe(proxy);
 });
 
+test('a model the gateway names after its subscription is the native one, not a second entry', () => {
+  const native = [{ id: 'gpt-6.1-sol', name: 'GPT-6.1-Sol', default: true, speeds: [{ id: 'priority', label: 'Fast' }] }];
+  const proxy = [{ id: 'codex/gpt-6.1-sol', name: 'GPT 6.1 Sol', default: true }, { id: 'codex/codex-auto-review', name: 'Auto review', default: false },
+    { id: 'antigravity/gpt-6.1-sol', name: 'Other pool', default: false }];
+  expect(mergeProxyModels(native, proxy)).toEqual([native[0]!, proxy[1]!, proxy[2]!]);
+});
+
 test('a Claude child drops the parent session markers and keeps the account variables', () => {
   const saved = process.env.CLAUDE_CODE_ENTRYPOINT;
   process.env.CLAUDE_CODE_ENTRYPOINT = 'parent-session';

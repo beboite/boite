@@ -1289,13 +1289,24 @@ export const strings = {
   },
 
   agentMessages: {
-    heading: 'Messages',
-    open: 'Open messages', filter: 'Filter agent messages',
-    all: 'All', sent: 'Sent', received: 'Received', empty: 'No messages here yet.',
-    forwardedOne: 'Forwarded 1 message', forwardedMany: 'Forwarded {count} messages',
-    receivedOne: 'Received 1 message', receivedMany: 'Received {count} messages',
-    /** Incoming letters the steward of this thread's project sent. */
-    stewardOne: '1 message from the steward', stewardMany: '{count} messages from the steward',
+    heading: 'Discussions',
+    open: 'Open the discussion', back: 'All discussions', openThread: 'Open this conversation',
+    empty: 'No discussion with another agent yet.',
+    /** The two halves of a discussion's count, for screen readers and hover. */
+    sentReceived: '{sent} sent, {received} received',
+    /** A letter of this thread's own agent, in a preview. */
+    mine: 'This agent',
+    /** A delegation prompt the user typed, on this thread's side. */
+    you: 'You',
+    result: 'Result',
+    about: 'Works on',
+    replyTo: 'In reply to',
+    /** A burst touched more discussions than the timeline lists. */
+    more: '+{count} more',
+    /** Who started or delegated whom. Where a conversation runs is said by its project and machine, not a tag. */
+    relation: {
+      starter: 'Started this thread', started: 'Started from here', parent: 'Parent', child: 'Subagent', steward: 'Steward', stewarded: 'Looked after'
+    },
     /** What the core told this steward about the threads it looks after. */
     noticeOne: '1 thread notice', noticeMany: '{count} thread notices'
   },
@@ -1312,13 +1323,6 @@ export const strings = {
     sent: '{used} sent this hour', woken: '{used} wake turns this hour',
     directory: 'Authorized contacts', refresh: 'Refresh', directoryEmpty: 'No opted-in thread in this project is available.', unavailable: 'Unavailable contacts',
     details: 'Show exchange',
-    receivedFrom: 'Received from', sentTo: 'Your agent sent to',
-    userSentTo: 'You sent to', userMessageVia: 'User message via',
-    /** A letter the steward of this thread's project sent it, and the same letter in the steward's own thread. */
-    stewardFrom: 'From the steward', stewardSentTo: 'Steward sent to',
-    /** The core told this steward what happened in a thread it looks after. */
-    noticeFrom: 'Notice from {title}',
-    receivedStatus: 'Received',
     machineNotConnected: 'Connect to this machine in Settings to open its thread.',
     status: {
       queued: 'Queued in the outbox', received: 'Received by the recipient core', delivered: 'Submitted to the recipient agent',
@@ -1395,7 +1399,10 @@ export const strings = {
     elapsed: 'Elapsed time',
     showTeam: 'View subagents',
     doneStatus: 'Completed',
-    stoppedStatus: 'Stopped'
+    stoppedStatus: 'Stopped',
+    failedStatus: 'Failed',
+    activeSection: 'Active',
+    finishedSection: 'Finished'
   },
 
   workflow: {

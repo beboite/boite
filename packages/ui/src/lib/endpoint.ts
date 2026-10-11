@@ -406,7 +406,13 @@ export const MAIN_STORAGE_KEY = 'boite.main';
  */
 export type MainMachine = { local: true } | { url: string; coreId?: string; groupId?: string };
 
+/**
+ * The desktop app always opens on the machine shown last: it starts its own
+ * core and the owner switches machines from the sidebar. A choice an earlier
+ * version saved there counts for nothing.
+ */
 export function readMainMachine(): MainMachine | null {
+  if (insideTauri()) return null;
   try {
     const parsed: unknown = JSON.parse(window.localStorage.getItem(MAIN_STORAGE_KEY) ?? 'null');
     if (typeof parsed !== 'object' || parsed === null) return null;
