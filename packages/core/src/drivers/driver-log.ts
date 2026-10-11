@@ -67,6 +67,11 @@ export function noteReady<T>(
     // A driver that must throw on a stop marks the error, so a normal stop is no warning.
     if ((error as { abandoned?: unknown } | null)?.abandoned === true || stopped()) { abandoned(); throw error; }
     const elapsed = Date.now() - at;
+    // A stored session the agent no longer has: the turn starts a new one, so this is lifecycle.
+    if ((error as { sessionLost?: unknown } | null)?.sessionLost === true) {
+      ctx.diagnostic?.('info', `${agent} no longer has the stored session (${error instanceof Error ? error.message : String(error)}); the turn starts a new one`, { event: 'driver.session.lost', durationMs: elapsed, data: { resume } });
+      throw error;
+    }
     ctx.diagnostic?.('warn', `${agent} session failed to open after ${elapsed} ms: ${error instanceof Error ? error.message : String(error)}`, { event: 'driver.session.open-failed', durationMs: elapsed, data: { resume, code: errorCodeOf((error as { code?: unknown } | null)?.code) } });
     throw error;
   };

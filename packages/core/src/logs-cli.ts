@@ -36,7 +36,8 @@ export const LOGS_HELP = `boite logs: Boite's own diagnostics (the app, its shel
                                  prefilled link; an agent gets the link, the user submits it
 
 Each line: time (UTC), level, origin, source/event, [thread provider/model <parent turn=],
-(duration), message, {data}. Ids are real and grep-able across lines.`;
+(duration), message, {data}. Ids are real and grep-able across lines.
+A value that starts with -- goes after an equals sign: --search=--verbose.`;
 
 type Printer = (lines: string[], value: unknown) => void;
 
@@ -72,10 +73,20 @@ function flags(args: string[]): { positional: string[]; flags: LogFlags } {
   const result: LogFlags = { mine: false, anonymize: false, noLogs: false };
   const positional: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index]!;
+    let arg = args[index]!;
+    // `--search=--verbose`: the one way to pass a value that starts with dashes.
+    let inline: string | undefined;
+    const equals = arg.startsWith('--') ? arg.indexOf('=') : -1;
+    if (equals > 2) { inline = arg.slice(equals + 1); arg = arg.slice(0, equals); }
+    let took = false;
     const next = (): string => {
+      took = true;
+      if (inline !== undefined) {
+        if (inline === '') throw new Usage(`${arg} needs a value`);
+        return inline;
+      }
       const value = args[index + 1];
-      if (value === undefined || value.startsWith('--')) throw new Usage(`${arg} needs a value`);
+      if (value === undefined || value.startsWith('--')) throw new Usage(`${arg} needs a value; write ${arg}=<value> for one that starts with --`);
       index += 1;
       return value;
     };
@@ -106,6 +117,7 @@ function flags(args: string[]): { positional: string[]; flags: LogFlags } {
     else if (arg === '--no-logs') result.noLogs = true;
     else if (arg.startsWith('--')) throw new Usage(`unknown flag ${arg}; boite logs help lists them`);
     else positional.push(arg);
+    if (inline !== undefined && !took) throw new Usage(`${arg} takes no value`);
   }
   return { positional, flags: result };
 }

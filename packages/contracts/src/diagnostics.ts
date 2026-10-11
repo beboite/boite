@@ -690,8 +690,8 @@ export function validateDiagnosticReport(raw: unknown, secrets: readonly string[
       level: level(value.level, `${field}.level`), at: timestamp(value.at, `${field}.at`),
       // Chosen by the client like the message: redacted too, then bounded.
       source: normalizeCoreLogText(plainText(value.source, `${field}.source`, 60), secrets).slice(0, 60), event: normalizeCoreLogText(plainText(value.event, `${field}.event`, 100), secrets).slice(0, 100),
-      // Whole: the core redacts its secrets before it bounds the text, so a cut never splits one.
-      message: typeof value.message === 'string' && value.message.length > 0 && value.message.length <= REPORT_MESSAGE_CHARS ? value.message : (() => { throw new Error(`${field}.message: expected 1 to ${REPORT_MESSAGE_CHARS} characters`); })(),
+      // The secrets go here already; the store's own pass bounds the text later, so a cut never splits one.
+      message: typeof value.message === 'string' && value.message.length > 0 && value.message.length <= REPORT_MESSAGE_CHARS ? secrets.reduce((text, secret) => secret.length > 0 ? text.split(secret).join('[redacted]') : text, value.message) : (() => { throw new Error(`${field}.message: expected 1 to ${REPORT_MESSAGE_CHARS} characters`); })(),
     };
     if (value.threadId !== undefined) record.threadId = plainText(value.threadId, `${field}.threadId`);
     if (value.durationMs !== undefined) {

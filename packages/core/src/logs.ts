@@ -329,7 +329,8 @@ export class DiagnosticLogs {
         }
         (await this.read(this.path(index), 'core', keep)).forEach((record, line) => { if (!records.has(record.id)) place(record, (LOG_FILE_COUNT - index) * LINES_PER_FILE + line); });
       }
-      for (let index = 0; index < SHELL_LOG_FILE_COUNT; index += 1) (await this.read(this.shellPath(index), 'shell', keep)).forEach((record, line) => place(record, (SHELL_LOG_FILE_COUNT - index) * LINES_PER_FILE + line));
+      // Bands below the core's, so a shell and a core record of the same millisecond always sort the same way.
+      for (let index = 0; index < SHELL_LOG_FILE_COUNT; index += 1) (await this.read(this.shellPath(index), 'shell', keep)).forEach((record, line) => place(record, -(index + 1) * LINES_PER_FILE + line));
       result = sortNewest([...records.values()], record => rank.get(record.id) ?? 0).slice(0, limit);
     }).catch(error => { this.failure(error); result = sortNewest(fromMemory()).slice(0, limit); });
     await this.writing;

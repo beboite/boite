@@ -185,7 +185,11 @@ GitHub owner and repository other than Boite's own `<owner:xxxxxx>` and
 `<repo:xxxxxx>`. `xxxxxx` is a hash
 salted with `<dataDir>/logs/anonymize.salt`, so one machine's exports agree
 with each other and differ from another machine's. Thread, turn and run ids,
-versions, times and loopback addresses stay readable.
+versions, times and loopback addresses stay readable. A path is replaced
+whatever the name; a bare name is replaced only when it is not an everyday word
+of the logs (`server`, `demo`, `admin`, `app` and the rest of `COMMON_WORDS`),
+because replacing such a word everywhere would erase the logs' own vocabulary.
+A project named `demo` keeps that word in free text.
 
 ### Reading them
 

@@ -165,6 +165,10 @@ test('a session open that throws before its first await is logged as a failure, 
   await expect(noteReady(ctx, 'Codex app-server', () => Promise.reject(new Error('spawn codex ENOENT')), undefined, () => false)).rejects.toThrow('ENOENT');
   expect(notes).toMatchObject([{ level: 'warn', event: 'driver.session.open-failed' }]);
   notes.length = 0;
+  // A stored thread the agent no longer has is a resume miss the turn recovers from.
+  await expect(noteReady(ctx, 'Codex app-server', () => Promise.reject(Object.assign(new Error('thread not found'), { sessionLost: true })))).rejects.toThrow('thread not found');
+  expect(notes).toMatchObject([{ level: 'info', event: 'driver.session.lost' }]);
+  notes.length = 0;
   await noteReady(ctx, 'pi', () => { const until = Date.now() + 30; while (Date.now() < until) { /* synchronous setup */ } return Promise.resolve(); }, () => ({ text: ', on gpt', data: { model: 'gpt' } }));
   expect(notes[0]).toMatchObject({ level: 'info', event: 'driver.session.ready' });
   expect(notes[0]!.durationMs).toBeGreaterThanOrEqual(25);

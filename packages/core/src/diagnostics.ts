@@ -365,9 +365,12 @@ export class Diagnostics {
       // A client clock can be wrong; keep its time only when it is near ours.
       const at = Math.abs(record.at - now) < 10 * 60_000 ? record.at : now;
       // A reporter names a thread; only one that exists is kept, so no client can file problems under an invented one.
-      // A paired device files problems only under a thread it has open, as its other reads are scoped.
+      // A paired device files problems only under a thread it has open, as its other reads are scoped;
+      // an agent (refused this method by the router today) only under its own.
       const known = record.threadId && this.core.journal.getThread(record.threadId) ? record.threadId : undefined;
-      const threadId = known && connection.identity.principal === 'session' && !connection.subscriptions.has(known) ? undefined : known;
+      const principal = connection.identity.principal;
+      const allowed = principal === 'owner' || (principal === 'session' ? connection.subscriptions.has(known ?? '') : known === connection.identity.threadId);
+      const threadId = known && allowed ? known : undefined;
       this.core.logs.record(record.level, record.message, {
         origin: 'ui', source: record.source, event: record.event, ...(threadId ? { threadId } : {}),
         ...(record.durationMs === undefined ? {} : { durationMs: record.durationMs }),

@@ -483,7 +483,8 @@ boite logs help
 ```
 
 Filters: `--limit` (default 100), `--min-level` (default `info`), `--since`
-(`30m`, `2h`, `1d` or a date), `--origin core|shell|ui`, `--search`. Owner
+(`30m`, `2h`, `1d` or a date), `--origin core|shell|ui`, `--search`. A value
+that starts with `--` goes after an equals sign: `--search=--verbose`. Owner
 only: `--level` (exact), `--turn` and `--anonymize`, plus the global `--thread`
 to read one conversation. Agent only:
 `--mine`, the thread and the threads it started without the records about no

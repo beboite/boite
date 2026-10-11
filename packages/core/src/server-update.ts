@@ -48,8 +48,10 @@ export class ServerUpdates {
     this.state = { ...this.state, ...patch };
     // Each phase once, not each download tick; checking and current are the routine poll.
     if (this.state.phase !== was && !['checking', 'current'].includes(this.state.phase)) {
-      this.core.logs.record(this.state.phase === 'error' ? 'warn' : 'info', `Server update ${was} -> ${this.state.phase}: ${this.state.currentVersion} to ${this.state.version ?? 'unknown'} (${this.state.mode}, ${this.state.channel})${this.state.error ? `: ${this.state.error}` : ''}`, {
-        source: 'updates', event: `server-update.${this.state.phase}`, data: { from: was, phase: this.state.phase, mode: this.state.mode, current: this.state.currentVersion, version: this.state.version, channel: this.state.channel, totalBytes: this.state.total },
+      // The version comes from the network and the error can hold a command's stderr: one line each, so neither forges a record.
+      const line = (value: string, max: number): string => value.replace(/[\r\n\u2028\u2029]+/g, ' | ').replace(/[\p{C}]/gu, '').trim().slice(0, max);
+      this.core.logs.record(this.state.phase === 'error' ? 'warn' : 'info', `Server update ${was} -> ${this.state.phase}: ${this.state.currentVersion} to ${this.state.version ? line(this.state.version, 80) : 'unknown'} (${this.state.mode}, ${this.state.channel})${this.state.error ? `: ${line(this.state.error, 500)}` : ''}`, {
+        source: 'updates', event: `server-update.${this.state.phase}`, data: { from: was, phase: this.state.phase, mode: this.state.mode, current: this.state.currentVersion, version: this.state.version, channel: this.state.channel, totalBytes: this.state.total, error: this.state.error ?? null },
       });
     }
     this.core.bus.emit('core.updateChanged', this.snapshot());

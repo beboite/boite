@@ -48,7 +48,8 @@ import { errorCodeOf, httpStatusOf, noteReady } from '../driver-log.ts';
 const MISSING_THREAD = /no rollout found for (?:thread|conversation) id|thread not found: /i;
 
 /** `thread/resume` refused a thread the agent no longer has. */
-class ThreadLostError extends Error {}
+/** `sessionLost` tells `noteReady` this is a resume miss the turn recovers from, not a failed open. */
+class ThreadLostError extends Error { readonly sessionLost = true; }
 
 /** `hook/completed` statuses as the ledger counts them; `running` is not an end. */
 const HOOK_OUTCOMES: Record<string, HookOutcome> = {
