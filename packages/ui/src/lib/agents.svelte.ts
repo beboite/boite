@@ -211,6 +211,8 @@ export function attentionOf(snapshot: AgentsSnapshot, threads: Store['threads'])
   };
 }
 
+const VIEWS = new WeakMap<Store, AgentsView>();
+
 /** One view controller per owning Store. No renderer owns an execution. */
 export class AgentsView {
   snapshot = $state.raw<AgentsSnapshot | null>(null);
@@ -243,18 +245,49 @@ export class AgentsView {
   private loading: Promise<void> | null = null;
   private client: Store['client'] = null;
   private off: (() => void) | null = null;
+  /** The page is on screen: changes refresh the snapshot. Off screen the last one is kept for the next visit. */
+  private shown = false;
   constructor(readonly store: Store) {}
+  /**
+   * The view of this store, kept between visits: the page draws the last
+   * snapshot at once and refreshes it, instead of starting from "loading".
+   */
+  static of(store: Store): AgentsView {
+    let view = VIEWS.get(store);
+    if (!view) { view = new AgentsView(store); VIEWS.set(store, view); }
+    return view;
+  }
   start(): void {
+    this.shown = true;
+    // A failure of an earlier visit is not news on this one.
+    this.error = '';
+    // A visit starts from one bounded snapshot, drawn at once, not from every
+    // record an earlier visit paged in or saw created.
+    this.forgetHistory();
+    if (this.snapshot) this.seen = absorb(EMPTY, this.snapshot);
+    this.listen();
     void this.refresh();
+  }
+  private forgetHistory(): void {
+    this.seen = EMPTY; this.older = {}; this.tried.clear(); this.kinds.clear();
+    for (const kind of Object.keys(this.generation) as AgentHistoryKind[]) this.generation[kind]++;
+  }
+  /** Off screen: no snapshot is fetched for changes nobody sees. */
+  pause(): void {
+    this.shown = false;
+    this.off?.(); this.off = null;
+  }
+  private listen(): void {
+    if (this.off || !this.shown) return;
+    this.off = this.client?.on('agents.changed', () => { void this.refresh(); }) ?? null;
   }
   refresh(): Promise<void> {
     if (this.disposed) return Promise.resolve();
     if (this.client !== this.store.client) {
-      this.off?.();
+      this.off?.(); this.off = null;
       this.client = this.store.client;
-      this.seen = EMPTY; this.older = {}; this.tried.clear(); this.kinds.clear();
-      for (const kind of Object.keys(this.generation) as AgentHistoryKind[]) this.generation[kind]++;
-      this.off = this.client?.on('agents.changed', () => { void this.refresh(); }) ?? null;
+      this.forgetHistory();
+      this.listen();
     }
     this.dirty = true;
     if (!this.loading) this.loading = this.load().finally(() => { this.loading = null; });

@@ -4,7 +4,7 @@ import { removeDir } from '../fs-retry.ts';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Core } from '../core.ts';
-import { forgetProbes, probeModels, rememberExternalModels } from '../drivers/index.ts';
+import { forgetProbes, probedModelsOf, probeModels, refreshProbes, rememberExternalModels, settleRefresh } from '../drivers/index.ts';
 import { mergeProxyModels, readSubscriptionProxyModels } from '../subscription-proxy.ts';
 import { invalidParams, refused, unavailable } from '../errors.ts';
 import { logMessageOf } from '../log-errors.ts';
@@ -21,12 +21,17 @@ export function probeThreadId(providerId: ProviderId, accountId: AccountId): Thr
  * Claude, ACP, Codex and pi list models through one temporary process.
  * Echo uses its descriptor. The probe's empty working directory
  * keeps project instructions and the core's journal outside that session.
+ *
+ * The caller is answered as soon as the models are read. Stopping the process
+ * and removing its directory, up to a second more for Claude, land in
+ * `cleanups`: the account's next probe waits for them, the picker does not.
  */
 async function probeProvider(
   core: Core,
   providerId: ProviderId,
   accountId: AccountId,
   isCurrent: () => boolean,
+  cleanups: Promise<void>[],
   model?: string,
 ): Promise<RpcResult<'providers.probe'>> {
   const provider = core.providers.require(providerId);
@@ -52,7 +57,7 @@ async function probeProvider(
     // as a subscription would: effort scale, speed tiers, names. The gateway
     // only adds the models it routes beyond that list.
     let native: ModelInfo[] = [];
-    try { native = (await probeNative(core, provider, account.id, model)).models; }
+    try { native = (await probeNative(core, provider, account.id, cleanups, model)).models; }
     catch (error) { core.logs.record('warn', logMessageOf(error), { source: provider.id, event: 'provider.probeFailed', threadId: probeThreadId(provider.id, account.id) }); }
     if (!isCurrent()) throw refused('the subscription proxy changed during discovery; refresh models');
     const models = mergeProxyModels(native, proxyModels);
@@ -62,7 +67,7 @@ async function probeProvider(
     return { models, probedAt };
   }
   try {
-    const { models, probedAt } = await probeNative(core, provider, account.id, model);
+    const { models, probedAt } = await probeNative(core, provider, account.id, cleanups, model);
     core.accounts.require(account.id);
     if (!isCurrent()) throw refused('the provider or account changed during discovery; refresh models');
     core.bus.emit('providers.probed', { providerId: provider.id, accountId: account.id, models, probedAt });
@@ -73,11 +78,15 @@ async function probeProvider(
   }
 }
 
-/** One temporary agent process lists its models; every path stops it and removes its directory. */
+/**
+ * One temporary agent process lists its models; every path stops it and
+ * removes its directory, in a cleanup pushed to `cleanups` rather than awaited.
+ */
 async function probeNative(
   core: Core,
   provider: ReturnType<Core['providers']['require']>,
   accountId: AccountId,
+  cleanups: Promise<void>[],
   model?: string,
 ): Promise<{ models: ModelInfo[]; probedAt: number }> {
   const account = core.accounts.require(accountId);
@@ -122,6 +131,10 @@ async function probeNative(
     });
     return { models, probedAt };
   } finally {
+    cleanups.push(cleanup());
+  }
+
+  async function cleanup(): Promise<void> {
     // A descendant can hold the directory after the direct child closed. Neither
     // waiting for it nor removing the directory may replace the models just read.
     await core.procs.stopAndWait(threadId).catch((error: unknown) => core.log('warn', `probing ${provider.id}: ${error instanceof Error ? error.message : String(error)}`, cleanupContext));
@@ -158,29 +171,45 @@ export function registerProbeMethods(core: Core): ProviderProbe {
     accountRevisions.set(accountId, accountRevision(accountId) + 1);
   };
   const pending = new Map<string, Promise<RpcResult<'providers.probe'>>>();
+  /** When each account's list was last read, for an answer served from the cache. */
+  const answered = new Map<string, RpcResult<'providers.probe'>>();
   /** The last probe of each provider and account, settled or not: the next one waits for it. */
   const lanes = new Map<string, Promise<void>>();
   const probe: ProviderProbe = (params) => {
     if (params.model !== undefined && (typeof params.model !== 'string' || params.model.length === 0)) {
       throw invalidParams('model must be a non-empty string when given', { field: 'model', expected: 'a non-empty string' });
     }
+    // A list already read starts no process, so it waits neither for a probe
+    // of this account that is still exiting nor for a refresh still reading:
+    // the list a refresh keeps is the one model checks accept meanwhile.
+    const lane = JSON.stringify([params.providerId, params.accountId]);
+    const known = answered.get(lane);
+    if (!params.refresh && params.model === undefined && known !== undefined) {
+      const models = probedModelsOf(core.providers.require(params.providerId).protocol, params.providerId, params.accountId);
+      if (models !== null) return Promise.resolve({ models, probedAt: known.probedAt });
+    }
     const key = JSON.stringify([params.providerId, params.accountId, params.model ?? null]);
     const existing = pending.get(key);
     if (existing) return existing;
     // One probe at a time per account: they share a synthetic thread, so the
     // `killTree` that ends one would take a second one's process with it, and a
-    // refresh would drop the cache entry the other is still filling.
-    const lane = JSON.stringify([params.providerId, params.accountId]);
+    // refresh would drop the cache entry the other is still filling. The lane
+    // holds until the process has exited; the caller is answered before that.
     const before = lanes.get(lane) ?? Promise.resolve();
+    const cleanups: Promise<void>[] = [];
     const request = before.then(() => {
-      if (params.refresh) forgetProbes({ providerId: params.providerId, accountId: params.accountId });
+      const protocol = core.providers.require(params.providerId).protocol;
+      if (params.refresh) refreshProbes(protocol, params.providerId, params.accountId);
       const startedAtRevision = revision;
       const startedAtAccount = accountRevision(params.accountId);
       const isCurrent = () => revision === startedAtRevision && accountRevision(params.accountId) === startedAtAccount;
-      return probeProvider(core, params.providerId, params.accountId, isCurrent, params.model);
+      const answer = probeProvider(core, params.providerId, params.accountId, isCurrent, cleanups, params.model);
+      if (params.refresh) void answer.then(() => settleRefresh(params.providerId, params.accountId), () => undefined);
+      if (params.model === undefined) void answer.then((result) => { if (isCurrent()) answered.set(lane, result); }, () => undefined);
+      return answer;
     }).finally(() => pending.delete(key));
     pending.set(key, request);
-    const settled = request.then(() => undefined, () => undefined);
+    const settled = request.then(() => undefined, () => undefined).then(() => Promise.all(cleanups)).then(() => undefined, () => undefined);
     lanes.set(lane, settled);
     void settled.then(() => {
       if (lanes.get(lane) === settled) lanes.delete(lane);

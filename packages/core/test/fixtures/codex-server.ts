@@ -553,10 +553,13 @@ function handle(method: string, raw: unknown): unknown {
         notify('account/login/completed', { loginId: 'fake-login', success: true, error: null });
       }, 200);
       return { type: 'chatgptDeviceCode', loginId: 'fake-login', verificationUrl: 'https://example.invalid/device', userCode: 'TEST-CODE' };
-    case 'model/list':
+    case 'model/list': {
       log('model/list');
       // One page, and a null cursor: the driver stops asking on that.
-      return { data: MODELS, nextCursor: null };
+      const slow = Number(process.env['CODEX_FAKE_SLOW_MODELS'] ?? '0');
+      const page = { data: MODELS, nextCursor: null };
+      return slow > 0 ? new Promise((resolve) => setTimeout(() => resolve(page), slow)) : page;
+    }
     case 'thread/start': {
       planEnabled = (params['config'] as Record<string, unknown> | undefined)?.['tools.update_plan.enabled'] === true;
       threadCounter += 1;
@@ -660,6 +663,10 @@ function handle(method: string, raw: unknown): unknown {
       throw new Error(`the fake codex server does not implement ${method}`);
   }
 }
+
+// An agent that takes its time to shut down, the way a real CLI does.
+const slowExit = Number(process.env['CODEX_FAKE_SLOW_EXIT'] ?? '0');
+if (slowExit > 0) process.on('SIGTERM', () => setTimeout(() => process.exit(0), slowExit));
 
 let buffer = '';
 process.stdin.setEncoding('utf8');

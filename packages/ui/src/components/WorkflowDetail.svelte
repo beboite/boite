@@ -40,8 +40,10 @@
   });
   onDestroy(() => { void store.selectDelegatedAgent(null); });
 
+  // The step leaves the panel at once; its subscription stays for the open,
+  // whose subscribe and read go out in the same burst.
   async function openThread(threadId: string): Promise<void> {
-    await store.selectDelegatedAgent(null);
+    void store.selectDelegatedAgent(null, threadId);
     await store.open(threadId);
   }
 </script>

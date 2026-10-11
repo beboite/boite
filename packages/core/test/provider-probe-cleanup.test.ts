@@ -4,7 +4,7 @@ import { RpcErrorCode, type ModelInfo } from '@boite/contracts';
 import { getDriver, setDriver } from '../src/drivers/index.ts';
 import { unavailable } from '../src/errors.ts';
 import { probeThreadId } from '../src/providers/probe.ts';
-import { startTestCore } from './harness.ts';
+import { startTestCore, waitFor } from './harness.ts';
 
 const models: ModelInfo[] = [{ id: 'scripted', name: 'Scripted', default: true, effort: { levels: [{ id: 'low', label: 'Low' }, { id: 'high', label: 'High' }], default: 'high' } }];
 const result = { models, probedAt: 1700000000000 };
@@ -80,11 +80,12 @@ test.each(['success', 'failure', 'account change'] as const)('a probe preserves 
       : { code: RpcErrorCode.Refused, message: 'the provider or account changed during discovery; refresh models' } } });
     expect(retried).toEqual(result);
     expect(reads).toBe(2);
-    expect(harness.core.procs.liveCount(threadId)).toBe(0);
-    expect(harness.core.providers.installs.leaseCount('echo')).toBe(0);
     expect(closeListeners).toHaveLength(2);
     expect(directories).toHaveLength(2);
-    expect(directories.every(directory => !existsSync(directory))).toBe(true);
+    // The answer leaves before the cleanup; the cleanup still ends within its grace.
+    await within(waitFor(() => harness.core.procs.liveCount(threadId) === 0
+      && harness.core.providers.installs.leaseCount('echo') === 0
+      && directories.every(directory => !existsSync(directory))), 'the probe cleanup did not finish after its answer');
     await within(harness.stop(), 'a completed probe cleanup blocked core shutdown');
   } finally {
     // Release held notifications on failure so the old implementation can also tear down.

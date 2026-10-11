@@ -36,7 +36,7 @@
   import { hostLocalAgentBrowser } from './lib/agent-browser-host.svelte';
   import type { Store } from './lib/store.svelte';
   import { tourRequested, tourSeen } from './lib/onboarding.svelte';
-  import { prefetchAllowed, prefetchNames, whenIdle } from './lib/prefetch';
+  import { prefetchAllowed, prefetchNames, warmPages, whenIdle } from './lib/prefetch';
   import { startTheme } from './lib/theme';
   import { setZoom, stepZoom, wantedZoom, ZOOM_DEFAULT, zoomKey } from './lib/zoom';
   import { appName, appUpdater } from './lib/app-update.svelte';
@@ -122,7 +122,7 @@
   // that can spare the bytes (lib/prefetch.ts).
   $effect(() => {
     if (!store.booted || !prefetchAllowed()) return;
-    return whenIdle(needAll);
+    return whenIdle(() => { needAll(); warmPages(store, experimentOn('resident-agents')); });
   });
   let WhipOverlay = $state<typeof import('./components/WhipOverlay.svelte').default>();
   $effect(() => {

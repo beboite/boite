@@ -78,6 +78,13 @@
       const provider = owner.providerOf(instance.providerId);
       if (!provider) return;
       const native = ['claude-sdk', 'acp', 'codex-appserver', 'muse', 'pi', 'agy'].includes(provider.protocol);
+      // A row from a list the core already gave lands now: a refresh still
+      // reading behind it changes nothing, and the core keeps that list meanwhile.
+      if (requested !== undefined && (!native || owner.catalogHas(instance.providerId, instance.accountId, requested))) {
+        apply({ ...instance, model: requested });
+        if (close) popover.hide();
+        return;
+      }
       if (native) await owner.probeModels(instance.providerId, instance.accountId);
       if (!current()) return;
       const models = owner.modelsOf(instance.providerId, instance.accountId);
@@ -91,6 +98,11 @@
       apply({ ...instance, model });
       if (close) popover.hide();
     } finally { if (epoch === pickEpoch) pickPending = false; }
+  }
+
+  /** The agent owns its list, so the core only accepts a model it read from it. */
+  function agentListed(protocol: string | undefined): boolean {
+    return protocol === 'claude-sdk' || protocol === 'acp' || protocol === 'codex-appserver' || protocol === 'muse' || protocol === 'pi' || protocol === 'agy';
   }
 
   function pickFavorite(entry: FavoriteModel) {
@@ -142,7 +154,7 @@
   // Nothing is asked of a provider whose executable is not on the machine.
   $effect(() => {
     if (!popover.open || favoritesOpen || !shown || needsInstall) return;
-    if (shown.protocol !== 'claude-sdk' && shown.protocol !== 'acp' && shown.protocol !== 'codex-appserver' && shown.protocol !== 'muse' && shown.protocol !== 'pi' && shown.protocol !== 'agy') return;
+    if (!agentListed(shown.protocol)) return;
     const accountId = shownAccountId;
     if (accountId === null) return;
     void store.probeModels(shown.id, accountId);
