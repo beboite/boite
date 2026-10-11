@@ -31,7 +31,7 @@ import { DEVICE_LINK_JOIN, GRANT_TTL_MS, GROUP_MAX_CORES, GROUP_TICKET_TTL_MS, P
 import { deviceAdmitInput, deviceHelloInput, type CoordinationPeer, type DeviceHello, type DeviceInvite, type Group, type GroupDevice, type GroupInvite, type GroupTicket, type PairingRole, type Principal } from '@boite/contracts';
 import { boundedBody, MAX_BODY, PeerGone } from './coordination-wire.ts';
 import type { Core } from './core.ts';
-import { invalidParams, messageOf, refused, RpcFailure, unauthorized } from './errors.ts';
+import { invalidParams, messageOf, refused, RpcFailure, unauthorized, unavailable } from './errors.ts';
 import { advertisedAddresses, probeTailnet, tailnetAddress, ticketAddresses, type Tailnet } from './group/addresses.ts';
 import { admissionInput, checkCard, checkRoster, clockOf, CORE_ENTRIES_MAX, DEVICE_ENTRIES_MAX, digestOf, fingerprint, homeOf, liveCores, liveDeviceKeys, liveDevices, memberOrigins, mergeRosters, groupName, peerOf } from './group/roster.ts';
 import { deviceAdmissionInput, deviceId, deviceKey, deviceSigned, SERVED_ORIGINS_MAX, type DeviceKeyEntry } from './group/device-keys.ts';
@@ -945,6 +945,10 @@ export class GroupStore {
     if (!deviceSigned(publicKey, deviceAdmitInput(grant, publicKey), offer.sig)) throw unauthorized('device.sig: expected the device\'s signature over the grant it redeems');
     const name = typeof offer.name === 'string' ? offer.name.slice(0, 100) : client.name;
     const id = deviceId(publicKey);
+    // Before the grant is spent: a removed key gets a refusal that leaves the code good for the key the app makes next.
+    if (this.roster?.deviceKeys?.some((device) => device.id === id && device.removed)) {
+      throw unauthorized('this device was removed from the group: it needs a new key, which the app makes when it is added again');
+    }
     let role: PairingRole;
     try {
       role = this.core.sessions.redeem(grant, id, nonce);
@@ -1006,20 +1010,23 @@ export class GroupStore {
    * record of the device: its last visit, its push destination, its sockets.
    */
   authenticateDevice(hello: unknown, client: ClientIdentity, now = Date.now()): { sessionId: string; role: PairingRole; deviceId: string } {
+    // Unauthorized says the device is out for good, and the app drops its key on it. A device this machine has not
+    // heard of yet, its roster behind the member that admitted it, is told to come back; so is a clock that is off.
     const roster = this.roster;
-    if (roster === null) throw unauthorized('this machine belongs to no group, so it knows no device key');
     const raw = (typeof hello === 'object' && hello !== null ? hello : {}) as Partial<DeviceHello>;
-    const entry = typeof raw.id === 'string' ? liveDeviceKeys(roster).find((device) => device.id === raw.id) : undefined;
-    if (entry === undefined) throw unauthorized('this device is not in the group, or was removed from it');
+    const known = typeof raw.id === 'string' ? roster?.deviceKeys?.find((device) => device.id === raw.id) : undefined;
+    if (roster === null || known === undefined) throw unavailable('this machine has not heard of this device yet: its group tells it within seconds');
+    const entry = liveDeviceKeys(roster).find((device) => device === known);
+    if (entry === undefined) throw unauthorized('this device was removed from the group');
     if (typeof raw.at !== 'number' || Math.abs(now - raw.at) > DEVICE_HELLO_SKEW_MS) {
-      throw unauthorized('the device hello is dated more than two minutes from this machine\'s clock');
+      throw refused('the device hello is dated more than two minutes from this machine\'s clock: set the clock of this device or that machine');
     }
-    if (typeof raw.nonce !== 'string' || raw.nonce.length < 16 || raw.nonce.length > 64) throw unauthorized('device.nonce: expected 16 to 64 characters');
+    if (typeof raw.nonce !== 'string' || raw.nonce.length < 16 || raw.nonce.length > 64) throw refused('device.nonce: expected 16 to 64 characters');
     if (!deviceSigned(entry.publicKey, deviceHelloInput(this.selfId(), raw.at, raw.nonce), raw.sig)) throw unauthorized('the device hello is not signed by its key for this machine');
     for (const [nonce, until] of this.deviceNonces) if (until <= now) this.deviceNonces.delete(nonce);
     const key = `${entry.id}:${raw.nonce}`;
-    if (this.deviceNonces.has(key)) throw unauthorized('this device hello was already used');
-    if (this.deviceNonces.size >= DEVICE_NONCES_MAX) throw unauthorized('too many device hellos at once: try again in a minute');
+    if (this.deviceNonces.has(key)) throw refused('this device hello was already used');
+    if (this.deviceNonces.size >= DEVICE_NONCES_MAX) throw unavailable('too many device hellos at once: try again in a minute');
     this.deviceNonces.set(key, raw.at + DEVICE_HELLO_SKEW_MS * 2);
     return { sessionId: this.deviceSession(entry, client, now), role: entry.role, deviceId: entry.id };
   }

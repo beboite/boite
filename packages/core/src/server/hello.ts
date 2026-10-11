@@ -2,7 +2,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { hostname } from 'node:os';
 import { CLIENT_DEVICE_MAX, PROTOCOL_VERSION, RpcCloseCode, RpcErrorCode, type SentFrom } from '@boite/contracts';
 import type { Core } from '../core.ts';
-import { messageOf } from '../errors.ts';
+import { messageOf, RpcFailure } from '../errors.ts';
 import { NONCE_MAX, NONCE_MIN, nonceProblem, principalOf, type Identity } from '../sessions.ts';
 import type { ServerConnection } from './connection.ts';
 
@@ -89,7 +89,10 @@ async function greet(core: Core, connection: ServerConnection, id: number | stri
         identity = { principal: principalOf(done.role), sessionId: done.sessionId, threadId: null };
       }
     } catch (error) {
-      refuse(messageOf(error), grant === null ? 'bad device signature' : 'bad grant');
+      // Only a removal is Unauthorized: a device not heard of yet, or a clock that is off, is said with its own code.
+      const code = error instanceof RpcFailure && grant === null ? error.code : RpcErrorCode.Unauthorized;
+      connection.sendResponse({ jsonrpc: '2.0', id, error: { code, message: messageOf(error) } });
+      connection.close(RpcCloseCode.Unauthorized, grant === null ? 'bad device signature' : 'bad grant');
       return;
     }
   } else if (ticket !== null && token === null && grant === null) {

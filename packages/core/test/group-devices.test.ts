@@ -76,8 +76,11 @@ test('a phone added on one member says hello on every member with one key, and o
   b.core.group.revokeDevice(deviceId);
   await waitFor(() => a.core.group.view('owner')?.devices.length === 0);
   await waitFor(() => a.core.journal.listSessions().length === 0);
-  await expect(open(a.url, { device: helloFor(phone, deviceId, id(a)) })).rejects.toThrow('not in the group');
-  await expect(open(b.url, { device: helloFor(phone, deviceId, id(b)) })).rejects.toThrow('not in the group');
+  await expect(open(a.url, { device: helloFor(phone, deviceId, id(a)) })).rejects.toThrow('removed from the group');
+  await expect(open(b.url, { device: helloFor(phone, deviceId, id(b)) })).rejects.toThrow('removed from the group');
+  // A device a machine never heard of is told to come back, never that it was removed.
+  const stranger = phoneKey();
+  await expect(open(a.url, { device: helloFor(stranger, 'f'.repeat(64), id(a)) })).rejects.toThrow('has not heard of this device yet');
 });
 
 test('a code drawn on one member is typed on another and still admits the phone', async () => {
@@ -108,7 +111,7 @@ test('a phone paired the older way hands over its key and keeps both until revok
   clients.push(await connect(b.url, '', { device: helloFor(phone, enrolled.id, id(b)) }));
   // Revoked on b: the older pairing it took over is revoked with it.
   b.core.group.revokeDevice(enrolled.id);
-  await expect(connect(b.url, '', { device: helloFor(phone, enrolled.id, id(b)) })).rejects.toThrow('not in the group');
+  await expect(connect(b.url, '', { device: helloFor(phone, enrolled.id, id(b)) })).rejects.toThrow('removed from the group');
 });
 
 test('a machine alone with its phones joins a group and brings them', async () => {

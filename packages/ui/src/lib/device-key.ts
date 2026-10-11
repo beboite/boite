@@ -119,6 +119,15 @@ export async function deviceKey(): Promise<DeviceKey> {
   return current;
 }
 
+/**
+ * The group removed this device: its key opens nothing any more and is never
+ * admitted again, so it goes, and the next admission makes a new one.
+ */
+export function dropDeviceKey(): void {
+  try { localStorage.removeItem(DEVICE_STORAGE_KEY); } catch { /* storage refused */ }
+  current = null;
+}
+
 /** Another window made or replaced the key: read it again. */
 export function forgetLoadedKey(): void {
   current = null;

@@ -157,7 +157,7 @@
   {/if}
 
     <!-- A device of a group has nothing to add: its group brings every machine. One that reaches none adds itself here. -->
-    {#if !groupStore.owner && !workspace.machines.some(machine => machine.store.connection === 'ready')}<PairMachine {mobile} bind:this={pairingForm} />{/if}
+    {#if window.__TAURI_INTERNALS__ === undefined && groupStore.principal !== 'owner' && !workspace.machines.some(machine => machine.store.connection === 'ready')}<PairMachine {mobile} bind:this={pairingForm} />{/if}
     {#each groupStores as owner (owner.group?.id ?? 'ungrouped')}
     <GroupCard store={owner} {mobile} migration={owner === groupStores[0] ? migration : undefined}>
     <div class="machines">

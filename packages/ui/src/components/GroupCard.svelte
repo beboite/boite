@@ -40,6 +40,8 @@
     });
   }
   let group = $derived(store.group);
+  /** The owner as the machine said at hello: before any answer, a page with no key is nobody's yet. */
+  let owner = $derived(store.owner && store.principal !== null);
   let members = $derived.by(() => {
     if (!group) return [];
     const self = group.self;
@@ -162,7 +164,7 @@
           <input bind:this={renameInput} bind:value={name} data-testid="group-rename" aria-label={strings.group.name} maxlength="80" disabled={busy === 'rename'}
             onblur={() => void rename()} onkeydown={(event) => { if (event.key === 'Escape') { event.preventDefault(); editing = false; } else if (event.key === 'Enter') { event.preventDefault(); void rename(); } }} />
         </form>
-      {:else if store.owner}
+      {:else if owner}
         <button class="ghost group-name" data-testid="group-rename-start" title={strings.group.rename} onclick={() => { name = group!.name; editingId = group!.id; editing = true; }}>{group.name}</button>
       {:else}{group.name}{/if}
       <InfoTip topic={strings.group.heading} text={strings.group.intro} />
@@ -181,7 +183,7 @@
               {#if core.addresses[0]}<span class="address">{core.addresses[0]}</span>{/if}
             </span>
             {#if state.label}<span class="status" class:ready={state.ready}>{state.label}</span>{/if}
-            {#if store.owner && core.coreId !== group.self}
+            {#if owner && core.coreId !== group.self}
               <button type="button" class="ghost icon-only" data-testid="group-member-remove" aria-label={strings.group.remove} title={strings.group.remove} onclick={() => void remove(core)}><Trash2 size={15} /></button>
             {/if}
           </div>
@@ -202,7 +204,7 @@
                 <span class="name">{deviceName(device)}{#if group.device === device.id}<span class="tag">{strings.group.thisDevice}</span>{/if}</span>
                 {#if note}<span class="address">{note}</span>{/if}
               </span>
-              {#if store.owner}
+              {#if owner}
                 <button type="button" class="ghost icon-only" data-testid="group-device-remove" aria-label={strings.group.revokeDevice} title={strings.group.revokeDevice} onclick={() => void revoke(device)}><Trash2 size={15} /></button>
               {/if}
             </div>
@@ -210,7 +212,7 @@
         {/each}
       </ul>
     {/if}
-    {#if store.owner}
+    {#if owner}
       {#if source && others.length > 0}
         <label class="sync">
           <input type="checkbox" data-testid="group-sync" checked={synced} disabled={targets.length === 0}
@@ -229,7 +231,7 @@
       {/if}
     {/if}
   </section>
-{:else if store.owner}
+{:else if owner}
   <section class="card group" class:mobile data-testid="group-card" id="settings-group">
     <h2>{strings.group.heading}<InfoTip topic={strings.group.heading} text={strings.group.intro} /></h2>
     {@render children?.()}
