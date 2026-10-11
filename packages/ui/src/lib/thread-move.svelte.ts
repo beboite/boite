@@ -94,6 +94,18 @@ function find(store: Store, threadId: ThreadId): ThreadSummary | null {
   return store.threads.find((t) => t.id === threadId) ?? (store.openThread?.id === threadId ? store.openThread : null);
 }
 
+/** The threads a move takes, the core's rule: an ordinary, kept conversation inside a project, not a sub-thread. */
+export type Movable = Pick<ThreadSummary, 'projectId' | 'parentThreadId' | 'agentSessionId' | 'archived' | 'incognito'>;
+
+/**
+ * Whether the thread can change project at all: a persistent agent's session
+ * and a thread outside any project have no project to leave, a sub-thread
+ * moves with its parent. Every menu and the drag read this one rule.
+ */
+export function canMove(thread: Movable): boolean {
+  return !thread.parentThreadId && !thread.agentSessionId && thread.projectId !== null && !thread.archived && !thread.incognito;
+}
+
 /**
  * Whether a sub-thread of this thread works. The core refuses the move then:
  * the parent's turn end is no moment to move a thread whose child still runs.

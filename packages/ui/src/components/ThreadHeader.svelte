@@ -2,16 +2,14 @@
   import AgentAvatar from './agents/AgentAvatar.svelte';
   import { stewardOfThread } from '../lib/steward-view';
   import { agentDirectory } from '../lib/agent-directory.svelte';
-  import { entrust, pickEntrustItem } from '../lib/thread-entrust';
+  import { entrust } from '../lib/thread-entrust';
   import { tick } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import { ArrowLeft, ChevronDown, FolderInput, GitBranch, Network, PanelRight, Search, SquareTerminal, UsersRound, VenetianMask } from '@lucide/svelte';
   import { focusOnMount } from '../lib/actions';
   import { contextMenu } from '../lib/context-menu.svelte';
-  import { archiveThread } from '../lib/archive';
-  import { deleteThread } from '../lib/thread-removal';
-  import { pendingLine, pickMoveItem } from '../lib/thread-move.svelte';
-  import { threadMenuItems } from '../lib/thread-menu';
+  import { pendingLine } from '../lib/thread-move.svelte';
+  import { pickThreadAction, threadMenuItems } from '../lib/thread-menu';
   import type { MenuItem } from '../lib/menu';
   import { fill, strings } from '../lib/strings';
   import { work } from '../lib/work-prefs.svelte';
@@ -93,19 +91,12 @@
     if (action === 'coordination') coordinationThreadId = open.id;
     else if (action === 'agents') store.panel.toggleKind('agents');
     else if (action === 'terminal') store.toggleTerminal();
-    else if (action === 'rename') beginRename();
-    else if (action === 'retitle') void store.retitle(open.id);
-    else if (action === 'pin') void store.pin(open.id, !open.pinned);
-    else if (action === 'copy') void store.copy(open.cwd);
     else if (action === 'find') {
       store.findOpen = true;
       store.findRequest += 1;
     }
-    // From a phone's sheet the picker hangs under the title; from a right-click, where that menu stood.
-    else if (pickMoveItem(store, open, action, document.querySelector<HTMLElement>('[data-testid="thread-menu-trigger"]'))) return;
-    else if (pickEntrustItem(store, open, action, document.querySelector<HTMLElement>('[data-testid="thread-menu-trigger"]'))) return;
-    else if (action === 'archive') void archiveThread(store, open.id);
-    else if (action === 'delete') void deleteThread(store, open);
+    // From a phone's sheet the pickers hang under the title; from a right-click, where that menu stood.
+    else pickThreadAction(store, open, action, { rename: beginRename, anchor: () => document.querySelector<HTMLElement>('[data-testid="thread-menu-trigger"]') });
   }
 
   function openTitleMenu(event: MouseEvent) {

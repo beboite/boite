@@ -49,9 +49,7 @@
   /** The clock the rows' times read: a minute's precision is all they show. */
   const now = $derived(minuteClock.now);
   let filter = $state<string | null>(null);
-  let machines = $derived(
-    workspace.machines.length ? workspace.machines : [{ id: 'local', label: strings.machines.local, store }]
-  );
+  let machines = $derived(workspace.machinesOr(store));
   /** One machine says nothing about where a thread runs: its icon only shows once there are two. */
   let multi = $derived(machines.length > 1);
   /** A filter on a machine that has since gone filters nothing, so the list never empties itself. */

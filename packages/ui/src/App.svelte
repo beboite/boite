@@ -362,7 +362,7 @@
   // every connected machine that wait on an answer or finished unread. The
   // installed app's icon badge carries the same count.
   $effect(() => {
-    const stores = workspace.machines.length ? workspace.machines.map((machine) => machine.store) : [store];
+    const stores = workspace.machinesOr(store).map((machine) => machine.store);
     const count = attentionCount(stores);
     const name = appName();
     document.title = count > 0 ? `(${count}) ${name}` : name;

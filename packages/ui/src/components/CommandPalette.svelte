@@ -44,7 +44,7 @@
 
   /** Every live thread, most recent first; the list cuts it to the recents until something is typed. */
   let threadItems = $derived.by((): PaletteItem[] =>
-    (workspace.machines.length ? workspace.machines : [{ id: '', label: '', store }]).flatMap(machine => [...machine.store.threads]
+    workspace.machinesOr(store).flatMap(machine => [...machine.store.threads]
       .filter((t) => !t.archived && !t.incognito)
       .map((t) => ({
         id: `thread:${machine.store.threadKey(t.id)}`,
@@ -139,7 +139,7 @@
   function threadOf(item: PaletteItem): ThreadSummary | null {
     if (item.kind !== 'thread') return null;
     const id = item.id.slice('thread:'.length);
-    const hosts = workspace.machines.length ? workspace.machines.map(m => m.store) : [store];
+    const hosts = workspace.machinesOr(store).map(m => m.store);
     for (const host of hosts) { const thread = host.threads.find(t => host.threadKey(t.id) === id); if (thread) return thread; }
     return null;
   }

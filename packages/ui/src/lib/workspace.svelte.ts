@@ -135,6 +135,14 @@ export class Workspace {
   #memberTap = 0;
   #lifecycle = 0;
 
+  /**
+   * The connected machines or, before the first connection, the one store the
+   * app runs on, under the id `local` that only the caller's own keys read.
+   */
+  machinesOr(store: Store): Machine[] {
+    return this.machines.length ? this.machines : [{ id: 'local', label: strings.machines.local, store }];
+  }
+
   #current(lifecycle: number): boolean {
     return lifecycle === this.#lifecycle;
   }

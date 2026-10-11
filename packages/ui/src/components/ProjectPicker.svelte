@@ -21,7 +21,7 @@
   let previous: HTMLElement | null = null;
   let target = $state<Store>();
   const selected = $derived(target ?? store);
-  const available = $derived(workspace.machines.length ? workspace.machines : [{ id: 'current', label: strings.connection.local, store }]);
+  const available = $derived(workspace.machinesOr(store));
   const machineName = $derived(available.find(m => m.store === selected)?.label ?? strings.connection.local);
   const machines = $derived([
     ...available.map(m => ({ id: m.id, label: m.label, active: m.store === selected })),

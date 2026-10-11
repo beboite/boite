@@ -3,26 +3,22 @@
   import WindowList from './WindowList.svelte';
   import MobileMenu from './MobileMenu.svelte';
   import ThreadHeader from './ThreadHeader.svelte';
-  import { Activity, ArrowLeft, ChevronDown, Ellipsis, FolderCog, MessageSquare, PencilLine, Pin, Plus, Radar, Search, X } from '@lucide/svelte';
+  import { Activity, ArrowLeft, ChevronDown, Ellipsis, FolderCog, MessageSquare, Plus, Radar, Search, X } from '@lucide/svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import MobileConnect from './MobileConnect.svelte';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import { fill, strings } from '../lib/strings';
-  import { agentLabel, projectName } from '../lib/format';
-  import { hasUnsentDraft } from '../lib/composer-queue';
+  import { projectName } from '../lib/format';
   import { mobileOverlay } from '../lib/mobile-history';
-  import { archiveThread } from '../lib/archive';
-  import { groupWorkingThread, markDone, recentPreferences } from '../lib/recent.svelte';
-  import { deleteThread } from '../lib/thread-removal';
-  import { pickMoveItem } from '../lib/thread-move.svelte';
-  import { threadMenuItems } from '../lib/thread-menu';
+  import { groupWorkingThread, recentPreferences } from '../lib/recent.svelte';
+  import { pickThreadAction, threadMenuItems } from '../lib/thread-menu';
   import { projectMenu } from '../lib/project-menu';
   import type { MenuItem } from '../lib/menu';
   import type { ThreadSummary } from '@boite/contracts';
   import Menu from './Menu.svelte';
   import ThreadState from './ThreadState.svelte';
-  import ProviderLogo from './ProviderLogo.svelte';
+  import ThreadHeadline from './ThreadHeadline.svelte';
   import ProjectViews from './ProjectViews.svelte';
   import RecentGroup from './RecentGroup.svelte';
   import RecentDone from './RecentDone.svelte';
@@ -53,7 +49,7 @@
   $effect(() => { if (narrow.current && scrollRoot) { const saved = scrollPositions.get(listKey) ?? 0; void tick().then(() => { if (scrollRoot) scrollRoot.scrollTop = saved; }); } });
   /** The clock the rows' times read: a minute's precision is all they show. */
   const now = $derived(minuteClock.now);
-  let machines = $derived(workspace.machines.length ? workspace.machines : [{ id: 'local', label: strings.machines.local, store }]);
+  let machines = $derived(workspace.machinesOr(store));
   let machine = $derived(machines.find(m => m.store === store));
   let several = $derived(machines.length > 1);
   let place = $derived(store.pairingRequired ? strings.mobile.pairingRequired : store.connection === 'ready' ? machine?.label ?? strings.mobile.computer : strings.connection[store.connection]);
@@ -114,24 +110,18 @@
   function rowItems(owner: Store, thread: ThreadSummary): MenuItem[] {
     return threadMenuItems(owner, thread, { showDone: screen === 'threads' });
   }
-  /** Thread ids can collide between machines: the row's own store acts. */
-  async function rowAction(owner: Store, thread: ThreadSummary, action: string, machineId: string) {
-    if (action === 'pin') void owner.pin(thread.id, !thread.pinned);
-    else if (action === 'retitle') void owner.retitle(thread.id);
-    else if (action === 'rename') {
-      show('chat');
-      await workspace.select(owner, thread.id);
-      if (workspace.active === owner && owner.openThread?.id === thread.id) owner.renameRequested = true;
-    }
-    else if (action === 'copy') void owner.copy(thread.cwd);
-    else if (action === 'move' || action === 'move-cancel') {
-      const row = Array.from(document.querySelectorAll<HTMLElement>('.mobile-list [data-thread-id][data-machine-id]'))
-        .find(row => row.dataset.threadId === thread.id && row.dataset.machineId === machineId);
-      pickMoveItem(owner, thread, action, row?.querySelector<HTMLElement>('[aria-haspopup=menu]'));
-    }
-    else if (action === 'done') void markDone(owner, thread);
-    else if (action === 'archive') void archiveThread(owner, thread.id);
-    else if (action === 'delete') void deleteThread(owner, thread);
+  /** Thread ids can collide between machines: the row's own store acts, and its pickers hang under the row's own trigger. */
+  function rowAction(owner: Store, thread: ThreadSummary, action: string, machineId: string) {
+    pickThreadAction(owner, thread, action, {
+      rename: async () => {
+        show('chat');
+        await workspace.select(owner, thread.id);
+        if (workspace.active === owner && owner.openThread?.id === thread.id) owner.renameRequested = true;
+      },
+      anchor: () => Array.from(document.querySelectorAll<HTMLElement>('.mobile-list [data-thread-id][data-machine-id]'))
+        .find(row => row.dataset.threadId === thread.id && row.dataset.machineId === machineId)
+        ?.querySelector<HTMLElement>('[aria-haspopup=menu]')
+    });
   }
   async function pickProject(key: string) {
     if (key === 'add-project') { store.projectPickerOpen = true; return; }
@@ -212,10 +202,10 @@
     {#snippet threadRow(row: typeof rows[number])}
       <div class="row" data-thread-id={row.thread.id} data-machine-id={row.machine.id}>
         <button class="ghost thread" class:offline={row.machine.store.connection !== 'ready'} data-testid="mobile-thread-{row.thread.id}" onclick={() => { show('chat'); void workspace.select(row.machine.store, row.thread.id); }}>
-          <span class="summary"><span class="title"><span class="provider" data-testid="thread-provider" role="img" aria-label={agentLabel(row.machine.store, row.thread)}><ProviderLogo providerId={row.thread.providerId} size={13} /></span>{#if row.thread.pinned}<Pin size={12} />{/if}{row.thread.title}{#if hasUnsentDraft(row.machine.store.composerStates[row.thread.id])}<span class="draft" data-testid="thread-draft" title={strings.sidebar.unsentDraft} aria-label={strings.sidebar.unsentDraft}><PencilLine size={12} /></span>{/if}</span><span class="detail" title={row.thread.branch ?? undefined}>{[projectName(row.project), several ? row.machine.label : null, row.thread.branch].filter(Boolean).join(' · ')}</span></span>
+          <span class="summary"><ThreadHeadline owner={row.machine.store} thread={row.thread} wrap /><span class="detail" title={row.thread.branch ?? undefined}>{[projectName(row.project), several ? row.machine.label : null, row.thread.branch].filter(Boolean).join(' · ')}</span></span>
           <ThreadState thread={row.thread} {now} subagents={row.machine.store.subagents(row.thread.id)} countSubagents />
         </button>
-        <Menu items={rowItems(row.machine.store, row.thread)} onpick={(action) => void rowAction(row.machine.store, row.thread, action, row.machine.id)} label={strings.sidebar.threadMenu} placement="bottom" variant="ghost" testid="mobile-thread-menu-{row.thread.id}"><Ellipsis size={18} /></Menu>
+        <Menu items={rowItems(row.machine.store, row.thread)} onpick={(action) => rowAction(row.machine.store, row.thread, action, row.machine.id)} label={strings.sidebar.threadMenu} placement="bottom" variant="ghost" testid="mobile-thread-menu-{row.thread.id}"><Ellipsis size={18} /></Menu>
       </div>
     {/snippet}
     {#if screen === 'threads' && workspace.view === 'projects'}
@@ -353,13 +343,8 @@
     .row :global(.menu) { flex: none; }
     .thread { display: flex; flex: 1; min-width: 0; gap: 10px; align-items: center; min-height: 68px; height: auto; text-align: left; border-radius: var(--radius-md); padding: 12px; color: var(--color-foreground); }
     .summary { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 5px; }
-    .title { font-size: var(--text-base); font-weight: 500; white-space: normal; overflow-wrap: anywhere; }
-    .title :global(svg) { margin-right: 4px; color: var(--color-muted-foreground); vertical-align: -1px; }
-    .title .draft :global(svg) { margin: 0 0 0 6px; color: var(--color-accent); }
-    .title .provider { display: inline-flex; margin-right: 6px; vertical-align: -2px; }
     /* Its machine dropped: the row still opens, to read what is held and queue a prompt. */
     .thread.offline .summary { opacity: 0.55; }
-    .title .provider :global(svg) { margin: 0; }
     .detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-xs); color: var(--color-muted-foreground); }
     .empty-state { display: flex; align-items: center; flex-direction: column; text-align: center; padding: 44px 16px; }
     .empty-icon { display: grid; place-items: center; width: 52px; height: 52px; border-radius: var(--radius-xl); border: 1px solid var(--color-edge); background: var(--color-surface-2); color: var(--color-muted-foreground); margin-bottom: 18px; }

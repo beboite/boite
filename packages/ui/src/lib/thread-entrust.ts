@@ -6,6 +6,7 @@ import { contextMenu } from './context-menu.svelte';
 import { experimentOn } from './experiments.svelte';
 import type { MenuItem } from './menu';
 import type { Store } from './store.svelte';
+import { canMove, type Movable } from './thread-move.svelte';
 import { fill, strings } from './strings';
 
 /*
@@ -15,11 +16,11 @@ import { fill, strings } from './strings';
  * `agents.entrust` does the rest in the core (docs/agents.md).
  */
 
-type Entrustable = Pick<ThreadSummary, 'id' | 'projectId' | 'parentThreadId' | 'agentSessionId' | 'archived' | 'incognito'>;
+type Entrustable = Pick<ThreadSummary, 'id'> & Movable;
 
-/** A thread the owner can hand over: an ordinary, kept conversation in a project. */
+/** A thread the owner can hand over: the same ordinary, kept conversation in a project a move takes. */
 export function canEntrust(store: Store, thread: Entrustable): boolean {
-  return experimentOn('resident-agents') && store.owner && !thread.parentThreadId && !thread.agentSessionId && thread.projectId !== null && !thread.archived && !thread.incognito;
+  return experimentOn('resident-agents') && store.owner && canMove(thread);
 }
 
 export function entrustItems(store: Store, thread: Entrustable): MenuItem[] {
