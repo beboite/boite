@@ -14,9 +14,9 @@
   import ModelPicker from './ModelPicker.svelte';
   import ProviderLogo from './ProviderLogo.svelte';
   import StatusMark from './StatusMark.svelte';
+  import { threadTone, workflowTone } from '../lib/thread-state';
   import Elapsed from './Elapsed.svelte';
   import NativeAgents from './NativeAgents.svelte';
-  import WorkflowMark from './WorkflowMark.svelte';
   import WorkflowRunPane from './WorkflowRunPane.svelte';
   import { agentProgress } from '../lib/delegation-progress';
 
@@ -137,7 +137,7 @@
 {#snippet runRow(entry: (typeof runs)[number])}
   {@const progress = runProgress(entry)}
   <button type="button" class="member" data-testid="delegation-run" data-run-id={entry.id} onclick={() => showRun(entry.id)}>
-    <span class="avatar run"><Workflow size={16} strokeWidth={1.75} /><span class="dot"><WorkflowMark status={entry.status} run /></span></span>
+    <span class="avatar run"><Workflow size={16} strokeWidth={1.75} /><StatusMark {...workflowTone(entry.status, true)} corner /></span>
     <span class="member-main">
       <strong class="title"><span class="ui-label">{entry.name}</span></strong>
       <span class="route"><span class="ui-label">{fill(strings.workflow.steps, { done: String(progress.done), total: String(progress.total) })}</span></span>
@@ -157,7 +157,7 @@
   <button type="button" class="member" class:selected={selected?.thread.id === agent.thread.id} data-testid="delegation-member" data-agent-id={agent.thread.id} onclick={() => void store.selectDelegatedAgent(agent.thread.id)}>
     <span class="avatar" role="img" aria-label={route.maker} title={route.maker}>
       <ProviderLogo providerId={route.logo} size={20} />
-      {#if progress.active}<span class="dot"><StatusMark status={agent.thread.status} /></span>{/if}
+      {#if progress.active}<StatusMark {...threadTone(agent.thread.status)} corner />{/if}
     </span>
     <span class="member-main">
       <strong class="title"><span class="ui-label">{agent.thread.title}</span></strong>
@@ -304,9 +304,8 @@
   .member { width: 100%; height: auto; padding: 10px 9px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 0 10px; border: 1px solid transparent; border-radius: var(--radius-md); background: transparent; text-align: left; }
   .member + .member { margin-top: 2px; }
   .member:hover, .member.selected { background: var(--color-hover); border-color: var(--color-border); }
-  .avatar { position: relative; width: 30px; height: 30px; display: grid; place-items: center; border-radius: var(--radius-md); background: var(--color-surface-2); border: 1px solid var(--color-border); }
+  .avatar { --ring: var(--color-background); position: relative; width: 30px; height: 30px; display: grid; place-items: center; border-radius: var(--radius-md); background: var(--color-surface-2); border: 1px solid var(--color-border); }
   .avatar.run { color: var(--color-muted-foreground); }
-  .avatar .dot { position: absolute; right: -3px; bottom: -3px; display: grid; place-items: center; padding: 2px; border-radius: 50%; background: var(--color-background); }
   .member-main { min-width: 0; display: grid; gap: 6px; padding-top: 1px; }
   .title { min-width: 0; font-size: var(--text-sm); font-weight: 600; }
   .title .ui-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

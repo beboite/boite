@@ -5,7 +5,8 @@
   import { fill, strings } from '../lib/strings';
   import { phasesOf, runProgress } from '../lib/workflow-view';
   import ActivityCard from './ActivityCard.svelte';
-  import WorkflowMark from './WorkflowMark.svelte';
+  import StatusMark from './StatusMark.svelte';
+  import { workflowTone } from '../lib/thread-state';
 
   /** A run in the chat where it started: its name, one mark per phase, and the way to its graph. */
   let { store, run }: { store: Store; run: WorkflowRun } = $props();
@@ -32,7 +33,7 @@
     <span class="icon" aria-hidden="true"><Workflow size={15} strokeWidth={1.75} /></span>
   {/snippet}
   {#snippet progress()}
-    <WorkflowMark status={run.status} run />
+    <StatusMark {...workflowTone(run.status, true)} />
     <span class="ui-label">{strings.workflow.status[run.status]}</span>
     <span class="ui-label">· {fill(strings.workflow.steps, { done: String(steps.done), total: String(steps.total) })}</span>
   {/snippet}

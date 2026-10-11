@@ -6,7 +6,8 @@
   import { edgesOf, fitsPhase, nodeProgress, nodeTiming, phasesOf, routeOf } from '../lib/workflow-view';
   import Elapsed from './Elapsed.svelte';
   import ProviderLogo from './ProviderLogo.svelte';
-  import WorkflowMark from './WorkflowMark.svelte';
+  import StatusMark from './StatusMark.svelte';
+  import { workflowTone } from '../lib/thread-state';
 
   /**
    * The run top to bottom, one row per dependency level, the steps of a row
@@ -103,7 +104,7 @@
     onclick={() => onselect(node.id)}
   >
     <span class="head">
-      <WorkflowMark status={node.status} />
+      <StatusMark {...workflowTone(node.status)} />
       <span class="name ui-label">{node.title}</span>
       {#if node.forEach && progress.total > 0}<span class="count ui-label" data-testid="workflow-node-count">{progress.done}/{progress.total}</span>{/if}
     </span>

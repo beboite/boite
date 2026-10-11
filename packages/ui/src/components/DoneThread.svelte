@@ -1,12 +1,11 @@
 <script lang="ts">
-  import { errorText } from '../lib/errors';
   import { ArchiveRestore, Ellipsis } from '@lucide/svelte';
   import type { ThreadSummary } from '@boite/contracts';
   import type { ProjectEntry } from '../lib/project-view.svelte';
-  import { restoreThread } from '../lib/archive';
   import { contextMenu } from '../lib/context-menu.svelte';
   import { separator } from '../lib/menu';
-  import { canDeleteThread, deleteThread } from '../lib/thread-removal';
+  import { canDeleteThread } from '../lib/thread-removal';
+  import { ThreadRestore } from '../lib/thread-restore.svelte';
   import { ago, exactTime, projectName } from '../lib/format';
   import { fill, strings } from '../lib/strings';
   import { workspace } from '../lib/workspace.svelte';
@@ -18,29 +17,15 @@
     showMachine?: boolean;
     onopen?: () => void;
   } = $props();
-  let restoring = $state(false);
-  let deleting = $state(false);
+  const lock = new ThreadRestore();
+  let deleting = $derived(lock.deleting !== null);
 
-  async function restore(): Promise<void> {
-    if (restoring || deleting) return;
-    const owner = entry.machine.store;
-    restoring = true;
-    try { await restoreThread(owner, entry.thread.id); }
-    catch (error) { owner.error = errorText(error); }
-    finally { restoring = false; }
+  function restore(): void {
+    void lock.restore(entry.machine.store, entry.thread.id);
   }
-  /**
-   * The row stays until the list reloads: the lock is kept on success so a
-   * second pick cannot ask the core again and raise an error banner.
-   */
-  async function remove(): Promise<void> {
-    if (deleting || restoring) return;
-    const owner = entry.machine.store;
-    deleting = true;
-    let removed = false;
-    try { removed = await deleteThread(owner, entry.thread); }
-    catch (error) { owner.error = errorText(error); }
-    finally { if (!removed) deleting = false; }
+  /** The row stays until the list reloads, its lock with it. */
+  function remove(): void {
+    void lock.remove(entry.machine.store, entry.thread, true);
   }
   function open(): void {
     // Being deleted, or gone already: there is no thread left to open.
@@ -57,16 +42,16 @@
       event,
       [
         { id: 'open', label: strings.sidebar.open, disabled: deleting },
-        { id: 'restore', label: strings.sidebar.reopenThread, disabled: restoring || deleting || offline },
+        { id: 'restore', label: strings.sidebar.reopenThread, disabled: lock.busy || offline },
         // On hover: a worktree path printed beside the label squeezes it into a column of letters.
         { id: 'copy', label: strings.sidebar.copyPath, title: thread.cwd },
-        ...(canDeleteThread(thread) ? [separator(), { id: 'delete', label: strings.sidebar.delete, danger: true, disabled: restoring || deleting || offline }] : [])
+        ...(canDeleteThread(thread) ? [separator(), { id: 'delete', label: strings.sidebar.delete, danger: true, disabled: lock.busy || offline }] : [])
       ],
       (action) => {
         if (action === 'open') open();
-        if (action === 'restore') void restore();
+        if (action === 'restore') restore();
         if (action === 'copy') void owner.copy(thread.cwd);
-        if (action === 'delete') void remove();
+        if (action === 'delete') remove();
       }
     );
   }
@@ -83,7 +68,7 @@
   </button>
   <button type="button" class="ghost icon restore" data-testid="done-thread-restore" title={strings.sidebar.reopenThread}
     aria-label={fill(strings.sidebar.reopenNamedThread, { title: entry.thread.title })}
-    disabled={restoring || deleting || entry.machine.store.connection !== 'ready'} onclick={() => void restore()}><ArchiveRestore size={14} /></button>
+    disabled={lock.busy || entry.machine.store.connection !== 'ready'} onclick={restore}><ArchiveRestore size={14} /></button>
   <button type="button" class="ghost icon actions" data-testid="done-thread-menu" title={strings.sidebar.threadMenu}
     aria-label={strings.sidebar.threadMenu} onclick={menu}><Ellipsis size={15} /></button>
   {#if entry.thread.archiveReason?.type === 'pr-merged'}

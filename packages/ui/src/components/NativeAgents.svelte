@@ -4,6 +4,7 @@
   import { fill, strings } from '../lib/strings';
   import Elapsed from './Elapsed.svelte';
   import StatusMark from './StatusMark.svelte';
+  import { threadTone } from '../lib/thread-state';
   let { agents, source = 'provider' }: { agents: NativeAgent[]; source?: 'provider' | 'process' } = $props();
 </script>
 
@@ -15,7 +16,7 @@
         <ChevronRight size={12} class="chevron" />
         <span class="identity"><strong>{agent.name ?? agent.task ?? fill(strings.delegation.profileName, { count: String(index + 1) })}</strong>{#if agent.model || agent.effort}<small>{agent.model ?? ''}{#if agent.model && agent.effort} · {/if}{agent.effort ?? ''}</small>{/if}</span>
         <span class="status" data-status={agent.status}>
-          {#if agent.status === 'running'}<StatusMark status="running" />{/if}
+          {#if agent.status === 'running'}<StatusMark {...threadTone('running')} />{/if}
           <span class="ui-label">{strings.delegation.nativeStatus[agent.status]}</span>
           {#if source === 'process'}<Elapsed startedAt={agent.startedAt} finishedAt={agent.finishedAt ?? null} active={agent.status === 'running'} />{/if}
         </span>

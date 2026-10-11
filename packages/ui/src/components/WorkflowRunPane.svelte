@@ -10,7 +10,8 @@
   import Elapsed from './Elapsed.svelte';
   import WorkflowDetail from './WorkflowDetail.svelte';
   import WorkflowGraph from './WorkflowGraph.svelte';
-  import WorkflowMark from './WorkflowMark.svelte';
+  import StatusMark from './StatusMark.svelte';
+  import { workflowTone } from '../lib/thread-state';
 
   /** One run inside the subagents surface: its graph, and one step's detail over it once picked. */
   let { store, run, onback }: { store: Store; run: WorkflowRun; onback: () => void } = $props();
@@ -41,7 +42,7 @@
     <div class="title">
       <h2><Workflow size={15} strokeWidth={1.75} /><span class="ui-label">{run.name}</span></h2>
       <p class="meta" data-testid="workflow-meta">
-        <WorkflowMark status={run.status} run />
+        <StatusMark {...workflowTone(run.status, true)} />
         <span class="ui-label">{strings.workflow.status[run.status]}</span>
         <span class="ui-label">·</span><span class="ui-label">{fill(strings.workflow.steps, { done: String(progress.done), total: String(progress.total) })}</span>
         <span class="ui-label">·</span><Elapsed startedAt={run.createdAt} finishedAt={run.finishedAt} active={run.status === 'running'} />

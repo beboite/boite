@@ -10,6 +10,7 @@
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import StatusMark from './StatusMark.svelte';
+  import { threadTone } from '../lib/thread-state';
 
   let { store }: { store: Store } = $props();
 
@@ -201,7 +202,7 @@
             onclick={() => pick(item)}
           >
             <!-- Empty for a command, so every label starts on the same line. -->
-            <span class="mark-slot">{#if thread}<StatusMark status={thread.status} unread={thread.unread} />{/if}</span>
+            <span class="mark-slot">{#if thread}<StatusMark {...threadTone(thread.status, thread.unread)} />{/if}</span>
             <span class="label ui-label">{item.label}</span>
             {#if item.hint}
               <span class="hint ui-label" class:kbd={item.kind === 'command'}>{item.hint}</span>

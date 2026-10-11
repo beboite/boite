@@ -4,6 +4,7 @@
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import StatusMark from './StatusMark.svelte';
+  import { threadTone } from '../lib/thread-state';
   import Elapsed from './Elapsed.svelte';
 
   let { store, threadId }: { store: Store; threadId: string } = $props();
@@ -30,7 +31,7 @@
 {#if count > 0 || runs.length > 0}
   <div class="dock" data-testid="agent-dock">
     <button type="button" class="quiet activity" data-testid="active-subagents" onclick={open}>
-      <StatusMark status="running" />
+      <StatusMark {...threadTone('running')} />
       <span class="counts">
         {#if count > 0}<span class="ui-label">{fill(count === 1 ? strings.delegation.activeOne : strings.delegation.activeMany, { count: String(count) })}</span>{/if}
         {#if count > 0 && runs.length > 0}<span class="ui-label" aria-hidden="true">·</span>{/if}

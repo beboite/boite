@@ -11,6 +11,7 @@
   import Menu from './Menu.svelte';
   import ProviderLogo from './ProviderLogo.svelte';
   import StatusMark from './StatusMark.svelte';
+  import { threadTone } from '../lib/thread-state';
 
   let { store, onopenthread }: { store: Store; onopenthread?: () => void } = $props();
   let snapshot = $state.raw<AgentResourceSnapshot | null>(null);
@@ -127,7 +128,7 @@
       <div class="identity">
         <ProviderLogo providerId={entry.providerId} size={20} />
         <button class="quiet title" onclick={() => { const owner = store; onopenthread?.(); void owner.open(entry.threadId); }}><span class="ui-label">{entry.title}</span><small>{store.providers.find(row => row.id === entry.providerId)?.name ?? entry.providerId}{entry.model ? ` · ${entry.model}` : ''}</small></button>
-        <StatusMark status={entry.status} />
+        <StatusMark {...threadTone(entry.status)} />
         <span class="status ui-label">{strings.threadStatus[entry.status]}</span>
       </div>
       <dl class="metrics">

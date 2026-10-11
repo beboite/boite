@@ -6,6 +6,7 @@
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import StatusMark from './StatusMark.svelte';
+  import { threadTone } from '../lib/thread-state';
 
   let { store, limitsOnly = false }: { store: Store; limitsOnly?: boolean } = $props();
   const uid = $props.id();
@@ -110,7 +111,7 @@
   {#each resources as entry (entry.threadId)}
     <section class="card flush" data-testid="resource-row" data-thread-id={entry.threadId}>
       <div class="head">
-        <StatusMark status={entry.status} />
+        <StatusMark {...threadTone(entry.status)} />
         <button class="quiet title" onclick={() => void store.open(entry.threadId)}><span class="ui-label">{entry.title}</span></button>
         <span class="load" data-testid="resource-load">
           <span>{entry.load.processes} {strings.resources.processes}</span>

@@ -8,7 +8,8 @@
   import Elapsed from './Elapsed.svelte';
   import DelegationTranscript from './DelegationTranscript.svelte';
   import ProviderLogo from './ProviderLogo.svelte';
-  import WorkflowMark from './WorkflowMark.svelte';
+  import StatusMark from './StatusMark.svelte';
+  import { workflowTone } from '../lib/thread-state';
 
   /** One step: where it sits in the plan, its executions, and the conversation of the one picked. */
   let { store, run, node, profiles, onback }: { store: Store; run: WorkflowRun; node: WorkflowNode; profiles: DelegationProfile[]; onback: () => void } = $props();
@@ -50,7 +51,7 @@
   <header>
     <button type="button" class="ghost small icon" aria-label={strings.workflow.back} title={strings.workflow.back} data-testid="workflow-back" onclick={onback}><ArrowLeft size={15} strokeWidth={1.75} /></button>
     <div class="title">
-      <strong><WorkflowMark status={node.status} /><span class="ui-label">{node.title}</span></strong>
+      <strong><StatusMark {...workflowTone(node.status)} /><span class="ui-label">{node.title}</span></strong>
       <small>
         {strings.workflow.stepStatus[node.status]}
         {#if route}· <ProviderLogo providerId={route.providerId} size={12} /> {route.model || route.profile}{/if}
@@ -77,7 +78,7 @@
       <div class="instances" role="listbox" aria-label={strings.workflow.items}>
         {#each node.instances as inst (inst.key)}
           <button type="button" class="instance" class:chosen={inst.key === instance?.key} role="option" aria-selected={inst.key === instance?.key} data-testid="workflow-instance" onclick={() => (picked = inst.key)}>
-            <WorkflowMark status={inst.status} />
+            <StatusMark {...workflowTone(inst.status)} />
             <span class="label ui-label">{inst.label || inst.key}</span>
             {#if inst.startedAt !== null}<span class="time"><Elapsed startedAt={inst.startedAt} finishedAt={inst.finishedAt} active={inst.status === 'running'} /></span>{/if}
           </button>
