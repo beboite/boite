@@ -1,23 +1,33 @@
-/** Closed public vocabulary, shared by the host and the untrusted-input relay. */
-const MODELS = new Set([
-  'gpt-6-astra', 'gpt-6-sol', 'gpt-6-terra', 'gpt-6-luna',
-  'gpt-5.6', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5',
-  'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex', 'gpt-5.3-codex-spark',
-  'gpt-5.2', 'gpt-5.2-codex', 'gpt-5.1-codex-max', 'gpt-5.1-codex-mini',
-  'gpt-5', 'gpt-5-mini', 'gpt-5-nano', 'gpt-4.1', 'gpt-4o', 'o3', 'o4-mini',
-  'claude-fable-5-1', 'claude-fable-5', 'claude-opus-5', 'claude-sonnet-5',
-  'claude-opus-4-6', 'claude-sonnet-4-6', 'claude-opus-4-5', 'claude-sonnet-4-5',
-  'claude-haiku-4-5', 'claude-opus-4-1', 'claude-sonnet-4', 'claude-opus-4',
-  'gemini-3.1-pro', 'gemini-3-pro', 'gemini-3-flash', 'gemini-2.5-pro', 'gemini-2.5-flash',
-  'grok-4', 'grok-4-fast', 'grok-code-fast-1', 'deepseek-chat', 'deepseek-reasoner',
-]);
+/**
+ * Closed public vocabulary, shared by the host and the untrusted-input relay.
+ * Families instead of a frozen list, so a new release of a known family is
+ * counted without a Boite update. Every suffix comes from a fixed word list:
+ * custom aliases, paths, endpoints and fine-tuned IDs cannot match.
+ */
+const MODEL_FAMILIES = [
+  /^claude-(opus|sonnet|haiku|fable)-\d+(-\d+)?$/,
+  /^claude-\d+(-\d+)?-(opus|sonnet|haiku)$/,
+  /^(opus|sonnet|haiku|fable|opusplan)$/,
+  /^gpt-\d+(\.\d+)?(-(mini|nano|pro|codex|max|spark|sol|terra|luna|astra|chat|latest))*$/,
+  /^o\d(-(mini|pro))?$/,
+  /^gemini-\d+(\.\d+)?-(pro|flash|flash-lite)(-preview)?$/,
+  /^grok-code-fast-\d+$/,
+  /^grok-\d+(\.\d+)?(-(fast|mini|heavy|code|reasoning))*$/,
+  /^deepseek-(chat|reasoner|v\d+(\.\d+)?)$/,
+  /^glm-\d+(\.\d+)?$/,
+  /^kimi-k\d+(\.\d+)?$/,
+];
 
-/** Unknown aliases, local filenames, endpoints and fine-tuned IDs never leave the host. */
+/**
+ * Reduces a selected model to its public name, or `other`. Boite stores
+ * selections as `<provider>/<model>` and OpenCode as `<provider>/<vendor>/<model>`:
+ * only the last segment is ever considered, so a prefix never leaves the host.
+ */
 export function publicModel(value: unknown): string {
   if (value === null || value === undefined || value === '' || value === 'default') return 'default';
   if (typeof value !== 'string') return 'other';
-  const name = value.toLowerCase().replace(/^(openai|anthropic|google|x-ai|deepseek)\//, '').replace(/\[1m\]$/, '').replace(/-\d{8}$/, '');
-  return MODELS.has(name) ? name : 'other';
+  const name = value.toLowerCase().split('/').at(-1)!.replace(/\[1m\]$/, '').replace(/-\d{8}$/, '');
+  return name.length <= 40 && MODEL_FAMILIES.some((family) => family.test(name)) ? name : 'other';
 }
 
 function choice(value: unknown, values: readonly string[]): string {
