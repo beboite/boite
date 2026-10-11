@@ -9,7 +9,7 @@ mod tests {
         let mut context: tauri::Context<tauri::test::MockRuntime> = crate::shell_context();
         let authority = context.runtime_authority_mut();
         // The one list `lib.rs` hands both Tauri and the watchdog.
-        let handlers = include_str!("lib.rs").split("shell_commands![\n").nth(1).unwrap().split("];").next().unwrap();
+        let handlers = include_str!("lib.rs").split("shell_commands![").nth(1).unwrap().split("];").next().unwrap();
         for handler in handlers.split(',').map(str::trim).filter(|s| !s.is_empty()) {
             let command = handler.rsplit("::").next().unwrap();
             assert!(authority.resolve_access(command, "main", "main", &Origin::Local).is_some(), "{command} not allowed by ACL");

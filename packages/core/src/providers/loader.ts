@@ -478,7 +478,8 @@ export function registerProviderMethods(core: Core): void {
   };
   core.providers.installs.attach({
     emit: (payload) => {
-      logInstall(payload);
+      // The installer would take a throw here for a failed install.
+      try { logInstall(payload); } catch { /* Logging must not break installs. */ }
       core.bus.emit('providers.installProgress', payload);
     },
     updated: () => {

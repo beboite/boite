@@ -24,13 +24,14 @@ export function logLoginState(core: Core, account: Account | null, state: 'runni
   if (loginsStarted === undefined) { loginsStarted = new Map(); loginsByCore.set(core, loginsStarted); }
   if (state === 'running') {
     if (loginsStarted.has(account.id)) return;
-    loginsStarted.set(account.id, Date.now());
+    // Monotonic: a clock set back during the wait would make the duration negative.
+    loginsStarted.set(account.id, performance.now());
     core.logs.info(`Login started for account ${account.id} of ${account.providerId}`, { ...base, event: 'account.login.started' });
     return;
   }
   const startedAt = loginsStarted.get(account.id);
   loginsStarted.delete(account.id);
-  const durationMs = startedAt === undefined ? undefined : Date.now() - startedAt;
+  const durationMs = startedAt === undefined ? undefined : performance.now() - startedAt;
   if (state === 'done') {
     core.logs.info(`Login succeeded for account ${account.id} of ${account.providerId}`, { ...base, event: 'account.login.succeeded', ...(durationMs === undefined ? {} : { durationMs }) });
     return;

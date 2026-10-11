@@ -128,7 +128,13 @@ function write(path: string, text: string): void {
         if (attempt === 0) { rmSync(path, { force: true }); continue; }
         throw new Error(`${path} is not a regular file`);
       }
-      writeSync(fd, text);
+      // A short write (a full disk) must not leave a cut skill listed as whole.
+      const data = Buffer.from(text, 'utf8');
+      for (let offset = 0; offset < data.length;) {
+        const written = writeSync(fd, data, offset);
+        if (written <= 0) throw new Error(`${path}: short write`);
+        offset += written;
+      }
       return;
     } finally { if (fd !== null) closeSync(fd); }
   }
