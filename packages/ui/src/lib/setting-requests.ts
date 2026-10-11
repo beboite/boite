@@ -1,10 +1,11 @@
 /**
  * What a settings card says: a setting's name, its value as a person reads
  * it, and where it sits in Settings. The card itself is
- * `components/SettingRequestCard.svelte`; the core side is
- * `packages/core/src/setting-requests.ts`.
+ * `components/SettingRequestCard.svelte`; the checks it shares with the core
+ * are in `packages/contracts/src/setting-requests.ts`, the core's cards in
+ * `packages/core/src/threads/cards.ts`.
  */
-import type { ProviderSummary, RequestableSetting, SettingAsk, SettingsPage } from '@boite/contracts';
+import type { AutoCompactMoment, ProviderSummary, RequestableSetting, SettingAsk, SettingsPage } from '@boite/contracts';
 import { formatLocale } from './i18n.svelte';
 import { fill, strings } from './strings';
 import { formatTokens } from './tokens';
@@ -52,7 +53,14 @@ export function settingValueText(key: RequestableSetting, value: unknown, provid
     return provider ? `${provider.name} · ${object.model}` : object.model;
   }
   if (key === 'autoCompact') {
-    return typeof object.tokens === 'number' ? fill(words.compactAt, { tokens: formatTokens(object.tokens) }) : words.compactAny;
+    const size = typeof object.tokens === 'number' ? fill(words.compactAt, { tokens: formatTokens(object.tokens) }) : words.compactAny;
+    const names: Record<AutoCompactMoment, string> = {
+      'turn-end': strings.settings.autoCompactTurnEnd,
+      background: strings.settings.autoCompactBackground,
+      'cache-expiry': strings.settings.autoCompactCacheExpiry,
+    };
+    const moments = Array.isArray(object.moments) ? (object.moments as AutoCompactMoment[]).map((moment) => names[moment] ?? moment) : [];
+    return [size, ...moments].join(' · ');
   }
   return JSON.stringify(value);
 }
@@ -105,6 +113,37 @@ export function settingsSectionLabel(section: string, providers: readonly Provid
     'auto-compact': settings.autoCompact,
   };
   return labels[section] ?? null;
+}
+
+/** Pages a paired device's Settings leaves out: `OWNER_TABS` in `SettingsShell.svelte`. */
+const OWNER_PAGES: readonly SettingsPage[] = ['accounts', 'plugins', 'resources', 'brain'];
+/** Cards of the shared pages that only the owner's Settings draws there. */
+const OWNER_SECTIONS: readonly string[] = ['worktrees', 'privacy', 'execution', 'origins', 'auto-compact'];
+/**
+ * What a phone browser's Settings (`MobileSettings.svelte`) draws: the pages
+ * it opens whole, then the cards it has of the others. Keep it in step with
+ * that component's `page`.
+ */
+const PHONE_PAGES: readonly SettingsPage[] = ['appearance', 'voice', 'usage', 'limits', 'task-manager', 'experiments', 'brain'];
+const PHONE_CARDS: Partial<Record<SettingsPage, readonly string[]>> = {
+  resources: ['quiet', 'limits', 'tasks'],
+  machines: ['machines', 'group'],
+  general: ['archived', 'worktrees'],
+  advanced: ['auto-compact'],
+};
+
+/**
+ * Whether this client's Settings has the card a settings card points at. A
+ * button that would land on Home instead is not offered.
+ */
+export function settingsReachable(setting: SettingAsk, client: { owner: boolean; phone: boolean }): boolean {
+  const section = setting.section;
+  if (!client.owner && (OWNER_PAGES.includes(setting.page) || (section !== null && OWNER_SECTIONS.includes(section)))) return false;
+  if (!client.phone || PHONE_PAGES.includes(setting.page)) return true;
+  const cards = PHONE_CARDS[setting.page];
+  if (cards === undefined) return false;
+  // Resources and Machines open as pages of their own; General and Advanced only through one of their cards.
+  return section === null ? setting.page === 'resources' || setting.page === 'machines' : cards.includes(section);
 }
 
 /** `Resources › Limits`, the trail under a card. */

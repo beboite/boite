@@ -249,7 +249,9 @@ export function settingValue(raw: string): unknown {
 
 /** `resources#limits` into a page and a card. */
 function settingsPlace(raw: string): { page: string; section?: string } {
-  const [page = '', section] = raw.split('#', 2);
+  const parts = raw.split('#');
+  if (parts.length > 2) throw new Usage('settings open takes one page, with an optional #card');
+  const [page = '', section] = parts;
   return section === undefined || section.length === 0 ? { page } : { page, section };
 }
 

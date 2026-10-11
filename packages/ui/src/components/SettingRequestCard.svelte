@@ -1,8 +1,9 @@
 <script lang="ts">
   import { ArrowRight, Settings2, ShieldAlert } from '@lucide/svelte';
+  import { MediaQuery } from 'svelte/reactivity';
   import type { QuestionAnswer, Settings, SettingAsk } from '@boite/contracts';
   import { keepFocus } from '../lib/focus';
-  import { settingHeading, settingLabel, settingPlaceText, settingValueText } from '../lib/setting-requests';
+  import { settingHeading, settingLabel, settingPlaceText, settingsReachable, settingValueText } from '../lib/setting-requests';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
 
@@ -36,9 +37,14 @@
   } = $props();
 
   let busy = $state(false);
+  /** The same test Settings makes to draw the phone's own page (`SettingsShell.svelte`). */
+  const narrow = new MediaQuery('(max-width: 720px)');
+  const phone = $derived(narrow.current && window.__TAURI_INTERNALS__ === undefined);
 
   const change = $derived(setting.kind === 'change' ? setting : null);
   const canApply = $derived(change !== null && !change.sensitive && store.owner);
+  /** This client's Settings has the card: Show and Open land on it rather than on Home. */
+  const reachable = $derived(settingsReachable(setting, { owner: store.owner, phone }));
   const place = $derived(settingPlaceText(setting, store.providers));
   const heading = $derived(settingHeading(setting));
 
@@ -80,7 +86,8 @@
   }
 </script>
 
-{#if answer !== null || !pending}
+<!-- An answer this client just sent clears the pending list before the card's answer arrives: it stays busy until then. -->
+{#if answer !== null || (!pending && !busy)}
   <div class="setting-card resolved" data-testid="setting-card" data-state={answer === null ? 'closed' : 'answered'} data-outcome={answer?.optionIds[0]} title={text}>
     <span class="glyph"><Settings2 size={15} strokeWidth={1.75} /></span>
     <span class="verdict ui-label" data-testid="setting-verdict">{answer === null ? strings.settingRequest.closed : verdict(answer)}</span>
@@ -111,20 +118,24 @@
     <p class="place ui-label" data-testid="setting-place">{place}</p>
     {#if change && !store.owner}
       <p class="hint" data-testid="setting-guest-hint">{strings.settingRequest.guestHint}</p>
+    {:else if !reachable}
+      <p class="hint" data-testid="setting-elsewhere-hint">{strings.settingRequest.elsewhere}</p>
     {:else if change?.sensitive}
       <p class="hint" data-testid="setting-sensitive-hint">{strings.settingRequest.sensitiveHint}</p>
     {/if}
 
     <div class="actions">
       {#if setting.kind === 'open'}
-        <button type="button" class="primary" data-testid="setting-open" disabled={busy} onmousedown={keepFocus} onclick={() => answerWith('open')}><span class="ui-label">{strings.settingRequest.open}</span></button>
+        {#if reachable}
+          <button type="button" class="primary" data-testid="setting-open" disabled={busy} onmousedown={keepFocus} onclick={() => answerWith('open')}><span class="ui-label">{strings.settingRequest.open}</span></button>
+        {/if}
         <button type="button" class="ghost" data-testid="setting-refuse" disabled={busy} onmousedown={keepFocus} onclick={() => answerWith('refuse')}><span class="ui-label">{strings.settingRequest.dismiss}</span></button>
       {:else}
         {#if canApply}
           <button type="button" class="primary" data-testid="setting-apply" disabled={busy} onmousedown={keepFocus} onclick={apply}><span class="ui-label">{strings.settingRequest.apply}</span></button>
         {/if}
-        <!-- A paired device has no owner's page to show it on. -->
-        {#if store.owner}
+        <!-- A paired device has no owner's page to show it on, and a phone lacks some cards. -->
+        {#if store.owner && reachable}
           <button type="button" class={canApply ? 'ghost' : 'primary'} data-testid="setting-show" onmousedown={keepFocus} onclick={show}><span class="ui-label">{canApply ? strings.settingRequest.show : strings.settingRequest.open}</span></button>
         {/if}
         <button type="button" class="ghost" data-testid="setting-refuse" disabled={busy} onmousedown={keepFocus} onclick={() => answerWith('refuse')}><span class="ui-label">{strings.settingRequest.refuse}</span></button>

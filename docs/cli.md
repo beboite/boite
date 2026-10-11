@@ -442,7 +442,10 @@ holds it, or when a card on that key is already open in the thread.
 The card shows the reason, the setting's name, the current value struck
 through, the proposed one and where it sits in Settings. Apply calls
 `settings.set`, the call the Settings page makes, so only the owner can use it;
-a paired phone sees the card without Apply. The card never answers "applied"
+a paired phone sees a change card with Refuse only. Show in Settings and
+Open Settings appear only where this client's Settings has that card: not on a
+paired device for an owner page, nor in a phone browser for a card the phone's
+Settings lacks. The card never answers "applied"
 itself: the core closes every open card whose setting left the value it was
 asked from, whoever moved it, from the card or from the page. The agent then
 reads `applied: <key> is now <value>` or `changed: the user set <key> to

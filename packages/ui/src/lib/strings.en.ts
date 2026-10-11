@@ -37,6 +37,8 @@ export const strings = {
     dismiss: 'Dismiss',
     sensitiveHint: 'This one changes from Settings, beside its explanation. The card closes once it is changed.',
     guestHint: 'Only the computer running Boite can change this setting.',
+    elsewhere: 'This is in the Settings of the computer running Boite.',
+    loadFailed: 'This settings card did not load.',
     to: 'to',
     applied: 'Applied',
     changed: 'Set to {value} instead',

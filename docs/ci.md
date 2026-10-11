@@ -165,12 +165,12 @@ limits were 4,466,000 and 3,744,000, the branch measured 4,469,022 and
 
 Later on 2026-10-11 on Linux with Bun 1.4.2, `main` at `5dd77e39` measured
 4,472,003 UI bytes and 3,749,519 core bytes, and settings cards (`boite
-settings`) on top of it 4,492,750 and 3,760,579; the Windows job measured
-3,760,540 core bytes for that branch. The core gains 11,060 bytes for the
-card checks, the CLI and MCP commands; the UI 20,747 for the card, which
-loads outside the entry chunk, its English and French sentences and the shared
-checks in contracts. The entry chunk grows 3,509 bytes, to 584,955. The limits
-rise to 4,499,000 and 3,767,000.
+settings`) on top of it 4,495,656 and 3,760,802; the Windows job measured
+3,760,540 core bytes for an earlier head of that branch. The core gains 11,283
+bytes for the card checks, the CLI and MCP commands; the UI 23,653 for the
+card, which loads outside the entry chunk, its English and French sentences
+and the shared checks in contracts. The entry chunk grows 5,016 bytes, to
+586,462. The limits rise to 4,499,000 and 3,767,000.
 
 On 2026-10-10, `bun run build:ui` with Bun 1.4.2 measured 4,420,649 UI bytes at
 `feeb393b` and 4,425,557 with close confirmation and typed agent archival.

@@ -45,6 +45,8 @@ export const fr: Translation = {
     dismiss: 'Ignorer',
     sensitiveHint: "Celui-ci se change depuis les Réglages, à côté de son explication. La carte se ferme une fois le réglage changé.",
     guestHint: "Seul l'ordinateur qui fait tourner Boite peut changer ce réglage.",
+    elsewhere: "C'est dans les Réglages de l'ordinateur qui fait tourner Boite.",
+    loadFailed: "Cette carte de réglage n'a pas chargé.",
     to: 'vers',
     applied: 'Appliqué',
     changed: 'Réglé sur {value} à la place',

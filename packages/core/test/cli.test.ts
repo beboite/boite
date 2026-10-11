@@ -496,7 +496,8 @@ describe('settings', () => {
     await first;
 
     expect((await boite(['settings', 'request', 'agentCpuCapPercent', '60'])).code).toBe(2);
-    expect((await boite(['settings', 'request', 'cpu', '60', '--why', 'x'])).err).toContain('not a setting an agent may ask about');
+    // The refusal names the keys, so an agent reading plain text can pick one.
+    expect((await boite(['settings', 'request', 'cpu', '60', '--why', 'x'])).err).toMatch(/not a setting an agent may ask about; the keys are .*agentCpuCapPercent/);
     expect((await boite(['settings', 'request', 'agentCpuCapPercent', '75', '--why', 'x'])).err).toContain('already 75');
     expect((await boite(['settings', 'request', 'agentCpuCapPercent', '"lots"', '--why', 'x'])).code).toBe(1);
 
@@ -541,6 +542,8 @@ describe('settings', () => {
     await next;
 
     expect((await boite(['settings', 'open', 'nowhere', '--why', 'x'])).err).toContain('not a Settings page');
+    // A second fragment is a typo, not another card.
+    expect((await boite(['settings', 'open', 'accounts#provider-claude#extra', '--why', 'x'])).code).toBe(2);
     const opened = await ask(['settings', 'open', 'accounts#provider-claude', '--why', 'Sign in to Claude here']);
     const [card] = await client.call('questions.list', { threadId });
     expect(card?.setting).toEqual({ kind: 'open', page: 'accounts', section: 'provider-claude' });

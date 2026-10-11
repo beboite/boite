@@ -122,7 +122,10 @@ const MISSING: Partial<Record<RequestableSetting, unknown>> = {
 /** The value a setting has in effect: a missing key reads as its default, null when it has none. */
 export function effectiveSetting(settings: Settings, key: RequestableSetting): unknown {
   const value = settings[key];
-  return value === undefined ? (MISSING[key] ?? null) : value;
+  if (value !== undefined) return value;
+  const missing = MISSING[key] ?? null;
+  // A fresh copy: a caller that sorts or pushes must not change every later read.
+  return Array.isArray(missing) ? [...missing] : missing;
 }
 
 export function readSettings(settings: Settings): SettingReading[] {
@@ -173,7 +176,9 @@ export function checkSettingRequest(params: SettingRequestParams, settings: Sett
     };
   }
   const { key, value } = params;
-  if (!isRequestableSetting(key)) return { ok: false, message: `${String(key)} is not a setting an agent may ask about`, data: { field: 'key', expected: REQUESTABLE_SETTING_KEYS } };
+  if (!isRequestableSetting(key)) {
+    return { ok: false, message: `${String(key)} is not a setting an agent may ask about; the keys are ${REQUESTABLE_SETTING_KEYS.join(', ')}`, data: { field: 'key', expected: REQUESTABLE_SETTING_KEYS } };
+  }
   if (value === undefined) return { ok: false, message: 'a change needs a value', data: { field: 'value' } };
   const normalized = normalize({ [key]: value } as Partial<Settings>);
   if (!normalized.ok) return { ok: false, message: normalized.message, data: { field: 'value', setting: normalized.field } };
