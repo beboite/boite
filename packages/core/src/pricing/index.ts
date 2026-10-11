@@ -3,23 +3,12 @@ import list from './rates.json';
 
 /**
  * Public API rates per model, from `rates.json`, which `scripts/model-rates.ts`
- * regenerates from models.dev. USD per million tokens at the base tier: a
+ * regenerates from models.dev: `[input, output, cacheRead, cacheWrite]` in USD
+ * per million tokens at the base tier, null where the list gives no rate. A
  * request over a long-context threshold costs more on some models, and the
  * journal keeps one sum per turn, not each request's size.
  */
-interface Listed {
-  name: string;
-  maker: string;
-  input: number;
-  output: number;
-  cacheRead: number | null;
-  cacheWrite: number | null;
-}
-
-const MODELS = list.models as Record<string, Listed>;
-
-/** When the price list was generated. */
-export const RATES_DATE: string = list.date;
+const MODELS: Record<string, (number | null)[]> = list.models;
 
 /** A reasoning effort or a release date a harness appends to the model id. */
 const EFFORT = /-(?:minimal|low|medium|high|xhigh|max)$/;
@@ -27,7 +16,7 @@ const DATED = /-(?:\d{8}|\d{4}-\d{2}-\d{2})$/;
 /** OpenAI prices a Codex build of a model, and its `max` reasoning mode, as the model itself. */
 const CODEX = /-codex(?:-max)?$/;
 
-function listed(model: string): [string, Listed] | null {
+function listed(model: string): [string, (number | null)[]] | null {
   // `claude/claude-opus-5-5`, `anthropic.claude-opus-5-5`, `claude-opus-5-5@20260922`, `claude-opus-5-5[1m]`.
   let id = model.trim().toLowerCase().replace(/\[[^\]]*\]$/, '').replace(/@[^/]*$/, '');
   id = id.slice(id.lastIndexOf('/') + 1).replace(/^(?:anthropic|openai|google|xai|meta)\./, '');
@@ -50,10 +39,12 @@ export function priceOf(model: string | null, hourCache = false): UsagePrice | n
   if (model === null || model.trim() === '') return null;
   const found = listed(model);
   if (found === null) return null;
-  const [id, entry] = found;
-  const cacheWrite = hourCache && entry.maker === 'anthropic' ? entry.input * 2 : (entry.cacheWrite ?? entry.input);
-  const rates: TokenRates = { input: entry.input, output: entry.output, cacheRead: entry.cacheRead ?? entry.input, cacheWrite };
-  return { model: id, name: entry.name, rates };
+  const [id, [input = 0, output = 0, cacheRead = null, listedWrite = null]] = found;
+  if (input === null || output === null) return null;
+  // Every Anthropic id in the list starts with `claude-`.
+  const cacheWrite = hourCache && id.startsWith('claude-') ? input * 2 : (listedWrite ?? input);
+  const rates: TokenRates = { input, output, cacheRead: cacheRead ?? input, cacheWrite };
+  return { model: id, rates };
 }
 
 /** What these tokens cost at these rates, in USD. `usage.inputTokens` must exclude the cache reads. */

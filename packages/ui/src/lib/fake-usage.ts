@@ -20,9 +20,9 @@ export interface FakeFinishedTurn {
 }
 
 /** The rates the core's price list gives these models, USD per million tokens. */
-function rated(model: string, name: string, input: number, output: number, cacheRead: number, cacheWrite: number): UsagePrice {
+function rated(model: string, input: number, output: number, cacheRead: number, cacheWrite: number): UsagePrice {
   const rates: TokenRates = { input, output, cacheRead, cacheWrite };
-  return { model, name, rates };
+  return { model, rates };
 }
 
 interface Profile {
@@ -46,10 +46,10 @@ const PROFILES: Profile[] = [
     providerId: 'claude',
     // Claude Code writes its cache for an hour, twice the input rate.
     models: [
-      { id: 'claude-opus-5-5', share: 0.45, price: rated('claude-opus-5-5', 'Claude Opus 5.5', 4, 20, 0.2, 8) },
-      { id: 'claude/claude-opus-5-5', share: 0.15, price: rated('claude-opus-5-5', 'Claude Opus 5.5', 4, 20, 0.2, 8) },
-      { id: 'claude-sonnet-5-5', share: 0.3, price: rated('claude-sonnet-5-5', 'Claude Sonnet 5.5', 2, 10, 0.1, 4) },
-      { id: 'claude-haiku-5-5', share: 0.1, price: rated('claude-haiku-5-5', 'Claude Haiku 5.5', 0.1, 0.5, 0.01, 0.2) },
+      { id: 'claude-opus-5-5', share: 0.45, price: rated('claude-opus-5-5', 4, 20, 0.2, 8) },
+      { id: 'claude/claude-opus-5-5', share: 0.15, price: rated('claude-opus-5-5', 4, 20, 0.2, 8) },
+      { id: 'claude-sonnet-5-5', share: 0.3, price: rated('claude-sonnet-5-5', 2, 10, 0.1, 4) },
+      { id: 'claude-haiku-5-5', share: 0.1, price: rated('claude-haiku-5-5', 0.1, 0.5, 0.01, 0.2) },
     ],
     perDay: 42, since: 104, idle: 0.03,
     tokens: [2_600, 1_800, 61_000, 7_200],
@@ -65,7 +65,7 @@ const PROFILES: Profile[] = [
   },
   {
     providerId: 'codex',
-    models: [{ id: 'gpt-6.1-sol', share: 0.75, price: rated('gpt-6.1-sol', 'GPT-6.1 Sol', 2, 10, 0.1, 2.5) }, { id: null, share: 0.25 }],
+    models: [{ id: 'gpt-6.1-sol', share: 0.75, price: rated('gpt-6.1-sol', 2, 10, 0.1, 2.5) }, { id: null, share: 0.25 }],
     perDay: 22, since: 92, idle: 0.1,
     tokens: [8_400, 2_300, 39_000, 0],
     threads: [
@@ -104,7 +104,7 @@ const PROFILES: Profile[] = [
   },
   {
     providerId: 'pi',
-    models: [{ id: 'claude-sonnet-5-5', share: 1, price: rated('claude-sonnet-5-5', 'Claude Sonnet 5.5', 2, 10, 0.1, 2.5) }],
+    models: [{ id: 'claude-sonnet-5-5', share: 1, price: rated('claude-sonnet-5-5', 2, 10, 0.1, 2.5) }],
     perDay: 4, since: 58, idle: 0.55,
     tokens: [3_100, 1_200, 26_000, 3_000],
     threads: [{ id: 't-descriptors', title: 'Review the descriptor loader' }],

@@ -1103,7 +1103,6 @@ export interface TokenRates {
 export interface UsagePrice {
   /** The id in the core's price list, such as `claude-opus-5-5`. */
   model: string;
-  name: string;
   rates: TokenRates;
 }
 

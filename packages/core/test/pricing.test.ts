@@ -6,7 +6,7 @@ test('a model id resolves through provider prefixes, effort and date suffixes an
   for (const id of ['claude-opus-5-5', 'claude/claude-opus-5-5', 'antigravity/claude-opus-5-5-high', 'anthropic.claude-opus-5-5', 'claude-opus-5-5@20260922', 'claude-opus-5-5[1m]', 'Claude-Opus-5-5', 'claude-opus-5-5-20260922-xhigh']) {
     expect(priceOf(id)?.model).toBe('claude-opus-5-5');
   }
-  expect(priceOf('codex/gpt-6.1-sol')?.name).toBe('GPT-6.1 Sol');
+  expect(priceOf('codex/gpt-6.1-sol')?.model).toBe('gpt-6.1-sol');
   // A Codex build is priced as its model; a smaller variant is not.
   expect(priceOf('gpt-5.1-codex-max')?.model).toBe('gpt-5.1');
   expect(priceOf('gpt-5.1-codex-mini')?.model).not.toBe('gpt-5.1');
@@ -14,15 +14,15 @@ test('a model id resolves through provider prefixes, effort and date suffixes an
 });
 
 test('Claude Code writes an hour of cache at twice the input rate, other harnesses and makers keep the listed rate', () => {
-  const listed = list.models['claude-opus-5-5'];
-  expect(priceOf('claude-opus-5-5')?.rates).toEqual({ input: listed.input, output: listed.output, cacheRead: listed.cacheRead!, cacheWrite: listed.cacheWrite! });
-  expect(priceOf('claude-opus-5-5', true)?.rates.cacheWrite).toBe(listed.input * 2);
-  expect(priceOf('gpt-6.1-sol', true)?.rates.cacheWrite).toBe(list.models['gpt-6.1-sol'].cacheWrite!);
+  const [input = 0, output = 0, cacheRead = 0, cacheWrite = 0] = list.models['claude-opus-5-5'];
+  expect(priceOf('claude-opus-5-5')?.rates).toEqual({ input, output, cacheRead, cacheWrite });
+  expect(priceOf('claude-opus-5-5', true)?.rates.cacheWrite).toBe(input * 2);
+  expect(priceOf('gpt-6.1-sol', true)?.rates.cacheWrite).toBe(list.models['gpt-6.1-sol'][3]!);
 });
 
 test('a rate the list leaves out is charged at the input rate', () => {
-  const [id, entry] = Object.entries(list.models as Record<string, { input: number; cacheRead: number | null; cacheWrite: number | null }>).find(([, model]) => model.cacheRead === null && model.cacheWrite === null)!;
-  expect(priceOf(id)?.rates).toMatchObject({ cacheRead: entry.input, cacheWrite: entry.input });
+  const [id, [input]] = Object.entries(list.models as Record<string, (number | null)[]>).find(([, rates]) => rates[2] === null && rates[3] === null)!;
+  expect(priceOf(id)?.rates).toMatchObject({ cacheRead: input, cacheWrite: input });
 });
 
 test('the cost is each token kind at its rate per million', () => {
@@ -32,11 +32,13 @@ test('the cost is each token kind at its rate per million', () => {
 });
 
 test('the price list covers the major makers with usable rates', () => {
-  const models = Object.values(list.models as Record<string, { maker: string; input: number; output: number; cacheRead: number | null; cacheWrite: number | null }>);
-  for (const maker of ['anthropic', 'openai', 'google', 'xai', 'deepseek', 'moonshotai', 'zai', 'mistral', 'alibaba', 'meta']) {
-    expect(models.some((model) => model.maker === maker)).toBe(true);
+  const models = list.models as Record<string, (number | null)[]>;
+  for (const id of ['claude-opus-5-5', 'gpt-6.1-sol', 'gemini-3.1-pro-preview', 'grok-4.7', 'deepseek-v4-pro', 'kimi-k3', 'glm-5.3', 'devstral-2512', 'qwen3.6-plus', 'muse-spark-1.3']) {
+    expect(models[id]).toBeDefined();
   }
-  for (const model of models) {
-    for (const rate of [model.input, model.output, model.cacheRead ?? 0, model.cacheWrite ?? 0]) expect(Number.isFinite(rate) && rate >= 0).toBe(true);
+  for (const rates of Object.values(models)) {
+    expect(rates).toHaveLength(4);
+    for (const rate of rates) expect(rate === null || (Number.isFinite(rate) && rate >= 0)).toBe(true);
+    expect(rates[0]! + rates[1]!).toBeGreaterThan(0);
   }
 });

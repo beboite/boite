@@ -107,7 +107,7 @@ test('the desktop page charts each day by provider, reads a column on hover and 
   await page.evaluate(`document.querySelector('[data-testid=usage-breakdown]').scrollIntoView({ block: 'center' })`);
   await page.click('[data-testid=usage-breakdown] tbody tr:first-child [data-testid=usage-price]');
   await page.waitFor(`document.querySelector('[data-testid=usage-price-text]')`);
-  expect(await page.text('[data-testid=usage-price-text]')).toContain('public API rates, per million tokens');
+  expect(await page.text('[data-testid=usage-price-text]')).toContain('Public API rates of claude-opus-5-5, per million tokens');
   await capture('usage-desktop-price.png');
   await page.click('[data-testid=usage-breakdown] tbody tr:first-child [data-testid=usage-price]');
 

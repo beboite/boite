@@ -101,7 +101,7 @@ describe('summarize', () => {
   });
 
   test('joins a model recorded with its provider prefix and says where each price comes from', () => {
-    const opus = { model: 'claude-opus-5-5', name: 'Claude Opus 5.5', rates: { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 8 } };
+    const opus = { model: 'claude-opus-5-5', rates: { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 8 } };
     const view = summarize({ edges: [0, 10], rows: [
       { ...row(0, 'claude', 'claude-opus-5-5', 2, usage(10, 0, 1)), price: opus },
       { ...row(0, 'claude', 'claude/claude-opus-5-5', 3, usage(20, 0, 2)), price: opus },
@@ -117,7 +117,7 @@ describe('summarize', () => {
     expect(ownModel('claude', 'claude/claude-opus-5-5')).toBe('claude-opus-5-5');
     expect(ownModel('claude', null)).toBeNull();
     const [claude, luna, house] = view.models;
-    expect(priceNote(claude!)).toBe('Claude Opus 5.5 public API rates, per million tokens: input $4, output $20, cache read $0.2, cache write $8.');
+    expect(priceNote(claude!)).toBe('Public API rates of claude-opus-5-5, per million tokens: input $4, output $20, cache read $0.2, cache write $8.');
     expect(priceNote(luna!)).toBe('No public rate matches this model, so the cost is the one its agent reported.');
     expect(priceNote(house!)).toBe('No public rate matches this model and its agent reported no cost.');
     expect(priceNote({ price: opus, priced: 0, reported: 0 })).toBe('The agent reported no tokens for these turns, so they have no cost.');

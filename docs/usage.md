@@ -270,9 +270,11 @@ returns the raw reports.
 
 The cost of a row is its tokens at the public API rates of the model its turns
 ran on. `packages/core/src/pricing/rates.json` lists those rates in USD per
-million tokens for the text models of Anthropic, OpenAI, Google, xAI, DeepSeek,
-Moonshot, Z.ai, MiniMax, Mistral, Alibaba and Meta, with the date it was
-generated. `bun scripts/model-rates.ts` regenerates it from
+million tokens for the text models Anthropic, OpenAI, Google, xAI, DeepSeek,
+Moonshot, Z.ai, MiniMax, Mistral, Alibaba and Meta released since 2025, with
+the date it was generated. Each model is four numbers (input, output, cache
+read, cache write) because the table ships in the core bundle, which
+`scripts/ci/budgets.json` caps. `bun scripts/model-rates.ts` regenerates it from
 [models.dev](https://models.dev), the catalogue OpenCode prices with; a path
 argument reads a saved copy instead. `packages/core/src/pricing/index.ts`
 matches a model and computes the cost.

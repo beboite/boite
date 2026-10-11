@@ -1812,7 +1812,7 @@ export const strings = {
     noUsage: 'Not reported',
     coverage: 'Tokens {reported}/{turns} turns · Cost {priced}/{turns}',
     partialCost: '{count} turns have no price and are left out of the estimate.',
-    rates: '{model} public API rates, per million tokens: input {input}, output {output}, cache read {cacheRead}, cache write {cacheWrite}.',
+    rates: 'Public API rates of {model}, per million tokens: input {input}, output {output}, cache read {cacheRead}, cache write {cacheWrite}.',
     reportedCost: 'No public rate matches this model, so the cost is the one its agent reported.',
     noRates: 'No public rate matches this model and its agent reported no cost.',
     noTokens: 'The agent reported no tokens for these turns, so they have no cost.',

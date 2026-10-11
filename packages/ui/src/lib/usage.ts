@@ -116,7 +116,7 @@ export function priceNote(row: { price: UsagePrice | null; priced: number; repor
   if (price !== null) {
     const { input, output, cacheRead, cacheWrite } = price.rates;
     return fill(strings.usage.rates, {
-      model: price.name,
+      model: price.model,
       input: formatRate(input),
       output: formatRate(output),
       cacheRead: formatRate(cacheRead),
