@@ -10,10 +10,9 @@ in the installed web app
 ## One host per APK
 
 A TWA trusts a single origin, fixed at build time. The repository has no
-hard-coded origin. The nightly requires `ANDROID_HOST`, a repository variable
-containing a bare hostname such as `boite.example.com`, before publishing. The
-page must be served over HTTPS at that host, through a proxy as in
-[phone.md](phone.md).
+hard-coded origin. A signed build requires `ANDROID_HOST`, a repository
+variable containing a bare hostname such as `boite.example.com`. The page must
+be served over HTTPS at that host, through a proxy as in [phone.md](phone.md).
 
 Android opens the page full screen only after it has checked both halves of
 Digital Asset Links. The app half is inside the APK and names the host. The site
@@ -28,15 +27,18 @@ instead of the browser.
 
 ## Installing it
 
-Each nightly release lists `boite-<version>.apk`. Download it on the phone,
-allow the browser to install unknown apps when Android asks, and open Boite.
+Releases no longer carry the APK. One APK opens one host, so a published copy
+sent every phone to the single core it was built for. Build and sign one for
+your own host (below), install it, allow the browser to install unknown apps
+when Android asks, and open Boite.
 The first launch shows the page without a session; pair it from the desktop
 the usual way. Android updates the app over an older one when the certificate
 matches and the version code is higher.
 
-## What a nightly publishes
+## Signed builds
 
-The nightly calls `.github/workflows/android.yml` with `release: true`.
+The nightly no longer builds the APK. Run `.github/workflows/android.yml` by
+hand with `release: true` to sign one; it is kept as the run's artifact.
 `scripts/ci/android-apk.ts reuse` checks the newest published release with a
 signed APK. It reuses that file under its original name when all of these hold:
 
