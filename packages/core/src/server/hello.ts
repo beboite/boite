@@ -126,8 +126,6 @@ async function greet(core: Core, connection: ServerConnection, id: number | stri
   connection.sentFrom = sentFromOf(identity, client.name, params?.client?.device, connection.remote);
   connection.clientName = client.name;
   connection.authenticated = true;
-  // A page of this machine, served where its addresses do not say: the group learns that origin.
-  if (identity.principal !== 'agent') servedOrigin(core, connection);
   connection.sendResponse({
     jsonrpc: '2.0',
     id,
@@ -141,20 +139,6 @@ async function greet(core: Core, connection: ServerConnection, id: number | stri
       ...(identity.threadId === null ? {} : { threadId: identity.threadId }),
     },
   });
-}
-
-/** The socket came from a page whose origin names the host it asked for: this machine is served there. */
-function servedOrigin(core: Core, connection: ServerConnection): void {
-  const { origin, host } = connection.dialed;
-  if (origin === null || host === null) return;
-  try {
-    const url = new URL(origin);
-    if ((url.protocol !== 'https:' && url.protocol !== 'http:') || url.origin !== origin || url.host !== host.toLowerCase()) return;
-    if (/^(127\.0\.0\.1|localhost|\[::1\])$/.test(url.hostname)) return;
-    core.group.servedFrom(origin);
-  } catch {
-    // Not an origin: nothing learned.
-  }
 }
 
 /**

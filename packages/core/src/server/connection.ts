@@ -37,8 +37,6 @@ export class ServerConnection implements Connection {
   clientName = 'unknown';
   /** A hello is being answered. */
   greeting = false;
-  /** The page origin and the host name the socket was opened with. */
-  dialed: { origin: string | null; host: string | null } = { origin: null, host: null };
 
   private socket: ServerWebSocket<SocketData> | null = null;
   private congested = false;

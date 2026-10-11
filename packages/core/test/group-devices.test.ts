@@ -133,13 +133,16 @@ test('a member trusts the origins the others are served from, learned from their
   const [a, b] = await pair();
   // a is behind a proxy at an origin its addresses do not list, which its owner allowed there.
   const proxied = 'https://a-proxy.example';
-  a.core.settings.set({ browserOrigins: [proxied] });
+  a.core.settings.set({ browserOrigins: [proxied, 'https://other.example'] });
   const port = Number(new URL(b.url).port);
   expect(isAllowedOrigin(proxied, port, '127.0.0.1') || b.core.group.allowsOrigin(proxied)).toBe(false);
-  // A page of a, served there, opens its socket: the Host it asked for is the origin's.
-  const page = await connect(a.url, a.token, { headers: { origin: proxied, host: 'a-proxy.example' } });
-  clients.push(page);
+  // A page of a, served there, opens its socket: the Host it asked for is the origin's. A phone's first page
+  // holds no key yet, and its hello is refused: the origin is learned all the same, before any hello.
+  await expect(connect(a.url, 'no key yet', { headers: { origin: proxied, host: 'a-proxy.example' } })).rejects.toThrow();
   await waitFor(() => b.core.group.allowsOrigin(proxied));
+  // An origin a trusts but that does not name the host asked for is not one it is served at.
+  await expect(connect(a.url, 'no key yet', { headers: { origin: 'https://other.example', host: 'a-proxy.example' } })).rejects.toThrow();
+  expect(b.core.group.allowsOrigin('https://other.example')).toBe(false);
   // A socket from that page to b passes b's gate with no setting on b.
   const phone = phoneKey();
   const added = await b.core.group.addDevice();
