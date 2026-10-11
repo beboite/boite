@@ -19,6 +19,11 @@ export function gitSubcommand(args: readonly string[]): string {
   return first === 'worktree' || first === 'stash' || first === 'remote' ? `${first} ${second && !second.startsWith('-') ? second : ''}`.trim() : first;
 }
 
+/** Git runs for a scope rather than a conversation (`system:...`, `project:...`) carry a colon: those name no thread. */
+export function gitThread(threadId: string | null): { threadId?: string } {
+  return threadId === null || threadId.includes(':') ? {} : { threadId };
+}
+
 /**
  * One git run Boite started: worktree changes always, a failure with its
  * subcommand, exit code and the first line git printed on stderr, a slow
@@ -26,7 +31,7 @@ export function gitSubcommand(args: readonly string[]): string {
  */
 export function logGit(core: Core, threadId: string | null, args: readonly string[], code: number, ms: number, stderr: string): void {
   const subcommand = gitSubcommand(args);
-  const base = { source: 'git', ...(threadId === null || threadId.includes(':') ? {} : { threadId }), durationMs: ms };
+  const base = { source: 'git', ...gitThread(threadId), durationMs: ms };
   const cause = stderr.split(/\r?\n/).map(line => line.trim()).find(line => line.length > 0)?.slice(0, 300) ?? null;
   if (code !== 0) {
     // A folder that is no repository is a state the panel shows, asked again on every refresh.

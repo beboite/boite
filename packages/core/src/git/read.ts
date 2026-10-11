@@ -5,7 +5,7 @@ import type { FileHandle } from 'node:fs/promises';
 import { lstat, open, readlink } from 'node:fs/promises';
 import type { Core } from '../core.ts';
 import { folderGone, messageOf, refused } from '../errors.ts';
-import { gitSubcommand, logGit } from './git-log.ts';
+import { gitSubcommand, gitThread, logGit } from './git-log.ts';
 
 /**
  * What one side of a diff may weigh before it is refused outright. Well past
@@ -77,7 +77,7 @@ export async function git(core: Core, threadId: ThreadId, cwd: string, args: str
 /** A git read stopped at its deadline, under the same thread rule as `logGit`. */
 function logGitTimeout(core: Core, threadId: ThreadId, args: readonly string[], timeoutMs: number, at: number): void {
   core.logs.warn(`git ${gitSubcommand(args)} gave no answer within ${timeoutMs / 1000} s and was stopped`, {
-    source: 'git', event: 'git.timeout', ...(threadId.includes(':') ? {} : { threadId }), durationMs: performance.now() - at, data: { subcommand: gitSubcommand(args), timeoutMs },
+    source: 'git', event: 'git.timeout', ...gitThread(threadId), durationMs: performance.now() - at, data: { subcommand: gitSubcommand(args), timeoutMs },
   });
 }
 
