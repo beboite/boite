@@ -67,7 +67,8 @@
     status.state === 'unset' ? fill(text.unset, { networks: names(status.networks.filter((name) => !status!.allowed.includes(name))) }) :
     status.state === 'error' ? text.unreadable : ''
   );
-  const outcome = $derived(!status?.detail ? '' : status.detail === 'cancelled' ? text.cancelled : text.failed);
+  // An unreadable firewall is said by `unreadable`; no change was tried, so none was refused.
+  const outcome = $derived(!status?.detail || status.state === 'error' ? '' : status.detail === 'cancelled' ? text.cancelled : text.failed);
 </script>
 
 {#if listening && store.owner}

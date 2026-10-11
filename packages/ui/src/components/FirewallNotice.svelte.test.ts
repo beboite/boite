@@ -58,3 +58,19 @@ test('a refused administrator prompt leaves the block named, with the button to 
   await settle();
   expect(call.mock.calls.filter(([method]) => method === 'firewall.allow')).toHaveLength(2);
 });
+
+test('an unreadable firewall says so, and claims no refused change nor offers the button', async () => {
+  const unreadable: FirewallStatus = { state: 'error', networks: [], allowed: [], blocked: [], detail: 'timeout' };
+  const call = vi.fn(async () => unreadable);
+  const store = $state({
+    owner: true, principal: 'owner', connection: 'ready', pairing: null, sessions: [],
+    settings: { listenOnLan: true, publicUrl: null }, client: { call },
+    loadSessions: vi.fn(async () => {}), saveSettings: vi.fn(async () => true),
+  });
+  mounted = mount(PairingCard, { target: document.body, props: { store: store as unknown as Store } });
+  await settle();
+  const notice = document.querySelector<HTMLElement>('[data-testid=firewall-notice]')!;
+  expect(notice.dataset.state).toBe('error');
+  expect(document.querySelector('[data-testid=firewall-outcome]')).toBeNull();
+  expect(document.querySelector('[data-testid=firewall-allow]')).toBeNull();
+});
