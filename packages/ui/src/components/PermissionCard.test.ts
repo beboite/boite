@@ -32,12 +32,13 @@ test('both buttons hold while an answer is out, and come back when it fails', as
     }
   });
   flushSync();
+  // Three taps before the card redraws: only the first one is sent.
   button('permission-allow').click();
+  button('permission-allow').click();
+  button('permission-deny').click();
   flushSync();
   expect(button('permission-allow').disabled).toBe(true);
   expect(button('permission-deny').disabled).toBe(true);
-  button('permission-allow').click();
-  button('permission-deny').click();
   expect(sent).toEqual(['allow']);
   settle(false);
   await Promise.resolve();

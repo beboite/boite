@@ -171,8 +171,11 @@ export function registerProbeMethods(core: Core): ProviderProbe {
     accountRevisions.set(accountId, accountRevision(accountId) + 1);
   };
   const pending = new Map<string, Promise<RpcResult<'providers.probe'>>>();
-  /** When each account's list was last read, for an answer served from the cache. */
-  const answered = new Map<string, RpcResult<'providers.probe'>>();
+  /** When each account's list was last read, for an answer served from the cache. Dropped with the catalog. */
+  const answered = new Map<string, number>();
+  const forgetAnswered = (accountId?: AccountId): void => {
+    for (const lane of answered.keys()) if (accountId === undefined || (JSON.parse(lane) as string[])[1] === accountId) answered.delete(lane);
+  };
   /** The last probe of each provider and account, settled or not: the next one waits for it. */
   const lanes = new Map<string, Promise<void>>();
   const probe: ProviderProbe = (params) => {
@@ -186,7 +189,7 @@ export function registerProbeMethods(core: Core): ProviderProbe {
     const known = answered.get(lane);
     if (!params.refresh && params.model === undefined && known !== undefined) {
       const models = probedModelsOf(core.providers.require(params.providerId).protocol, params.providerId, params.accountId);
-      if (models !== null) return Promise.resolve({ models, probedAt: known.probedAt });
+      if (models !== null) return Promise.resolve({ models, probedAt: known });
     }
     const key = JSON.stringify([params.providerId, params.accountId, params.model ?? null]);
     const existing = pending.get(key);
@@ -205,7 +208,7 @@ export function registerProbeMethods(core: Core): ProviderProbe {
       const isCurrent = () => revision === startedAtRevision && accountRevision(params.accountId) === startedAtAccount;
       const answer = probeProvider(core, params.providerId, params.accountId, isCurrent, cleanups, params.model);
       if (params.refresh) void answer.then(() => settleRefresh(params.providerId, params.accountId), () => undefined);
-      if (params.model === undefined) void answer.then((result) => { if (isCurrent()) answered.set(lane, result); }, () => undefined);
+      if (params.model === undefined) void answer.then((result) => { if (isCurrent()) answered.set(lane, result.probedAt); }, () => undefined);
       return answer;
     }).finally(() => pending.delete(key));
     pending.set(key, request);
@@ -225,6 +228,7 @@ export function registerProbeMethods(core: Core): ProviderProbe {
       proxyConfig = nextProxy;
       revision++;
       forgetProbes();
+      forgetAnswered();
       return;
     }
     // The descriptors were re-read, so what an agent listed under the old ones
@@ -232,6 +236,7 @@ export function registerProbeMethods(core: Core): ProviderProbe {
     if (name === 'providers.updated') {
       revision++;
       forgetProbes();
+      forgetAnswered();
       return;
     }
     // An account whose login or isolation changed may list other models.
@@ -239,12 +244,14 @@ export function registerProbeMethods(core: Core): ProviderProbe {
       const account = payload as RpcEvents['accounts.updated'];
       bumpAccount(account.id);
       forgetProbes({ providerId: account.providerId, accountId: account.id });
+      forgetAnswered(account.id);
       return;
     }
     if (name === 'accounts.removed') {
       const { accountId } = payload as RpcEvents['accounts.removed'];
       bumpAccount(accountId);
       forgetProbes({ accountId });
+      forgetAnswered(accountId);
     }
   });
   return probe;

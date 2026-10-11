@@ -8,7 +8,7 @@ import { pairingUrlOf, startCore } from '../tests/e2e/lib/core.ts';
 
 const arg = (name: string, fallback: string) => {
   const at = process.argv.indexOf(`--${name}`);
-  return at >= 0 ? process.argv[at + 1]! : fallback;
+  return at >= 0 ? (process.argv[at + 1] ?? fallback) : fallback;
 };
 const ui = arg('ui', '');
 const latency = Number(arg('latency', '40'));
@@ -31,7 +31,7 @@ for (let run = 0; run < runs; run++) {
     client.close();
     page = await BrowserPage.launch({ url: pairingUrlOf(core), experiments: ['resident-agents'], windowSize: { width: 1440, height: 900 } });
     await page.send('Network.enable', {});
-    await page.send('Network.emulateNetworkConditions', { offline: false, latency, downloadThroughput: kbps * 128, uploadThroughput: kbps * 128 });
+    await page.send('Network.emulateNetworkConditions', { offline: false, latency, downloadThroughput: (kbps * 1000) / 8, uploadThroughput: (kbps * 1000) / 8 });
     await page.waitFor(`document.querySelector('[data-testid=status-connection]')?.dataset.state === 'ready'`, 30_000);
     await page.waitFor(`document.querySelector('[data-testid$=view-agents]')`, 30_000);
     // Long enough for an idle prefetch to have run, as for someone reading a thread first.
@@ -44,7 +44,7 @@ for (let run = 0; run < runs; run++) {
         if (!pageAt && document.querySelector('[data-testid=agents-page]')) pageAt = performance.now() - start;
         if (document.querySelector('[data-testid^="agent-entry-"]')) {
           const chunk = performance.getEntriesByType('resource').find(e => /AgentsPage/.test(e.name));
-          resolve(JSON.stringify({ ms: performance.now() - start, pageAt, chunkEnd: chunk ? chunk.responseEnd - start : null }));
+          resolve(JSON.stringify({ ms: performance.now() - start, pageAt, chunkEnd: chunk && chunk.responseEnd >= start ? chunk.responseEnd - start : null }));
         } else requestAnimationFrame(check);
       };
       check();

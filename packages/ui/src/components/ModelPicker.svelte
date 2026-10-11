@@ -80,7 +80,8 @@
       const native = ['claude-sdk', 'acp', 'codex-appserver', 'muse', 'pi', 'agy'].includes(provider.protocol);
       // A row from a list the core already gave lands now: a refresh still
       // reading behind it changes nothing, and the core keeps that list meanwhile.
-      if (requested !== undefined && (!native || owner.catalogHas(instance.providerId, instance.accountId, requested))) {
+      if (requested !== undefined && (owner.catalogHas(instance.providerId, instance.accountId, requested)
+        || (!native && owner.modelsOf(instance.providerId, instance.accountId).some((entry) => entry.id === requested)))) {
         apply({ ...instance, model: requested });
         if (close) popover.hide();
         return;

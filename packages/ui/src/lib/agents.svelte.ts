@@ -254,13 +254,15 @@ export class AgentsView {
    */
   static of(store: Store): AgentsView {
     let view = VIEWS.get(store);
+    // A closed view never loads again: the next visit gets a fresh one.
+    if (view?.disposed) view = undefined;
     if (!view) { view = new AgentsView(store); VIEWS.set(store, view); }
     return view;
   }
   start(): void {
     this.shown = true;
     // A failure of an earlier visit is not news on this one.
-    this.error = '';
+    this.error = ''; this.loadError = '';
     // A visit starts from one bounded snapshot, drawn at once, not from every
     // record an earlier visit paged in or saw created.
     this.forgetHistory();

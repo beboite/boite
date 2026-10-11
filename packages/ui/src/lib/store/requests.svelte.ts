@@ -168,7 +168,9 @@ export class Requests {
     if (!client) return false;
     try {
       await client.call('permissions.answer', { requestId, decision });
-      if (this.ctx.currentClient(client, generation)) this.resolvePermission(requestId);
+      // Another connection holds the card now: false hands its buttons back.
+      if (!this.ctx.currentClient(client, generation)) return false;
+      this.resolvePermission(requestId);
       return true;
     } catch (error) {
       if (this.ctx.currentClient(client, generation)) this.ctx.fail(error);

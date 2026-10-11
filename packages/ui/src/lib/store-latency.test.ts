@@ -82,6 +82,18 @@ test('a second answer to a permission while the first is out sends nothing, and 
   } finally { store.detach(); client.close(); }
 });
 
+test('a permission answer that lands on a replaced connection gives the card its buttons back', async () => {
+  const { store, client } = await ready();
+  const next = new FakeClient({ delayMs: 0 });
+  try {
+    const { held } = hold(client, 'permissions.answer');
+    const answered = store.answer('perm-held', 'allow');
+    store.attach(next);
+    held[0]!.resolve({ ok: true });
+    expect(await answered).toBe(false);
+  } finally { store.detach(); client.close(); next.close(); }
+});
+
 test('picking another agent reads it without waiting for the previous one to be let go', async () => {
   const { store, client } = await ready(true);
   try {

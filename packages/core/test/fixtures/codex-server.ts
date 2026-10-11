@@ -17,6 +17,8 @@
  * `thread/start` and `thread/resume`, and `CODEX_FAKE_DEAF=1` answers `turn/interrupt` without
  * ending the turn.
  * `CODEX_FAKE_NO_LIVE_SETTINGS=1` is a server with no `turn/settings/update`.
+ * `CODEX_FAKE_SLOW_MODELS=<ms>` delays the answer to `model/list`, and
+ * `CODEX_FAKE_SLOW_EXIT=<ms>` delays the exit that follows a SIGTERM.
  *
  * The wire is copied from the real server on purpose: responses and
  * notifications carry no `jsonrpc` member, which is what the driver has to
