@@ -197,7 +197,7 @@ stopped and thrown away.
 
 ## Watching it
 
-The panel's **Agent browser** surface looks like a browser: a strip of the
+The panel's **Browser** surface looks like a browser: a strip of the
 conversation's tabs, then a toolbar with back, forward, reload, the address
 and two buttons, **Display** and pause, then the page. In the desktop app on
 its own core, the one it started, the page shows at once: the app trusts the
@@ -207,7 +207,8 @@ the machine, "This agent controls a browser on m2", with the page's title, and
 a **Show** button; nothing is captured or sent before that. Show starts the
 live view and, while a page shows, the eye in the tab strip covers it again. When the agent opens a
 tab in the conversation on screen, the panel opens on that surface. The
-launcher's **W** opens it by hand. On a client with a cover, it holds for the
+launcher's **B** opens it by hand, and `boite browse <url>` opens a page in a
+new tab of it. On a client with a cover, it holds for the
 conversation while the app stays open, and a reload covers it again.
 
 The owner opens and closes tabs as in any browser. **+** adds a new tab page

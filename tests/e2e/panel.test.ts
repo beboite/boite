@@ -122,7 +122,6 @@ test('the panel opens on its launcher, and the workbench surfaces fit both width
   expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('panel-launcher')} .card')).map(card => card.dataset.testid)`)).toEqual([
     'launch-agents',
     'launch-messages',
-    'launch-browser',
     'launch-agent-browser',
     'launch-device',
     'launch-changes',
@@ -130,9 +129,9 @@ test('the panel opens on its launcher, and the workbench surfaces fit both width
     'launch-tasks',
     'launch-trace'
   ]);
-  // The fixture's iframe bridge paints the user's Browser; every client watches the agent's.
-  expect(await page.evaluate(`document.querySelector('${id('launch-browser')}').disabled`)).toBe(false);
+  // One browser, the conversation's, on every client; the cards carry no subtitle.
   expect(await page.evaluate(`document.querySelector('${id('launch-agent-browser')}').disabled`)).toBe(false);
+  expect(await page.evaluate(`document.querySelector('${id('launch-agent-browser')}').textContent.replace(/\\s+/g, ' ').trim()`)).toBe('Browser B');
   expect(await page.evaluate(`document.querySelector('${id('launch-changes')}').disabled`)).toBe(false);
   await capture('panel-launcher.png');
 

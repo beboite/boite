@@ -47,13 +47,13 @@ test('each answer writes its preset, and every piece changes on its own afterwar
 
 test('a button hides and comes back one at a time, and a preset puts back only the buttons', () => {
   work.choose('developer');
-  work.show('panel.browser', false);
+  work.show('panel.agent-browser', false);
   work.show('header.branch', false);
   // The catalogue's order, whatever order they were hidden in.
-  expect(work.current.hidden).toEqual(['header.branch', 'panel.browser']);
-  expect(work.shows('panel.browser')).toBe(false);
+  expect(work.current.hidden).toEqual(['header.branch', 'panel.agent-browser']);
+  expect(work.shows('panel.agent-browser')).toBe(false);
   expect(matchingPreset(work.current.hidden)).toBeNull();
-  work.show('panel.browser', true);
+  work.show('panel.agent-browser', true);
   expect(work.current.hidden).toEqual(['header.branch']);
 
   work.setPanel('launcher');
