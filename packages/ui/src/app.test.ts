@@ -2152,7 +2152,7 @@ test('the Tailscale switch serves the core over HTTPS, pairing links follow it, 
   expect(store.settings?.publicUrl).toBe('https://boite-pc.tail0d6070.ts.net');
   // Turning it on mints the phone's link through the new address.
   await waitFor(() => store.pairing?.url.startsWith('https://boite-pc.tail0d6070.ts.net/?grant=') === true);
-  expect(document.querySelector('[data-testid=pairing-lan-hint]')).toBeNull();
+  expect(document.querySelector('[data-testid=lan-reach]')).toBeNull();
 
   query<HTMLButtonElement>('[data-testid=tailscale-disable]').click();
   await waitFor(() => document.querySelector('[data-testid=confirm-dialog]') !== null);

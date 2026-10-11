@@ -1,5 +1,6 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import type { Message, Turn } from '@boite/contracts';
+import { connect } from '../src/client.ts';
 import { Core } from '../src/core.ts';
 import { startServer, type RunningServer } from '../src/server.ts';
 import { HANDOFF } from '../src/threads/handoff.ts';
@@ -368,4 +369,19 @@ test('with nothing running the stop is immediate, and a wrong pid is refused', a
     expect(await accepted.json()).toEqual({ ok: true, pid: process.pid });
     await waitFor(() => stops === 1);
   } finally { await h.stop(); }
+});
+
+test('core.restart is that same restart for the owner, and a paired phone is refused it', async () => {
+  let stops = 0;
+  const h = await startTestCore({ onShutdown: () => { stops += 1; } });
+  try {
+    const owner = await h.connect();
+    const { grant } = await owner.call('pairing.grant', {});
+    const phone = await connect(h.url, '', { grant });
+    await expect(phone.call('core.restart', {})).rejects.toThrow('core.restart is for the owner only');
+    expect(stops).toBe(0);
+    expect(await owner.call('core.restart', {})).toEqual({ ok: true });
+    expect(h.core.stopping).toBe(true);
+    await waitFor(() => stops === 1);
+  } finally { await h.stop().catch(() => undefined); }
 });
