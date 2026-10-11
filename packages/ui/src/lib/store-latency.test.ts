@@ -48,6 +48,21 @@ test('an archived row leaves the list before the core answers, and a refusal bri
   } finally { store.detach(); client.close(); }
 });
 
+test('an archive another client made while ours was out stays hidden when ours is refused', async () => {
+  const { store, client } = await ready();
+  try {
+    const thread = store.threads.find((t) => t.status === 'idle' && !t.parentThreadId && !t.archived)!;
+    const { held } = hold(client, 'threads.archive');
+    const archiving = store.archive(thread.id);
+    await vi.waitFor(() => expect(held).toHaveLength(1));
+    // The other client's archive reaches the fake core past the held call, and its event this store.
+    await FakeClient.prototype.call.call(client, 'threads.archive', { threadId: thread.id, archived: true });
+    held[0]!.reject(refused());
+    await archiving;
+    expect(store.threadsOf(thread.projectId!).map((t) => t.id)).not.toContain(thread.id);
+  } finally { store.detach(); client.close(); }
+});
+
 test('a pin shows before the core answers and is taken back on a refusal', async () => {
   const { store, client } = await ready();
   try {
@@ -71,8 +86,13 @@ test('pin then unpin, both refused in their order, ends where it started', async
     const { held } = hold(client, 'threads.pin');
     const pin = store.pin('t-trace', true);
     const unpin = store.pin('t-trace', false);
+    expect(store.threads.find((t) => t.id === 't-trace')?.pinned).toBe(false);
+    // The core takes them in tap order: the unpin leaves once the pin is answered.
+    expect(held).toHaveLength(1);
     held[0]!.reject(refused());
     await pin;
+    await vi.waitFor(() => expect(held).toHaveLength(2));
+    expect(held[1]!.params).toMatchObject({ pinned: false });
     held[1]!.reject(refused());
     await unpin;
     expect(store.threads.find((t) => t.id === 't-trace')?.pinned).toBe(false);

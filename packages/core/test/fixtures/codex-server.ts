@@ -17,8 +17,7 @@
  * `thread/start` and `thread/resume`, and `CODEX_FAKE_DEAF=1` answers `turn/interrupt` without
  * ending the turn.
  * `CODEX_FAKE_NO_LIVE_SETTINGS=1` is a server with no `turn/settings/update`.
- * `CODEX_FAKE_SLOW_MODELS=<ms>` delays the answer to `model/list`, and
- * `CODEX_FAKE_SLOW_EXIT=<ms>` delays the exit that follows a SIGTERM.
+ * `CODEX_FAKE_SLOW_MODELS=<ms>` delays the answer to `model/list`.
  *
  * The wire is copied from the real server on purpose: responses and
  * notifications carry no `jsonrpc` member, which is what the driver has to
@@ -665,10 +664,6 @@ function handle(method: string, raw: unknown): unknown {
       throw new Error(`the fake codex server does not implement ${method}`);
   }
 }
-
-// An agent that takes its time to shut down, the way a real CLI does.
-const slowExit = Number(process.env['CODEX_FAKE_SLOW_EXIT'] ?? '0');
-if (slowExit > 0) process.on('SIGTERM', () => setTimeout(() => process.exit(0), slowExit));
 
 let buffer = '';
 process.stdin.setEncoding('utf8');

@@ -668,7 +668,7 @@ export class Threads {
     if (!client) return;
     try {
       const shown = [this.threads.find((t) => t.id === threadId), this.openThread?.id === threadId ? this.openThread : null];
-      const summary = await pinWhile(shown, pinned, client.call('threads.pin', { threadId, pinned }));
+      const summary = await pinWhile(shown, pinned, () => client.call('threads.pin', { threadId, pinned }));
       if (!this.ctx.currentClient(client, clientGeneration)) return;
       this.upsertThread(summary);
       const open = this.openThread;

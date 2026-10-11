@@ -18,7 +18,7 @@ import { countLogLines, countProcesses, readScriptedLog, writeScriptedProvider }
 /** The fake Codex app-server: a real ndjson JSON-RPC process over stdio, run by bun. */
 const FAKE_SERVER = fileURLToPath(new URL('./fixtures/codex-server.ts', import.meta.url));
 /** The fixture's environment switches a test may set; every one is cleared after it. */
-const FAKE_SWITCHES = ['CODEX_FAKE_NO_LIVE_SETTINGS', 'CODEX_FAKE_FORK_ERROR', 'CODEX_FAKE_FORK_SAME', 'CODEX_FAKE_LOST', 'CODEX_FAKE_DEAF', 'CODEX_FAKE_SLOW_START', 'CODEX_FAKE_HOOKS', 'CODEX_FAKE_INIT_FAILURES', 'CODEX_FAKE_INIT_ERROR', 'CODEX_FAKE_CRASH_ERROR', 'CODEX_FAKE_INIT_RPC_ERROR', 'CODEX_FAKE_LOGIN_WAIT', 'CODEX_FAKE_RESET_CREDITS', 'CODEX_FAKE_RESET_ERROR', 'CODEX_FAKE_SLOW_MODELS', 'CODEX_FAKE_SLOW_EXIT'];
+const FAKE_SWITCHES = ['CODEX_FAKE_NO_LIVE_SETTINGS', 'CODEX_FAKE_FORK_ERROR', 'CODEX_FAKE_FORK_SAME', 'CODEX_FAKE_LOST', 'CODEX_FAKE_DEAF', 'CODEX_FAKE_SLOW_START', 'CODEX_FAKE_HOOKS', 'CODEX_FAKE_INIT_FAILURES', 'CODEX_FAKE_INIT_ERROR', 'CODEX_FAKE_CRASH_ERROR', 'CODEX_FAKE_INIT_RPC_ERROR', 'CODEX_FAKE_LOGIN_WAIT', 'CODEX_FAKE_RESET_CREDITS', 'CODEX_FAKE_RESET_ERROR', 'CODEX_FAKE_SLOW_MODELS'];
 
 test('native collaboration is journalled and appears in Team without using Boite delegation', async () => {
   const client = await startCore();
@@ -1451,26 +1451,15 @@ describe('codex driver', () => {
     expect(countLines('model/list')).toBe(1);
   });
 
-  test('a probe answers once the models are read, and the next one waits for the exit', async () => {
-    process.env['CODEX_FAKE_SLOW_EXIT'] = '1500';
+  test('a list already read is answered without a process, and a refresh reads it again', async () => {
     const client = await startCore();
     const { accountId } = await codexAccount(client);
-    const threadId = `probe:codex-fake:${accountId}`;
-
     const first = await client.call('providers.probe', { providerId: 'codex-fake', accountId });
     expect(first.models.map((model) => model.id)).toContain('fake-smart');
-    // The picker has its list while the agent is still shutting down. Only
-    // Linux is sure to deliver the SIGTERM the fixture delays its exit on.
-    const exiting = process.platform === 'linux';
-    if (exiting) expect(harness?.core.procs.liveCount(threadId)).toBe(1);
-    // A list already read is answered from the cache, not after that exit.
     expect((await client.call('providers.probe', { providerId: 'codex-fake', accountId })).probedAt).toBe(first.probedAt);
-    if (exiting) expect(harness?.core.procs.liveCount(threadId)).toBe(1);
-
-    // One process per account at a time: a refresh starts once the first has exited.
+    expect(countLines('model/list')).toBe(1);
     await client.call('providers.probe', { providerId: 'codex-fake', accountId, refresh: true });
     expect(countLines('model/list')).toBe(2);
-    await waitFor(() => harness?.core.procs.liveCount(threadId) === 0, 10_000);
   });
 
   test('a refresh keeps the last catalog for model checks until the agent answers', async () => {

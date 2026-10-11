@@ -73,6 +73,9 @@ test.each(['success', 'failure', 'account change'] as const)('a probe preserves 
     // A different request key shares this account's lane, rather than the first promise.
     const next = client.call('providers.probe', { providerId: 'echo', accountId: account.id, model: 'retry' });
     requests.push(next);
+    // The answer does not wait for the cleanup: its close event is still held, so its directory is still there.
+    await within(first, 'the probe answer waited for its process cleanup');
+    expect(existsSync(directories[0]!)).toBe(true);
     const [settled, retried] = await within(Promise.all([first, next]), 'probe cleanup blocked its protocol result and the next request in its account lane');
     if (outcome === 'success') expect(settled).toEqual({ value: result });
     else expect(settled).toMatchObject({ error: { rpc: outcome === 'failure'

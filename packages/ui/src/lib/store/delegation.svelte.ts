@@ -306,7 +306,8 @@ export class Delegation {
       if (subscribed) {
         await subscribed;
         if (!current()) {
-          if (this.delegationSelectedAgentId !== threadId && threads.subscribedThreadId !== threadId) {
+          // An open that took this thread over keeps its subscription.
+          if (this.delegationSelectedAgentId !== threadId && threads.subscribedThreadId !== threadId && threads.openThread?.id !== threadId) {
             await client.call('threads.unsubscribe', { threadId }).catch(() => undefined);
           }
           return;
