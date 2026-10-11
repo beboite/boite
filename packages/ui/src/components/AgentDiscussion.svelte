@@ -2,11 +2,11 @@
   import { tick } from 'svelte';
   import { ArrowLeft, CheckCheck, CornerUpLeft, SquareArrowOutUpRight } from '@lucide/svelte';
   import { hierarchyOf, whereOf, type AgentMail, type Discussion } from '../lib/agent-mail';
-  import { clockTime, exactTime } from '../lib/format';
+  import { clockTime, count, exactTime } from '../lib/format';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
-  import AgentAvatar from './AgentAvatar.svelte';
+  import DiscussionAvatar from './DiscussionAvatar.svelte';
 
   /**
    * One discussion, back and forth, the way this thread's chat reads: its own
@@ -78,6 +78,8 @@
   let flash = $state<string | null>(null);
   /** The discussion and letter the view last landed on, and how many letters it had then. */
   let landed: string | undefined;
+  /** The discussion and letter the view opened on, even while that letter has not arrived. */
+  let opened: string | undefined;
   let seen = 0;
   let atEnd = true;
   function show(id: string): void {
@@ -90,19 +92,28 @@
   $effect(() => {
     const target = `${discussion.key}:${letterId ?? ''}`;
     const size = discussion.entries.length;
+    const found = letterId !== undefined && discussion.entries.some(entry => entry.letter.id === letterId);
     if (!list || landed === target) return;
-    // The letter a timeline row named may still be on its way from the core.
-    if (letterId && !discussion.entries.some(entry => entry.letter.id === letterId)) return;
-    landed = target;
-    seen = size;
-    // Another discussion starts at its end; where the reader was in the last one says nothing about it.
-    atEnd = true;
-    void tick().then(() => {
-      if (!list) return;
-      if (letterId) show(letterId);
-      else list.scrollTop = list.scrollHeight;
-      scrolled();
-    });
+    if (opened !== target) {
+      opened = target;
+      seen = size;
+      // Another discussion starts at its end; where the reader was in the last one says nothing about it.
+      atEnd = true;
+      if (found || letterId === undefined) landed = target;
+      void tick().then(() => {
+        if (!list) return;
+        if (found) show(letterId!);
+        else list.scrollTop = list.scrollHeight;
+        scrolled();
+      });
+      return;
+    }
+    // Opened on the end while its letter was on its way: land on it once it arrives. A pruned one never does.
+    if (found) {
+      landed = target;
+      seen = size;
+      void tick().then(() => show(letterId!));
+    }
   });
   // New mail follows the end when the reader is there.
   $effect(() => {
@@ -125,7 +136,7 @@
     <button type="button" class="ghost small icon back" data-testid="agent-discussion-back" aria-label={strings.agentMessages.back} title={strings.agentMessages.back} onclick={onback}>
       <ArrowLeft size={15} />
     </button>
-    <AgentAvatar title={discussion.title} providerId={discussion.providerId} status={discussion.status} steward={discussion.steward} size={32} />
+    <DiscussionAvatar title={discussion.title} providerId={discussion.providerId} status={discussion.status} steward={discussion.steward} size={32} />
     <div class="who">
       <strong data-testid="agent-discussion-heading" tabindex="-1">{discussion.title}</strong>
       <span class="facts">
@@ -147,7 +158,7 @@
       {#if item.kind === 'time'}
         <time class="stretch" datetime={new Date(item.at).toISOString()} title={exactTime(item.at)}>{clockTime(item.at)}</time>
       {:else if item.kind === 'notice'}
-        <p class="notice" data-testid="agent-notice" data-letter-id={item.entry.letter.id} title={exactTime(item.entry.letter.createdAt)}>{item.entry.letter.text}</p>
+        <p class="notice" class:flash={flash === item.entry.letter.id} data-testid="agent-notice" data-letter-id={item.entry.letter.id} title={exactTime(item.entry.letter.createdAt)}>{item.entry.letter.text}</p>
       {:else}
         {@const letter = item.entry.letter}
         {@const failed = FAILED.includes(letter.status)}
@@ -184,7 +195,7 @@
       {/if}
     {/each}
   </div>
-  <footer class="tally">{fill(strings.agentMessages.sentReceived, { sent: String(discussion.sent), received: String(discussion.received) })}</footer>
+  <footer class="tally">{fill(strings.agentMessages.sentReceived, { sent: count(discussion.sent), received: count(discussion.received) })}</footer>
 </article>
 
 <style>
@@ -219,6 +230,7 @@
   .msg.steward .label { color: var(--color-steward); }
   .msg.failed .bubble { border-style: dashed; }
   .msg.flash .bubble { box-shadow: 0 0 0 2px var(--color-accent); }
+  .notice.flash { border-left-color: var(--color-accent); background: var(--color-accent-soft); }
   .text { margin: 0; font-size: var(--text-sm); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
   .quote { display: flex; align-items: center; gap: 5px; width: 100%; height: auto; min-height: 0; margin: 0 0 5px; padding: 3px 7px; border: 0; border-left: 2px solid var(--color-edge); border-radius: var(--radius-sm); background: var(--color-hover); color: var(--color-muted-foreground); font-size: var(--text-xs); text-align: left; }
   .quote:hover { color: var(--color-foreground); }

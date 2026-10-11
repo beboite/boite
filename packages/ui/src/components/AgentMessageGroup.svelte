@@ -4,7 +4,7 @@
   import { count } from '../lib/format';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
-  import AgentAvatar from './AgentAvatar.svelte';
+  import DiscussionAvatar from './DiscussionAvatar.svelte';
 
   /**
    * A burst of agent mail in the timeline: one row per conversation it went to
@@ -28,7 +28,7 @@
       data-testid="agent-discussion-row" data-peer={discussion.key} data-count={discussion.entries.length}
       title={strings.agentMessages.open}
       onclick={() => store.panel.openMessages(discussion.key, discussion.entries[0]!.letter.id)}>
-      <AgentAvatar title={discussion.title} providerId={discussion.providerId} status={discussion.status} steward={discussion.steward} size={28} />
+      <DiscussionAvatar title={discussion.title} providerId={discussion.providerId} status={discussion.status} steward={discussion.steward} size={28} />
       <span class="body">
         <span class="top">
           <strong class="title" data-testid="agent-discussion-title">{discussion.title}</strong>

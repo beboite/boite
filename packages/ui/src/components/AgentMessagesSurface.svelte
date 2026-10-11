@@ -7,7 +7,7 @@
   import { count, relativeTime } from '../lib/format';
   import { page } from '../lib/page-hidden.svelte';
   import { fill, strings } from '../lib/strings';
-  import AgentAvatar from './AgentAvatar.svelte';
+  import DiscussionAvatar from './DiscussionAvatar.svelte';
   import AgentDiscussion from './AgentDiscussion.svelte';
 
   /**
@@ -39,7 +39,8 @@
    * the open row closes it, the way back from a wide panel.
    */
   function choose(peer: string): void {
-    const closing = peer === surface.peer;
+    // A stored peer that names no discussion is not open: its row opens it on the first click.
+    const closing = peer === current?.key;
     open(closing ? undefined : peer);
     if (!closing) void tick().then(() => rows?.parentElement?.querySelector<HTMLElement>('[data-testid=agent-discussion-heading]')?.focus());
   }
@@ -63,7 +64,7 @@
         <button type="button" class="row" class:selected={discussion === current} class:steward={discussion.steward}
           data-testid="agent-discussion" data-peer={discussion.key} aria-current={discussion === current ? 'true' : undefined}
           onclick={() => choose(discussion.key)}>
-          <AgentAvatar title={discussion.title} providerId={discussion.providerId} status={discussion.status} steward={discussion.steward} size={34} />
+          <DiscussionAvatar title={discussion.title} providerId={discussion.providerId} status={discussion.status} steward={discussion.steward} size={34} />
           <span class="main">
             <span class="line">
               <strong>{discussion.title}</strong>
