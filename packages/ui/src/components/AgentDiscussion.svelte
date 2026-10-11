@@ -78,6 +78,8 @@
   let flash = $state<string | null>(null);
   /** The discussion and letter the view last landed on, and how many letters it had then. */
   let landed: string | undefined;
+  /** The discussion and letter the view opened on, even while that letter has not arrived. */
+  let opened: string | undefined;
   let seen = 0;
   let atEnd = true;
   function show(id: string): void {
@@ -90,18 +92,28 @@
   $effect(() => {
     const target = `${discussion.key}:${letterId ?? ''}`;
     const size = discussion.entries.length;
+    const found = letterId !== undefined && discussion.entries.some(entry => entry.letter.id === letterId);
     if (!list || landed === target) return;
-    landed = target;
-    seen = size;
-    // Another discussion starts at its end; where the reader was in the last one says nothing about it.
-    atEnd = true;
-    void tick().then(() => {
-      if (!list) return;
-      // A row names a letter of the mail it was drawn from; one a reload kept after the core pruned it lands on the end.
-      if (letterId && discussion.entries.some(entry => entry.letter.id === letterId)) show(letterId);
-      else list.scrollTop = list.scrollHeight;
-      scrolled();
-    });
+    if (opened !== target) {
+      opened = target;
+      seen = size;
+      // Another discussion starts at its end; where the reader was in the last one says nothing about it.
+      atEnd = true;
+      if (found || letterId === undefined) landed = target;
+      void tick().then(() => {
+        if (!list) return;
+        if (found) show(letterId!);
+        else list.scrollTop = list.scrollHeight;
+        scrolled();
+      });
+      return;
+    }
+    // Opened on the end while its letter was on its way: land on it once it arrives. A pruned one never does.
+    if (found) {
+      landed = target;
+      seen = size;
+      void tick().then(() => show(letterId!));
+    }
   });
   // New mail follows the end when the reader is there.
   $effect(() => {
