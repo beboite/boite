@@ -109,11 +109,11 @@ export class Workflows {
     return row ? JSON.parse(row.data) as WorkflowRun : null;
   }
   private heldLogs: WorkflowRun[] | null = null;
-  /** A transaction whose saves are logged once it commits: a rolled-back run leaves no record. */
+  /** A transaction whose saves are logged and announced once it commits: a rolled-back run leaves no record. */
   private committed(write: () => void): void {
     const held: WorkflowRun[] = [];
     this.heldLogs = held;
-    try { this.core.journal.db.transaction(write)(); } finally { this.heldLogs = null; }
+    try { this.core.bus.afterCommit(() => this.core.journal.db.transaction(write)()); } finally { this.heldLogs = null; }
     for (const run of held) try { this.log.saved(run); } catch { /* as in save */ }
   }
   private save(run: WorkflowRun): void {
