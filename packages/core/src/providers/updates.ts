@@ -742,7 +742,8 @@ export class HarnessUpdates {
     this.emit();
     const updateAt = logUpdate(this.core, providerId, 'started', { from: drain.before.current });
     void this.runUpdate(drain.target, drain.before)
-      .then(() => logUpdate(this.core, providerId, 'finished', { from: drain.before.current, to: this.entries.get(providerId)?.current ?? null, state: this.entries.get(providerId)?.state ?? null }, updateAt))
+      // A shutdown leaves the entry mid-update: no finish happened to log.
+      .then(() => { if (this.closed || this.core.stopping) return; logUpdate(this.core, providerId, 'finished', { from: drain.before.current, to: this.entries.get(providerId)?.current ?? null, state: this.entries.get(providerId)?.state ?? null }, updateAt); })
       .catch((error: unknown) => {
         this.core.log('error', `updating ${providerId}: ${error instanceof Error ? error.message : String(error)}`);
       })

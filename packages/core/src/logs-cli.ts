@@ -63,9 +63,9 @@ const FLAG_NAMES: Record<keyof LogFlags, string> = {
 };
 
 /** A filter the subcommand would not apply is refused rather than ignored. */
-function only(action: string, options: LogFlags, allowed: readonly (keyof LogFlags)[]): void {
+function only(command: string, options: LogFlags, allowed: readonly (keyof LogFlags)[]): void {
   const extra = (Object.keys(options) as (keyof LogFlags)[]).filter(key => !allowed.includes(key) && options[key] !== undefined && options[key] !== false);
-  if (extra.length > 0) throw new Usage(`logs ${action} takes ${allowed.map(key => FLAG_NAMES[key]).join(', ')}; ${extra.map(key => FLAG_NAMES[key]).join(', ')} does not apply to it`);
+  if (extra.length > 0) throw new Usage(`${command} takes ${allowed.map(key => FLAG_NAMES[key]).join(', ')}; ${extra.map(key => FLAG_NAMES[key]).join(', ')} does not apply to it`);
 }
 
 function flags(args: string[]): { positional: string[]; flags: LogFlags } {
@@ -135,13 +135,13 @@ export async function logsCommand(args: string[], client: CoreClient, threadId: 
   if (action === 'help') { print([LOGS_HELP], { help: LOGS_HELP }); return; }
   if (positional.length > 1) throw new Usage(`logs ${action} takes flags only; boite logs help lists them`);
   if (action === 'problems') {
-    only('problems', options, ['since']);
+    only('logs problems', options, ['since']);
     const summary = await client.call('diagnostics.summary', { ...own, ...(options.since === undefined ? {} : { since: options.since }) });
     print(problemLines(summary), summary);
     return;
   }
   if (action === 'export') {
-    only('export', options, ['since', 'focus', 'out']);
+    only('logs export', options, ['since', 'focus', 'out']);
     const result = await client.call('diagnostics.export', { ...own, ...(options.since === undefined ? {} : { since: options.since }), ...(options.focus ? { focusThreadId: options.focus } : {}) });
     let written: string | null = null;
     if (options.out) {
@@ -159,6 +159,8 @@ export async function logsCommand(args: string[], client: CoreClient, threadId: 
     return;
   }
   if (action !== 'list') throw new Usage(`logs expects list, problems, export or help, got ${action}`);
+  only('logs', options, ['limit', 'level', 'minLevel', 'since', 'origin', 'search', 'turn', 'mine', 'anonymize']);
+  if (options.level && options.minLevel) throw new Usage('--level and --min-level filter the same field: give one of them');
   if (agent) {
     if (options.level || options.turn || options.anonymize) throw new Usage('--level, --turn and --anonymize are the owner\'s; an agent uses --min-level, --since, --search and --mine');
     const records = await client.call('diagnostics.logs', {
@@ -185,6 +187,8 @@ export async function issueCommand(args: string[], client: CoreClient, threadId:
   const { positional, flags: options } = flags(args);
   const action = positional[0];
   if (action !== 'draft' && action !== 'submit') throw new Usage('issue expects draft or submit; boite logs help shows the flags');
+  if (positional.length > 1) throw new Usage(`issue ${action} takes flags only; boite logs help lists them`);
+  only(`issue ${action}`, options, ['title', 'description', 'descriptionFile', 'noLogs']);
   if (!options.title) throw new Usage('issue needs --title');
   let description = options.description;
   if (options.descriptionFile) {

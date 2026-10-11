@@ -150,6 +150,10 @@ test('a session open that throws before its first await is logged as a failure, 
   expect(notes[0]).toMatchObject({ level: 'info', event: 'driver.session.ready' });
   expect(notes[0]!.durationMs).toBeGreaterThanOrEqual(25);
   expect(notes[0]!.message).toContain(', on gpt');
+  // A resume asked for that came back new says both.
+  notes.length = 0;
+  await noteReady({ ...ctx, sessionId: 'ses_old' }, 'pi', () => Promise.resolve(), () => ({ resumed: false }));
+  expect(notes[0]).toMatchObject({ event: 'driver.session.ready', data: { resume: true, resumed: false } });
 });
 
 test('log fields from an unauthenticated hello cannot forge a line, and a reset time a Date cannot hold is dropped', () => {
@@ -174,6 +178,9 @@ test('provider detection warns once when the rejected descriptor count changes, 
   // The warning belongs to the call where the count moved, before the two availability changes.
   expect(records.findIndex(record => record.context.event === 'provider.rejected')).toBe(1);
   expect(records.filter(record => record.context.event === 'provider.detected')).toHaveLength(3);
+  // A program name may hold any character the file system allows, `|` included.
+  log([provider(true), { id: 'pipe', executable: '/opt/odd|name', available: true, enabled: true } as unknown as ProviderSummary], 1);
+  expect(records.at(-1)?.context.data).toMatchObject({ providerId: 'pipe', state: 'available', program: 'odd|name', version: null });
 });
 
 

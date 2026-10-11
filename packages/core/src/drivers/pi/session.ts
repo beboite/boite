@@ -627,15 +627,15 @@ export class PiSession {
         break;
       }
       case 'auto_retry_start': {
-        turn.ctx.reportProgress?.('retrying', `${String(message['attempt'])}/${String(message['maxAttempts'])}`);
         const count = (value: unknown): number | null => typeof value === 'number' ? value : null;
         const attempt = count(message['attempt']), maxAttempts = count(message['maxAttempts']), retryAfterMs = count(message['delayMs']);
+        turn.ctx.reportProgress?.('retrying', `${attempt ?? '?'}/${maxAttempts ?? '?'}`);
         turn.ctx.diagnostic?.('warn', `pi request failed, retry ${attempt ?? '?'} of ${maxAttempts ?? '?'} in ${retryAfterMs ?? '?'} ms: ${textOf(message['errorMessage'])}`, {
           event: 'driver.api.retry', data: { attempt, maxAttempts, retryAfterMs },
         });
         turn.ctx.log(
           'info',
-          `pi: retrying the request (attempt ${String(message['attempt'])} of ${String(message['maxAttempts'])}, in ${String(message['delayMs'])} ms): ${textOf(message['errorMessage'])}`,
+          `pi: retrying the request (attempt ${attempt ?? '?'} of ${maxAttempts ?? '?'}, in ${retryAfterMs ?? '?'} ms): ${textOf(message['errorMessage'])}`,
         );
         break;
       }

@@ -476,7 +476,10 @@ export function registerProviderMethods(core: Core): void {
       // installer, which would take it for a failed install and delete the release.
       try { core.accounts.ensureDefaults(); }
       catch (error) { core.log('error', `default accounts after an install: ${error instanceof Error ? error.message : String(error)}`); }
-      core.bus.emit('providers.updated', core.providers.list());
+      // The announce fingerprint follows, so the next version read does not announce this list again.
+      const list = core.providers.list();
+      noteListed(list);
+      core.bus.emit('providers.updated', list);
     },
     log: (level, message) => {
       core.log(level, message);

@@ -32,25 +32,32 @@ export function installLogger(core: Core): (payload: ProviderInstallState & { pr
  * one appears, disappears or moves to another program: the program's file
  * name and the version it reported, never its path.
  */
+/** What a detection record says of one provider; a change in any field is logged. */
+interface Detected { state: 'off' | 'available' | 'missing'; program: string | null; version: string | null }
+
 export function detectionLogger(core: Core): (providers: ProviderSummary[], rejected: number) => void {
-  let last = new Map<string, string>();
+  let last = new Map<string, Detected>();
   let lastRejected = 0;
   return (providers, rejected) => {
-    const now = new Map<string, string>();
+    const now = new Map<string, Detected>();
     for (const provider of providers) {
-      const program = provider.executable === null ? null : programName(provider.executable);
-      now.set(provider.id, `${provider.enabled === false ? 'off' : provider.available ? 'available' : 'missing'}|${program ?? ''}|${provider.executable === null ? '' : knownVersion(provider.executable) ?? ''}`);
+      now.set(provider.id, {
+        state: provider.enabled === false ? 'off' : provider.available ? 'available' : 'missing',
+        program: provider.executable === null ? null : programName(provider.executable),
+        version: provider.executable === null ? null : knownVersion(provider.executable),
+      });
     }
-    const changed = [...now].filter(([id, state]) => last.get(id) !== state).map(([id]) => id);
+    const same = (a: Detected | undefined, b: Detected): boolean => a !== undefined && a.state === b.state && a.program === b.program && a.version === b.version;
+    const changed = [...now].filter(([id, state]) => !same(last.get(id), state)).map(([id]) => id);
     const gone = [...last.keys()].filter(id => !now.has(id));
     last = now;
     const rejectedChanged = rejected !== lastRejected;
     lastRejected = rejected;
     if (changed.length === 0 && gone.length === 0 && !rejectedChanged) return;
     for (const id of changed) {
-      const [state, program, version] = now.get(id)!.split('|');
+      const { state, program, version } = now.get(id)!;
       core.logs.info(`Provider ${id} is ${state}${program ? `, program ${program}${version ? ` ${version}` : ''}` : ''}`, {
-        source: 'providers', event: 'provider.detected', data: { providerId: id, state: state ?? null, program: program || null, version: version || null },
+        source: 'providers', event: 'provider.detected', data: { providerId: id, state, program, version },
       });
     }
     for (const id of gone) core.logs.info(`Provider ${id} is no longer loaded`, { source: 'providers', event: 'provider.removed', data: { providerId: id } });

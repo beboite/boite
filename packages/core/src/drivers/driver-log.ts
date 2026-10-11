@@ -79,7 +79,7 @@ export function noteReady<T>(
     // A session asked to resume can still come back new, when the agent could not load it.
     const resumed = extra.resumed ?? resume;
     const elapsed = Date.now() - at;
-    ctx.diagnostic?.('info', `${agent} session ready in ${elapsed} ms, ${resumed ? 'resumed' : 'new'}${extra.text ?? ''}`, { event: 'driver.session.ready', durationMs: elapsed, data: { ...extra.data, resume: resumed } });
+    ctx.diagnostic?.('info', `${agent} session ready in ${elapsed} ms, ${resumed ? 'resumed' : 'new'}${extra.text ?? ''}`, { event: 'driver.session.ready', durationMs: elapsed, data: { ...extra.data, resume, resumed } });
     return value;
   }, failed);
 }

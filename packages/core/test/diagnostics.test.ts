@@ -271,7 +271,7 @@ test('the CLI prints records oldest first, filters by time and level, and export
     expect(await runCli(['logs', '--data-dir', harness.dataDir, '--mine'], { env: {}, cwd: harness.dataDir, out: () => undefined, err: value => { refusedMine += value; } })).not.toBe(0);
     expect(refusedMine).toContain('--mine is the agent');
     // Every subcommand refuses an extra word, and an unreadable description file is a usage error.
-    for (const [args, expected] of [[['logs', 'problems', 'extra'], 'logs problems takes flags only'], [['logs', 'problems', '--search', 'timeout'], '--search does not apply to it'], [['issue', 'draft', '--title', 'The window froze', '--description-file', 'missing.md'], '--description-file missing.md cannot be read: ENOENT']] as const) {
+    for (const [args, expected] of [[['logs', 'problems', 'extra'], 'logs problems takes flags only'], [['logs', 'problems', '--search', 'timeout'], '--search does not apply to it'], [['logs', '--out', 'x.txt'], '--out does not apply to it'], [['logs', '--level', 'warn', '--min-level', 'info'], '--level and --min-level filter the same field'], [['issue', 'draft', 'extra', '--title', 'The window froze', '--description', 'x'], 'issue draft takes flags only'], [['issue', 'draft', '--title', 'The window froze', '--description', 'x', '--since', '1h'], '--since does not apply to it'], [['issue', 'draft', '--title', 'The window froze', '--description-file', 'missing.md'], '--description-file missing.md cannot be read: ENOENT']] as const) {
       let refused = '';
       expect(await runCli(['--data-dir', harness.dataDir, ...args], { env: {}, cwd: harness.dataDir, out: () => undefined, err: value => { refused += value; } })).not.toBe(0);
       expect(refused).toContain(expected);
