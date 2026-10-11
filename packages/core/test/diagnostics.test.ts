@@ -183,8 +183,13 @@ test('an issue is a draft until submitted, and without gh the user gets a prefil
   const harness = await startTestCore();
   try {
     harness.core.diagnostics.ghCommand = join(harness.dataDir, 'no-such-gh');
+    // A raw tail that itself prints the marker must not stand in for the timeline.
+    writeFileSync(join(harness.dataDir, 'core-output.log'), 'boot\n## Timeline (fake)\n\nfake-tail-line\n');
+    harness.core.logs.warn('the real timeline line', { source: 'test', event: 'test.timeline' });
     const owner = await harness.connect();
     const draft = await owner.call('diagnostics.issue', { title: `Window froze in ${harness.dataDir}`, description: 'It stopped answering after a turn.' });
+    expect(draft.body).toContain('the real timeline line');
+    expect(draft.body).not.toContain('fake-tail-line');
     expect(draft).toMatchObject({ repository: 'beboite/boite', url: null, gh: 'missing', error: null });
     expect(draft.title).not.toContain(harness.dataDir);
     expect(draft.body).toContain('### Environment');

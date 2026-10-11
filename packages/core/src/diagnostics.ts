@@ -457,7 +457,9 @@ export function renderIssueBody(description: string, exported: DiagnosticsExport
     '',
   );
   const footer = ['', `<sub>Anonymized by Boite. The full export (${exported.name}, ${formatBytes(exported.bytes)}) can be attached to this issue.</sub>`];
-  const timeline = exported.text.split('\n## Timeline')[1]?.split('\n').slice(2).filter(line => line.length > 0) ?? [];
+  // The last marker: a raw tail above it may itself hold `## Timeline`.
+  const parts = exported.text.split('\n## Timeline');
+  const timeline = parts.length > 1 ? parts.at(-1)!.split('\n').slice(2).filter(line => line.length > 0) : [];
   const fixed = head.join('\n').length + footer.join('\n').length + 120;
   const room = maxChars - fixed;
   const chosen: string[] = [];

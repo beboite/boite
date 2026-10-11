@@ -154,7 +154,7 @@ export class MobileDevices {
         this.#settle(device.id, { state: 'ready' });
       },
       (error: unknown) => {
-        if (this.#alive(boot)) this.#core.logs.warn(`Device ${device.id} failed to boot: ${error instanceof Error ? error.message : String(error)}`, { source: 'devices', event: 'device.boot-failed', data: { deviceId: device.id, platform: device.platform } });
+        if (this.#alive(boot)) this.#core.logs.warn(`Device ${device.id} failed to boot: ${error instanceof Error ? error.message : String(error)}`, { source: 'devices', event: 'device.boot-failed', threadId, data: { deviceId: device.id, platform: device.platform } });
         if (this.#alive(boot)) this.#settle(device.id, { state: 'failed', error: error instanceof Error ? error.message : String(error) });
       },
     );

@@ -118,14 +118,22 @@ pub fn run() {
     let context = shell_context();
     let channel = Channel::of_identifier(&context.config().identifier);
     let directory = resolve_data_dir(channel);
-    shell_log::init(&directory);
-    let (os, os_build) = platform::watch::os_build();
-    shell_log::info("startup", "shell.start", format!("Boite shell {} ({}) starting on {os} {os_build} {}",
-        context.package_info().version, channel_label(channel), std::env::consts::ARCH), json!({
-        "version": context.package_info().version.to_string(), "channel": channel_label(channel), "os": os, "osBuild": os_build,
-        "arch": std::env::consts::ARCH, "pid": std::process::id(), "hidden": hidden(),
-    }));
-    phase("context", launched);
+    // The shell log starts once this process owns the data directory (or runs without the lock):
+    // a second launch only forwards to the running shell and must not write into its files.
+    let context_took = launched.elapsed();
+    let start_log = |instance_took: std::time::Duration| {
+        shell_log::init(&directory);
+        let (os, os_build) = platform::watch::os_build();
+        shell_log::info("startup", "shell.start", format!("Boite shell {} ({}) starting on {os} {os_build} {}",
+            context.package_info().version, channel_label(channel), std::env::consts::ARCH), json!({
+            "version": context.package_info().version.to_string(), "channel": channel_label(channel), "os": os, "osBuild": os_build,
+            "arch": std::env::consts::ARCH, "pid": std::process::id(), "hidden": hidden(),
+        }));
+        shell_log::timed(shell_log::Level::Info, "startup", "shell.startup.phase",
+            format!("startup phase context took {} ms", context_took.as_millis()), context_took, json!({ "phase": "context" }));
+        shell_log::timed(shell_log::Level::Info, "startup", "shell.startup.phase",
+            format!("startup phase instance took {} ms", instance_took.as_millis()), instance_took, json!({ "phase": "instance" }));
+    };
     let instance_started = std::time::Instant::now();
     // Linux and macOS restart through `app.restart()`, which sets the
     // variable; on Windows the installer starts the new shell and says so in
@@ -136,15 +144,13 @@ pub fn run() {
     // Started by the login entry: the core starts, the window waits in the tray.
     let at_login = autostart::launched_at_login(std::env::args_os(), restarted);
     let _instance = match acquire_after_update(&directory, restarted) {
-        Ok(Some(file)) => Some(file),
+        Ok(Some(file)) => { start_log(instance_started.elapsed()); Some(file) }
         // Another instance already owns this data directory: it shows its
         // window, which may be in the tray or behind others, and this process
         // has nothing left to do. Automation never raises a window, and
         // neither does a login start finding Boite already running.
         Ok(None) => {
-            shell_log::info("startup", "shell.instance.forwarded",
-                "another shell already owns this data directory; asking it to show its window and exiting", json!({ "atLogin": at_login }));
-            shell_log::flush(std::time::Duration::from_millis(300));
+            eprintln!("[shell] another shell already owns this data directory; asking it to show its window and exiting");
             if !hidden() && !at_login {
                 if let Err(error) = instance::wake(&directory) {
                     eprintln!("[shell] Boite is already running, but it could not be asked to show its window: {error}");
@@ -156,6 +162,7 @@ pub fn run() {
             eprintln!(
                 "[shell] the shell instance lock could not be acquired: {error}; continuing without single-instance protection"
             );
+            start_log(instance_started.elapsed());
             shell_log::warn("startup", "shell.instance.unlocked",
                 format!("the shell instance lock could not be acquired: {error}; continuing without single-instance protection"), json!({}));
             None
@@ -175,7 +182,6 @@ pub fn run() {
         record_failure(&failures, &format!("the shell panicked: {info}"));
         previous_hook(info);
     }));
-    phase("instance", instance_started);
     let failures = directory.clone();
     let preferences_path = directory.join("shell-settings.json");
     let close_to_tray = close_to_tray_or_default(&preferences_path);

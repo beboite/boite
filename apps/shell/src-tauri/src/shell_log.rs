@@ -87,7 +87,9 @@ pub(crate) struct Logger {
 
 impl Logger {
     fn record(&self, level: Level, source: &'static str, event: &'static str, message: String, duration_ms: Option<u64>, data: Value) {
-        let pending = Pending { seq: self.shared.next(), at: unix_ms(), level, source, event, message, duration_ms, data };
+        // Numbered by the writer, in the order it writes: two threads that log at once
+        // could otherwise queue seq 2 before seq 1, and file order would not match ids.
+        let pending = Pending { seq: 0, at: unix_ms(), level, source, event, message, duration_ms, data };
         match self.sender.try_send(Message::Record(pending)) {
             Ok(()) => {}
             Err(TrySendError::Full(_)) => { self.shared.dropped.fetch_add(1, Ordering::Relaxed); }
@@ -278,7 +280,8 @@ fn channel(capacity: usize) -> (Logger, Receiver<Message>, Arc<Shared>) {
 fn serve(receiver: Receiver<Message>, mut writer: Writer, shared: Arc<Shared>) {
     while let Ok(message) = receiver.recv() {
         match message {
-            Message::Record(pending) => {
+            Message::Record(mut pending) => {
+                pending.seq = shared.next();
                 if let Some(line) = render(&shared.run_id, pending) { writer.write_line(&line); }
                 write_dropped(&shared, &mut writer);
             }

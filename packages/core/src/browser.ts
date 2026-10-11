@@ -483,8 +483,8 @@ export class AgentBrowser {
     if (this.#closed) throw refused('the core is shutting down');
     this.#watch();
     const previous = this.#queues.get(threadId) ?? Promise.resolve();
-    const at = performance.now();
-    const run = previous.catch(() => {}).then(() => this.#run(threadId, params.tabId, action));
+    let at = performance.now(); // Reset when the command runs: the wait behind the thread's previous one is not its time.
+    const run = previous.catch(() => {}).then(() => { at = performance.now(); return this.#run(threadId, params.tabId, action); });
     run.catch(() => this.#core.logs.debug(`browser ${action.kind} failed after ${Math.round(performance.now() - at)} ms`, { source: 'browser', event: 'browser.command-failed', threadId, durationMs: performance.now() - at, data: { action: action.kind } }));
     this.#queues.set(threadId, run);
     void run.finally(() => { if (this.#queues.get(threadId) === run) this.#queues.delete(threadId); }).catch(() => {});
