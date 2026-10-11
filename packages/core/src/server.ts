@@ -1,6 +1,6 @@
 import type { ServerWebSocket } from 'bun';
 import type { Channel, RpcEventName, RpcEvents, ThreadId } from '@boite/contracts';
-import { FILE_ROUTE, RPC_MAX_FRAME_BYTES, RPC_PATH, RpcCloseCode, VIEW_CONTENT_POLICY, VIEW_ROUTE, VIEW_SANDBOX } from '@boite/contracts';
+import { APP_ORIGIN, FILE_ROUTE, RPC_MAX_FRAME_BYTES, RPC_PATH, RpcCloseCode, VIEW_CONTENT_POLICY, VIEW_ROUTE, VIEW_SANDBOX } from '@boite/contracts';
 import { timingSafeEqual } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { hostname, networkInterfaces } from 'node:os';
@@ -65,6 +65,17 @@ export const PLACEHOLDER_HTML =
   '<!doctype html><meta charset="utf-8"><title>Boite core</title><p>Boite core is running; the UI is not built</p>';
 
 const SHELL_ORIGINS = ['tauri://localhost', 'http://tauri.localhost', 'https://tauri.localhost'];
+
+/** The phone app's origin (`APP_ORIGIN`), or the one `BOITE_APP_ORIGIN` names: a page no core serves, accepted by all. */
+export function appOrigin(env: Record<string, string | undefined> = process.env): string {
+  const named = env['BOITE_APP_ORIGIN']?.trim();
+  if (!named) return APP_ORIGIN;
+  try {
+    const url = new URL(named);
+    if (url.protocol === 'https:' && url.origin === named.replace(/\/$/, '')) return url.origin;
+  } catch { /* falls through */ }
+  throw new Error(`BOITE_APP_ORIGIN: expected an https origin such as ${APP_ORIGIN}, got ${named}`);
+}
 
 export interface ServerOptions {
   core: Core;
@@ -415,6 +426,8 @@ export function startServer(options: ServerOptions): RunningServer {
     return identity === null || identity.principal === 'agent' ? null : { sessionId: identity.sessionId };
   }, { helloTimeoutMs, helloMaxBytes: PREAUTH_FRAME_MAX_BYTES });
   core.relays = relays;
+  // Read once: a misspelt override stops the start rather than letting a page nobody meant in.
+  const app = appOrigin();
   let stopping = false;
 
   // One set of handlers for every address the core answers on: the sockets,
@@ -471,7 +484,7 @@ export function startServer(options: ServerOptions): RunningServer {
       const ownOrigin = (origin: string | null): boolean => isAllowedOrigin(origin, self.port ?? 0, hostname)
         || (origin !== null && (core.settings.get().browserOrigins?.includes(origin) === true || origin === core.settings.get().publicUrl));
       // A page served by one machine of the group opens its socket on the others.
-      const allowedOrigin = (origin: string | null): boolean => ownOrigin(origin) || (origin !== null && core.group.allowsOrigin(origin));
+      const allowedOrigin = (origin: string | null): boolean => ownOrigin(origin) || (origin !== null && (origin === app || core.group.allowsOrigin(origin)));
 
       const relayed = parseRelayPath(url.pathname);
       if (relayed !== null) {

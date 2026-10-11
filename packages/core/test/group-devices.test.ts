@@ -2,7 +2,8 @@ import { afterEach, expect, test } from 'bun:test';
 import { deviceAdmitInput, deviceHelloInput } from '@boite/contracts';
 import { generateKeyPairSync, randomBytes, sign, type KeyObject } from 'node:crypto';
 import { connect, type CoreClient } from '../src/client.ts';
-import { isAllowedOrigin } from '../src/server.ts';
+import { appOrigin, isAllowedOrigin } from '../src/server.ts';
+import { APP_ORIGIN } from '@boite/contracts';
 import { startTestCore, waitFor, type TestCore } from './harness.ts';
 
 const cores: TestCore[] = [];
@@ -195,4 +196,11 @@ test('a device redeeming its code again after a lost answer is answered until th
   const refusal = await connect(a.url, '', { grant, device: { publicKey: 'not-a-key', sig: 'x' } }).catch((error: { rpc?: { code: number; data?: { field?: string } } }) => error);
   await settled(a, before);
   expect((refusal as { rpc?: { code: number; data?: { field?: string } } }).rpc).toMatchObject({ code: -32602, data: { field: 'device.publicKey' } });
+});
+
+test('every core accepts the phone app\'s address, the published one or the one its start names, and refuses a misspelt one', () => {
+  expect(appOrigin({})).toBe(APP_ORIGIN);
+  expect(appOrigin({ BOITE_APP_ORIGIN: 'https://app.example/' })).toBe('https://app.example');
+  expect(() => appOrigin({ BOITE_APP_ORIGIN: 'http://app.example' })).toThrow('BOITE_APP_ORIGIN');
+  expect(() => appOrigin({ BOITE_APP_ORIGIN: 'https://app.example/path' })).toThrow('BOITE_APP_ORIGIN');
 });

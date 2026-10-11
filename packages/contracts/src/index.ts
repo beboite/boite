@@ -2894,6 +2894,15 @@ export interface DeviceInvite {
   codeExpiresAt: Timestamp;
 }
 
+/**
+ * Where the phone app is served from: a page that belongs to no core. Every
+ * core accepts its sockets, as it does the desktop shell's, and the app reaches
+ * the machines of the group it was added to from there. A core's
+ * `BOITE_APP_ORIGIN` and the UI's `VITE_BOITE_APP_ORIGIN` name another one, for
+ * tests and for a fork that serves its own.
+ */
+export const APP_ORIGIN = 'https://beboite.github.io';
+
 /** The fragment key of a device link that carries a machine's group invitation. */
 export const DEVICE_LINK_JOIN = 'join';
 

@@ -216,7 +216,9 @@ under Advanced) whose host is the one the socket asked for, outside loopback. It
 learns it before any hello, so the first page of a phone that holds no key yet
 already opens the way, and publishes up to four in the roster (`origins`). A
 machine behind a reverse proxy is thus accepted by the others without anything
-set on them. The origin check keeps arbitrary websites out; it grants nothing,
+set on them. Every core also accepts the phone app's own address
+(`APP_ORIGIN`, [phone](phone.md#the-app-on-its-own-address)), a page no machine
+serves. The origin check keeps arbitrary websites out; it grants nothing,
 since every socket still needs a credential at `hello`.
 
 ## Relay

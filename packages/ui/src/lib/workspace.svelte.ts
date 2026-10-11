@@ -26,6 +26,7 @@ import { strings } from './strings';
 import { onReveal, reveal } from './reveal';
 import { AutoSettingsSync } from './auto-settings-sync.svelte';
 import { GroupLinks, holdsBack } from './group-links.svelte';
+import { appPage } from './app-origin';
 
 export interface Machine {
   id: string;
@@ -552,7 +553,9 @@ export class Workspace {
     if (existing && existing.store.connection === 'ready') return fail(strings.machines.duplicate);
     // A machine paired by hand at this address stays what it is: the group neither replaces its key nor claims it.
     if (existing && endpoint.ticket !== undefined && existing.coreId !== endpoint.coreId) return false;
-    const target = existing?.store ?? new Store();
+    // The phone app's window opened on no machine: the first one added becomes the one it shows.
+    const adopt = !existing && appPage() && store.endpointUrl === null && !store.localCore;
+    const target = existing?.store ?? (adopt ? store : new Store());
     target.client?.close();
     target.detach();
     target.machineId = id;
@@ -565,7 +568,7 @@ export class Workspace {
         ...(endpoint.coreId === undefined || endpoint.epoch === undefined ? {} : { epoch: endpoint.epoch })
       };
       this.#distinct(fresh);
-      this.machines = [...this.machines, fresh];
+      this.machines = adopt ? [fresh, ...this.machines.filter((m) => m.store !== store)] : [...this.machines, fresh];
     }
     // Read back from the list: the name the core reports is written through the
     // reactive entry, or a card already drawn under the address keeps showing it.
