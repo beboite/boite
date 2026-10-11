@@ -1,7 +1,7 @@
 import { archiveState, archiveStateKey } from './merged-pr-archive-state.ts';
 import { assertIdleFamily } from './threads/completion.ts';
 import { repositoryOf, type MergedPrProof } from './pull-requests.ts';
-import { previewReferencesError, previewPrompt, DEFAULT_THREAD_DELETION_RETENTION_DAYS, type AgentProfile } from '@boite/contracts';
+import { previewReferencesError, previewPrompt, DEFAULT_THREAD_DELETION_RETENTION_DAYS, type ActivityTurn, type AgentProfile } from '@boite/contracts';
 import type {
   Account,
   AccountId,
@@ -662,7 +662,7 @@ export class ThreadStore {
     return this.moves.userMove(threadId, projectId, stopBackground);
   }
 
-  startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], expectedSelectionVersion?: number, operation?: NonNullable<Turn['execution']>['operation'], activity?: { kind: 'goal' | 'loop'; iteration: number }, clientRequestId?: string, displayText?: string, previewReferences: PreviewReference[] = [], agentRunId?: string, startedBy?: ThreadLink, sentFrom: SentFrom | null = null): Turn {
+  startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], expectedSelectionVersion?: number, operation?: NonNullable<Turn['execution']>['operation'], activity?: ActivityTurn, clientRequestId?: string, displayText?: string, previewReferences: PreviewReference[] = [], agentRunId?: string, startedBy?: ThreadLink, sentFrom: SentFrom | null = null): Turn {
     if (this.core.stopping) throw refused('the core is stopping; reconnect before sending another prompt');
     let thread = this.require(threadId);
     this.codeCheckpoints.assertAvailable(thread.cwd);

@@ -84,6 +84,51 @@ reports inaccessible pages explicitly. Selected page content is untrusted data;
 it never grants the page access to host commands. This version does not attach
 a screenshot to the reference.
 
+## Reviewed goals
+
+`goal2` adds `/goal2 <objective>` to the composer and its slash menu. With the
+switch off, `/goal2` goes to the agent as typed. The switch belongs to the
+client; the core accepts `goal: { objective, review: true }` from any client
+(`threads.activity.set`).
+
+A reviewed goal runs like `/goal` (see [context](context.md#pending-prompts-goals-and-loops)) until the agent ends a
+turn with `[BOITE_GOAL_COMPLETE]`. There, the core treats the marker as a claim
+and does not complete the goal:
+
+1. It starts a reviewer in a new child conversation of the thread, in the same
+   checkout and permission mode, with none of the agent's history. The reviewer
+   runs on the owner's delegation profile whose id or name is `reviewer`, else
+   on the conversation's own model. A profile on another agent gives a
+   cross-provider review, for example Codex judging a Claude goal.
+2. The reviewer receives the objective and the agent's last answer, both as
+   JSON data. It is told to inspect the diff, run the checks that prove the
+   objective, edit nothing, and end with `VERDICT: PASS`, `PARTIAL` or `FAIL`
+   under its findings.
+3. PASS completes the goal. PARTIAL, FAIL or an answer without a verdict line
+   (`missing`) goes back to the agent: the next goal turn carries the
+   findings, as JSON data, and from the second failed review it is told to
+   reconsider its approach. Only that first turn after a review carries them.
+4. After five reviews without a pass, the goal stops as blocked. The user's
+   reply resumes it for one more round, and so does each later reply.
+
+`ThreadActivity.goal.review` holds the phase, the reviewer conversation running
+now and every verdict with its round, its summary (2000 characters at most)
+and its conversation. The goal bar labels the goal Reviewed goal, shows
+Reviewing during a review, and draws one dot per verdict plus a pulsing dot for
+the running review. A dot opens its reviewer conversation. The details list
+each verdict with its findings.
+
+Reviewers are not subagents. Like workflow steps, they need no enabled team, a
+paused team holds them, and their answer goes to the goal, never to the parent
+as mail. They are not listed in the Subagents tab. Pausing, removing or
+completing the goal by hand stops the running reviewer, and resuming a goal
+paused during its review starts a new review. A core restart keeps the
+verdicts and drops the interrupted review; the resume starts a fresh one.
+
+This version does not run checks itself before the review: the reviewer runs
+them and spends tokens doing so. It has no token budget and no detection of
+the same finding repeated: the five-review stop bounds a goal instead.
+
 ## Verification
 
 `artifacts.test.ts` covers publication, path boundaries and byte preservation in
@@ -91,6 +136,12 @@ the core. The end-to-end tests `artifacts.test.ts` and
 `preview-comments.test.ts` cover desktop and phone-sized interfaces. Preview
 unit tests cover owning-machine boundaries and selection validation.
 No live provider login is required.
+
+`goal-review.test.ts` drives reviewed goals through the real core with the
+echo driver: a failed review then a pass, the five-review stop and the reply
+that allows one more, pause and resume during a review, and a restart. UI unit
+tests cover the `/goal2` switch, the goal bar's verdicts and the fake core's
+reviewer.
 
 `whip.test.ts` covers the toggle, persistence, desktop and phone layout, drop and rethrow, whole
 interface movement, rope drawing and release, cancellation and reduced motion. `shell.test.ts` verifies

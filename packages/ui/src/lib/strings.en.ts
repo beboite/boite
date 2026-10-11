@@ -870,6 +870,21 @@ export const strings = {
     goalDescription: 'Keep working toward an objective',
     loopDescription: 'Repeat a task a set number of times or on a schedule',
     goalUsage: 'Use /goal followed by an objective.',
+    /** `/goal2`, the Reviewed goals experiment: a fresh reviewer must pass the work. */
+    goal2: 'Reviewed goal',
+    goal2Description: 'Work toward an objective until a fresh reviewer passes it',
+    goal2Usage: 'Use /goal2 followed by an objective.',
+    /** The goal's agent claimed completion and a reviewer conversation is checking it. */
+    reviewing: 'Reviewing',
+    reviews: 'Reviews',
+    reviewRound: 'Review {round}',
+    reviewRoundOf: 'Review {round} of {total}',
+    reviewInProgress: 'Review {round} in progress',
+    openReview: 'Open the reviewer conversation',
+    pass: 'Pass',
+    partial: 'Partial',
+    fail: 'Fail',
+    missing: 'No verdict',
     loopUsage: 'Use /loop 2 prompt for two iterations, or /loop 5m prompt for a schedule. Choose 1 to 1000 iterations.',
     intervalError: 'Loop intervals must be between 1 second and 24 hours.',
     active: 'Active',
@@ -2212,6 +2227,7 @@ export const strings = {
       drop: 'Drop the whip'
     },
     previewComments: { title: 'Preview comments', hint: 'Select an element in the integrated browser and add feedback to the conversation draft' },
+    goal2: { title: 'Reviewed goals', hint: 'Adds /goal2: when the agent says the goal is done, a new conversation that has not seen its work checks it and answers pass, partial or fail. Anything but a pass goes back to the agent, for up to five reviews' },
     themeGrain: {
       title: 'Grain theme',
       hint: 'A grainy ground fading from light grey at the top left to black at the bottom right'
