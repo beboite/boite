@@ -60,8 +60,13 @@ to 100 tokens and capped at ten million. Missing usage stays absent.
 These values come from the frozen execution snapshot, regardless of later model
 changes.
 `default` means the provider chose its model; it does not claim a resolved model.
-`packages/contracts/src/telemetry.ts` lists public models. Unknown models, custom
-aliases, paths and fine-tuned IDs become `other` on both the host and relay.
+`packages/contracts/src/telemetry.ts` matches public model families (Claude,
+GPT and o-series, Gemini, Grok, DeepSeek, GLM, Kimi) with closed patterns, so a
+new release of a known family needs no Boite update. Only the segment after the
+last `/` is checked: `codex/gpt-6.1-sol` reports `gpt-6.1-sol` and the prefix is
+dropped. Unknown models, custom aliases, paths and fine-tuned IDs become `other`
+on both the host and relay. Both normalize, so a family added to the patterns
+counts only after a host release and a relay deployment.
 Basic mode strips every enhanced field even from modified clients.
 
 These fields measure model adoption, retention among consenting installations,
