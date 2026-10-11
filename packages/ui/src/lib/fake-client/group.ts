@@ -163,9 +163,12 @@ export function groupMethods(ctx: FakeContext) {
       const expiresAt = ctx.now() + GRANT_TTL_MS;
       roster.invites.set(grant, expiresAt);
       const invite = GROUP_INVITE_PREFIX + btoa(JSON.stringify({ v: 1, g: roster.id, n: roster.name, c: ctx.identity.coreId, a: [ctx.identity.url], t: grant }));
+      // The real core's link: its public address, else where it listens. `?lan=off` is a fresh install that listens on itself.
+      const lanOff = typeof location !== 'undefined' && new URLSearchParams(location.search).get('lan') === 'off' && !ctx.settings.listenOnLan;
+      const origin = ctx.settings.publicUrl ?? (lanOff ? 'http://127.0.0.1:8777' : 'http://192.168.1.20:8777');
       return {
-        url: `${ctx.identity.url}/?grant=fake-grant-${ctx.seq}#${DEVICE_LINK_JOIN}=${encodeURIComponent(invite)}`,
-        code: 'K7QD-4M2X',
+        url: `${origin}/?grant=fake-grant-${ctx.seq}#${DEVICE_LINK_JOIN}=${encodeURIComponent(invite)}`,
+        code: `K7QM-${String(ctx.seq).padStart(4, '2')}`,
         expiresAt,
         codeExpiresAt: ctx.now() + PAIRING_CODE_TTL_MS
       };
