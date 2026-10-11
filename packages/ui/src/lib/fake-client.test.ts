@@ -904,6 +904,21 @@ test('a fake blocked goal waits for the reply, then runs again', async ({ create
   expect((await client.call('threads.get', { threadId })).activity?.goal).toMatchObject({ status: 'paused', blocked: true, iterations: 2 });
 });
 
+test('a fake reviewed goal fails its first review, works on the finding and passes the second', async ({ createClient }) => {
+  vi.useFakeTimers();
+  const client = await createClient({ delayMs: 1 });
+  const { id: threadId } = await newThread(client);
+  await client.call('threads.activity.set', { threadId, goal: { objective: 'Rename the empty state', review: true } });
+  await vi.runAllTimersAsync();
+  const thread = await client.call('threads.get', { threadId });
+  const review = thread.activity!.goal!.review!;
+  expect(thread.activity!.goal).toMatchObject({ status: 'complete', iterations: 2 });
+  expect(review.verdicts.map(v => v.verdict)).toEqual(['fail', 'pass']);
+  expect(review).toMatchObject({ phase: 'working', reviewerThreadId: null, delivered: 1 });
+  for (const verdict of review.verdicts) expect((await client.call('threads.get', { threadId: verdict.threadId })).parentThreadId).toBe(threadId);
+  expect(thread.messages.filter(m => m.role === 'user').map(m => m.parts[0]?.type === 'text' && m.parts[0].text)).toEqual(['/goal2 Rename the empty state', '/goal2 Rename the empty state']);
+});
+
 async function newThread(client: FakeClient, projectId = 'p-boite') {
   return client.call('threads.create', { projectId, providerId: 'echo', accountId: 'a-echo' });
 }

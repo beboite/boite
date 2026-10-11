@@ -346,21 +346,29 @@ export class Delegation {
     if (!thread.parentThreadId && operation !== 'delegation') return;
     const root = this.root(threadId);
     // On the parent, only a workflow summary gets here unchecked: team mail passes the inbox gate first.
-    this.available(root, thread.parentThreadId ? this.core.workflows.owns(threadId) : true);
+    this.available(root, thread.parentThreadId ? this.stepOwned(threadId) : true);
     const used = this.used(root.id);
     this.core.journal.setSetting(`delegation-turns:${root.id}`, used + 1);
     return () => { this.stopped.delete(threadId); };
   }
+  /**
+   * A child the core runs for a plan rather than for the agent: a workflow
+   * step or a `/goal2` reviewer. It needs no enabled team, only an unpaused
+   * one, and its answer never comes back as mail.
+   */
+  private stepOwned(threadId: string): boolean {
+    return this.core.workflows.owns(threadId) || this.core.activity.ownsReviewer(threadId);
+  }
   canRun(threadId: string): boolean {
     const thread = this.core.journal.getThread(threadId);
     if (!thread?.parentThreadId) return true;
-    return !this.held(this.config(thread.parentThreadId), this.core.workflows.owns(threadId));
+    return !this.held(this.config(thread.parentThreadId), this.stepOwned(threadId));
   }
   prepareTurn(turn: Turn): boolean {
     const thread = this.core.threads.require(turn.threadId);
     if (!thread.parentThreadId && turn.execution?.operation !== 'delegation') return true;
     const root = this.root(thread.id), config = this.config(root.id);
-    const workflow = thread.parentThreadId ? this.core.workflows.owns(thread.id) : true;
+    const workflow = thread.parentThreadId ? this.stepOwned(thread.id) : true;
     if (this.closed || root.archived || thread.archived || this.held(config, workflow) || this.stopped.has(thread.id)) return false;
     for (const letter of this.letters(thread.id, 'uncertain')) if (letter.error === `Queued for provider turn ${turn.id}`) this.update(letter, 'uncertain', `Awaiting provider turn ${turn.id}`);
     return true;
@@ -485,8 +493,8 @@ export class Delegation {
       if (turn.status !== 'done' && this.config(thread.id).enabled) this.stop(thread.id);
       return;
     }
-    // A workflow step's answer goes to its run, never to the parent as mail.
-    if (this.core.workflows.owns(thread.id)) return;
+    // A workflow step's answer goes to its run, and a goal reviewer's to its goal, never to the parent as mail.
+    if (this.stepOwned(thread.id)) return;
     const root = this.core.journal.getThread(thread.parentThreadId);
     if (!root) return;
     this.changed(root.id);
@@ -542,6 +550,7 @@ export class Delegation {
   instructions(threadId: string, request?: string, fresh = true): string {
     const thread = this.core.threads.require(threadId), root = this.root(threadId), config = this.config(root.id);
     if (thread.parentThreadId && this.core.workflows.owns(threadId)) return this.core.workflows.instructions(threadId);
+    if (thread.parentThreadId && this.core.activity.ownsReviewer(threadId)) return '\nYou are a Boite goal reviewer. Your final answer and its VERDICT line go to the goal automatically; do not message the parent, start subagents or edit project files.\n';
     if (thread.parentThreadId) return config.enabled ? `\nYou are a Boite subagent of ${root.id}. Blocked: boite delegate send ${root.id} "<what blocks you>". Your final answer returns automatically. You cannot start subagents or workflows. Shared checkout: change only the files your task names.\n` : '';
     // With delegation off, only a workflow request is worth the words; spawn would be refused anyway.
     const asked = request === undefined || /workflow/i.test(request) || (config.enabled && DELEGATION_WORDS.test(request));

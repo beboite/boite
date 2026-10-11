@@ -1,13 +1,20 @@
-import type { AgentTask, Attachment, MessagePart, RpcParams, ThreadActivity, Turn } from '@boite/contracts';
+import type { ActivityTurn, AgentTask, Attachment, GoalReview, MessagePart, RpcParams, ThreadActivity, ThreadSummary, Turn } from '@boite/contracts';
 import type { Core } from './core.ts';
-import { invalidParams, refused } from './errors.ts';
-import { activityResult } from './activity-prompt.ts';
+import { invalidParams, messageOf, refused } from './errors.ts';
+import { activityResult, parseVerdict, reviewPrompt } from './activity-prompt.ts';
 import { checkAttachmentArray, checkAttachments } from './threads/inputs.ts';
+import { assertDriverRunnable } from './drivers/index.ts';
+import type { ChildRoute } from './delegation/routes.ts';
 
 const empty = (): ThreadActivity => ({ goal: null, loop: null, tasks: [] });
 type PendingAttachments = Partial<Record<'goal' | 'loop', Attachment[]>>;
 /** How a goal stopped working: met, waiting on the user, or paused by a failed or stopped turn. */
 export interface GoalOutcome { threadId: string; outcome: 'complete' | 'blocked' | 'stopped'; text: string }
+/** Reviews of a `/goal2` before it stops for the user. */
+export const GOAL_REVIEW_ROUNDS = 5;
+const newReview = (): GoalReview => ({ phase: 'working', maxRounds: GOAL_REVIEW_ROUNDS, reviewerThreadId: null, claimTurnId: null, delivered: 0, verdicts: [] });
+/** The review a reviewer conversation's first turn answers. */
+interface ReviewRun { threadId: string; generation: number; round: number }
 
 /** Activity survives reconnects; a restarted core requires an explicit resume. */
 export class ActivityStore {
@@ -16,6 +23,10 @@ export class ActivityStore {
   private readonly ownTurns = new Map<string, { kind: 'goal' | 'loop'; generation: number; iteration: number }>();
   private readonly generations = new Map<string, number>();
   private readonly goalListeners = new Set<(event: GoalOutcome) => void>();
+  /** Every reviewer conversation of a `/goal2`: delegation treats them as steps it does not own. */
+  private readonly reviewers = new Set<string>();
+  /** Reviewer conversation to the review its first turn answers, until that turn ends. */
+  private readonly reviewing = new Map<string, ReviewRun>();
   private closed = false;
 
   constructor(private readonly core: Core) {
@@ -26,6 +37,10 @@ export class ActivityStore {
       const saved = core.journal.getSetting(`activity:${thread.id}`) as ThreadActivity | undefined;
       if (!saved) continue;
       let changed = pauseActivity(saved, 'Core restarted. Resume to continue.');
+      const review = saved.goal?.review;
+      for (const verdict of review?.verdicts ?? []) this.reviewers.add(verdict.threadId);
+      // The interrupted review is not adopted: resuming starts a fresh one.
+      if (review?.reviewerThreadId) { this.reviewers.add(review.reviewerThreadId); review.reviewerThreadId = null; changed = true; }
       for (const run of saved.loop?.history ?? []) {
         if (run.status === 'running') { run.status = 'error'; run.summary = 'Core restarted before this iteration finished.'; run.finishedAt = Date.now(); changed = true; }
       }
@@ -45,6 +60,10 @@ export class ActivityStore {
       }
       if (name === 'thread.removed' && !(payload as { undoable?: boolean }).undoable) {
         const { threadId } = payload as { threadId: string };
+        const review = this.reviewing.get(threadId);
+        if (review) this.reviewEnded(review, threadId, 'The reviewer conversation was removed. Resume to review again.');
+        for (const [reviewer, run] of this.reviewing) if (run.threadId === threadId) this.reviewing.delete(reviewer);
+        this.reviewers.delete(threadId);
         this.clearTimer(threadId);
         this.states.delete(threadId);
         core.journal.deleteSetting(`activity:${threadId}`);
@@ -74,6 +93,9 @@ export class ActivityStore {
 
   get(threadId: string): ThreadActivity { return structuredClone(this.states.get(threadId) ?? empty()); }
 
+  /** A `/goal2` reviewer: its answers go to the goal, never to the parent as mail. */
+  ownsReviewer(threadId: string): boolean { return this.reviewers.has(threadId); }
+
   set(params: RpcParams<'threads.activity.set'>): ThreadActivity {
     const thread = this.core.journal.getThread(params.threadId);
     if (thread?.agentSessionId) throw refused('persistent agent sessions are scheduled through Agents, not thread goals or loops');
@@ -85,7 +107,10 @@ export class ActivityStore {
     const state = this.get(params.threadId);
     if (params.goal !== undefined) {
       if (params.goal !== null && (typeof params.goal.objective !== 'string' || !params.goal.objective.trim())) throw invalidParams('goal.objective must be non-empty text');
-      state.goal = params.goal === null ? null : { objective: params.goal.objective.trim(), status: 'active', iterations: 0, error: null };
+      if (params.goal && params.goal.review !== undefined && typeof params.goal.review !== 'boolean') throw invalidParams('goal.review must be a boolean');
+      if (params.goal?.review && thread.parentThreadId) throw refused('a reviewed goal starts reviewer conversations; start it in a top-level thread');
+      this.stopReview(params.threadId);
+      state.goal = params.goal === null ? null : { objective: params.goal.objective.trim(), status: 'active', iterations: 0, error: null, ...(params.goal.review ? { review: newReview() } : {}) };
     }
     if (params.loop !== undefined) {
       if (params.loop !== null) validateLoop(params.loop);
@@ -117,8 +142,13 @@ export class ActivityStore {
     if (params.action === 'complete' && params.kind !== 'goal') throw invalidParams('only a goal can be completed');
     // A finished loop cannot resume, so pausing it would leave it stuck on `paused`.
     if (params.action === 'pause' && item.status === 'complete') throw refused(`this ${params.kind} is complete; there is nothing to pause`);
+    // Paused, removed or finished by hand, a goal stops paying for its review.
+    if (params.kind === 'goal' && params.action !== 'resume') this.stopReview(params.threadId);
     if (params.action === 'remove') state[params.kind] = null;
-    else if (params.action === 'complete' && state.goal) { state.goal.status = 'complete'; delete state.goal.blocked; }
+    else if (params.action === 'complete' && state.goal) {
+      state.goal.status = 'complete'; delete state.goal.blocked;
+      if (state.goal.review) Object.assign(state.goal.review, { phase: 'working', reviewerThreadId: null });
+    }
     else { item.status = params.action === 'resume' ? 'active' : 'paused'; item.error = null; if (params.kind === 'goal' && state.goal) { state.goal.dismissed = false; delete state.goal.blocked; } }
     if (params.action === 'remove' || params.action === 'complete') {
       const key = `${params.threadId}:${params.kind}`;
@@ -195,6 +225,8 @@ export class ActivityStore {
   }
 
   private finished(turn: Turn): void {
+    const review = this.reviewing.get(turn.threadId);
+    if (review) { this.reviewFinished(turn, review); return; }
     const owned = this.ownTurns.get(turn.id);
     this.ownTurns.delete(turn.id);
     const state = this.states.get(turn.threadId);
@@ -215,16 +247,19 @@ export class ActivityStore {
     if (owned?.kind === 'goal' && current && state.goal?.status === 'active') {
       const signal = this.goalResult(turn);
       // Clients that know `blocked` show their own words; the error serves older ones.
+      const reviewed = state.goal.review;
       if (signal === 'blocked') { state.goal.status = 'paused'; state.goal.blocked = true; state.goal.error = 'The agent reported a blocker. Reply to resume.'; this.save(turn.threadId); }
+      // A reviewed goal's completion is a claim; the scheduled run starts its review.
+      else if (signal === 'complete' && reviewed) { Object.assign(reviewed, { phase: 'reviewing', claimTurnId: turn.id }); this.save(turn.threadId); }
       else if (signal === 'complete') { state.goal.status = 'complete'; this.save(turn.threadId); }
-      if (signal && this.goalListeners.size) this.goalEnded({ threadId: turn.threadId, outcome: signal, text: this.answer(turn) });
+      if (signal && !(signal === 'complete' && reviewed) && this.goalListeners.size) this.goalEnded({ threadId: turn.threadId, outcome: signal, text: this.answer(turn) });
     }
     // Let the scheduler release its running slot and clients submit queued user input first.
     this.schedule(turn.threadId, 250);
   }
 
   /** The turn's assistant text without goal markers. */
-  private answer(turn: Turn): string {
+  private answer(turn: Pick<Turn, 'threadId' | 'id'>): string {
     return activityResult(Array.from(this.core.journal.walkTurnMessages(turn.threadId, turn.id)).filter(message => message.role === 'assistant').flatMap(message => message.parts.filter(part => part.type === 'text').map(part => part.text)).join('\n'));
   }
 
@@ -253,17 +288,24 @@ export class ActivityStore {
       if (state.loop?.status === 'active') this.schedule(threadId, Math.max(0, (state.loop.nextRunAt ?? Date.now()) - Date.now()));
       return;
     }
-    const prompt = `/${kind} ${kind === 'goal' ? state.goal!.objective : state.loop!.prompt}`;
+    const review = kind === 'goal' ? state.goal!.review : undefined;
+    if (review?.phase === 'reviewing') { this.startReview(threadId, thread); return; }
+    const last = review?.verdicts.at(-1);
+    // Only the first turn after a review carries its findings; later ones have them in the history.
+    const feedback = review && last && last.verdict !== 'pass' && review.delivered < review.verdicts.length ? { round: last.round, feedback: last.summary } : undefined;
+    const prompt = `/${review ? 'goal2' : kind} ${kind === 'goal' ? state.goal!.objective : state.loop!.prompt}`;
     const iteration = state[kind]!.iterations + 1;
     try {
       const pending = this.pendingAttachments(threadId);
-      const turn = this.core.threads.startTurn(threadId, prompt, pending[kind] ?? [], undefined, undefined, { kind, iteration });
+      const turnActivity: ActivityTurn = { kind, iteration, ...(feedback ? { review: feedback } : {}) };
+      const turn = this.core.threads.startTurn(threadId, prompt, pending[kind] ?? [], undefined, undefined, turnActivity);
       delete pending[kind];
       this.saveAttachments(threadId, pending);
       this.ownTurns.set(turn.id, { kind, generation: this.generations.get(`${threadId}:${kind}`) ?? 0, iteration });
       // Drivers may synchronously report tasks while startTurn runs.
       const current = this.states.get(threadId)!;
       current[kind]!.iterations++;
+      if (feedback && current.goal?.review) current.goal.review.delivered = current.goal.review.verdicts.length;
       if (kind === 'loop') {
         current.loop!.nextRunAt = null;
         current.loop!.history = [...(current.loop!.history ?? []), { iteration, turnId: turn.id, status: 'running' as const, summary: '', startedAt: Date.now(), finishedAt: null }].slice(-50);
@@ -296,7 +338,79 @@ export class ActivityStore {
     const state = this.states.get(threadId);
     if (!state) return;
     this.clearTimer(threadId);
+    if (!this.closed) this.stopReview(threadId);
     if (pauseActivity(state, error)) this.save(threadId);
+  }
+
+  // -- reviewed goals (`/goal2`) ----------------------------------------------
+
+  /** A fresh child conversation with none of the agent's context judges the claim. */
+  private startReview(threadId: string, parent: ThreadSummary): void {
+    const goal = this.states.get(threadId)?.goal;
+    const review = goal?.review;
+    if (!goal || !review || goal.status !== 'active' || review.phase !== 'reviewing') return;
+    for (const run of this.reviewing.values()) if (run.threadId === threadId) return;
+    const round = review.verdicts.length + 1;
+    const generation = this.generations.get(`${threadId}:goal`) ?? 0;
+    let reviewer: string | null = null;
+    try {
+      const route = this.reviewerRoute(parent);
+      const provider = this.core.providers.require(route.providerId);
+      assertDriverRunnable(provider.protocol, this.core.providers.summary(provider.id), this.core.accounts.require(route.accountId), () => this.core.providers.launcherScriptOnly(provider.id));
+      const claim = review.claimTurnId ? this.answer({ threadId, id: review.claimTurnId }) : '';
+      reviewer = this.core.delegation.createChild(parent, route, `Review ${round} · ${goal.objective}`.slice(0, 120), id => { this.reviewers.add(id); });
+      this.reviewing.set(reviewer, { threadId, generation, round });
+      review.reviewerThreadId = reviewer;
+      this.save(threadId);
+      this.core.threads.startTurn(reviewer, reviewPrompt(goal.objective, claim, round), [], undefined, 'delegation', undefined, undefined, `Review the goal: ${goal.objective}`.slice(0, 500));
+    } catch (error) {
+      if (reviewer) this.reviewing.delete(reviewer);
+      review.reviewerThreadId = null;
+      this.stop(threadId, `The review could not start: ${messageOf(error)}`);
+    }
+  }
+
+  /** The owner's delegation profile named "reviewer" (another agent, say), else this conversation's own model. */
+  private reviewerRoute(parent: ThreadSummary): ChildRoute {
+    const named = this.core.delegation.config(parent.id).profiles.find(p => p.id.toLowerCase() === 'reviewer' || p.name.trim().toLowerCase() === 'reviewer');
+    return this.core.delegation.resolve(parent.id, { profileId: named?.id ?? null });
+  }
+
+  private reviewFinished(turn: Turn, run: ReviewRun): void {
+    if (turn.status !== 'done') { this.reviewEnded(run, turn.threadId, `The review ${turn.status === 'stopped' ? 'was stopped' : `failed: ${turn.error ?? 'no error given'}`}. Resume to review again.`); return; }
+    this.reviewing.delete(turn.threadId);
+    const goal = this.states.get(run.threadId)?.goal;
+    const review = goal?.review;
+    if (!goal || !review || run.generation !== (this.generations.get(`${run.threadId}:goal`) ?? 0) || review.reviewerThreadId !== turn.threadId) return;
+    const { verdict, summary } = parseVerdict(this.answer(turn));
+    review.verdicts.push({ round: run.round, verdict, summary, threadId: turn.threadId, finishedAt: turn.finishedAt ?? Date.now() });
+    Object.assign(review, { phase: 'working', reviewerThreadId: null });
+    let outcome: GoalOutcome['outcome'] | null = null;
+    if (verdict === 'pass') { goal.status = 'complete'; goal.error = null; delete goal.blocked; outcome = 'complete'; }
+    else if (goal.status === 'active' && review.verdicts.length >= review.maxRounds) {
+      Object.assign(goal, { status: 'paused', blocked: true, error: `${review.verdicts.length} reviews did not pass. Reply to steer the agent; the goal resumes after your reply.` });
+      outcome = 'blocked';
+    }
+    this.save(run.threadId);
+    if (outcome) this.goalEnded({ threadId: run.threadId, outcome, text: outcome === 'complete' && review.claimTurnId ? this.answer({ threadId: run.threadId, id: review.claimTurnId }) : summary });
+    this.schedule(run.threadId, 250);
+  }
+
+  /** A review that ended without a verdict leaves the goal paused on review, so a resume starts another. */
+  private reviewEnded(run: ReviewRun, reviewer: string, error: string): void {
+    this.reviewing.delete(reviewer);
+    const goal = this.states.get(run.threadId)?.goal;
+    if (!goal?.review || run.generation !== (this.generations.get(`${run.threadId}:goal`) ?? 0) || goal.review.reviewerThreadId !== reviewer) return;
+    goal.review.reviewerThreadId = null;
+    if (goal.status === 'active') this.stop(run.threadId, error);
+    else this.save(run.threadId);
+  }
+
+  private stopReview(threadId: string): void {
+    for (const [reviewer, run] of this.reviewing) {
+      if (run.threadId !== threadId) continue;
+      try { this.core.threads.stopTurn(reviewer); } catch (error) { this.core.log('warn', `goal review ${reviewer}: ${messageOf(error)}`); }
+    }
   }
 
   private save(threadId: string): void {

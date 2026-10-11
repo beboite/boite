@@ -113,3 +113,25 @@ test('a blocked goal asks for an answer and its reply button focuses the compose
   hint.querySelector('button')!.click();
   expect(document.activeElement).toBe(box);
 });
+
+test('a reviewed goal shows one dot per verdict, the running review, and opens a reviewer conversation', () => {
+  const store = render({ tasks: [], loop: null, goal: { objective: 'Fix the parser', status: 'active', iterations: 2, error: null, review: {
+    phase: 'reviewing', maxRounds: 5, reviewerThreadId: 'reviewer-2', claimTurnId: 'turn-2', delivered: 1,
+    verdicts: [{ round: 1, verdict: 'fail', summary: '- The parser test fails', threadId: 'reviewer-1', finishedAt: 1 }]
+  } } });
+  const open = vi.spyOn(store, 'open').mockResolvedValue(undefined as never);
+  const goal = document.querySelector('[data-testid=activity-goal]')!;
+  expect(goal.textContent).toContain('Reviewed goal');
+  expect(goal.textContent).toContain('Reviewing');
+  const dots = [...document.querySelectorAll<HTMLButtonElement>('[data-testid=activity-goal-reviews] .verdict')];
+  expect(dots.map(dot => dot.dataset.verdict)).toEqual(['fail', 'running']);
+  expect(dots[0]!.title).toBe('Review 1: Fail');
+  expect(document.querySelector('[data-testid=activity-goal-reviews]')!.textContent).toContain('Review 2 in progress');
+  dots[0]!.click();
+  dots[1]!.click();
+  expect(open.mock.calls.map(call => call[0])).toEqual(['reviewer-1', 'reviewer-2']);
+  toggle().click();
+  flushSync();
+  expect(toggle().textContent).toContain('Reviews');
+  expect(document.querySelector('[data-testid=activity-reviews]')!.textContent).toContain('- The parser test fails');
+});

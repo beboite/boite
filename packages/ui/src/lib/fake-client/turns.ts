@@ -95,7 +95,7 @@ export function startTurn(ctx: FakeContext, threadId: ThreadId, prompt: string, 
     role: automatic ? 'system' : 'user',
     // The images ride after the text, the order the core journals them in.
     parts: [
-      { type: 'text', text: activityKind ? `/${activityKind} ${prompt}` : previewPrompt(prompt, previewReferences), ...(automatic ? { displayText: 'Automatic compaction' } : {}), ...(previewReferences.length ? { displayText: prompt, previewReferences: structuredClone(previewReferences) } : {}), ...(activityKind ? { activity: { kind: activityKind, iteration: (thread.activity?.[activityKind]?.iterations ?? 0) + 1 } } : {}), ...(moved ? { moved: structuredClone(moved) } : {}) },
+      { type: 'text', text: activityKind ? `/${activityKind === 'goal' && thread.activity?.goal?.review ? 'goal2' : activityKind} ${prompt}` : previewPrompt(prompt, previewReferences), ...(automatic ? { displayText: 'Automatic compaction' } : {}), ...(previewReferences.length ? { displayText: prompt, previewReferences: structuredClone(previewReferences) } : {}), ...(activityKind ? { activity: { kind: activityKind, iteration: (thread.activity?.[activityKind]?.iterations ?? 0) + 1 } } : {}), ...(moved ? { moved: structuredClone(moved) } : {}) },
       ...attachments.map((attachment): MessagePart => attachment.kind === 'file' ? { type: 'file', mimeType: attachment.mimeType, data: attachment.data, name: attachment.name } : ({
         type: 'image',
         mimeType: attachment.mimeType,

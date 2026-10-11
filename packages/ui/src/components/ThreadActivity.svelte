@@ -67,6 +67,16 @@
   let current = $derived(tasks.find((task) => task.status === 'in_progress')?.text ??
     (done === tasks.length ? strings.activity.allTasksDone : strings.activity.waitingTasks));
   let history = $derived([...(loop?.history ?? [])].reverse());
+  /** A `/goal2`: its verdicts, newest first in the details, and the review running now. */
+  let review = $derived(goal?.review);
+  let verdicts = $derived([...(review?.verdicts ?? [])].reverse());
+  let reviewing = $derived(review?.phase === 'reviewing' && goal?.status === 'active');
+  let reviewLine = $derived.by(() => {
+    if (!review) return '';
+    if (review.reviewerThreadId) return fill(strings.activity.reviewInProgress, { round: String(review.verdicts.length + 1) });
+    const last = review.verdicts.at(-1);
+    return last ? `${fill(strings.activity.reviewRoundOf, { round: String(last.round), total: String(review.maxRounds) })} · ${strings.activity[last.verdict]}` : '';
+  });
   const detailsId = $props.id();
 
   // Task details overlay the timeline. Queued prompts reserve the full dock
@@ -191,11 +201,12 @@
         <div class="entry" class:blocked={waiting}>
         <div class="activity-row" class:finished={entry.status === 'complete'} data-testid="activity-{kind}" data-blocked={waiting || undefined}>
           {#if waiting}<Hand size={16} />{:else if kind === 'goal'}<Target size={16} />{:else}<Repeat size={16} />{/if}
-          <span class="kind ui-label">{kind === 'goal' ? strings.activity.goal : strings.activity.loop}</span>
+          <!-- A phone keeps the short word: the review line under it already says the goal is reviewed. -->
+          <span class="kind ui-label">{#if kind === 'goal' && review}<span class="wide">{strings.activity.goal2}</span><span class="narrow">{strings.activity.goal}</span>{:else}{kind === 'goal' ? strings.activity.goal : strings.activity.loop}{/if}</span>
           <span class="objective" title={'objective' in entry ? entry.objective : entry.prompt}>
             {#if 'objective' in entry}{entry.objective}{:else}{iteration(entry.iterations, entry.maxIterations)}{/if}
           </span>
-          {#if !waiting}<span class="meta status ui-label-box" class:live={entry.status === 'active'}><span class="ui-label">{strings.activity[entry.status]}</span></span>{/if}
+          {#if !waiting}<span class="meta status ui-label-box" class:live={entry.status === 'active'}><span class="ui-label">{kind === 'goal' && reviewing ? strings.activity.reviewing : strings.activity[entry.status]}</span></span>{/if}
           {#if entry.status !== 'complete'}
             <button type="button" class="ghost small icon" disabled={saving || store.connection !== 'ready'}
               aria-label={entry.status === 'active' ? strings.activity.pause : strings.activity.resume}
@@ -209,6 +220,21 @@
           {/if}
           <button type="button" class="ghost small icon" disabled={saving || store.connection !== 'ready'} aria-label={strings.activity.remove} title={strings.activity.remove} onclick={() => void control(kind as 'goal' | 'loop', 'remove')}><X size={16} /></button>
         </div>
+        {#if kind === 'goal' && review && reviewLine}
+          <div class="review-line" data-testid="activity-goal-reviews">
+            <span class="verdicts">
+              {#each review.verdicts as verdict (verdict.threadId)}
+                {@const label = `${fill(strings.activity.reviewRound, { round: String(verdict.round) })}: ${strings.activity[verdict.verdict]}`}
+                <button type="button" class="verdict" data-verdict={verdict.verdict} aria-label={`${label}. ${strings.activity.openReview}`} title={label} onclick={() => void store.open(verdict.threadId)}></button>
+              {/each}
+              {#if review.reviewerThreadId}
+                {@const reviewer = review.reviewerThreadId}
+                <button type="button" class="verdict" data-verdict="running" aria-label={`${reviewLine}. ${strings.activity.openReview}`} title={reviewLine} onclick={() => void store.open(reviewer)}></button>
+              {/if}
+            </span>
+            <span class="meta ui-label">{reviewLine}</span>
+          </div>
+        {/if}
         {#if waiting}
           <div class="blocker" data-testid="activity-goal-blocked">
             <span class="waiting-dot" aria-hidden="true"></span>
@@ -219,13 +245,13 @@
         </div>
       {/if}
     {/each}
-    {#if tasks.length || loop}
+    {#if tasks.length || loop || verdicts.length}
       <button type="button" class="ghost tasks-toggle" aria-expanded={expanded} aria-controls={detailsId}
         data-testid="activity-tasks-toggle" onclick={() => (expanded = !expanded)}
         onkeydown={(event) => { if (event.key === 'Escape') { expanded = false; event.stopPropagation(); } }}>
         <span class="toggle-line">
           <ListTodo size={16} />
-          <span class="current ui-label">{tasks.length ? current : strings.activity.history}</span>
+          <span class="current ui-label">{tasks.length ? current : loop ? strings.activity.history : strings.activity.reviews}</span>
           {#if tasks.length}<span class="count ui-label">{fill(strings.activity.taskCount, { done: String(done), total: String(tasks.length) })}</span>{/if}
           <ChevronDown size={16} class={expanded ? 'turned' : ''} />
         </span>
@@ -247,6 +273,20 @@
                 </li>
               {/each}
             </ul>
+          {/if}
+          {#if verdicts.length}
+            <ol class="history" aria-label={strings.activity.reviews} data-testid="activity-reviews">
+              {#each verdicts as verdict (verdict.threadId)}
+                <li>
+                  <div class="run-heading">
+                    <span>{fill(strings.activity.reviewRound, { round: String(verdict.round) })}</span>
+                    <span class="verdict-name" data-verdict={verdict.verdict}>{strings.activity[verdict.verdict]}</span>
+                  </div>
+                  {#if verdict.summary}<p>{verdict.summary}</p>{/if}
+                  <button type="button" class="ghost small open-review" onclick={() => void store.open(verdict.threadId)}>{strings.activity.openReview}</button>
+                </li>
+              {/each}
+            </ol>
           {/if}
           {#if loop}
             {#if loop.intervalMs > 0}<p class="meta cadence">{fill(strings.activity.every, { interval: interval(loop.intervalMs) })}</p>{/if}
@@ -283,7 +323,8 @@
   .activity-row button { flex: none; }
   /* A folded question's text gives way to the pager, not the pager to it. */
   .activity-row .question-toggle { flex: 1 1 auto; min-width: 0; }
-  .kind { font-weight: 600; color: var(--color-accent); }
+  .kind { flex: none; white-space: nowrap; font-weight: 600; color: var(--color-accent); }
+  .kind .narrow { display: none; }
   .status { padding: 2px 8px; border-radius: var(--radius-sm); background: var(--color-surface-2); }
   .status.live { color: var(--color-accent); }
   .finished .status { color: var(--color-success); }
@@ -327,12 +368,28 @@
   .run-heading { display: flex; justify-content: space-between; gap: 12px; }
   .history p { margin: 4px 0 0; white-space: pre-wrap; }
   .cadence { margin: 8px 8px 0; }
+  /* A reviewed goal's rounds: one dot per verdict, the running review pulsing in the accent. */
+  .review-line { display: flex; align-items: center; gap: 8px; min-height: var(--control-sm); padding: 0 8px 4px 32px; min-width: 0; }
+  .review-line .meta { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .verdicts { display: inline-flex; align-items: center; flex: none; }
+  .verdict { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; border: none; border-radius: var(--radius-full); background: transparent; cursor: pointer; }
+  .verdict::before { content: ''; width: 8px; height: 8px; border-radius: var(--radius-full); background: var(--verdict, var(--color-muted-foreground)); }
+  .verdict:hover::before, .verdict:focus-visible::before { box-shadow: 0 0 0 3px color-mix(in srgb, var(--verdict, var(--color-muted-foreground)) 28%, transparent); }
+  [data-verdict='pass'] { --verdict: var(--color-success); }
+  [data-verdict='partial'] { --verdict: var(--color-live); }
+  [data-verdict='fail'], [data-verdict='missing'] { --verdict: var(--color-danger); }
+  [data-verdict='running'] { --verdict: var(--color-accent); }
+  .verdict[data-verdict='running']::before { animation: waiting 1.8s ease-in-out infinite; }
+  .verdict-name { color: var(--verdict); font-weight: 600; }
+  .open-review { margin-top: 4px; padding-inline: 6px; color: var(--color-accent); }
   .error { color: var(--color-danger); margin: 2px 8px 6px; overflow-wrap: anywhere; }
   @media (max-width: 720px) {
     .activity-row { gap: 6px; }
+    .kind .wide { display: none; }
+    .kind .narrow { display: inline; }
     .blocker { align-items: flex-start; }
     .waiting-dot { margin-top: 7px; }
   }
-  :global(html[data-motion='reduced']) .waiting-dot { animation: none; }
-  @media (prefers-reduced-motion: reduce) { .waiting-dot { animation: none; } .activity, .task-disclosure, progress::-webkit-progress-value, .toggle-line > :global(svg:last-child) { transition: none; } }
+  :global(html[data-motion='reduced']) .waiting-dot, :global(html[data-motion='reduced']) .verdict::before { animation: none; }
+  @media (prefers-reduced-motion: reduce) { .waiting-dot, .verdict::before { animation: none; } .activity, .task-disclosure, progress::-webkit-progress-value, .toggle-line > :global(svg:last-child) { transition: none; } }
 </style>

@@ -7,6 +7,7 @@
  */
 import type { AgentCommand, PreviewReference } from '@boite/contracts';
 import { AGENT_PREFIX } from './commands.svelte';
+import { experimentOn } from './experiments.svelte';
 import type { PaletteItem } from './palette';
 import { strings } from './strings';
 
@@ -28,7 +29,7 @@ export function mentionQueryOf(text: string, caret: number, previewReferences: P
 
 /** The agent's own, in the order it reported them. Never on a draft: there is no agent yet. */
 export function agentSlashItems(commands: AgentCommand[]): PaletteItem[] {
-  return commands.filter((command) => !['goal', 'loop', 'btw'].includes(command.name)).map((command) => ({
+  return commands.filter((command) => !['goal', 'goal2', 'loop', 'btw'].includes(command.name)).map((command) => ({
     id: `${AGENT_PREFIX}${command.name}`,
     kind: 'command' as const,
     label: `/${command.name}`,
@@ -45,6 +46,8 @@ export function boiteSlashItems(chips: Record<string, ChipCommand>, sideQuestion
   return [
     ...(sideQuestions ? [{ id: 'btw', kind: 'command' as const, label: '/btw', hint: '<question>', description: strings.btw.description }] : []),
     { id: 'goal', kind: 'command', label: '/goal', description: strings.activity.goalDescription },
+    // Read inside the composer's derived list, so the Experiments switch adds or removes it live.
+    ...(experimentOn('goal2') ? [{ id: 'goal2', kind: 'command' as const, label: '/goal2', description: strings.activity.goal2Description }] : []),
     { id: 'loop', kind: 'command', label: '/loop', description: strings.activity.loopDescription },
     ...Object.entries(chips).map(([name, chip]) => ({
       id: name,

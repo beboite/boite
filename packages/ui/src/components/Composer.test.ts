@@ -10,6 +10,7 @@ import { store } from '../lib/store.svelte';
 import { repliesOf } from '../lib/question-reply.svelte';
 import { closeTour } from '../lib/onboarding.svelte';
 import { freshWork, work, WORK_STORAGE_KEY } from '../lib/work-prefs.svelte';
+import { setExperiment } from '../lib/experiments';
 
 /**
  * The three composer keys, on the whole app over the in-memory fake: Ctrl+Enter
@@ -844,6 +845,25 @@ test('Send now submits a follow-up without interrupting the live agent', async (
   expect(rpc.mock.calls.filter(([method]) => method === 'turns.steer')).toHaveLength(1);
   expect(rpc.mock.calls.filter(([method]) => method === 'turns.stop')).toHaveLength(0);
   await waitFor(() => !store.busy);
+});
+
+test('/goal2 joins the slash menu with its experiment and starts a reviewed goal', async ({ app: _app }) => {
+  await store.open('t-trace');
+  await type('/goa');
+  await waitFor(() => slashMenu() !== null);
+  expect(slashRows()).toContain('goal');
+  expect(slashRows()).not.toContain('goal2');
+  setExperiment('goal2', true);
+  try {
+    await waitFor(() => slashRows().includes('goal2'));
+    const call = vi.spyOn(store.client!, 'call');
+    await type('/goal2 Rename the empty state');
+    press('Enter');
+    await waitFor(() => document.querySelector('[data-testid=activity-goal]')?.textContent?.includes('Reviewed goal') === true);
+    expect(call.mock.calls.find(([method]) => method === 'threads.activity.set')?.[1]).toMatchObject({ goal: { objective: 'Rename the empty state', review: true } });
+    await store.stop();
+    await waitFor(() => !store.busy);
+  } finally { setExperiment('goal2', false); }
 });
 
 test('goal and loop coexist above the composer with expandable agent tasks', async ({ app: _app }) => {

@@ -622,7 +622,7 @@
 
   /** Prompt commands complete the box; other commands execute and close the menu. */
   function pickSlash(item: PaletteItem) {
-    if (item.id === 'goal' || item.id === 'loop' || item.id === 'btw') {
+    if (item.id === 'goal' || item.id === 'goal2' || item.id === 'loop' || item.id === 'btw') {
       put(`/${item.id} `);
       box?.focus({ preventScroll: true });
       return;

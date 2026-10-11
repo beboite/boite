@@ -1,14 +1,67 @@
 /** A thread's goal, loop and task list, and the timer that runs them. */
-import { attachmentError, RpcErrorCode, type AgentTask, type Thread, type ThreadActivity, type Turn } from '@boite/contracts';
+import { attachmentError, RpcErrorCode, type AgentTask, type GoalReview, type Thread, type ThreadActivity, type Turn } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { refusal } from './shared';
+import { workflowAnswer, workflowChild } from './delegation';
 import type { FakeContext, FakeMethods } from './context';
+
+/**
+ * The in-memory reviewer of a `/goal2`: a child conversation that answers
+ * after a moment, FAIL on the first review and PASS after, as a real reviewer
+ * of a first attempt with one gap would.
+ */
+const reviews = new WeakMap<FakeContext, Map<string, { timer: ReturnType<typeof setTimeout>; reviewer: string }>>();
+const REVIEW_MS = 1200;
+const FAKE_FINDING = '- The empty state still shows the old label in ThreadList.svelte';
+
+function reviewsOf(ctx: FakeContext) {
+  let map = reviews.get(ctx);
+  if (!map) reviews.set(ctx, map = new Map());
+  return map;
+}
+
+function startReview(ctx: FakeContext, thread: Thread, review: GoalReview): void {
+  const running = reviewsOf(ctx);
+  if (running.has(thread.id) || !thread.activity?.goal) return;
+  const round = review.verdicts.length + 1;
+  const objective = thread.activity.goal.objective;
+  const route = { id: 'conversation', name: 'Conversation', providerId: thread.providerId, accountId: thread.accountId, model: thread.model, effort: thread.effort };
+  const reviewer = workflowChild(ctx, thread, route, `Review ${round} · ${objective}`.slice(0, 120), `Review the goal: ${objective}`);
+  review.reviewerThreadId = reviewer;
+  ctx.publishActivity(thread);
+  const timer = setTimeout(() => {
+    running.delete(thread.id);
+    const goal = thread.activity?.goal;
+    if (goal?.review !== review || review.reviewerThreadId !== reviewer) return;
+    const verdict = review.verdicts.length === 0 ? 'fail' as const : 'pass' as const;
+    const summary = verdict === 'fail' ? FAKE_FINDING : 'The label is updated and the list test passes.';
+    workflowAnswer(ctx, reviewer, `${summary}\nVERDICT: ${verdict.toUpperCase()}`, true);
+    review.verdicts.push({ round, verdict, summary, threadId: reviewer, finishedAt: ctx.now() });
+    Object.assign(review, { phase: 'working', reviewerThreadId: null });
+    if (verdict === 'pass') goal.status = 'complete';
+    ctx.publishActivity(thread);
+    scheduleActivity(ctx, thread.id, 250);
+  }, REVIEW_MS);
+  running.set(thread.id, { timer, reviewer });
+}
+
+/** Paused, removed or finished by hand, the goal's reviewer stops. */
+function stopReview(ctx: FakeContext, thread: Thread): void {
+  const running = reviewsOf(ctx).get(thread.id);
+  if (!running) return;
+  clearTimeout(running.timer);
+  reviewsOf(ctx).delete(thread.id);
+  workflowAnswer(ctx, running.reviewer, 'Stopped', false);
+  const review = thread.activity?.goal?.review;
+  if (review?.reviewerThreadId === running.reviewer) review.reviewerThreadId = null;
+}
 
 export function pauseActivity(ctx: FakeContext, thread: Thread): void {
   const timer = ctx.activityTimers.get(thread.id);
   if (timer) clearTimeout(timer);
   ctx.activityTimers.delete(thread.id);
   if (!thread.activity) return;
+  stopReview(ctx, thread);
   for (const kind of ['goal', 'loop'] as const) {
     const item = thread.activity[kind];
     if (item?.status === 'active') item.status = 'paused';
@@ -32,12 +85,15 @@ function scheduleActivity(ctx: FakeContext, threadId: string, delay = 0): void {
       if (activity.loop?.status === 'active') scheduleActivity(ctx, threadId, Math.max(0, (activity.loop.nextRunAt ?? Date.now()) - Date.now()));
       return;
     }
+    const review = kind === 'goal' ? activity.goal!.review : undefined;
+    if (review?.phase === 'reviewing') { startReview(ctx, thread, review); return; }
     try {
       const key = `${threadId}:${kind}`;
       const turn = ctx.startTurn(threadId, kind === 'goal' ? activity.goal!.objective : activity.loop!.prompt, ctx.activityAttachments.get(key) ?? [], undefined, kind);
       ctx.activityAttachments.delete(key);
       ctx.activityTurns.set(turn.id, { kind, generation: ctx.activityGenerations.get(`${threadId}:${kind}`) ?? 0 });
       activity[kind]!.iterations++;
+      if (review) review.delivered = review.verdicts.length;
       if (kind === 'loop') {
         activity.loop!.nextRunAt = null;
         activity.loop!.history = [...(activity.loop!.history ?? []), { iteration: activity.loop!.iterations, turnId: turn.id, status: 'running' as const, summary: '', startedAt: Date.now(), finishedAt: null }].slice(-50);
@@ -79,6 +135,7 @@ export function finishActivityTurn(ctx: FakeContext, turn: Turn): void {
       const goal = thread.activity.goal;
       if (owned?.kind === 'goal' && current && goal?.status === 'active') {
         if (goal.objective.trim().endsWith('?')) { goal.status = 'paused'; goal.blocked = true; goal.error = 'The agent reported a blocker. Reply to resume.'; }
+        else if (goal.review) Object.assign(goal.review, { phase: 'reviewing', claimTurnId: turn.id });
         else goal.status = 'complete';
         ctx.publishActivity(thread);
       }
@@ -105,7 +162,11 @@ export function activityMethods(ctx: FakeContext) {
       const activity = structuredClone(thread.activity ?? { goal: null, loop: null, tasks: [] });
       if (params.goal !== undefined) {
         if (params.goal !== null && !params.goal.objective?.trim()) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'goal.objective must be non-empty text' });
-        activity.goal = params.goal === null ? null : { objective: params.goal.objective.trim(), status: 'active', iterations: 0, error: null };
+        if (params.goal && params.goal.review !== undefined && typeof params.goal.review !== 'boolean') throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'goal.review must be a boolean' });
+        if (params.goal?.review && thread.parentThreadId) throw refusal('a reviewed goal starts reviewer conversations; start it in a top-level thread');
+        stopReview(ctx, thread);
+        activity.goal = params.goal === null ? null : { objective: params.goal.objective.trim(), status: 'active', iterations: 0, error: null,
+          ...(params.goal.review ? { review: { phase: 'working' as const, maxRounds: 5, reviewerThreadId: null, claimTurnId: null, delivered: 0, verdicts: [] } } : {}) };
       }
       if (params.loop !== undefined) {
         if (params.loop !== null && (!params.loop.prompt?.trim() || !Number.isInteger(params.loop.intervalMs) || (params.loop.intervalMs < 1000 && !(params.loop.intervalMs === 0 && params.loop.maxIterations)) || params.loop.intervalMs > 86400000 || (params.loop.maxIterations != null && (!Number.isInteger(params.loop.maxIterations) || params.loop.maxIterations < 1 || params.loop.maxIterations > 1000)))) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'loop requires text and an interval from 1000 to 86400000 ms, or 0 with 1 to 1000 iterations' });
@@ -130,8 +191,12 @@ export function activityMethods(ctx: FakeContext) {
       if (!activity || !item) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `this thread has no ${params.kind}` });
       if (params.action === 'complete' && params.kind !== 'goal') throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'only a goal can be completed' });
       if (params.action === 'resume' && params.kind === 'loop' && activity.loop?.maxIterations && activity.loop.iterations >= activity.loop.maxIterations) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'this loop has finished all its iterations' });
+      if (params.kind === 'goal' && params.action !== 'resume') stopReview(ctx, thread);
       if (params.action === 'remove') activity[params.kind] = null;
-      else if (params.action === 'complete' && activity.goal) { activity.goal.status = 'complete'; delete activity.goal.blocked; }
+      else if (params.action === 'complete' && activity.goal) {
+        activity.goal.status = 'complete'; delete activity.goal.blocked;
+        if (activity.goal.review) Object.assign(activity.goal.review, { phase: 'working', reviewerThreadId: null });
+      }
       else { item.status = params.action === 'resume' ? 'active' : 'paused'; item.error = null; if (params.kind === 'goal' && activity.goal) { activity.goal.dismissed = false; delete activity.goal.blocked; } }
       if (params.action === 'remove' || params.action === 'complete') {
         const key = `${thread.id}:${params.kind}`;
