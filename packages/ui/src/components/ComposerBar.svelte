@@ -291,7 +291,7 @@
         aria-label={strings.composer.attach}
         onclick={() => picker?.click()}
       >
-        <Paperclip size={14} strokeWidth={1.75} />
+        <Paperclip size={16} strokeWidth={1.75} />
       </button>
       <input
         bind:this={picker}
@@ -334,9 +334,6 @@
     display: none;
   }
 
-  .attach {
-    padding: 0 7px;
-  }
   .context-control { flex: none; }
 
   .mode-icon { display: inline-flex; }

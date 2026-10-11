@@ -1377,6 +1377,8 @@ export const fr: Translation = {
     imagePreview: 'Aperçu de {image}',
     imagePreviewClose: "Fermer l'aperçu de l'image",
     attachPending: 'Recharger pour récupérer',
+    attachMore: 'Afficher {count} de plus',
+    attachLess: 'Afficher moins',
     attachUnnamed: "l'image collée",
     attachFormat: '{name} est en {type}, or une image doit être de type {formats}.',
     attachTooLarge: '{name} est trop lourde : une image pèse {max} au maximum.',

@@ -1462,6 +1462,9 @@ export const strings = {
     imagePreview: 'Preview {image}',
     imagePreviewClose: 'Close image preview',
     attachPending: 'Reload to recover',
+    /** The last tile of a full strip: how many more it hides, and folding them back. */
+    attachMore: 'Show {count} more',
+    attachLess: 'Show fewer',
     attachUnnamed: 'the attachment',
     attachFormat: '{name} is {type}, and an image must be one of {formats}.',
     attachTooLarge: '{name} is too big: a file may weigh {max} at most.',
