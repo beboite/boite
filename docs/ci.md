@@ -133,9 +133,9 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 591,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,475,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,495,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 3,760,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 3,785,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
@@ -162,6 +162,13 @@ for that same branch, 6,033 more than Linux. Merged with `b8dc6c21`, whose
 limits were 4,466,000 and 3,744,000, the branch measured 4,469,022 and
 3,749,375 on Linux, about 3,755,400 core bytes on Windows. The limits rise to
 4,475,000 and 3,760,000.
+
+Device keys for the group measured 4,487,556 UI bytes and 3,774,293 core bytes
+on Linux the same day, and 3,774,254 core bytes in the Windows job: the UI
+gains about 18,500 bytes for the signing chunk (`@noble/ed25519`, loaded at the
+first signature), Add a device and the English/French sentences, the core about
+24,900 for device admission, signed hellos, served origins and
+`group/clients.ts`. The limits rise to 4,495,000 and 3,785,000.
 
 On 2026-10-10, `bun run build:ui` with Bun 1.4.2 measured 4,420,649 UI bytes at
 `feeb393b` and 4,425,557 with close confirmation and typed agent archival.
