@@ -314,7 +314,7 @@ export class CodexSession {
   // -- the process ----------------------------------------------------------
 
   private start(ctx: SessionContext): Promise<void> {
-    if (this.starting === null) this.starting = noteReady(ctx, 'Codex app-server', () => this.open(ctx), () => ({ text: this.served.model ? `, on ${this.served.model}` : '', data: { model: this.served.model } }), () => this.active?.isStopped === true);
+    if (this.starting === null) this.starting = noteReady(ctx, 'Codex app-server', () => this.open(ctx), () => ({ text: this.served.model ? `, on ${this.served.model}` : '', data: { model: this.served.model } }), () => this.active?.isStopped === true || this.closing || this.ended);
     return this.starting;
   }
 

@@ -66,8 +66,8 @@ export class TurnAttempts {
   open(state: TurnAttemptState): LivePermissions {
     const { threadId } = state;
     const permissions = new LivePermissions(state.thread.permissionMode, handle => {
-      this.threads.cards.clearPermissionsOf(threadId);
-      this.threads.cards.clearQuestionsOf(threadId);
+      this.threads.cards.clearPermissionsOf(threadId, 'mode change');
+      this.threads.cards.clearQuestionsOf(threadId, false, 'mode change');
       handle.stop();
       this.armStopDeadline(threadId, handle);
     }, mode => {
@@ -121,6 +121,8 @@ export class TurnAttempts {
     /** What the agent is told when its turn goes on after an agent update. */
     let afterUpdate: Resume | null = null;
     let attempt = 0;
+    /** What started the next attempt, set where the loop goes round again. */
+    let because = 'first attempt';
     for (;;) {
       attempt += 1;
       state.thread.permissionMode = permissions.mode;
@@ -145,7 +147,7 @@ export class TurnAttempts {
       if (state.running.execution) state.running.execution = { ...state.running.execution, permissionMode: permissions.mode };
       this.core.journal.putTurn(state.running);
       const attemptAt = performance.now();
-      const why = attempt === 1 ? 'first attempt' : note ? 'after an agent update' : retriedLostSession && !resumed ? 'retry on a fresh session' : 'after a permission mode change';
+      const why = because;
       this.core.logs.info(`Attempt ${attempt} (${why}) on ${provider.id} ${state.thread.model ?? 'default model'}, ${state.thread.sessionId === null ? 'new session' : 'resuming session'}, permission mode ${permissions.mode}`, {
         source: 'turns', event: 'turn.attempt.started', threadId, turnId, providerId: provider.id, ...(state.thread.model ? { model: state.thread.model } : {}),
         data: { attempt, why, protocol: provider.protocol, accountId: account.id, resume: state.thread.sessionId !== null, permissionMode: permissions.mode, effort: state.thread.effort ?? null, speed: state.thread.speed ?? null },
@@ -177,6 +179,7 @@ export class TurnAttempts {
         state.thread = fresh;
         retriedLostSession = true;
         state.running = { ...state.running, ...(state.running.execution ? { execution: { ...state.running.execution, sessionId: null, sessionGeneration: fresh.sessionGeneration ?? 0 } } : {}) };
+        because = 'retry on a fresh session';
         continue;
       }
       // Stopped between two tool calls for an agent update: the same turn
@@ -191,15 +194,17 @@ export class TurnAttempts {
         }
         afterUpdate = resume;
         resumed = true;
+        because = 'after an agent update';
         continue;
       }
       if (!permissions.restarting || result.status === 'done') break;
       usage = sumUsage(usage, result.usage);
       this.keepSession(state, result);
-      this.threads.cards.clearPermissionsOf(threadId);
-      this.threads.cards.clearQuestionsOf(threadId);
+      this.threads.cards.clearPermissionsOf(threadId, 'mode change');
+      this.threads.cards.clearQuestionsOf(threadId, false, 'mode change');
       setThreadStatus(this.core, threadId, 'running');
       resumed = true;
+      because = 'after a permission mode change';
     }
     result = { ...result, usage: sumUsage(usage, result.usage) };
     if (state.running.execution) state.running.execution = { ...state.running.execution, permissionMode: state.thread.permissionMode };
@@ -341,8 +346,8 @@ export class TurnAttempts {
     // An open card is what the driver is parked on. Aborting without answering
     // it leaves that await pending for good: the turn never finishes, the
     // thread stays `waiting`, and Stop does nothing the user can see.
-    this.threads.cards.clearPermissionsOf(threadId);
-    this.threads.cards.clearQuestionsOf(threadId);
+    this.threads.cards.clearPermissionsOf(threadId, 'stop');
+    this.threads.cards.clearQuestionsOf(threadId, false, 'stop');
     this.stopRequested.add(threadId);
     handle.stop();
     this.armStopDeadline(threadId, handle);

@@ -22,6 +22,13 @@ import type { ThreadStore } from '../threads.ts';
 import { nativeCommandPrompt } from './operations.ts';
 import { setThreadStatus, withLoad } from './records.ts';
 
+/** Why open cards were cleared, as the log says it. */
+export type CardClearReason = 'turn end' | 'stop' | 'mode change' | 'archive' | 'rewind';
+const CLEARED_BECAUSE: Record<CardClearReason, string> = {
+  'turn end': 'the turn ended', stop: 'the turn was stopped', 'mode change': 'the permission mode changed',
+  archive: 'the thread was archived', rewind: 'the conversation was rewound',
+};
+
 /** Tool name, decision, who decided and how long it waited: never the tool input or the question text. */
 function logCard(core: Core, request: PermissionRequest | QuestionRequest, event: string, message: string, data: Record<string, string | number | boolean>): void {
   // A clock stepped back would make the wait negative.
@@ -364,7 +371,7 @@ export class ThreadCards {
    * settles. An asynchronous card outlives its turn and goes only with `all`,
    * when the thread is put away.
    */
-  clearQuestionsOf(threadId: ThreadId, all = false): void {
+  clearQuestionsOf(threadId: ThreadId, all = false, reason: CardClearReason = 'turn end'): void {
     let asyncGone = false;
     for (const [id, pending] of [...this.questions]) {
       if (pending.request.threadId !== threadId) continue;
@@ -373,7 +380,7 @@ export class ThreadCards {
       this.asyncCards.delete(id);
       this.closeUnanswered(pending.request);
       asyncGone ||= pending.request.async === true;
-      logCard(this.core, pending.request, 'question.cancelled', 'Question cancelled because the turn ended', { async: pending.request.async === true, by: 'turn end' });
+      logCard(this.core, pending.request, 'question.cancelled', `Question cancelled because ${CLEARED_BECAUSE[reason]}`, { async: pending.request.async === true, by: reason });
       this.core.bus.emit('question.answered', { questionId: id, threadId, answer: null });
       pending.resolve(null);
     }
@@ -395,11 +402,11 @@ export class ThreadCards {
   }
 
   /** The turn ended with a card still open: it is denied, and every client is told so. */
-  clearPermissionsOf(threadId: ThreadId): void {
+  clearPermissionsOf(threadId: ThreadId, reason: CardClearReason = 'turn end'): void {
     for (const [id, pending] of [...this.permissions]) {
       if (pending.request.threadId !== threadId) continue;
       this.permissions.delete(id);
-      logCard(this.core, pending.request, 'permission.decided', `Permission for ${pending.request.toolName} denied because the turn ended`, { decision: 'deny', by: 'turn end' });
+      logCard(this.core, pending.request, 'permission.decided', `Permission for ${pending.request.toolName} denied because ${CLEARED_BECAUSE[reason]}`, { decision: 'deny', by: reason });
       // Without this the card stays on screen with live buttons, and pressing
       // one answers `unknown permission request`.
       this.core.bus.emit('permission.resolved', { requestId: id, threadId, decision: 'deny' });

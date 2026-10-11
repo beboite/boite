@@ -140,7 +140,7 @@ export function createAgyDriver(): Driver {
       noteWarmSession(ctx, 'agy', { kept: session !== null, usable, sameSetup: session?.key === key && session.conversationId === ctx.sessionId, setupChange: 'the thread changed model, effort, permission mode, account, folder or conversation' });
       if (session !== null && !usable) {
         sessions.delete(threadId);
-        session.close(session.key === key ? null : 'the thread changed model, effort, permission mode, account or folder', ctx);
+        session.close(session.key !== key ? 'the thread changed model, effort, permission mode, account or folder' : session.conversationId !== ctx.sessionId ? 'the thread moved to another conversation' : null, ctx);
         session = null;
       }
       if (session === null) {

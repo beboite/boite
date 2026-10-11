@@ -497,7 +497,7 @@ export class ThreadStore {
       this.agentState.commands.delete(threadId);
       this.agentState.noteBackground(threadId, []);
       // Nobody answers a card on a thread put away, and no turn should start from one.
-      this.cards.clearQuestionsOf(threadId, true);
+      this.cards.clearQuestionsOf(threadId, true, 'archive');
       this.deferred.deferredAnswers.delete(threadId);
       this.deferred.consumed.delete(threadId);
       this.deferred.pendingWakes.delete(threadId);
