@@ -470,7 +470,7 @@ export class AcpSession {
         const reason = rpcReason(error);
         ctx.log('warn', `acp: ${ctx.provider.id} refused to load the session ${ctx.sessionId}: ${reason}`);
         const kind = loadRefusal(error, reason);
-        ctx.diagnostic?.('warn', `session/load refused with code ${String((error as { code?: unknown }).code)}, read as ${kind}`, { event: 'driver.session.load-refused', data: { code: errorCodeOf((error as { code?: unknown }).code), kind } });
+        ctx.diagnostic?.('warn', `session/load refused with code ${errorCodeOf((error as { code?: unknown }).code) ?? 'unknown'}, read as ${kind}`, { event: 'driver.session.load-refused', data: { code: errorCodeOf((error as { code?: unknown }).code), kind } });
         if (kind === 'gone' || (kind === 'unsure' && this.memory.refusedLoads.has(refusedKey))) {
           // Pruned, migrated, another project: retrying the same id would fail
           // every turn of the thread from now on.

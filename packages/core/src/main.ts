@@ -506,7 +506,7 @@ export function main(argv: string[]): void {
       const deadline = setTimeout(() => { unlock(); refuseToStart(error); }, SHUTDOWN_TIMEOUT_MS);
       deadline.unref();
       void core.close()
-        .catch(closeError => core.log('error', `startup cleanup failed: ${messageOf(closeError)}`))
+        .catch(closeError => { try { core.log('error', `startup cleanup failed: ${messageOf(closeError)}`); } catch { /* the unlock below still runs */ } })
         .finally(() => {
           clearTimeout(deadline);
           unlock();
@@ -571,7 +571,7 @@ export function main(argv: string[]): void {
       // A driver that never answers its stop must not hold the process open, and
       // a rejection anywhere in the chain must not skip unlock() and the exit.
       const deadline = setTimeout(() => {
-        core.log('error', `shutdown did not finish in ${SHUTDOWN_TIMEOUT_MS} ms, exiting`, { source: 'core', event: 'core.shutdown.timeout', durationMs: SHUTDOWN_TIMEOUT_MS });
+        try { core.log('error', `shutdown did not finish in ${SHUTDOWN_TIMEOUT_MS} ms, exiting`, { source: 'core', event: 'core.shutdown.timeout', durationMs: SHUTDOWN_TIMEOUT_MS }); } catch { /* The unlock and exit below still run. */ }
         unlock();
         process.exit(1);
       }, SHUTDOWN_TIMEOUT_MS);
@@ -581,7 +581,8 @@ export function main(argv: string[]): void {
         .then(() => { stepAt = step('core.shutdown.drained', 'Running turns drained', stepAt); return server.stop(); })
         .then(() => { stepAt = step('core.shutdown.server-stopped', 'Server stopped', stepAt); return core.close(); })
         .catch((error: unknown) => {
-          core.log('error', `shutdown failed: ${messageOf(error)}`, { source: 'core', event: 'core.shutdown.failed', durationMs: performance.now() - shutdownAt });
+          // A throw here would surface as an unhandled rejection after the exit is decided.
+          try { core.log('error', `shutdown failed: ${messageOf(error)}`, { source: 'core', event: 'core.shutdown.failed', durationMs: performance.now() - shutdownAt }); } catch { /* the exit below still runs */ }
         })
         .finally(() => {
           clearTimeout(deadline);
@@ -609,7 +610,8 @@ export function main(argv: string[]): void {
     // line, stops the turns and releases the lock on the way out; the process
     // never carries on after an error nobody expected.
     const fatal = (kind: string) => (error: unknown): void => {
-      core.log('error', `${kind}: ${messageOf(error)}`, { source: 'core', event: 'core.fatal', data: { kind, ...(error instanceof Error ? { name: error.name, stack: (error.stack ?? '').split('\n').slice(1, 4).map(line => line.trim()).join(' | ') } : {}) } });
+      // A throw here would skip the shutdown and come back to this handler.
+      try { core.log('error', `${kind}: ${messageOf(error)}`, { source: 'core', event: 'core.fatal', data: { kind, ...(error instanceof Error ? { name: error.name, stack: (error.stack ?? '').split('\n').slice(1, 4).map(line => line.trim()).join(' | ') } : {}) } }); } catch { /* Stderr and shutdown below still run. */ }
       process.stderr.write(`boite-core ${kind}: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`);
       process.exitCode = 1;
       shutdown();
