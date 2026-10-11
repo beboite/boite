@@ -85,6 +85,8 @@
     reported = visible;
     onrows?.(visible);
   });
+  // Unmounted once the fold empties: the rows it reported leave Alt+digit too, as RecentDone's do.
+  $effect(() => () => { if (reported.length) onrows?.([]); });
 
   async function run(machine: Machine, project: Project, action: () => Promise<unknown>) {
     if (busy !== null) return;
