@@ -371,7 +371,8 @@ export function createLogAnonymizer(context: LogAnonymizeContext): LogAnonymizer
     const spaced = replaceSpaced ? replaceSpaced(raw) : raw;
     return replacePrefixes && /[\\/]/.test(spaced) ? replacePrefixes(spaced) : spaced;
   };
-  const replaceWords = combined(words, '(?![\\w-])', match => match.toLowerCase(), '(^|[^\\w.-])');
+  // A hyphen ends a name: `meetsu-notes.txt` and `secret-game-backup` keep only their suffix.
+  const replaceWords = combined(words, '(?!\\w)', match => match.toLowerCase(), '(^|[^\\w.])');
   const replaceExtras = combined(extras, '', match => match.toLowerCase());
 
   const text = (raw: string): string => {

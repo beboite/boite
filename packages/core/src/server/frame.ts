@@ -4,7 +4,7 @@ import { RpcFailure } from '../errors.ts';
 import { logMessageOf } from '../log-errors.ts';
 import { ServerConnection } from './connection.ts';
 import { hello } from './hello.ts';
-import { logRpcTiming } from './connection-log.ts';
+import { clientField, logRpcTiming } from './connection-log.ts';
 
 export async function handleFrame(core: Core, connection: ServerConnection, raw: string): Promise<void> {
   let frame: { id?: unknown; method?: unknown; params?: unknown; progress?: unknown };
@@ -66,8 +66,9 @@ export async function handleFrame(core: Core, connection: ServerConnection, raw:
       causes.push(logMessageOf(cause));
       cause = cause instanceof Error ? cause.cause : undefined;
     }
-    core.logs.record('error', `${method} failed: ${causes.join('; caused by: ')}`, {
-      source: 'rpc', event: 'rpc.failed', requestId: String(id), durationMs: performance.now() - startedAt, data: { method, principal: connection.identity.principal },
+    const named = clientField(method, 100, '(none)');
+    core.logs.record('error', `${named} failed: ${causes.join('; caused by: ')}`, {
+      source: 'rpc', event: 'rpc.failed', requestId: String(id), durationMs: performance.now() - startedAt, data: { method: named, principal: connection.identity.principal },
       ...(connection.identity.threadId === null ? {} : { threadId: connection.identity.threadId }),
     });
     connection.sendResponse({

@@ -208,7 +208,8 @@ fn current_endpoint(state: &CoreState) -> Result<CoreEndpoint, String> {
     }
     if claim(&state.slot, settled.generation) {
         let reason = match (&settled.outcome, settled.pid) {
-            (Err(error), _) => format!("the last start failed ({error})"),
+            // Only the first line: the core's output under it stays in the exit record's data.stderrTail.
+            (Err(error), _) => format!("the last start failed ({})", error.lines().next().unwrap_or("")),
             (Ok(_), Some(pid)) => format!("the core pid {pid} is no longer running"),
             (Ok(_), None) => "the core is gone".to_string(),
         };

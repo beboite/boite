@@ -36,8 +36,9 @@ export function noteClaudeMessage(ctx: Diagnosable, message: SDKMessage, session
     return;
   }
   if (message.type === 'rate_limit_event') {
-    const info = message.rate_limit_info;
-    if (info.status === 'allowed') return;
+    // A shape the SDK types do not promise must not throw inside the receive loop.
+    const info = message.rate_limit_info as typeof message.rate_limit_info | undefined | null;
+    if (info === undefined || info === null || info.status === 'allowed') return;
     const resets = isoTime(info.resetsAt);
     note(info.status === 'rejected' ? 'warn' : 'info', `Claude rate limit ${info.status === 'rejected' ? 'reached' : 'warning'}${info.rateLimitType ? ` on the ${info.rateLimitType} window` : ''}${typeof info.utilization === 'number' ? `, ${Math.round(info.utilization * 100)}% used` : ''}${resets ? `, resets ${resets}` : ''}`, {
       event: 'driver.rate-limit',

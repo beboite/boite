@@ -6,7 +6,7 @@
 //! window going "Not responding" then has a cause in `shell.N.ndjson`.
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use serde_json::json;
@@ -28,6 +28,10 @@ static COMMANDS: OnceLock<Vec<&'static str>> = OnceLock::new();
 /// `(index + 1) << 48 | started ms`, so a reader never pairs one command with
 /// another's start. 0 when no command runs.
 static COMMAND: AtomicU64 = AtomicU64::new(0);
+/// The packed value of every command still running, oldest first. Invokes can
+/// overlap (several windows, plugins) and end in any order, so the slot always
+/// names the newest one still running rather than whatever a finished one saw.
+static RUNNING: Mutex<Vec<u64>> = Mutex::new(Vec::new());
 /// The same packing for the last window or WebView event.
 static EVENT: AtomicU64 = AtomicU64::new(0);
 /// The last ping the main thread ran, and when.
@@ -56,14 +60,19 @@ pub(crate) fn register_commands(paths: &[&'static str]) {
 }
 
 /// While alive, the slot names this command. Dropping it records a slow one.
-pub(crate) struct Running { index: Option<usize>, started: Instant, previous: u64 }
+pub(crate) struct Running { index: Option<usize>, started: Instant, packed: u64 }
 
 /// Called by the invoke handler before Tauri dispatches `name`. A name that is
 /// not one of ours (a plugin's) is timed under "other".
 pub(crate) fn begin(name: &str) -> Running {
     let index = COMMANDS.get().and_then(|names| names.iter().position(|known| *known == name));
-    let previous = COMMAND.swap(pack(index.unwrap_or(OTHER_COMMAND), since_start()), Ordering::AcqRel);
-    Running { index, started: Instant::now(), previous }
+    let packed = pack(index.unwrap_or(OTHER_COMMAND), since_start());
+    {
+        let mut running = RUNNING.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        running.push(packed);
+        COMMAND.store(packed, Ordering::Release);
+    }
+    Running { index, started: Instant::now(), packed }
 }
 
 fn name_at(index: usize) -> &'static str {
@@ -72,7 +81,11 @@ fn name_at(index: usize) -> &'static str {
 
 impl Drop for Running {
     fn drop(&mut self) {
-        COMMAND.store(self.previous, Ordering::Release);
+        {
+            let mut running = RUNNING.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            if let Some(at) = running.iter().rposition(|value| *value == self.packed) { running.remove(at); }
+            COMMAND.store(running.last().copied().unwrap_or(0), Ordering::Release);
+        }
         let took = self.started.elapsed();
         if took < SLOW_COMMAND { return; }
         let command = self.index.map(name_at).unwrap_or("other");
@@ -325,6 +338,16 @@ mod tests {
             let now = since_start();
             assert_eq!(blame(now).command.map(|(name, _)| name), Some("shell_ready"));
         }
+        assert_eq!(blame(since_start()).command, None);
+        // Overlapping invokes that end out of order: the slot keeps the one still running.
+        let first = begin("notify");
+        let second = begin("shell_ready");
+        drop(first);
+        assert_eq!(blame(since_start()).command.map(|(name, _)| name), Some("shell_ready"));
+        let third = begin("notify");
+        drop(second);
+        assert_eq!(blame(since_start()).command.map(|(name, _)| name), Some("notify"));
+        drop(third);
         assert_eq!(blame(since_start()).command, None);
         saw(Seen::ScaleChanged);
         assert_eq!(blame(since_start()).event.map(|(name, _)| name), Some("window.scale-changed"));

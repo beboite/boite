@@ -35,7 +35,8 @@ export function logLoginState(core: Core, account: Account | null, state: 'runni
     core.logs.info(`Login succeeded for account ${account.id} of ${account.providerId}`, { ...base, event: 'account.login.succeeded', ...(durationMs === undefined ? {} : { durationMs }) });
     return;
   }
-  const reason = output.trim().slice(0, 300) || 'no reason printed';
+  // A login line often carries its sign-in link with device or OAuth parameters: only the site stays.
+  const reason = output.trim().slice(0, 300).replace(/(https?:\/\/[^\s/?#]+)\S*/g, '$1/<redacted>') || 'no reason printed';
   core.logs.warn(`Login failed for account ${account.id} of ${account.providerId}${exitCode === null ? '' : `, exit code ${exitCode}`}: ${reason}`, {
     ...base, event: 'account.login.failed', ...(durationMs === undefined ? {} : { durationMs }), data: { ...base.data, exitCode, reason },
   });

@@ -176,6 +176,9 @@ test('a failed Claude result without an error list is logged, not thrown into th
   const ctx = { diagnostic: (level: string, _message: string, context: { event: string; data?: Record<string, unknown> }) => { notes.push({ level, ...context }); } };
   noteClaudeMessage(ctx, { type: 'result', subtype: 'error_from_a_newer_cli', is_error: true, num_turns: 2, duration_ms: 10, duration_api_ms: 5 } as never, null);
   expect(notes).toMatchObject([{ level: 'warn', event: 'driver.result.error', data: { errors: 0 } }]);
+  // A rate-limit event without its info is skipped too.
+  noteClaudeMessage(ctx, { type: 'rate_limit_event' } as never, null);
+  expect(notes).toHaveLength(1);
 });
 
 test('two cores in one process time their own logins, even for the same account id', () => {
@@ -188,6 +191,11 @@ test('two cores in one process time their own logins, even for the same account 
   logLoginState(first.core, account, 'done', '', 0);
   logLoginState(second.core, account, 'done', '', 0);
   for (const { records } of [first, second]) expect(typeof records.find(record => record.context.event === 'account.login.succeeded')?.context.durationMs).toBe('number');
+  // A failed login keeps the sign-in site and drops the link's device or OAuth parameters.
+  logLoginState(first.core, account, 'failed', 'Open https://claude.ai/oauth/device/ABCD-1234?code=secret-code to sign in', 1);
+  const failed = first.records.find(record => record.context.event === 'account.login.failed');
+  expect(failed?.message).toContain('Open https://claude.ai/<redacted> to sign in');
+  expect(JSON.stringify(failed)).not.toContain('ABCD-1234');
 });
 
 test('a method name the client chose cannot forge a line in a refused or slow RPC record', () => {

@@ -281,9 +281,10 @@ export class AgentBrowser {
   async #launch(profile: string, identify = true, hosted = false): Promise<Engine> {
     const at = performance.now();
     try {
-      const engine = await (hosted ? this.#launchHosted(profile) : this.#launchLocal(profile, identify));
+      const found = hosted ? null : this.findBrowser();
+      const engine = await (found === null ? this.#launchHosted(profile) : this.#launchLocal(profile, identify, found));
       if (!identify) this.#probing.add(engine);
-      this.#core.logs.record(identify ? 'info' : 'debug', `Agent browser started for profile ${profile} in ${Math.round(performance.now() - at)} ms`, { source: 'browser', event: 'browser.started', durationMs: performance.now() - at, data: { profile, hosted, program: hosted ? 'desktop app' : this.findBrowser().path?.split(/[\\/]/).pop() ?? null } });
+      this.#core.logs.record(identify ? 'info' : 'debug', `Agent browser started for profile ${profile} in ${Math.round(performance.now() - at)} ms`, { source: 'browser', event: 'browser.started', durationMs: performance.now() - at, data: { profile, hosted, program: found === null ? 'desktop app' : found.path?.split(/[\\/]/).pop() ?? null } });
       return engine;
     } catch (error) {
       this.#core.logs.warn(`Agent browser for profile ${profile} did not start after ${Math.round(performance.now() - at)} ms: ${error instanceof Error ? error.message : String(error)}`, { source: 'browser', event: 'browser.start-failed', durationMs: performance.now() - at, data: { profile, hosted } });
@@ -291,8 +292,7 @@ export class AgentBrowser {
     }
   }
 
-  async #launchLocal(profile: string, identify: boolean): Promise<Engine> {
-    const found = this.findBrowser();
+  async #launchLocal(profile: string, identify: boolean, found: ReturnType<typeof findChromium>): Promise<Engine> {
     if (found.path === null) throw refused(`the agent browser cannot start on ${this.#machine}: ${found.reason}`);
     const identity = identify ? await this.#identities.of(found.path) : null;
     const dir = this.#profileDir(profile);
@@ -485,7 +485,7 @@ export class AgentBrowser {
     const previous = this.#queues.get(threadId) ?? Promise.resolve();
     const at = performance.now();
     const run = previous.catch(() => {}).then(() => this.#run(threadId, params.tabId, action));
-    run.catch((error: unknown) => this.#core.logs.debug(`browser ${action.kind} failed after ${Math.round(performance.now() - at)} ms: ${error instanceof Error ? error.message : String(error)}`, { source: 'browser', event: 'browser.command-failed', threadId, durationMs: performance.now() - at, data: { action: action.kind } }));
+    run.catch((error: unknown) => this.#core.logs.debug(`browser ${action.kind} failed after ${Math.round(performance.now() - at)} ms: ${(error instanceof Error ? error.message : String(error)).slice(0, 300)}`, { source: 'browser', event: 'browser.command-failed', threadId, durationMs: performance.now() - at, data: { action: action.kind } }));
     this.#queues.set(threadId, run);
     void run.finally(() => { if (this.#queues.get(threadId) === run) this.#queues.delete(threadId); }).catch(() => {});
     return run;

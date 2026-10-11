@@ -25,7 +25,9 @@ test('the anonymizer replaces paths, names, addresses and private hosts and keep
     'opened file:///home/meetsu/projects/secret-game/index.html.',
     'loaded file:///D:/Dev/Factory/assets/logo.png',
     'GET https://api.github.com/repos/acme/hidden-repo/pulls 404',
+    'kept meetsu-notes.txt and secret-game-backup',
   ].join('\n'));
+  expect(text).toMatch(/kept <user>-notes\.txt and <project:[0-9a-f]{6}>-backup$/m);
   // An API path names the owner and repository one segment later.
   expect(text).toMatch(/api\.github\.com\/repos\/<owner:[0-9a-f]{6}>\/<repo:[0-9a-f]{6}>\/pulls 404/);
   expect(text).toMatch(/opened file:\/\/<project:[0-9a-f]{6}>\/index\.html\.$/m);
