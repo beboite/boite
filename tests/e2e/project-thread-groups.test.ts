@@ -200,6 +200,8 @@ for (const width of [1280, 390]) {
       await click(`${root} ${id('project-shelf-toggle')}`);
       // The fold lists idle projects as compact rows, never as project sections.
       const idleRow = (projectId: string) => `${root} ${id('project-shelf')} ${id('idle-project')}[data-machine-id="${main}"][data-project-id="${projectId}"]`;
+      // Its rows load on their own, at the latest when it opens.
+      await page.waitFor(`document.querySelector('${idleRow(empty)}')`);
       expect(await page.evaluate(`!!document.querySelector('${building}:not(.inactive)') && !document.querySelector('${idleRow(busy)}') && !!document.querySelector('${idleRow(empty)}')`)).toBe(true);
       expect(await page.evaluate(`!document.querySelector('${root} ${id('project-shelf')} ${id(width < 720 ? 'mobile-project-group' : 'project')}')`)).toBe(true);
       expect(await page.evaluate(`document.querySelector('${building} ${id('project-working-toggle')}').dataset.count`)).toBe('1');
