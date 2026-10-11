@@ -5,9 +5,11 @@ import { machineMemory } from './memory.ts';
 import * as jobs from './jobs.ts';
 import * as guard from './guard.ts';
 import { findTailscaleCli } from '../tailscale.ts';
+import { firewallAllow, firewallQuery } from './firewall.ts';
 
 export const platform: ProcessPlatform = {
   tailscaleCli: () => findTailscaleCli('windows'),
+  firewall: { query: firewallQuery, allow: firewallAllow },
   retain(events, protections) {
     jobs.retainJobs(events);
     guard.retainGuard(protections);

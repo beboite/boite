@@ -37,3 +37,9 @@ test('a settled duration stays frozen and an unknown finish is not fabricated', 
   flushSync();
   expect(document.querySelector('[data-testid=agent-elapsed]')).toBeNull();
 });
+
+test('a run past an hour reads in hours and minutes, not thousands of minutes', async () => {
+  component = mount(AgentElapsed, { target: document.body, props: { startedAt: 0, finishedAt: (32 * 60 + 16) * 60_000 + 29_000, active: false } });
+  flushSync();
+  expect(document.body.textContent?.trim()).toBe('32 h 16 min');
+});

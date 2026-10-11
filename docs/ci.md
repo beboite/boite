@@ -133,9 +133,9 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 591,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,520,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,526,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 3,852,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 3,856,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
@@ -171,7 +171,10 @@ limit 3,826,000; entry and core
 bundle limits stay unchanged.
 Merged with `ed68bd94` (group relay, project search, plugin updates), a local
 Linux build of the branch measured 4,511,575 UI bytes and 3,843,682 core
-bytes, and the limits become 4,520,000 and 3,852,000.
+bytes, and the limits become 4,520,000 and 3,852,000. Merged with `ffd433a4`,
+whose firewall check had raised `main`'s limits by 6,000 and 4,000 bytes, the
+branch measured 4,516,117 and 3,851,614 on Linux on 2026-10-11, and its limits
+take the same increase: 4,526,000 and 3,856,000.
 
 On 2026-10-03, fresh builds of `e1f00a3` measured 2,695,204 core bytes and 3,932,309
 UI bytes. The orchestration additions measured 3,228,444 and 3,943,301 bytes:
@@ -234,6 +237,12 @@ adds 5,137 UI bytes: 4,430,694 against 4,425,557 for `main` at `19ef51b2`,
 measured on Linux on 2026-10-10. A machine icon in the picker cost another
 2,563 bytes through a chunk split and was left out. The UI limit rises from
 4,429,000 to 4,435,000, leaving about 4 KB.
+
+The Windows Defender Firewall check and its pairing-card notice add 3,866 UI
+bytes and 5,792 emitted core JavaScript bytes: 4,445,296 and 3,726,463 against
+4,441,430 and 3,720,671 for `main` at `64a0b6ad`, measured on Linux on
+2026-10-10. Merged with `main` at `ed68bd94` they measured 4,459,197 and
+3,739,869 bytes, within the 4,460,000 and 3,740,000 limits set there.
 
 Recent's Done and Working groups measured 3,949,936 UI bytes on 2026-10-03
 before integrating these orchestration additions. The combined build measured

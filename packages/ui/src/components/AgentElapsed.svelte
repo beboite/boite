@@ -13,6 +13,8 @@
   function format(ms: number) {
     const seconds = Math.floor(Math.max(0, ms) / 1000);
     const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    if (hours > 0) return `${hours} ${strings.units.hours} ${String(minutes % 60).padStart(2, '0')} ${strings.units.minutes}`;
     return minutes > 0
       ? `${minutes} ${strings.units.minutes} ${String(seconds % 60).padStart(2, '0')} ${strings.units.seconds}`
       : `${seconds} ${strings.units.seconds}`;

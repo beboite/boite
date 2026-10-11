@@ -510,6 +510,37 @@ describe('WsClient', () => {
     expect(client.principal).toBe('owner');
   });
 
+  test('a client given no version says the release the build defined, not a literal', async () => {
+    // A version the repository never had: a literal left in client.ts could not match it.
+    const setup = (globalThis as { __BOITE_VERSION__?: string }).__BOITE_VERSION__;
+    vi.resetModules();
+    vi.stubGlobal('__BOITE_VERSION__', '9.8.7-nightly.20991231.1');
+    try {
+      const { WsClient: Fresh } = await import('./client');
+      const sockets: FakeSocket[] = [];
+      // QuotaApp and the group links open clients this way.
+      const client = new Fresh({
+        url: 'http://127.0.0.1:8777',
+        token: 'secret',
+        socketFactory: () => {
+          const socket = new FakeSocket();
+          sockets.push(socket);
+          return socket;
+        },
+        reconnect: false
+      });
+      void client.connect().catch(() => {});
+      const live = take(sockets, 0);
+      live.open();
+      const hello = live.frame(0) as { params: { client: { version: string } } };
+      expect(hello.params.client.version).toBe('9.8.7-nightly.20991231.1');
+      client.close();
+    } finally {
+      vi.stubGlobal('__BOITE_VERSION__', setup);
+      vi.resetModules();
+    }
+  });
+
   test('a grant goes out on the first hello, and the session that comes back is the token from then on', async () => {
     const sockets: FakeSocket[] = [];
     const stored: { id: string; token: string }[] = [];

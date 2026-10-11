@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
+import { releaseVersion } from '../../packages/ui/release-version.ts';
 import { setNightlyVersion } from './nightly-build.ts';
 test('nightly build stamps the core and installer without changing the stable config', () => {
   const root = mkdtempSync(join(tmpdir(), 'boite-nightly-version-'));
@@ -11,6 +12,13 @@ test('nightly build stamps the core and installer without changing the stable co
     setNightlyVersion('2.0.0-nightly.20260915.2', root);
     for (const file of files.slice(0, 3)) expect(JSON.parse(readFileSync(join(root, file), 'utf8')).version).toBe('2.0.0-nightly.20260915.2');
     expect(JSON.parse(readFileSync(join(root, files[3]!), 'utf8')).version).toBe('2.0.0-beta.1');
+    // The UI reports the version it reads where the stamp writes, so a nightly phone says nightly.
+    expect(releaseVersion(join(root, 'package.json'))).toBe('2.0.0-nightly.20260915.2');
     expect(() => setNightlyVersion('2.0.0', root)).toThrow('invalid nightly version');
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('the UI build defines the version it reports from the root package.json the stamp writes', async () => {
+  const { default: config } = await import('../../packages/ui/vite.config.ts');
+  expect((config as { define?: Record<string, string> }).define?.['__BOITE_VERSION__']).toBe(JSON.stringify(releaseVersion()));
 });
