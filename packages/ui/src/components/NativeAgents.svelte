@@ -2,7 +2,7 @@
   import type { NativeAgent } from '@boite/contracts';
   import { ChevronRight } from '@lucide/svelte';
   import { fill, strings } from '../lib/strings';
-  import AgentElapsed from './AgentElapsed.svelte';
+  import Elapsed from './Elapsed.svelte';
   import StatusMark from './StatusMark.svelte';
   let { agents, source = 'provider' }: { agents: NativeAgent[]; source?: 'provider' | 'process' } = $props();
 </script>
@@ -17,7 +17,7 @@
         <span class="status" data-status={agent.status}>
           {#if agent.status === 'running'}<StatusMark status="running" />{/if}
           <span class="ui-label">{strings.delegation.nativeStatus[agent.status]}</span>
-          {#if source === 'process'}<AgentElapsed startedAt={agent.startedAt} finishedAt={agent.finishedAt ?? null} active={agent.status === 'running'} />{/if}
+          {#if source === 'process'}<Elapsed startedAt={agent.startedAt} finishedAt={agent.finishedAt ?? null} active={agent.status === 'running'} />{/if}
         </span>
       </summary>
       <div class="body">

@@ -68,6 +68,5 @@
   .failed p { margin: 0; overflow-wrap: anywhere; }
   .muted { margin: 0; padding: 14px 4px; color: var(--color-muted-foreground); font-size: var(--text-sm); }
   .actions :global(.spinning) { animation: spin 900ms linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .actions :global(.spinning) { animation: none; } }
 </style>

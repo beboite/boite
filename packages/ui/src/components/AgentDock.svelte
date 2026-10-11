@@ -4,7 +4,7 @@
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import StatusMark from './StatusMark.svelte';
-  import AgentElapsed from './AgentElapsed.svelte';
+  import Elapsed from './Elapsed.svelte';
 
   let { store, threadId }: { store: Store; threadId: string } = $props();
   let active = $derived((store.delegation?.agents ?? []).filter(agent => threadActive(agent.thread.status)));
@@ -37,7 +37,7 @@
         {#if runs.length > 0}<span class="ui-label">{fill(runs.length === 1 ? strings.workflow.activeOne : strings.workflow.activeMany, { count: String(runs.length) })}</span>{/if}
       </span>
       <span class="ui-label" aria-hidden="true">·</span>
-      <AgentElapsed {startedAt} finishedAt={null} active />
+      <Elapsed {startedAt} finishedAt={null} active />
       <ChevronRight size={13} strokeWidth={1.75} />
     </button>
   </div>

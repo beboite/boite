@@ -33,6 +33,7 @@
   import MachineIcon from './MachineIcon.svelte';
   import ProjectTile from './ProjectTile.svelte';
   import RailFrame from './RailFrame.svelte';
+  import { minuteClock } from '../lib/clock.svelte';
   let { store }: { store: Store } = $props();
   const mobile = new MediaQuery('(max-width: 720px)');
   let scrollRoot = $state<HTMLDivElement>();
@@ -45,7 +46,8 @@
   const showRows = $derived(mobile.current ? store.sidebarOpen : !store.sidebarCollapsed);
   $effect(() => { if (showRows && scrollRoot) void tick().then(() => { if (scrollRoot && showRows) scrollRoot.scrollTop = savedScroll; }); });
   let projectButton = $state<HTMLButtonElement>();
-  let now = $state(Date.now());
+  /** The clock the rows' times read: a minute's precision is all they show. */
+  const now = $derived(minuteClock.now);
   let filter = $state<string | null>(null);
   let machines = $derived(
     workspace.machines.length ? workspace.machines : [{ id: 'local', label: strings.machines.local, store }]
@@ -116,10 +118,6 @@
             .concat(...(['done', 'archived'] as const).map(kind => projectThreadView.isOpen(entry, kind) ? projectDoneRows[JSON.stringify([kind, projectKey(entry)])] ?? [] : []));
         }).concat(idleRows)
     ).slice(0, 9);
-  });
-  $effect(() => {
-    const timer = setInterval(() => (now = Date.now()), 30_000);
-    return () => clearInterval(timer);
   });
   function addProject() {
     store.projectPickerOpen = true;
@@ -403,10 +401,8 @@
   .rollup.error { color: var(--color-danger); }
   .rollup.done { color: var(--color-success); }
   .rollup.queued { color: var(--color-muted-foreground); }
-  .rollup.delegating .dot, .rollup.monitoring .dot, .rollup.background .dot { animation: rollup-pulse 1.6s var(--ease-out-quint) infinite; }
-  .rollup :global(.spinner) { animation: rollup-spin 1s linear infinite; }
-  @keyframes rollup-spin { to { transform: rotate(360deg); } }
-  @keyframes rollup-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+  .rollup.delegating .dot, .rollup.monitoring .dot, .rollup.background .dot { animation: pulse 1.6s var(--ease-out-quint) infinite; }
+  .rollup :global(.spinner) { animation: spin 1s linear infinite; }
   @media (prefers-reduced-motion: reduce) { .rollup .dot, .rollup :global(.spinner) { animation: none; } }
   :global(html[data-motion='reduced']) .rollup .dot,
   :global(html[data-motion='reduced']) .rollup :global(.spinner) { animation: none; }

@@ -17,7 +17,6 @@
   .failed { background: var(--color-danger); border-color: var(--color-danger); }
   .stopped { background: var(--color-muted-foreground); border-color: var(--color-muted-foreground); }
   .skipped { border-style: dashed; border-color: var(--color-subtle); }
-  @keyframes pulse { 50% { opacity: 0.45; } }
   :global(html[data-motion='reduced']) .running { animation: none; }
   @media (prefers-reduced-motion: reduce) { .running { animation: none; } }
 </style>

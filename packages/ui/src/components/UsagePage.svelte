@@ -424,7 +424,6 @@
   .refresh { margin-left: auto; width: var(--control); height: var(--control); padding: 0; }
   .filter-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 190px; }
   .refresh :global(.spinning) { animation: spin 900ms linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
   .failure { max-width: var(--settings-width); margin: 0 0 12px; color: var(--color-danger); font-size: var(--text-sm); }
   .body { max-width: var(--settings-width); transition: opacity var(--dur-2) var(--ease-out-quint); }
   .body.stale { opacity: 0.6; }

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { errorText } from '../lib/errors';
-  import { page } from '../lib/page-hidden.svelte';
+  import { secondClock } from '../lib/clock.svelte';
   import { Bot, ChevronRight, FilePen, FileText, Globe, Search, SquareTerminal, Wrench, X } from '@lucide/svelte';
   import type { ToolDocument, ToolStatus } from '@boite/contracts';
   import { elapsed, json } from '../lib/format';
@@ -60,19 +60,11 @@
     nested?: boolean;
   } = $props();
 
-  let now = $state(Date.now());
-  const hidden = $derived(page.hidden);
-  // A running call ticks once a second while the page is on screen.
-  $effect(() => {
-    if (status !== 'running' || startedAt === null || hidden) return;
-    now = Date.now();
-    const timer = setInterval(() => { now = Date.now(); }, 1000);
-    return () => clearInterval(timer);
-  });
   /** Shown from one second on: a quick call needs no clock. */
   let took = $derived.by(() => {
     if (startedAt === null) return '';
-    const end = status === 'running' ? now : finishedAt;
+    // A running call reads the second clock, paused while the page is hidden.
+    const end = status === 'running' ? secondClock.now : finishedAt;
     if (end === null || end === undefined) return '';
     const spent = end - startedAt;
     return spent >= 1000 ? elapsed(spent) : '';
@@ -354,11 +346,6 @@
     animation: pulse 1.6s var(--ease-out-quint) infinite;
   }
 
-  @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: .3; }
-  }
-
   .took {
     flex: none;
     color: var(--color-subtle);
@@ -379,12 +366,6 @@
     border: 1.5px solid var(--color-edge);
     border-top-color: var(--color-live);
     animation: spin 0.9s linear infinite;
-  }
-
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
   }
 
   /* The open and the close are the same move: the rows track goes 0fr to 1fr,

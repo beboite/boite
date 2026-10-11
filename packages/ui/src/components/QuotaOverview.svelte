@@ -267,7 +267,6 @@
   .track[aria-busy='true'] { filter: saturate(0.15); }
   .track[aria-busy='true'] .fill { animation: breathe 1.1s ease-in-out infinite alternate; }
   @keyframes rise { from { opacity: 0; transform: translateY(-4px); } }
-  @keyframes breathe { to { opacity: 0.45; } }
   @media (prefers-reduced-motion: reduce) { .details, .track[aria-busy='true'] .fill { animation: none; } .track, .fill { transition: none; } }
   :global(html[data-motion='reduced']) .track[aria-busy='true'] .fill { animation: none; }
 </style>

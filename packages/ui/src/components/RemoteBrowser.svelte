@@ -386,10 +386,8 @@
   .omnibox.secure .site { color: var(--color-foreground); opacity: .7; }
   .state { flex: none; font-size: var(--text-xs); color: var(--color-muted-foreground); }
   .nav button[aria-pressed=true] { color: var(--color-accent); background: var(--color-accent-soft); }
-  .nav :global(.spin) { animation: reload-spin 1s linear infinite; }
-  @keyframes reload-spin { to { transform: rotate(360deg); } }
+  .nav :global(.spin) { animation: spin 1s linear infinite; }
   .loading { position: absolute; top: 39px; left: 0; height: 2px; width: 40%; z-index: 2; background: var(--color-accent); animation: loading-slide 1.1s var(--ease-out-quint) infinite; }
-  @keyframes loading-slide { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
   @media (prefers-reduced-motion: reduce) { .nav :global(.spin), .loading { animation: none; } }
   .viewer { position: relative; flex: 1; min-height: 80px; overflow: hidden; }
   .screen-area { width: 100%; height: 100%; display: flex; background: var(--color-background); overflow: auto; }

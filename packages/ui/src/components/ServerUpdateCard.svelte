@@ -99,7 +99,6 @@
   summary { cursor: pointer; }
   code { display: block; overflow-wrap: anywhere; }
   :global(.spinning) { animation: spin 1s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
   @media (max-width: 720px) {
     .update-row { flex-wrap: wrap; }
     button, .metadata .release { min-height: var(--touch-target); }

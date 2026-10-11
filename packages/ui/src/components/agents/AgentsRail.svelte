@@ -10,6 +10,7 @@
   import RailHead from '../RailHead.svelte';
   import AgentAvatar from './AgentAvatar.svelte';
   import AgentRow from './AgentRow.svelte';
+  import { minuteClock } from '../../lib/clock.svelte';
 
   /**
    * The conversations with agents, listed the way a messenger lists its chats
@@ -32,11 +33,7 @@
   const labels = $derived(strings.agents);
   let query = $state('');
   let searching = $state(false);
-  let now = $state(Date.now());
-  $effect(() => {
-    const timer = setInterval(() => (now = Date.now()), 30_000);
-    return () => clearInterval(timer);
-  });
+  const now = $derived(minuteClock.now);
 
   const snapshot = $derived(view.snapshot);
   const profiles = $derived(new Map(snapshot?.profiles.map(a => [a.id, a]) ?? []));

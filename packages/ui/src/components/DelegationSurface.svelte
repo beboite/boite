@@ -14,7 +14,7 @@
   import ModelPicker from './ModelPicker.svelte';
   import ProviderLogo from './ProviderLogo.svelte';
   import StatusMark from './StatusMark.svelte';
-  import AgentElapsed from './AgentElapsed.svelte';
+  import Elapsed from './Elapsed.svelte';
   import NativeAgents from './NativeAgents.svelte';
   import WorkflowMark from './WorkflowMark.svelte';
   import WorkflowRunPane from './WorkflowRunPane.svelte';
@@ -144,7 +144,7 @@
     </span>
     <span class="meta">
       {#if !isLive(entry)}<span class="outcome ui-label" data-status={entry.status}>{strings.workflow.status[entry.status]}</span>{/if}
-      <AgentElapsed startedAt={entry.createdAt} finishedAt={entry.finishedAt} active={entry.status === 'running'} />
+      <Elapsed startedAt={entry.createdAt} finishedAt={entry.finishedAt} active={entry.status === 'running'} />
     </span>
   </button>
 {/snippet}
@@ -167,7 +167,7 @@
     </span>
     <span class="meta">
       {#if outcome}<span class="outcome ui-label" data-status={progress.status}>{outcome}</span>{/if}
-      <AgentElapsed startedAt={progress.startedAt} finishedAt={progress.finishedAt} active={progress.active} />
+      <Elapsed startedAt={progress.startedAt} finishedAt={progress.finishedAt} active={progress.active} />
       {#if tokens !== null}<span class="tokens ui-label">{formatTokens(tokens)} {strings.units.tokens}</span>{/if}
     </span>
     {#if agent.result}<span class="result"><span>{agent.result}</span></span>{/if}

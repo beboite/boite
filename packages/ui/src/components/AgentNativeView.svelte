@@ -73,10 +73,8 @@
   .omnibox input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; color: var(--color-foreground); font-size: var(--text-sm); text-overflow: ellipsis; outline: none; }
   .site { display: flex; align-items: center; flex: none; align-self: stretch; padding: 0 6px 0 10px; line-height: 0; cursor: text; }
   .omnibox.secure .site { color: var(--color-foreground); opacity: .7; }
-  .nav :global(.spin) { animation: reload-spin 1s linear infinite; }
-  @keyframes reload-spin { to { transform: rotate(360deg); } }
+  .nav :global(.spin) { animation: spin 1s linear infinite; }
   .loading { position: absolute; top: 39px; left: 0; height: 2px; width: 40%; z-index: 2; background: var(--color-accent); animation: loading-slide 1.1s var(--ease-out-quint) infinite; }
-  @keyframes loading-slide { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
   @media (prefers-reduced-motion: reduce) { .nav :global(.spin), .loading { animation: none; } }
   .error { margin: 0; padding: 6px 12px; font-size: var(--text-sm); color: var(--color-danger); border-bottom: 1px solid var(--color-border); overflow-wrap: anywhere; }
   .slot { position: relative; flex: 1; min-height: 0; background: var(--color-background); }

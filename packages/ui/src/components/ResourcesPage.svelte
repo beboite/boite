@@ -212,7 +212,6 @@
     animation: pulse 2s var(--ease-out-quint) infinite;
   }
 
-  @keyframes pulse { 50% { opacity: 0.35; } }
   @media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
 
   .confirm {

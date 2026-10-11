@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { page } from '../lib/page-hidden.svelte';
+  import { secondClock } from '../lib/clock.svelte';
   import { Brain, ChevronRight } from '@lucide/svelte';
   import { renderMarkdown } from '../lib/markdown';
   import { ParagraphScan } from '../lib/message-display';
@@ -8,15 +8,7 @@
 
   let { text, live = false, startedAt = null, finishedAt = null }: { text: string; live?: boolean; startedAt?: number | null; finishedAt?: number | null } = $props();
 
-  let now = $state(Date.now());
-  const hidden = $derived(page.hidden);
-  $effect(() => {
-    if (!live || startedAt === null || hidden) return;
-    now = Date.now();
-    const timer = setInterval(() => { now = Date.now(); }, 1000);
-    return () => clearInterval(timer);
-  });
-  const took = $derived(startedAt === null || (!live && finishedAt === null) ? '' : elapsed((live ? now : finishedAt!) - startedAt));
+  const took = $derived(startedAt === null || (!live && finishedAt === null) ? '' : elapsed((live ? secondClock.now : finishedAt!) - startedAt));
 
   // Folded by default, and the fold belongs to this part alone.
   let open = $state(false);

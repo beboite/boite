@@ -4,7 +4,7 @@
   import type { DelegationProfile, WorkflowNode, WorkflowRun } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
   import { edgesOf, fitsPhase, nodeProgress, nodeTiming, phasesOf, routeOf } from '../lib/workflow-view';
-  import AgentElapsed from './AgentElapsed.svelte';
+  import Elapsed from './Elapsed.svelte';
   import ProviderLogo from './ProviderLogo.svelte';
   import WorkflowMark from './WorkflowMark.svelte';
 
@@ -119,7 +119,7 @@
     {#if node.status === 'skipped'}
       <span class="note ui-label">{strings.workflow.stepStatus.skipped}</span>
     {:else if timing.startedAt !== null}
-      <span class="note"><AgentElapsed startedAt={timing.startedAt} finishedAt={timing.finishedAt} active={timing.active} /></span>
+      <span class="note"><Elapsed startedAt={timing.startedAt} finishedAt={timing.finishedAt} active={timing.active} /></span>
     {/if}
   </button>
 {/snippet}

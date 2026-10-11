@@ -417,7 +417,6 @@
   .updates[data-state='failed'] { color: var(--color-danger); }
   .fold :global(svg) { transition: transform var(--dur-2) var(--ease-out-quint); }
   .head :global(.spinning) { animation: spin 1s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
   :global(html[data-motion='reduced']) .head :global(.spinning) { animation: none; }
   .fold.open :global(svg) { transform: rotate(180deg); }
   .details { padding: 12px 0 4px 52px; }

@@ -5,7 +5,7 @@
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import { nodeTiming, routeOf, shown } from '../lib/workflow-view';
-  import AgentElapsed from './AgentElapsed.svelte';
+  import Elapsed from './Elapsed.svelte';
   import DelegationTranscript from './DelegationTranscript.svelte';
   import ProviderLogo from './ProviderLogo.svelte';
   import WorkflowMark from './WorkflowMark.svelte';
@@ -54,7 +54,7 @@
       <small>
         {strings.workflow.stepStatus[node.status]}
         {#if route}· <ProviderLogo providerId={route.providerId} size={12} /> {route.model || route.profile}{/if}
-        {#if timing.startedAt !== null}· <AgentElapsed startedAt={timing.startedAt} finishedAt={timing.finishedAt} active={timing.active} />{/if}
+        {#if timing.startedAt !== null}· <Elapsed startedAt={timing.startedAt} finishedAt={timing.finishedAt} active={timing.active} />{/if}
       </small>
     </div>
     {#if canRetry}
@@ -79,7 +79,7 @@
           <button type="button" class="instance" class:chosen={inst.key === instance?.key} role="option" aria-selected={inst.key === instance?.key} data-testid="workflow-instance" onclick={() => (picked = inst.key)}>
             <WorkflowMark status={inst.status} />
             <span class="label ui-label">{inst.label || inst.key}</span>
-            {#if inst.startedAt !== null}<span class="time"><AgentElapsed startedAt={inst.startedAt} finishedAt={inst.finishedAt} active={inst.status === 'running'} /></span>{/if}
+            {#if inst.startedAt !== null}<span class="time"><Elapsed startedAt={inst.startedAt} finishedAt={inst.finishedAt} active={inst.status === 'running'} /></span>{/if}
           </button>
         {/each}
       </div>

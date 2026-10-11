@@ -6,6 +6,7 @@
   import { totalTokens } from '../lib/usage';
   import { fill, strings } from '../lib/strings';
   import { backgroundLabel } from '../lib/background';
+  import { secondClock } from '../lib/clock.svelte';
   import type { Snippet } from 'svelte';
   let { turn, requestStartedAt = null, progress, waiting = false, activeTool = false, activeContent = false, background = [], stop, pointed = false, actions }: {
     turn: Turn;
@@ -31,8 +32,9 @@
     actions?: Snippet;
   } = $props();
   const hidden = $derived(page.hidden);
-  let now = $state(Date.now());
   const running = $derived(turn.status === 'running');
+  /** The second clock ticks while the turn runs and the page is on screen; a settled turn keeps the time it stopped at. */
+  const now = $derived(running ? secondClock.now : Date.now());
   const compactOperation = $derived(turn.execution?.operation === 'compact');
   const observed = $derived(running && !waiting && progress?.turnId === turn.id ? progress : null);
   const compacting = $derived(running && !waiting && (compactOperation || observed?.phase === 'compacting'));
@@ -63,14 +65,6 @@
   const quiet = $derived(observed ? Math.max(0, now - observed.at) : 0);
   const activityLabel = $derived(observed ? strings.chat.progress[observed.phase] : null);
   const providerAge = $derived(observed?.providerAt == null ? null : Math.max(0, now - observed.providerAt));
-
-  // The clock only ticks while the turn runs and the page is on screen.
-  $effect(() => {
-    if (!running || hidden) return;
-    now = Date.now();
-    const timer = setInterval(() => { now = Date.now(); }, 1000);
-    return () => clearInterval(timer);
-  });
 </script>
 
 {#snippet metric(id: string, text: string | null, title?: string, quiet = false)}
@@ -154,8 +148,6 @@
   .stop-background:hover { color: var(--color-danger); border-color: currentColor; }
   .summary :global(.spinner) { animation: spin 1.5s linear infinite; }
   .paused :global(.spinner) { animation-play-state: paused; }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
   @media (prefers-reduced-motion: reduce) { .summary :global(.spinner), .pulse { animation: none; } }
   :global(html[data-motion='reduced']) .summary :global(.spinner),
   :global(html[data-motion='reduced']) .summary .pulse { animation: none; }

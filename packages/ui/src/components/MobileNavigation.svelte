@@ -35,6 +35,7 @@
   import { workingThread } from '../lib/recent.svelte';
   import { compareThreads } from '../lib/thread-order';
   import { needsUser } from '../lib/thread-state';
+  import { minuteClock } from '../lib/clock.svelte';
 
   let { store, recover = false, screen = $bindable('chat') }: { store: Store; recover?: boolean; screen: 'chat' | 'threads' | 'activity' } = $props();
   const narrow = new MediaQuery('(max-width: 720px)');
@@ -50,12 +51,8 @@
   }
   const listKey = $derived(`${screen}:${workspace.view}:${projectView.filter}`);
   $effect(() => { if (narrow.current && scrollRoot) { const saved = scrollPositions.get(listKey) ?? 0; void tick().then(() => { if (scrollRoot) scrollRoot.scrollTop = saved; }); } });
-  /** The clock the rows' times read, a minute's precision is all they show. */
-  let now = $state(Date.now());
-  $effect(() => {
-    const timer = setInterval(() => (now = Date.now()), 30_000);
-    return () => clearInterval(timer);
-  });
+  /** The clock the rows' times read: a minute's precision is all they show. */
+  const now = $derived(minuteClock.now);
   let machines = $derived(workspace.machines.length ? workspace.machines : [{ id: 'local', label: strings.machines.local, store }]);
   let machine = $derived(machines.find(m => m.store === store));
   let several = $derived(machines.length > 1);

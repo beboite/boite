@@ -3,14 +3,8 @@
   import type { ProcessRecord, TraceCapability } from '@boite/contracts';
   import { bytes, millis } from '../lib/format';
   import { strings } from '../lib/strings';
+  import { secondClock } from '../lib/clock.svelte';
   let { records, capability }: { records: ProcessRecord[]; capability: TraceCapability | null } = $props();
-  let now = $state(Date.now());
-  let live = $derived(records.some(record => record.exitedAt === null));
-  $effect(() => {
-    if (!live) return;
-    const timer = setInterval(() => { now = Date.now(); }, 1000);
-    return () => clearInterval(timer);
-  });
   let ordered = $derived([...records].sort((a, b) => Number(b.exitedAt === null) - Number(a.exitedAt === null) || b.startedAt - a.startedAt));
   function name(exe: string) { return exe.split(/[\\/]/).pop() ?? exe; }
 </script>
@@ -37,7 +31,7 @@
               </span>
             </div>
             <div class="metrics">
-              <span>{strings.trace.duration} <b>{millis((record.exitedAt ?? now) - record.startedAt)}</b></span>
+              <span>{strings.trace.duration} <b>{millis((record.exitedAt ?? secondClock.now) - record.startedAt)}</b></span>
               <span>{strings.trace.memory} <b>{bytes(record.peakMemoryBytes)}</b></span>
             </div>
           </summary>

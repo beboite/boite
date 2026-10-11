@@ -7,7 +7,7 @@
   import { formatTokens } from '../lib/format';
   import { totalTokens } from '../lib/usage';
   import { isLive, retryable, runProgress } from '../lib/workflow-view';
-  import AgentElapsed from './AgentElapsed.svelte';
+  import Elapsed from './Elapsed.svelte';
   import WorkflowDetail from './WorkflowDetail.svelte';
   import WorkflowGraph from './WorkflowGraph.svelte';
   import WorkflowMark from './WorkflowMark.svelte';
@@ -44,7 +44,7 @@
         <WorkflowMark status={run.status} run />
         <span class="ui-label">{strings.workflow.status[run.status]}</span>
         <span class="ui-label">·</span><span class="ui-label">{fill(strings.workflow.steps, { done: String(progress.done), total: String(progress.total) })}</span>
-        <span class="ui-label">·</span><AgentElapsed startedAt={run.createdAt} finishedAt={run.finishedAt} active={run.status === 'running'} />
+        <span class="ui-label">·</span><Elapsed startedAt={run.createdAt} finishedAt={run.finishedAt} active={run.status === 'running'} />
         {#if tokens > 0}<span class="ui-label">·</span><span class="ui-label">{fill(strings.workflow.tokens, { tokens: formatTokens(tokens) })}</span>{/if}
       </p>
     </div>

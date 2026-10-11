@@ -703,11 +703,10 @@
     margin: 0 8px;
     border-radius: var(--radius-sm);
     background: var(--color-hover);
-    animation: skeleton-pulse calc(var(--dur-whip) * 3) var(--ease-out-quint) infinite alternate;
+    animation: breathe calc(var(--dur-whip) * 3) var(--ease-out-quint) infinite alternate;
   }
   .skeleton:nth-child(2) { margin-right: 25%; }
   .skeleton:nth-child(3) { margin-right: 40%; }
-  @keyframes skeleton-pulse { to { opacity: 0.45; } }
   @media (prefers-reduced-motion: reduce) { .skeleton { animation: none; } }
   :global(html[data-motion='reduced']) .skeleton { animation: none; }
 
