@@ -888,14 +888,11 @@ shellTest('the machine picker opens a folder on the selected core and reports a 
   try {
     await page?.click(testid('nav-settings'));
     await page?.click(testid('settings-tab-machines'));
-    if (await page?.evaluate(`!!document.querySelector('[data-testid=group-name]')`)) {
-      await page?.type(testid('group-name'), 'Home');
-      await page?.click(testid('group-create'));
-    }
-    await page?.waitFor(`document.querySelector('[data-testid=group-invite]')`);
-    await page?.click(testid('group-invite'));
-    await page?.waitFor(`document.querySelector('[data-testid=group-invite-code]')?.value.startsWith('boite-group:')`);
-    const invite = await page!.evaluate<string>(`document.querySelector('[data-testid=group-invite-code]').value`);
+    // Add a device starts a group on a machine in no group; the remote machine pastes its link, as a computer does.
+    await page?.click(testid('group-add-device'));
+    await page?.waitFor(`(document.querySelector('[data-testid=add-device]')?.dataset.link ?? '').includes('#join=')`);
+    const invite = await page!.evaluate<string>(`document.querySelector('[data-testid=add-device]').dataset.link`);
+    await page?.click(testid('add-device-close'));
     await remoteClient.call('group.join', { invite });
     await page?.waitFor(`document.querySelectorAll('[data-testid=machine-card]').length === 2`);
     await page?.click(testid('settings-back'));
