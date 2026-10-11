@@ -132,6 +132,8 @@ test('fake diagnostics: summary, export and issue for the owner; report for the 
 
     client.becomes('agent');
     await expect(client.call('diagnostics.report', { records: [{ level: 'info', at: 1, source: 's', event: 'e', message: 'm' }] })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+    // The owner's raw history is never an agent's, with or without a thread.
+    for (const params of [{}, { threadId: 'any-thread' }]) await expect(client.call('core.logs', params)).rejects.toMatchObject({ code: RpcErrorCode.Refused });
     await expect(client.call('diagnostics.summary', {})).rejects.toMatchObject({ code: RpcErrorCode.Refused, message: expect.stringMatching(/its own thread/) });
     client.becomes('owner');
     await client.call('settings.set', { agentLogAccess: false });

@@ -100,6 +100,8 @@ test('a stop the core asked for is no crash, and old stderr does not describe a 
   expect(git.records.map(record => record.level)).toEqual(['debug', 'warn', 'debug', 'warn']);
   logUpdate(git.core, 'codex', 'finished', { state: 'idle', to: '1.2.3' });
   expect(git.records.at(-1)?.message).toBe('Update of codex succeeded, now at 1.2.3');
+  logUpdate(git.core, 'codex', 'finished', { state: null, to: null });
+  expect(git.records.at(-1)?.message).toBe('Update of codex ended with state unknown, now at unknown');
 });
 
 test('slow RPC thresholds: debug from 1 s, warn from 10 s except for methods that hold their answer on purpose', () => {

@@ -1,8 +1,8 @@
 import { chmod, mkdir, open, rename, stat, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
-  LOG_CONTEXT_CHARS, logMatches, normalizeCoreLogOutput, normalizeCoreLogText as redactLogText, normalizeLogData, parseLogRecord, validateCoreLogsQuery,
-  type CoreLogLevel, type CoreLogRecord, type CoreLogsQuery, type LogData, type LogOrigin, type RpcEventName, type RpcEvents,
+  LOG_CONTEXT_CHARS, logMatches, normalizeCoreLogOutput, normalizeCoreLogText as redactLogText, normalizeLogData, parseLogRecord, validateCoreLogsQuery, validateDiagnosticReport,
+  type CoreLogLevel, type CoreLogRecord, type CoreLogsQuery, type DiagnosticReportRecord, type LogData, type LogOrigin, type RpcEventName, type RpcEvents,
 } from '@boite/contracts';
 import type { Bus, EventPayload } from './bus.ts';
 import { invalidParams } from './errors.ts';
@@ -57,7 +57,7 @@ export class DiagnosticLogs {
   private readonly activeTurns = new Map<string, { turnId: string; startedAt: number }>();
   private readonly processTurns = new Map<string, string>();
 
-  constructor(dataDir: string, readonly secrets: readonly string[] = [], private readonly report: (message: string) => void = message => console.error(message), private readonly fileBytes = LOG_FILE_BYTES) {
+  constructor(dataDir: string, private readonly secrets: readonly string[] = [], private readonly report: (message: string) => void = message => console.error(message), private readonly fileBytes = LOG_FILE_BYTES) {
     this.directory = join(dataDir, 'logs');
     // Startup performs only bounded metadata operations. History is read on demand.
     this.ready = this.initialize().catch(error => { this.failed = true; this.failure(error); });
@@ -115,6 +115,8 @@ export class DiagnosticLogs {
 
   /** Credentials and sensitive fields removed, as every stored record is. */
   redact(text: string): string { return redactLogText(text, this.secrets); }
+  /** A client's report, redacted with the secrets this store knows; they never leave it. */
+  validateReport(raw: unknown): DiagnosticReportRecord[] { return validateDiagnosticReport(raw, this.secrets); }
 
   private bounded(value: string): string { return redactLogText(value, this.secrets).replace(/[\r\n\t]/g, ' ').slice(0, LOG_CONTEXT_CHARS); }
 

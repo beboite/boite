@@ -68,9 +68,11 @@ export function detectionLogger(core: Core): (providers: ProviderSummary[], reje
 /** The steps of an agent update Boite runs: waiting for turns, started, finished. Returns the time the step was logged. */
 export function logUpdate(core: Core, providerId: string, step: 'waiting' | 'started' | 'finished', data: Record<string, string | number | null>, startedAt?: number): number {
   const now = performance.now();
+  // `idle` is where a successful run leaves the entry; anything else is said as it is.
+  const outcome = data.state === 'failed' ? 'failed' : data.state === 'idle' ? 'succeeded' : `ended with state ${data.state ?? 'unknown'}`;
   const message = step === 'waiting' ? `Update of ${providerId} waits for ${data.running} running turns to pause or end`
     : step === 'started' ? `Updating ${providerId} from ${data.from ?? 'unknown'}`
-      : `Update of ${providerId} ${data.state === 'failed' ? 'failed' : 'succeeded'}, now at ${data.to ?? 'unknown'}`;
+      : `Update of ${providerId} ${outcome}, now at ${data.to ?? 'unknown'}`;
   core.logs.record(step === 'finished' && data.state === 'failed' ? 'warn' : 'info', message, {
     source: 'updates', event: `provider.update.${step}`, ...(startedAt === undefined ? {} : { durationMs: now - startedAt }), data: { providerId, ...data },
   });

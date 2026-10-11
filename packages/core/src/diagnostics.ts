@@ -4,7 +4,7 @@ import { chmod, mkdir, open, readdir, unlink, writeFile } from 'node:fs/promises
 import { arch, cpus, freemem, homedir, hostname, platform, release, totalmem, userInfo, version as osVersion } from 'node:os';
 import { join } from 'node:path';
 import {
-  AGENT_SUBMIT_REFUSED, createLogAnonymizer, formatLogDuration, formatLogLine, formatLogTime, ISSUE_REPOSITORY, logLevelAtLeast, logMatches, validateDiagnosticReport, validateDiagnosticsLogsQuery,
+  AGENT_SUBMIT_REFUSED, createLogAnonymizer, formatLogDuration, formatLogLine, formatLogTime, ISSUE_REPOSITORY, logLevelAtLeast, logMatches, validateDiagnosticsLogsQuery,
   type CoreLogLevel, type CoreLogRecord, type DiagnosticEnvironment, type DiagnosticProblem, type DiagnosticReportRecord, type DiagnosticsExport, type DiagnosticsExportParams,
   type DiagnosticsIssue, type DiagnosticsIssueParams, type DiagnosticsLogsQuery, type DiagnosticSummary, type DiagnosticThread, type LogAnonymizer, type LogData, type ThreadSummary,
 } from '@boite/contracts';
@@ -337,7 +337,7 @@ export class Diagnostics {
   /** A client's own errors. Bounded per connection, so a render loop cannot flood the files. */
   report(raw: unknown, connection: Connection): { accepted: number } {
     let records: DiagnosticReportRecord[];
-    try { records = validateDiagnosticReport(raw, this.core.logs.secrets); } catch (error) { throw invalidParams((error as Error).message); }
+    try { records = this.core.logs.validateReport(raw); } catch (error) { throw invalidParams((error as Error).message); }
     const minute = Math.floor(Date.now() / 60_000);
     const budget = this.#reports.get(connection.id);
     const used = budget?.minute === minute ? budget.count : 0;

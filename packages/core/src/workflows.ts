@@ -110,10 +110,11 @@ export class Workflows {
   }
   private save(run: WorkflowRun): void {
     run.updatedAt = Date.now();
-    this.log.saved(run);
     this.core.journal.append({ type: 'workflow.changed', threadId: run.rootThreadId, version: 1, payload: { runId: run.id, status: run.status } }, db => {
       db.query('INSERT OR REPLACE INTO workflow_runs VALUES (?, ?, ?, ?, ?, ?)').run(run.id, run.rootThreadId, run.status, run.createdAt, run.updatedAt, JSON.stringify(run));
     });
+    // After the write: a failed append leaves no record of a transition that did not persist.
+    this.log.saved(run);
     this.core.bus.emit('workflows.changed', { threadId: run.rootThreadId, runId: run.id });
     // A step's conversation shows its parent's runs, and a client reading it subscribes to that thread alone.
     for (const node of run.nodes) for (const inst of node.instances) {

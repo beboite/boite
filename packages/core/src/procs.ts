@@ -178,7 +178,7 @@ export class ProcRegistry {
       },
       note: (threadId, message) => {
         this.bus.emit('core.log', { level: 'warn', message: 'the process platform reported a warning', source: 'process', event: 'platform.warning', threadId, at: Date.now() });
-        options.diagnostic?.(`Process platform: ${message}`, { event: 'platform.warning.detail', threadId });
+        try { options.diagnostic?.(`Process platform: ${message}`, { event: 'platform.warning.detail', threadId }); } catch { /* Observability must not break the platform's callback. */ }
       },
       memoryLimit: (threadId, kind) => {
         this.memory.memoryLimit(threadId, kind);
@@ -208,7 +208,7 @@ export class ProcRegistry {
       },
       note: (message) => {
         this.bus.emit('core.log', { level: 'warn', message: 'the process guard reported a warning', source: 'process', event: 'guard.warning', at: Date.now() });
-        options.diagnostic?.(`Focus and audio guard: ${message}`, { event: 'guard.warning.detail' });
+        try { options.diagnostic?.(`Focus and audio guard: ${message}`, { event: 'guard.warning.detail' }); } catch { /* Observability must not break the guard's callback. */ }
       },
     });
     this.loadTimer = setInterval(() => {
@@ -465,7 +465,10 @@ export class ProcRegistry {
 
     const attached = this.platform.attach(threadId, pid);
     if (!attached) this.unassigned.add(pid);
-    if (!attached && this.capability().mode === 'events') this.options.diagnostic?.(`pid ${pid} could not join the job of its thread: no CPU cap, memory cap or tree kill applies to it`, { event: 'job.assign-failed', threadId, data: { pid } });
+    // The child already runs: a failing log must not leave it unregistered, out of the trace and of killTree.
+    if (!attached && this.capability().mode === 'events') {
+      try { this.options.diagnostic?.(`pid ${pid} could not join the job of its thread: no CPU cap, memory cap or tree kill applies to it`, { event: 'job.assign-failed', threadId, data: { pid } }); } catch { /* see above */ }
+    }
     if (control.startup && attached && this.platform.startup) {
       this.finishStartup(threadId);
       this.platform.startup(threadId, true);
