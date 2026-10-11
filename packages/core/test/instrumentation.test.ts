@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import type { CoreLogRecord } from '@boite/contracts';
+import { normalizeCoreLogText, type CoreLogRecord } from '@boite/contracts';
 import { connect } from '../src/client.ts';
 import type { Core } from '../src/core.ts';
 import { forgetStderr, noteStderr, STDERR_TAIL_CHARS, stderrTail } from '../src/drivers/stderr-tail.ts';
@@ -21,7 +21,7 @@ import { startTestCore } from './harness.ts';
 function recordingCore(): { core: Core; records: { level: string; message: string; context: Record<string, unknown> }[] } {
   const records: { level: string; message: string; context: Record<string, unknown> }[] = [];
   const record = (level: string, message: string, context: Record<string, unknown> = {}) => { records.push({ level, message, context }); };
-  const logs = { record, info: (m: string, c?: Record<string, unknown>) => record('info', m, c), warn: (m: string, c?: Record<string, unknown>) => record('warn', m, c), debug: (m: string, c?: Record<string, unknown>) => record('debug', m, c), error: (m: string, c?: Record<string, unknown>) => record('error', m, c) };
+  const logs = { record, info: (m: string, c?: Record<string, unknown>) => record('info', m, c), warn: (m: string, c?: Record<string, unknown>) => record('warn', m, c), debug: (m: string, c?: Record<string, unknown>) => record('debug', m, c), error: (m: string, c?: Record<string, unknown>) => record('error', m, c), redact: (text: string) => normalizeCoreLogText(text) };
   return { core: { logs } as unknown as Core, records };
 }
 
@@ -240,6 +240,9 @@ test('two cores in one process time their own logins, even for the same account 
   const failed = first.records.find(record => record.context.event === 'account.login.failed');
   expect(failed?.message).toContain('Open https://claude.ai/<redacted> to sign in');
   expect(JSON.stringify(failed)).not.toContain('ABCD-1234');
+  // A token across the 300th character is redacted before the cut, so no prefix of it stays.
+  logLoginState(first.core, account, 'failed', `${'x'.repeat(290)} key sk-ant-api03-abcdefghijklmnop`, 1);
+  expect(JSON.stringify(first.records.at(-1))).not.toContain(' sk-');
   // A sign-in the user cancelled is lifecycle, not a failure, whatever the login printed last;
   // a provider that prints the same words on its own failure is still a failure.
   logLoginState(second.core, account, 'failed', 'Waiting for the browser', 1, true);

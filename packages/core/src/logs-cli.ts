@@ -51,7 +51,8 @@ export function parseSince(raw: string, now = Date.now()): number {
   const relative = /^(\d+(?:\.\d+)?)\s*(s|m|min|h|d)$/i.exec(raw.trim());
   if (relative) {
     const unit = { s: 1000, m: 60_000, min: 60_000, h: 3_600_000, d: 86_400_000 }[relative[2]!.toLowerCase() as 's' | 'm' | 'min' | 'h' | 'd'];
-    return now - Number(relative[1]) * unit;
+    // `--since 30000d` means everything, not a time before 1970 the core refuses.
+    return Math.max(0, now - Number(relative[1]) * unit);
   }
   const at = Date.parse(raw);
   if (!Number.isFinite(at)) throw new Usage(`--since expects 30m, 2h, 1d or a date, got ${raw}`);

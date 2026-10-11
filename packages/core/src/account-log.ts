@@ -36,7 +36,8 @@ export function logLoginState(core: Core, account: Account | null, state: 'runni
     return;
   }
   // A login line often carries its sign-in link with device or OAuth parameters: only the site stays.
-  const reason = output.trim().slice(0, 300).replace(/(https?:\/\/[^\s/?#]+)\S*/g, '$1/<redacted>') || 'no reason printed';
+  // Redacted whole, then cut: a token cut first could keep a prefix too short to be recognized.
+  const reason = core.logs.redact(output.trim().replace(/(https?:\/\/[^\s/?#]+)\S*/g, '$1/<redacted>')).slice(0, 300) || 'no reason printed';
   // The user stopped it: lifecycle, not a problem to group. The run says so, whatever the login printed last.
   if (cancelled) {
     core.logs.info(`Login cancelled for account ${account.id} of ${account.providerId}`, { ...base, event: 'account.login.cancelled', ...(durationMs === undefined ? {} : { durationMs }) });

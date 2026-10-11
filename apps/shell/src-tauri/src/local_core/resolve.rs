@@ -42,11 +42,16 @@ fn running_child(state: &CoreState) -> Option<Arc<AtomicBool>> {
 /// not a problem.
 fn log_exit(spawned: &super::spawn::Spawned, status: std::process::ExitStatus, when: &str) {
     spawned.settle();
-    let tail = spawned.output.tail().join(" | ");
-    let cut = tail.char_indices().rev().nth(299).map_or(tail.as_str(), |(index, _)| &tail[index..]);
     let level = if status.success() { Level::Info } else { Level::Error };
     shell_log::log(level, "core", "shell.core.exited", format!("the core pid {} exited ({status}) {when}", spawned.child.id()), None,
-        json!({ "pid": spawned.child.id(), "exitCode": status.code(), "stderrTail": if cut.is_empty() { None } else { Some(cut) } }));
+        json!({ "pid": spawned.child.id(), "exitCode": status.code(), "stderrTail": stderr_tail(spawned) }));
+}
+
+/// The last 300 characters the core printed, for `data.stderrTail`; None when it printed nothing.
+fn stderr_tail(spawned: &super::spawn::Spawned) -> Option<String> {
+    let tail = spawned.output.tail().join(" | ");
+    let cut = tail.char_indices().rev().nth(299).map_or(tail.as_str(), |(index, _)| &tail[index..]);
+    if cut.is_empty() { None } else { Some(cut.to_string()) }
 }
 
 /// Why the core this shell started is gone, if it exited: its exit status
@@ -162,17 +167,18 @@ pub(super) fn resolve_core(state: &CoreState) -> Result<(CoreEndpoint, Option<u3
             launch.timeout.as_secs()
         ));
     }
-    let output = match state.child.lock().ok().and_then(|mut guard| guard.take()) {
+    // What the stopped core printed goes in the record too: the error string is all the user sees.
+    let (output, tail) = match state.child.lock().ok().and_then(|mut guard| guard.take()) {
         Some(mut spawned) => {
             job::stop_core(&mut spawned.child);
             spawned.settle();
-            spawned.output.quoted()
+            (spawned.output.quoted(), stderr_tail(&spawned))
         }
-        None => String::new(),
+        None => (String::new(), None),
     };
     if let Ok(mut guard) = state.job.lock() { drop(guard.take()); }
     shell_log::error("core", "shell.core.timeout", format!("the core did not answer /health within {} s and was stopped", launch.timeout.as_secs()),
-        json!({ "timeoutMs": launch.timeout.as_millis() as u64, "resident": false }));
+        json!({ "timeoutMs": launch.timeout.as_millis() as u64, "resident": false, "stderrTail": tail }));
     Err(format!(
         "the core did not write {} and answer /health within {} s{output}",
         file.display(),

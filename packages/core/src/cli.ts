@@ -312,7 +312,7 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
     },
     // `boite --limit 5 logs` parsed them as globals: they come first, so the command's own flags still win.
     // A global `--level` yields to the command's own `--min-level`, which it would otherwise override.
-    logs: () => logsCommand([...(parsed.limit === undefined ? [] : ['--limit', String(parsed.limit)]), ...(parsed.level === undefined || rest.includes('--min-level') ? [] : ['--level', parsed.level]), ...rest], client, threadId, agentCaller, io.cwd, print),
+    logs: () => logsCommand([...(parsed.limit === undefined ? [] : ['--limit', String(parsed.limit)]), ...(parsed.level === undefined || rest.some(entry => entry === '--min-level' || entry.startsWith('--min-level=')) ? [] : ['--level', parsed.level]), ...rest], client, threadId, agentCaller, io.cwd, print),
     issue: () => issueCommand(rest, client, threadId, agentCaller, io.cwd, print),
     server: async () => {
       const action = rest[0] ?? 'check';

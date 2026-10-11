@@ -502,7 +502,8 @@ export class Delegation {
     const root = this.core.journal.getThread(thread.parentThreadId);
     if (!root) return;
     this.changed(root.id);
-    this.core.logs.record(turn.status === 'done' ? 'info' : 'warn', `Subagent ${thread.id} of ${root.id} finished its turn: ${turn.status}`, {
+    // A stopped turn is someone's Stop, not a problem to group.
+    this.core.logs.record(turn.status === 'done' || turn.status === 'stopped' ? 'info' : 'warn', `Subagent ${thread.id} of ${root.id} finished its turn: ${turn.status}`, {
       source: 'delegation', event: 'delegation.finished', threadId: thread.id, turnId: turn.id,
       ...(turn.startedAt !== null && turn.finishedAt !== null ? { durationMs: turn.finishedAt - turn.startedAt } : {}), data: { parent: root.id, status: turn.status },
     });
