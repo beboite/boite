@@ -385,8 +385,8 @@ the setting returns links to the core's local address. No wildcard origin or
 forwarded header is trusted.
 
 On iPhone, open the pairing link in Safari, choose Share, then Add to Home Screen.
-On Android, use Install Boite in Phone app or the browser's installation menu,
-or install the nightly APK ([android.md](android.md)).
+On Android, use Install Boite in Phone app or the browser's installation menu
+([android.md](android.md)).
 Open the installed icon and pair from inside Boite. On iPhone, installation
 does not copy the browser's localStorage, where Boite keeps its session key.
 The installed app therefore needs its own pairing even if Chrome or Safari
@@ -619,8 +619,8 @@ devices you intend to give that control.
   and it has to be opened within ten minutes. There is no discovery on the
   network. One pairing is enough for the machines of a [group](groups.md): the
   phone is handed a key by each of the others.
-- There is no iOS package. On Android, the nightly APK opens one core's page
-  full screen ([android.md](android.md)); otherwise the phone runs the installed
+- There is no iOS package, and no published Android package
+  ([android.md](android.md)): the phone runs the installed
   web app.
 - Push is a notification channel, not background execution. The core must stay
   running to run agents and send notifications; delivery is not guaranteed.

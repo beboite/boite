@@ -392,8 +392,8 @@ native shell E2E on Windows, the installed Debian package, the extracted
 AppImage and the macOS bundle. The Rust tests are skipped because the commit's
 CI already ran them.
 
-A dispatch with `dry-run` builds any branch with throwaway signing keys and an
-unsigned APK, even a commit that already has a nightly. It accepts that
+A dispatch with `dry-run` builds any branch with throwaway signing keys, even a
+commit that already has a nightly. It accepts that
 branch's pull request CI run without rerunning it, skips reservation and every
 publication, and has its own concurrency group.
 
@@ -402,7 +402,7 @@ resetting the counter each UTC day. For example, September 15's first build is
 `2.0.0-nightly.20260915.1`, then `.2` for a new commit. Build inputs stamp the
 version; source manifests retain theirs.
 
-The CI check, desktop builds, native image builds and Android run alongside one
+The CI check, desktop builds and native image builds run alongside one
 another. Only after all pass does reservation bind the tag to the exact commit. A publishing
 failure keeps that tag for retry, including on a later day. A reserved tag alone
 is not a successful release. `server-manifest.yml` promotes the tested digests
@@ -411,8 +411,8 @@ stable Docker `latest` or GitHub's latest stable release.
 
 Stable and nightly desktop tracks share the regular install and data; Boite Dev
 is separate ([updates](updates.md)). The server uses `dev`; use separate Compose
-volumes ([server](server.md)). The signed or reused APK is required too;
-[Android](android.md) owns the host, signing and reuse rules.
+volumes ([server](server.md)). A nightly publishes no APK
+([Android](android.md)).
 
 ## Pull request reviews
 
