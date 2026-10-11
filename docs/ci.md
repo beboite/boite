@@ -132,10 +132,10 @@ The tested installer becomes the release artifact.
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 591,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,475,000 |
+| UI entry chunk | 593,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,515,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 3,760,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 3,772,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
@@ -162,6 +162,20 @@ for that same branch, 6,033 more than Linux. Merged with `b8dc6c21`, whose
 limits were 4,466,000 and 3,744,000, the branch measured 4,469,022 and
 3,749,375 on Linux, about 3,755,400 core bytes on Windows. The limits rise to
 4,475,000 and 3,760,000.
+
+Later on 2026-10-11 on Linux with Bun 1.4.2, `main` at `5dd77e39` measured
+4,472,003 UI bytes and 3,749,519 core bytes, and settings cards (`boite
+settings`) on top of it 4,495,656 and 3,760,802; the Windows job measured
+3,760,540 core bytes for an earlier head of that branch. The core gains 11,283
+bytes for the card checks, the CLI and MCP commands; the UI 23,653 for the
+card, which loads outside the entry chunk, its English and French sentences
+and the shared checks in contracts. The entry chunk grows 5,016 bytes, to
+586,462. The limits rise to 4,499,000 and 3,767,000. `main` at `da347f40`,
+whose agent mail had raised the UI limit to 4,500,000 without this table,
+measured 4,485,829 UI bytes, a 585,698-byte entry chunk and 3,754,727 core
+bytes; merged with settings cards, 4,509,505, 590,714 and 3,766,024. The
+limits rise to 4,515,000, 593,000 and 3,772,000, the core keeping room for the
+Windows job's larger build.
 
 On 2026-10-10, `bun run build:ui` with Bun 1.4.2 measured 4,420,649 UI bytes at
 `feeb393b` and 4,425,557 with close confirmation and typed agent archival.

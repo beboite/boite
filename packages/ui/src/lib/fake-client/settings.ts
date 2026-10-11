@@ -3,6 +3,7 @@ import { KEYBINDING_COMMANDS, parseChord, RpcErrorCode, checkSettingsPatch } fro
 import { RpcFailure } from '../client';
 import type { FakeContext, FakeMethods } from './context';
 import { gatewayQuotas } from './accounts';
+import { settleSettings } from './requests';
 
 export function settingsMethods(ctx: FakeContext) {
   return {
@@ -78,6 +79,7 @@ export function settingsMethods(ctx: FakeContext) {
       ctx.settings = { ...ctx.settings, ...checked.patch };
       ctx.emit('scheduler.updated', structuredClone(ctx.scheduler));
       ctx.emit('settings.updated', { ...ctx.settings });
+      settleSettings(ctx, ctx.settings);
       if (checked.patch.subscriptionProxy) ctx.emit('subscriptionProxy.quotasUpdated', gatewayQuotas(ctx));
       return { ...ctx.settings };
     },
