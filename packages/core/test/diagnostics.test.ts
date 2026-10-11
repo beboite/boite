@@ -43,6 +43,9 @@ test('the anonymizer replaces paths, names, addresses and private hosts and keep
   // A client chooses its record's source and event: they are anonymized too.
   const reported = anonymizer.record({ id: 'a', runId: 'r', at: 1, level: 'warn', origin: 'ui', source: 'meetsu', event: 'secret-game.failed', message: 'm' });
   expect(`${reported.source} ${reported.event}`).not.toMatch(/meetsu|secret-game/);
+  // The core's own names and a model id keep their shape, whatever a project is called.
+  const named = createLogAnonymizer({ salt: 'fixed-salt', projects: [{ path: '/srv/process', name: 'process' }, { path: '/srv/opus', name: 'opus' }] });
+  expect(named.record({ id: 'a', runId: 'r', at: 1, level: 'warn', source: 'process', event: 'process.exited', model: 'claude-opus-5-5', message: 'process' })).toMatchObject({ source: 'process', event: 'process.exited', model: 'claude-opus-5-5', message: expect.stringMatching(/^<project:/) });
   // The same project gets the same placeholder everywhere, by path and by name.
   const placeholders = text.match(/<project:[0-9a-f]{6}>/g) ?? [];
   expect(new Set(placeholders).size).toBe(2);

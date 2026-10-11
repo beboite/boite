@@ -247,7 +247,7 @@ export function observeLog<E extends RpcEventName>(ctx: FakeContext, event: E, p
     const turnId = ctx.logProcesses.get(key) ?? ctx.logTurns.get(proc.threadId);
     if (event === 'process.started' && turnId !== undefined) ctx.logProcesses.set(key, turnId);
     if (event === 'process.exited') ctx.logProcesses.delete(key);
-    record = { at: (event === 'process.started' ? proc.startedAt : proc.exitedAt) ?? ctx.now(), level: event === 'process.exited' && proc.exitCode !== null && proc.exitCode !== 0 ? 'warn' : 'info', source: 'processes', event, message: event === 'process.started' ? `Process started: pid ${proc.pid}` : `Process exited: pid ${proc.pid}, code ${proc.exitCode ?? 'unknown'}`, threadId: proc.threadId, ...(turnId === undefined ? {} : { turnId }) };
+    record = { at: (event === 'process.started' ? proc.startedAt : proc.exitedAt) ?? ctx.now(), level: event === 'process.exited' && proc.exitCode !== null && (proc.exitCode < 0 || proc.exitCode > 255) ? 'warn' : 'debug', source: 'processes', event, message: event === 'process.started' ? `Process started: pid ${proc.pid}` : `Process exited: pid ${proc.pid}, code ${proc.exitCode ?? 'unknown'}`, threadId: proc.threadId, ...(turnId === undefined ? {} : { turnId }) };
   } else return;
   add(ctx, record);
 }

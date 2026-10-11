@@ -307,6 +307,7 @@ export class Diagnostics {
     try { spawned = this.core.procs.spawn(scope, this.ghCommand, args, { agentRoot: false, env: { GH_PROMPT_DISABLED: '1', GH_NO_UPDATE_NOTIFIER: '1', NO_COLOR: '1' } }); }
     catch (error) { if (/ENOENT|not found|No such file/i.test(messageOf(error))) return { code: null, stdout: '', stderr: 'missing' }; throw error; }
     const timer = setTimeout(() => { try { this.core.procs.killTree(scope); } catch { /* The exit below still settles. */ } }, timeoutMs);
+    timer.unref?.();
     try {
       const [stdout, stderr, code] = await Promise.all([new Response(spawned.proc.stdout).text(), new Response(spawned.proc.stderr).text(), spawned.exited]);
       return { code, stdout: stdout.slice(0, 64 * 1024), stderr: stderr.slice(0, 64 * 1024) };
@@ -355,7 +356,9 @@ export class Diagnostics {
       // A client clock can be wrong; keep its time only when it is near ours.
       const at = Math.abs(record.at - now) < 10 * 60_000 ? record.at : now;
       // A reporter names a thread; only one that exists is kept, so no client can file problems under an invented one.
-      const threadId = record.threadId && this.core.journal.getThread(record.threadId) ? record.threadId : undefined;
+      // A paired device files problems only under a thread it has open, as its other reads are scoped.
+      const known = record.threadId && this.core.journal.getThread(record.threadId) ? record.threadId : undefined;
+      const threadId = known && connection.identity.principal === 'session' && !connection.subscriptions.has(known) ? undefined : known;
       this.core.logs.record(record.level, record.message, {
         origin: 'ui', source: record.source, event: record.event, ...(threadId ? { threadId } : {}),
         ...(record.durationMs === undefined ? {} : { durationMs: record.durationMs }),

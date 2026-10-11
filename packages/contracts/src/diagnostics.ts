@@ -112,6 +112,7 @@ export function validateCoreLogsQuery(raw: unknown, maxLimit = 1000): CoreLogsQu
   if (query.turnId !== undefined) result.turnId = plainText(query.turnId, 'core.logs turnId');
   if (query.level !== undefined) result.level = level(query.level, 'core.logs level');
   if (query.minLevel !== undefined) result.minLevel = level(query.minLevel, 'core.logs minLevel');
+  if (result.level !== undefined && result.minLevel !== undefined) throw new Error('core.logs level and minLevel: expected one of them, not both');
   if (query.origin !== undefined) {
     if (!LOG_ORIGINS.includes(query.origin as LogOrigin)) throw new Error('core.logs origin: expected core, shell or ui');
     result.origin = query.origin as LogOrigin;
@@ -321,7 +322,8 @@ function publicHost(host: string): boolean {
   return PUBLIC_HOSTS.some(suffix => name === suffix || name.endsWith(`.${suffix}`));
 }
 
-function privateIpv4(ip: string): boolean {
+/** Whether an IPv4 address is masked: every one but loopback and the two special ones, public addresses included. */
+function maskedIpv4(ip: string): boolean {
   const octets = ip.split('.').map(Number);
   if (octets.length !== 4 || octets.some(octet => !Number.isInteger(octet) || octet > 255)) return false;
   if (octets[0] === 127 || ip === '0.0.0.0' || ip === '255.255.255.255') return false;
@@ -375,7 +377,8 @@ export function createLogAnonymizer(context: LogAnonymizeContext): LogAnonymizer
   const replaceWords = combined(words, '(?!\\w)', match => match.toLowerCase(), '(^|[^\\w.])');
   const replaceExtras = combined(extras, '(?!\\w)', match => match.toLowerCase(), '(^|[^\\w.])');
 
-  const text = (raw: string): string => {
+  /** Paths, homes, addresses and hosts; no word pass, so an identifier keeps its shape. */
+  const structural = (raw: string): string => {
     let value = replacePaths(raw);
     // Other accounts' homes and profiles.
     value = value
@@ -394,7 +397,7 @@ export function createLogAnonymizer(context: LogAnonymizeContext): LogAnonymizer
       }
       return `${scheme}<host:${shortHash(context.salt, host.toLowerCase())}>${port ?? ''}${path && path !== '/' ? '/<path>' : (path ?? '')}`;
     });
-    value = value.replace(/(^|[^\w.])(\d{1,3}(?:\.\d{1,3}){3})(?![\w.])/g, (match, before: string, ip: string) => privateIpv4(ip) ? `${before}<ip>` : match);
+    value = value.replace(/(^|[^\w.])(\d{1,3}(?:\.\d{1,3}){3})(?![\w.])/g, (match, before: string, ip: string) => maskedIpv4(ip) ? `${before}<ip>` : match);
     value = value.replace(/\b(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}\b/gi, '<mac>');
     // An IPv6 address has `::` or seven colons; a time such as 14:03:22 has neither.
     value = value.replace(/(^|[^\w:.<])([0-9a-f]{0,4}(?::[0-9a-f]{0,4}){2,7})(?![\w:])/gi, (match, before: string, address: string) => {
@@ -402,6 +405,10 @@ export function createLogAnonymizer(context: LogAnonymizeContext): LogAnonymizer
       if (address === '::1' || address === '::' || groups.some(group => group.length > 4)) return match;
       return (address.includes('::') && /[0-9a-f]/i.test(address)) || groups.length === 8 ? `${before}<ip6>` : match;
     });
+    return value;
+  };
+  const text = (raw: string): string => {
+    let value = structural(raw);
     if (replaceWords) value = replaceWords(value);
     if (replaceExtras) value = replaceExtras(value);
     return value;
@@ -411,10 +418,12 @@ export function createLogAnonymizer(context: LogAnonymizeContext): LogAnonymizer
     text,
     project: path => (path ? projectNames.get(path) ?? projectLabel(path) : '<none>'),
     record: record => {
-      // A client names its own source and event: they pass through the same replacements.
-      const copy: CoreLogRecord = { ...record, message: text(record.message), source: text(record.source), event: text(record.event) };
+      // The core's sources and events are names from its code: a project called `process` must not
+      // rewrite them, so they and the model get no word pass. A client's are its own choice: all of it.
+      const label = record.origin === 'ui' ? text : structural;
+      const copy: CoreLogRecord = { ...record, message: text(record.message), source: label(record.source), event: label(record.event) };
       if (record.data) copy.data = Object.fromEntries(Object.entries(record.data).map(([key, value]) => [key, PROVIDER_OUTPUT_KEYS.has(key) ? PROVIDER_OUTPUT_KEPT : typeof value === 'string' ? text(value) : value]));
-      if (record.model) copy.model = text(record.model);
+      if (record.model) copy.model = structural(record.model);
       return copy;
     },
   };

@@ -11,7 +11,7 @@ test('fake diagnostic history preserves newest-first filters, strict query valid
     expect((await client.call('core.logs', { limit: 2 })).map(record => record.message)).toEqual(['second diagnostic token=[redacted]', 'first diagnostic']);
     expect((await client.call('core.logs', { level: 'warn' }))[0]?.level).toBe('warn');
     expect(await client.call('core.logs', { threadId: 'absent-thread' })).toEqual([]);
-    for (const params of [null, [], 'all', { limit: 0 }, { limit: 1001 }, { limit: 1.5 }, { limit: null }, { limit: '10' }, { threadId: '' }, { threadId: 'x'.repeat(201) }, { threadId: 'bad\nthread' }, { level: 'trace' }, { level: {} }, { minLevel: 'all' }, { origin: 'agent' }, { since: -1 }, { until: 'now' }, { search: '' }, { anonymize: 'yes' }, { before: 1 }]) {
+    for (const params of [null, [], 'all', { limit: 0 }, { limit: 1001 }, { limit: 1.5 }, { limit: null }, { limit: '10' }, { threadId: '' }, { threadId: 'x'.repeat(201) }, { threadId: 'bad\nthread' }, { level: 'trace' }, { level: {} }, { minLevel: 'all' }, { origin: 'agent' }, { since: -1 }, { until: 'now' }, { search: '' }, { anonymize: 'yes' }, { before: 1 }, { level: 'info', minLevel: 'warn' }]) {
       await expect(client.call('core.logs', params as never)).rejects.toMatchObject({ code: RpcErrorCode.InvalidParams });
     }
     const observed: string[] = [];

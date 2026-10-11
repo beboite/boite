@@ -283,7 +283,7 @@ export class TurnContexts {
         ? sentFromNote(origin.from) : '';
       const coordinationGuide = inject && operation !== 'compact' && guideEnabled ? this.core.coordination.instructions(threadId) + this.core.stewards.instructions(threadId) + this.core.workforce.entrusted.instructions(threadId) : '';
       const guide = inject && sessionId === null && guideEnabled
-        ? agentGuide(provider.protocol !== 'echo' && this.core.settings.get().asyncQuestions !== false, this.core.settings.get().agentLogAccess === false ? [] : builtinSkills(this.core.dataDir, message => this.core.logs.warn(message, { source: 'skills', event: 'skills.write-failed' }))) : '';
+        ? agentGuide(provider.protocol !== 'echo' && this.core.settings.get().asyncQuestions !== false, this.core.settings.get().agentLogAccess !== false, this.core.settings.get().agentLogAccess === false ? [] : builtinSkills(this.core.dataDir, message => this.core.logs.warn(message, { source: 'skills', event: 'skills.write-failed' }))) : '';
       const prefix = (inject ? this.core.brain.instructions(provider.id) : '') + guide;
       return carried.memory + prefix + (prefix ? 'User request:\n' : '') + said + deferred + body + coordinationGuide + tail(inject && sessionId === null && guideEnabled) + this.threads.cards.askInstructions({ ...thread, sessionId }, provider, turn, body);
     };

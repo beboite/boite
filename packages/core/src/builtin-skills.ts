@@ -1,4 +1,4 @@
-import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readSync, rmSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
@@ -99,6 +99,19 @@ function holds(path: string, text: string): boolean {
   } finally { closeSync(fd); }
 }
 
+/** Writes `text` without following a link swapped in after the checks: a link there is removed, once. */
+function write(path: string, text: string): void {
+  const flags = constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | (constants.O_NOFOLLOW ?? 0);
+  let fd: number;
+  try { fd = openSync(path, flags, 0o644); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ELOOP') throw error;
+    rmSync(path, { force: true });
+    fd = openSync(path, flags, 0o644);
+  }
+  try { writeSync(fd, text); } finally { closeSync(fd); }
+}
+
 /** Writes each skill when missing or different, and returns where each lives. A write that fails leaves that skill out. */
 export function ensureBuiltinSkills(dataDir: string, onError: (message: string) => void = () => {}): { name: string; description: string; path: string }[] {
   const listed: { name: string; description: string; path: string }[] = [];
@@ -112,7 +125,7 @@ export function ensureBuiltinSkills(dataDir: string, onError: (message: string) 
       if (!kind(path, 'file')) rmSync(path, { recursive: true, force: true });
       if (!kind(path, 'file') || !holds(path, text)) {
         mkdirSync(directory, { recursive: true });
-        writeFileSync(path, text);
+        write(path, text);
       }
       listed.push({ name: skill.name, description: skill.description, path });
     } catch (error) { onError(`built-in skill ${skill.name} could not be written to ${path}: ${error instanceof Error ? error.message : String(error)}`); }

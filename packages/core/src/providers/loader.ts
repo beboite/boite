@@ -511,16 +511,19 @@ export function registerProviderMethods(core: Core): void {
   // (a reload, an install, an agent update); the first one once the version reads settle,
   // so a program not read yet is not logged missing before it is found.
   const logDetection = detectionLogger(core);
+  // Lists announced while the first reads land are partial: the settled one below comes first.
+  let settledOnce = false;
   core.bus.onAny((name, payload) => {
-    if (name !== 'providers.updated') return;
+    if (name !== 'providers.updated' || !settledOnce) return;
     const result = payload as ProviderLoadResult;
     logDetection(result.loaded, result.rejected.length);
   });
   void core.providers.settle().then(() => {
+    settledOnce = true;
     if (core.stopping || core.journal.isClosed()) return;
     const first = core.providers.list();
     logDetection(first.loaded, first.rejected.length);
-  }, () => {});
+  }, () => { settledOnce = true; });
   let listed = fingerprint(core.providers.list());
   /** True when the list differs from the last one announced. */
   const noteListed = (result: ProviderLoadResult): boolean => {

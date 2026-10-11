@@ -150,7 +150,14 @@ function recheckWhenDue(program: string, args: string[]): void {
  */
 /** The version a program last reported, without asking it again; null when unknown. */
 export function knownVersion(program: string): string | null {
-  return readings.get(program)?.version ?? null;
+  const reading = readings.get(program);
+  if (reading === undefined) return null;
+  // Only while the file is the one that was read, as `majorAt` checks: a replaced program is unknown.
+  try {
+    const stat = statSync(program);
+    if (stat.mtimeMs !== reading.mtimeMs || stat.size !== reading.size) return null;
+  } catch { return null; }
+  return reading.version;
 }
 
 export function majorAt(program: string, args: readonly string[], ask = true): number | null | undefined {
