@@ -24,7 +24,7 @@ import { CLIENT_NAME, EXIT_GRACE_MS, isGrok, STDERR_MAX, type AcpDeps, type Time
 import { jsonLinesOnly } from './stdout.ts';
 import { commandsOf, imageBlocksOf, usdCostOf, type AcpTurn } from './turn.ts';
 import { answerPermission, drawUpdate } from './updates.ts';
-import { noteReady } from '../driver-log.ts';
+import { errorCodeOf, noteReady } from '../driver-log.ts';
 
 /** A glog line at info severity: `I0921 09:51:32.917720 10292 main.py:80] ...`. */
 const GLOG_INFO = /^I\d{4} \d{2}:\d{2}:\d{2}\.\d+\s/;
@@ -470,7 +470,7 @@ export class AcpSession {
         const reason = rpcReason(error);
         ctx.log('warn', `acp: ${ctx.provider.id} refused to load the session ${ctx.sessionId}: ${reason}`);
         const kind = loadRefusal(error, reason);
-        ctx.diagnostic?.('warn', `session/load refused with code ${String((error as { code?: unknown }).code)}, read as ${kind}`, { event: 'driver.session.load-refused', data: { code: (error as { code?: number }).code ?? null, kind } });
+        ctx.diagnostic?.('warn', `session/load refused with code ${String((error as { code?: unknown }).code)}, read as ${kind}`, { event: 'driver.session.load-refused', data: { code: errorCodeOf((error as { code?: unknown }).code), kind } });
         if (kind === 'gone' || (kind === 'unsure' && this.memory.refusedLoads.has(refusedKey))) {
           // Pruned, migrated, another project: retrying the same id would fail
           // every turn of the thread from now on.

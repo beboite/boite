@@ -172,7 +172,8 @@ export class Diagnostics {
       } else {
         problem.count += 1;
         if (record.at < problem.firstAt) problem.firstAt = record.at;
-        if (record.at >= problem.lastAt) { problem.lastAt = record.at; problem.message = record.message.slice(0, 500); }
+        // Read newest first: a record of the same instant is older, so the newest message stays.
+        if (record.at > problem.lastAt) { problem.lastAt = record.at; problem.message = record.message.slice(0, 500); }
         if (record.threadId && !problem.threadIds.includes(record.threadId) && problem.threadIds.length < 5) problem.threadIds.push(record.threadId);
       }
     }
@@ -226,7 +227,8 @@ export class Diagnostics {
     try {
       await mkdir(join(this.core.logs.directory, 'exports'), { recursive: true, mode: 0o700 });
       await writeFile(path, text, { mode: 0o600 });
-      await chmod(path, 0o600);
+      // No Unix modes on Windows, where Bun 1.4.2 also crashed around fs chmod calls in these tests.
+      if (process.platform !== 'win32') await chmod(path, 0o600);
     } catch (error) {
       this.core.logs.warn(`the diagnostic export could not be saved: ${messageOf(error)}`, { source: 'diagnostics', event: 'diagnostics.export-failed' });
       path = null;

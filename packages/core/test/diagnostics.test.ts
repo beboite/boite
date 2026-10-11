@@ -179,6 +179,17 @@ test('the export is one readable anonymized file with environment, problems, thr
   } finally { await harness.stop(); }
 });
 
+test('a problem shows its newest message, also when two records share their millisecond', async () => {
+  const harness = await startTestCore();
+  try {
+    const at = Date.now();
+    harness.core.logs.record('warn', 'the older one', { source: 'test', event: 'test.same-instant' }, at);
+    harness.core.logs.record('warn', 'the newer one', { source: 'test', event: 'test.same-instant' }, at);
+    const summary = await harness.core.diagnostics.summary({});
+    expect(summary.problems.find(problem => problem.event === 'test.same-instant')).toMatchObject({ count: 2, message: 'the newer one' });
+  } finally { await harness.stop(); }
+});
+
 test('an issue is a draft until submitted, and without gh the user gets a prefilled link', async () => {
   const harness = await startTestCore();
   try {

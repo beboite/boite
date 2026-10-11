@@ -170,7 +170,8 @@ export class DiagnosticsReporter {
       this.#offlineSince = now;
       this.push('warn', 'connection', 'ui.disconnected', 'The connection to the core dropped; reconnecting');
     } else if (state === 'ready' && this.#offlineSince !== null) {
-      const offline = now - this.#offlineSince;
+      // A clock moved back reads as no time offline, never a negative one.
+      const offline = Math.max(0, now - this.#offlineSince);
       this.#offlineSince = null;
       this.push('warn', 'connection', 'ui.reconnected', `The connection to the core came back after ${seconds(offline)} offline`, { durationMs: offline });
     } else if (state === 'closed') {
@@ -195,15 +196,18 @@ export class DiagnosticsReporter {
       const target = own ?? (Object.getPrototypeOf(client) as { call: Client['call'] }).call;
       const result = target.call(client, method, params, options);
       if (method === 'diagnostics.report') return result;
-      result.catch((error: unknown) => {
-        if (!worthReporting(error)) return;
-        const failure = error as RpcFailure;
-        const timedOut = wasUnanswered(failure);
-        reporter.push('error', 'rpc', timedOut ? 'ui.rpc.timeout' : 'ui.rpc.failed',
-          timedOut ? `${method} got no answer from the core after ${seconds(reporter.#timers.now() - began)}` : `${method} failed inside the core (code ${failure.code})`,
-          { durationMs: reporter.#timers.now() - began, data: { method: method as RpcMethodName, code: failure.code } });
+      // Chained, not caught on the side: the caller's promise still rejects, and one it
+      // forgets to handle still surfaces as an unhandled rejection.
+      return result.then(value => value, (error: unknown) => {
+        if (worthReporting(error)) {
+          const failure = error as RpcFailure;
+          const timedOut = wasUnanswered(failure);
+          reporter.push('error', 'rpc', timedOut ? 'ui.rpc.timeout' : 'ui.rpc.failed',
+            timedOut ? `${method} got no answer from the core after ${seconds(reporter.#timers.now() - began)}` : `${method} failed inside the core (code ${failure.code})`,
+            { durationMs: reporter.#timers.now() - began, data: { method: method as RpcMethodName, code: failure.code } });
+        }
+        throw error;
       });
-      return result;
     };
     client.call = watched;
     this.#stops.push(() => {

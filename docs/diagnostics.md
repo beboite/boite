@@ -93,7 +93,7 @@ keeps at most 300 records a minute per connection and stores them with
 | `diagnostics.logs` | owner, agents | anonymized records about no thread, plus every thread for the owner or the agent's own family |
 | `diagnostics.summary` | owner, agents | environment, grouped problems, threads, log files, counts |
 | `diagnostics.export` | owner, agents | the anonymized export text and where it was saved |
-| `diagnostics.issue` | owner, agents | an issue draft, created through `gh` only with `submit: true` |
+| `diagnostics.issue` | owner, agents | an issue draft; only the owner's `submit: true` creates it through `gh`, an agent always gets the draft and its prefilled link |
 | `diagnostics.report` | owner, paired devices | up to 50 records a client sends about itself |
 
 The in-memory core (`packages/ui/src/lib/fake-client/logs.ts`) answers the
