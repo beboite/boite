@@ -2,7 +2,7 @@ import { appendFileSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
- * The nightly APK is a Trusted Web Activity: its whole UI comes from the core,
+ * The APK is a Trusted Web Activity: its whole UI comes from the core,
  * so a rebuild from an unchanged `apps/android/` gives the same app with a new
  * version number. `reuse` finds the APK of the latest published release and
  * keeps it when nothing that goes into it moved: the wrapper's sources, the

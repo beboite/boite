@@ -10,9 +10,10 @@ in the installed web app
 ## One host per APK
 
 A TWA trusts a single origin, fixed at build time. The repository has no
-hard-coded origin. A signed build requires `ANDROID_HOST`, a repository
-variable containing a bare hostname such as `boite.example.com`. The page must
-be served over HTTPS at that host, through a proxy as in [phone.md](phone.md).
+hard-coded origin. A signed build takes the bare hostname, such as
+`boite.example.com`, from the workflow's `host` input or else the repository
+variable `ANDROID_HOST`. The page must be served over HTTPS at that host,
+through a proxy as in [phone.md](phone.md).
 
 Android opens the page full screen only after it has checked both halves of
 Digital Asset Links. The app half is inside the APK and names the host. The site
@@ -38,7 +39,8 @@ matches and the version code is higher.
 ## Signed builds
 
 The nightly no longer builds the APK. Run `.github/workflows/android.yml` by
-hand with `release: true` to sign one; it is kept as the run's artifact.
+hand with `release: true` and `host` set to your core's hostname to sign one;
+it is kept as the run's `android-apk` artifact.
 `scripts/ci/android-apk.ts reuse` checks the newest published release with a
 signed APK. It reuses that file under its original name when all of these hold:
 

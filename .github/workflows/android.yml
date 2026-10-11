@@ -1,9 +1,10 @@
 name: android
 
 # The Android app: a Trusted Web Activity in apps/android that opens the core
-# at one host, vars.ANDROID_HOST. ci builds it unsigned to prove it compiles;
-# the nightly signs it, or takes the previous release's APK back when nothing
-# that goes into it changed (scripts/ci/android-apk.ts). docs/android.md.
+# at one host, the host input or vars.ANDROID_HOST. ci builds it unsigned to
+# prove it compiles; a run by hand with release signs it, or takes the previous
+# release's APK back when nothing that goes into it changed
+# (scripts/ci/android-apk.ts). Nightlies publish no APK. docs/android.md.
 
 on:
   workflow_call:
@@ -13,6 +14,10 @@ on:
         type: boolean
         default: false
       version:
+        type: string
+        default: ''
+      host:
+        description: Bare hostname the APK opens; falls back to vars.ANDROID_HOST.
         type: string
         default: ''
     secrets:
@@ -27,6 +32,10 @@ on:
         description: Sign the APK and reuse the previous release's when nothing changed.
         type: boolean
         default: false
+      host:
+        description: Bare hostname the APK opens, such as boite.example.com.
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -51,13 +60,13 @@ jobs:
         id: meta
         env:
           RELEASE: ${{ inputs.release }}
-          ANDROID_HOST: ${{ vars.ANDROID_HOST }}
+          ANDROID_HOST: ${{ inputs.host || vars.ANDROID_HOST }}
           INPUT_VERSION: ${{ inputs.version }}
         run: |
           host="$ANDROID_HOST"
           if [[ -z "$host" ]]; then
             if [[ "$RELEASE" == 'true' ]]; then
-              echo '::error::the repository variable ANDROID_HOST is unset: a released APK has to name the host it opens' >&2
+              echo '::error::no host: pass the host input or set the repository variable ANDROID_HOST, a released APK has to name the host it opens' >&2
               exit 1
             fi
             host=boite.example.com
