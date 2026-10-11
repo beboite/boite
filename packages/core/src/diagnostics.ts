@@ -46,7 +46,8 @@ export class Diagnostics {
       this.#salt = randomBytes(16).toString('hex');
       void mkdir(this.core.logs.directory, { recursive: true, mode: 0o700 })
         // `mode` applies only to a new file: one replaced here (invalid, or from an older install) is made private too.
-        .then(() => writeFile(file, `${this.#salt}\n`, { mode: 0o600 }).then(() => chmod(file, 0o600)))
+        // Not on Windows, which has no Unix modes, and where Bun 1.4.2 corrupted its heap around this unawaited chmod.
+        .then(() => writeFile(file, `${this.#salt}\n`, { mode: 0o600 }).then(() => process.platform === 'win32' ? undefined : chmod(file, 0o600)))
         .catch(error => this.core.logs.warn(`the anonymization salt could not be saved: ${messageOf(error)}`, { source: 'diagnostics', event: 'diagnostics.salt-failed' }));
     }
     return this.#salt;
