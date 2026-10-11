@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { spawn } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import type { CoreLogRecord } from '@boite/contracts';
 import { connect } from '../src/client.ts';
 import type { Core } from '../src/core.ts';
@@ -35,7 +36,9 @@ test('an agent process that crashes leaves one warning with its exit code and th
   child.stdin?.end();
   child.stdout?.resume();
   child.stderr?.resume();
-  await new Promise<void>(resolve => child.once('close', () => resolve()));
+  // The record is what counts, whichever of `close` or `exit` wrote it.
+  const until = Date.now() + 10_000;
+  while (!records.some(record => record.context.event === 'driver.process.crashed') && Date.now() < until) await Bun.sleep(20);
   const crashed = records.find(record => record.context.event === 'driver.process.crashed');
   expect(crashed?.level).toBe('warn');
   const data = crashed?.context.data as Record<string, unknown>;
@@ -184,4 +187,20 @@ test('a method name the client chose cannot forge a line in a refused or slow RP
   logRpcTiming(core, connection, 'slow\u2028forged', 'r2', 12_000, null);
   for (const record of records) expect(`${record.message}${JSON.stringify(record.context.data)}`).not.toMatch(/[\n\u2028]/);
   expect(records.map(record => record.context.event)).toEqual(['rpc.refused', 'rpc.slow']);
+});
+
+test('a process that reports its exit but never closes is still logged, with its exit time', async () => {
+  const { core, records } = recordingCore();
+  const child = Object.assign(new EventEmitter(), { pid: 4242 }) as unknown as SpawnedChild;
+  watchProviderProcess(core, child, 'codex', { threadId: 'thr_no_close', providerId: 'codex', resume: false });
+  child.emit('exit', 1, null);
+  const until = Date.now() + 5_000;
+  while (!records.some(record => record.context.event === 'driver.process.crashed') && Date.now() < until) await Bun.sleep(50);
+  const crashed = records.find(record => record.context.event === 'driver.process.crashed');
+  expect(crashed?.context.data).toMatchObject({ exitCode: 1, pid: 4242 });
+  // The lifetime ends at the exit, not after the wait for `close`.
+  expect(Number(crashed?.context.durationMs)).toBeLessThan(1_000);
+  // A late `close` writes no second record.
+  child.emit('close', 1, null);
+  expect(records.filter(record => record.context.event === 'driver.process.crashed')).toHaveLength(1);
 });

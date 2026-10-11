@@ -30,6 +30,9 @@ export function abnormalExit(code: number | null, signal: NodeJS.Signals | null)
   return code !== null && code !== 0;
 }
 
+/** How long `close` gets after `exit` before the end is logged from `exit` alone. */
+const CLOSE_GRACE_MS = 2_000;
+
 /**
  * Logs one agent process from spawn to exit: the program and the version it
  * last reported, new or resumed session, how long it lived, its exit code or
@@ -53,10 +56,18 @@ export function watchProviderProcess(core: Core, child: SpawnedChild, command: s
     });
   });
   // `close` and not `exit`: stderr is drained by then, so the tail holds the last line.
-  child.once('close', (code: number | null, signal: NodeJS.Signals | null) => {
+  // `exit` is the fallback: on macOS CI the test of a child that exited at once
+  // sometimes never saw `close`, and such an end would be missing from the log.
+  let exitedAt: number | null = null;
+  child.once('close', (code: number | null, signal: NodeJS.Signals | null) => ended(code, signal));
+  child.once('exit', (code: number | null, signal: NodeJS.Signals | null) => {
+    exitedAt = performance.now();
+    setTimeout(() => ended(code, signal), CLOSE_GRACE_MS).unref?.();
+  });
+  function ended(code: number | null, signal: NodeJS.Signals | null): void {
     if (reported) return;
     reported = true;
-    const lifetime = performance.now() - startedAt;
+    const lifetime = (exitedAt ?? performance.now()) - startedAt;
     const abnormal = abnormalExit(code, signal);
     const tail = abnormal ? stderrTail(who.threadId) : null;
     const how = signal !== null ? `was ended by ${signal}` : `exited with code ${code ?? 'unknown'}`;
@@ -64,5 +75,5 @@ export function watchProviderProcess(core: Core, child: SpawnedChild, command: s
       ...base, event: abnormal ? 'driver.process.crashed' : 'driver.process.exited', durationMs: lifetime,
       data: { program, version, pid: child.pid ?? null, exitCode: code, signal, ...(tail ? { stderrTail: tail } : {}) },
     });
-  });
+  }
 }
