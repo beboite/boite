@@ -1736,6 +1736,30 @@ html[data-glass] #app {
   }
 }
 
+/* The focused composer (Composer.svelte): the accent lights its edge, bright along the top and fading
+   down the sides, and lays a soft bloom under the box rather than a hard ring around it. Under
+   `.composer-wrap` so it outranks the component's own resting shadow whichever stylesheet loads last. */
+.composer-wrap .composer::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  z-index: 2;
+  padding: 1px;
+  border-radius: inherit;
+  background: var(--composer-edge);
+  -webkit-mask: linear-gradient(black, black) content-box, linear-gradient(black, black);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(black, black) content-box, linear-gradient(black, black);
+  mask-composite: exclude;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-3) var(--ease-out-quint);
+}
+.composer-wrap .composer:focus-within { border-color: var(--color-composer-focus); box-shadow: var(--composer-rest), var(--composer-glow); }
+.composer-wrap .composer:focus-within::before { opacity: 1; }
+/* The gradient draws the whole edge; without color-mix it is transparent and the accent hairline stays. */
+@supports (color: color-mix(in oklch, red 50%, blue)) { .composer-wrap .composer:focus-within { border-color: transparent; } }
+
 @supports (color: color-mix(in oklab, white 50%, black)) {
   html[data-theme='grain'] .composer {
     --color-composer-surface: color-mix(in oklab, var(--color-surface-2) 62%, transparent);

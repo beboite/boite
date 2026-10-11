@@ -3,14 +3,14 @@
   import { supportsSideQuestions, type Attachment, type PreviewReference } from '@boite/contracts';
   import { restorePreviewMentions } from '../lib/preview-mentions';
   import { AGENT_PREFIX, isAgentCommand, runCommand } from '../lib/commands.svelte';
-  import { agentSlashItems, boiteSlashItems, listKey, mentionQueryOf, mentionRows, slashQueryOf, type ChipCommand } from '../lib/composer-menus';
+  import { agentSlashItems, boiteSlashItems, listKey, mentionQueryOf, slashQueryOf, type ChipCommand } from '../lib/composer-menus';
   import { attachFiles } from '../lib/composer-attachments';
   import { rewindComposerEdit } from '../lib/composer-edit';
   import { fitHeight, selfSizing } from '../lib/composer-size';
   import { editComposerInput, insertImageReference, removeImageReferences, touchesImageReference, trackImageSend } from '../lib/composer-images';
-  import { checkpoint, editKind, recordEdit, redoStep, resetHistory, settled, undoStep, type ComposerSnapshot } from '../lib/composer-history';
-  import { copiedFrom, copyImages, fitCopy, pastesAsText } from '../lib/composer-clipboard';
-  import { acceptAttachments } from '../lib/attachments';
+  import { checkpoint, editKind, recordEdit, resetHistory, settled } from '../lib/composer-history';
+  import { boxSelection, copySelection, pasteImages, travel, type EditingHost } from '../lib/composer-editing';
+  import { ComposerMentions } from '../lib/composer-mentions.svelte';
   import { unresolvedAssetId } from '../lib/draft-attachments';
   import { focusWithin } from '../lib/focus';
   import { touchScreen } from '../lib/device';
@@ -70,20 +70,7 @@
   /** Where the caret stands in the text, kept for the mention menu. */
   let caret = $state(0);
   let pendingEdit: { start: number; end: number } | undefined;
-  /** Escape shuts the mention menu on text it keeps, until that text changes again. */
-  let mentionDismissed = $state(false);
-  /** The row the keyboard is on in the mention menu. */
-  let mentionAt = $state(0);
-  /** The core's last page of files for the mention query. */
-  let mentionItems = $state<PaletteItem[]>([]);
-  /** How many matches the core held beyond that page. */
-  let mentionMore = $state(0);
-  /** The number of the last `projects.files` asked, so an older answer is dropped. */
-  let mentionAsk = 0;
-  /** The project `mentionItems` was ranked in: another one's paths are never shown. */
-  let mentionFrom: string | null = null;
-  const MENTION_PAGE = 30;
-  const MENTION_DEBOUNCE_MS = 60;
+  const mentions = new ComposerMentions();
 
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
   /** The three commands the composer runs itself: each one opens a chip's menu. */
@@ -199,49 +186,15 @@
   $effect(() => {
     void text;
     slashDismissed = false;
-    mentionDismissed = false;
+    mentions.dismissed = false;
   });
 
-  let mentionOpen = $derived(mentionQuery !== null && focused && !mentionDismissed);
+  let mentionOpen = $derived(mentionQuery !== null && focused && !mentions.dismissed);
 
   /** The project whose files are named: the open thread's, or the draft's. */
   let mentionProject = $derived(store.openThread?.projectId ?? store.draft?.projectId ?? null);
 
-  /** The core's page for the query, asked a beat after the last keystroke, the stale answer dropped. */
-  $effect(() => {
-    const query = mentionQuery;
-    const projectId = mentionProject;
-    const client = store.client;
-    // Every run drops the page in flight, the one that shuts the menu included.
-    const ask = ++mentionAsk;
-    // The menu opens on the frame `@` is typed, a whole round trip before the
-    // answer: a list ranked in another project, or for a word the user has
-    // left, would be pickable until then. Narrowing inside one project keeps
-    // its rows, which is what makes the list stand still while he types.
-    if (query === null || projectId !== mentionFrom) {
-      mentionFrom = projectId;
-      mentionItems = [];
-      mentionMore = 0;
-    }
-    if (query === null || projectId === null || !client) return;
-    const timer = setTimeout(() => {
-      void client
-        .call('projects.files', { projectId, query, limit: MENTION_PAGE })
-        .then((page) => {
-          if (ask !== mentionAsk) return;
-          mentionItems = mentionRows(page.files);
-          mentionMore = Math.max(0, page.total - page.files.length);
-          mentionAt = 0;
-        })
-        .catch(() => {
-          // A project gone or a core away: the menu says nothing matches, the text stands.
-          if (ask !== mentionAsk) return;
-          mentionItems = [];
-          mentionMore = 0;
-        });
-    }, MENTION_DEBOUNCE_MS);
-    return () => clearTimeout(timer);
-  });
+  $effect(() => mentions.follow(mentionQuery, mentionProject, store.client));
 
   let agentItems = $derived.by((): PaletteItem[] => agentSlashItems(store.openThread?.commands ?? []));
 
@@ -370,91 +323,10 @@
     requestAnimationFrame(grow);
   }
 
-  /** The box's own selection, or null before it exists. */
-  function selection() {
-    return box ? { start: box.selectionStart, end: box.selectionEnd } : undefined;
-  }
-
-  /**
-   * Ctrl+Z and Ctrl+Y (or Ctrl+Shift+Z), and the context menu's Undo: the
-   * composer's history, never the textarea's, which a written value wipes and
-   * which never held the attachments (`lib/composer-history.ts`).
-   */
-  function travel(back: boolean) {
-    const state = stateForInput();
-    const step = back ? undoStep(state, selection()) : redoStep(state, selection());
-    if (step) restoreStep(state, step);
-  }
-
-  /** Text, pictures, page references and selection exactly as the step held them. */
-  function restoreStep(state: ComposerState, step: ComposerSnapshot) {
-    state.attachments = [...step.attachments];
-    state.previewReferences = [...step.previewReferences];
-    // Persists the draft at once; the references it would re-derive are the step's own.
-    store.editComposerText(key, step.text);
-    state.previewReferences = [...step.previewReferences];
-    const end = Math.min(step.text.length, step.selection.end), start = Math.min(end, step.selection.start);
-    state.selection = { start, end };
-    if (box) { box.value = step.text; box.setSelectionRange(start, end); }
-    caret = end;
-    recall = null;
-    settled(state);
-    if (!sizesItself) grow(); else syncInput();
-  }
-
-  /** The box's text after an edit the composer made itself, with the caret after `at` unless a reference took more. */
-  function writeEdit(state: ComposerState, value: string, edit: { start: number; end: number }, at: number) {
-    if (!box) return;
-    box.value = value;
-    const whole = editComposerInput(store, key, box, false, edit);
-    if (whole === null) { box.setSelectionRange(at, at); state.selection = { start: at, end: at }; caret = at; } else caret = whole;
-    settled(state);
-    recall = null;
-    if (!sizesItself) grow(); else syncInput();
-  }
-
-  /**
-   * A copy or cut that takes `[Image 2]` takes its picture too (`lib/composer-clipboard.ts`).
-   * A cut is then the composer's own edit: one undo step, the reference and its picture going together.
-   */
-  function copySelection(event: ClipboardEvent, cut: boolean) {
-    if (!box) return;
-    const state = stateForInput(), start = box.selectionStart, end = box.selectionEnd;
-    if (!copyImages(event.clipboardData, state, start, end)) return;
-    event.preventDefault();
-    if (!cut) return;
-    recordEdit(state, 'big', { start, end });
-    writeEdit(state, state.text.slice(0, start) + state.text.slice(end), { start, end }, start);
-  }
-
-  /**
-   * Pasting a copy of ours into another composer, here or on another machine,
-   * brings its pictures and renumbers their references. Where they already
-   * stand under the same numbers, the browser's own paste is enough.
-   */
-  function pasteImages(event: ClipboardEvent): boolean {
-    const copied = copiedFrom(event.clipboardData);
-    if (!copied || !box) return false;
-    const state = stateForInput();
-    if (pastesAsText(copied, state)) return false;
-    event.preventDefault();
-    const start = box.selectionStart, end = box.selectionEnd;
-    recordEdit(state, 'big', { start, end });
-    // An answer's files reach the agent as paths, so it takes images whatever the provider reads.
-    const attachmentProvider = reply ? null : provider;
-    const fitted = fitCopy(copied, state.attachments, (incoming) => {
-      if (incoming.length === 0) return [];
-      if (attachmentProvider && !attachmentProvider.capabilities.images) {
-        store.error = fill(strings.composer.attachNoImages, { provider: attachmentProvider.name });
-        return [];
-      }
-      const result = acceptAttachments(state.attachments, incoming);
-      if (result.refused !== null) store.error = result.refused;
-      return incoming.filter((item) => result.accepted.includes(item));
-    });
-    state.attachments = fitted.attachments;
-    writeEdit(state, state.text.slice(0, start) + fitted.text + state.text.slice(end), { start, end }, start + fitted.text.length);
-    return true;
+  /** What the composer's own edits write to (`lib/composer-editing.ts`). An answer's files reach the agent as paths, so it takes images whatever the provider reads. */
+  function editing(): EditingHost {
+    return { store, key, box, state: stateForInput(), provider: reply ? null : provider,
+      moved: (at) => { caret = at; recall = null; if (!sizesItself) grow(); else syncInput(); } };
   }
 
   /**
@@ -571,7 +443,7 @@
       .filter((item) => item.kind === 'file')
       .map((item) => item.getAsFile())
       .filter((file): file is File => file !== null);
-    if (files.length === 0) { pasteImages(event); return; }
+    if (files.length === 0) { pasteImages(editing(), event); return; }
     // The text of a clipboard that also carries an image stays out of the box.
     event.preventDefault();
     void take(files);
@@ -779,7 +651,7 @@
    */
   function menuKey(event: KeyboardEvent): boolean {
     if (mentionOpen) {
-      return listKey(event, mentionItems, mentionAt, (index) => (mentionAt = index), () => (mentionDismissed = true), pickMention);
+      return listKey(event, mentions.items, mentions.at, (index) => (mentions.at = index), () => (mentions.dismissed = true), pickMention);
     }
     if (slashOpen) {
       return listKey(event, slashItems, slashAt, (index) => (slashAt = index), () => (slashDismissed = true), pickSlash);
@@ -794,7 +666,7 @@
     const letter = event.key?.toLowerCase();
     if (meta && !event.altKey && (letter === 'z' || letter === 'y') && !store.isKey(event, 'send-and-draft') && !store.isKey(event, 'stash')) {
       event.preventDefault();
-      travel(letter === 'z' && !event.shiftKey);
+      travel(editing(), letter === 'z' && !event.shiftKey);
       return;
     }
     // The two composer chords come from the keyboard table, like the app's.
@@ -877,11 +749,11 @@
       bind:this={box}
       value={text}
       onbeforeinput={(event) => {
-        if (event.inputType === 'historyUndo' || event.inputType === 'historyRedo') { event.preventDefault(); travel(event.inputType === 'historyUndo'); return; }
-        pendingEdit = selection();
+        if (event.inputType === 'historyUndo' || event.inputType === 'historyRedo') { event.preventDefault(); travel(editing(), event.inputType === 'historyUndo'); return; }
+        pendingEdit = boxSelection(box);
       }}
-      oncopy={(event) => copySelection(event, false)}
-      oncut={(event) => copySelection(event, true)}
+      oncopy={(event) => copySelection(editing(), event, false)}
+      oncut={(event) => copySelection(editing(), event, true)}
       {oninput}
       {onkeydown}
       {onpaste}
@@ -912,11 +784,11 @@
 
     <MentionMenu
       open={mentionOpen}
-      items={mentionItems}
-      selected={mentionAt}
-      more={mentionMore}
+      items={mentions.items}
+      selected={mentions.at}
+      more={mentions.more}
       onpick={pickMention}
-      onhover={(index) => (mentionAt = index)}
+      onhover={(index) => (mentions.at = index)}
     />
 
     {#if speechStatus}
@@ -954,7 +826,7 @@
     padding: 0 20px;
   }
 
-  /* A translucent surface with a top reflection. */
+  /* A translucent surface with a top reflection. Focus lights its edge and lays a bloom under it: app.css, beside its themes. */
   .composer {
     position: relative;
     display: flex;
@@ -969,32 +841,9 @@
     border-top-color: var(--color-edge);
     border-radius: var(--radius-xl);
     --composer-rest: var(--shadow-composer);
-    box-shadow: var(--composer-rest), 0 0 0 3px transparent;
+    box-shadow: var(--composer-rest);
     transition: border-color var(--dur-3) var(--ease-out-quint), box-shadow var(--dur-3) var(--ease-out-quint);
   }
-
-  /* Focus lights the edge with the accent, bright along the top and fading down the sides, and lays a
-     soft bloom of it under the box rather than a hard ring around it. */
-  .composer::before {
-    content: '';
-    position: absolute;
-    inset: -1px;
-    z-index: 2;
-    padding: 1px;
-    border-radius: inherit;
-    background: var(--composer-edge);
-    -webkit-mask: linear-gradient(black, black) content-box, linear-gradient(black, black);
-    -webkit-mask-composite: xor;
-    mask: linear-gradient(black, black) content-box, linear-gradient(black, black);
-    mask-composite: exclude;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity var(--dur-3) var(--ease-out-quint);
-  }
-  /* The gradient draws the whole edge; without color-mix it is transparent and the plain accent hairline stays. */
-  .composer:focus-within { border-color: var(--color-composer-focus); box-shadow: var(--composer-rest), var(--composer-glow); }
-  @supports (color: color-mix(in oklch, red 50%, blue)) { .composer:focus-within { border-color: transparent; } }
-  .composer:focus-within::before { opacity: 1; }
 
   .input-wrap { position: relative; }
 
