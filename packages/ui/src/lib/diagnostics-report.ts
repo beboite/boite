@@ -200,7 +200,7 @@ export class DiagnosticsReporter {
         const failure = error as RpcFailure;
         const timedOut = wasUnanswered(failure);
         reporter.push('error', 'rpc', timedOut ? 'ui.rpc.timeout' : 'ui.rpc.failed',
-          timedOut ? `${method} got no answer from the core after ${seconds(reporter.#timers.now() - began)}` : `${method} failed inside the core (code ${failure.code}): ${failure.message.slice(0, 300)}`,
+          timedOut ? `${method} got no answer from the core after ${seconds(reporter.#timers.now() - began)}` : `${method} failed inside the core (code ${failure.code})`,
           { durationMs: reporter.#timers.now() - began, data: { method: method as RpcMethodName, code: failure.code } });
       });
       return result;

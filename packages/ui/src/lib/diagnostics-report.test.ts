@@ -68,7 +68,7 @@ test('a failed call is reported by method and code, never its parameters; a time
   expect(reporter.queued.map(record => record.event)).toEqual(['ui.rpc.failed', 'ui.rpc.timeout']);
   expect(reporter.queued[0]).toMatchObject({ level: 'error', source: 'rpc', data: { method: 'threads.get', code: RpcErrorCode.Internal } });
   expect(reporter.queued[1]?.message).toMatch(/^turns\.start got no answer from the core after/);
-  expect(JSON.stringify(reporter.queued)).not.toMatch(/private|never-sent/);
+  expect(JSON.stringify(reporter.queued)).not.toMatch(/private|never-sent|journal read failed/);
   await vi.advanceTimersByTimeAsync(REPORT_INTERVAL_MS);
   // The batch failed with an internal error: dropped, and that failure is not a new record.
   expect(client.sent).toHaveLength(1);

@@ -641,7 +641,7 @@ export class PiSession {
       }
       case 'auto_retry_end':
         turn.ctx.reportProgress?.('working');
-        turn.ctx.diagnostic?.(message['success'] === false ? 'warn' : 'info', message['success'] === false ? `pi gave up retrying: ${textOf(message['finalError'])}` : 'pi retry succeeded', { event: 'driver.api.retry-ended', data: { success: message['success'] !== false } });
+        turn.ctx.diagnostic?.(message['success'] === false ? 'warn' : 'info', message['success'] === false ? `pi gave up retrying: ${textOf(message['finalError']) || turn.pendingError || 'no reason given'}` : 'pi retry succeeded', { event: 'driver.api.retry-ended', data: { success: message['success'] !== false } });
         if (message['success'] === false) {
           turn.noteOutcome(textOf(message['finalError']) || turn.pendingError || 'pi gave up retrying the request');
         }

@@ -121,7 +121,7 @@ test('fake diagnostics: summary, export and issue for the owner; report for the 
     expect(await client.call('diagnostics.report', { records: [{ level: 'error', at: Date.now(), source: 'window', event: 'ui.error', message: 'The interface hit an error: boom', data: { stack: 'at x' } }] })).toEqual({ accepted: 1 });
     const reported = (await client.call('core.logs', { origin: 'ui', limit: 1 }))[0];
     expect(reported).toMatchObject({ origin: 'ui', event: 'ui.error', data: { stack: 'at x', client: 'owner', remote: false } });
-    for (const params of [{}, { records: [] }, { records: Array.from({ length: 51 }, () => ({ level: 'info', at: 1, source: 's', event: 'e', message: 'm' })) }, { records: [{ level: 'loud', at: 1, source: 's', event: 'e', message: 'm' }] }, { records: [{ level: 'info', at: 1, source: 's', event: 'e', message: 'm', threadID: 'thr_1' }] }, { records: [{ level: 'info', at: 1, source: 's', event: 'e', message: 'm' }], extra: true }]) {
+    for (const params of [{}, { records: [] }, { records: Array.from({ length: 51 }, () => ({ level: 'info', at: 1, source: 's', event: 'e', message: 'm' })) }, { records: [{ level: 'loud', at: 1, source: 's', event: 'e', message: 'm' }] }, { records: [{ level: 'info', at: 1, source: 's', event: 'e', message: 'm', threadID: 'thr_1' }] }, { records: [{ level: 'info', at: 1, source: 's', event: 'e', message: 'm' }], extra: true }, { records: [{ level: 'info', at: 1, source: 's', event: 'e', message: 'm'.repeat(20_001) }] }]) {
       await expect(client.call('diagnostics.report', params as never)).rejects.toMatchObject({ code: RpcErrorCode.InvalidParams });
     }
 

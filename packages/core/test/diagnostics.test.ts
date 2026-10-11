@@ -39,6 +39,9 @@ test('the anonymizer replaces paths, names, addresses and private hosts and keep
   for (const kept of ['https://api.anthropic.com/v1/messages', 'beboite/boite/issues/9', '127.0.0.1:3773', '10.0.19045.4529', 'v1.2.3', '14:03:22', 'thr_yrbzgyt5xjtjbq334d7m', 'trn_1f992a9ph60nzwzzp8sv', '<data>/logs', '~/.claude', '<user>', '<host>', '<email>', '<ip>']) {
     expect(text).toContain(kept);
   }
+  // A client chooses its record's source and event: they are anonymized too.
+  const reported = anonymizer.record({ id: 'a', runId: 'r', at: 1, level: 'warn', origin: 'ui', source: 'meetsu', event: 'secret-game.failed', message: 'm' });
+  expect(`${reported.source} ${reported.event}`).not.toMatch(/meetsu|secret-game/);
   // The same project gets the same placeholder everywhere, by path and by name.
   const placeholders = text.match(/<project:[0-9a-f]{6}>/g) ?? [];
   expect(new Set(placeholders).size).toBe(2);
@@ -84,6 +87,7 @@ test('a stored line from any origin parses, bounds its fields and formats on one
   const long = parseLogRecord(JSON.stringify({ id: 'a', runId: 'r', at: 1, level: 'warn', source: 's', event: 'e', message: `${'x'.repeat(4090)} straddling-secret-value` }), 'shell', ['straddling-secret-value'])!;
   expect(long.message).not.toContain('stra');
   expect(parseLogRecord('{"id":1}')).toBeNull();
+  expect(parseLogRecord(JSON.stringify({ id: 'a', runId: 'r', at: -5, level: 'info', source: 's', event: 'e', message: 'm' }))).toBeNull();
   expect(parseLogRecord('{"broken')).toBeNull();
   expect(parseLogRecord(JSON.stringify({ id: 'a', runId: 'r', at: 1, level: 'info', source: 's', event: 'e', message: 'm' }))!.origin).toBe('core');
 });
@@ -249,6 +253,8 @@ test('the CLI prints records oldest first, filters by time and level, and export
     expect(parse(['logs', '--since', '--json'])).toMatchObject({ positional: ['logs', '--since'], json: true });
     expect(parse(['logs', '--search', 'timeout', '--json'])).toMatchObject({ positional: ['logs', '--search', 'timeout'], json: true });
     const owned = (await run(['logs', '--data-dir', harness.dataDir, '--min-level', 'warn', '--since', '10m'])).trim().split('\n');
+    // A global `--limit` before the command still bounds it.
+    expect((await run(['--limit', '1', 'logs', '--data-dir', harness.dataDir, '--min-level', 'warn'])).trim().split('\n')).toHaveLength(1);
     expect(owned.at(-2)).toContain('test/test.first');
     expect(owned.at(-1)).toContain('ERROR core  test/test.second');
     // `--mine` is the agent's: the owner is told so rather than handed every thread.

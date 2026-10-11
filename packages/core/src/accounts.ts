@@ -294,8 +294,10 @@ export class AccountStore {
   authenticationFailed(accountId: AccountId): void {
     if (this.core.journal.isClosed() || this.removing.has(accountId) || !this.core.journal.getAccount(accountId)) return;
     const current = this.require(accountId);
+    // Once per sign-out: later rejected turns of an account already marked signed out add nothing.
+    const already = this.core.journal.getSetting(`account-auth-rejected:${accountId}`) === true && current.status === 'unauthenticated';
     this.core.journal.setSetting(`account-auth-rejected:${accountId}`, true);
-    this.core.logs.warn(`The agent rejected the login of account ${accountId}; it is marked signed out`, { source: 'accounts', event: 'account.auth-rejected', data: { accountId, providerId: current.providerId } });
+    if (!already) this.core.logs.warn(`The agent rejected the login of account ${accountId}; it is marked signed out`, { source: 'accounts', event: 'account.auth-rejected', data: { accountId, providerId: current.providerId } });
     this.saveCheck(accountId, { status: 'unauthenticated', identity: current.identity });
   }
 

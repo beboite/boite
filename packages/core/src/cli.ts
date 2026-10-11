@@ -309,7 +309,8 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
       const result = await deviceCommand(rest, io, client, threadId, parsed.timeout);
       print(result.lines, result.value);
     },
-    logs: () => logsCommand(rest, client, threadId, agentCaller, io.cwd, print),
+    // `boite --limit 5 logs` parsed them as globals: they come first, so the command's own flags still win.
+    logs: () => logsCommand([...(parsed.limit === undefined ? [] : ['--limit', String(parsed.limit)]), ...(parsed.level === undefined ? [] : ['--level', parsed.level]), ...rest], client, threadId, agentCaller, io.cwd, print),
     issue: () => issueCommand(rest, client, threadId, agentCaller, io.cwd, print),
     server: async () => {
       const action = rest[0] ?? 'check';

@@ -410,7 +410,8 @@ export function createLogAnonymizer(context: LogAnonymizeContext): LogAnonymizer
     text,
     project: path => (path ? projectNames.get(path) ?? projectLabel(path) : '<none>'),
     record: record => {
-      const copy: CoreLogRecord = { ...record, message: text(record.message) };
+      // A client names its own source and event: they pass through the same replacements.
+      const copy: CoreLogRecord = { ...record, message: text(record.message), source: text(record.source), event: text(record.event) };
       if (record.data) copy.data = Object.fromEntries(Object.entries(record.data).map(([key, value]) => [key, PROVIDER_OUTPUT_KEYS.has(key) ? PROVIDER_OUTPUT_KEPT : typeof value === 'string' ? text(value) : value]));
       if (record.model) copy.model = text(record.model);
       return copy;
@@ -454,11 +455,11 @@ export function parseLogRecord(line: string, fallbackOrigin: LogOrigin = 'core',
   if (line.length === 0) return null;
   let raw: Record<string, unknown>;
   try { raw = JSON.parse(line) as Record<string, unknown>; } catch { return null; }
-  if (!raw || typeof raw !== 'object' || typeof raw.id !== 'string' || typeof raw.runId !== 'string' || typeof raw.at !== 'number' || !Number.isFinite(raw.at)
+  if (!raw || typeof raw !== 'object' || typeof raw.id !== 'string' || typeof raw.runId !== 'string' || typeof raw.at !== 'number' || !Number.isFinite(raw.at) || raw.at < 0
     || !LOG_LEVELS.includes(raw.level as CoreLogLevel) || typeof raw.message !== 'string' || typeof raw.source !== 'string' || typeof raw.event !== 'string') return null;
   const bounded = (value: unknown): string | undefined => typeof value === 'string' && value.length > 0 ? value.replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, LOG_CONTEXT_CHARS) : undefined;
   const record: CoreLogRecord = {
-    id: raw.id.slice(0, LOG_CONTEXT_CHARS), runId: raw.runId.slice(0, LOG_CONTEXT_CHARS), at: raw.at, level: raw.level as CoreLogLevel,
+    id: bounded(raw.id) ?? '', runId: bounded(raw.runId) ?? '', at: raw.at, level: raw.level as CoreLogLevel,
     origin: LOG_ORIGINS.includes(raw.origin as LogOrigin) ? raw.origin as LogOrigin : fallbackOrigin,
     source: bounded(raw.source) ?? 'core', event: bounded(raw.event) ?? 'core.log', message: normalizeCoreLogText(raw.message, secrets),
   };
@@ -641,6 +642,8 @@ export interface DiagnosticReportRecord {
   data?: LogData;
 }
 
+/** A client cuts its messages to 4096; past this a report is refused before any redaction runs over it. */
+const REPORT_MESSAGE_CHARS = 20_000;
 const REPORT_RECORD_KEYS = ['level', 'at', 'source', 'event', 'message', 'threadId', 'durationMs', 'data'] as const;
 
 /** `secrets` are redacted from `data` before its strings are cut, so a cut never splits one. */
@@ -659,7 +662,7 @@ export function validateDiagnosticReport(raw: unknown, secrets: readonly string[
       level: level(value.level, `${field}.level`), at: timestamp(value.at, `${field}.at`),
       source: plainText(value.source, `${field}.source`, 60), event: plainText(value.event, `${field}.event`, 100),
       // Whole: the core redacts its secrets before it bounds the text, so a cut never splits one.
-      message: typeof value.message === 'string' && value.message.length > 0 ? value.message : (() => { throw new Error(`${field}.message: expected text`); })(),
+      message: typeof value.message === 'string' && value.message.length > 0 && value.message.length <= REPORT_MESSAGE_CHARS ? value.message : (() => { throw new Error(`${field}.message: expected 1 to ${REPORT_MESSAGE_CHARS} characters`); })(),
     };
     if (value.threadId !== undefined) record.threadId = plainText(value.threadId, `${field}.threadId`);
     if (value.durationMs !== undefined) {

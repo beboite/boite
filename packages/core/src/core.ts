@@ -236,7 +236,8 @@ export class Core {
   requestHandoffShutdown(graceMs?: number): 'accepted' | 'unsupported' {
     if (!this.#onShutdown) return 'unsupported';
     if (this.#shutdownRequested || this.threads.handoff.active) return 'accepted';
-    this.logs.info(`Restart handoff started: ${this.scheduler.state().running.length} running turns end their tool call, then stop`, { source: 'core', event: 'core.handoff.started', data: { running: this.scheduler.state().running.length, graceMs: graceMs ?? null } });
+    const running = this.scheduler.state().running.length;
+    this.logs.info(`Restart handoff started: ${running} running turns end their tool call, then stop`, { source: 'core', event: 'core.handoff.started', data: { running, graceMs: graceMs ?? null } });
     this.#stopping = true;
     void this.threads.handoff.begin(graceMs).then(() => this.requestShutdown());
     return 'accepted';
