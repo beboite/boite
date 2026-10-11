@@ -88,7 +88,6 @@ export class FakeClient implements ObservableClient {
     this.#methods = this.#answer(ctx);
     registerCore(ctx);
     seed(ctx);
-    seedDiagnostics(ctx);
     if (options.delegationDemo) seedDelegationDemo(ctx);
     if (options.stewardDemo) seedStewardDemo(ctx);
     if (options.uninstalled) {
@@ -109,6 +108,8 @@ export class FakeClient implements ObservableClient {
       ctx.usageSeeded = false;
       ctx.scheduler = { ...ctx.scheduler, running: [], queued: [] };
     }
+    // After a first launch has cleared the threads, so no record names one that is gone.
+    seedDiagnostics(ctx);
   }
 
   // -------------------------------------------------------------------------

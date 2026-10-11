@@ -78,6 +78,8 @@ export class DiagnosticsReporter {
   #offlineSince: number | null = null;
   /** The first connect is no drop: only a socket that was ready once can be lost. */
   #wasReady = false;
+  /** Set by `stop`: a batch still in flight must not queue itself again or arm a timer. */
+  #stopped = false;
   #stops: (() => void)[] = [];
 
   constructor(client: Client, timers: Timers = browserTimers) {
@@ -99,6 +101,7 @@ export class DiagnosticsReporter {
   }
 
   stop(): void {
+    this.#stopped = true;
     for (const stop of this.#stops.splice(0)) stop();
     if (this.#timer !== null) this.#timers.clearTimeout(this.#timer);
     this.#timer = null;
@@ -110,7 +113,7 @@ export class DiagnosticsReporter {
    * counts a repeat instead of taking a second place: a render loop is one line.
    */
   push(level: CoreLogLevel, source: string, event: string, message: string, extra: { durationMs?: number; data?: LogData; threadId?: string } = {}): void {
-    if (this.#off) return;
+    if (this.#off || this.#stopped) return;
     const text = message.replace(/[\r\n]+/g, ' ').trim().slice(0, 4096) || event;
     const same = this.#queue.find(record => record.event === event && record.message === text);
     if (same) {
@@ -132,7 +135,7 @@ export class DiagnosticsReporter {
   }
 
   #schedule(): void {
-    if (this.#timer !== null || this.#off || this.#queue.length === 0) return;
+    if (this.#timer !== null || this.#off || this.#stopped || this.#queue.length === 0) return;
     this.#timer = this.#timers.setTimeout(() => { this.#timer = null; void this.flush(); }, REPORT_INTERVAL_MS);
   }
 
@@ -148,7 +151,7 @@ export class DiagnosticsReporter {
       if (error instanceof RpcFailure && (error.code === RpcErrorCode.MethodNotFound || error.code === RpcErrorCode.Refused || error.code === RpcErrorCode.Unauthorized)) {
         this.#off = true;
         this.#queue = [];
-      } else if (wasDropped(error) || this.#client.state !== 'ready') {
+      } else if (!this.#stopped && (wasDropped(error) || this.#client.state !== 'ready')) {
         // Lost with the socket: the batch goes again once it is back. Any other failure drops it, so a broken report cannot loop.
         this.#queue.unshift(...batch);
         if (this.#queue.length > REPORT_QUEUE) this.#queue.splice(0, this.#queue.length - REPORT_QUEUE);
@@ -186,7 +189,6 @@ export class DiagnosticsReporter {
     // A method the class provides is looked up at each call, not kept: code that
     // replaces the class's method later (a test fixture, a hot reload) still runs.
     const own = Object.prototype.hasOwnProperty.call(client, 'call') ? client.call : null;
-    const original = client.call;
     const reporter = this;
     const watched: Client['call'] = function (this: unknown, method, params, options) {
       const began = reporter.#timers.now();
@@ -206,9 +208,10 @@ export class DiagnosticsReporter {
     client.call = watched;
     this.#stops.push(() => {
       if (client.call !== watched) return;
-      // An own property hides the class's method; removing it shows the method again.
-      if (Object.prototype.hasOwnProperty.call(client, 'call') && original === Object.getPrototypeOf(client)?.call) delete (client as { call?: unknown }).call;
-      else client.call = original;
+      // An own property hides the class's method; removing it shows the current method again,
+      // even one replaced since `start`. Only a method that was the client's own goes back.
+      if (own === null) delete (client as { call?: unknown }).call;
+      else client.call = own;
     });
   }
 }

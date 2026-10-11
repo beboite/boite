@@ -164,3 +164,13 @@ test('fake summary keeps the latest error by time and stays inside the focused f
     expect(focused.threads.map(thread => thread.threadId)).toEqual([child!.id]);
   } finally { client.close(); }
 });
+
+test('a first-launch fake seeds diagnostics that name no thread it cleared', async () => {
+  const client = new FakeClient({ delayMs: 0, uninstalled: true });
+  await client.connect();
+  try {
+    const records = await client.call('core.logs', { limit: 100 });
+    expect(records.length).toBeGreaterThan(0);
+    expect(records.filter(record => record.threadId !== undefined)).toEqual([]);
+  } finally { client.close(); }
+});

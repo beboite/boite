@@ -524,7 +524,8 @@ export class Delegation {
       || this.core.journal.db.query("SELECT 1 FROM delegation_messages WHERE root_id = ? AND status = 'received' LIMIT 1").get(root.id) !== null;
     const pausing = !thread.parentThreadId && !agentId && live();
     if (pausing) this.saveConfig(root.id, { ...this.config(root.id), paused: true });
-    this.core.logs.info(`Stopping ${ids.length} subagents of ${root.id}${pausing ? '; the team is paused until the owner resumes it' : ''}`, { source: 'delegation', event: 'delegation.stopped', threadId: root.id, data: { agents: ids.length, paused: pausing, by: agentId ? 'agent' : thread.parentThreadId ? 'self' : 'parent' } });
+    const workflow = this.core.workflows.active(root.id);
+    this.core.logs.info(`Stopping ${ids.length > 0 ? `${ids.length} subagents` : 'the workflows'} of ${root.id}${pausing ? '; the team is paused until the owner resumes it' : ''}`, { source: 'delegation', event: 'delegation.stopped', threadId: root.id, data: { agents: ids.length, workflow, paused: pausing, by: agentId ? 'agent' : thread.parentThreadId ? 'self' : 'parent' } });
     let stopped = 0;
     for (const id of ids) {
       this.stopped.add(id);

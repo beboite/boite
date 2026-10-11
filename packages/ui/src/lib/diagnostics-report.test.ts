@@ -91,7 +91,29 @@ test('a method the class gets later still runs while the reporter watches calls'
   try {
     expect(await client.call('threads.list', {})).toBe('replaced');
     expect(replaced).toHaveBeenCalledWith('threads.list', {}, undefined);
+    // Stopping leaves the method replaced since, not the one seen at start.
+    stop();
+    expect(Object.prototype.hasOwnProperty.call(client, 'call')).toBe(false);
+    expect(await client.call('threads.list', {})).toBe('replaced');
   } finally { Later.prototype.call = before; stop(); }
+});
+
+test('a batch still in flight when the reporter stops is not queued again and arms no timer', async () => {
+  const client = new StubClient();
+  const reporter = new DiagnosticsReporter(client as never, timers());
+  const stop = reporter.start();
+  let drop: (error: unknown) => void = () => undefined;
+  client.answer = () => new Promise((_resolve, reject) => { drop = reject; });
+  reporter.push('error', 'window', 'ui.error', 'in flight');
+  await vi.advanceTimersByTimeAsync(REPORT_INTERVAL_MS);
+  expect(client.calls).toEqual(['diagnostics.report']);
+  stop();
+  drop(new RpcFailure({ code: RpcErrorCode.Internal, message: 'socket closed', data: { transport: 'dropped' } }));
+  await vi.advanceTimersByTimeAsync(REPORT_INTERVAL_MS * 3);
+  expect(reporter.queued).toHaveLength(0);
+  expect(client.calls).toEqual(['diagnostics.report']);
+  reporter.push('error', 'window', 'ui.error', 'after stop');
+  expect(reporter.queued).toHaveLength(0);
 });
 
 test('a reconnection reports the time offline, and a core without the method turns reporting off', async () => {

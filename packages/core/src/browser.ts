@@ -485,7 +485,7 @@ export class AgentBrowser {
     const previous = this.#queues.get(threadId) ?? Promise.resolve();
     const at = performance.now();
     const run = previous.catch(() => {}).then(() => this.#run(threadId, params.tabId, action));
-    run.catch((error: unknown) => this.#core.logs.debug(`browser ${action.kind} failed after ${Math.round(performance.now() - at)} ms: ${(error instanceof Error ? error.message : String(error)).slice(0, 300)}`, { source: 'browser', event: 'browser.command-failed', threadId, durationMs: performance.now() - at, data: { action: action.kind } }));
+    run.catch(() => this.#core.logs.debug(`browser ${action.kind} failed after ${Math.round(performance.now() - at)} ms`, { source: 'browser', event: 'browser.command-failed', threadId, durationMs: performance.now() - at, data: { action: action.kind } }));
     this.#queues.set(threadId, run);
     void run.finally(() => { if (this.#queues.get(threadId) === run) this.#queues.delete(threadId); }).catch(() => {});
     return run;

@@ -93,7 +93,8 @@ export function ensureBuiltinSkills(dataDir: string, onError: (message: string) 
       // Anything but a plain folder and file there (a link, a folder named SKILL.md) is replaced.
       if (!kind(directory, 'directory')) rmSync(directory, { recursive: true, force: true });
       if (!kind(path, 'file')) rmSync(path, { recursive: true, force: true });
-      if (!kind(path, 'file') || readFileSync(path, 'utf8') !== text) {
+      // The size first: an agent can rewrite this file, and a huge one must not be read whole.
+      if (!kind(path, 'file') || lstatSync(path).size !== Buffer.byteLength(text) || readFileSync(path, 'utf8') !== text) {
         mkdirSync(directory, { recursive: true });
         writeFileSync(path, text);
       }
