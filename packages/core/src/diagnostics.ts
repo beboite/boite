@@ -96,6 +96,8 @@ export class Diagnostics {
 
   /** Throws unless this connection may read diagnostics, and returns whether they are an agent's. */
   private gate(connection: Connection | undefined, threadId: string | undefined): boolean {
+    // The router already keeps a paired device to diagnostics.report; this holds even if access.ts changes.
+    if (connection?.identity.principal === 'session') throw refused('diagnostics: a paired device only reports its own errors');
     if (connection?.identity.principal !== 'agent') return false;
     if (this.core.settings.get().agentLogAccess === false) throw refused('diagnostics: the owner turned off agent access to logs (Settings > Diagnostics)');
     if (threadId === undefined || threadId !== connection.identity.threadId) throw refused('diagnostics: an agent names its own thread');
@@ -428,7 +430,7 @@ export function renderExport(summary: DiagnosticSummary, records: readonly CoreL
     `## Problems (${summary.problems.length} kinds, warnings and errors grouped, errors first)`,
     ...(summary.problems.length ? summary.problems.map(problemLine) : ['none']),
     '',
-    `## Threads (${summary.threads.length}, each id below appears in the timeline)`,
+    `## Threads (${summary.threads.length}, mentioned in the timeline or active in the window)`,
     ...(summary.threads.length ? summary.threads.map(threadLine) : ['none']),
     '',
     '## Log files',

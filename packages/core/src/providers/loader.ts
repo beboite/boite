@@ -464,6 +464,18 @@ export class ProviderRegistry {
 
 export function registerProviderMethods(core: Core): void {
   const logInstall = installLogger(core);
+  // The loaded descriptors in full, what each resolves to and the rejections:
+  // a reload that changes none of it leaves every client and cached model list alone.
+  const fingerprint = (result: ProviderLoadResult): string =>
+    JSON.stringify([result, result.loaded.map((summary) => core.providers.get(summary.id))]);
+  let listed = fingerprint(core.providers.list());
+  /** True when the list differs from the last one announced. */
+  const noteListed = (result: ProviderLoadResult): boolean => {
+    const now = fingerprint(result);
+    if (now === listed) return false;
+    listed = now;
+    return true;
+  };
   core.providers.installs.attach({
     emit: (payload) => {
       logInstall(payload);
@@ -503,10 +515,6 @@ export function registerProviderMethods(core: Core): void {
     return core.providers.list();
   };
   core.router.register('providers.list', settledList);
-  // The loaded descriptors in full, what each resolves to and the rejections:
-  // a reload that changes none of it leaves every client and cached model list alone.
-  const fingerprint = (result: ProviderLoadResult): string =>
-    JSON.stringify([result, result.loaded.map((summary) => core.providers.get(summary.id))]);
   // A program that just reported its version may be what a provider was
   // waiting for: it is listed as installed from now on, and a login it already
   // has is adopted before the clients hear of it.
@@ -527,14 +535,6 @@ export function registerProviderMethods(core: Core): void {
     const first = core.providers.list();
     logDetection(first.loaded, first.rejected.length);
   }, () => { settledOnce = true; });
-  let listed = fingerprint(core.providers.list());
-  /** True when the list differs from the last one announced. */
-  const noteListed = (result: ProviderLoadResult): boolean => {
-    const now = fingerprint(result);
-    if (now === listed) return false;
-    listed = now;
-    return true;
-  };
   // One fingerprint for every change found behind a list, so the next one is not announced twice.
   const announce = (after: string): void => {
     if (core.stopping || core.journal.isClosed()) return;
@@ -548,14 +548,18 @@ export function registerProviderMethods(core: Core): void {
       const at = performance.now();
       const name = programName(program);
       return programOutput(core, program, args).then((output) => {
-        const version = readVersion(output);
-        core.logs.record(version === null ? 'warn' : 'debug', version === null ? `${name} answered its version question with no version in ${Math.round(performance.now() - at)} ms` : `${name} reports version ${version}`, {
-          source: 'providers', event: 'provider.version-read', durationMs: performance.now() - at, data: { program: name, version },
-        });
+        // A log that throws must not turn a good read into a failed one.
+        try {
+          const version = readVersion(output);
+          core.logs.record(version === null ? 'warn' : 'debug', version === null ? `${name} answered its version question with no version in ${Math.round(performance.now() - at)} ms` : `${name} reports version ${version}`, {
+            source: 'providers', event: 'provider.version-read', durationMs: performance.now() - at, data: { program: name, version },
+          });
+        } catch { /* the read stands */ }
         return output;
       }, (error: unknown) => {
         // The message names the program by its full path; the log names only the file.
-        core.logs.warn(`Reading the version of ${name} failed: ${(error instanceof Error ? error.message : String(error)).split(program).join(name)}`, { source: 'providers', event: 'provider.version-failed', durationMs: performance.now() - at, data: { program: name } });
+        try { core.logs.warn(`Reading the version of ${name} failed: ${(error instanceof Error ? error.message : String(error)).split(program).join(name)}`, { source: 'providers', event: 'provider.version-failed', durationMs: performance.now() - at, data: { program: name } }); }
+        catch { /* the original error is what the caller sees */ }
         throw error;
       });
     },

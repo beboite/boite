@@ -1362,7 +1362,7 @@ export type MessagePart =
    * `omitted`: characters a page left out of the end of `text` because the
    * message was too heavy to send whole (`MESSAGE_SENT_MAX_BYTES`). Never persisted.
    */
-  | { type: 'text'; text: string; complete?: boolean; displayText?: string; previewReferences?: PreviewReference[]; activity?: { kind: 'goal' | 'loop'; iteration: number }; moved?: MoveNotice; startedBy?: ThreadLink; started?: ThreadLink; sentFrom?: SentFrom; omitted?: number }
+  | { type: 'text'; text: string; complete?: boolean; displayText?: string; previewReferences?: PreviewReference[]; activity?: ActivityTurn; moved?: MoveNotice; startedBy?: ThreadLink; started?: ThreadLink; sentFrom?: SentFrom; omitted?: number }
   /**
    * An image the user sent with the prompt, journalled with the message. A page
    * asked with `compactImages` leaves a large one's `data` empty, with
@@ -1511,12 +1511,52 @@ export interface AgentTask {
   status: 'pending' | 'in_progress' | 'completed';
 }
 
+/** One review of a reviewed goal (`/goal2`): a fresh conversation that judged the work. */
+export interface GoalVerdict {
+  round: number;
+  /** `missing`: the reviewer ended without a `VERDICT:` line, which counts as not passing. */
+  verdict: 'pass' | 'partial' | 'fail' | 'missing';
+  /** The reviewer's findings above its verdict line, at most 2000 characters. */
+  summary: string;
+  /** The reviewer's own conversation, a child of the goal's thread. */
+  threadId: ThreadId;
+  finishedAt: Timestamp;
+}
+
+/**
+ * Set on a goal started with `/goal2`. The agent's `[BOITE_GOAL_COMPLETE]` is a
+ * claim: a reviewer in a new child conversation, with none of the agent's
+ * context, checks the checkout and answers PASS, PARTIAL or FAIL. Anything but
+ * PASS goes back to the agent as the next round's feedback.
+ */
+export interface GoalReview {
+  phase: 'working' | 'reviewing';
+  /** Reviews before the goal stops for the user; each reply then allows one more. */
+  maxRounds: number;
+  /** The reviewer conversation of the review in progress, else null. */
+  reviewerThreadId: ThreadId | null;
+  /** The agent turn whose completion claim is under review. */
+  claimTurnId: TurnId | null;
+  /** How many verdicts the agent has already been sent. */
+  delivered: number;
+  /** Oldest first, at most `maxRounds` plus one per reply after it. */
+  verdicts: GoalVerdict[];
+}
+
+/** What an automated goal or loop turn carries on its user message, for the driver prompt. */
+export interface ActivityTurn {
+  kind: 'goal' | 'loop';
+  iteration: number;
+  /** A reviewed goal's first turn after a failed review: what the reviewer reported. */
+  review?: { round: number; feedback: string };
+}
+
 export interface ThreadActivity {
   /**
    * `blocked`: the agent ended a goal turn with `[BOITE_GOAL_BLOCKED]` and
    * waits for the user. The goal is paused; the user's next message resumes it.
    */
-  goal: { objective: string; status: 'active' | 'paused' | 'complete'; iterations: number; error: string | null; dismissed?: boolean; blocked?: boolean } | null;
+  goal: { objective: string; status: 'active' | 'paused' | 'complete'; iterations: number; error: string | null; dismissed?: boolean; blocked?: boolean; review?: GoalReview } | null;
   loop: { prompt: string; intervalMs: number; maxIterations?: number | null; status: 'active' | 'paused' | 'complete'; iterations: number; nextRunAt: number | null; error: string | null; history?: ActivityIteration[] } | null;
   tasks: AgentTask[];
   tasksDismissed?: boolean;
@@ -3335,8 +3375,11 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'speech.streamChunk': { params: { requestId: string; revision: string; sequence: number; audio: string }; result: { text: string } };
   /** Drains the decoder and returns the entire transcript, including optional remaining audio. */
   'speech.streamFinish': { params: { requestId: string; revision: string; sequence: number; audio?: string }; result: { text: string } };
-  /** Attachments accompany the first turn of a single new goal or loop, then remain in its conversation history. */
-  'threads.activity.set': { params: { threadId: ThreadId; goal?: { objective: string } | null; loop?: { prompt: string; intervalMs: number; maxIterations?: number | null } | null; attachments?: Attachment[] }; result: ThreadActivity };
+  /**
+   * Attachments accompany the first turn of a single new goal or loop, then remain in its conversation history.
+   * `goal.review` starts a reviewed goal (`/goal2`, see `GoalReview`).
+   */
+  'threads.activity.set': { params: { threadId: ThreadId; goal?: { objective: string; review?: boolean } | null; loop?: { prompt: string; intervalMs: number; maxIterations?: number | null } | null; attachments?: Attachment[] }; result: ThreadActivity };
   'threads.activity.control': { params: { threadId: ThreadId; kind: 'goal' | 'loop'; action: 'pause' | 'resume' | 'remove' | 'complete' }; result: ThreadActivity };
   'quotas.list': { params: { refresh?: boolean; requestId?: string }; result: AccountQuota[] };
   'quotas.configure': { params: { accountId: AccountId; enabled: boolean }; result: AccountQuota[] };

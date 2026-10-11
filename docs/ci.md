@@ -133,9 +133,9 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 591,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,532,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,541,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 3,864,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 3,880,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
@@ -152,6 +152,16 @@ still said 4,435,000 and 3,714,000. The limits rose to 4,450,000 and
 to 4,460,000, the UI measured 4,455,331 bytes, within it, and the core
 3,733,915, 2,085 bytes under its limit after the plugin changes merged
 meanwhile. The core limit rises to 3,740,000.
+
+On 2026-10-11 on Linux with Bun 1.4.2, `26d9f7be` measured 4,455,331 UI bytes
+and 3,734,556 core bytes, and reviewed goals (`/goal2`) on top of it 4,461,282
+and 3,743,353: 5,951 UI bytes for the goal bar's verdicts, the fake core's
+reviewer and the English/French sentences, and 8,797 core bytes for the
+reviewer loop and its prompts. The Windows job measured 3,749,386 core bytes
+for that same branch, 6,033 more than Linux. Merged with `b8dc6c21`, whose
+limits were 4,466,000 and 3,744,000, the branch measured 4,469,022 and
+3,749,375 on Linux, about 3,755,400 core bytes on Windows. The limits rise to
+4,475,000 and 3,760,000.
 
 On 2026-10-10, `bun run build:ui` with Bun 1.4.2 measured 4,420,649 UI bytes at
 `feeb393b` and 4,425,557 with close confirmation and typed agent archival.
