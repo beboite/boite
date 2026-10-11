@@ -7,8 +7,27 @@ import { startTestCore, waitFor, type TestCore } from './harness.ts';
 
 const cores: TestCore[] = [];
 const clients: CoreClient[] = [];
+/**
+ * Bun 1.4.2 on Windows crashes in its socket code when a socket is opened or
+ * refused while another one of the same process is still closing (see
+ * group.test.ts): each refusal and each close is let finish on the core before
+ * the next socket.
+ */
+async function settled(h: TestCore, open: number): Promise<void> {
+  await waitFor(() => h.server.connections() <= open);
+  await new Promise((resolve) => setTimeout(resolve, 25));
+}
+
+async function refused(h: TestCore, hello: Promise<unknown>, message?: string): Promise<void> {
+  const open = h.server.connections();
+  if (message === undefined) await expect(hello).rejects.toThrow();
+  else await expect(hello).rejects.toThrow(message);
+  await settled(h, open);
+}
+
 afterEach(async () => {
   for (const client of clients.splice(0)) client.close();
+  for (const core of cores) await settled(core, 0);
   const stopping = cores.splice(0);
   await Promise.all(stopping.map((core) => core.core.group.close()));
   for (const core of stopping) await core.stop();
@@ -67,20 +86,20 @@ test('a phone added on one member says hello on every member with one key, and o
   expect(onA.principal).toBe('session');
   expect((await onA.call('group.get', {}))?.devices.map((device) => device.id)).toEqual([deviceId]);
   // A signature made for b opens nothing on a, and the same hello twice is refused.
-  await expect(open(a.url, { device: helloFor(phone, deviceId, id(b)) })).rejects.toThrow('not signed by its key for this machine');
+  await refused(a, open(a.url, { device: helloFor(phone, deviceId, id(b)) }), 'not signed by its key for this machine');
   const once = helloFor(phone, deviceId, id(a));
   clients.push(await connect(a.url, '', { device: once }));
-  await expect(connect(a.url, '', { device: once })).rejects.toThrow('already used');
-  await expect(open(a.url, { device: helloFor(phone, deviceId, id(a), Date.now() - 10 * 60_000) })).rejects.toThrow('two minutes');
+  await refused(a, connect(a.url, '', { device: once }), 'already used');
+  await refused(a, open(a.url, { device: helloFor(phone, deviceId, id(a), Date.now() - 10 * 60_000) }), 'two minutes');
   // The owner revokes it on b: a closes its socket and refuses its next hello.
   b.core.group.clients.revokeDevice(deviceId);
   await waitFor(() => a.core.group.view('owner')?.devices.length === 0);
   await waitFor(() => a.core.journal.listSessions().length === 0);
-  await expect(open(a.url, { device: helloFor(phone, deviceId, id(a)) })).rejects.toThrow('removed from the group');
-  await expect(open(b.url, { device: helloFor(phone, deviceId, id(b)) })).rejects.toThrow('removed from the group');
+  await refused(a, open(a.url, { device: helloFor(phone, deviceId, id(a)) }), 'removed from the group');
+  await refused(b, open(b.url, { device: helloFor(phone, deviceId, id(b)) }), 'removed from the group');
   // A device a machine never heard of is told to come back, never that it was removed.
   const stranger = phoneKey();
-  await expect(open(a.url, { device: helloFor(stranger, 'f'.repeat(64), id(a)) })).rejects.toThrow('has not heard of this device yet');
+  await refused(a, open(a.url, { device: helloFor(stranger, 'f'.repeat(64), id(a)) }), 'has not heard of this device yet');
 });
 
 test('a code drawn on one member is typed on another and still admits the phone', async () => {
@@ -93,7 +112,7 @@ test('a code drawn on one member is typed on another and still admits the phone'
   expect(b.core.group.view('owner')?.devices.map((device) => device.by)).toEqual([id(b)]);
   // Spent: another phone with the same code is refused.
   const other = phoneKey();
-  await expect(open(a.url, { grant: code, device: { publicKey: other.publicKey, sig: other.sign(deviceAdmitInput(code, other.publicKey)) } })).rejects.toThrow('wrong, expired, or was already used');
+  await refused(a, open(a.url, { grant: code, device: { publicKey: other.publicKey, sig: other.sign(deviceAdmitInput(code, other.publicKey)) } }), 'wrong, expired, or was already used');
 });
 
 test('a phone paired the older way hands over its key and keeps both until revoked, and removing a machine keeps the phones it added', async () => {
@@ -111,7 +130,7 @@ test('a phone paired the older way hands over its key and keeps both until revok
   clients.push(await connect(b.url, '', { device: helloFor(phone, enrolled.id, id(b)) }));
   // Revoked on b: the older pairing it took over is revoked with it.
   b.core.group.clients.revokeDevice(enrolled.id);
-  await expect(connect(b.url, '', { device: helloFor(phone, enrolled.id, id(b)) })).rejects.toThrow('removed from the group');
+  await refused(b, connect(b.url, '', { device: helloFor(phone, enrolled.id, id(b)) }), 'removed from the group');
 });
 
 test('a machine alone with its phones joins a group and brings them', async () => {
@@ -141,10 +160,10 @@ test('a member trusts the origins the others are served from, learned from their
   expect(isAllowedOrigin(proxied, port, '127.0.0.1') || b.core.group.allowsOrigin(proxied)).toBe(false);
   // A page of a, served there, opens its socket: the Host it asked for is the origin's. A phone's first page
   // holds no key yet, and its hello is refused: the origin is learned all the same, before any hello.
-  await expect(connect(a.url, 'no key yet', { headers: { origin: proxied, host: 'a-proxy.example' } })).rejects.toThrow();
+  await refused(a, connect(a.url, 'no key yet', { headers: { origin: proxied, host: 'a-proxy.example' } }));
   await waitFor(() => b.core.group.allowsOrigin(proxied));
   // An origin a trusts but that does not name the host asked for is not one it is served at.
-  await expect(connect(a.url, 'no key yet', { headers: { origin: 'https://other.example', host: 'a-proxy.example' } })).rejects.toThrow();
+  await refused(a, connect(a.url, 'no key yet', { headers: { origin: 'https://other.example', host: 'a-proxy.example' } }));
   expect(b.core.group.allowsOrigin('https://other.example')).toBe(false);
   // A socket from that page to b passes b's gate with no setting on b.
   const phone = phoneKey();
@@ -153,7 +172,7 @@ test('a member trusts the origins the others are served from, learned from their
   const cross = await open(b.url, { headers: { origin: proxied }, grant, device: { publicKey: phone.publicKey, sig: phone.sign(deviceAdmitInput(grant, phone.publicKey)) } });
   expect(cross.device).toMatch(/^[0-9a-f]{64}$/);
   // An origin nobody of the group is served from stays out.
-  await expect(connect(b.url, '', { headers: { origin: 'https://elsewhere.example' }, device: helloFor(phone, cross.device!, id(b)) })).rejects.toThrow();
+  await refused(b, connect(b.url, '', { headers: { origin: 'https://elsewhere.example' }, device: helloFor(phone, cross.device!, id(b)) }));
 });
 
 test('a device redeeming its code again after a lost answer is answered until the grant expires, and a malformed key keeps its own refusal', async () => {
@@ -168,6 +187,8 @@ test('a device redeeming its code again after a lost answer is answered until th
   // A key that is no key is invalid, said so with its field: never taken for a removal.
   const fresh = await a.core.group.clients.addDevice();
   const grant = new URL(fresh.url).searchParams.get('grant')!;
+  const before = a.server.connections();
   const refusal = await connect(a.url, '', { grant, device: { publicKey: 'not-a-key', sig: 'x' } }).catch((error: { rpc?: { code: number; data?: { field?: string } } }) => error);
+  await settled(a, before);
   expect((refusal as { rpc?: { code: number; data?: { field?: string } } }).rpc).toMatchObject({ code: -32602, data: { field: 'device.publicKey' } });
 });
