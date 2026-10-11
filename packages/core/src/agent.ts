@@ -235,10 +235,13 @@ export function registerAgentMethods(core: Core): void {
       id: project.id, name: project.name, path: project.path, repository: project.repository === true, drafts: project.kind === 'drafts', current: project.id === own,
     }));
   });
-  core.router.register('panel.open', (params) => {
+  core.router.register('panel.open', async (params) => {
     const thread = core.threads.require(params.threadId);
     const surface = checkSurface(thread.cwd, params.surface);
-    core.bus.emit('panel.requested', { threadId: thread.id, surface, at: Date.now() });
+    // One browser per conversation: a page opens as a new tab of the browser
+    // its agent drives, and every client brings that tab forward on its own.
+    if (surface.kind === 'browser') await core.browser.command({ threadId: thread.id, action: { kind: 'open', url: surface.url } });
+    else core.bus.emit('panel.requested', { threadId: thread.id, surface, at: Date.now() });
     // Nobody is watching this thread: the agent learns its request went nowhere
     // rather than believing the user saw something.
     return { shown: core.subscribers.hasSubscribers(thread.id) };

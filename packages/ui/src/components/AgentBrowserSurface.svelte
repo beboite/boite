@@ -102,7 +102,7 @@
   });
 </script>
 
-<section class="agent-browser" data-testid="agent-browser-surface" aria-label={strings.rightPanel.agentBrowser}>
+<section class="agent-browser" data-testid="agent-browser-surface" aria-label={strings.rightPanel.browser}>
   {#if status && !status.available}
     <div class="empty" data-testid="agent-browser-unavailable">
       <AppWindow size={20} strokeWidth={1.75} />

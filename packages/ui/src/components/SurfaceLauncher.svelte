@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { SurfaceKind } from '../lib/right-panel.svelte';
   import { strings } from '../lib/strings';
-  import { offeredCards, kindHint, kindName, unavailable } from '../lib/surface-labels';
+  import { offeredCards, kindName, unavailable } from '../lib/surface-labels';
   import SurfaceIcon from './SurfaceIcon.svelte';
 
   /** The empty panel: one card per kind of surface, each with the letter that opens it. */
@@ -30,21 +30,20 @@
     </div>
   {/if}
   <div class="cards">
-    <!-- A card that cannot open stays and says why: a page needs the
-         desktop shell's webview, and the rest read what a paired device
-         is refused. -->
+    <!-- A card that cannot open stays and says why in its tooltip: the rest
+         read what a paired device is refused. -->
     {#each cards as card (card.kind)}
       <button
         type="button"
         class="card"
         disabled={!available(card.kind)}
+        title={available(card.kind) ? undefined : unavailable()}
         data-testid="launch-{card.kind}"
         onclick={() => onlaunch(card.kind)}
         oncontextmenu={(event) => onmenu(event, card.kind)}
       >
         <SurfaceIcon kind={card.kind} size={16} />
         <span class="card-name ui-label">{kindName(card.kind)}</span>
-        <span class="card-hint">{available(card.kind) ? kindHint(card.kind) : unavailable(card.kind)}</span>
         <span class="kbd ui-label">{card.key}</span>
       </button>
     {/each}
@@ -104,10 +103,6 @@
     margin-top: 6px;
   }
 
-  .card-hint {
-    font-size: var(--text-sm);
-    line-height: 1.4;
-  }
 
   .card .kbd {
     position: absolute;

@@ -71,8 +71,8 @@ it, and the menu's last row, Choose the buttons, leads back to the switches.
 
 | Surface  | Tab      | What it shows                                                                 |
 | -------- | -------- | ----------------------------------------------------------------------------- |
-| Browser  | many     | the user's own pages, in a shell child webview with persistent cookies; test fixtures use an iframe |
-| Agent browser | one | the conversation's browser tabs on its machine, a webview of the Windows desktop app on its own core, frames elsewhere, covered until Show except a tab the owner opens there; see [browser.md](browser.md) |
+| Browser  | one      | the conversation's browser, the one its agent drives: a webview of the Windows desktop app on its own core, frames from the thread's machine elsewhere, covered until Show except a tab the owner opens there; see [browser.md](browser.md) |
+| Preview  | many     | a `boite preview` page, in a shell child webview with persistent cookies, where preview comments pick elements; test fixtures use an iframe |
 | Changes  | one      | `git.status` of the working directory, a file's diff on click                 |
 | Files    | one      | the working directory as a tree, `files.list` one directory at a time         |
 | File     | per path | a text editor with save, an image viewer with zoom and pan, a video or audio player |
@@ -82,8 +82,13 @@ it, and the menu's last row, Choose the buttons, leads back to the switches.
 | Trace    | one      | the thread's processes, see [trace.md](trace.md)                              |
 | Device   | one      | the simulators and emulators open in the thread, covered until Show, see [devices.md](devices.md) |
 
+The launcher and the new-surface menu offer one Browser card, and `boite
+browse <url>` opens its page as a new tab of that same browser. Only `boite
+preview` opens a page in the desktop's own webview. A card says nothing below
+its name; one that cannot open on this client says why in its tooltip.
+
 The iframe bridge belongs to browser test fixtures; ordinary web clients have
-no native Browser surface. [Portability](portability.md#remaining-gaps) records
+no native Preview surface. [Portability](portability.md#remaining-gaps) records
 the Linux shell's system-browser fallback.
 
 The address field accepts public hosts, local development addresses such as
@@ -286,8 +291,8 @@ watching keeps the request on its panel for the next open.
 `panel` toggles the panel, `browser`, `changes`, `files`, `tasks` and `trace`
 open their surface, `close-surface` closes the active tab. The defaults are in
 [keybindings.md](keybindings.md). With the launcher showing, a single letter
-opens a surface: A, B, C, D, F, K, M, T, W. M opens Messages, D the Device
-surface and W the Agent browser.
+opens a surface: A, B, C, D, F, K, M, T. M opens Messages, D the Device
+surface and B the Browser, the conversation's.
 
 ## Experimental PR review
 

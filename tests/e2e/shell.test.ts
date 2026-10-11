@@ -1072,12 +1072,14 @@ shellTest(
 );
 
 shellTest('native preview references attach to the composer and highlight from sent history', async () => {
-  if (!page) throw new Error('shell is not ready');
-  const fixture = Bun.serve({
-    hostname: '127.0.0.1', port: 0,
-    fetch: () => new Response('<!doctype html><html><head><title>Preview fixture</title></head><body><button id="native-preview-target">Save changes</button></body></html>', { headers: { 'content-type': 'text/html' } })
-  });
-  const url = `http://127.0.0.1:${fixture.port}/preview`;
+  if (!page || !coreFile) throw new Error('shell is not ready');
+  // `boite preview` is what opens a page in the app's own webview: the panel's
+  // one Browser card opens the conversation's browser instead.
+  const core = await connect(`http://127.0.0.1:${coreFile.port}`, coreFile.token);
+  const thread = (await core.call('threads.list', {})).find(one => one.title.includes('shell turn'));
+  if (!thread) throw new Error('the shell turn thread is missing');
+  writeFileSync(join(thread.cwd, 'preview-fixture.html'), '<!doctype html><html><head><title>Preview fixture</title></head><body><button id="native-preview-target">Save changes</button></body></html>');
+  let url = '';
   let child: BrowserPage | undefined;
   try {
     await page.click(testid('nav-settings'));
@@ -1086,12 +1088,15 @@ shellTest('native preview references attach to the composer and highlight from s
     await page.click(testid('settings-back'));
     await page.type(testid('composer-input'), 'Make clearer.');
     await page.evaluate(`(() => { const input = document.querySelector('${testid('composer-input')}'); input.setSelectionRange(5, 5); input.dispatchEvent(new Event('select')); })()`);
-    await page.click(testid('panel-toggle'));
-    await page.waitFor(`document.querySelector('${testid('launch-browser')}')`);
-    await page.click(testid('launch-browser'));
-    await page.type(testid('browser-url'), url);
-    await page.evaluate(`document.querySelector('${testid('browser-url')}').closest('form').requestSubmit()`);
-    await waitForTargets(url, 1, 20_000);
+    await core.call('artifacts.preview', { threadId: thread.id, path: 'preview-fixture.html' });
+    // The client points the address at the host it reaches the core by: read the page it opened.
+    const deadline = Date.now() + 20_000;
+    while (!url) {
+      const targets = (await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json()) as { type: string; url: string }[];
+      url = targets.find(target => target.type === 'page' && target.url.endsWith('/preview-fixture.html'))?.url ?? '';
+      if (!url && Date.now() > deadline) throw new Error('the preview page never opened');
+      if (!url) await Bun.sleep(POLL_MS);
+    }
     child = await BrowserPage.attach(debugPort, url);
     await child.waitFor(`document.querySelector('#native-preview-target')`);
     await page.click(testid('preview-annotate'));
@@ -1132,7 +1137,7 @@ shellTest('native preview references attach to the composer and highlight from s
     // Closing the last tab destroys the child view and closes the panel.
     if (await page.evaluate(`!!document.querySelector('${testid('panel-tab-close')}')`)) await page.click(testid('panel-tab-close'));
     await page.type(testid('composer-input'), '');
-    fixture.stop(true);
+    core.close();
   }
 }, TIMEOUT);
 

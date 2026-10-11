@@ -125,7 +125,7 @@ function checkSurface(ctx: FakeContext, cwd: string, surface: PanelSurface): Pan
   return { kind: kind as 'trace' | 'tasks' };
 }
 
-export function workdirMethods(ctx: FakeContext) {
+export function workdirMethods(ctx: FakeContext, all: () => Pick<FakeMethods, 'browser.command'>) {
   const snapshots = new Map<string, ArtifactContent>();
   return {
     'artifacts.preview': async ({ threadId, path }) => {
@@ -215,11 +215,9 @@ export function workdirMethods(ctx: FakeContext) {
       // The core sends this to every client subscribed to the thread, and
       // `shown` says whether there was one to receive it.
       const shown = ctx.bus.subscribed.has(thread.id);
-      ctx.emitToThread(thread.id, 'panel.requested', {
-        threadId: thread.id,
-        surface,
-        at: ctx.now()
-      });
+      // As the core does: a page is a new tab of the conversation's browser.
+      if (surface.kind === 'browser') await all()['browser.command']({ threadId: thread.id, action: { kind: 'open', url: surface.url } });
+      else ctx.emitToThread(thread.id, 'panel.requested', { threadId: thread.id, surface, at: ctx.now() });
       return { shown };
     },
     'git.status': async (params) => {

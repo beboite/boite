@@ -249,7 +249,7 @@
       id: card.kind,
       label: kindName(card.kind),
       disabled: !available(card.kind),
-      ...(available(card.kind) ? {} : { hint: unavailable(card.kind) })
+      ...(available(card.kind) ? {} : { hint: unavailable() })
     }, ...profileItems(card.kind)]),
     // The way back to a kind this device put away.
     separator('sep-customize'),

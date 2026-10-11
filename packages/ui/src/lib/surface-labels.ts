@@ -1,6 +1,6 @@
 /**
  * What the right panel calls each kind of surface: the launcher's cards, the
- * tabs and the new-surface menu all read their names, hints and availability here.
+ * tabs and the new-surface menu all read their names and availability here.
  */
 import { baseName, type Surface, type SurfaceKind } from './right-panel.svelte';
 import { browserProfiles } from './browser-profiles.svelte';
@@ -14,8 +14,9 @@ import { work, type ControlId } from './work-prefs.svelte';
 export const CARDS: { kind: SurfaceKind; key: string }[] = [
   { kind: 'agents', key: 'A' },
   { kind: 'messages', key: 'M' },
-  { kind: 'browser', key: 'B' },
-  { kind: 'agent-browser', key: 'W' },
+  // One browser: the conversation's, which the agent drives too. On the app's
+  // own core it is the app's webview, elsewhere frames from the thread's machine.
+  { kind: 'agent-browser', key: 'B' },
   { kind: 'device', key: 'D' },
   { kind: 'changes', key: 'C' },
   { kind: 'files', key: 'F' },
@@ -41,26 +42,13 @@ export function offeredCards(): { kind: SurfaceKind; key: string }[] {
 export function kindName(kind: SurfaceKind): string {
   if (kind === 'agents') return strings.delegation.heading;
   if (kind === 'messages') return strings.agentMessages.heading;
-  if (kind === 'browser') return strings.rightPanel.browser;
-  if (kind === 'agent-browser') return strings.rightPanel.agentBrowser;
+  if (kind === 'browser' || kind === 'agent-browser') return strings.rightPanel.browser;
   if (kind === 'changes') return strings.rightPanel.changes;
   if (kind === 'files') return strings.rightPanel.files;
   if (kind === 'device') return strings.rightPanel.device;
   if (kind === 'file') return strings.rightPanel.file;
   if (kind === 'tasks') return strings.rightPanel.tasks;
   return strings.rightPanel.trace;
-}
-
-export function kindHint(kind: SurfaceKind): string {
-  if (kind === 'agents') return strings.delegation.panelHint;
-  if (kind === 'messages') return strings.agentMessages.hint;
-  if (kind === 'browser') return strings.rightPanel.browserHint;
-  if (kind === 'agent-browser') return strings.rightPanel.agentBrowserHint;
-  if (kind === 'changes') return strings.rightPanel.changesHint;
-  if (kind === 'files') return strings.rightPanel.filesHint;
-  if (kind === 'device') return strings.rightPanel.deviceHint;
-  if (kind === 'tasks') return strings.rightPanel.tasksHint;
-  return strings.rightPanel.traceHint;
 }
 
 /**
@@ -74,8 +62,9 @@ export function available(kind: SurfaceKind, inShell: boolean, owner: boolean): 
   return kind === 'browser' ? inShell : owner;
 }
 
-export function unavailable(kind: SurfaceKind): string {
-  return kind === 'browser' ? strings.rightPanel.browserAbsent : strings.rightPanel.ownerOnly;
+/** Why a card cannot open: every card a device offers opens on the owner's app. */
+export function unavailable(): string {
+  return strings.rightPanel.ownerOnly;
 }
 
 export function label(surface: Surface): string {

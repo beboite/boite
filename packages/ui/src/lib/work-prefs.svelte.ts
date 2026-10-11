@@ -30,7 +30,6 @@ export const CONTROL_IDS = [
   'sidebar.add-project',
   'panel.agents',
   'panel.messages',
-  'panel.browser',
   'panel.agent-browser',
   'panel.changes',
   'panel.files',

@@ -531,11 +531,12 @@
         store.togglePanel();
         break;
       case 'browser': {
-        if (!store.openThread || !inShell) return;
+        // The conversation's browser, the one its agent drives, on every client.
+        if (!store.openThread) return;
         event.preventDefault();
-        const open = store.panel.surfaces.find((surface) => surface.kind === 'browser');
+        const open = store.panel.surfaces.find((surface) => surface.kind === 'agent-browser');
         if (open) store.panel.activate(open.id);
-        else store.panel.open('browser');
+        else store.panel.open('agent-browser');
         break;
       }
       case 'changes':

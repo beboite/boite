@@ -2353,7 +2353,8 @@ export interface AgentMove {
 /**
  * What the right panel shows on request. `file` opens the file at the line;
  * `diff` opens the changes, on one file when a path is given; `browser` opens
- * the url in the panel's browser; `trace` and `tasks` open those surfaces.
+ * the url in a new tab of the conversation's browser, the one its agent drives
+ * (`artifacts.preview` alone sends a `browser` surface to the panel itself); `trace` and `tasks` open those surfaces.
  * Paths are relative to the thread's working directory or absolute inside it.
  */
 export type PanelSurface =

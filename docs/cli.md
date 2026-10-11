@@ -260,7 +260,7 @@ boite preview <file.html>          open a local HTML artifact and its neighbouri
 boite preview-close <file.html>    stop serving that preview
 boite show <file>[:line]         open the file in the panel, at that line
 boite diff [file]                open the changes surface, or one file's diff
-boite browse <url>               open the url in the panel's browser (http, https)
+boite browse <url>               open the url in a new tab of this conversation's browser (http, https)
 boite open trace|tasks|changes|files [dir]
 boite status                     git status: branch, upstream, one row per change
 boite ask <question> [option ...] [--multiple]
