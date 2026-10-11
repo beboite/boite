@@ -231,7 +231,11 @@ export function fakeUsageHistory(edges: number[], options: { seeded: boolean; fi
     }
   }
   for (const turn of options.finished) {
-    groups.push({ ...turn, turns: 1, reported: 1, priced: turn.usage.costUsdEquivalent === null ? 0 : 1, usage: { ...turn.usage }, price: null });
+    // A turn finished here is priced like the seeded ones: at its model's rates when the ledger lists them.
+    const price = PROFILES.find((profile) => profile.providerId === turn.providerId)?.models.find((model) => model.id === turn.model)?.price ?? null;
+    const usage = { ...turn.usage };
+    if (price !== null) usage.costUsdEquivalent = (usage.inputTokens * price.rates.input + usage.outputTokens * price.rates.output + usage.cacheReadTokens * price.rates.cacheRead + usage.cacheWriteTokens * price.rates.cacheWrite) / 1_000_000;
+    groups.push({ ...turn, turns: 1, reported: 1, priced: usage.costUsdEquivalent === null ? 0 : 1, usage, price });
   }
 
   const rows = new Map<string, UsageHistoryRow>();

@@ -24,7 +24,8 @@ const OUT = join(import.meta.dir, '..', 'packages', 'core', 'src', 'pricing', 'r
 const SINCE = '2025-01-01';
 /** Speech, vision and computer-use builds, reseller copies and open-weight sizes such as `qwen3-14b` or `qwen3.6-35b-a3b`. */
 const SKIPPED = /embedding|asr|voxtral|-vl\b|vl-|qvq|omni|vision|computer-use|^glm-[\d.]+v|v-turbo|^zai-|-\d+b(?:-a\d+b)?(?:-|$)/;
-const DATED = /-(?:\d{8}|\d{4})$/;
+/** The release dates `priceOf` strips before it looks again (`packages/core/src/pricing/index.ts`); only those aliases can go. */
+const DATED = /-(?:\d{8}|\d{4}-\d{2}-\d{2})$/;
 
 interface Listed {
   release_date?: string;

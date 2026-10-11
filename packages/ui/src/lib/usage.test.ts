@@ -196,5 +196,8 @@ describe('the fake ledger', () => {
     const history = fakeUsageHistory(edges, { seeded: false, finished: [turn], now });
     expect(history.rows).toEqual([{ bucket: 89, providerId: 'echo', model: null, turns: 1, reported: 1, priced: 1, usage: usage(4, 4, 0.01), price: null }]);
     expect(history.threads.map((thread) => thread.threadId)).toEqual(['t-new']);
+    // A finished turn on a listed model is priced at its rates, whatever cost it carried.
+    const opus = { ...turn, providerId: 'claude', model: 'claude-opus-5-5', usage: usage(1_000_000, 0, 99) };
+    expect(fakeUsageHistory(edges, { seeded: false, finished: [opus], now }).rows[0]).toMatchObject({ priced: 1, price: { model: 'claude-opus-5-5' }, usage: { costUsdEquivalent: 4 } });
   });
 });
