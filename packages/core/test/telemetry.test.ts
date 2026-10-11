@@ -47,6 +47,17 @@ test('enhanced normalization preserves canonical defaults across host and relay'
   expect(publicModel('anthropic/claude-sonnet-4-5-20250929[1m]')).toBe('claude-sonnet-4-5');
 });
 
+test('public models follow families and Boite provider prefixes', () => {
+  // Selections as Boite stores them; a frozen list reported all of these as `other`.
+  for (const [selected, reported] of <[string, string][]>[
+    ['claude/claude-opus-5-5', 'claude-opus-5-5'], ['claude-haiku-5-5', 'claude-haiku-5-5'],
+    ['codex/gpt-6.1-sol', 'gpt-6.1-sol'], ['grok-4.7', 'grok-4.7'],
+    ['opencode/openrouter/deepseek-v4', 'deepseek-v4'], ['opus', 'opus'],
+  ]) expect(publicModel(selected)).toBe(reported);
+  for (const hidden of ['ft:gpt-4o:acme:secret', 'gpt-6-acme', 'C:\\models\\gpt-5.gguf', 'claude-opus-5-internal', 'my-proxy/acme-coder'])
+    expect(publicModel(hidden)).toBe('other');
+});
+
 afterEach(async () => { for (const cleanup of cleanups.splice(0)) await cleanup(); });
 function fixture(respond: (path: string, body: any) => Promise<Response> = async () => Response.json({ ok: true })) {
   const dataDir = mkdtempSync(join(tmpdir(), 'boite-telemetry-'));
