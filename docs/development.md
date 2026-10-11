@@ -234,7 +234,8 @@ drafts stay visible while Working is folded and appear once when expanded;
 questions and failures stay in the main list. Done and Archived read only that project's
 archived summaries when expanded, with the same reading and restore actions as
 Recent. One closed fold below the main list, on desktop and phone, holds every
-project the list leaves out (`ProjectShelf.svelte`): idle ones, empty or with
+project the list leaves out (`ProjectShelf.svelte`, its rows in `ProjectShelfRows.svelte`,
+loaded at the first opening or once the list has drawn): idle ones, empty or with
 every conversation archived, then archived projects, a step quieter and marked
 with the archive glyph. It reads Idle projects or Archived projects while it holds
 one kind, Other projects once it holds both. Choosing an idle row starts a draft

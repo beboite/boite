@@ -133,7 +133,7 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 591,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,500,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,525,000 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 3,760,000 |
 
@@ -175,7 +175,12 @@ limit rises to 4,500,000. Merged with `5dd77e39` and its review fixes, the
 Windows job measured a 591,007-byte entry chunk at `b294a3da`, and the next
 fixes 591,270 on Linux. A done row now loads with the first done rows (5,167
 bytes of JavaScript, 3,113 of CSS): the entry chunk measured 587,071 and the UI
-4,496,036, both under their limits.
+4,496,036. Merged with `daff9a53`, whose agent discussions had raised the UI
+limit to 4,500,000 on their own, the Windows job measured 591,322 and
+4,508,531 at `a1bd2cc4`. The project fold's rows now load at its first opening
+or after the list has drawn (7,250 bytes of JavaScript, 3,406 of CSS): on Linux
+the entry chunk measured 585,204, under its unchanged 591,000, and the UI
+4,511,041. The UI limit rises to 4,525,000.
 
 On 2026-10-10, `bun run build:ui` with Bun 1.4.2 measured 4,420,649 UI bytes at
 `feeb393b` and 4,425,557 with close confirmation and typed agent archival.
