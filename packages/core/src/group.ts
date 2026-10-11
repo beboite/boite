@@ -84,6 +84,12 @@ export function inviteOf(text: string): string {
 
 interface JoinReply { nonce: string; publicKey: string; roster?: unknown; error?: string }
 
+/** Where a member is reached: the addresses it gives, then the origins it said it is served at. */
+function reachOf(roster: Roster, core: CoreEntry): string[] {
+  const served = roster.origins?.[core.coreId]?.list ?? [];
+  return [...core.addresses, ...served.filter((origin) => !core.addresses.includes(origin))];
+}
+
 export class GroupStore {
   private roster: Roster | null = null;
   /** Session id here to the member it stands for: `core:<id>` or `device:<id>`. Local, never exchanged. */
@@ -188,7 +194,7 @@ export class GroupStore {
       id: roster.id,
       name: roster.name,
       self: this.selfId(),
-      cores: liveCores(roster).map((core) => ({ coreId: core.coreId, name: core.name, ...(core.os ? { os: core.os } : {}), addresses: [...core.addresses], epoch: core.epoch })),
+      cores: liveCores(roster).map((core) => ({ coreId: core.coreId, name: core.name, ...(core.os ? { os: core.os } : {}), addresses: reachOf(roster, core), epoch: core.epoch })),
       // Who else is in the group is the owner's to read; a device sees itself.
       devices: principal === 'owner' ? devices : devices.filter((entry) => entry.id === device),
       ...(device === undefined ? {} : { device }),
@@ -212,9 +218,10 @@ export class GroupStore {
   /** Every address of a member, the one that last answered first. Null for a core outside the group. */
   routes(coreId: string): string[] | null {
     const entry = this.roster?.cores.find((core) => core.coreId === coreId);
-    if (entry === undefined) return null;
+    if (entry === undefined || this.roster === null) return null;
+    const all = reachOf(this.roster, entry);
     const good = this.good.get(coreId);
-    return good !== undefined && entry.addresses.includes(good) ? [good, ...entry.addresses.filter((address) => address !== good)] : [...entry.addresses];
+    return good !== undefined && all.includes(good) ? [good, ...all.filter((address) => address !== good)] : all;
   }
 
   reached(coreId: string, url: string): void {
@@ -323,12 +330,14 @@ export class GroupStore {
    * last published, and between a move and the next publication it is behind.
    */
   private given(): string[] {
+    // Where pages of this machine were served is given too: a proxy in front of it answers there.
+    const served = [...new Set([...(this.roster?.origins?.[this.selfId()]?.list ?? []), ...this.served])];
     // Until the server is bound there is nothing to read: what was last published stands.
-    if (!this.live) return ticketAddresses(this.roster?.cores.find((core) => core.coreId === this.selfId())?.addresses ?? []);
+    if (!this.live) return ticketAddresses([...(this.roster?.cores.find((core) => core.coreId === this.selfId())?.addresses ?? []), ...served]);
     const ip = tailnetAddress();
     const tailnet = ip === null ? null : { ip, name: null };
     const listening = { ...this.core.boundEndpoint(), tailnet: this.onTailnet && ip === this.tailnet?.ip, publicUrl: this.core.settings.get().publicUrl };
-    return ticketAddresses(advertisedAddresses(listening, tailnet));
+    return ticketAddresses([...advertisedAddresses(listening, tailnet), ...served]);
   }
 
   /** False for a key the group issued for an address this machine no longer gives, revoked on the spot. Any other key is none of the group's. */
@@ -1134,7 +1143,7 @@ export class GroupStore {
     const target = liveCores(roster).find((core) => core.coreId === coreId);
     if (target === undefined || target.coreId === self) throw refused(`${String(coreId)} is not another machine of this group`, { field: 'coreId' });
     // The ticket is good at one address, and the member checks it still gives that one: a stale roster here vouches for nothing there.
-    const usable = ticketAddresses(target.addresses);
+    const usable = ticketAddresses(reachOf(roster, target));
     const at = url === undefined ? usable[0] : usable.find((address) => address === url);
     if (at === undefined) throw refused(`url: expected an address of ${target.name} a key may be sent to, HTTPS when it has one and written as numbers otherwise`, { field: 'url' });
     let sub: string;
@@ -1156,7 +1165,7 @@ export class GroupStore {
       { v: 1, g: roster.id, iss: self, aud: target.coreId, u: at, sub, role, nonce: newToken(), exp: expiresAt },
       (input) => this.core.coordination.signature(input),
     );
-    return { ticket, coreId: target.coreId, addresses: this.routes(target.coreId) ?? [...target.addresses], url: at, expiresAt };
+    return { ticket, coreId: target.coreId, addresses: this.routes(target.coreId) ?? reachOf(roster, target), url: at, expiresAt };
   }
 
   /** `hello` with a ticket: checked against the roster, then a session of this core's own, once. */
