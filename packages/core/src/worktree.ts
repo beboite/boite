@@ -196,7 +196,7 @@ export class Worktrees {
     }
     const at = performance.now();
     const [stderr, stdout, code] = await Promise.all([new Response(spawned.proc.stderr).text(), new Response(spawned.proc.stdout).text(), spawned.exited]);
-    logGit(this.core, threadId, args, code, performance.now() - at, stderr);
+    try { logGit(this.core, threadId, args, code, performance.now() - at, stderr); } catch { /* A diagnostic storage failure must not break worktrees. */ }
     return { code, stderr, stdout };
   }
 }

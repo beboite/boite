@@ -10,7 +10,7 @@
 import { closeSync, fchmodSync, openSync, writeFileSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { formatLogLine, formatLogTime, LOG_LEVELS, LOG_ORIGINS, type CoreLogLevel, type CoreLogRecord, type CoreLogsQuery, type DiagnosticSummary, type LogOrigin } from '@boite/contracts';
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import type { CoreClient } from './client.ts';
 import { Usage } from './cli-args.ts';
 
@@ -144,7 +144,8 @@ function problemLines(summary: DiagnosticSummary): string[] {
 export async function logsCommand(args: string[], client: CoreClient, threadId: string, agent: boolean, cwd: string, print: Printer): Promise<void> {
   const { positional, flags: options } = flags(args);
   const action = positional[0] ?? 'list';
-  const own = agent ? { threadId } : {};
+  // An agent reads its own thread; the owner one thread when the global --thread names it, as `logs` does.
+  const own = agent || threadId ? { threadId } : {};
   if (action === 'help') { print([LOGS_HELP], { help: LOGS_HELP }); return; }
   if (positional.length > 1) throw new Usage(`logs ${action} takes flags only; boite logs help lists them`);
   if (action === 'problems') {
@@ -214,7 +215,12 @@ export async function issueCommand(args: string[], client: CoreClient, threadId:
   if (options.description !== undefined && options.descriptionFile !== undefined) throw new Usage('issue takes --description or --description-file, not both');
   let description = options.description;
   if (options.descriptionFile) {
-    try { description = readFileSync(isAbsolute(options.descriptionFile) ? options.descriptionFile : resolve(cwd, options.descriptionFile), 'utf8'); }
+    const file = isAbsolute(options.descriptionFile) ? options.descriptionFile : resolve(cwd, options.descriptionFile);
+    // The core takes 20000 characters: a log or a dump given by mistake is refused before it is read.
+    let size = 0;
+    try { size = statSync(file).size; } catch { /* readFileSync below says why */ }
+    if (size > 256 * 1024) throw new Usage(`--description-file ${options.descriptionFile} is ${Math.round(size / 1024)} KiB; a description is at most 20000 characters`);
+    try { description = readFileSync(file, 'utf8'); }
     catch (error) { throw new Usage(`--description-file ${options.descriptionFile} cannot be read: ${(error as NodeJS.ErrnoException).code ?? (error as Error).message}`); }
   }
   if (!description) throw new Usage('issue needs --description or --description-file');

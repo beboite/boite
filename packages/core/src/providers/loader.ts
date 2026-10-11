@@ -530,12 +530,6 @@ export function registerProviderMethods(core: Core): void {
     const result = payload as ProviderLoadResult;
     logDetection(result.loaded, result.rejected.length);
   });
-  void core.providers.settle().then(() => {
-    settledOnce = true;
-    if (core.stopping || core.journal.isClosed()) return;
-    const first = core.providers.list();
-    logDetection(first.loaded, first.rejected.length);
-  }, () => { settledOnce = true; });
   // One fingerprint for every change found behind a list, so the next one is not announced twice.
   const announce = (after: string): void => {
     if (core.stopping || core.journal.isClosed()) return;
@@ -566,6 +560,13 @@ export function registerProviderMethods(core: Core): void {
     },
     () => announce('a version read'),
   );
+  // After attachVersions, so the wait covers the reads it starts: a program not read yet is not logged missing.
+  void core.providers.settle().then(() => {
+    settledOnce = true;
+    if (core.stopping || core.journal.isClosed()) return;
+    const first = core.providers.list();
+    logDetection(first.loaded, first.rejected.length);
+  }, () => { settledOnce = true; });
   core.router.register('providers.reload', async () => {
     const before = fingerprint(core.providers.list());
     core.providers.load();

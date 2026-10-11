@@ -146,8 +146,11 @@ export class TurnRunner {
       this.core.log('error', `turn ${turnId} failed: ${result.diagnosticError ?? result.error ?? 'unknown error'}`, { source: thread.providerId, event: 'turn.failed', threadId, turnId });
       // The agent's own last words are usually the cause; provider output is otherwise never persisted.
       // Only this turn's: a quick retry must not blame the previous turn's lines on it.
-      const tail = stderrTail(threadId, undefined, undefined, running.startedAt ?? 0);
-      if (tail !== null) this.core.logs.warn(`The agent printed ${tail.length} characters on stderr before turn ${turnId} failed; they are in data.stderrTail and stay on this machine`, { source: thread.providerId, event: 'turn.failed.stderr', threadId, turnId, data: { stderrTail: tail } });
+      // After settlement: a diagnostic failure must not skip the moves, wakes and flushes below.
+      try {
+        const tail = stderrTail(threadId, undefined, undefined, running.startedAt ?? 0);
+        if (tail !== null) this.core.logs.warn(`The agent printed ${tail.length} characters on stderr before turn ${turnId} failed; they are in data.stderrTail and stay on this machine`, { source: thread.providerId, event: 'turn.failed.stderr', threadId, turnId, data: { stderrTail: tail } });
+      } catch { /* the turn's own record above already says it failed */ }
     }
     if (!next) return;
     if (!threadOwned) {

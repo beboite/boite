@@ -42,6 +42,8 @@ export function watchProviderProcess(core: Core, child: SpawnedChild, command: s
   const program = programName(command);
   const version = knownVersion(command);
   const startedAt = performance.now();
+  // Wall time, as `noteStderr` stamps lines: only what this process printed describes its end.
+  const startedWall = Date.now();
   const base = { source: who.providerId, threadId: who.threadId, ...(who.turnId === undefined ? {} : { turnId: who.turnId }) };
   const started = (): void => core.logs.info(`Started ${program}${version ? ` ${version}` : ''} for ${who.providerId}, pid ${child.pid ?? 'unknown'}, ${who.resume ? 'resuming its saved session' : 'new session'}`, {
     ...base, event: 'driver.process.started', data: { program, version, pid: child.pid ?? null, resume: who.resume },
@@ -74,7 +76,7 @@ export function watchProviderProcess(core: Core, child: SpawnedChild, command: s
     reported = true;
     const lifetime = (exitedAt ?? performance.now()) - startedAt;
     const abnormal = abnormalExit(code, signal);
-    const tail = abnormal ? stderrTail(who.threadId) : null;
+    const tail = abnormal ? stderrTail(who.threadId, undefined, undefined, startedWall) : null;
     const how = signal !== null ? `was ended by ${signal}` : `exited with code ${code ?? 'unknown'}`;
     core.logs.record(abnormal ? 'warn' : 'info', `${program} for ${who.providerId}, pid ${child.pid ?? 'unknown'}, ${how} after ${Math.round(lifetime / 100) / 10} s${tail ? `; its last ${tail.length} characters of stderr are in data.stderrTail` : abnormal ? '; it printed nothing on stderr' : ''}`, {
       ...base, event: abnormal ? 'driver.process.crashed' : 'driver.process.exited', durationMs: lifetime,

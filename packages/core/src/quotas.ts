@@ -155,8 +155,8 @@ async function withQuotaProbe<T>(core: Core, account: Account, name: string, rea
     await Promise.all(exits);
     // A descendant can hold the directory after the direct child closed. Neither
     // waiting for it nor removing the directory may replace the windows just read.
-    await core.procs.stopAndWait(threadId).catch((error: unknown) => core.log('warn', `${name} quota: ${error instanceof Error ? error.message : String(error)}`));
-    await removeDir(cwd, (message) => core.log('warn', `${name} quota: ${message}`));
+    await core.procs.stopAndWait(threadId).catch((error: unknown) => core.log('warn', `${name}${reset ? '' : ' quota'}: ${error instanceof Error ? error.message : String(error)}`, { source: 'quotas', event: 'quota.read' }));
+    await removeDir(cwd, (message) => core.log('warn', `${name}${reset ? '' : ' quota'}: ${message}`, { source: 'quotas', event: 'quota.read' }));
   }
 }
 

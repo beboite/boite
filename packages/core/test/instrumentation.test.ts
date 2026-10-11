@@ -28,13 +28,13 @@ function recordingCore(): { core: Core; records: { level: string; message: strin
 test('an agent process that crashes leaves one warning with its exit code and the tail of its stderr in data only', async () => {
   const threadId = 'thr_stderr_tail';
   forgetStderr(threadId);
-  for (let index = 0; index < 30; index += 1) noteStderr(threadId, `line ${index} ${'x'.repeat(40)}`);
-  noteStderr(threadId, 'fatal: the model refused the session');
   const { core, records } = recordingCore();
   // A stand-in child: on macOS CI a real one sometimes delivered neither `exit` nor `close`
   // within 10 s, and this test is about the record, not the runtime's process events.
   const child = Object.assign(new EventEmitter(), { pid: 4243 }) as unknown as SpawnedChild;
   watchProviderProcess(core, child, '/home/someone/.local/bin/claude', { threadId, turnId: 'trn_1', providerId: 'claude', resume: true });
+  for (let index = 0; index < 30; index += 1) noteStderr(threadId, `line ${index} ${'x'.repeat(40)}`);
+  noteStderr(threadId, 'fatal: the model refused the session');
   child.emit('exit', 3, null);
   child.emit('close', 3, null);
   const crashed = records.find(record => record.context.event === 'driver.process.crashed');
@@ -48,6 +48,14 @@ test('an agent process that crashes leaves one warning with its exit code and th
   expect(crashed?.message).not.toContain('fatal: the model refused');
   expect(crashed?.message).not.toContain('/home/someone');
   expect(records[0]?.context.event).toBe('driver.process.started');
+  forgetStderr(threadId);
+  // Only what this process printed: a line from before it started is left out.
+  const next = Object.assign(new EventEmitter(), { pid: 4244 }) as unknown as SpawnedChild;
+  noteStderr(threadId, 'from the previous process', Date.now() - 1000);
+  watchProviderProcess(core, next, '/home/someone/.local/bin/claude', { threadId, providerId: 'claude', resume: true });
+  noteStderr(threadId, 'this one failed');
+  next.emit('exit', 3, null); next.emit('close', 3, null);
+  expect((records.at(-1)?.context.data as Record<string, unknown>).stderrTail).toBe('this one failed');
   forgetStderr(threadId);
 });
 
