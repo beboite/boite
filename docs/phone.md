@@ -102,9 +102,10 @@ the owner is at the switch, so once the rule is in place Windows' own prompt
 never comes up; a refused or failed allow leaves it to come up at the next
 start. While the core
 listens on the network and Windows does not let it through, the pairing card says
-so above the paired devices, with Allow in Windows Firewall. `?fake=1&firewall=`
-`blocked` or `unset` shows that state; `refused` shows `blocked` with an
-administrator prompt nobody accepts.
+so above the paired devices, with Allow in Windows Firewall.
+`?fake=1&firewall=blocked` and `?fake=1&firewall=unset` show those states;
+`?fake=1&firewall=refused` shows `blocked` with an administrator prompt nobody
+accepts.
 
 Two things guard the socket whatever it is bound to. The `Origin` header must be
 absent, one of the shell origins, or the core's own HTTP origin, and the first

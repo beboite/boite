@@ -36,7 +36,7 @@ function card(localCore = true) {
     client: {
       call: vi.fn(async (method: string) => {
         calls.push(method);
-        if (method === 'core.restart') { listening = store.settings.listenOnLan; return { ok: true }; }
+        if (method === 'core.restart') { listening = store.settings.listenOnLan; store.core = { endpoint: { host: listening ? '0.0.0.0' : '127.0.0.1', port: 7337 } }; return { ok: true }; }
         if (method === 'firewall.allow') allowed = true;
         return allowed ? ready : unset;
       }),
@@ -77,23 +77,25 @@ test('isLoopback names the links that only reach the computer opening them', () 
   expect(['http://192.168.1.52:7337/?grant=a', 'https://boite.example.com/', 'not a url'].some(isLoopback)).toBe(false);
 });
 
-test('turning the network off with an owner link on show restarts, keeps the owner role and settles on loopback, through a failed mint', async () => {
-  let listening = true;
-  let failOnce = true;
-  const roles: string[] = [];
-  const ownerGrant = (host: string): PairingGrant => ({ ...grant(host), role: 'owner' });
+test('turning the network off restarts, settles on the bound address and re-mints the owner link with its code, even behind a public address', async () => {
+  const minted: [string, boolean | undefined][] = [];
+  const ownerGrant = (origin: string): PairingGrant => ({ url: `${origin}/?grant=g`, grant: 'g', role: 'owner', expiresAt: Date.now() + 600_000, code: 'K7QM-2222' });
   const store = $state({
     owner: true, principal: 'owner', connection: 'ready', localCore: true, sessions: [],
-    pairing: ownerGrant('192.168.1.52') as PairingGrant | null,
-    settings: { listenOnLan: true, publicUrl: null },
+    // A public address: the link names neither loopback nor the LAN, whatever the core listens on.
+    pairing: ownerGrant('https://boite.example.com') as PairingGrant | null,
+    settings: { listenOnLan: true, publicUrl: 'https://boite.example.com' },
     core: { endpoint: { host: '0.0.0.0', port: 7337 } },
-    client: { call: vi.fn(async (method: string) => { if (method === 'core.restart') listening = store.settings.listenOnLan; return ready; }) },
+    client: { call: vi.fn(async (method: string) => {
+      if (method === 'core.restart') {
+        // The old core answers through its grace; the next one comes back bound as the setting says.
+        setTimeout(() => { store.core = { endpoint: { host: store.settings.listenOnLan ? '0.0.0.0' : '127.0.0.1', port: 7337 } }; }, 2000);
+      }
+      return ready;
+    }) },
     loadSessions: vi.fn(async () => {}),
-    mintPairing: vi.fn(async (role: string) => {
-      roles.push(role);
-      if (failOnce) { failOnce = false; throw new Error('connection lost'); }
-      store.pairing = ownerGrant(listening ? '192.168.1.52' : '127.0.0.1');
-    }),
+    // Pairing.mintPairing never throws: a failure becomes the store's error.
+    mintPairing: vi.fn(async (role: string, short?: boolean) => { minted.push([role, short]); store.pairing = ownerGrant('https://boite.example.com'); }),
     saveSettings: vi.fn(async (patch: { listenOnLan?: boolean }) => { store.settings = { ...store.settings, ...patch }; return true; }),
   });
   mounted = mount(PairingCard, { target: document.body, props: { store: store as unknown as Store } });
@@ -107,10 +109,10 @@ test('turning the network off with an owner link on show restarts, keeps the own
   expect(lan.disabled).toBe(true);
   await vi.advanceTimersByTimeAsync(1600);
   await settle();
+  expect(minted).toEqual([]);
   await vi.advanceTimersByTimeAsync(1600);
   await settle();
-  expect(roles).toEqual(['owner', 'owner']);
-  expect(store.pairing?.url.startsWith('http://127.0.0.1:')).toBe(true);
-  expect(document.querySelector('[data-testid=lan-reach]')?.getAttribute('data-phase')).toBe('idle');
+  expect(minted).toEqual([['owner', true]]);
+  expect(document.querySelector('[data-testid=lan-reach]')).toBeNull();
   expect(lan.disabled).toBe(false);
 });

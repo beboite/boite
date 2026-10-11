@@ -35,10 +35,11 @@
   }
 
   /**
-   * Restarts the core so it listens as the setting now says. With `mint`, it
-   * draws the link on show again, for the same role, until its address agrees
-   * with the setting: the old core keeps answering through its grace, so the
-   * first links can still name the address it listened on.
+   * Restarts the core so it listens as the setting now says, and waits until
+   * the address it is bound to agrees: the old core keeps answering through
+   * its grace. A link's own address cannot tell, since a public address or a
+   * group's names neither loopback nor the LAN. With `mint`, the link on show
+   * is drawn again once, for the same role and kind, from the new core.
    */
   export async function restart(mint = false): Promise<void> {
     if (!canRestart || phase === 'restarting') return;
@@ -56,30 +57,24 @@
     let settled = false;
     while (!settled && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 1500));
-      if (store.connection !== 'ready') continue;
-      const lan = store.settings?.listenOnLan === true;
-      if (!mint) {
-        settled = (store.core?.endpoint.host !== '127.0.0.1') === lan;
-        continue;
-      }
-      try {
-        await store.mintPairing(role, short);
-      } catch {
-        // The core is still coming back; the next round asks again.
-        continue;
-      }
-      settled = !!store.pairing && isLoopback(store.pairing.url) !== lan;
+      if (store.connection !== 'ready' || !store.core) continue;
+      settled = !isLoopbackHost(store.core.endpoint.host) === (store.settings?.listenOnLan === true);
     }
+    if (settled && mint) await store.mintPairing(role, short);
     phase = settled ? 'idle' : 'failed';
   }
 </script>
 
 <script lang="ts" module>
+  /** An address only the computer itself reaches. */
+  function isLoopbackHost(host: string): boolean {
+    return host === 'localhost' || host === '[::1]' || host === '::1' || host.startsWith('127.');
+  }
+
   /** A link that only reaches the computer that opens it. */
   export function isLoopback(url: string): boolean {
     try {
-      const host = new URL(url).hostname;
-      return host === 'localhost' || host === '[::1]' || host.startsWith('127.');
+      return isLoopbackHost(new URL(url).hostname);
     } catch {
       return false;
     }
