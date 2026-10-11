@@ -48,7 +48,7 @@
 </script>
 
 {#if invite}
-  <div class="add-device" data-testid="add-device">
+  <div class="add-device" data-testid="add-device" data-link={invite.url}>
     {#if qr && !loopback}
       <div class="qr" data-testid="add-device-qr" role="img" aria-label={strings.group.qr}>{@html qr}</div>
     {/if}
