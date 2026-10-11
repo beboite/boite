@@ -565,9 +565,11 @@ export function registerProviderMethods(core: Core): void {
   void core.providers.settle().then(() => {
     settledOnce = true;
     if (core.stopping || core.journal.isClosed()) return;
-    const first = core.providers.list();
     // An unhandled rejection here would stop the core: logging must not break startup.
-    try { logDetection(first.loaded, first.rejected.length); } catch { /* the next list is logged */ }
+    try {
+      const first = core.providers.list();
+      logDetection(first.loaded, first.rejected.length);
+    } catch { /* the next list is logged */ }
   }, () => { settledOnce = true; });
   core.router.register('providers.reload', async () => {
     const before = fingerprint(core.providers.list());

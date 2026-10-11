@@ -225,7 +225,8 @@ export class DiagnosticLogs {
     }
     const active = this.activeTurns.get(turn.threadId);
     if (active?.turnId === turn.id) this.activeTurns.delete(turn.threadId);
-    const started = turn.startedAt ?? active?.startedAt;
+    // Only this turn's own start: the thread may be running another turn while this one ends.
+    const started = turn.startedAt ?? (active?.turnId === turn.id ? active.startedAt : undefined);
     const finished = turn.finishedAt ?? Date.now();
     const data: LogData = { status: turn.status };
     if (turn.usage) {
@@ -331,6 +332,8 @@ export class DiagnosticLogs {
       }
       // Bands below the core's, so a shell and a core record of the same millisecond always sort the same way.
       for (let index = 0; index < SHELL_LOG_FILE_COUNT; index += 1) (await this.read(this.shellPath(index), 'shell', keep)).forEach((record, line) => place(record, -(index + 1) * LINES_PER_FILE + line));
+      // What was recorded while the files were read is in memory only, and newest of all.
+      fromMemory().forEach((record, line) => { if (!records.has(record.id)) place(record, (LOG_FILE_COUNT + 2) * LINES_PER_FILE + line); });
       result = sortNewest([...records.values()], record => rank.get(record.id) ?? 0).slice(0, limit);
     }).catch(error => { this.failure(error); result = sortNewest(fromMemory()).slice(0, limit); });
     await this.writing;

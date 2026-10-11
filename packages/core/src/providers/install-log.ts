@@ -17,8 +17,8 @@ export function installLogger(core: Core): (payload: ProviderInstallState & { pr
     const ended = payload.state === 'installed' || payload.state === 'failed' || payload.state === 'absent';
     if (ended) runs.delete(payload.providerId);
     else runs.set(payload.providerId, { state: payload.state, startedAt });
-    // A list that reports an install already on disk is no step of a run.
-    if (run === undefined && ended) return;
+    // A list that reports an install already on disk, or none, is no step of a run; a failure is, even as the first event.
+    if (run === undefined && ended && payload.state !== 'failed') return;
     const base = { source: 'updates', event: `provider.install.${payload.state}`, durationMs, data: { providerId: payload.providerId, version: payload.version, step: payload.state } };
     if (payload.state === 'downloading') core.logs.info(`Installing ${payload.providerId} ${payload.version}: downloading ${Math.round(payload.totalBytes / 1048576)} MiB`, { ...base, data: { ...base.data, totalBytes: payload.totalBytes } });
     else if (payload.state === 'failed') core.logs.warn(`Installing ${payload.providerId} ${payload.version} failed after ${Math.round(durationMs / 1000)} s: ${payload.message}`, { ...base, data: { ...base.data, reason: payload.message } });

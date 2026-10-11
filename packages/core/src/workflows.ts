@@ -108,13 +108,23 @@ export class Workflows {
     const row = this.core.journal.db.query('SELECT data FROM workflow_runs WHERE id = ?').get(runId) as DataRow | null;
     return row ? JSON.parse(row.data) as WorkflowRun : null;
   }
+  private heldLogs: WorkflowRun[] | null = null;
+  /** A transaction whose saves are logged once it commits: a rolled-back run leaves no record. */
+  private committed(write: () => void): void {
+    const held: WorkflowRun[] = [];
+    this.heldLogs = held;
+    try { this.core.journal.db.transaction(write)(); } finally { this.heldLogs = null; }
+    for (const run of held) try { this.log.saved(run); } catch { /* as in save */ }
+  }
   private save(run: WorkflowRun): void {
     run.updatedAt = Date.now();
     this.core.journal.append({ type: 'workflow.changed', threadId: run.rootThreadId, version: 1, payload: { runId: run.id, status: run.status } }, db => {
       db.query('INSERT OR REPLACE INTO workflow_runs VALUES (?, ?, ?, ?, ?, ?)').run(run.id, run.rootThreadId, run.status, run.createdAt, run.updatedAt, JSON.stringify(run));
     });
-    // After the write: a failed append leaves no record of a transition that did not persist.
-    try { this.log.saved(run); } catch { /* A diagnostic storage failure must not break workflows. */ }
+    // After the write: a failed append leaves no record of a transition that did not persist,
+    // and inside `committed` the record waits for the outer transaction.
+    if (this.heldLogs !== null) this.heldLogs.push(run);
+    else try { this.log.saved(run); } catch { /* A diagnostic storage failure must not break workflows. */ }
     this.core.bus.emit('workflows.changed', { threadId: run.rootThreadId, runId: run.id });
     // A step's conversation shows its parent's runs, and a client reading it subscribes to that thread alone.
     for (const node of run.nodes) for (const inst of node.instances) {
@@ -217,10 +227,10 @@ export class Workflows {
       usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsdEquivalent: null },
       createdAt: now, updatedAt: now, finishedAt: null,
     };
-    this.core.journal.db.transaction(() => {
+    this.committed(() => {
       this.save(run);
       this.core.journal.db.query('INSERT INTO workflow_requests VALUES (?, ?, ?, ?)').run(root.id, params.requestId, fingerprint, run.id);
-    })();
+    });
     this.advance(run.id);
     return this.view(this.load(run.id)!);
   }
@@ -238,13 +248,13 @@ export class Workflows {
     const config = this.team(run.rootThreadId);
     const steps = planError(() => checkSteps(params.steps, { profiles: config.profiles.map(p => p.id), existing: run.nodes.map(n => ({ id: n.id, after: n.after })) }));
     this.checkRoutes(run.rootThreadId, steps);
-    this.core.journal.db.transaction(() => {
+    this.committed(() => {
       this.mutate(run.id, current => {
         current.plan.steps.push(...steps.map(({ deps: _deps, ...step }) => step));
         current.nodes.push(...steps.map(step => this.node(step, step.deps)));
       });
       this.core.journal.db.query('INSERT INTO workflow_requests VALUES (?, ?, ?, ?)').run(run.id, params.requestId, fingerprint, run.id);
-    })();
+    });
     this.advance(run.id);
     return this.view(this.load(run.id)!);
   }

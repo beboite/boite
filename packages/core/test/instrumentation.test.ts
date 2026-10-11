@@ -85,8 +85,10 @@ test('a signal the core did not ask for is a crash; one after its own stop is no
 
 test('a stop the core asked for is no crash, and old stderr does not describe a new failure', () => {
   expect(abnormalExit(0, null)).toBe(false);
-  expect(abnormalExit(null, 'SIGTERM')).toBe(false);
-  expect(abnormalExit(null, 'SIGKILL')).toBe(false);
+  expect(abnormalExit(null, 'SIGTERM', true)).toBe(false);
+  expect(abnormalExit(null, 'SIGKILL', true)).toBe(false);
+  // Unasked, the same signal is a crash: the default fails closed.
+  expect(abnormalExit(null, 'SIGKILL')).toBe(true);
   expect(abnormalExit(null, 'SIGSEGV')).toBe(true);
   expect(abnormalExit(1, null)).toBe(true);
   noteStderr('thr_old', 'from an hour ago', Date.now() - 60 * 60_000);

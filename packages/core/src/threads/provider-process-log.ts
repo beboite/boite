@@ -25,7 +25,7 @@ export function programName(command: string): string {
  * the core uses to stop it. Anything else is what a developer reading the log
  * needs explained.
  */
-export function abnormalExit(code: number | null, signal: NodeJS.Signals | null, askedToStop = true): boolean {
+export function abnormalExit(code: number | null, signal: NodeJS.Signals | null, askedToStop = false): boolean {
   // A stop signal is the core's own stop only when the core asked: an OOM kill or an outside `kill` is a crash.
   if (signal !== null) return !(askedToStop && STOP_SIGNALS.has(signal));
   return code !== null && code !== 0;
@@ -57,7 +57,8 @@ export function watchProviderProcess(core: Core, child: SpawnedChild, command: s
   let askedToStop = false;
   const kill = (child as { kill?: unknown }).kill;
   if (typeof kill === 'function') {
-    (child as unknown as { kill: (...args: unknown[]) => unknown }).kill = (...args: unknown[]) => { askedToStop = true; return kill.apply(child, args); };
+    // Only a signal that was delivered: a late cleanup `kill()` of a process already gone is no stop.
+    (child as unknown as { kill: (...args: unknown[]) => unknown }).kill = (...args: unknown[]) => { const delivered = kill.apply(child, args); if (delivered !== false) askedToStop = true; return delivered; };
   }
   let reported = false;
   child.once('error', (error) => {
@@ -66,10 +67,13 @@ export function watchProviderProcess(core: Core, child: SpawnedChild, command: s
     reported = true;
     // The code and not the message: `spawn /home/<name>/... ENOENT` names the user.
     const code = (error as NodeJS.ErrnoException).code ?? null;
-    core.logs.warn(`${program} for ${who.providerId} could not start${code ? ` (${code})` : ''}`, {
-      ...base, event: 'driver.process.spawn-failed', durationMs: performance.now() - startedAt,
-      data: { program, version, code },
-    });
+    // Inside the child's event handlers: a diagnostic storage failure must not throw there.
+    try {
+      core.logs.warn(`${program} for ${who.providerId} could not start${code ? ` (${code})` : ''}`, {
+        ...base, event: 'driver.process.spawn-failed', durationMs: performance.now() - startedAt,
+        data: { program, version, code },
+      });
+    } catch { /* the spawn's own error reaches the driver */ }
   });
   // `close` and not `exit`: stderr is drained by then, so the tail holds the last line.
   // `exit` is the fallback: on macOS CI the test of a child that exited at once
@@ -88,9 +92,9 @@ export function watchProviderProcess(core: Core, child: SpawnedChild, command: s
     const abnormal = abnormalExit(code, signal, asked);
     const tail = abnormal ? stderrTail(who.threadId, undefined, undefined, startedWall) : null;
     const how = signal !== null ? `was ended by ${signal}` : `exited with code ${code ?? 'unknown'}`;
-    core.logs.record(abnormal ? 'warn' : 'info', `${program} for ${who.providerId}, pid ${child.pid ?? 'unknown'}, ${how} after ${Math.round(lifetime / 100) / 10} s${tail ? `; its last ${tail.length} characters of stderr are in data.stderrTail` : abnormal ? '; it printed nothing on stderr' : ''}`, {
+    try { core.logs.record(abnormal ? 'warn' : 'info', `${program} for ${who.providerId}, pid ${child.pid ?? 'unknown'}, ${how} after ${Math.round(lifetime / 100) / 10} s${tail ? `; its last ${tail.length} characters of stderr are in data.stderrTail` : abnormal ? '; it printed nothing on stderr' : ''}`, {
       ...base, event: abnormal ? 'driver.process.crashed' : 'driver.process.exited', durationMs: lifetime,
       data: { program, version, pid: child.pid ?? null, exitCode: code, signal, ...(tail ? { stderrTail: tail } : {}) },
-    });
+    }); } catch { /* the exit stands without its record */ }
   }
 }

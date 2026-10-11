@@ -380,7 +380,7 @@ export class ThreadCards {
       this.asyncCards.delete(id);
       this.closeUnanswered(pending.request);
       asyncGone ||= pending.request.async === true;
-      logCard(this.core, pending.request, 'question.cancelled', `Question cancelled because ${CLEARED_BECAUSE[reason]}`, { async: pending.request.async === true, by: reason });
+      logCard(this.core, pending.request, 'question.cancelled', `Question cancelled because ${CLEARED_BECAUSE[reason]}`, { async: pending.request.async === true, by: 'the core', reason });
       this.core.bus.emit('question.answered', { questionId: id, threadId, answer: null });
       pending.resolve(null);
     }
@@ -406,7 +406,7 @@ export class ThreadCards {
     for (const [id, pending] of [...this.permissions]) {
       if (pending.request.threadId !== threadId) continue;
       this.permissions.delete(id);
-      logCard(this.core, pending.request, 'permission.decided', `Permission for ${pending.request.toolName} denied because ${CLEARED_BECAUSE[reason]}`, { decision: 'deny', by: reason });
+      logCard(this.core, pending.request, 'permission.decided', `Permission for ${pending.request.toolName} denied because ${CLEARED_BECAUSE[reason]}`, { decision: 'deny', by: 'the core', reason });
       // Without this the card stays on screen with live buttons, and pressing
       // one answers `unknown permission request`.
       this.core.bus.emit('permission.resolved', { requestId: id, threadId, decision: 'deny' });

@@ -37,6 +37,8 @@ export function logMethods(ctx: FakeContext): Pick<FakeMethods, DiagnosticMethod
    * branch; `diagnostics.test.ts` covers the agent's reads on the real core.
    */
   const gate = (): void => {
+    // As the core: a paired device only reports, whatever DEVICE_METHODS holds.
+    if (ctx.bus.principal === 'session') throw refused('diagnostics: a paired device only reports its own errors');
     if (ctx.bus.principal !== 'agent') return;
     if (ctx.settings.agentLogAccess === false) throw refused('diagnostics: the owner turned off agent access to logs (Settings > Diagnostics)');
     throw refused('diagnostics: an agent names its own thread');
