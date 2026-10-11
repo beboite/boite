@@ -1,7 +1,8 @@
 import type { Account } from '@boite/contracts';
 import type { Core } from './core.ts';
 
-const loginsStarted = new Map<string, number>();
+/** When each running login started, per core: two cores in one process (tests) never share one. */
+const loginsByCore = new WeakMap<Core, Map<string, number>>();
 
 /** An account's connection status moved: signed in, signed out, broken. Never the identity itself. */
 export function logAccountStatus(core: Core, account: Account, status: Account['status']): void {
@@ -19,6 +20,8 @@ export function logAccountStatus(core: Core, account: Account, status: Account['
 export function logLoginState(core: Core, account: Account | null, state: 'running' | 'done' | 'failed', output: string, exitCode: number | null): void {
   if (account === null) return;
   const base = { source: 'accounts', data: { accountId: account.id, providerId: account.providerId } };
+  let loginsStarted = loginsByCore.get(core);
+  if (loginsStarted === undefined) { loginsStarted = new Map(); loginsByCore.set(core, loginsStarted); }
   if (state === 'running') {
     if (loginsStarted.has(account.id)) return;
     loginsStarted.set(account.id, Date.now());

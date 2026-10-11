@@ -23,8 +23,11 @@ test('the anonymizer replaces paths, names, addresses and private hosts and keep
     'peer 192.168.1.39 and 100.64.0.15:3773, loopback 127.0.0.1:3773, build 10.0.19045.4529, v1.2.3, at 14:03:22, mac aa:bb:cc:dd:ee:ff, fe80::1c2b:3a4d',
     'thread thr_yrbzgyt5xjtjbq334d7m turn trn_1f992a9ph60nzwzzp8sv',
     'opened file:///home/meetsu/projects/secret-game/index.html.',
+    'loaded file:///D:/Dev/Factory/assets/logo.png',
   ].join('\n'));
   expect(text).toMatch(/opened file:\/\/<project:[0-9a-f]{6}>\/index\.html\.$/m);
+  // A drive path keeps all three slashes, and its prefix is still found.
+  expect(text).toMatch(/loaded file:\/\/\/<project:[0-9a-f]{6}>\/assets\/logo\.png$/m);
   for (const personal of ['meetsu', 'secret-game', 'Factory', 'nuno-x870', 'example.com', 'Work Account', 'tasbem', 'klNuno', '192.168.1.39', '100.64.0.15', 'other', 'C:\\Users\\nuno', 'aa:bb:cc', 'fe80']) {
     expect(text).not.toContain(personal);
   }
@@ -38,6 +41,11 @@ test('the anonymizer replaces paths, names, addresses and private hosts and keep
   // Stable per installation, different across installations.
   expect(createLogAnonymizer({ salt: 'fixed-salt', projects: [{ path: '/home/meetsu/projects/secret-game', name: 'x' }] }).project('/home/meetsu/projects/secret-game')).toBe(placeholders[0]!);
   expect(createLogAnonymizer({ salt: 'other-salt' }).project('/home/meetsu/projects/secret-game')).not.toBe(placeholders[0]!);
+});
+
+test('a name equal to a placeholder word leaves the placeholders whole', () => {
+  const anonymizer = createLogAnonymizer({ salt: 'fixed-salt', user: 'email', hostname: 'host.lan' });
+  expect(anonymizer.text('mail me@example.com from host.lan')).toBe('mail <email> from <host>');
 });
 
 test('a thread folder beside a project, sharing only its name prefix, gets its own placeholder', () => {
@@ -61,6 +69,10 @@ test('a stored line from any origin parses, bounds its fields and formats on one
   // Seconds that round up carry into the minutes.
   expect(formatLogDuration(119_500)).toBe('2 min 0 s');
   expect(formatLogDuration(61_000)).toBe('1 min 1 s');
+  // A line the shell or a client wrote is redacted on the way in, with the secrets known now.
+  const leaky = parseLogRecord(JSON.stringify({ id: 'a', runId: 'r', at: 1, level: 'warn', source: 's', event: 'e', message: 'Authorization: Bearer abcdefghijklmnop123456 with hunter2-value', data: { note: 'hunter2-value' } }), 'shell', ['hunter2-value'])!;
+  expect(JSON.stringify(leaky)).not.toContain('abcdefghijklmnop123456');
+  expect(JSON.stringify(leaky)).not.toContain('hunter2-value');
   expect(parseLogRecord('{"id":1}')).toBeNull();
   expect(parseLogRecord('{"broken')).toBeNull();
   expect(parseLogRecord(JSON.stringify({ id: 'a', runId: 'r', at: 1, level: 'info', source: 's', event: 'e', message: 'm' }))!.origin).toBe('core');
@@ -102,6 +114,12 @@ test('agents read anonymized diagnostics of the app and their own family, until 
       expect(exported.text).not.toMatch(new RegExp(`^${other} `, 'm'));
       expect(exported.text).not.toContain('## core-output.log');
       expect((await owner.call('diagnostics.summary', {})).threads.map(thread => thread.threadId)).toEqual(expect.arrayContaining([threadId, other]));
+      // The owner naming a thread reads that thread's family, never every conversation.
+      expect((await owner.call('diagnostics.summary', { threadId })).threads.map(thread => thread.threadId)).toEqual([threadId]);
+      expect((await owner.call('diagnostics.logs', { threadId, minLevel: 'warn' })).map(record => record.event)).not.toContain('test.theirs');
+      // The text is the agent's; the file's folder names the owner's home.
+      expect(exported.path).toBeNull();
+      expect((await owner.call('diagnostics.export', {})).path).not.toBeNull();
       expect(summary.environment.providers.some(provider => provider.id === 'echo')).toBe(true);
       await owner.call('settings.set', { agentLogAccess: false });
       try { await agent.call('diagnostics.logs', { threadId }); throw new Error('accepted while off'); }

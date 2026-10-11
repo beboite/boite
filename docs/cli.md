@@ -480,7 +480,8 @@ boite logs help
 
 Filters: `--limit` (default 100), `--min-level` (default `info`), `--since`
 (`30m`, `2h`, `1d` or a date), `--origin core|shell|ui`, `--search`. Owner
-only: `--level` (exact), `--turn`, `--thread` and `--anonymize`. Agent only:
+only: `--level` (exact), `--turn` and `--anonymize`, plus the global `--thread`
+to read one conversation. Agent only:
 `--mine`, the thread and the threads it started without the records about no
 thread; by default an agent reads those records plus its own family, never
 another conversation's. `--json` keeps the records.

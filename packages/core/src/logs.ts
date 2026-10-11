@@ -344,12 +344,9 @@ export class DiagnosticLogs {
       const records: CoreLogRecord[] = [];
       for (const line of buffer.subarray(0, bytesRead).toString('utf8').split('\n')) {
         // A crash can leave an incomplete final line; other records still answer.
-        const parsed = parseLogRecord(line, origin);
-        if (parsed === null) continue;
         // Re-redacted with today's secrets: a credential configured after the write is still removed.
-        const record: CoreLogRecord = { ...parsed, message: redactLogText(parsed.message, this.secrets) };
-        if (parsed.data) { const data = normalizeLogData(parsed.data, this.secrets); if (data) record.data = data; else delete record.data; }
-        if (keep(record)) records.push(record);
+        const record = parseLogRecord(line, origin, this.secrets);
+        if (record !== null && keep(record)) records.push(record);
       }
       return records;
     } finally { await handle.close(); }

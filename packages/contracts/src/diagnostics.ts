@@ -221,7 +221,9 @@ const PUBLIC_HOSTS = [
   'openrouter.ai', 'tauri.app', 'rust-lang.org', 'crates.io', 'pypi.org', 'python.org', 'sentry.io', 'tailscale.com', 'astral.sh', 'docker.com', 'docker.io',
 ];
 /** Words a project, account or machine name may share with Boite's own vocabulary. */
-const COMMON_WORDS = new Set(['boite', 'brain', 'app', 'apps', 'web', 'test', 'tests', 'core', 'server', 'client', 'shell', 'main', 'demo', 'docs', 'home', 'user', 'users', 'root', 'admin', 'dev', 'src', 'data', 'code', 'work', 'project', 'projects', 'default', 'public', 'local', 'localhost', 'claude', 'codex', 'agent', 'agents', 'thread', 'threads', 'turn', 'turns', 'window', 'windows', 'linux']);
+const COMMON_WORDS = new Set(['boite', 'brain', 'app', 'apps', 'web', 'test', 'tests', 'core', 'server', 'client', 'shell', 'main', 'demo', 'docs', 'home', 'user', 'users', 'root', 'admin', 'dev', 'src', 'data', 'code', 'work', 'project', 'projects', 'default', 'public', 'local', 'localhost', 'claude', 'codex', 'agent', 'agents', 'thread', 'threads', 'turn', 'turns', 'window', 'windows', 'linux',
+  // The anonymizer's own placeholder words: a name equal to one would rewrite the placeholder.
+  'host', 'email', 'owner', 'repo', 'private', 'path', 'ip6', 'mac', 'none', 'redacted']);
 
 /** FNV-1a, 32 bits: sync, the same in the core and the browser, short enough to read. */
 function shortHash(salt: string, value: string): string {
@@ -290,8 +292,10 @@ function prefixReplacer(prefixes: ReadonlyMap<string, string>): ((text: string) 
   return text => text.replace(PATH_TOKEN, (match: string, drive: string | undefined, rest: string, offset: number, whole: string) => {
     // A drive letter right after another letter is a scheme's end (`file:///`), not a drive.
     const scheme = drive !== undefined && offset > 0 && /[A-Za-z]/.test(whole[offset - 1]!);
-    // After a scheme, the extra slashes of `///` stay: the placeholder stands for the path's own first one.
-    const lead = scheme ? (/^[\\/]+/.exec(rest)?.[0] ?? '').slice(1) : '';
+    // After a scheme, the extra slashes of `///` stay: the placeholder stands for the path's own first one,
+    // except before a drive (`file:///C:/`), where none of them belongs to the path.
+    const slashes = scheme ? (/^[\\/]+/.exec(rest)?.[0] ?? '') : '';
+    const lead = scheme && !/^[A-Za-z]:/.test(rest.slice(slashes.length)) ? slashes.slice(1) : slashes;
     const kept = scheme ? drive + lead : '';
     const token = scheme ? rest.slice(lead.length) : match;
     const path = withoutTrailing(token, '.');
@@ -438,8 +442,12 @@ export function formatLogLine(record: CoreLogRecord): string {
   return `${formatLogTime(record.at)} ${record.level.toUpperCase().padEnd(5)} ${(record.origin ?? 'core').padEnd(5)} ${record.source}/${record.event}${who}${request}${duration} ${record.message.replace(/[\r\n]+/g, ' ')}${data}`;
 }
 
-/** Validates one stored line written by any origin, or returns null. */
-export function parseLogRecord(line: string, fallbackOrigin: LogOrigin = 'core'): CoreLogRecord | null {
+/**
+ * Validates one stored line written by any origin, or returns null. Message
+ * and data are redacted again with `secrets`: a line written by the shell or
+ * a client, or before a credential was configured, may still hold one.
+ */
+export function parseLogRecord(line: string, fallbackOrigin: LogOrigin = 'core', secrets: readonly string[] = []): CoreLogRecord | null {
   if (line.length === 0) return null;
   let raw: Record<string, unknown>;
   try { raw = JSON.parse(line) as Record<string, unknown>; } catch { return null; }
@@ -449,11 +457,11 @@ export function parseLogRecord(line: string, fallbackOrigin: LogOrigin = 'core')
   const record: CoreLogRecord = {
     id: raw.id.slice(0, LOG_CONTEXT_CHARS), runId: raw.runId.slice(0, LOG_CONTEXT_CHARS), at: raw.at, level: raw.level as CoreLogLevel,
     origin: LOG_ORIGINS.includes(raw.origin as LogOrigin) ? raw.origin as LogOrigin : fallbackOrigin,
-    source: bounded(raw.source) ?? 'core', event: bounded(raw.event) ?? 'core.log', message: raw.message.slice(0, LOG_MESSAGE_CHARS),
+    source: bounded(raw.source) ?? 'core', event: bounded(raw.event) ?? 'core.log', message: normalizeCoreLogText(raw.message.slice(0, LOG_MESSAGE_CHARS), secrets),
   };
   for (const key of ['threadId', 'turnId', 'requestId', 'providerId', 'model', 'parentThreadId'] as const) { const value = bounded(raw[key]); if (value !== undefined) record[key] = value; }
   if (typeof raw.durationMs === 'number' && Number.isFinite(raw.durationMs) && raw.durationMs >= 0) record.durationMs = raw.durationMs;
-  const data = normalizeLogData(raw.data);
+  const data = normalizeLogData(raw.data, secrets);
   if (data) record.data = data;
   return record;
 }

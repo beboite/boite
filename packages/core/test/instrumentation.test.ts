@@ -9,6 +9,7 @@ import { clientField, closeLevel, slowRpcLevel } from '../src/server/connection-
 import { noteReady } from '../src/drivers/driver-log.ts';
 import { isoTime, noteClaudeMessage } from '../src/drivers/claude/diagnostics.ts';
 import { detectionLogger } from '../src/providers/install-log.ts';
+import { logLoginState } from '../src/account-log.ts';
 import type { ProviderSummary } from '@boite/contracts';
 import { abnormalExit, programName, watchProviderProcess } from '../src/threads/provider-process-log.ts';
 import { gitSubcommand } from '../src/git/git-log.ts';
@@ -162,4 +163,16 @@ test('a failed Claude result without an error list is logged, not thrown into th
   const ctx = { diagnostic: (level: string, _message: string, context: { event: string; data?: Record<string, unknown> }) => { notes.push({ level, ...context }); } };
   noteClaudeMessage(ctx, { type: 'result', subtype: 'error_from_a_newer_cli', is_error: true, num_turns: 2, duration_ms: 10, duration_api_ms: 5 } as never, null);
   expect(notes).toMatchObject([{ level: 'warn', event: 'driver.result.error', data: { errors: 0 } }]);
+});
+
+test('two cores in one process time their own logins, even for the same account id', () => {
+  const first = recordingCore();
+  const second = recordingCore();
+  const account = { id: 'acc_same', providerId: 'claude' } as never;
+  logLoginState(first.core, account, 'running', '', null);
+  logLoginState(second.core, account, 'running', '', null);
+  expect(second.records.map(record => record.context.event)).toEqual(['account.login.started']);
+  logLoginState(first.core, account, 'done', '', 0);
+  logLoginState(second.core, account, 'done', '', 0);
+  for (const { records } of [first, second]) expect(typeof records.find(record => record.context.event === 'account.login.succeeded')?.context.durationMs).toBe('number');
 });

@@ -203,7 +203,7 @@ export class ServerUpdates {
   start(): void {
     this.first = setTimeout(() => {
       void this.status(true).catch(error => this.core.log('warn', `server update check: ${messageOf(error)}`, { source: 'updates', event: 'server-update.check-failed' }));
-      this.interval = setInterval(() => { void this.status(true).catch(error => this.core.log('warn', `server update check: ${messageOf(error)}`)); }, 6 * 60 * 60 * 1000);
+      this.interval = setInterval(() => { void this.status(true).catch(error => this.core.log('warn', `server update check: ${messageOf(error)}`, { source: 'updates', event: 'server-update.check-failed' })); }, 6 * 60 * 60 * 1000);
       this.interval.unref();
     }, 8000);
     this.first.unref();

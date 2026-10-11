@@ -117,18 +117,17 @@ export class Diagnostics {
    * own thread and the threads it started, as every agent call is: it still
    * sees the records about no thread (the shell, the core, the clients), which
    * is what tells it whether Boite itself failed. The owner reads everything,
-   * or one thread's family when it asks.
+   * or one thread's family when it names a thread.
    */
-  private reach(agent: boolean, threadId: string | undefined, focus: boolean): Set<string> | null {
-    if (threadId === undefined || (!agent && !focus)) return null;
-    return this.family(threadId, this.core.journal.listThreads());
+  private reach(threadId: string | undefined): Set<string> | null {
+    return threadId === undefined ? null : this.family(threadId, this.core.journal.listThreads());
   }
 
   async logs(raw: unknown, connection?: Connection): Promise<CoreLogRecord[]> {
     let query: ReturnType<typeof validateDiagnosticsLogsQuery>;
     try { query = validateDiagnosticsLogsQuery(raw); } catch (error) { throw invalidParams((error as Error).message); }
-    const agent = this.gate(connection, query.threadId);
-    const family = this.reach(agent, query.threadId, query.scope === 'thread');
+    this.gate(connection, query.threadId);
+    const family = this.reach(query.threadId);
     // `scope: 'thread'` leaves out the records about no thread too.
     const keep = (record: CoreLogRecord): boolean => logMatches(record, { minLevel: query.minLevel, origin: query.origin, since: query.since, search: query.search })
       && (family === null || (record.threadId === undefined ? query.scope !== 'thread' : family.has(record.threadId)));
@@ -137,9 +136,9 @@ export class Diagnostics {
   }
 
   async summary(params: { threadId?: string; since?: number }, connection?: Connection): Promise<DiagnosticSummary> {
-    const agent = this.gate(connection, params.threadId);
+    this.gate(connection, params.threadId);
     const since = typeof params.since === 'number' && Number.isFinite(params.since) ? params.since : Date.now() - DAY_MS;
-    const family = this.reach(agent, params.threadId, false);
+    const family = this.reach(params.threadId);
     const anonymizer = this.anonymizer();
     const records = (await this.core.logs.select(record => record.at >= since && within(record, family), EXPORT_LIMIT)).map(record => anonymizer.record(record));
     return this.summarize(records, since, anonymizer, family);
@@ -207,7 +206,7 @@ export class Diagnostics {
     const limit = params.limit === undefined ? EXPORT_LIMIT : params.limit;
     if (!Number.isInteger(limit) || limit < 1 || limit > EXPORT_LIMIT) throw invalidParams(`diagnostics.export limit: expected an integer from 1 to ${EXPORT_LIMIT}`);
     // An agent exports its own family whatever it names; the owner may focus on one.
-    const family = agent ? this.reach(true, params.threadId, false) : params.focusThreadId ? this.family(params.focusThreadId, this.core.journal.listThreads()) : null;
+    const family = agent ? this.reach(params.threadId) : params.focusThreadId ? this.family(params.focusThreadId, this.core.journal.listThreads()) : null;
     const anonymizer = this.anonymizer();
     const records = (await this.core.logs.select(record => record.at >= since && within(record, family), limit))
       .map(record => anonymizer.record(record));
@@ -235,7 +234,8 @@ export class Diagnostics {
       source: 'diagnostics', event: 'diagnostics.exported', ...(connection?.identity.threadId ? { threadId: connection.identity.threadId } : {}),
       data: { records: records.length, bytes: Buffer.byteLength(text), by: connection?.identity.principal ?? 'owner' },
     });
-    return { name, path, bytes: Buffer.byteLength(text), records: records.length, text, summary };
+    // The folder names the owner's home: an agent gets the text, the owner the file.
+    return { name, path: agent ? null : path, bytes: Buffer.byteLength(text), records: records.length, text, summary };
   }
 
   private async pruneExports(): Promise<void> {

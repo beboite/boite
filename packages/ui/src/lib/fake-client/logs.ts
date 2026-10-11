@@ -37,6 +37,17 @@ export function logMethods(ctx: FakeContext): Pick<FakeMethods, DiagnosticMethod
     throw refused('diagnostics: an agent names its own thread');
   };
 
+  /** A named thread and every thread it started, as the core reads them; null for all threads. */
+  const familyOf = (threadId: string | undefined): Set<string> | null => {
+    if (threadId === undefined) return null;
+    const family = new Set([threadId]);
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const thread of ctx.threads.values()) if (thread.parentThreadId && family.has(thread.parentThreadId) && !family.has(thread.id)) { family.add(thread.id); grew = true; }
+    }
+    return family;
+  };
+
   const anonymizer = (): LogAnonymizer => createLogAnonymizer({
     salt: 'fake-salt', home: 'C:\\Users\\you', user: 'you', hostname: 'fake-host', dataDir: DATA_DIR,
     projects: ctx.projects.map(project => ({ path: project.path, name: project.name })),
@@ -135,23 +146,18 @@ export function logMethods(ctx: FakeContext): Pick<FakeMethods, DiagnosticMethod
       try { query = validateDiagnosticsLogsQuery(raw); } catch (error) { throw invalid(error); }
       gate();
       const names = anonymizer();
-      const family = new Set<string>();
-      if (query.scope === 'thread' && query.threadId !== undefined) {
-        family.add(query.threadId);
-        for (let grew = true; grew;) {
-          grew = false;
-          for (const thread of ctx.threads.values()) if (thread.parentThreadId && family.has(thread.parentThreadId) && !family.has(thread.id)) { family.add(thread.id); grew = true; }
-        }
-      }
+      const family = familyOf(query.threadId);
+      // `scope: 'thread'` leaves out the records about no thread too.
       return newestFirst(record => logMatches(record, { minLevel: query.minLevel, origin: query.origin, since: query.since, search: query.search })
-        && (family.size === 0 || record.threadId === undefined || family.has(record.threadId)), query.limit).map(record => names.record(record));
+        && (family === null || (record.threadId === undefined ? query.scope !== 'thread' : family.has(record.threadId))), query.limit).map(record => names.record(record));
     },
     'diagnostics.summary': async params => {
       if (params === null || typeof params !== 'object') throw invalid(new Error('diagnostics.summary params: expected an object'));
       gate();
       const since = typeof params.since === 'number' && Number.isFinite(params.since) ? params.since : Date.now() - DAY_MS;
       const names = anonymizer();
-      return summarize(newestFirst(record => record.at >= since, EXPORT_LIMIT).map(record => names.record(record)), since, names);
+      const family = familyOf(params.threadId);
+      return summarize(newestFirst(record => record.at >= since && (family === null || record.threadId === undefined || family.has(record.threadId)), EXPORT_LIMIT).map(record => names.record(record)), since, names);
     },
     'diagnostics.export': async params => {
       if (params === null || typeof params !== 'object') throw invalid(new Error('diagnostics.export params: expected an object'));
@@ -181,7 +187,7 @@ export function logMethods(ctx: FakeContext): Pick<FakeMethods, DiagnosticMethod
       const prefillUrl = `https://github.com/${ISSUE_REPOSITORY}/issues/new?${new URLSearchParams({ title: safeTitle, body: body.slice(0, PREFILL_BODY_CHARS) }).toString()}`;
       return {
         repository: ISSUE_REPOSITORY, title: safeTitle, body, url: null, prefillUrl, gh: 'missing',
-        error: params.submit !== true ? null : ctx.bus.principal === 'agent' ? AGENT_SUBMIT_REFUSED : 'GitHub CLI (gh) is not installed on this machine', exportPath: exported?.path ?? null,
+        error: params.submit !== true ? null : ctx.bus.principal === 'agent' ? AGENT_SUBMIT_REFUSED : 'GitHub CLI (gh) is not installed on this machine', exportPath: ctx.bus.principal === 'agent' ? null : exported?.path ?? null,
       };
     },
     'diagnostics.report': async raw => {

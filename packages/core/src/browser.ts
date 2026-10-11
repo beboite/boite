@@ -277,12 +277,13 @@ export class AgentBrowser {
     return startChromium((cmd, args, options) => this.#core.procs.spawn(SCOPE, cmd, args, options), path, dir, START_TIMEOUT_MS, userAgent);
   }
 
-  /** `identify` false starts the browser as it is: a page check (`probe`) visits no site. `hosted` opens it in the desktop app. */
+  /** `identify` false starts the browser as it is: a page check (`probe`) visits no site, and its start and end are debug. `hosted` opens it in the desktop app. */
   async #launch(profile: string, identify = true, hosted = false): Promise<Engine> {
     const at = performance.now();
     try {
       const engine = await (hosted ? this.#launchHosted(profile) : this.#launchLocal(profile, identify));
-      this.#core.logs.info(`Agent browser started for profile ${profile} in ${Math.round(performance.now() - at)} ms`, { source: 'browser', event: 'browser.started', durationMs: performance.now() - at, data: { profile, hosted, program: hosted ? 'desktop app' : this.findBrowser().path?.split(/[\\/]/).pop() ?? null } });
+      if (!identify) this.#probing.add(engine);
+      this.#core.logs.record(identify ? 'info' : 'debug', `Agent browser started for profile ${profile} in ${Math.round(performance.now() - at)} ms`, { source: 'browser', event: 'browser.started', durationMs: performance.now() - at, data: { profile, hosted, program: hosted ? 'desktop app' : this.findBrowser().path?.split(/[\\/]/).pop() ?? null } });
       return engine;
     } catch (error) {
       this.#core.logs.warn(`Agent browser for profile ${profile} did not start after ${Math.round(performance.now() - at)} ms: ${error instanceof Error ? error.message : String(error)}`, { source: 'browser', event: 'browser.start-failed', durationMs: performance.now() - at, data: { profile, hosted } });
@@ -319,16 +320,15 @@ export class AgentBrowser {
     }
   }
 
-  /** Engines whose end is already in the log (the exit, the closed socket and a shutdown all call `#lost`), and those the core is closing. */
-  readonly #ended = new WeakSet<Engine>(); readonly #closing = new WeakSet<Engine>();
-
+  /** Engines whose end is already in the log (the exit, the closed socket and a shutdown all call `#lost`), those the core is closing, and page checks. */
+  readonly #ended = new WeakSet<Engine>(); readonly #closing = new WeakSet<Engine>(); readonly #probing = new WeakSet<Engine>();
   /** The process ended or dropped its connection: its tabs are gone. */
   #lost(engine: Engine): void {
     if (!this.#ended.has(engine)) {
       this.#ended.add(engine);
       // Closed by the core, or with the desktop app hosting it, or with no tab: no crash.
       const expected = this.#closing.has(engine) || engine.hosted || engine.tabs.size === 0;
-      this.#core.logs.record(expected ? 'info' : 'warn', `Agent browser for profile ${engine.profile} ended${expected ? '' : ' on its own'} with ${engine.tabs.size} tabs open`, {
+      this.#core.logs.record(!expected ? 'warn' : this.#probing.has(engine) ? 'debug' : 'info', `Agent browser for profile ${engine.profile} ended${expected ? '' : ' on its own'} with ${engine.tabs.size} tabs open`, {
         source: 'browser', event: expected ? 'browser.ended' : 'browser.lost', data: { profile: engine.profile, tabs: engine.tabs.size, hosted: engine.hosted } });
     }
     const current = this.#engines.get(engine.key);
