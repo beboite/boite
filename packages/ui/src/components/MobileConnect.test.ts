@@ -33,8 +33,10 @@ class TestSocket implements SocketLike {
   onerror: (() => void) | null = null;
   send(data: string) { this.sent.push(JSON.parse(data)); }
   close() { this.onclose?.(); }
-  refuse(message = 'the token is wrong') {
+  /** Answers the hello with a refusal. A hello that waits for the device key to load is waited for first. */
+  async refuse(message = 'the token is wrong') {
     this.onopen?.();
+    if (this.sent.length === 0) await vi.waitFor(() => expect(this.sent.length).toBeGreaterThan(0));
     this.onmessage?.({ data: JSON.stringify({ id: this.sent[0]!.id, error: { code: RpcErrorCode.Unauthorized, message } }) });
   }
 }
@@ -57,25 +59,32 @@ async function refused(error: Error) {
   return store;
 }
 
-test('an installed app without a browser key offers pairing; a bad link keeps recovery open', async () => {
+test('an app without a browser key offers only the scan and the code; a bad code keeps recovery open', async () => {
   const store = await refused(new RpcFailure({ code: RpcErrorCode.Unauthorized, message: 'Missing credential' }));
   expect(store.pairingRequired).toBe(true);
   expect(store.error).toBe(strings.errors.unpaired);
   const onpaired = vi.fn();
   mounted = mount(MobileConnect, { target: document.body, props: { store, onpaired } });
   flushSync();
-  expect(document.body.textContent).toContain(strings.mobile.pairInstalled);
   expect(document.querySelector('[data-testid=machine-scan]')).not.toBeNull();
+  expect(document.querySelector('[data-testid=machine-code-open]')).not.toBeNull();
+  // A phone has its camera and the code: no link to paste.
+  expect(document.querySelector('[data-testid=machine-add-open]')).toBeNull();
+  expect(document.querySelector('[data-testid=machine-link]')).toBeNull();
   expect(document.querySelector('[data-testid=mobile-reconnect]')).toBeNull();
-  document.querySelector<HTMLButtonElement>('[data-testid=machine-add-open]')!.click();
+  // A browser tab is not the installed app: no word about scanning from it.
+  expect(document.querySelector('[data-testid=mobile-pair-hint]')).toBeNull();
+  const pair = vi.spyOn(workspace, 'pair');
+  document.querySelector<HTMLButtonElement>('[data-testid=machine-code-open]')!.click();
   flushSync();
-  const input = document.querySelector<HTMLInputElement>('[data-testid=machine-link]')!;
-  input.value = 'not a pairing link';
+  const input = document.querySelector<HTMLInputElement>('[data-testid=machine-code]')!;
+  input.value = 'K7QM';
   input.dispatchEvent(new Event('input', { bubbles: true }));
   flushSync();
-  document.querySelector<HTMLButtonElement>('[data-testid=machine-add]')!.click();
-  await vi.waitFor(() => expect(document.querySelector('[role=alert]')?.textContent).toBe(strings.errors.pairingLink));
-  expect(input.value).toBe('not a pairing link');
+  document.querySelector<HTMLButtonElement>('[data-testid=machine-code-submit]')!.click();
+  await vi.waitFor(() => expect(document.querySelector('[data-testid=machine-code-form] [role=alert]')?.textContent).toBe(strings.machines.codeInvalid));
+  expect(input.value).toBe('K7QM');
+  expect(pair).not.toHaveBeenCalled();
   expect(onpaired).not.toHaveBeenCalled();
 
   // A known pairing problem must not hide a later transport failure.
@@ -90,7 +99,7 @@ test('an installed app without a browser key offers pairing; a bad link keeps re
   const repairing = store.connectEndpoint({ url: 'https://computer.example', token: '', grant: 'expired-test-grant' });
   flushSync();
   expect(store.pairingRequired).toBe(true);
-  expect(document.querySelector('[data-testid=machine-link]')).toBe(input);
+  expect(document.querySelector('[data-testid=machine-code]')).toBe(input);
   reject(new RpcFailure({ code: RpcErrorCode.Unauthorized, message: 'Pairing code expired' }));
   await repairing;
   expect(store.pairingRequired).toBe(true);
@@ -159,7 +168,7 @@ test.each([
   const store = new Store();
   stores.push(store);
   const opening = store.connectEndpoint({ ...endpoint, url: 'https://computer.example' } as Endpoint);
-  sockets[0]!.refuse(message);
+  await sockets[0]!.refuse(message);
   await opening;
   expect(store.pairingRequired).toBe(pairing);
   expect(store.error).toBe(expected);
