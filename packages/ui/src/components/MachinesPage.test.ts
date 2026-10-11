@@ -149,7 +149,9 @@ test('offline and paired machines cannot be edited and a removed target never fa
   target.store.principal = 'owner';
   target.store.connection = 'closed';
   flushSync();
-  expect(query<HTMLButtonElement>('[data-machine-id="target"] [data-testid="machine-settings-open"]').disabled).toBe(true);
+  // Out of reach, the row folds its details away: nothing there works without the machine.
+  expect(document.querySelector('[data-machine-id="target"] [data-testid="machine-details-toggle"]')).toBeNull();
+  expect(query('[data-machine-id="target"] [data-testid="machine-settings-open"]').closest<HTMLElement>('.reveal')!.inert).toBe(true);
   target.store.connection = 'ready';
   flushSync();
   query<HTMLButtonElement>('[data-machine-id="target"] [data-testid="machine-settings-open"]').click();
@@ -161,6 +163,29 @@ test('offline and paired machines cannot be edited and a removed target never fa
   flushSync();
   expect(document.querySelector('[data-testid="machine-settings"]')).toBeNull();
   expect(workspace.active).toBe(source.store);
+});
+
+test('a machine that does not answer is grey and offers only its name, its icon and its removal', async () => {
+  const { target } = await setup();
+  const card = () => query('[data-machine-id="target"]');
+  const has = (id: string) => card().querySelector(`[data-testid="${id}"]`) !== null;
+  expect([has('machine-open'), has('machine-details-toggle'), card().dataset.away]).toEqual([true, true, undefined]);
+  // The screenshot's case: the first attempt timed out and the client keeps retrying behind the card.
+  target.store.connection = 'connecting';
+  target.store.booted = true;
+  target.store.error = 'connection did not answer within 10 seconds';
+  flushSync();
+  expect(card().dataset.away).toBe('true');
+  expect(query('[data-machine-id="target"] [data-testid="machine-card-status"]').textContent).toBe(strings.connection.offline);
+  expect([has('machine-open'), has('machine-details-toggle'), has('machine-rename'), has('machine-customize')]).toEqual([false, false, true, true]);
+  expect(card().querySelector('.error')).toBeNull();
+  query<HTMLButtonElement>('[data-machine-id="target"] [data-testid="machine-remove"]').click();
+  await vi.waitFor(() => expect(confirm.current?.title).toContain(target.label));
+  confirm.answer(false);
+  // Back online, the card is whole again without a click.
+  target.store.connection = 'ready';
+  flushSync();
+  expect([has('machine-open'), has('machine-details-toggle'), card().dataset.away]).toEqual([true, true, undefined]);
 });
 
 test('removing a connected row removes the group member and keeps the current conversation on its owner', async () => {
