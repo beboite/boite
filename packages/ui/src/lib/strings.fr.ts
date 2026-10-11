@@ -1164,8 +1164,7 @@ export const fr: Translation = {
     replyTo: 'En réponse à',
     more: '+{count} autres',
     relation: {
-      starter: 'A lancé cette conversation', started: 'Lancée d\'ici', parent: 'Parent', child: 'Sous-agent',
-      steward: 'Gardien', stewarded: 'Sous sa garde', project: 'Même projet', 'other-project': 'Autre projet', machine: 'Autre machine'
+      starter: 'A lancé cette conversation', started: 'Lancée d\'ici', parent: 'Parent', child: 'Sous-agent', steward: 'Gardien', stewarded: 'Sous sa garde'
     },
     noticeOne: '1 avis de conversation', noticeMany: '{count} avis de conversation'
   },

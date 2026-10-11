@@ -166,8 +166,10 @@ export function groupAgentMail(timeline: Message[], mail: AgentMail[]): { timeli
   return { timeline: rows, groups };
 }
 
-/** The relations worth a tag: who started or delegated whom, and the steward. Where a thread runs is said apart. */
-export function hierarchyOf(discussion: Pick<Discussion, 'relation' | 'steward'>): AgentRelation | undefined {
+/** The relations worth a tag: who started or delegated whom, and the steward. */
+export type Hierarchy = Exclude<AgentRelation, 'project' | 'other-project' | 'machine'>;
+/** The tag of a discussion; where a thread runs is said by its project and machine instead. */
+export function hierarchyOf(discussion: Pick<Discussion, 'relation' | 'steward'>): Hierarchy | undefined {
   if (discussion.steward) return 'steward';
   const relation = discussion.relation;
   return relation === 'project' || relation === 'other-project' || relation === 'machine' ? undefined : relation;

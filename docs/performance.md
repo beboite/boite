@@ -587,6 +587,17 @@ fix adds 126 bytes to the 3,979,995-byte build at `46388ac4`; the intervening
 usage changes add another 4,804 bytes. The earlier UI limit adjustment is
 superseded by main's text-alignment budget.
 
+### Agent discussions
+
+On 2026-10-11, `bun run build:ui` with Bun 1.4.2 on Linux measured 4,483,627
+bytes for the complete UI and 585,725 bytes for its entry chunk. Main's desktop
+CI at `4762402b` reported 4,366.7 KiB complete and 567.8 KiB entry; the
+discussion rows, the Discussions tab with its conversation view, the avatar and
+their translations add about 12.1 KB, net of the removed message bubble. The
+total UI budget increases from 4,475,000 to 4,500,000 bytes, leaving 16,373
+bytes of headroom; entry and core limits stay unchanged. Totals exclude
+precompressed copies, as `bun scripts/ci/budgets.ts` does.
+
 ## The desktop browser on a phone
 
 A paired phone watching the desktop's browser tab, before the agent's browser

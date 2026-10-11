@@ -1239,10 +1239,9 @@ export const strings = {
     replyTo: 'In reply to',
     /** A burst touched more discussions than the timeline lists. */
     more: '+{count} more',
-    /** How the other conversation relates to this one. Same project, other project and other machine carry no tag. */
+    /** Who started or delegated whom. Where a conversation runs is said by its project and machine, not a tag. */
     relation: {
-      starter: 'Started this thread', started: 'Started from here', parent: 'Parent', child: 'Subagent',
-      steward: 'Steward', stewarded: 'Looked after', project: 'Same project', 'other-project': 'Other project', machine: 'Other machine'
+      starter: 'Started this thread', started: 'Started from here', parent: 'Parent', child: 'Subagent', steward: 'Steward', stewarded: 'Looked after'
     },
     /** What the core told this steward about the threads it looks after. */
     noticeOne: '1 thread notice', noticeMany: '{count} thread notices'
