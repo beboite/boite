@@ -4,7 +4,7 @@ import { work } from '../work-prefs.svelte';
 import type { Draft } from '../store.svelte';
 import type { StoreContext } from './context';
 import { retainRows } from './snapshot-reads';
-import { draftKey } from './drafts.svelte';
+import { created, draftKey } from './drafts.svelte';
 import { secureId } from '../secure-id';
 
 /** The projects in the sidebar, the draft a new thread starts as, and where the app lands. */
@@ -378,6 +378,8 @@ export class Projects {
     const drafts = s.draftsProject?.id ?? null;
     const owner = options.draftId === undefined ? undefined : this.ctx.drafts.projectOf(options.draftId);
     const draftId = owner === undefined ? undefined : options.draftId;
+    // A draft gone since its row was drawn (deleted, sent) opens an empty one, never another parked draft.
+    const fresh = options.fresh === true || (options.draftId !== undefined && owner === undefined);
     const target = owner !== undefined ? owner : projectId === null ? drafts
       : projectId ?? s.openProject?.id ?? (work.current.startIn === 'drafts' ? drafts : s.lastProject());
     threads.rememberReadingThread();
@@ -387,7 +389,7 @@ export class Projects {
     s.trace = [];
     workbench.tracedThreadId = null;
     this.ctx.requests.keepRequestsOf(null);
-    this.ctx.drafts.resume(target, { fresh: options.fresh === true, ...(draftId === undefined ? {} : { draftId }) });
+    this.ctx.drafts.resume(target, { fresh, ...(draftId === undefined ? {} : { draftId }) });
     this.ctx.drafts.persist();
     if (target !== null) this.collapsedProjects = this.collapsedProjects.filter(id => id !== target);
     if (target !== null) this.rememberProject(target);
@@ -412,8 +414,8 @@ export class Projects {
     // Its saved copy, if any, still names the old project: the open draft replaces it.
     this.ctx.drafts.forget(draftKey(draft));
     const { incognito, ...kept } = draft;
-    // A draft keeps its id; one opened before ids existed gets one, so its old project key stays that project's.
-    this.draft = { ...kept, id: draft.id ?? secureId(), ...(incognito && drafts ? { incognito } : {}), projectId: target, worktree: drafts || project?.repository !== true ? false : draft.worktreeExplicit ? draft.worktree : project?.worktreeDefault === true };
+    // A draft keeps its id; one opened before ids existed gets one and a creation time, so its old project key stays that project's.
+    this.draft = { ...kept, ...(draft.id ? {} : { id: secureId(), createdAt: created() }), ...(incognito && drafts ? { incognito } : {}), projectId: target, worktree: drafts || project?.repository !== true ? false : draft.worktreeExplicit ? draft.worktree : project?.worktreeDefault === true };
     if (target === null) return;
     this.rememberProject(target);
     this.collapsedProjects = this.collapsedProjects.filter((id) => id !== target);

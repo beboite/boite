@@ -356,8 +356,9 @@
     const images = attachments;
     const references = previewReferences;
     if (reply) {
+      const answeredKey = key;
       if (canSend && await sendAnswer(store, reply)) {
-        const answered = store.composerStates[key];
+        const answered = store.composerStates[answeredKey];
         if (answered) resetHistory(answered);
         recall = null; requestAnimationFrame(grow);
       }

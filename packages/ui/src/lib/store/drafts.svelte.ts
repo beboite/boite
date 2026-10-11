@@ -28,7 +28,7 @@ const projectKey = (id: string | null) => JSON.stringify(id);
 export const draftKey = (draft: Draft) => draft.id ?? projectKey(draft.projectId);
 let lastCreated = 0;
 /** A creation time no two drafts share, so the newest-first order is total. */
-const created = () => (lastCreated = Math.max(Date.now(), lastCreated + 1));
+export const created = () => (lastCreated = Math.max(Date.now(), lastCreated + 1));
 /** An empty draft of its own. */
 const newDraft = (projectId: string | null, worktree: boolean): Draft => ({ id: secureId(), createdAt: created(), projectId, worktree });
 /**

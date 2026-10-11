@@ -577,3 +577,16 @@ test('sending one draft of a project keeps the others, and Ctrl+Enter opens a fr
   expect(await store.submit('Keep me', store.defaultChoice()!)).toBe(true);
   expect(store.draftEntries).toEqual([]);
 });
+
+test('a draft row that outlived its draft opens an empty draft, never another parked one', async () => {
+  const store = await ready('stale-draft-row');
+  store.startDraft('p-boite', { fresh: true });
+  store.editComposerText('draft', 'An older parked draft');
+  store.startDraft('p-boite', { fresh: true });
+  store.editComposerText('draft', 'The draft about to go');
+  const gone = store.draft!.id!;
+  store.discardDraft(gone);
+  store.startDraft('p-boite', { draftId: gone });
+  expect(store.composerStates.draft?.text ?? '').toBe('');
+  expect(store.draftEntries.map(entry => entry.text)).toEqual(['An older parked draft']);
+});

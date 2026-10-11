@@ -176,7 +176,7 @@
                       {#if list === 'done'}<CheckCheck size={12} aria-hidden="true" />{:else}<Archive size={12} aria-hidden="true" />{/if}<span class="ui-label">{formatCount(count)}</span>
                     </button>
                   {/each}
-                  {#if kind === 'archived'}<span class="archived-mark" title={strings.sidebar.archivedProject} aria-label={strings.sidebar.archivedProject}><Archive size={12} /></span>{/if}
+                  {#if kind === 'archived'}<span class="archived-mark" title={strings.sidebar.archivedProject}><Archive size={12} aria-label={strings.sidebar.archivedProject} /></span>{/if}
                   <span class="actions">
                     {#if kind === 'idle'}
                       {#if project.kind !== 'drafts'}

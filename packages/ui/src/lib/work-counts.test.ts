@@ -38,3 +38,12 @@ test('a steward mid-turn counts once among the agents at work', async () => {
   store.stewards = [...store.stewards!, { threadId: 't-scheduler', projectIds: ['p-boite'], allProjects: false, capabilities: [], grantedAt: 0 }] as never;
   expect(agentsAtWork([store]).count).toBe(1);
 });
+
+test('an agent whose own thread rests but asks the user counts, in the waiting colour', async () => {
+  const store = await ready();
+  const { agentDirectory } = await import('./agent-directory.svelte');
+  store.threads = store.threads.map(thread => ({ ...thread, status: 'idle', openQuestions: 0, backgroundWork: null, unread: false,
+    ...(thread.id === 't-trace' ? { agentSessionId: 'session-1', openQuestions: 1 } : {}) }));
+  agentDirectory(store).snapshot = { profiles: [{ id: 'agent-1', name: 'Mira', status: 'active' }], sessions: [{ id: 'session-1', agentId: 'agent-1' }], work: [], runs: [], entrusted: [] } as never;
+  expect(agentsAtWork([store])).toEqual({ count: 1, waiting: true });
+});

@@ -88,7 +88,6 @@ export function pasteImages(host: EditingHost, event: ClipboardEvent): boolean {
   if (!copied || !box || pastesAsText(copied, state)) return false;
   event.preventDefault();
   const start = box.selectionStart, end = box.selectionEnd;
-  recordEdit(state, 'big', { start, end });
   const fitted = fitCopy(copied, state.attachments, (incoming) => {
     if (incoming.length === 0) return [];
     if (provider && !provider.capabilities.images) {
@@ -99,6 +98,9 @@ export function pasteImages(host: EditingHost, event: ClipboardEvent): boolean {
     if (result.refused !== null) store.error = result.refused;
     return incoming.filter((item) => result.accepted.includes(item));
   });
+  // Every picture refused and nothing left to write: the selection stays, the refusal is on screen.
+  if (!fitted.text && fitted.attachments.length === state.attachments.length) return true;
+  recordEdit(state, 'big', { start, end });
   state.attachments = fitted.attachments;
   writeEdit(host, state.text.slice(0, start) + fitted.text + state.text.slice(end), { start, end }, start + fitted.text.length);
   return true;

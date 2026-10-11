@@ -41,3 +41,22 @@ describe('composer clipboard', () => {
     expect(copiedFrom(text)).toBeNull();
   });
 });
+
+describe('pasting a copy whose pictures are all refused', () => {
+  it('keeps the selected text instead of replacing it with nothing', async () => {
+    const { pasteImages } = await import('./composer-editing');
+    const from: ComposerState = { text: '[Image 1]', attachments: [image('b25l')], queued: [], sending: false, paused: false };
+    const clipboard = board();
+    copyImages(clipboard, from, 0, from.text.length);
+    const state: ComposerState = { text: 'keep these words', attachments: [], queued: [], sending: false, paused: false };
+    const box = document.createElement('textarea');
+    box.value = state.text;
+    box.setSelectionRange(0, 4);
+    const store = { error: null as string | null, editComposerText: (_key: string, value: string) => { state.text = value; } };
+    const event = { clipboardData: clipboard, preventDefault() {} } as unknown as ClipboardEvent;
+    expect(pasteImages({ store: store as never, key: 'k', box, state, provider: { name: 'Text only', capabilities: { images: false } }, moved: () => {} }, event)).toBe(true);
+    expect(state.text).toBe('keep these words');
+    expect(box.value).toBe('keep these words');
+    expect(store.error).toContain('Text only');
+  });
+});

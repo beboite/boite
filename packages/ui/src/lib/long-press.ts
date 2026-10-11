@@ -35,8 +35,13 @@ export function longPress(node: HTMLElement): { destroy: () => void } {
   const move = (event: PointerEvent) => {
     if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > SLOP_PX) cancel();
   };
-  // The platform's own long press got there first: it already opened the menu.
-  const native = () => { if (!ours && timer !== undefined) { fired = true; cancel(); } };
+  // The platform's own long press got there first: it opens the menu and the timer stops. One arriving
+  // after ours is the same press: it goes no further, so the menu does not open twice.
+  const native = (event: Event) => {
+    if (ours) return;
+    if (timer !== undefined) { fired = true; cancel(); }
+    else if (fired) { event.preventDefault(); event.stopPropagation(); }
+  };
   const click = (event: MouseEvent) => {
     if (!fired) return;
     fired = false;

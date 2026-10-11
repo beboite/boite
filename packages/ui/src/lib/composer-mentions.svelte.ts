@@ -40,6 +40,7 @@ export class ComposerMentions {
       this.#from = projectId;
       this.items = [];
       this.more = 0;
+      this.at = 0;
     }
     if (query === null || projectId === null || !client) return undefined;
     const timer = setTimeout(() => {
@@ -56,6 +57,7 @@ export class ComposerMentions {
           if (ask !== this.#ask) return;
           this.items = [];
           this.more = 0;
+          this.at = 0;
         });
     }, DEBOUNCE_MS);
     return () => clearTimeout(timer);

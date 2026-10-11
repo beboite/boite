@@ -259,11 +259,11 @@
             {/if}
           </div>
           <div id="{controls}-done" hidden={!doneOpen} data-testid="project-done">
-            {#if doneOpen}<GroupLabel kind="done" count={archiveCount(group.project, 'done')} />{/if}
+            {#if doneOpen}<GroupLabel kind="done" count={query ? undefined : archiveCount(group.project, 'done')} />{/if}
             <RecentDone entries={[group]} {scrollRoot} {now} {query} open={doneOpen} header={false} onopen={() => show('chat')} />
           </div>
           <div id="{controls}-archived" hidden={!archivedOpen} data-testid="project-archived">
-            {#if archivedOpen}<GroupLabel kind="archived" count={archiveCount(group.project, 'archived')} />{/if}
+            {#if archivedOpen}<GroupLabel kind="archived" count={query ? undefined : archiveCount(group.project, 'archived')} />{/if}
             <RecentDone kind="archived" entries={[group]} {scrollRoot} {now} {query} open={archivedOpen} header={false} onopen={() => show('chat')} />
           </div>
           {#if groupRows.length === 0 && !group.project.archivedThreads && drafts.length === 0}<p class="empty">{strings.sidebar.noThreads}</p>{/if}
