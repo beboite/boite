@@ -32,7 +32,8 @@ export const GIT_READ_TIMEOUT_MS = 30_000;
  */
 function spawnRead(core: Core, threadId: ThreadId, cwd: string, args: string[], needs: string) {
   try {
-    return core.procs.spawn(threadId, 'git', ['-c', 'core.fsmonitor=', ...args], { cwd, env: { GIT_OPTIONAL_LOCKS: '0' } });
+    // English messages whatever the locale (gettext reads LANGUAGE first): the log classifies git's failures by their text.
+    return core.procs.spawn(threadId, 'git', ['-c', 'core.fsmonitor=', ...args], { cwd, env: { GIT_OPTIONAL_LOCKS: '0', LANGUAGE: 'en' } });
   } catch (error) {
     // A spawn in a folder that is gone fails with the same ENOENT as a git that is not installed.
     if (!existsSync(cwd)) throw folderGone(cwd, { threadId, field: 'cwd' });

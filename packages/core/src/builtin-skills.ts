@@ -83,33 +83,55 @@ function kind(path: string, wanted: 'file' | 'directory'): boolean {
 }
 
 /**
+ * Never wait on the open: a pipe swapped in after `kind` would otherwise block
+ * the core's event loop until someone opened its other end. Windows has no such files.
+ */
+const NONBLOCK = constants.O_NONBLOCK ?? 0;
+
+/**
  * Whether the file holds exactly `text`. An agent can rewrite it, even swap it
- * between two calls: one descriptor, opened without following a link, gives the
- * size and the bytes, and never more than `text` and one byte are read.
+ * between two calls: one descriptor, opened without following a link or waiting,
+ * gives the kind, the size and the bytes, and never more than `text` and one byte are read.
  */
 function holds(path: string, text: string): boolean {
   const expected = Buffer.from(text, 'utf8');
   let fd: number;
-  try { fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0)); } catch { return false; }
+  try { fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | NONBLOCK); } catch { return false; }
   try {
-    if (fstatSync(fd).size !== expected.length) return false;
+    const stat = fstatSync(fd);
+    if (!stat.isFile() || stat.size !== expected.length) return false;
     const buffer = Buffer.alloc(expected.length + 1);
     const read = readSync(fd, buffer, 0, buffer.length, 0);
     return read === expected.length && buffer.subarray(0, read).equals(expected);
   } finally { closeSync(fd); }
 }
 
-/** Writes `text` without following a link swapped in after the checks: a link there is removed, once. */
+/**
+ * Writes `text` into a regular file only, without following a link or waiting on a pipe
+ * swapped in after the checks. Such a thing is removed once, and the second open must
+ * create the file itself (`O_EXCL`); a second swap fails rather than write anywhere else.
+ */
 function write(path: string, text: string): void {
-  const flags = constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | (constants.O_NOFOLLOW ?? 0);
-  let fd: number;
-  try { fd = openSync(path, flags, 0o644); }
-  catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ELOOP') throw error;
-    rmSync(path, { force: true });
-    fd = openSync(path, flags, 0o644);
+  const flags = constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | (constants.O_NOFOLLOW ?? 0) | NONBLOCK;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    let fd: number | null = null;
+    try { fd = openSync(path, attempt === 0 ? flags : flags | constants.O_EXCL, 0o644); }
+    catch (error) {
+      // A link (ELOOP) or a pipe nobody reads (ENXIO).
+      const code = (error as NodeJS.ErrnoException).code;
+      if (attempt === 0 && (code === 'ELOOP' || code === 'ENXIO')) { rmSync(path, { force: true }); continue; }
+      throw error;
+    }
+    try {
+      if (!fstatSync(fd).isFile()) {
+        closeSync(fd); fd = null;
+        if (attempt === 0) { rmSync(path, { force: true }); continue; }
+        throw new Error(`${path} is not a regular file`);
+      }
+      writeSync(fd, text);
+      return;
+    } finally { if (fd !== null) closeSync(fd); }
   }
-  try { writeSync(fd, text); } finally { closeSync(fd); }
 }
 
 /** Writes each skill when missing or different, and returns where each lives. A write that fails leaves that skill out. */

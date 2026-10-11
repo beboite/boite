@@ -168,17 +168,19 @@ pub(super) fn resolve_core(state: &CoreState) -> Result<(CoreEndpoint, Option<u3
         ));
     }
     // What the stopped core printed goes in the record too: the error string is all the user sees.
-    let (output, tail) = match state.child.lock().ok().and_then(|mut guard| guard.take()) {
+    // A core already gone (its exit is logged where it was found) had nothing left to stop.
+    let (output, tail, stopped) = match state.child.lock().ok().and_then(|mut guard| guard.take()) {
         Some(mut spawned) => {
             job::stop_core(&mut spawned.child);
             spawned.settle();
-            (spawned.output.quoted(), stderr_tail(&spawned))
+            (spawned.output.quoted(), stderr_tail(&spawned), true)
         }
-        None => (String::new(), None),
+        None => (String::new(), None, false),
     };
     if let Ok(mut guard) = state.job.lock() { drop(guard.take()); }
-    shell_log::error("core", "shell.core.timeout", format!("the core did not answer /health within {} s and was stopped", launch.timeout.as_secs()),
-        json!({ "timeoutMs": launch.timeout.as_millis() as u64, "resident": false, "stderrTail": tail }));
+    shell_log::error("core", "shell.core.timeout",
+        format!("the core did not answer /health within {} s{}", launch.timeout.as_secs(), if stopped { " and was stopped" } else { "; it had already exited" }),
+        json!({ "timeoutMs": launch.timeout.as_millis() as u64, "resident": launch.resident, "stopped": stopped, "stderrTail": tail }));
     Err(format!(
         "the core did not write {} and answer /health within {} s{output}",
         file.display(),

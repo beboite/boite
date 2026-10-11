@@ -335,7 +335,8 @@ export class Diagnostics {
       const result = await this.gh(['auth', 'status', '--hostname', 'github.com'], 10_000);
       if (result.code === null) return 'missing';
       return result.code === 0 ? 'ready' : 'unauthenticated';
-    } catch { return 'missing'; }
+      // gh is there (a missing one answers code null) but did not answer in time or could not start.
+    } catch { return 'unauthenticated'; }
   }
 
   private async createIssue(title: string, body: string): Promise<string> {
