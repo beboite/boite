@@ -240,11 +240,14 @@ test('clients report their own errors as ui records, bounded per connection, and
     expect(record).toMatchObject({ origin: 'ui', source: 'render', event: 'ui.error', message: 'TypeError: x is undefined' });
     expect(record?.data?.stack).toBe('at App.svelte:3');
     let total = 0;
+    const minute = Math.floor(Date.now() / 60_000);
     for (let batch = 0; batch < 8; batch += 1) {
       const records = Array.from({ length: 50 }, (_, index) => ({ level: 'warn' as const, at: Date.now(), source: 'rpc', event: 'ui.rpc-failed', message: `call ${batch}:${index} failed` }));
       total += (await owner.call('diagnostics.report', { records })).accepted;
     }
-    expect(total).toBe(299);
+    // A runner slow enough to cross into the next minute got a refill: the bound holds per minute, not exactly 299.
+    if (Math.floor(Date.now() / 60_000) === minute) expect(total).toBe(299);
+    else expect(total).toBeLessThan(400);
     expect((await owner.call('core.logs', { source: 'diagnostics', limit: 5 })).map(entry => entry.event)).toContain('diagnostics.report-throttled');
     const { grant } = await owner.call('pairing.grant', {});
     const phone = await connect(harness.url, '', { grant });

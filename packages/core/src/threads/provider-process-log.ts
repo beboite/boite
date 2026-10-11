@@ -25,8 +25,9 @@ export function programName(command: string): string {
  * the core uses to stop it. Anything else is what a developer reading the log
  * needs explained.
  */
-export function abnormalExit(code: number | null, signal: NodeJS.Signals | null): boolean {
-  if (signal !== null) return !STOP_SIGNALS.has(signal);
+export function abnormalExit(code: number | null, signal: NodeJS.Signals | null, askedToStop = true): boolean {
+  // A stop signal is the core's own stop only when the core asked: an OOM kill or an outside `kill` is a crash.
+  if (signal !== null) return !(askedToStop && STOP_SIGNALS.has(signal));
   return code !== null && code !== 0;
 }
 
@@ -52,6 +53,12 @@ export function watchProviderProcess(core: Core, child: SpawnedChild, command: s
   // A program that cannot start has no pid and never emits `spawn`: its only record is the failure.
   if (child.pid === undefined) child.once('spawn', started);
   else started();
+  // Drivers stop their process with `child.kill()`, the core with `procs.killTree`: either is asking.
+  let askedToStop = false;
+  const kill = (child as { kill?: unknown }).kill;
+  if (typeof kill === 'function') {
+    (child as unknown as { kill: (...args: unknown[]) => unknown }).kill = (...args: unknown[]) => { askedToStop = true; return kill.apply(child, args); };
+  }
   let reported = false;
   child.once('error', (error) => {
     // Only a spawn that never started: an error after it (a failed kill) leaves its exit record to come.
@@ -77,7 +84,8 @@ export function watchProviderProcess(core: Core, child: SpawnedChild, command: s
     if (reported) return;
     reported = true;
     const lifetime = (exitedAt ?? performance.now()) - startedAt;
-    const abnormal = abnormalExit(code, signal);
+    const asked = askedToStop || core.stopping === true || (core.procs?.stopAskedSince?.(who.threadId, startedWall) ?? false);
+    const abnormal = abnormalExit(code, signal, asked);
     const tail = abnormal ? stderrTail(who.threadId, undefined, undefined, startedWall) : null;
     const how = signal !== null ? `was ended by ${signal}` : `exited with code ${code ?? 'unknown'}`;
     core.logs.record(abnormal ? 'warn' : 'info', `${program} for ${who.providerId}, pid ${child.pid ?? 'unknown'}, ${how} after ${Math.round(lifetime / 100) / 10} s${tail ? `; its last ${tail.length} characters of stderr are in data.stderrTail` : abnormal ? '; it printed nothing on stderr' : ''}`, {

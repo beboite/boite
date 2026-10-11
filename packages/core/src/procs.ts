@@ -595,7 +595,18 @@ export class ProcRegistry {
     return measured;
   }
 
+  /** When the core last asked each thread's processes to stop: a signal after that is its own stop, not a crash. */
+  private readonly stopsAsked = new Map<ThreadId, number>();
+  /** Whether the core asked this thread's processes to stop at or after `since` (wall time). */
+  stopAskedSince(threadId: ThreadId, since: number): boolean {
+    const at = this.stopsAsked.get(threadId);
+    return at !== undefined && at >= since;
+  }
+
   killTree(threadId: ThreadId): number {
+    this.stopsAsked.delete(threadId);
+    this.stopsAsked.set(threadId, Date.now());
+    if (this.stopsAsked.size > 1024) this.stopsAsked.delete(this.stopsAsked.keys().next().value!);
     this.finishStartup(threadId);
     const byPid = this.live.get(threadId);
     const entries = byPid === undefined ? [] : [...byPid.values()];

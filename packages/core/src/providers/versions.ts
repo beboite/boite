@@ -138,16 +138,6 @@ function recheckWhenDue(program: string, args: string[]): void {
   else if (Date.now() >= at) start(program, args);
 }
 
-/**
- * The major version of the program at this path: a number once it is known,
- * null when the program answered with no version, cannot be reached or could
- * not be run, and undefined while it has not been asked yet, in which case the
- * question is on its way. A program that could not be run stays no candidate,
- * so the ones behind it get their turn, and is asked again in the background
- * once `RETRY_MS` has passed. `args` is what makes the program print its
- * version. With `ask` false nothing is ever started: the answer is what is
- * already known, for a provider that is turned off and must start nothing.
- */
 /** The version a program last reported, without asking it again; null when unknown. */
 export function knownVersion(program: string): string | null {
   const reading = readings.get(program);
@@ -160,6 +150,16 @@ export function knownVersion(program: string): string | null {
   return reading.version;
 }
 
+/**
+ * The major version of the program at this path: a number once it is known,
+ * null when the program answered with no version, cannot be reached or could
+ * not be run, and undefined while it has not been asked yet, in which case the
+ * question is on its way. A program that could not be run stays no candidate,
+ * so the ones behind it get their turn, and is asked again in the background
+ * once `RETRY_MS` has passed. `args` is what makes the program print its
+ * version. With `ask` false nothing is ever started: the answer is what is
+ * already known, for a provider that is turned off and must start nothing.
+ */
 export function majorAt(program: string, args: readonly string[], ask = true): number | null | undefined {
   let stat: { mtimeMs: number; size: number };
   try {

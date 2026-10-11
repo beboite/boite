@@ -1,5 +1,4 @@
 import { expect, test } from 'bun:test';
-import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { normalizeCoreLogText, type CoreLogRecord } from '@boite/contracts';
 import { connect } from '../src/client.ts';
@@ -59,16 +58,29 @@ test('an agent process that crashes leaves one warning with its exit code and th
   forgetStderr(threadId);
 });
 
-test('a program that cannot start leaves only its failure, never a start', async () => {
+test('a program that cannot start leaves only its failure, never a start', () => {
   const { core, records } = recordingCore();
-  const child = spawn('/nonexistent/boite-test/claude', [], { stdio: ['pipe', 'pipe', 'pipe'] }) as unknown as SpawnedChild;
+  // What the runtime does for a missing program: no pid, no `spawn`, an `error` with its code, then `close`.
+  const child = Object.assign(new EventEmitter(), { pid: undefined }) as unknown as SpawnedChild;
   watchProviderProcess(core, child, '/nonexistent/boite-test/claude', { threadId: 'thr_missing', providerId: 'claude', resume: false });
-  const until = Date.now() + 10_000;
-  while (records.length === 0 && Date.now() < until) await Bun.sleep(20);
-  await Bun.sleep(50);
+  child.emit('error', Object.assign(new Error('spawn /nonexistent/boite-test/claude ENOENT'), { code: 'ENOENT' }));
+  child.emit('close', -2, null);
   expect(records.map(record => record.context.event)).toEqual(['driver.process.spawn-failed']);
   // The error code, never the spawn message that holds the full path.
   expect(records[0]?.message).toBe('claude for claude could not start (ENOENT)');
+});
+
+test('a signal the core did not ask for is a crash; one after its own stop is not', () => {
+  const { core, records } = recordingCore();
+  const outside = Object.assign(new EventEmitter(), { pid: 4245, kill: () => true }) as unknown as SpawnedChild;
+  watchProviderProcess(core, outside, '/usr/bin/codex', { threadId: 'thr_oom', providerId: 'codex', resume: false });
+  outside.emit('exit', null, 'SIGKILL'); outside.emit('close', null, 'SIGKILL');
+  expect(records.at(-1)).toMatchObject({ level: 'warn', context: { event: 'driver.process.crashed' } });
+  const stopped = Object.assign(new EventEmitter(), { pid: 4246, kill: () => true }) as unknown as SpawnedChild;
+  watchProviderProcess(core, stopped, '/usr/bin/codex', { threadId: 'thr_stopped', providerId: 'codex', resume: false });
+  stopped.kill('SIGTERM');
+  stopped.emit('exit', null, 'SIGTERM'); stopped.emit('close', null, 'SIGTERM');
+  expect(records.at(-1)).toMatchObject({ level: 'info', context: { event: 'driver.process.exited' } });
 });
 
 test('a stop the core asked for is no crash, and old stderr does not describe a new failure', () => {
@@ -272,6 +284,10 @@ test('a method name the client chose cannot forge a line in a refused or slow RP
   expect(describeConnection({ authenticated: false, remote: false, clientName: 'app\u2028forged' } as never).client).toBe('appforged');
   for (const record of records) expect(`${record.message}${JSON.stringify(record.context.data)}`).not.toMatch(/[\n\u2028]/);
   expect(records.map(record => record.context.event)).toEqual(['rpc.refused', 'rpc.slow', 'rpc.refused', 'connection.hello-refused']);
+  // A peer retrying bad hellos in a loop: the first ten of a minute warn, the rest are detail.
+  const flood = recordingCore();
+  for (let index = 0; index < 12; index += 1) logHelloRefused(flood.core, { id: `c${index}`, remote: true } as never, 'bad token', 'app');
+  expect(flood.records.map(record => record.level)).toEqual([...Array(10).fill('warn'), 'debug', 'debug']);
 });
 
 test('a process that reports its exit but never closes is still logged, with its exit time', async () => {

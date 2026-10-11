@@ -374,7 +374,8 @@ export class TurnContexts {
         ...opts,
         env: agentEnvOf(this.core, threadId, opts?.env ?? process.env),
       });
-      if (session !== undefined) watchProviderProcess(this.core, child, cmd, { threadId, providerId: provider.id, ...session });
+      // A diagnostic storage failure must not break a spawn.
+      try { if (session !== undefined) watchProviderProcess(this.core, child, cmd, { threadId, providerId: provider.id, ...session }); } catch { /* the child runs unwatched */ }
       const installs = this.core.providers.installs;
       installs.acquire(provider.id);
       let released = false;

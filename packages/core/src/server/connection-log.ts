@@ -12,7 +12,7 @@ export const SLOW_RPC_WARN_MS = 10_000;
  * on another agent, a question to the user, a browser command. Their duration
  * is the wait, not a sign of a stalled core, so they never reach `warn`.
  */
-const HELD_METHODS = /^(delegation\.(wait|send)|collaboration\.(wait|send)|questions\.ask|agents\.decision\.request|browser\.|devices\.|terminals\.|panel\.|accounts\.login|providers\.(install|update|dryRun)|plugins\.(install|uninstall)|speech\.(install|transcribe|stream)|imports\.run|brain\.sync|core\.update)/;
+const HELD_METHODS = /^(delegation\.(wait|send)|collaboration\.(wait|send)|questions\.ask|agents\.decision\.request|browser\.|devices\.|panel\.|accounts\.login|providers\.(install|update|dryRun)|plugins\.(install|uninstall)|speech\.(install|transcribe|stream)|imports\.run|brain\.sync|core\.update)/;
 
 /**
  * A value an unauthenticated client chose, made safe for a log line: control,
@@ -57,9 +57,18 @@ export function logHelloAccepted(core: Core, connection: ServerConnection, clien
   });
 }
 
+/** Hello refusals a minute that are worth a warning; past them a stranger's retries are detail. */
+const HELLO_REFUSALS_WARNED = 10;
+const helloRefusals = new WeakMap<Core, { minute: number; count: number }>();
+
 export function logHelloRefused(core: Core, connection: ServerConnection, reason: string, rawClientName: string): void {
   const clientName = clientField(rawClientName, 100);
-  core.logs.warn(`Connection ${connection.id} from ${clientName}${connection.remote ? ' over the network' : ' on this machine'} was refused at hello: ${clientField(reason, 300)}`, {
+  // A phone that cannot pair needs its refusal seen; a peer sending bad hellos in a loop must not fill the files with warnings.
+  const minute = Math.floor(Date.now() / 60_000);
+  const seen = helloRefusals.get(core);
+  const count = seen !== undefined && seen.minute === minute ? seen.count + 1 : 1;
+  helloRefusals.set(core, { minute, count });
+  core.logs.record(count <= HELLO_REFUSALS_WARNED ? 'warn' : 'debug', `Connection ${connection.id} from ${clientName}${connection.remote ? ' over the network' : ' on this machine'} was refused at hello: ${clientField(reason, 300)}`, {
     source: 'connections', event: 'connection.hello-refused', data: { connectionId: connection.id, reason, client: clientName, remote: connection.remote },
   });
 }

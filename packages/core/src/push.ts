@@ -318,7 +318,7 @@ export class PushStore {
     try { keys = await this.keys(); }
     catch (error) {
       // The callers log a delivery failure as detail: this cause is said here, once.
-      this.core.logs.warn(`Web Push keys could not be read or created: ${error instanceof Error ? error.message : String(error)}`, { source: 'push', event: 'push.failed', ...(payload.threadId ? { threadId: payload.threadId } : {}), data: { sessionId, stage: 'keys' } });
+      this.core.logs.warn(`Web Push keys could not be read or created: ${error instanceof Error ? error.message : String(error)}`, { source: 'push', event: 'push.failed', ...(payload.threadId && !payload.core ? { threadId: payload.threadId } : {}), data: { sessionId, stage: 'keys' } });
       throw error;
     }
     if (this.closed || !this.core.journal.getSession(sessionId)) return;
@@ -334,7 +334,8 @@ export class PushStore {
       let service = 'unknown';
       try { service = new URL(subscription.endpoint).hostname; } catch { /* stays unknown */ }
       this.core.logs.warn(`Web Push to session ${sessionId} via ${service} failed${status ? ` with HTTP ${status}` : ' before an answer'}${gone ? '; the subscription is gone and was removed' : ''}`, {
-        source: 'push', event: 'push.failed', ...(payload.threadId ? { threadId: payload.threadId } : {}), data: { sessionId, status: status ?? null, service, removed: gone, code: (error as { code?: string }).code ?? null },
+        // A relayed push names a thread of another machine: no local thread is blamed for it.
+        source: 'push', event: 'push.failed', ...(payload.threadId && !payload.core ? { threadId: payload.threadId } : {}), data: { sessionId, status: status ?? null, service, removed: gone, code: (error as { code?: string }).code ?? null },
       });
       // Provider errors often contain the endpoint and encryption material. Do not forward them.
       throw refused(`Web Push delivery failed${status ? ` (${status})` : ''}`);

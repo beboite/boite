@@ -550,14 +550,14 @@ export function main(argv: string[]): void {
       // long. Honour it rather than ignoring it, which used to leave no way out
       // short of killing the process.
       if (stopping) {
-        core.log('warn', 'second shutdown signal, exiting now', { source: 'core', event: 'core.shutdown.forced' });
+        try { core.log('warn', 'second shutdown signal, exiting now', { source: 'core', event: 'core.shutdown.forced' }); } catch { /* Forced exit must not depend on logging. */ }
         process.exit(1);
       }
       stopping = true;
       const shutdownAt = performance.now();
       const step = (event: string, message: string, since: number): number => {
         const now = performance.now();
-        core.logs.info(`${message} in ${Math.round(now - since)} ms`, { source: 'core', event, durationMs: now - since });
+        try { core.logs.info(`${message} in ${Math.round(now - since)} ms`, { source: 'core', event, durationMs: now - since }); } catch { /* Shutdown goes on without its record. */ }
         return now;
       };
       const running = core.scheduler.state();

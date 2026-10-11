@@ -42,8 +42,9 @@ describe('the CLI prints records oldest first, filters by time and level, and ex
     // A global flag right after one of the logs filters stays global.
     expect(parse(['logs', '--since', '--json'])).toMatchObject({ positional: ['logs', '--since'], json: true });
     expect(parse(['logs', '--search', 'timeout', '--json'])).toMatchObject({ positional: ['logs', '--search', 'timeout'], json: true });
-    const owned = (await run(['logs', '--data-dir', harness.dataDir, '--min-level', 'warn', '--since', '10m'])).trim().split('\n');
-    expect((await run(['--limit', '1', 'logs', '--data-dir', harness.dataDir, '--min-level', 'warn'])).trim().split('\n')).toHaveLength(1);
+    // Only the two fixtures: the core logs its own warnings too (detection, connections).
+    const owned = (await run(['logs', '--data-dir', harness.dataDir, '--min-level', 'warn', '--since', '10m', '--search', 'test.'])).trim().split('\n');
+    expect((await run(['--limit', '1', 'logs', '--data-dir', harness.dataDir, '--min-level', 'warn', '--search', 'test.'])).trim().split('\n')).toHaveLength(1);
     expect(owned.at(-2)).toContain('test/test.first');
     expect(owned.at(-1)).toContain('ERROR core  test/test.second');
   });
