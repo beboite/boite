@@ -121,11 +121,10 @@ const MISSING: Partial<Record<RequestableSetting, unknown>> = {
 
 /** The value a setting has in effect: a missing key reads as its default, null when it has none. */
 export function effectiveSetting(settings: Settings, key: RequestableSetting): unknown {
-  const value = settings[key];
-  if (value !== undefined) return value;
-  const missing = MISSING[key] ?? null;
-  // A fresh copy: a caller that sorts or pushes must not change every later read.
-  return Array.isArray(missing) ? [...missing] : missing;
+  const value = settings[key] === undefined ? (MISSING[key] ?? null) : settings[key];
+  // A copy of a list or an object: a card keeps it, and a caller that sorts or
+  // pushes must change neither the settings nor the default. Settings are JSON.
+  return value !== null && typeof value === 'object' ? JSON.parse(JSON.stringify(value)) : value;
 }
 
 export function readSettings(settings: Settings): SettingReading[] {

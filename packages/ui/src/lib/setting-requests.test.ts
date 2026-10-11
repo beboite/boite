@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import type { SettingAsk } from '@boite/contracts';
+import { readSettings, type Settings, type SettingAsk } from '@boite/contracts';
 import { settingsReachable, settingValueText } from './setting-requests';
 
 const open = (page: SettingAsk['page'], section: string | null): SettingAsk => ({ kind: 'open', page, section });
@@ -22,4 +22,13 @@ test('an automatic compaction change that only adds a moment reads differently f
   const after = settingValueText('autoCompact', { tokens: 8000, moments: ['background', 'turn-end'] });
   expect(after).not.toBe(before);
   expect(after.startsWith(before)).toBe(true);
+});
+
+test('a reading is a copy: sorting or pushing to it leaves the settings and the defaults alone', () => {
+  const settings = { browserOrigins: ['https://b.example', 'https://a.example'] } as Settings;
+  const origins = (reading: ReturnType<typeof readSettings>) => reading.find((entry) => entry.key === 'browserOrigins')!.value as string[];
+  origins(readSettings(settings)).sort();
+  expect(settings.browserOrigins).toEqual(['https://b.example', 'https://a.example']);
+  origins(readSettings({} as Settings)).push('https://c.example');
+  expect(origins(readSettings({} as Settings))).toEqual([]);
 });

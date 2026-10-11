@@ -118,7 +118,7 @@
     <p class="place ui-label" data-testid="setting-place">{place}</p>
     {#if change && !store.owner}
       <p class="hint" data-testid="setting-guest-hint">{strings.settingRequest.guestHint}</p>
-    {:else if !reachable}
+    {:else if !reachable && !canApply}
       <p class="hint" data-testid="setting-elsewhere-hint">{strings.settingRequest.elsewhere}</p>
     {:else if change?.sensitive}
       <p class="hint" data-testid="setting-sensitive-hint">{strings.settingRequest.sensitiveHint}</p>
