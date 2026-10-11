@@ -202,6 +202,9 @@ test('a phone installed from one machine scans the code of another and lists and
   deviceId = groupA!.devices[0]!.id;
   expect(groupA!.devices[0]!.name).toBe('phone');
 
+  // Both cores run on this computer under its name: each gets a name of its own here, as an owner would give it.
+  const names = (page: BrowserPage) => page.evaluate(`(() => { const w = globalThis.__boiteTest.workspace; for (const m of w.machines) w.customize(m.id, m.id.includes('a.test') ? 'Server' : 'Box'); })()`);
+  await names(phone);
   // Both machines' conversations are on the phone, and each opens and answers.
   await mobileAction(phone, 'mobile-conversations');
   for (const thread of [threadA, threadB]) await phone.waitFor(`document.querySelector('${id(`mobile-thread-${thread}`)}')`, 20_000);
@@ -233,6 +236,7 @@ test('a phone installed from one machine scans the code of another and lists and
   });
   pages.push(desk);
   await desk.waitFor(`globalThis.__boiteTest?.workspace.machines.length === 2 && globalThis.__boiteTest.workspace.machines.every(machine => machine.store.connection === 'ready')`, 45_000);
+  await desk.evaluate(`(() => { const w = globalThis.__boiteTest.workspace; for (const m of w.machines) w.customize(m.id, m.store === w.primary ? 'Server' : 'Box'); })()`);
   await desk.evaluate(`globalThis.__boiteTest.workspace.active.showSettings('machines')`);
   await desk.waitFor(`document.querySelector('${id('group-card')} ${id('group-device')}') && document.querySelectorAll('${id('machine-card')}').length === 2`);
   expect(await desk.evaluate(`document.body.textContent.includes('Phones and other devices')`)).toBe(false);

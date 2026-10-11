@@ -110,8 +110,10 @@
   }
   function addedOn(device: GroupDevice): string | null {
     if (device.legacy) return strings.group.deviceLegacy;
-    const by = group?.cores.find((core) => core.coreId === device.by);
-    return by === undefined ? null : fill(strings.group.deviceAdded, { machine: by.name });
+    // The name this device gave that machine, else the one the machine gives itself.
+    const label = workspace.machines.find((machine) => GroupLinks.coreOf(machine) === device.by)?.label;
+    const by = label ?? group?.cores.find((core) => core.coreId === device.by)?.name;
+    return by === undefined ? null : fill(strings.group.deviceAdded, { machine: by });
   }
 
   async function revoke(device: GroupDevice) {
