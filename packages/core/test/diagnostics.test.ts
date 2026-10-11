@@ -241,6 +241,10 @@ test('the CLI prints records oldest first, filters by time and level, and export
     const owned = (await run(['logs', '--data-dir', harness.dataDir, '--min-level', 'warn', '--since', '10m'])).trim().split('\n');
     expect(owned.at(-2)).toContain('test/test.first');
     expect(owned.at(-1)).toContain('ERROR core  test/test.second');
+    // `--mine` is the agent's: the owner is told so rather than handed every thread.
+    let refusedMine = '';
+    expect(await runCli(['logs', '--data-dir', harness.dataDir, '--mine'], { env: {}, cwd: harness.dataDir, out: () => undefined, err: value => { refusedMine += value; } })).not.toBe(0);
+    expect(refusedMine).toContain('--mine is the agent');
     const agentEnv = { BOITE_CORE_URL: harness.url, BOITE_AGENT_TOKEN: harness.core.agents.tokenFor(threadId), BOITE_THREAD_ID: threadId };
     expect(await run(['logs', '--mine', '--min-level', 'warn'], agentEnv)).toContain('first warning');
     expect(await run(['logs', 'problems'], agentEnv)).toContain('1x error core/test/test.second');

@@ -156,6 +156,7 @@ export async function logsCommand(args: string[], client: CoreClient, threadId: 
     print(lines(records), records);
     return;
   }
+  if (options.mine) throw new Usage('--mine is the agent\'s; the owner reads every thread, or one with the global --thread <thread-id>');
   const query: CoreLogsQuery = {
     limit: options.limit ?? 100,
     ...(threadId ? { threadId } : {}),

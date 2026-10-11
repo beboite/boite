@@ -510,13 +510,18 @@ export function registerProviderMethods(core: Core): void {
   const logDetection = detectionLogger(core);
   let listed = fingerprint(core.providers.list());
   { const first = core.providers.list(); logDetection(first.loaded, first.rejected.length); }
+  /** Logs a list that differs from the last one logged; true when it did. Every path that changes the list goes through here. */
+  const noteListed = (result: ProviderLoadResult): boolean => {
+    const now = fingerprint(result);
+    if (now === listed) return false;
+    listed = now;
+    logDetection(result.loaded, result.rejected.length);
+    return true;
+  };
   // One fingerprint for every change found behind a list, so the next one is not announced twice.
   const announce = (after: string): void => {
     if (core.stopping || core.journal.isClosed()) return;
-    const now = fingerprint(core.providers.list());
-    if (now === listed) return;
-    listed = now;
-    { const current = core.providers.list(); logDetection(current.loaded, current.rejected.length); }
+    if (!noteListed(core.providers.list())) return;
     try { core.accounts.ensureDefaults(); }
     catch (error) { core.log('error', `default accounts after ${after}: ${error instanceof Error ? error.message : String(error)}`); }
     core.bus.emit('providers.updated', core.providers.list());
@@ -543,6 +548,7 @@ export function registerProviderMethods(core: Core): void {
     core.providers.load();
     const result = await settledList();
     core.accounts.ensureDefaults();
+    noteListed(result);
     if (fingerprint(result) !== before) core.bus.emit('providers.updated', result);
     return result;
   });
@@ -586,6 +592,7 @@ export function registerProviderMethods(core: Core): void {
       }
     }
     const result = core.providers.list();
+    noteListed(result);
     core.bus.emit('providers.updated', result);
     return result;
   });

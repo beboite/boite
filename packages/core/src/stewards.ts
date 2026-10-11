@@ -289,10 +289,10 @@ export class Stewards {
     const question = this.core.threads.listQuestions(target.id).find(request => request.id === params.questionId);
     if (question === undefined) throw refused(`steward.answer.questionId: ${String(params.questionId)} is not a pending question of ${target.id}`, { threadId: params.threadId, field: 'questionId', expected: 'a pending question id of the target' });
     const steward = this.core.threads.require(params.threadId);
-    if (params.skip === true) this.core.threads.skipQuestion({ threadId: target.id, questionId: question.id });
+    if (params.skip === true) this.core.threads.skipQuestion({ threadId: target.id, questionId: question.id }, 'steward');
     else {
       if (!Array.isArray(params.optionIds)) throw invalidParams('steward.answer.optionIds: expected an array of option ids');
-      this.core.threads.answerQuestion({ threadId: target.id, questionId: question.id, optionIds: params.optionIds, ...(params.text === undefined ? {} : { text: params.text }) });
+      this.core.threads.answerQuestion({ threadId: target.id, questionId: question.id, optionIds: params.optionIds, ...(params.text === undefined ? {} : { text: params.text }) }, 'steward');
     }
     this.line(target.id, `${params.skip === true ? 'Question skipped' : 'Question answered'} by the steward "${steward.title}" (${steward.id}), not by the user.`);
     return { ok: true };
@@ -304,7 +304,7 @@ export class Stewards {
     const request = this.core.threads.listPermissions(target.id).find(pending => pending.id === params.requestId);
     if (request === undefined) throw refused(`steward.permission.requestId: ${String(params.requestId)} is not a pending permission of ${target.id}`, { threadId: params.threadId, field: 'requestId', expected: 'a pending permission request id of the target' });
     const steward = this.core.threads.require(params.threadId);
-    this.core.threads.answerPermission({ requestId: request.id, decision: params.decision });
+    this.core.threads.answerPermission({ requestId: request.id, decision: params.decision }, 'steward');
     this.line(target.id, `${request.toolName} ${params.decision === 'allow' ? 'allowed' : 'denied'} by the steward "${steward.title}" (${steward.id}), not by the user.`);
     return { ok: true };
   }

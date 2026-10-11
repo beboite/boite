@@ -123,7 +123,7 @@ export class ThreadCards {
     return scoped.sort((a, b) => a.createdAt - b.createdAt);
   }
 
-  skipQuestion(params: { threadId: ThreadId; questionId: RequestId }): void {
+  skipQuestion(params: { threadId: ThreadId; questionId: RequestId }, by = 'user'): void {
     const pending = this.questions.get(params.questionId);
     if (pending === undefined) throw notFound(`unknown question ${params.questionId}`, params);
     const request = pending.request;
@@ -131,7 +131,7 @@ export class ThreadCards {
       throw refused('the question belongs to another thread', { ...params, expected: request.threadId });
     }
     this.questions.delete(request.id);
-    logCard(this.core, request, 'question.skipped', 'Question skipped by the user', { async: request.async === true });
+    logCard(this.core, request, 'question.skipped', `Question skipped by ${by}`, { async: request.async === true, by });
     this.core.journal.append(
       { type: 'question.answered', threadId: request.threadId, version: 1, payload: { questionId: request.id, answer: null } },
       () => undefined,
@@ -149,7 +149,7 @@ export class ThreadCards {
     optionIds: string[];
     text?: string;
     attachments?: Attachment[];
-  }): void {
+  }, by = 'user'): void {
     const pending = this.questions.get(params.questionId);
     if (pending === undefined) throw notFound(`unknown question ${params.questionId}`, params);
     const request = pending.request;
@@ -200,7 +200,7 @@ export class ThreadCards {
       () => undefined,
     );
     this.core.bus.emit('question.answered', { questionId: request.id, threadId: request.threadId, answer });
-    logCard(this.core, request, 'question.answered', `Question answered with ${answer.optionIds.length} options${answer.text ? ' and text' : ''}`, { options: answer.optionIds.length, text: Boolean(answer.text), async: request.async === true });
+    logCard(this.core, request, 'question.answered', `Question answered by ${by} with ${answer.optionIds.length} options${answer.text ? ' and text' : ''}`, { options: answer.optionIds.length, text: Boolean(answer.text), async: request.async === true, by });
     if (request.async === true) {
       this.foldAsyncCard(request.id, answer);
       this.asyncChanged(request.threadId);

@@ -80,8 +80,10 @@ export function slowRpcLevel(method: string, ms: number): 'debug' | 'warn' | nul
   return null;
 }
 
-export function logRpcTiming(core: Core, connection: ServerConnection, method: string, requestId: string, ms: number, failure: RpcFailure | null): void {
+export function logRpcTiming(core: Core, connection: ServerConnection, rawMethod: string, requestId: string, ms: number, failure: RpcFailure | null): void {
   const threadId = connection.identity.threadId ?? undefined;
+  // The client names the method, unknown ones included: never raw in a line.
+  const method = clientField(rawMethod, 100, '(none)');
   if (failure !== null) {
     core.logs.debug(`${method} refused with code ${failure.code}: ${failure.message}`, {
       source: 'rpc', event: 'rpc.refused', requestId, threadId, durationMs: ms,

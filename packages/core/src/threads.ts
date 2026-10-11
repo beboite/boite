@@ -859,20 +859,21 @@ export class ThreadStore {
     return this.cards.listPermissions(threadId);
   }
 
-  answerPermission(params: { requestId: RequestId; decision: 'allow' | 'deny' }): void {
-    this.cards.answerPermission(params);
+  /** `by` names who decided in the log: the user, or a steward acting for them. */
+  answerPermission(params: { requestId: RequestId; decision: 'allow' | 'deny' }, by = 'user'): void {
+    this.cards.answerPermission(params, by);
   }
 
   listQuestions(threadId?: ThreadId): QuestionRequest[] {
     return this.cards.listQuestions(threadId);
   }
 
-  answerQuestion(params: { threadId: ThreadId; questionId: RequestId; optionIds: string[]; text?: string; attachments?: Attachment[] }): void {
-    this.cards.answerQuestion(params);
+  answerQuestion(params: { threadId: ThreadId; questionId: RequestId; optionIds: string[]; text?: string; attachments?: Attachment[] }, by = 'user'): void {
+    this.cards.answerQuestion(params, by);
   }
 
-  skipQuestion(params: { threadId: ThreadId; questionId: RequestId }): void {
-    this.cards.skipQuestion(params);
+  skipQuestion(params: { threadId: ThreadId; questionId: RequestId }, by = 'user'): void {
+    this.cards.skipQuestion(params, by);
   }
 
   askAsync(params: { threadId: ThreadId; text: string; options?: string[]; multiple?: boolean }): { questionId: RequestId } {

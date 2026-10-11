@@ -334,6 +334,8 @@ export class HarnessUpdates {
     this.entries.set(providerId, { ...entry, state: 'updating', message: null });
     for (const threadId of this.runningThreads(providerId)) this.core.threads.runner.requestPause(threadId, providerId);
     drain.waitingFor = this.waitingFor(providerId);
+    // `advance` logs only a change of this count: the first wait is said here.
+    if (drain.waitingFor > 0) logUpdate(this.core, providerId, 'waiting', { running: drain.waitingFor });
     this.emit();
     this.advance(providerId);
     return this.describe(providerId)!;

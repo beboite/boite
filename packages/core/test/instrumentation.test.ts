@@ -5,7 +5,7 @@ import { connect } from '../src/client.ts';
 import type { Core } from '../src/core.ts';
 import { forgetStderr, noteStderr, STDERR_TAIL_CHARS, stderrTail } from '../src/drivers/stderr-tail.ts';
 import type { SpawnedChild } from '../src/procs.ts';
-import { clientField, closeLevel, slowRpcLevel } from '../src/server/connection-log.ts';
+import { clientField, closeLevel, logRpcTiming, slowRpcLevel } from '../src/server/connection-log.ts';
 import { noteReady } from '../src/drivers/driver-log.ts';
 import { isoTime, noteClaudeMessage } from '../src/drivers/claude/diagnostics.ts';
 import { detectionLogger } from '../src/providers/install-log.ts';
@@ -175,4 +175,13 @@ test('two cores in one process time their own logins, even for the same account 
   logLoginState(first.core, account, 'done', '', 0);
   logLoginState(second.core, account, 'done', '', 0);
   for (const { records } of [first, second]) expect(typeof records.find(record => record.context.event === 'account.login.succeeded')?.context.durationMs).toBe('number');
+});
+
+test('a method name the client chose cannot forge a line in a refused or slow RPC record', () => {
+  const { core, records } = recordingCore();
+  const connection = { identity: { principal: 'owner', threadId: null } } as never;
+  logRpcTiming(core, connection, 'nope\n2026-10-10 ERROR core forged', 'r1', 3, { code: -32601, message: 'unknown method' } as never);
+  logRpcTiming(core, connection, 'slow\u2028forged', 'r2', 12_000, null);
+  for (const record of records) expect(`${record.message}${JSON.stringify(record.context.data)}`).not.toMatch(/[\n\u2028]/);
+  expect(records.map(record => record.context.event)).toEqual(['rpc.refused', 'rpc.slow']);
 });

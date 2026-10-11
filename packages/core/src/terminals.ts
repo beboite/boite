@@ -156,6 +156,8 @@ export interface StartOptions {
   /** A command typed into the shell once its prompt is up. */
   type?: string[];
   onExit?: () => void;
+  /** The thread a thread's shell belongs to, set on its log records. */
+  threadId?: ThreadId;
 }
 
 export class TerminalStore {
@@ -172,7 +174,7 @@ export class TerminalStore {
     if (thread.archived) throw refused(`the thread ${threadId} is archived`, { threadId, field: 'archived', expected: false });
     // The ids bound the count: the first shell and `term-2` to `term-16`.
     const id = threadTerminalId(threadId, terminalId);
-    return this.open(id, { cwd: thread.cwd, env: { ...process.env }, cols, rows });
+    return this.open(id, { cwd: thread.cwd, env: { ...process.env }, cols, rows, threadId });
   }
 
   /** The thread's running shells, in the order they started. A closing one is gone already. */
@@ -281,13 +283,14 @@ export class TerminalStore {
     }
     const openedAt = Date.now();
     const shellName = shell.exe.split(/[\\/]/).pop() ?? 'shell';
-    this.core.logs.info(`Terminal ${id} opened with ${shellName}`, { source: 'terminals', event: 'terminal.opened', data: { id, shell: shellName } });
+    const owner = options.threadId === undefined ? {} : { threadId: options.threadId };
+    this.core.logs.info(`Terminal ${id} opened with ${shellName}`, { source: 'terminals', event: 'terminal.opened', ...owner, data: { id, shell: shellName } });
     const exited = spawned.exited.then(
       (code) => code,
       () => null,
     ).then((code) => {
       this.core.logs.record(code === 0 || code === null ? 'info' : 'warn', `Terminal ${id} (${shellName}) exited with code ${code ?? 'unknown'} after ${Math.round((Date.now() - openedAt) / 1000)} s`, {
-        source: 'terminals', event: 'terminal.exited', durationMs: Date.now() - openedAt, data: { id, shell: shellName, exitCode: code },
+        source: 'terminals', event: 'terminal.exited', ...owner, durationMs: Date.now() - openedAt, data: { id, shell: shellName, exitCode: code },
       });
       clearTimeout(fallback);
       if (quiet !== null) clearTimeout(quiet);

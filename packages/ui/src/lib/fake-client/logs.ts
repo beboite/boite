@@ -1,5 +1,5 @@
 import {
-  AGENT_SUBMIT_REFUSED, createLogAnonymizer, formatLogLine, formatLogTime, ISSUE_REPOSITORY, logLevelAtLeast, logMatches, normalizeCoreLogText, normalizeLogData, validateCoreLogsQuery, validateDiagnosticReport,
+  createLogAnonymizer, formatLogLine, formatLogTime, ISSUE_REPOSITORY, logLevelAtLeast, logMatches, normalizeCoreLogText, normalizeLogData, validateCoreLogsQuery, validateDiagnosticReport,
   validateDiagnosticsLogsQuery, RpcErrorCode,
   type CoreLogLevel, type CoreLogRecord, type DiagnosticProblem, type DiagnosticsExport, type DiagnosticSummary, type DiagnosticThread, type LogAnonymizer, type RpcEventName, type RpcEvents,
 } from '@boite/contracts';
@@ -30,7 +30,12 @@ function refused(message: string): RpcFailure {
 export function logMethods(ctx: FakeContext): Pick<FakeMethods, DiagnosticMethods> {
   let reportBudget = { minute: 0, count: 0 };
 
-  /** The core's gate: an agent reads only while the owner allows it, and only for its own thread, which the fixture cannot prove. */
+  /**
+   * The core's gate: an agent reads only while the owner allows it, and only
+   * for its own thread. The fixture's agent has no thread of its own to prove,
+   * so it is always refused here, which is why nothing below has an agent
+   * branch; `diagnostics.test.ts` covers the agent's reads on the real core.
+   */
   const gate = (): void => {
     if (ctx.bus.principal !== 'agent') return;
     if (ctx.settings.agentLogAccess === false) throw refused('diagnostics: the owner turned off agent access to logs (Settings > Diagnostics)');
@@ -113,9 +118,10 @@ export function logMethods(ctx: FakeContext): Pick<FakeMethods, DiagnosticMethod
     };
   };
 
-  const exportBundle = (since: number, limit: number): DiagnosticsExport => {
+  /** `family` keeps that thread's records and those about no thread, as the core's focused export does. */
+  const exportBundle = (since: number, limit: number, family: Set<string> | null = null): DiagnosticsExport => {
     const names = anonymizer();
-    const records = newestFirst(record => record.at >= since, limit).map(record => names.record(record));
+    const records = newestFirst(record => record.at >= since && (family === null || record.threadId === undefined || family.has(record.threadId)), limit).map(record => names.record(record));
     const summary = summarize(records, since, names);
     const lines = [
       'Boite diagnostics', '=================',
@@ -165,7 +171,7 @@ export function logMethods(ctx: FakeContext): Pick<FakeMethods, DiagnosticMethod
       const since = typeof params.since === 'number' && Number.isFinite(params.since) && params.since >= 0 ? params.since : Date.now() - DAY_MS;
       const limit = params.limit === undefined ? EXPORT_LIMIT : params.limit;
       if (!Number.isInteger(limit) || limit < 1 || limit > EXPORT_LIMIT) throw invalid(new Error(`diagnostics.export limit: expected an integer from 1 to ${EXPORT_LIMIT}`));
-      return exportBundle(since, limit);
+      return exportBundle(since, limit, familyOf(params.focusThreadId));
     },
     'diagnostics.issue': async params => {
       if (params === null || typeof params !== 'object') throw invalid(new Error('diagnostics.issue params: expected an object'));
@@ -187,7 +193,7 @@ export function logMethods(ctx: FakeContext): Pick<FakeMethods, DiagnosticMethod
       const prefillUrl = `https://github.com/${ISSUE_REPOSITORY}/issues/new?${new URLSearchParams({ title: safeTitle, body: body.slice(0, PREFILL_BODY_CHARS) }).toString()}`;
       return {
         repository: ISSUE_REPOSITORY, title: safeTitle, body, url: null, prefillUrl, gh: 'missing',
-        error: params.submit !== true ? null : ctx.bus.principal === 'agent' ? AGENT_SUBMIT_REFUSED : 'GitHub CLI (gh) is not installed on this machine', exportPath: ctx.bus.principal === 'agent' ? null : exported?.path ?? null,
+        error: params.submit !== true ? null : 'GitHub CLI (gh) is not installed on this machine', exportPath: exported?.path ?? null,
       };
     },
     'diagnostics.report': async raw => {

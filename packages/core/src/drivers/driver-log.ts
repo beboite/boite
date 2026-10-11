@@ -60,12 +60,14 @@ export function noteReady<T>(
   const at = Date.now();
   const resume = ctx.sessionId !== null;
   const abandoned = (): void => {
-    ctx.diagnostic?.('debug', `${agent} session open was abandoned after ${Date.now() - at} ms: the turn was stopped before the session opened`, { event: 'driver.session.open-abandoned', durationMs: Date.now() - at, data: { resume } });
+    const elapsed = Date.now() - at;
+    ctx.diagnostic?.('debug', `${agent} session open was abandoned after ${elapsed} ms: the turn was stopped before the session opened`, { event: 'driver.session.open-abandoned', durationMs: elapsed, data: { resume } });
   };
   const failed = (error: unknown): never => {
     // A driver that must throw on a stop marks the error, so a normal stop is no warning.
     if ((error as { abandoned?: unknown } | null)?.abandoned === true || stopped()) { abandoned(); throw error; }
-    ctx.diagnostic?.('warn', `${agent} session failed to open after ${Date.now() - at} ms: ${error instanceof Error ? error.message : String(error)}`, { event: 'driver.session.open-failed', durationMs: Date.now() - at, data: { resume, code: errorCodeOf((error as { code?: unknown } | null)?.code) } });
+    const elapsed = Date.now() - at;
+    ctx.diagnostic?.('warn', `${agent} session failed to open after ${elapsed} ms: ${error instanceof Error ? error.message : String(error)}`, { event: 'driver.session.open-failed', durationMs: elapsed, data: { resume, code: errorCodeOf((error as { code?: unknown } | null)?.code) } });
     throw error;
   };
   let started: Promise<T>;
@@ -76,7 +78,8 @@ export function noteReady<T>(
     if (extra.abandoned) { abandoned(); return value; }
     // A session asked to resume can still come back new, when the agent could not load it.
     const resumed = extra.resumed ?? resume;
-    ctx.diagnostic?.('info', `${agent} session ready in ${Date.now() - at} ms, ${resumed ? 'resumed' : 'new'}${extra.text ?? ''}`, { event: 'driver.session.ready', durationMs: Date.now() - at, data: { ...extra.data, resume: resumed } });
+    const elapsed = Date.now() - at;
+    ctx.diagnostic?.('info', `${agent} session ready in ${elapsed} ms, ${resumed ? 'resumed' : 'new'}${extra.text ?? ''}`, { event: 'driver.session.ready', durationMs: elapsed, data: { ...extra.data, resume: resumed } });
     return value;
   }, failed);
 }

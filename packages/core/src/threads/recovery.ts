@@ -73,7 +73,8 @@ export class ThreadRecovery {
       );
     }
     if (stuck.length > 0) {
-      this.core.logs.warn(`Recovered ${stuck.length} unfinished turns left by the previous core: ${counts.requeued} requeued, ${counts.held} held, ${counts.handedOver} handed over, ${counts.failed} marked failed`, {
+      // Requeued, held or handed over turns are a normal restart: only a failed one is worth a warning.
+      this.core.logs.record(counts.failed > 0 ? 'warn' : 'info', `Recovered ${stuck.length} unfinished turns left by the previous core: ${counts.requeued} requeued, ${counts.held} held, ${counts.handedOver} handed over, ${counts.failed} marked failed`, {
         source: 'startup', event: 'startup.turns-recovered', data: { total: stuck.length, ...counts },
       });
     }

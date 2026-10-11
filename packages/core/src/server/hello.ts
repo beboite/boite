@@ -97,7 +97,6 @@ export function hello(core: Core, connection: ServerConnection, id: number | str
   if (wrongProtocol()) return;
   connection.identity = identity;
   connection.sentFrom = sentFromOf(identity, client.name, params?.client?.device, connection.remote);
-  connection.clientName = client.name;
   connection.authenticated = true;
   connection.clientName = clientName;
   logHelloAccepted(core, connection, clientField(client.version, 40, ''));
