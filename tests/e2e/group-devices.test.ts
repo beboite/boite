@@ -37,7 +37,7 @@ let ui: { close(): Promise<void> };
 let uiUrl: string;
 let tls: { key: string; cert: string };
 
-interface Piped { path: string; origin: string | null; host: string; upstream?: WebSocket; queue: (string | Buffer)[] }
+interface Piped { path: string; origin: string | null; host: string; upstream?: WebSocket; queue: (string | Uint8Array<ArrayBuffer>)[] }
 
 /**
  * An HTTPS reverse proxy in front of one core, as Caddy is: the page and its
@@ -83,8 +83,9 @@ function proxy(core: RunningCore): ReturnType<typeof Bun.serve> {
       },
       message(socket: ServerWebSocket<Piped>, frame) {
         const upstream = socket.data.upstream;
-        if (upstream?.readyState === WebSocket.OPEN) upstream.send(frame);
-        else socket.data.queue.push(frame);
+        const copy = typeof frame === 'string' ? frame : new Uint8Array(frame);
+        if (upstream?.readyState === WebSocket.OPEN) upstream.send(copy);
+        else socket.data.queue.push(copy);
       },
       close(socket: ServerWebSocket<Piped>) {
         socket.data.upstream?.close();

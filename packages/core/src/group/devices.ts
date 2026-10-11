@@ -15,9 +15,9 @@ import { homeOf } from './roster.ts';
  * push subscription, are on that member.
  */
 export function deviceElsewhere(core: Core, sessionId: string): { home: CoordinationPeer; device: string } | null {
-  const keyed = core.group.deviceOf(sessionId);
+  const keyed = core.group.clients.deviceOf(sessionId);
   if (keyed !== undefined) {
-    const at = core.group.pushHome(keyed);
+    const at = core.group.clients.pushHome(keyed);
     const home = at === undefined ? undefined : core.group.peers().find((peer) => peer.coreId === at);
     return home === undefined ? null : { home, device: keyed };
   }
@@ -34,7 +34,7 @@ export function deviceElsewhere(core: Core, sessionId: string): { home: Coordina
 export function ownDevice(core: Core, device: unknown): string | null {
   const group = core.group.view('owner');
   if (typeof device !== 'string' || group === null) return null;
-  if (/^[0-9a-f]{64}$/.test(device)) return core.group.pushHome(device) === group.self ? core.group.sessionOfDevice(device) ?? null : null;
+  if (/^[0-9a-f]{64}$/.test(device)) return core.group.clients.pushHome(device) === group.self ? core.group.clients.sessionOfDevice(device) ?? null : null;
   if (homeOf(device) !== group.self) return null;
   if (!group.devices.some((entry) => entry.id === device)) return null;
   return device.slice(device.indexOf(':') + 1);

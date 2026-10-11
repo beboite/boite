@@ -54,7 +54,7 @@ test('a phone added on one member says hello on every member with one key, and o
   const [a, b] = await pair();
   const phone = phoneKey();
   // "Add a device" on b: one link and one code.
-  const added = await b.core.group.addDevice();
+  const added = await b.core.group.clients.addDevice();
   const grant = new URL(added.url).searchParams.get('grant')!;
   expect(added.url).toContain('#join=');
   const admitted = await open(b.url, { grant, device: { publicKey: phone.publicKey, name: 'Phone', sig: phone.sign(deviceAdmitInput(grant, phone.publicKey)) } });
@@ -73,7 +73,7 @@ test('a phone added on one member says hello on every member with one key, and o
   await expect(connect(a.url, '', { device: once })).rejects.toThrow('already used');
   await expect(open(a.url, { device: helloFor(phone, deviceId, id(a), Date.now() - 10 * 60_000) })).rejects.toThrow('two minutes');
   // The owner revokes it on b: a closes its socket and refuses its next hello.
-  b.core.group.revokeDevice(deviceId);
+  b.core.group.clients.revokeDevice(deviceId);
   await waitFor(() => a.core.group.view('owner')?.devices.length === 0);
   await waitFor(() => a.core.journal.listSessions().length === 0);
   await expect(open(a.url, { device: helloFor(phone, deviceId, id(a)) })).rejects.toThrow('removed from the group');
@@ -86,7 +86,7 @@ test('a phone added on one member says hello on every member with one key, and o
 test('a code drawn on one member is typed on another and still admits the phone', async () => {
   const [a, b] = await pair();
   const phone = phoneKey();
-  const { code } = await b.core.group.addDevice();
+  const { code } = await b.core.group.clients.addDevice();
   // The installed app sends the code to the machine that serves its page: a, which never drew it.
   const admitted = await open(a.url, { grant: code, device: { publicKey: phone.publicKey, sig: phone.sign(deviceAdmitInput(code, phone.publicKey)) } });
   expect(admitted.device).toMatch(/^[0-9a-f]{64}$/);
@@ -110,7 +110,7 @@ test('a phone paired the older way hands over its key and keeps both until revok
   expect(b.core.group.view('owner')?.devices.find((device) => device.id === enrolled.id)?.by).toBe(id(b));
   clients.push(await connect(b.url, '', { device: helloFor(phone, enrolled.id, id(b)) }));
   // Revoked on b: the older pairing it took over is revoked with it.
-  b.core.group.revokeDevice(enrolled.id);
+  b.core.group.clients.revokeDevice(enrolled.id);
   await expect(connect(b.url, '', { device: helloFor(phone, enrolled.id, id(b)) })).rejects.toThrow('removed from the group');
 });
 
@@ -120,12 +120,12 @@ test('a machine alone with its phones joins a group and brings them', async () =
   await a.core.group.create('Home');
   const phone = phoneKey();
   // Adding a device to a machine in no group starts one of its own.
-  const added = await b.core.group.addDevice();
+  const added = await b.core.group.clients.addDevice();
   expect(b.core.group.view('owner')?.cores.map((core) => core.coreId)).toEqual([id(b)]);
   const grant = new URL(added.url).searchParams.get('grant')!;
   const admitted = await open(b.url, { grant, device: { publicKey: phone.publicKey, sig: phone.sign(deviceAdmitInput(grant, phone.publicKey)) } });
   // b pastes a's link: the invitation after #join.
-  const link = await a.core.group.addDevice();
+  const link = await a.core.group.clients.addDevice();
   await b.core.group.join(link.url);
   expect(b.core.group.view('owner')?.id).toBe(a.core.group.view('owner')?.id);
   await waitFor(() => a.core.group.view('owner')?.devices.some((device) => device.id === admitted.device) === true);
@@ -148,7 +148,7 @@ test('a member trusts the origins the others are served from, learned from their
   expect(b.core.group.allowsOrigin('https://other.example')).toBe(false);
   // A socket from that page to b passes b's gate with no setting on b.
   const phone = phoneKey();
-  const added = await b.core.group.addDevice();
+  const added = await b.core.group.clients.addDevice();
   const grant = new URL(added.url).searchParams.get('grant')!;
   const cross = await open(b.url, { headers: { origin: proxied }, grant, device: { publicKey: phone.publicKey, sig: phone.sign(deviceAdmitInput(grant, phone.publicKey)) } });
   expect(cross.device).toMatch(/^[0-9a-f]{64}$/);

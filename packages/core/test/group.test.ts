@@ -380,13 +380,13 @@ test('a ticket is refused when forged, expired, for another machine or from outs
   await join(a, c);
   await outsider.core.group.create('Home');
   const owner = { principal: 'owner' as const, sessionId: null, threadId: null };
-  const forB = a.core.group.ticket(id(b), owner).ticket;
+  const forB = a.core.group.clients.ticket(id(b), owner).ticket;
   const [payload, signature] = forB.split('.') as [string, string];
   const tampered = Buffer.from(JSON.stringify({ ...JSON.parse(Buffer.from(payload, 'base64url').toString()), role: 'owner', sub: `core:${id(c)}` })).toString('base64url');
   await refusedHello(b, '', { ticket: `${tampered}.${signature}` }, 'signature');
   await refusedHello(c, '', { ticket: forB }, 'another machine');
   await refusedHello(outsider, '', { ticket: forB }, 'another machine');
-  expect(() => b.core.group.admit(forB, { name: 't', version: '1' }, Date.now() + 5 * 60_000)).toThrow('expired');
+  expect(() => b.core.group.clients.admit(forB, { name: 't', version: '1' }, Date.now() + 5 * 60_000)).toThrow('expired');
   await refusedHello(b, '', { ticket: 'nonsense' }, 'malformed');
   // A core in no group has nothing to check a ticket against.
   const alone = await machine();
@@ -433,7 +433,7 @@ test('a phone paired with one member reaches the others as a device, and one rev
   await waitFor(() => b.core.sessions.list(null).length === 0);
   await refusedHello(b, onB.session!.token, undefined, 'token is wrong');
   // And no member vouches for it again.
-  expect(() => b.core.group.admit(ticket.ticket, { name: 'pwa', version: '1' })).toThrow();
+  expect(() => b.core.group.clients.admit(ticket.ticket, { name: 'pwa', version: '1' })).toThrow();
   phone.close();
   onB.close();
 });
@@ -464,7 +464,7 @@ test('a removed machine is told, leaves, and its keys die on the members that st
   await join(a, c);
   await waitFor(() => members(b).length === 3 && members(c).length === 3);
   // b's shell holds an owner key on a.
-  const key = await connect(a.url, '', { ticket: b.core.group.ticket(id(a), { principal: 'owner', sessionId: null, threadId: null }).ticket });
+  const key = await connect(a.url, '', { ticket: b.core.group.clients.ticket(id(a), { principal: 'owner', sessionId: null, threadId: null }).ticket });
   await hangUp(a, key);
   expect(a.core.sessions.list(null)).toHaveLength(1);
 
@@ -803,12 +803,12 @@ test('a ticket stays spent across a restart of the machine it was used on', asyn
   const b = await machine();
   await a.core.group.create('Home');
   await join(a, b);
-  const ticket = a.core.group.ticket(id(b), { principal: 'owner', sessionId: null, threadId: null }).ticket;
-  const first = b.core.group.admit(ticket, { name: 'shell', version: '1' });
+  const ticket = a.core.group.clients.ticket(id(b), { principal: 'owner', sessionId: null, threadId: null }).ticket;
+  const first = b.core.group.clients.admit(ticket, { name: 'shell', version: '1' });
   expect(first.role).toBe('owner');
   const before = b.core.group;
   const restarted = restart(b);
-  expect(() => restarted.admit(ticket, { name: 'shell', version: '1' })).toThrow('already used');
+  expect(() => restarted.clients.admit(ticket, { name: 'shell', version: '1' })).toThrow('already used');
   expect(b.core.sessions.list(null)).toHaveLength(1);
   await before.close();
 });
@@ -818,7 +818,7 @@ test('keys die with what they stood for even when the core stopped between the r
   const b = await machine();
   await a.core.group.create('Home');
   await join(a, b);
-  const key = b.core.group.admit(a.core.group.ticket(id(b), { principal: 'owner', sessionId: null, threadId: null }).ticket, { name: 'shell', version: '1' });
+  const key = b.core.group.clients.admit(a.core.group.clients.ticket(id(b), { principal: 'owner', sessionId: null, threadId: null }).ticket, { name: 'shell', version: '1' });
   const roster = b.core.journal.getSetting('group') as Roster;
   // The removal of `a` reached the journal, the session it vouched for was not dropped yet: the core died there.
   b.core.journal.setSetting('group', { ...roster, cores: roster.cores.map((core) => (core.coreId === id(a) ? { ...core, rev: 50, removed: true } : core)) });

@@ -409,7 +409,7 @@ export function startServer(options: ServerOptions): RunningServer {
   const relays = new RelayHub(core, (credential) => {
     if (typeof credential !== 'string') {
       // A device of the group carried to another member: its signature for this machine, never one made for another.
-      try { return { sessionId: core.group.authenticateDevice(credential, { name: 'pwa', version: '' }).sessionId }; } catch { return null; }
+      try { return { sessionId: core.group.clients.authenticateDevice(credential, { name: 'pwa', version: '' }).sessionId }; } catch { return null; }
     }
     const identity = authenticateToken(core, credential);
     return identity === null || identity.principal === 'agent' ? null : { sessionId: identity.sessionId };

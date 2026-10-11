@@ -81,11 +81,11 @@ async function greet(core: Core, connection: ServerConnection, id: number | stri
     try {
       if (grant !== null) {
         const nonce = typeof params?.nonce === 'string' ? params.nonce : null;
-        const done = await core.group.admitDevice(grant, device, client, nonce);
+        const done = await core.group.clients.admitDevice(grant, device, client, nonce);
         admitted = done.deviceId;
         identity = { principal: principalOf(done.role), sessionId: done.sessionId, threadId: null };
       } else {
-        const done = core.group.authenticateDevice(device, client);
+        const done = core.group.clients.authenticateDevice(device, client);
         identity = { principal: principalOf(done.role), sessionId: done.sessionId, threadId: null };
       }
     } catch (error) {
@@ -99,7 +99,7 @@ async function greet(core: Core, connection: ServerConnection, id: number | stri
     // Like a grant, a ticket is spent once: the protocol is checked first.
     if (wrongProtocol()) return;
     try {
-      session = core.group.admit(ticket, client);
+      session = core.group.clients.admit(ticket, client);
     } catch (error) {
       refuse(messageOf(error), 'bad ticket');
       return;

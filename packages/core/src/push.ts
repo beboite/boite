@@ -155,7 +155,7 @@ export class PushStore {
   subscribe(sessionId: string | null, input: Subscription) {
     const id = this.requireSession(sessionId);
     // A device key subscribes on the machine whose page it installed, this one: the others send its notifications here from now on.
-    const keyed = this.core.group.deviceOf(id);
+    const keyed = this.core.group.clients.deviceOf(id);
     // A pairing of the older kind gets its pushes through the machine it paired with (`deliverAll`): one here would come without the machine the thread is on.
     const home = keyed === undefined ? deviceElsewhere(this.core, id)?.home : undefined;
     if (home !== undefined) throw refused(`notifications of this device come through ${home.name}, the machine it was paired with: enable them there`);
@@ -164,7 +164,7 @@ export class PushStore {
     // A new pairing of the same browser replaces its old delivery destination.
     for (const [key, previous] of Object.entries(all)) if (previous.endpoint === subscription.endpoint) delete all[key];
     all[id] = subscription;
-    if (keyed !== undefined) this.core.group.pushedHere(keyed);
+    if (keyed !== undefined) this.core.group.clients.pushedHere(keyed);
     this.core.journal.append({ type: 'push.subscribed', threadId: null, version: 1, payload: { sessionId: id } }, () => {
       this.core.journal.setSetting(SUBSCRIPTIONS, all);
     });

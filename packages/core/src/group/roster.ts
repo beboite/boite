@@ -267,6 +267,12 @@ export function memberOrigins(roster: Roster): Set<string> {
   return origins;
 }
 
+/** Where a member is reached: the addresses it gives, then the origins it said it is served at. */
+export function reachOf(roster: Roster, core: CoreEntry): string[] {
+  const served = roster.origins?.[core.coreId]?.list ?? [];
+  return [...core.addresses, ...served.filter((origin) => !core.addresses.includes(origin))];
+}
+
 /** The highest revision the roster holds: the next change is one above it. */
 export function clockOf(roster: Roster): number {
   let clock = 0;

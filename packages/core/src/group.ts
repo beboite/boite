@@ -33,13 +33,14 @@ import { boundedBody, MAX_BODY, PeerGone } from './coordination-wire.ts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused, RpcFailure, unauthorized, unavailable } from './errors.ts';
 import { advertisedAddresses, probeTailnet, tailnetAddress, ticketAddresses, type Tailnet } from './group/addresses.ts';
-import { admissionInput, checkCard, checkRoster, clockOf, CORE_ENTRIES_MAX, DEVICE_ENTRIES_MAX, digestOf, fingerprint, homeOf, liveCores, liveDeviceKeys, liveDevices, memberOrigins, mergeRosters, groupName, peerOf } from './group/roster.ts';
+import { admissionInput, checkCard, checkRoster, clockOf, CORE_ENTRIES_MAX, DEVICE_ENTRIES_MAX, digestOf, fingerprint, homeOf, liveCores, liveDeviceKeys, liveDevices, memberOrigins, mergeRosters, groupName, peerOf, reachOf } from './group/roster.ts';
 import { deviceAdmissionInput, deviceId, deviceKey, deviceSigned, SERVED_ORIGINS_MAX, type DeviceKeyEntry } from './group/device-keys.ts';
 import type { CoreCard, CoreEntry, DeviceEntry, Roster } from './group/roster.ts';
 import { boxPublic, boxSigningInput, newBoxKey, open, openResponse, pack, readBoxKey, seal, SEALED, sealedName, sealResponse, unpack } from './group/seal.ts';
 import type { Sealing } from './group/seal.ts';
 import { encodeInvite, encodeTicket, parseInvite, parseTicket, ticketSigningInput, inviteId, invitePsk } from './group/ticket.ts';
 import type { Invite } from './group/ticket.ts';
+import { GroupClients } from './group/clients.ts';
 import { newId, newToken } from './ids.ts';
 import { currentOs } from './paths.ts';
 import { principalOf as principalOfRole, type ClientIdentity, type Identity } from './sessions.ts';
@@ -64,13 +65,6 @@ const FULL_SYNC_TICKS = 20;
 const NAME_REFRESH_MS = 5 * 60_000;
 /** How long a leaving machine waits for the others to hear it before it goes anyway. */
 const FAREWELL_MS = 6000;
-/** Clocks of two machines may differ by this much before a ticket is refused for its date. */
-const CLOCK_SKEW_MS = 60_000;
-const DEVICES_MAX = 200;
-/** How far a device's hello may be dated from this machine's clock. */
-const DEVICE_HELLO_SKEW_MS = 2 * 60_000;
-/** Device hello nonces remembered at once; past it, hellos are refused until the oldest expire. */
-const DEVICE_NONCES_MAX = 20_000;
 
 export type { NetworkSink } from './group/addresses.ts';
 
@@ -84,25 +78,19 @@ export function inviteOf(text: string): string {
 
 interface JoinReply { nonce: string; publicKey: string; roster?: unknown; error?: string }
 
-/** Where a member is reached: the addresses it gives, then the origins it said it is served at. */
-function reachOf(roster: Roster, core: CoreEntry): string[] {
-  const served = roster.origins?.[core.coreId]?.list ?? [];
-  return [...core.addresses, ...served.filter((origin) => !core.addresses.includes(origin))];
-}
-
 export class GroupStore {
-  private roster: Roster | null = null;
+  roster: Roster | null = null;
   /** Session id here to the member it stands for: `core:<id>` or `device:<id>`. Local, never exchanged. */
-  private sessions: Record<string, string> = {};
+  sessions: Record<string, string> = {};
   /** The address each of those sessions was issued for: it lives while this machine still gives it. */
-  private vias: Record<string, string> = {};
+  vias: Record<string, string> = {};
   /** Keyed by `inviteId`: the grant itself is kept nowhere once the invitation is handed out. */
   private readonly invites = new Map<string, { expiresAt: number; joined: string | null; psk: Buffer; seen: Set<string> }>();
   private boxKey: KeyObject | null = null;
   /** Ticket nonces already exchanged, until they would have expired anyway. Kept in the journal: a restart must not make a used ticket good again. */
-  private readonly spent = new Map<string, number>();
+  readonly spent = new Map<string, number>();
   /** Sessions being revoked right now: their own revocation is not started a second time from inside it. */
-  private readonly revoking = new Set<string>();
+  readonly revoking = new Set<string>();
   private joins = { since: 0, count: 0 };
   /** The roster digest each member last agreed on with this core. */
   private readonly acked = new Map<string, string>();
@@ -119,12 +107,14 @@ export class GroupStore {
   private live = false;
   private reconciling = false;
   private readonly pending = new Set<Promise<unknown>>();
-  /** Device hello nonces seen, until their hello would be refused for its date anyway. In memory: see docs/groups.md, limits. */
-  private readonly deviceNonces = new Map<string, number>();
   /** Origins pages of this machine were served from, newest last: what it publishes beside its addresses. */
   private served: string[] = [];
 
-  constructor(private readonly core: Core) {
+  /** Phones, browsers and the desktop app of a member: how each gets in (`group/clients.ts`). */
+  readonly clients: GroupClients;
+
+  constructor(readonly core: Core) {
+    this.clients = new GroupClients(this);
     const stored = core.journal.getSetting(SETTING);
     if (stored !== undefined && stored !== null) {
       try {
@@ -171,11 +161,11 @@ export class GroupStore {
     this.background(this.refresh().then(() => this.syncPending()));
   }
 
-  private selfId(): string {
+  selfId(): string {
     return this.core.coordination.card().coreId;
   }
 
-  private require(): Roster {
+  require(): Roster {
     if (this.roster === null) throw refused('this machine belongs to no group');
     return this.roster;
   }
@@ -331,7 +321,7 @@ export class GroupStore {
    * the interfaces and the settings now: the roster holds what this machine
    * last published, and between a move and the next publication it is behind.
    */
-  private given(): string[] {
+  given(): string[] {
     // Where pages of this machine were served is given too: a proxy in front of it answers there.
     const served = [...new Set([...(this.roster?.origins?.[this.selfId()]?.list ?? []), ...this.served])];
     // Until the server is bound there is nothing to read: what was last published stands.
@@ -381,7 +371,7 @@ export class GroupStore {
 
   // -- The roster, kept and exchanged.
 
-  private commit(next: Roster): void {
+  commit(next: Roster): void {
     const before = this.roster === null ? null : digestOf(this.roster);
     this.roster = next;
     this.core.journal.setSetting(SETTING, next);
@@ -391,12 +381,12 @@ export class GroupStore {
     this.kick();
   }
 
-  private saveSessions(): void {
+  saveSessions(): void {
     this.core.journal.setSetting(SESSIONS_SETTING, this.sessions);
     this.core.journal.setSetting(VIAS_SETTING, this.vias);
   }
 
-  private saveSpent(): void {
+  saveSpent(): void {
     this.core.journal.setSetting(SPENT_SETTING, Object.fromEntries(this.spent));
   }
 
@@ -471,7 +461,7 @@ export class GroupStore {
     if (member?.startsWith('core:')) return;
     if (member?.startsWith('key:')) {
       this.revoking.add(sessionId);
-      try { this.revokeKey(roster, member.slice('key:'.length)); } finally { this.revoking.delete(sessionId); }
+      try { this.clients.revokeKey(roster, member.slice('key:'.length)); } finally { this.revoking.delete(sessionId); }
       return;
     }
     const deviceId = member === undefined ? `${this.selfId()}:${sessionId}` : member.slice('device:'.length);
@@ -498,7 +488,7 @@ export class GroupStore {
     this.saveSessions();
   }
 
-  private absorb(theirs: Roster): void {
+  absorb(theirs: Roster): void {
     const mine = this.roster;
     if (mine === null) return;
     let merged: Roster;
@@ -881,337 +871,6 @@ export class GroupStore {
     // The removed machine hears it from a member it still listens to, and leaves on its own.
     this.background(this.core.coordination.request(peerOf(entry), 'group.sync', this.require()).catch(() => undefined));
     return this.view('owner')!;
-  }
-
-  // -- Devices: one key each, admitted once, let in on every member.
-
-  /** A core in no group starts one named after itself: a device is always a device of a group. */
-  private async ensureGroup(): Promise<Roster> {
-    if (this.roster === null) await this.create((hostname() || 'Boite').slice(0, 80));
-    return this.require();
-  }
-
-  /** "Add a device": one admission grant, as a link and a code, and an invitation a computer's core joins with. */
-  async addDevice(): Promise<DeviceInvite> {
-    await this.ensureGroup();
-    const grant = this.core.sessions.grant(Date.now(), 'device');
-    const { invite } = await this.invite();
-    return {
-      url: `${grant.url}#${DEVICE_LINK_JOIN}=${encodeURIComponent(invite)}`,
-      code: grant.code!,
-      expiresAt: Math.min(grant.expiresAt, Date.now() + GRANT_TTL_MS),
-      codeExpiresAt: grant.codeExpiresAt!,
-    };
-  }
-
-  /** Writes a device into the roster under this machine's signature; the same key again is the same device. */
-  private admitKey(publicKey: string, name: string, role: PairingRole, legacy: string[] = []): DeviceKeyEntry {
-    const roster = this.require();
-    const id = deviceId(publicKey);
-    const known = roster.deviceKeys?.find((entry) => entry.id === id);
-    if (known?.removed) throw unauthorized('this device was removed from the group: it needs a new key, which the app makes when it is added again');
-    const live = known !== undefined && liveDeviceKeys(roster).includes(known);
-    const legacyIds = [...new Set([...(known?.legacy ?? []), ...legacy])].sort();
-    if (live && known!.role === role && JSON.stringify(known!.legacy ?? []) === JSON.stringify(legacyIds)) return known!;
-    if (!live && liveDeviceKeys(roster).length >= DEVICES_MAX) throw refused(`a group holds at most ${DEVICES_MAX} devices; revoke one that is no longer used`);
-    if (known === undefined && (roster.deviceKeys?.length ?? 0) >= DEVICE_ENTRIES_MAX) {
-      throw refused(`this group has listed ${DEVICE_ENTRIES_MAX} devices over its life, revoked ones included, and takes no new one: start a new group`);
-    }
-    const self = this.selfId();
-    const entry: DeviceKeyEntry = {
-      id,
-      publicKey,
-      name: (name.trim() || 'device').slice(0, 100),
-      role,
-      admit: { by: self, sig: this.core.coordination.signature(deviceAdmissionInput(roster.id, id, role)).toString('base64') },
-      at: known?.at ?? Date.now(),
-      rev: clockOf(roster) + 1,
-      ...(known?.push === undefined ? {} : { push: known.push }),
-      ...(legacyIds.length > 0 ? { legacy: legacyIds } : {}),
-    };
-    this.commit({ ...roster, deviceKeys: [...(roster.deviceKeys ?? []).filter((device) => device.id !== id), entry] });
-    return entry;
-  }
-
-  /**
-   * `hello` with a grant and a device key: the grant, or a code naming one, is
-   * spent here, or on the member that minted it when only that member knows
-   * the code, and the device is in the group from then on. The key is proven
-   * held by a signature over the grant itself.
-   */
-  async admitDevice(grant: string, offer: { publicKey?: unknown; name?: unknown; sig?: unknown }, client: ClientIdentity, nonce: string | null): Promise<{ deviceId: string; sessionId: string; role: PairingRole }> {
-    const publicKey = typeof offer.publicKey === 'string' ? offer.publicKey : '';
-    if (deviceKey(publicKey) === null) throw invalidParams('device.publicKey: expected a raw Ed25519 key in base64url', { field: 'device.publicKey' });
-    if (!deviceSigned(publicKey, deviceAdmitInput(grant, publicKey), offer.sig)) throw unauthorized('device.sig: expected the device\'s signature over the grant it redeems');
-    const name = typeof offer.name === 'string' ? offer.name.slice(0, 100) : client.name;
-    const id = deviceId(publicKey);
-    // Before the grant is spent: a removed key gets a refusal that leaves the code good for the key the app makes next.
-    if (this.roster?.deviceKeys?.some((device) => device.id === id && device.removed)) {
-      throw unauthorized('this device was removed from the group: it needs a new key, which the app makes when it is added again');
-    }
-    let role: PairingRole;
-    try {
-      role = this.core.sessions.redeem(grant, id, nonce);
-    } catch (error) {
-      // A code another member drew: that member knows it, and says yes or no.
-      if (!(error instanceof RpcFailure) || !this.isCode(grant) || this.roster === null || liveCores(this.roster).length < 2) throw error;
-      const entry = await this.redeemElsewhere(grant, { publicKey, name, sig: offer.sig as string });
-      if (entry === null) throw error;
-      return { deviceId: entry.id, sessionId: this.deviceSession(entry, client), role: entry.role };
-    }
-    await this.ensureGroup();
-    const entry = this.admitKey(publicKey, name, role);
-    return { deviceId: entry.id, sessionId: this.deviceSession(entry, client), role: entry.role };
-  }
-
-  private isCode(grant: string): boolean {
-    return grant.length <= 16 && /^[0-9A-Za-z-]+$/.test(grant);
-  }
-
-  /** Asks every other member whether it drew this code, sealed; the one that did admits the device and answers with the roster. */
-  private async redeemElsewhere(code: string, offer: { publicKey: string; name: string; sig: string }): Promise<DeviceKeyEntry | null> {
-    const roster = this.require();
-    const self = this.selfId();
-    const asks = liveCores(roster).filter((core) => core.coreId !== self).map(async (core) => {
-      const answer = await this.core.coordination.request(peerOf(core), 'group.redeem', { code, ...offer }) as { roster?: unknown } | null;
-      const theirs = checkRoster(answer?.roster);
-      if (theirs.id !== this.roster?.id) throw new Error('another group');
-      this.absorb(theirs);
-      const entry = this.roster === null ? undefined : liveDeviceKeys(this.roster).find((device) => device.id === deviceId(offer.publicKey));
-      if (entry === undefined) throw new Error('not admitted');
-      return entry;
-    });
-    try {
-      return await Promise.any(asks);
-    } catch {
-      return null;
-    }
-  }
-
-  /** The other end of `redeemElsewhere`, on a member: its own code, spent here, for a device another member is talking to. */
-  redeemFor(peer: CoordinationPeer, payload: unknown): { roster: Roster } {
-    const roster = this.require();
-    if (!liveCores(roster).some((core) => core.coreId === peer.coreId)) throw refused('only a machine of this group may redeem a code here');
-    const raw = (typeof payload === 'object' && payload !== null ? payload : {}) as { code?: unknown; publicKey?: unknown; name?: unknown; sig?: unknown };
-    const code = typeof raw.code === 'string' ? raw.code : '';
-    const publicKey = typeof raw.publicKey === 'string' ? raw.publicKey : '';
-    if (!this.isCode(code) || deviceKey(publicKey) === null || !deviceSigned(publicKey, deviceAdmitInput(code, publicKey), raw.sig)) {
-      throw invalidParams('group.redeem: expected a code, a device key and its signature over the code');
-    }
-    const role = this.core.sessions.redeem(code, deviceId(publicKey), null);
-    this.admitKey(publicKey, typeof raw.name === 'string' ? raw.name : 'device', role);
-    return { roster: this.require() };
-  }
-
-  /**
-   * `hello` with a device signature. The device is one this roster lists
-   * live; the signature names this machine, is dated within two minutes and
-   * its nonce was never seen. The session row it opens is this machine's
-   * record of the device: its last visit, its push destination, its sockets.
-   */
-  authenticateDevice(hello: unknown, client: ClientIdentity, now = Date.now()): { sessionId: string; role: PairingRole; deviceId: string } {
-    // Unauthorized says the device is out for good, and the app drops its key on it. A device this machine has not
-    // heard of yet, its roster behind the member that admitted it, is told to come back; so is a clock that is off.
-    const roster = this.roster;
-    const raw = (typeof hello === 'object' && hello !== null ? hello : {}) as Partial<DeviceHello>;
-    const known = typeof raw.id === 'string' ? roster?.deviceKeys?.find((device) => device.id === raw.id) : undefined;
-    if (roster === null || known === undefined) throw unavailable('this machine has not heard of this device yet: its group tells it within seconds');
-    const entry = liveDeviceKeys(roster).find((device) => device === known);
-    if (entry === undefined) throw unauthorized('this device was removed from the group');
-    if (typeof raw.at !== 'number' || Math.abs(now - raw.at) > DEVICE_HELLO_SKEW_MS) {
-      throw refused('the device hello is dated more than two minutes from this machine\'s clock: set the clock of this device or that machine');
-    }
-    if (typeof raw.nonce !== 'string' || raw.nonce.length < 16 || raw.nonce.length > 64) throw refused('device.nonce: expected 16 to 64 characters');
-    if (!deviceSigned(entry.publicKey, deviceHelloInput(this.selfId(), raw.at, raw.nonce), raw.sig)) throw unauthorized('the device hello is not signed by its key for this machine');
-    for (const [nonce, until] of this.deviceNonces) if (until <= now) this.deviceNonces.delete(nonce);
-    const key = `${entry.id}:${raw.nonce}`;
-    if (this.deviceNonces.has(key)) throw refused('this device hello was already used');
-    if (this.deviceNonces.size >= DEVICE_NONCES_MAX) throw unavailable('too many device hellos at once: try again in a minute');
-    this.deviceNonces.set(key, raw.at + DEVICE_HELLO_SKEW_MS * 2);
-    return { sessionId: this.deviceSession(entry, client, now), role: entry.role, deviceId: entry.id };
-  }
-
-  /** This machine's session row for a device key, made on its first visit. Its token is thrown away: the key is what opens it. */
-  private deviceSession(entry: DeviceKeyEntry, client: ClientIdentity, now = Date.now()): string {
-    const member = `key:${entry.id}`;
-    const known = Object.entries(this.sessions).find(([sessionId, held]) => held === member && this.core.journal.getSession(sessionId) !== null);
-    if (known !== undefined) {
-      this.core.journal.touchSession(known[0], now);
-      return known[0];
-    }
-    const session = this.core.sessions.issue(entry.role, client, now);
-    this.sessions[session.id] = member;
-    this.saveSessions();
-    return session.id;
-  }
-
-  /** The device id a session of this machine stands for, when a device key opened it. */
-  deviceOf(sessionId: string | null): string | undefined {
-    const member = sessionId === null ? undefined : this.sessions[sessionId];
-    return member?.startsWith('key:') ? member.slice('key:'.length) : undefined;
-  }
-
-  /**
-   * A device paired the older way hands over its key: the session it called
-   * with is listed as what the key took over, so revoking either revokes both.
-   */
-  async enrollDevice(identity: Identity, params: { publicKey?: unknown; name?: unknown; at?: unknown; sig?: unknown }): Promise<{ id: string; group: Group }> {
-    if (identity.sessionId === null || identity.principal === 'agent') throw refused('group.enrollDevice is for a paired device; this machine\'s own app is the machine itself');
-    const row = this.core.journal.getSession(identity.sessionId);
-    if (row === null) throw unauthorized('this session was revoked');
-    const publicKey = typeof params.publicKey === 'string' ? params.publicKey : '';
-    if (deviceKey(publicKey) === null) throw invalidParams('publicKey: expected a raw Ed25519 key in base64url', { field: 'publicKey' });
-    const at = typeof params.at === 'number' ? params.at : 0;
-    if (Math.abs(Date.now() - at) > DEVICE_HELLO_SKEW_MS || !deviceSigned(publicKey, deviceHelloInput(this.selfId(), at, 'enroll'), params.sig)) {
-      throw invalidParams('sig: expected the device\'s signature for this machine, dated now', { field: 'sig' });
-    }
-    const already = this.sessions[identity.sessionId];
-    if (already?.startsWith('key:')) throw refused('this session is already a device key\'s');
-    await this.ensureGroup();
-    const legacy = already?.startsWith('device:') ? already.slice('device:'.length) : `${this.selfId()}:${identity.sessionId}`;
-    const entry = this.admitKey(publicKey, typeof params.name === 'string' ? params.name : row.client_name, row.role, [legacy]);
-    return { id: entry.id, group: this.view(principalOfRole(row.role), entry.id)! };
-  }
-
-  /** This machine's session for a device key, once the device has said hello here. */
-  sessionOfDevice(id: string): string | undefined {
-    return Object.entries(this.sessions).find(([sessionId, held]) => held === `key:${id}` && this.core.journal.getSession(sessionId) !== null)?.[0];
-  }
-
-  /** The member whose page a device installed holds its push subscription: the others send its notifications there. */
-  pushHome(deviceIdValue: string): string | undefined {
-    return this.roster === null ? undefined : liveDeviceKeys(this.roster).find((device) => device.id === deviceIdValue)?.push;
-  }
-
-  /** The device subscribed to notifications on this machine. */
-  pushedHere(deviceIdValue: string): void {
-    const roster = this.roster;
-    const entry = roster === null ? undefined : liveDeviceKeys(roster).find((device) => device.id === deviceIdValue);
-    if (roster === null || entry === undefined || entry.push === this.selfId()) return;
-    this.commit({ ...roster, deviceKeys: roster.deviceKeys!.map((device) => (device === entry ? { ...entry, push: this.selfId(), rev: clockOf(roster) + 1 } : device)) });
-  }
-
-  /** Takes a device out of the group, by its key's id or its older pairing's id. */
-  revokeDevice(id: unknown): Group {
-    const roster = this.require();
-    if (typeof id !== 'string') throw invalidParams('id: expected a device id', { field: 'id' });
-    const keyed = roster.deviceKeys?.find((device) => device.id === id && !device.removed);
-    if (keyed !== undefined) {
-      this.revokeKey(roster, id);
-      return this.view('owner')!;
-    }
-    const legacy = liveDevices(roster).find((device) => device.id === id);
-    if (legacy === undefined) throw refused(`${id} is not a device of this group`, { field: 'id' });
-    const prefix = `${this.selfId()}:`;
-    if (id.startsWith(prefix) && this.core.journal.getSession(id.slice(prefix.length)) !== null) this.core.sessions.revoke(id.slice(prefix.length));
-    else this.commit({ ...roster, devices: roster.devices.map((device) => (device === legacy ? { ...device, rev: clockOf(roster) + 1, removed: true as const } : device)) });
-    return this.view('owner')!;
-  }
-
-  /** The key's removal, and the older pairings it took over, written together. */
-  private revokeKey(roster: Roster, id: string): void {
-    const entry = roster.deviceKeys?.find((device) => device.id === id);
-    if (entry === undefined || entry.removed) return;
-    const rev = clockOf(roster) + 1;
-    const legacy = new Set(entry.legacy ?? []);
-    const devices = roster.devices.map((device) => (legacy.has(device.id) && !device.removed ? { ...device, rev, removed: true as const } : device));
-    for (const old of legacy) {
-      if (!devices.some((device) => device.id === old)) devices.push({ id: old, name: entry.name, role: entry.role, rev, removed: true });
-    }
-    this.commit({ ...roster, devices, deviceKeys: roster.deviceKeys!.map((device) => (device === entry ? { ...entry, rev, removed: true as const } : device)) });
-    // The sessions of its older pairings on this machine go too.
-    const prefix = `${this.selfId()}:`;
-    for (const old of legacy) {
-      const sessionId = old.startsWith(prefix) ? old.slice(prefix.length) : undefined;
-      if (sessionId !== undefined && !this.revoking.has(sessionId) && this.core.journal.getSession(sessionId) !== null) {
-        try { this.core.sessions.revoke(sessionId); } catch (error) { this.core.log('warn', `group: could not revoke session ${sessionId}: ${messageOf(error)}`); }
-      }
-    }
-  }
-
-  // -- Tickets: one member's word for a client, exchanged on another member.
-
-  private enroll(sessionId: string, name: string, role: PairingRole): string {
-    const roster = this.require();
-    const id = `${this.selfId()}:${sessionId}`;
-    const known = roster.devices.find((device) => device.id === id);
-    if (known !== undefined && !known.removed) return id;
-    if (known?.removed) throw unauthorized('this device was removed from the group');
-    if (liveDevices(roster).length >= DEVICES_MAX) throw refused(`a group holds at most ${DEVICES_MAX} devices; revoke one that is no longer used`);
-    if (roster.devices.length >= DEVICE_ENTRIES_MAX) {
-      throw refused(`this group has listed ${DEVICE_ENTRIES_MAX} devices over its life, revoked ones included, and takes no new one: start a new group`);
-    }
-    const entry: DeviceEntry = { id, name: (name || 'device').slice(0, 100), role, rev: clockOf(roster) + 1 };
-    this.commit({ ...roster, devices: [...roster.devices, entry] });
-    return id;
-  }
-
-  ticket(coreId: unknown, identity: Identity, url?: unknown): GroupTicket {
-    const roster = this.require();
-    const self = this.selfId();
-    const target = liveCores(roster).find((core) => core.coreId === coreId);
-    if (target === undefined || target.coreId === self) throw refused(`${String(coreId)} is not another machine of this group`, { field: 'coreId' });
-    // The ticket is good at one address, and the member checks it still gives that one: a stale roster here vouches for nothing there.
-    const usable = ticketAddresses(reachOf(roster, target));
-    const at = url === undefined ? usable[0] : usable.find((address) => address === url);
-    if (at === undefined) throw refused(`url: expected an address of ${target.name} a key may be sent to, HTTPS when it has one and written as numbers otherwise`, { field: 'url' });
-    let sub: string;
-    let role: PairingRole;
-    if (identity.sessionId === null) {
-      if (identity.principal !== 'owner') throw refused('group.ticket is for the owner and paired devices');
-      // The shell of this machine, holding its core token: the machine itself vouches.
-      sub = `core:${self}`;
-      role = 'owner';
-    } else {
-      const row = this.core.journal.getSession(identity.sessionId);
-      if (row === null) throw unauthorized('this session was revoked');
-      role = row.role;
-      // A client that came in through the group keeps the name it came in under.
-      sub = this.sessions[identity.sessionId] ?? `device:${this.enroll(identity.sessionId, row.client_name, role)}`;
-    }
-    const expiresAt = Date.now() + GROUP_TICKET_TTL_MS;
-    const ticket = encodeTicket(
-      { v: 1, g: roster.id, iss: self, aud: target.coreId, u: at, sub, role, nonce: newToken(), exp: expiresAt },
-      (input) => this.core.coordination.signature(input),
-    );
-    return { ticket, coreId: target.coreId, addresses: this.routes(target.coreId) ?? reachOf(roster, target), url: at, expiresAt };
-  }
-
-  /** `hello` with a ticket: checked against the roster, then a session of this core's own, once. */
-  admit(text: string, client: ClientIdentity, now = Date.now()): { id: string; token: string; role: PairingRole } {
-    const roster = this.roster;
-    if (roster === null) throw unauthorized('this machine belongs to no group');
-    const { payload, encoded, signature } = parseTicket(text);
-    if (payload.g !== roster.id || payload.aud !== this.selfId()) throw unauthorized('the group ticket is for another machine or another group');
-    const issuer = liveCores(roster).find((core) => core.coreId === payload.iss);
-    if (issuer === undefined || issuer.coreId === this.selfId()) throw unauthorized('the group ticket was issued by a machine that is not in this group');
-    if (!verify(null, ticketSigningInput(encoded), issuer.publicKey, signature)) throw unauthorized('the group ticket signature is wrong');
-    if (payload.exp <= now - CLOCK_SKEW_MS || payload.exp > now + GROUP_TICKET_TTL_MS + CLOCK_SKEW_MS) {
-      throw unauthorized('the group ticket expired, or the clocks of the two machines differ by more than a minute');
-    }
-    if (!PAIRING_ROLES.includes(payload.role)) throw unauthorized('the group ticket is malformed');
-    if (!this.given().includes(payload.u)) throw unauthorized(`the group ticket was made for ${payload.u}, an address this machine does not give, or no longer`);
-    if (payload.sub.startsWith('core:')) {
-      const member = payload.sub.slice('core:'.length);
-      if (payload.role !== 'owner' || !liveCores(roster).some((core) => core.coreId === member)) throw unauthorized('the group ticket names a machine that is not in this group');
-    } else if (payload.sub.startsWith('device:')) {
-      const id = payload.sub.slice('device:'.length);
-      if (!liveCores(roster).some((core) => core.coreId === homeOf(id)) || roster.devices.some((device) => device.id === id && device.removed)) {
-        throw unauthorized('this device was removed from the group');
-      }
-    } else throw unauthorized('the group ticket is malformed');
-    const spent = `${payload.iss}:${payload.nonce}`;
-    if (this.spent.has(spent)) throw unauthorized('the group ticket was already used');
-    // One write: the ticket is spent, the session exists and names who it stands for, or none of the three.
-    return this.core.journal.db.transaction(() => {
-      this.spent.set(spent, payload.exp + CLOCK_SKEW_MS);
-      this.saveSpent();
-      const session = this.core.sessions.issue(payload.role, client, now);
-      this.sessions[session.id] = payload.sub;
-      this.vias[session.id] = payload.u;
-      this.saveSessions();
-      return session;
-    })();
   }
 
   beginClose(): void {
