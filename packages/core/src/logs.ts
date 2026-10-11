@@ -316,7 +316,8 @@ export class DiagnosticLogs {
         // Once `limit` kept records are all newer than that, this file and older ones cannot enter.
         if (index > 0 && records.size >= limit) {
           const modified = await this.modified(this.path(index));
-          if (modified === null) break;
+          // A missing file (deleted, or a crash mid-rotation) holds nothing; older ones still can.
+          if (modified === null) continue;
           const limitTh = [...records.values()].map(record => record.at).sort((a, b) => b - a)[limit - 1]!;
           if (limitTh > modified + CLOCK_SKEW_MS) break;
         }

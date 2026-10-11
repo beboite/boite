@@ -43,9 +43,12 @@ export function watchProviderProcess(core: Core, child: SpawnedChild, command: s
   const version = knownVersion(command);
   const startedAt = performance.now();
   const base = { source: who.providerId, threadId: who.threadId, ...(who.turnId === undefined ? {} : { turnId: who.turnId }) };
-  core.logs.info(`Started ${program}${version ? ` ${version}` : ''} for ${who.providerId}, pid ${child.pid ?? 'unknown'}, ${who.resume ? 'resuming its saved session' : 'new session'}`, {
+  const started = (): void => core.logs.info(`Started ${program}${version ? ` ${version}` : ''} for ${who.providerId}, pid ${child.pid ?? 'unknown'}, ${who.resume ? 'resuming its saved session' : 'new session'}`, {
     ...base, event: 'driver.process.started', data: { program, version, pid: child.pid ?? null, resume: who.resume },
   });
+  // A program that cannot start has no pid and never emits `spawn`: its only record is the failure.
+  if (child.pid === undefined) child.once('spawn', started);
+  else started();
   let reported = false;
   child.once('error', (error) => {
     if (reported) return;

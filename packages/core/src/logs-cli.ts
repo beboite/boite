@@ -122,6 +122,7 @@ export async function logsCommand(args: string[], client: CoreClient, threadId: 
   const action = positional[0] ?? 'list';
   const own = agent ? { threadId } : {};
   if (action === 'help') { print([LOGS_HELP], { help: LOGS_HELP }); return; }
+  if (positional.length > 1) throw new Usage(`logs ${action} takes flags only; boite logs help lists them`);
   if (action === 'problems') {
     const summary = await client.call('diagnostics.summary', { ...own, ...(options.since === undefined ? {} : { since: options.since }) });
     print(problemLines(summary), summary);
@@ -145,7 +146,6 @@ export async function logsCommand(args: string[], client: CoreClient, threadId: 
     return;
   }
   if (action !== 'list') throw new Usage(`logs expects list, problems, export or help, got ${action}`);
-  if (positional.length > 1) throw new Usage('logs takes flags only; boite logs help lists them');
   if (agent) {
     if (options.level || options.turn || options.anonymize) throw new Usage('--level, --turn and --anonymize are the owner\'s; an agent uses --min-level, --since, --search and --mine');
     const records = await client.call('diagnostics.logs', {
@@ -174,7 +174,10 @@ export async function issueCommand(args: string[], client: CoreClient, threadId:
   if (action !== 'draft' && action !== 'submit') throw new Usage('issue expects draft or submit; boite logs help shows the flags');
   if (!options.title) throw new Usage('issue needs --title');
   let description = options.description;
-  if (options.descriptionFile) description = readFileSync(isAbsolute(options.descriptionFile) ? options.descriptionFile : resolve(cwd, options.descriptionFile), 'utf8');
+  if (options.descriptionFile) {
+    try { description = readFileSync(isAbsolute(options.descriptionFile) ? options.descriptionFile : resolve(cwd, options.descriptionFile), 'utf8'); }
+    catch (error) { throw new Usage(`--description-file ${options.descriptionFile} cannot be read: ${(error as NodeJS.ErrnoException).code ?? (error as Error).message}`); }
+  }
   if (!description) throw new Usage('issue needs --description or --description-file');
   const result = await client.call('diagnostics.issue', {
     ...(agent ? { threadId } : {}), title: options.title, description, includeLogs: !options.noLogs, submit: action === 'submit',

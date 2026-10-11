@@ -67,16 +67,19 @@ export function logMethods(ctx: FakeContext): Pick<FakeMethods, DiagnosticMethod
     return out;
   };
 
-  const summarize = (records: readonly CoreLogRecord[], since: number, names: LogAnonymizer): DiagnosticSummary => {
+  const summarize = (records: readonly CoreLogRecord[], since: number, names: LogAnonymizer, family: Set<string> | null): DiagnosticSummary => {
     const counts: Record<CoreLogLevel, number> = { debug: 0, info: 0, warn: 0, error: 0 };
     const problems = new Map<string, DiagnosticProblem>();
-    const perThread = new Map<string, { warnings: number; errors: number; lastError: string | null }>();
+    const perThread = new Map<string, { warnings: number; errors: number; lastError: { at: number; message: string } | null }>();
     for (const record of records) {
       counts[record.level] += 1;
       if (record.threadId !== undefined) {
         const entry = perThread.get(record.threadId) ?? { warnings: 0, errors: 0, lastError: null };
         if (record.level === 'warn') entry.warnings += 1;
-        if (record.level === 'error') { entry.errors += 1; entry.lastError ??= record.message.slice(0, 300); }
+        if (record.level === 'error') {
+          entry.errors += 1;
+          if (entry.lastError === null || entry.lastError.at < record.at) entry.lastError = { at: record.at, message: record.message.slice(0, 300) };
+        }
         perThread.set(record.threadId, entry);
       }
       if (!logLevelAtLeast(record.level, 'warn')) continue;
@@ -92,13 +95,13 @@ export function logMethods(ctx: FakeContext): Pick<FakeMethods, DiagnosticMethod
       }
     }
     const mentioned = new Set(records.flatMap(record => [record.threadId, record.parentThreadId].filter((id): id is string => id !== undefined)));
-    const threads: DiagnosticThread[] = [...ctx.threads.values()].map(toSummary).filter(thread => mentioned.has(thread.id)).map(thread => {
+    const threads: DiagnosticThread[] = [...ctx.threads.values()].map(toSummary).filter(thread => (family === null || family.has(thread.id)) && (mentioned.has(thread.id) || (!thread.archived && thread.updatedAt >= since))).map(thread => {
       const seen = perThread.get(thread.id);
       return {
         threadId: thread.id, providerId: thread.providerId, model: thread.model, effort: thread.effort, status: thread.status,
         parentThreadId: thread.parentThreadId ?? null, project: names.project(ctx.projects.find(project => project.id === thread.projectId)?.path ?? null),
         archived: thread.archived, createdAt: thread.createdAt, updatedAt: thread.updatedAt,
-        warnings: seen?.warnings ?? 0, errors: seen?.errors ?? 0, lastError: seen?.lastError ?? null,
+        warnings: seen?.warnings ?? 0, errors: seen?.errors ?? 0, lastError: seen?.lastError?.message ?? null,
       };
     });
     const bytes = new TextEncoder().encode(ctx.logs.map(record => JSON.stringify(record)).join('\n')).length;
@@ -122,7 +125,7 @@ export function logMethods(ctx: FakeContext): Pick<FakeMethods, DiagnosticMethod
   const exportBundle = (since: number, limit: number, family: Set<string> | null = null): DiagnosticsExport => {
     const names = anonymizer();
     const records = newestFirst(record => record.at >= since && (family === null || record.threadId === undefined || family.has(record.threadId)), limit).map(record => names.record(record));
-    const summary = summarize(records, since, names);
+    const summary = summarize(records, since, names, family);
     const lines = [
       'Boite diagnostics', '=================',
       `Generated ${formatLogTime(summary.generatedAt)} (times are UTC).`,
@@ -163,7 +166,7 @@ export function logMethods(ctx: FakeContext): Pick<FakeMethods, DiagnosticMethod
       const since = typeof params.since === 'number' && Number.isFinite(params.since) ? params.since : Date.now() - DAY_MS;
       const names = anonymizer();
       const family = familyOf(params.threadId);
-      return summarize(newestFirst(record => record.at >= since && (family === null || record.threadId === undefined || family.has(record.threadId)), EXPORT_LIMIT).map(record => names.record(record)), since, names);
+      return summarize(newestFirst(record => record.at >= since && (family === null || record.threadId === undefined || family.has(record.threadId)), EXPORT_LIMIT).map(record => names.record(record)), since, names, family);
     },
     'diagnostics.export': async params => {
       if (params === null || typeof params !== 'object') throw invalid(new Error('diagnostics.export params: expected an object'));

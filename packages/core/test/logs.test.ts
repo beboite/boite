@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { normalizeCoreLogText, RpcErrorCode, type ProcessRecord, type RpcEvents, type Turn } from '@boite/contracts';
@@ -166,6 +166,25 @@ describe('bounded persistent diagnostics', () => {
       const newest = await reader.query({ limit: 3 });
       expect(newest.map(record => record.message.split(' ').slice(0, 2).join(' '))).toEqual(['recent 19', 'recent 18', 'recent 17']);
       expect(newest[0]?.data?.where).toBe('[redacted] here');
+    } finally { await reader.close(); rmSync(directory, { recursive: true, force: true }); }
+  });
+
+  test('a missing file between rotated ones does not hide the older files behind it', async () => {
+    const directory = temporary();
+    const now = Date.now();
+    const writer = new DiagnosticLogs(directory, [], undefined, 1024);
+    try {
+      for (let index = 0; index < 20; index += 1) writer.record('info', `recent ${index} ${'x'.repeat(150)}`, { source: 'test', event: 'recent' }, now - 20_000 + index * 1000);
+      await writer.flush();
+      // Enough to rotate: the newest file then holds only records dated long ago.
+      for (let index = 0; index < 7; index += 1) writer.record('info', `queued long ago ${index} ${'x'.repeat(200)}`, { source: 'test', event: 'backdated' }, now - 3_600_000);
+    } finally { await writer.close(); }
+    rmSync(join(directory, 'logs', 'core.1.ndjson'));
+    expect(existsSync(join(directory, 'logs', 'core.2.ndjson'))).toBe(true);
+    const reader = new DiagnosticLogs(directory, [], undefined, 1024);
+    try {
+      const newest = await reader.query({ limit: 1 });
+      expect(newest.map(record => record.event)).toEqual(['recent']);
     } finally { await reader.close(); rmSync(directory, { recursive: true, force: true }); }
   });
 

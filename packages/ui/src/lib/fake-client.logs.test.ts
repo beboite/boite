@@ -141,3 +141,26 @@ test('fake diagnostics: summary, export and issue for the owner; report for the 
     expect((await client.call('diagnostics.logs', { limit: 5, minLevel: 'error' })).every(record => record.level === 'error')).toBe(true);
   } finally { client.close(); }
 });
+
+test('fake summary keeps the latest error by time and stays inside the focused family, as the core does', async () => {
+  const client = new FakeClient({ delayMs: 0, delegationDemo: true });
+  await client.connect();
+  try {
+    const threads = await client.call('threads.list', {});
+    const child = threads.find(thread => thread.parentThreadId);
+    expect(child).toBeDefined();
+    const root = child!.parentThreadId!;
+    const now = Date.now();
+    // Reported last but dated earlier: the summary must still name the newer error.
+    await client.call('diagnostics.report', { records: [
+      { level: 'error', at: now, source: 'window', event: 'ui.error', message: 'newer error', threadId: root },
+      { level: 'error', at: now - 5 * 60_000, source: 'window', event: 'ui.error', message: 'older error', threadId: root },
+      { level: 'error', at: now, source: 'window', event: 'ui.error', message: 'child error', threadId: child!.id },
+    ] });
+    const all = await client.call('diagnostics.summary', {});
+    expect(all.threads.find(thread => thread.threadId === root)?.lastError).toBe('newer error');
+    // The child's records name its parent, which is still outside the child's family.
+    const focused = await client.call('diagnostics.summary', { threadId: child!.id });
+    expect(focused.threads.map(thread => thread.threadId)).toEqual([child!.id]);
+  } finally { client.close(); }
+});

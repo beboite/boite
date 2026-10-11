@@ -24,7 +24,10 @@ test('the anonymizer replaces paths, names, addresses and private hosts and keep
     'thread thr_yrbzgyt5xjtjbq334d7m turn trn_1f992a9ph60nzwzzp8sv',
     'opened file:///home/meetsu/projects/secret-game/index.html.',
     'loaded file:///D:/Dev/Factory/assets/logo.png',
+    'GET https://api.github.com/repos/acme/hidden-repo/pulls 404',
   ].join('\n'));
+  // An API path names the owner and repository one segment later.
+  expect(text).toMatch(/api\.github\.com\/repos\/<owner:[0-9a-f]{6}>\/<repo:[0-9a-f]{6}>\/pulls 404/);
   expect(text).toMatch(/opened file:\/\/<project:[0-9a-f]{6}>\/index\.html\.$/m);
   // A drive path keeps all three slashes, and its prefix is still found.
   expect(text).toMatch(/loaded file:\/\/\/<project:[0-9a-f]{6}>\/assets\/logo\.png$/m);
@@ -245,6 +248,12 @@ test('the CLI prints records oldest first, filters by time and level, and export
     let refusedMine = '';
     expect(await runCli(['logs', '--data-dir', harness.dataDir, '--mine'], { env: {}, cwd: harness.dataDir, out: () => undefined, err: value => { refusedMine += value; } })).not.toBe(0);
     expect(refusedMine).toContain('--mine is the agent');
+    // Every subcommand refuses an extra word, and an unreadable description file is a usage error.
+    for (const [args, expected] of [[['logs', 'problems', 'extra'], 'logs problems takes flags only'], [['issue', 'draft', '--title', 'The window froze', '--description-file', 'missing.md'], '--description-file missing.md cannot be read: ENOENT']] as const) {
+      let refused = '';
+      expect(await runCli(['--data-dir', harness.dataDir, ...args], { env: {}, cwd: harness.dataDir, out: () => undefined, err: value => { refused += value; } })).not.toBe(0);
+      expect(refused).toContain(expected);
+    }
     const agentEnv = { BOITE_CORE_URL: harness.url, BOITE_AGENT_TOKEN: harness.core.agents.tokenFor(threadId), BOITE_THREAD_ID: threadId };
     expect(await run(['logs', '--mine', '--min-level', 'warn'], agentEnv)).toContain('first warning');
     expect(await run(['logs', 'problems'], agentEnv)).toContain('1x error core/test/test.second');

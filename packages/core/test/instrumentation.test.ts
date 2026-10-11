@@ -53,6 +53,16 @@ test('an agent process that crashes leaves one warning with its exit code and th
   forgetStderr(threadId);
 });
 
+test('a program that cannot start leaves only its failure, never a start', async () => {
+  const { core, records } = recordingCore();
+  const child = spawn('/nonexistent/boite-test/claude', [], { stdio: ['pipe', 'pipe', 'pipe'] }) as unknown as SpawnedChild;
+  watchProviderProcess(core, child, '/nonexistent/boite-test/claude', { threadId: 'thr_missing', providerId: 'claude', resume: false });
+  const until = Date.now() + 10_000;
+  while (records.length === 0 && Date.now() < until) await Bun.sleep(20);
+  await Bun.sleep(50);
+  expect(records.map(record => record.context.event)).toEqual(['driver.process.spawn-failed']);
+});
+
 test('a stop the core asked for is no crash, and old stderr does not describe a new failure', () => {
   expect(abnormalExit(0, null)).toBe(false);
   expect(abnormalExit(null, 'SIGTERM')).toBe(false);

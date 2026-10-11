@@ -384,9 +384,11 @@ export function createLogAnonymizer(context: LogAnonymizeContext): LogAnonymizer
     value = value.replace(/\b([a-z][a-z0-9+.-]*:\/\/)(\[[0-9a-f:]+\]|[^\s/?#<>"':]+)(:\d+)?(\/[^\s<>"']*)?/gi, (match, scheme: string, host: string, port: string | undefined, path: string | undefined) => {
       if (publicHost(host)) {
         if (!/github(?:usercontent)?\.com$/i.test(host) || !path) return match;
-        // A repository path names its owner; Boite's own stays readable.
+        // A repository path names its owner; Boite's own stays readable. An API path
+        // (`/repos/<owner>/<repo>`, `/orgs/<owner>`) names them one segment later.
         const segments = path.split('/');
-        return scheme + host + (port ?? '') + segments.map((segment, index) => (index === 1 || index === 2) && segment.length > 0 && !/^(?:beboite|boite|\[redacted\])$/i.test(segment) && !/^(?:repos|orgs|users|api|v\d)$/i.test(segment) ? `<${index === 1 ? 'owner' : 'repo'}:${shortHash(context.salt, segment.toLowerCase())}>` : segment).join('/');
+        const owner = /^(?:repos|orgs|users)$/i.test(segments[1] ?? '') ? 2 : 1;
+        return scheme + host + (port ?? '') + segments.map((segment, index) => (index === owner || index === owner + 1) && segment.length > 0 && !/^(?:beboite|boite|\[redacted\])$/i.test(segment) && !/^(?:repos|orgs|users|api|v\d)$/i.test(segment) ? `<${index === owner ? 'owner' : 'repo'}:${shortHash(context.salt, segment.toLowerCase())}>` : segment).join('/');
       }
       return `${scheme}<host:${shortHash(context.salt, host.toLowerCase())}>${port ?? ''}${path && path !== '/' ? '/<path>' : (path ?? '')}`;
     });
