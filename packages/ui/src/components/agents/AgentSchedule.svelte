@@ -152,7 +152,7 @@
   </details>
 
   <div class="agent-form-actions">
-    <button class="primary" disabled={!ready} data-testid="routine-save">{initial.routine ? labels.save : t.schedule}</button>
-    {#if oncancel}<button type="button" class="ghost" onclick={oncancel}>{labels.cancel}</button>{/if}
+    <button class="primary" disabled={!ready} data-testid="routine-save">{initial.routine ? strings.common.save : t.schedule}</button>
+    {#if oncancel}<button type="button" class="ghost" onclick={oncancel}>{strings.common.cancel}</button>{/if}
   </div>
 </form>

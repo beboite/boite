@@ -41,11 +41,11 @@
     contextMenu.open(
       event,
       [
-        { id: 'open', label: strings.sidebar.open, disabled: deleting },
+        { id: 'open', label: strings.common.open, disabled: deleting },
         { id: 'restore', label: strings.sidebar.reopenThread, disabled: lock.busy || offline },
         // On hover: a worktree path printed beside the label squeezes it into a column of letters.
         { id: 'copy', label: strings.sidebar.copyPath, title: thread.cwd },
-        ...(canDeleteThread(thread) ? [separator(), { id: 'delete', label: strings.sidebar.delete, danger: true, disabled: lock.busy || offline }] : [])
+        ...(canDeleteThread(thread) ? [separator(), { id: 'delete', label: strings.common.delete, danger: true, disabled: lock.busy || offline }] : [])
       ],
       (action) => {
         if (action === 'open') open();

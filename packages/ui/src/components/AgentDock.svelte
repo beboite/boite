@@ -21,16 +21,11 @@
   $effect(() => { void store.loadDelegation(threadId); });
   $effect(() => { void store.loadWorkflows(threadId); });
 
-  function open(): void {
-    const surface = store.panel.open('agents');
-    store.panel.update(surface.id, { runId: undefined });
-    void store.selectDelegatedAgent(null);
-  }
 </script>
 
 {#if count > 0 || runs.length > 0}
   <div class="dock" data-testid="agent-dock">
-    <button type="button" class="quiet activity" data-testid="active-subagents" onclick={open}>
+    <button type="button" class="quiet activity" data-testid="active-subagents" onclick={() => store.showTeam()}>
       <StatusMark {...threadTone('running')} />
       <span class="counts">
         {#if count > 0}<span class="ui-label">{fill(count === 1 ? strings.delegation.activeOne : strings.delegation.activeMany, { count: String(count) })}</span>{/if}

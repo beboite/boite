@@ -113,8 +113,8 @@
       {/if}
       <span class="fold-caret" class:open aria-hidden="true"><ChevronRight size={12} /></span>
     </button>
-    <div class="fold" class:open inert={!open}>
-      <div class="clip">
+    <div class="disclosure-fold" class:open inert={!open}>
+      <div>
         {#if built}
           <div class="calls">
             {#each steps as { part, index } (part.type === 'tool' ? part.toolId : `thinking-${index}`)}
@@ -222,25 +222,6 @@
     border: 1.5px solid var(--color-edge);
     border-top-color: var(--color-live);
     animation: spin 0.9s linear infinite;
-  }
-
-  .fold {
-    display: grid;
-    grid-template-rows: 0fr;
-    opacity: 0;
-    transition:
-      grid-template-rows var(--dur-3) var(--ease-out-quint),
-      opacity var(--dur-3) var(--ease-out-quint);
-  }
-
-  .fold.open {
-    grid-template-rows: 1fr;
-    opacity: 1;
-  }
-
-  .clip {
-    min-height: 0;
-    overflow: hidden;
   }
 
   /* The calls hang off a hairline under the summary's glyph. */

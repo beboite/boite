@@ -7,6 +7,7 @@
   import { mobileOverlay } from '../../lib/mobile-history';
   import type { Store } from '../../lib/store.svelte';
   import { fill, strings } from '../../lib/strings';
+  import { avatarStatus } from '../../lib/thread-state';
   import Menu from '../Menu.svelte';
   import InfoTip from '../InfoTip.svelte';
   import AgentsRail from './AgentsRail.svelte';
@@ -209,7 +210,7 @@
       <header class="agents-detail-head">
         {#if narrow.current || parent}{@render backButton(backLabel)}{/if}
         <button type="button" class="ghost agents-identity" onclick={() => { pane = null; }} aria-label={title}>
-          <AgentAvatar kind={selected.kind} id={selected.id} name={title} avatar={profile?.avatar} {members} status={liveHere?.status === 'waiting' ? 'waiting' : liveHere ? 'running' : 'idle'} size={32} />
+          <AgentAvatar kind={selected.kind} id={selected.id} name={title} avatar={profile?.avatar} {members} status={avatarStatus(liveHere?.status)} size={32} />
           <span class="agents-identity-text">
             <strong>{title}</strong>
             <small data-status={status.tone}>{status.text}</small>

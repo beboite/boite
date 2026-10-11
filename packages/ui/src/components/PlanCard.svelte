@@ -65,7 +65,7 @@
   <div class="body"><Prose text={plan} {store} {threadId} /></div>
   <div class="actions">
     <button type="button" class="ghost small" data-testid="plan-copy" onclick={() => void copy()}>
-      {#if copied}<Check size={14} /><span class="ui-label">{strings.chat.copied}</span>{:else}<Copy size={14} /><span class="ui-label">{strings.chat.copy}</span>{/if}
+      {#if copied}<Check size={14} /><span class="ui-label">{strings.chat.copied}</span>{:else}<Copy size={14} /><span class="ui-label">{strings.common.copy}</span>{/if}
     </button>
     <button type="button" class="ghost small" data-testid="plan-download" onclick={download}>
       <Download size={14} /><span class="ui-label">{strings.chat.planDownload}</span>

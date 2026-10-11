@@ -137,7 +137,7 @@
             class="ghost title"
             bind:this={titleButton}
             data-testid="thread-title"
-            title={strings.sidebar.rename}
+            title={strings.common.rename}
             onclick={beginRename}
             oncontextmenu={openTitleMenu}
           >

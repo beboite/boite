@@ -98,6 +98,6 @@
       </div>
     </fieldset>
 
-    {#if view.store.owner}<div class="agent-form-actions"><button class="primary" disabled={view.pending} data-testid="agent-runtime-save"><span class="ui-label">{labels.save}</span></button></div>{/if}
+    {#if view.store.owner}<div class="agent-form-actions"><button class="primary" disabled={view.pending} data-testid="agent-runtime-save"><span class="ui-label">{strings.common.save}</span></button></div>{/if}
   </form>
 {/if}

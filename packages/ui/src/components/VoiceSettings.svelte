@@ -201,7 +201,7 @@
           <button type="button" class="primary small" data-testid="voice-repair" disabled={busy} onclick={() => void apply()}><span class="ui-label">{strings.speech.repair}</span></button>
         {:else if stage === 'local' || stage === 'failed'}
           <button type="button" class="primary small" data-testid="voice-install" disabled={busy} onclick={() => void manage('speech.install')}>
-            <Download size={14} /><span class="ui-label">{stage === 'failed' ? strings.speech.tryAgain : strings.speech.setUp}</span>
+            <Download size={14} /><span class="ui-label">{stage === 'failed' ? strings.common.retry : strings.speech.setUp}</span>
           </button>
         {:else if stage === 'ready' && status.engine === 'local' && status.runtimeOutdated}
           <button type="button" class="small" data-testid="voice-update" disabled={busy} onclick={() => void manage('speech.install')}><span class="ui-label">{strings.speech.update}</span></button>

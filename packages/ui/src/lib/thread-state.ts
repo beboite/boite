@@ -21,6 +21,11 @@ export function needsUser(thread: Pick<ThreadSummary, 'status' | 'openQuestions'
   return thread.status === 'waiting' || (thread.openQuestions ?? 0) > 0;
 }
 
+/** What an agent's picture shows for the thread it works in: waiting on the user, at work while queued or running, else at rest. */
+export function avatarStatus(status: ThreadStatus | undefined): 'running' | 'waiting' | 'idle' {
+  return status === 'waiting' ? 'waiting' : status === 'running' || status === 'queued' ? 'running' : 'idle';
+}
+
 /** `delegated`: how many of the thread's delegated agents still have a turn under way. */
 export function threadState(thread: StateFields, delegated = 0): ThreadState | null {
   if (needsUser(thread)) return 'waiting';

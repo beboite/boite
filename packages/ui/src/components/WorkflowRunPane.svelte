@@ -31,7 +31,7 @@
   });
 
   async function stop(): Promise<void> {
-    const ok = await confirm.ask({ title: fill(strings.workflow.stopTitle, { name: run.name }), body: strings.workflow.stopBody, confirmLabel: strings.workflow.stop, cancelLabel: strings.workflow.cancel, danger: true });
+    const ok = await confirm.ask({ title: fill(strings.workflow.stopTitle, { name: run.name }), body: strings.workflow.stopBody, confirmLabel: strings.workflow.stop, cancelLabel: strings.common.cancel, danger: true });
     if (ok) await store.controlWorkflow(run, 'stop');
   }
 </script>

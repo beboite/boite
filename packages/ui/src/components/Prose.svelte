@@ -76,11 +76,11 @@
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'ghost small copy';
-    button.textContent = strings.chat.copy;
-    button.title = strings.chat.copy;
+    button.textContent = strings.common.copy;
+    button.title = strings.common.copy;
     button.setAttribute('data-testid', 'code-copy');
     const reset = () => {
-      button.textContent = strings.chat.copy;
+      button.textContent = strings.common.copy;
     };
     button.addEventListener('click', () => void copy(pre, button));
     button.addEventListener('pointerleave', reset);
@@ -95,7 +95,7 @@
       await navigator.clipboard.writeText((code ?? pre).textContent ?? '');
       button.textContent = strings.chat.copied;
     } catch {
-      button.textContent = strings.chat.copy;
+      button.textContent = strings.common.copy;
     }
   }
 </script>

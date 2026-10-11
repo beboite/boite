@@ -7,6 +7,7 @@
   import { stewardChip } from '../lib/steward';
   import { stewardsWithThreads } from '../lib/steward-view';
   import { fill, strings } from '../lib/strings';
+  import { avatarStatus } from '../lib/thread-state';
   import AgentAvatar from './agents/AgentAvatar.svelte';
   import ThreadState from './ThreadState.svelte';
 
@@ -49,14 +50,14 @@
     <h2><span class="ui-label">{strings.agents.inCharge}</span>{#if showMachine}<span class="machine ui-label">{machine.label}</span>{/if}</h2>
     {#each stewards as { grant, thread } (thread.id)}
       <button type="button" class="ghost row steward" class:open={open(thread.id)} title={`${thread.title} · ${stewardChip(grant)}`} onclick={() => void workspace.select(store, thread.id)} data-testid="steward-at-work" data-thread-id={thread.id}>
-        <AgentAvatar kind="profile" id={thread.id} name={thread.title} status={thread.status === 'waiting' ? 'waiting' : thread.status === 'running' || thread.status === 'queued' ? 'running' : 'idle'} size={20} />
+        <AgentAvatar kind="profile" id={thread.id} name={thread.title} status={avatarStatus(thread.status)} size={20} />
         <span class="text"><span class="name ui-label">{thread.title}</span><span class="detail ui-label">{stewardChip(grant)}</span></span>
         <ThreadState {thread} {now} />
       </button>
     {/each}
     {#each entrusted as { agent, thread } (thread.id)}
       <button type="button" class="ghost row" class:open={open(thread.id)} title={fill(strings.agents.entrustedTo, { name: agent.name })} onclick={() => void workspace.select(store, thread.id)} data-testid="entrusted-at-work" data-thread-id={thread.id}>
-        <AgentAvatar kind="profile" id={agent.id} name={agent.name} avatar={agent.avatar} status={thread.status === 'waiting' ? 'waiting' : thread.status === 'running' || thread.status === 'queued' ? 'running' : 'idle'} size={20} />
+        <AgentAvatar kind="profile" id={agent.id} name={agent.name} avatar={agent.avatar} status={avatarStatus(thread.status)} size={20} />
         <span class="text"><span class="name ui-label">{agent.name}</span><span class="detail entrusted ui-label">{thread.title}</span></span>
         <ThreadState {thread} {now} />
       </button>

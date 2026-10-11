@@ -10,7 +10,7 @@
   const limits = $derived(view.snapshot!.limits);
 
   async function stopEngine() {
-    if (!await confirm.ask({ title: labels.stopEngine, body: labels.stopEngineBody, confirmLabel: labels.stopEngine, cancelLabel: labels.cancel, danger: true })) return;
+    if (!await confirm.ask({ title: labels.stopEngine, body: labels.stopEngineBody, confirmLabel: labels.stopEngine, cancelLabel: strings.common.cancel, danger: true })) return;
     try { await view.store.client?.call('core.shutdown', {}); view.store.client?.close(); }
     catch (error) { view.error = errorText(error); }
   }

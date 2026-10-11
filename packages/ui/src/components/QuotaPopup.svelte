@@ -39,7 +39,7 @@
       {#if error}
         <div class="failed" role="alert" data-testid={`${testPrefix}-error`}>
           <p>{fill(strings.quotas.readFailed, { error })}</p>
-          <button type="button" class="ghost small" disabled={loading} data-testid={`${testPrefix}-retry`} onclick={refresh}><span class="ui-label">{strings.quotas.retry}</span></button>
+          <button type="button" class="ghost small" disabled={loading} data-testid={`${testPrefix}-retry`} onclick={refresh}><span class="ui-label">{strings.common.retry}</span></button>
         </div>
       {/if}
       {#if rows === null}

@@ -1704,7 +1704,7 @@ test('a tool card stays folded while its input arrives and reveals parsed detail
 
   await waitFor(() => card.dataset.streaming === 'false');
   expect(card.querySelector('[data-testid=tool-toggle]')?.getAttribute('aria-expanded')).toBe('false');
-  expect(card.querySelector('.fold')?.classList.contains('open')).toBe(false);
+  expect(card.querySelector('.disclosure-fold')?.classList.contains('open')).toBe(false);
   expect(card.querySelector('.line')?.textContent).toBe('Ran 1 command');
 
   card.querySelector<HTMLButtonElement>('[data-testid=tool-toggle]')?.click();

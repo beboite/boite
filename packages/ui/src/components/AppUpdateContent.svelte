@@ -82,7 +82,7 @@
         </button>
       {:else if update.phase === 'error'}
         <button type="button" onclick={() => updater.check(update.channel)} data-testid="app-update-retry">
-          <span class="ui-label">{strings.appUpdate.retry}</span>
+          <span class="ui-label">{strings.common.retry}</span>
         </button>
       {:else if update.phase !== 'downloading' && update.phase !== 'installing'}
         <!-- Keep the running check visible and disabled. -->

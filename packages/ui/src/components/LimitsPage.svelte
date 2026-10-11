@@ -101,13 +101,13 @@
   {#if store.owner && reader.error}
     <div class="card failed" role="alert" data-testid="limits-error">
       <p>{fill(strings.quotas.readFailed, { error: reader.error })}</p>
-      <button type="button" class="ghost small" disabled={reader.loading} data-testid="limits-retry" onclick={refresh}><span class="ui-label">{strings.quotas.retry}</span></button>
+      <button type="button" class="ghost small" disabled={reader.loading} data-testid="limits-retry" onclick={refresh}><span class="ui-label">{strings.common.retry}</span></button>
     </div>
   {/if}
   {#if gatewayError}
     <div class="card failed" role="alert" data-testid="gateway-quotas-error">
       <p>{fill(strings.subscriptionProxy.quotasFailed, { name: proxyName, error: gatewayError })}</p>
-      <button type="button" class="ghost small" disabled={reader.loading} onclick={refresh}><span class="ui-label">{strings.quotas.retry}</span></button>
+      <button type="button" class="ghost small" disabled={reader.loading} onclick={refresh}><span class="ui-label">{strings.common.retry}</span></button>
     </div>
   {/if}
   {#if gatewayNative}

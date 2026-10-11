@@ -105,7 +105,7 @@
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
         height = node.offsetHeight;
-        const details = node.querySelector<HTMLElement>(':scope > .task-disclosure');
+        const details = node.querySelector<HTMLElement>(':scope > .disclosure-fold');
         readingHeight = height - (details?.offsetHeight ?? 0);
       });
     });
@@ -169,8 +169,8 @@
             </span>
           {/if}
         </div>
-        <div class="task-disclosure" class:open={questionOpen} inert={!questionOpen}>
-          <div class="task-clip">
+        <div class="disclosure-fold" class:open={questionOpen} inert={!questionOpen}>
+          <div>
             {#each asked as question (question.id)}
               {@const reply = replyOf(store, question.id)}
               <div hidden={question.id !== shown.id} data-testid="activity-question" data-question={question.id}>
@@ -262,8 +262,8 @@
              already says it in words, the bar only draws it. -->
         {#if tasks.length}<progress max={tasks.length} value={done} aria-hidden="true"></progress>{/if}
       </button>
-      <div class="task-disclosure" class:open={expanded} inert={!expanded}>
-        <div class="task-clip" id={detailsId}>
+      <div class="disclosure-fold" class:open={expanded} inert={!expanded}>
+        <div id={detailsId}>
           {#if tasks.length}
             <ul data-testid="activity-tasks">
               {#each tasks as task (task.id)}
@@ -355,9 +355,6 @@
   progress::-webkit-progress-bar { background: var(--color-surface-3); }
   progress::-webkit-progress-value { background: var(--color-accent); transition: width var(--dur-3); }
   progress::-moz-progress-bar { background: var(--color-accent); }
-  .task-disclosure { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--dur-3) var(--ease-out-quint); }
-  .task-disclosure.open { grid-template-rows: 1fr; }
-  .task-clip { overflow: hidden; min-height: 0; }
   ul, ol { list-style: none; margin: 0; padding: 2px 8px 6px; }
   li { display: flex; align-items: flex-start; gap: 8px; padding: 4px 0; line-height: 1.5; overflow-wrap: anywhere; }
   /* The same box as the toggle's icon, so the task text starts under its line. */
@@ -392,5 +389,5 @@
     .waiting-dot { margin-top: 7px; }
   }
   :global(html[data-motion='reduced']) .waiting-dot, :global(html[data-motion='reduced']) .verdict::before { animation: none; }
-  @media (prefers-reduced-motion: reduce) { .waiting-dot, .verdict::before { animation: none; } .activity, .task-disclosure, progress::-webkit-progress-value, .toggle-line > :global(svg:last-child) { transition: none; } }
+  @media (prefers-reduced-motion: reduce) { .waiting-dot, .verdict::before { animation: none; } .activity, progress::-webkit-progress-value, .toggle-line > :global(svg:last-child) { transition: none; } }
 </style>

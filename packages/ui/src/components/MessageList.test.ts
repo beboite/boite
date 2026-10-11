@@ -85,10 +85,13 @@ test('the parent timeline retains one team row, updates completion counts and op
   expect(row.textContent).toContain('Started 2 subagents');
   expect(row.textContent).toContain('1/2 completed');
   await owner.selectDelegatedAgent('t-team-running');
+  // A workflow graph left open in the agents tab gives way to the team, the way the dock opens it.
+  const graph = owner.panel.openWorkflow('run-left-open');
   row.click();
   flushSync();
   expect(owner.panel.isOpen).toBe(true);
   expect(owner.delegationSelectedAgentId).toBeNull();
+  expect(owner.panel.state.surfaces.find(surface => surface.id === graph.id)?.runId).toBeUndefined();
   const agent = owner.delegation!.agents.find(agent => agent.thread.id === 't-team-running')!;
   agent.thread.status = 'idle';
   agent.lastTurn!.status = 'done';

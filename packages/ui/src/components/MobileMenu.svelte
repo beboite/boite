@@ -22,7 +22,7 @@
 <button type="button" class="ghost icon" data-testid="mobile-menu" aria-label={strings.mobile.navigation} aria-expanded={shown} onclick={() => { shown = true; }}><Ellipsis size={21} /></button>
 {#if shown}
   <dialog bind:this={dialog} aria-label={strings.mobile.navigation} data-testid="mobile-menu-dialog" oncancel={e => { e.preventDefault(); shown = false; }}>
-    <header><img src="./icons/icon.svg" alt="" width="28" height="28" /><strong class="ui-label">Boite</strong><button class="ghost icon" aria-label={strings.imports.close} onclick={() => { shown = false; }}><X size={20} /></button></header>
+    <header><img src="./icons/icon.svg" alt="" width="28" height="28" /><strong class="ui-label">Boite</strong><button class="ghost icon" aria-label={strings.common.close} onclick={() => { shown = false; }}><X size={20} /></button></header>
     <button class="connection ghost" onclick={() => go(() => store.showSettings('machines'))}><Monitor size={18} /><span><strong>{place}</strong><small>{strings.connection[store.connection]}</small></span><ChevronRight size={16} /></button>
     <nav aria-label={strings.mobile.navigation}>
       <button class="ghost" data-testid="mobile-conversations" aria-current={store.page === 'chat' && screen !== 'activity' ? 'page' : undefined} onclick={() => go(() => navigate('threads'))}><MessageSquare size={20} /><span class="ui-label">{strings.mobile.threads}</span></button>

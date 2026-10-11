@@ -77,7 +77,7 @@
     </div>
   {/if}
   {#if error}<p class="error" role="alert">{error}</p>{/if}
-  <button type="submit" data-testid="worktree-storage-save" disabled={busy || !store.settings || !changed || store.connection !== 'ready'}><span class="ui-label">{strings.settings.save}</span></button>
+  <button type="submit" data-testid="worktree-storage-save" disabled={busy || !store.settings || !changed || store.connection !== 'ready'}><span class="ui-label">{strings.common.save}</span></button>
   </fieldset>
 </form>
 

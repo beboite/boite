@@ -24,7 +24,7 @@
         <details class="process" class:live={record.exitedAt === null} data-testid="trace-row" data-pid={record.pid}>
           <summary>
             <div class="headline">
-              <ChevronRight size={14} />
+              <ChevronRight size={14} class="fold-caret" />
               <span class="exe ui-label" data-exe={record.exe} title={`${record.exe}\npid ${record.pid}`}>{name(record.exe)}</span>
               <span class="status ui-label" class:failed={record.exitedAt !== null && record.exitCode !== null && record.exitCode !== 0}>
                 {record.exitedAt === null ? strings.trace.live : record.exitCode === 0 ? strings.trace.finished : record.exitCode === null ? strings.common.unknown : `${strings.trace.exit} ${record.exitCode}`}
@@ -59,8 +59,6 @@
   .process > summary { list-style: none; cursor: pointer; padding: 12px 0; }
   .process > summary::-webkit-details-marker { display: none; }
   .headline { display: flex; align-items: center; gap: 7px; }
-  .headline :global(svg) { flex: none; color: var(--color-subtle); transition: transform var(--dur-2); }
-  .process[open] .headline :global(svg) { transform: rotate(90deg); }
   .exe { flex: 1; min-width: 0; overflow-wrap: anywhere; font-weight: 500; font-size: var(--text-sm); }
   .status { flex: none; color: var(--color-muted-foreground); font-size: var(--text-xs); }
   .live .status { color: var(--color-live); }

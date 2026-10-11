@@ -220,7 +220,7 @@
               aria-expanded={open} aria-controls="{uid}-details-{machine.id}" onclick={() => (unfolded[machine.id] = !open)}><ChevronDown size={16} /></button>
             {/if}
           </div>
-          <div class="reveal" class:open={customizing === machine.id} inert={customizing !== machine.id}>
+          <div class="disclosure-fold" class:open={customizing === machine.id} inert={customizing !== machine.id}>
             <div>
               <div class="icon-choices" role="group" aria-label={strings.machines.icon}>
                 {#each machineIcons as icon (icon)}
@@ -230,7 +230,7 @@
             </div>
           </div>
           <!-- Versions, agents and the machine's own settings: one click away, and still in the page for whoever looks for them. -->
-          <div class="reveal" class:open inert={!open} id="{uid}-details-{machine.id}">
+          <div class="disclosure-fold" class:open inert={!open} id="{uid}-details-{machine.id}">
             <div>
               <div class="details" data-testid="machine-updates-card" data-machine-id={machine.id}>
                 <p class="address"><span class="ui-label">{strings.machines.address}</span><span class="value">{machine.store.localCore ? strings.machines.local : carrier !== undefined ? fill(strings.group.through, { machine: carrier.label }) : machine.id}</span></p>
@@ -305,22 +305,6 @@
   h1 {
     font-size: var(--text-lg);
     margin: 0;
-  }
-
-  /* Folds on its row height, so a close animates as much as an open. */
-  .reveal {
-    display: grid;
-    grid-template-rows: 0fr;
-    opacity: 0;
-    transition: grid-template-rows var(--dur-3) var(--ease-out-quint), opacity var(--dur-2);
-  }
-  .reveal.open {
-    grid-template-rows: 1fr;
-    opacity: 1;
-  }
-  .reveal > div {
-    overflow: hidden;
-    min-height: 0;
   }
 
   .machines {
@@ -470,7 +454,6 @@
   }
   .pair-hint { color: var(--color-muted-foreground); font-size: var(--text-sm); line-height: 1.6; margin: 12px 0 0; }
   @media (prefers-reduced-motion: reduce) {
-    .reveal,
     .fold :global(svg) {
       transition: none;
     }

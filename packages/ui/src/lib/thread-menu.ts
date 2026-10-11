@@ -26,7 +26,7 @@ export function threadMenuItems(store: Store, thread: ThreadSummary, options: Th
   // or moves it, and deleting it is what leaving does anyway.
   const kept = !thread.incognito;
   const items: MenuItem[] = [
-    ...(options.open === undefined ? [] : [{ id: 'open', label: strings.sidebar.open, glyph: MessageSquare, disabled: options.open }]),
+    ...(options.open === undefined ? [] : [{ id: 'open', label: strings.common.open, glyph: MessageSquare, disabled: options.open }]),
     ...(kept ? [
       { id: 'pin', label: thread.pinned ? strings.sidebar.unpin : strings.sidebar.pin, glyph: thread.pinned ? PinOff : Pin },
       separator('sep-archive'),
@@ -34,7 +34,7 @@ export function threadMenuItems(store: Store, thread: ThreadSummary, options: Th
       { id: 'archive', label: strings.sidebar.archive, glyph: Archive },
       separator('sep-organize')
     ] : []),
-    { id: 'rename', label: strings.sidebar.rename, glyph: PencilLine },
+    { id: 'rename', label: strings.common.rename, glyph: PencilLine },
     { id: 'retitle', label: retitling ? strings.sidebar.retitling : strings.sidebar.retitle, glyph: Sparkles, disabled: retitling },
     ...(canMove(thread) ? moveItems(store, thread).map(item => ({ ...item, glyph: item.id === 'move-cancel' ? X : FolderInput })) : []),
     ...entrustItems(store, thread),
@@ -43,7 +43,7 @@ export function threadMenuItems(store: Store, thread: ThreadSummary, options: Th
     ...(options.prLoading === undefined || !thread.branch || thread.branch === 'HEAD' ? [] : [{ id: 'pr', label: strings.machines.refreshPr, glyph: GitPullRequest, disabled: options.prLoading }]),
     ...(options.tools ?? [])
   ];
-  if (canDeleteThread(thread)) items.push(separator('sep-delete'), { id: 'delete', label: strings.sidebar.delete, glyph: Trash2, danger: true });
+  if (canDeleteThread(thread)) items.push(separator('sep-delete'), { id: 'delete', label: strings.common.delete, glyph: Trash2, danger: true });
   return items;
 }
 

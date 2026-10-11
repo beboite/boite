@@ -112,7 +112,7 @@
   <section class="shelf" data-testid="{kind}-projects">
     <FoldHeader label={kind === 'idle' ? strings.sidebar.idleProjects : strings.sidebar.archivedProjects} count={entries.length} {open}
       controls={uid} testid="{kind}-projects-toggle" onclick={() => (projectThreadView.shelf[kind] = !open)} />
-    <div id={uid} class="motion-fold" class:expanded={open} inert={!open}><div>
+    <div id={uid} class="disclosure-fold" class:open inert={!open}><div>
       {#if visited}
         {#each groups as { machine, projects } (machine.id)}
           {#if multi}

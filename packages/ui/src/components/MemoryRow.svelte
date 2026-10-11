@@ -2,7 +2,7 @@
   import type { MemoryEvent } from '@boite/contracts';
   import { strings } from '../lib/strings';
   import { bytes } from '../lib/format';
-  import { ChevronDown, Settings2, TriangleAlert } from '@lucide/svelte';
+  import { Settings2, TriangleAlert } from '@lucide/svelte';
 
   let { event, events = [event], onconfigure }: { event: MemoryEvent; events?: MemoryEvent[]; onconfigure?: () => void } = $props();
   function describeNotice(notice: MemoryEvent): string {
@@ -26,8 +26,8 @@
       <div class="footer">
         {#if event.kind === 'killed'}
           {#if events.length > 1}
-            <details class="process-list">
-              <summary><span class="chevron" aria-hidden="true"><ChevronDown size={14} /></span><span>{strings.resources.stoppedProcesses(events.length)}</span></summary>
+            <details class="process-list disclosure">
+              <summary><span>{strings.resources.stoppedProcesses(events.length)}</span></summary>
               <div class="processes">
                 {#each events as stopped}
                   <div class="details"><span class="process">{stopped.exe?.split(/[\\/]/).pop() ?? strings.resources.unknown}</span>{#if stopped.bytes !== undefined}<span class="size">{bytes(stopped.bytes)}</span>{/if}</div>
@@ -54,11 +54,7 @@
   .footer { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px 16px; margin-top: 12px; }
   .details { display: flex; flex: 1; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-width: 0; min-height: var(--control-sm); font-size: var(--text-xs); }
   .process-list { flex: 1; min-width: 0; }
-  summary { display: flex; align-items: center; gap: 6px; min-height: var(--control-sm); border-radius: var(--radius-sm); cursor: pointer; color: var(--color-muted-foreground); list-style: none; }
-  summary::-webkit-details-marker { display: none; }
-  summary:hover { color: var(--color-foreground); }
-  .chevron { display: flex; flex-shrink: 0; transform: rotate(-90deg); }
-  details[open] .chevron { transform: rotate(0); }
+  .process-list > summary { border-radius: var(--radius-sm); }
   .processes { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--color-border); }
   .configure { display: inline-flex; align-items: center; justify-content: center; gap: 6px; margin-left: auto; color: var(--color-muted-foreground); }
   .process { min-width: 0; padding: 3px 7px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface-2); color: var(--color-foreground); font-family: var(--font-mono); }
@@ -67,7 +63,7 @@
     .memory-row { gap: 10px; padding: 12px; }
     .footer { gap: 8px; }
     .footer > .details, .process-list { flex-basis: 100%; }
-    summary, .configure { min-height: var(--touch-target); }
+    .process-list > summary, .configure { min-height: var(--touch-target); }
     .configure { margin-left: 0; }
   }
 </style>

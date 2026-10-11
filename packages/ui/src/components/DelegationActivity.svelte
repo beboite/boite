@@ -9,13 +9,9 @@
 
   let { store, agents }: { store: Store; agents: DelegatedAgent[] } = $props();
   const team = $derived(teamProgress(agents));
-  function open() {
-    void store.selectDelegatedAgent(null);
-    store.panel.open('agents');
-  }
 </script>
 
-<ActivityCard live={team.active} heading={agents.length === 1 ? strings.delegation.startedOne : fill(strings.delegation.startedMany, { count: String(agents.length) })} timing={team} onclick={open} data-testid="delegation-activity" progressTestId="delegation-progress" title={strings.delegation.showTeam}>
+<ActivityCard live={team.active} heading={agents.length === 1 ? strings.delegation.startedOne : fill(strings.delegation.startedMany, { count: String(agents.length) })} timing={team} onclick={() => store.showTeam()} data-testid="delegation-activity" progressTestId="delegation-progress" title={strings.delegation.showTeam}>
   {#snippet mark()}
     <span class="avatars" aria-hidden="true">
       {#each agents.slice(0, 3) as agent (agent.thread.id)}

@@ -148,7 +148,7 @@
           <span class="subtle meta" title={exactTime(thread.updatedAt)}>{projectOf(thread)} · {ago(thread.updatedAt)}</span>
           {#if restored.includes(thread.id)}
             <button type="button" class="small" data-testid="archived-open" onclick={() => void workspace.select(store, thread.id)}>
-              <span class="ui-label">{strings.settings.archived.open}</span>
+              <span class="ui-label">{strings.common.open}</span>
             </button>
           {:else}
             <button type="button" class="small" data-testid="archived-restore" disabled={lock.busy} onclick={() => void restore(thread)}>
@@ -157,8 +157,8 @@
           {/if}
           {#if canDeleteThread(thread)}
             <button type="button" class="ghost small danger" data-testid="archived-delete"
-              aria-label={strings.sidebar.delete} title={strings.sidebar.delete} disabled={lock.busy}
-              onclick={() => void remove(thread)}><Trash2 size={14} /><span class="ui-label">{strings.sidebar.delete}</span></button>
+              aria-label={strings.common.delete} title={strings.common.delete} disabled={lock.busy}
+              onclick={() => void remove(thread)}><Trash2 size={14} /><span class="ui-label">{strings.common.delete}</span></button>
           {/if}
         </li>
       {/each}

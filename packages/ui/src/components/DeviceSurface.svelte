@@ -272,7 +272,7 @@
     <div class="picker" data-testid="device-picker">
       {#if sessions.length === 0}<p class="muted">{strings.devicePanel.empty}</p>{/if}
       <div class="heading"><span class="section-label">{strings.devicePanel.onMachine}</span>
-        <button type="button" class="chip" disabled={loading} onclick={() => void refresh()}><RefreshCw size={14} /><span class="ui-label">{strings.devicePanel.refresh}</span></button></div>
+        <button type="button" class="chip" disabled={loading} onclick={() => void refresh()}><RefreshCw size={14} /><span class="ui-label">{strings.common.refresh}</span></button></div>
       {#if list}
         {#each list.hosts as host (host.id)}
           {#each host.platforms.filter(one => one.reason) as platform (platform.platform)}
@@ -285,7 +285,7 @@
             {@const shown = sessions.some(one => one.deviceId === device.id)}
             <li>
               <span class="name">{device.name}<small>{device.platform === 'ios' ? 'iOS' : 'Android'}{device.runtime ? ` · ${device.runtime}` : ''} · {stateLabel(device.state)}</small></span>
-              <button type="button" class="chip" disabled={busy || shown} data-testid="device-open" onclick={() => void open(device.id)}><span class="ui-label">{strings.devicePanel.open}</span></button>
+              <button type="button" class="chip" disabled={busy || shown} data-testid="device-open" onclick={() => void open(device.id)}><span class="ui-label">{strings.common.open}</span></button>
             </li>
           {/each}
         </ul>

@@ -154,7 +154,7 @@
         <p class="muted">{fill(strings.agentBrowser.newTabHint, { machine })}</p>
         <div class="omnibox">
           <input bind:this={field} bind:value={address} data-testid="agent-browser-start-address" type="text" inputmode="url" enterkeyhint="go" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="4096" aria-label={strings.remoteBrowser.address} placeholder={strings.remoteBrowser.addressPlaceholder} />
-          <button type="submit" class="primary small" disabled={!address.trim() || opening}><span class="ui-label">{strings.agentBrowser.open}</span></button>
+          <button type="submit" class="primary small" disabled={!address.trim() || opening}><span class="ui-label">{strings.common.open}</span></button>
         </div>
         {#if failure}<p class="failure" role="alert">{failure}</p>{/if}
       </form>

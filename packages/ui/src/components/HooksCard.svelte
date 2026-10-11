@@ -160,7 +160,7 @@
                   {#each counters(provider) as counter, index (counter.kind)}{#if index > 0}{' '}<span class="dot" aria-hidden="true">·</span>{' '}{/if}<span class={counter.kind}>{counter.text}</span>{/each}
                 </span>
               {/if}
-              <ChevronRight size={14} class="chevron" />
+              <ChevronRight size={14} class="fold-caret" />
             </summary>
             <div class="detail">
               {#each provider.sources as source (source.path)}
@@ -224,8 +224,7 @@
   .counters .blocked { color: var(--color-foreground); }
   .counters .failed { color: var(--color-danger); }
   .counters .skipped { color: var(--color-live); }
-  summary :global(.chevron) { color: var(--color-muted-foreground); transition: transform var(--dur-2) var(--ease-out-quint); }
-  details[open] > summary :global(.chevron) { transform: rotate(90deg); }
+  summary :global(.fold-caret) { color: var(--color-muted-foreground); }
   /* A phone gives the counters their own line under the name, the chevron staying on the first. */
   @container (max-width: 480px) {
     .counters { order: 1; flex-basis: 100%; padding-left: 26px; }

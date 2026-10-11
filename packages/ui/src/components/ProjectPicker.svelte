@@ -128,7 +128,7 @@
         </div>
         {#if error}<p class="error" role="alert">{error}</p>{/if}
       </div>
-      <footer><button type="button" class="ghost" data-testid="project-cancel" onclick={close}><span class="ui-label">{strings.common.cancel}</span></button><button type="button" class="primary" data-testid="project-add" disabled={busy || !path.trim() || !selected.owner || selected.connection !== 'ready'} onclick={() => void open()}><FolderOpen size={15} /><span class="ui-label">{strings.firstRun.add}</span></button></footer>
+      <footer><button type="button" class="ghost" data-testid="project-cancel" onclick={close}><span class="ui-label">{strings.common.cancel}</span></button><button type="button" class="primary" data-testid="project-add" disabled={busy || !path.trim() || !selected.owner || selected.connection !== 'ready'} onclick={() => void open()}><FolderOpen size={15} /><span class="ui-label">{strings.common.open}</span></button></footer>
     </div>
   </div>
 {/if}

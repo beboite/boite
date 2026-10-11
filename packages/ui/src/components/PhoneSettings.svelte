@@ -100,7 +100,7 @@
       <div class="fields">
       <label for="{uid}-public-url"><span class="ui-label-box"><span class="ui-label" id="{uid}-public-url-name">{strings.phone.publicUrl}</span><InfoTip topic={strings.phone.publicUrl} text={strings.phone.publicUrlHint} /></span><input id="{uid}-public-url" aria-labelledby="{uid}-public-url-name" type="url" bind:value={publicUrl} placeholder={strings.phone.urlPlaceholder} data-testid="phone-public-url" /></label>
       <div class="actions">
-        <button disabled={store.connection !== 'ready'} onclick={() => void store.saveSettings({ publicUrl: publicUrl.trim() || null })}><span class="ui-label">{strings.settings.save}</span></button>
+        <button disabled={store.connection !== 'ready'} onclick={() => void store.saveSettings({ publicUrl: publicUrl.trim() || null })}><span class="ui-label">{strings.common.save}</span></button>
       </div>
       </div>
     </details></div>

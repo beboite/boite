@@ -195,8 +195,8 @@
     <span class="fold-caret" class:open={shown} aria-hidden="true"><ChevronRight size={12} /></span>
   </button>
 
-  <div class="fold" class:open={shown} inert={!shown}>
-    <div class="clip">
+  <div class="disclosure-fold" class:open={shown} inert={!shown}>
+    <div>
       {#if built}
         <div class="body">
           {#if loading}<p data-testid="tool-output-loading">{strings.app.loading}</p>{/if}
@@ -366,27 +366,6 @@
     border: 1.5px solid var(--color-edge);
     border-top-color: var(--color-live);
     animation: spin 0.9s linear infinite;
-  }
-
-  /* The open and the close are the same move: the rows track goes 0fr to 1fr,
-     so the card grows to whatever the body measures without a pixel written. */
-  .fold {
-    display: grid;
-    grid-template-rows: 0fr;
-    opacity: 0;
-    transition:
-      grid-template-rows var(--dur-3) var(--ease-out-quint),
-      opacity var(--dur-3) var(--ease-out-quint);
-  }
-
-  .fold.open {
-    grid-template-rows: 1fr;
-    opacity: 1;
-  }
-
-  .clip {
-    min-height: 0;
-    overflow: hidden;
   }
 
   /* The body sits under the line's words, past the glyph. */

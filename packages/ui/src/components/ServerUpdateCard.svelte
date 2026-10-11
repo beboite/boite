@@ -70,7 +70,7 @@
       <a class="release" href="https://github.com/beboite/boite/blob/main/docs/server.md" target="_blank" rel="noopener noreferrer"><span class="ui-label">{strings.serverUpdate.guide}</span><ExternalLink size={12} /></a>
     </details>
   {/if}
-  {#if updater.error}<p class="error" role="alert">{updater.error}</p><button class="ghost small" disabled={!connected || updater.busy} onclick={() => void updater.load()}><span class="ui-label">{strings.appUpdate.retry}</span></button>{/if}
+  {#if updater.error}<p class="error" role="alert">{updater.error}</p><button class="ghost small" disabled={!connected || updater.busy} onclick={() => void updater.load()}><span class="ui-label">{strings.common.retry}</span></button>{/if}
 </div>
 
 <style>

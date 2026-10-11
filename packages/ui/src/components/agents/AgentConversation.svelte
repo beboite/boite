@@ -6,6 +6,7 @@
   import type { AgentConversationMessage, AgentScope, ThreadSummary } from '@boite/contracts';
   import { chatKey, type AgentsView } from '../../lib/agents.svelte';
   import { fill, strings } from '../../lib/strings';
+  import { avatarStatus } from '../../lib/thread-state';
   import { dayClock, longDay } from '../../lib/format';
   import Prose from '../Prose.svelte';
   import AgentAvatar from './AgentAvatar.svelte';
@@ -165,7 +166,7 @@
       {#if live}
         <!-- What a messenger shows while the other side types: the agent at work, with the way into its thread. -->
         <div class="agent-typing" data-status={live.status} data-testid="agent-live">
-          <AgentAvatar kind="profile" id={worker?.id ?? ''} name={worker?.name ?? ''} avatar={worker?.avatar} status={live.status === 'waiting' ? 'waiting' : 'running'} size={22} />
+          <AgentAvatar kind="profile" id={worker?.id ?? ''} name={worker?.name ?? ''} avatar={worker?.avatar} status={avatarStatus(live.status)} size={22} />
           <div class="typing-bubble">
             {#if live.status === 'waiting'}<span>{fill(labels.liveWaiting, { name: worker?.name ?? '' })}</span>
             {:else}<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="typing-text">{fill(labels.liveWorking, { name: worker?.name ?? '' })}</span>{/if}

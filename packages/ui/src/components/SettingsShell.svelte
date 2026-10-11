@@ -268,10 +268,10 @@ import { workspace } from '../lib/workspace.svelte';
       >
         <Icon size={15} strokeWidth={1.75} />
         <span class="ui-label">{entry.label}</span>
-        {#if toc[entry.id]}<ChevronRight size={14} class={tab === entry.id ? 'expanded' : ''} />{/if}
+        {#if toc[entry.id]}<ChevronRight size={14} class={tab === entry.id ? 'fold-caret open' : 'fold-caret'} />{/if}
       </button>
       {#if toc[entry.id]}
-        <div class="subcategories" class:open={tab === entry.id} inert={tab !== entry.id}>
+        <div class="subcategories disclosure-fold" class:open={tab === entry.id} inert={tab !== entry.id}>
           <div>
             {#each toc[entry.id] ?? [] as child (child.id)}
               <button class="ghost subsection" class:chosen={chosenSection === child.id} data-settings-section={child.id} title={child.label} onclick={() => jump(child.id)}><span class="ui-label">{child.label}</span></button>
@@ -336,17 +336,12 @@ import { workspace } from '../lib/workspace.svelte';
   .category { flex: none; }
   .rule { flex: none; height: 1px; margin: 8px 10px; background: var(--color-border); }
   .tab span { flex: 1; text-align: left; }
-  .tab :global(svg:last-child) { transition: transform var(--dur-3) var(--ease-out-quint); }
-  .tab :global(.expanded) { transform: rotate(90deg); }
-  .subcategories { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows var(--dur-3) var(--ease-out-quint), opacity var(--dur-2); }
-  .subcategories.open { grid-template-rows: 1fr; opacity: 1; }
-  .subcategories > div { overflow: hidden; min-height: 0; }
+  .tab :global(.fold-caret) { color: inherit; }
   /* Block rather than flex, and a label longer than the rail wraps onto a second
      line: French says most of these in more letters, and a cut label hides the word
      that tells two sections apart. */
   .subsection { display: block; text-align: left; white-space: normal; text-wrap: pretty; height: auto; min-height: var(--control); padding-block: 5px; line-height: 1.3; width: calc(100% - 24px); margin-left: 24px; padding-left: 15px; border-left: 1px solid var(--color-edge); border-radius: 0; color: var(--color-muted-foreground); font-size: var(--text-sm); transition: color var(--dur-2), border-color var(--dur-2), background var(--dur-2); }
   .subsection.chosen { color: var(--color-foreground); border-left-color: var(--color-foreground); background: var(--color-hover); }
-  @media (prefers-reduced-motion: reduce) { .subcategories, .tab :global(svg:last-child) { transition: none; } }
 
   .settings {
     display: flex;

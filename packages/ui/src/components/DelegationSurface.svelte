@@ -286,10 +286,6 @@
   .switch-row > span, .profiles-head > span { flex: 1; min-width: 0; }
   .switch-row small, .profiles-head small { display: block; margin-top: 2px; color: var(--color-muted-foreground); font-size: var(--text-xs); line-height: 1.4; font-weight: normal; }
   .empty { margin: 16px; color: var(--color-muted-foreground); font-size: var(--text-sm); line-height: 1.5; }
-  input[role='switch'] { appearance: none; position: relative; width: 40px; height: 24px; min-height: 24px; padding: 0; border-radius: 999px; background: var(--color-surface-3); }
-  input[role='switch']::after { content: ''; position: absolute; width: 16px; height: 16px; top: 3px; left: 3px; border-radius: 50%; background: var(--color-muted-foreground); transition: transform var(--dur-2) var(--ease-out-quint); }
-  input[role='switch']:checked { background: var(--color-foreground); }
-  input[role='switch']:checked::after { transform: translateX(16px); background: var(--color-background); }
   .profiles { margin-top: 7px; display: grid; gap: 5px; }
   .profile { display: grid; grid-template-columns: minmax(90px, .8fr) minmax(140px, 1fr) auto var(--control-sm); gap: 6px; align-items: center; }
   .profile > input { min-width: 0; }
@@ -337,5 +333,4 @@
     .detail-pane > header > .quiet:not(.back) { grid-column: 2; justify-self: start; }
     .detail-pane > header > .danger { grid-column: 3; }
   }
-  @media (prefers-reduced-motion: reduce) { input[role='switch']::after { transition: none; } }
 </style>

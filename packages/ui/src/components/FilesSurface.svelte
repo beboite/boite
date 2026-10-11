@@ -272,7 +272,7 @@
         }}
         onfocus={() => (cursor = index)}
       >
-        <span class="chev" data-open={row.entry.kind === 'dir' ? expanded[row.entry.path] === true : null}>
+        <span class="chev fold-caret" class:open={row.entry.kind === 'dir' && expanded[row.entry.path] === true}>
           {#if row.entry.kind === 'dir'}
             <ChevronRight size={12} strokeWidth={2} />
           {/if}
@@ -395,17 +395,9 @@
   }
 
   .chev {
-    display: inline-flex;
     align-items: center;
     justify-content: center;
     width: 12px;
-    flex: none;
-    color: var(--color-subtle);
-    transition: transform var(--dur-2) var(--ease-out-quint);
-  }
-
-  .chev[data-open='true'] {
-    transform: rotate(90deg);
   }
 
   .glyph {

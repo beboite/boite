@@ -144,7 +144,7 @@
         title: fill(labels.archiveTitle, { name: existing.name }),
         body: labels.archiveBody,
         confirmLabel: labels.archive,
-        cancelLabel: labels.cancel,
+        cancelLabel: strings.common.cancel,
         danger: true,
         requiredText: existing.name,
         inputLabel: labels.archiveName,
@@ -173,8 +173,8 @@
 
 {#snippet actions()}
   <div class="agent-form-actions">
-    <button class="primary" type="submit" disabled={busy || !name.trim() || kind === 'profile' && creating && (!selection.accountId || !selection.model)} data-testid="agent-save"><span class="ui-label">{creating ? labels.createAction : labels.save}</span></button>
-    {#if creating}<button type="button" class="ghost" onclick={oncancel}><span class="ui-label">{labels.cancel}</span></button>{/if}
+    <button class="primary" type="submit" disabled={busy || !name.trim() || kind === 'profile' && creating && (!selection.accountId || !selection.model)} data-testid="agent-save"><span class="ui-label">{creating ? labels.createAction : strings.common.save}</span></button>
+    {#if creating}<button type="button" class="ghost" onclick={oncancel}><span class="ui-label">{strings.common.cancel}</span></button>{/if}
   </div>
 {/snippet}
 

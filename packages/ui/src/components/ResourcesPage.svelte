@@ -86,7 +86,7 @@
       <label><span class="name"><span class="ui-label">{strings.settings.memoryReserveMb}</span><InfoTip topic={strings.settings.memoryReserveMb} text={strings.settings.memoryReserveHint} /></span><input disabled={!memoryEnabled} aria-label={strings.settings.memoryReserveMb} data-testid="memory-reserve" type="number" min="0" required bind:value={memoryReserve} />
         {#if memoryEnabled && memoryReserve === 0 && store.memory}<span class="hint" data-testid="memory-reserve-auto">{strings.resources.auto(store.memory.limits.memoryReserveMb)}</span>{/if}
       </label>
-      <button type="submit" class="primary"><span class="ui-label">{strings.settings.save}</span></button>
+      <button type="submit" class="primary"><span class="ui-label">{strings.common.save}</span></button>
     </form>
   </section>
   <section class="card" data-testid="memory-status">
@@ -121,7 +121,7 @@
         {#if confirming === entry.threadId}
           <span class="confirm ui-label">{strings.resources.killConfirm}</span>
           <button class="danger" onclick={() => void kill(entry.threadId)}><span class="ui-label">{strings.resources.killConfirmYes}</span></button>
-          <button class="quiet" onclick={() => (confirming = null)}><span class="ui-label">{strings.resources.killConfirmNo}</span></button>
+          <button class="quiet" onclick={() => (confirming = null)}><span class="ui-label">{strings.common.cancel}</span></button>
         {:else}
           <button class="danger" onclick={() => (confirming = entry.threadId)}><span class="ui-label">{strings.resources.killTree}</span></button>
         {/if}

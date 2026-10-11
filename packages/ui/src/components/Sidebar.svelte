@@ -241,8 +241,8 @@
               onclick={(e) => openProjectMenu(e, machine, project)}><Ellipsis size={15} /></button
             >
           </div>
-          <div class="fold" class:expanded={!collapsed} inert={collapsed}>
-            <div class="rows">
+          <div class="disclosure-fold" class:open={!collapsed} inert={collapsed}>
+            <div>
               {#if draftHere}<DraftRow {owner} entry={draftHere} />{/if}
               <WindowList items={lists.attention} keyOf={thread => JSON.stringify([machine.id, thread.id])} {scrollRoot} active={!collapsed} estimate={34} measurements={measurements(JSON.stringify([machine.id, project.id]))}>
                 {#snippet row(thread)}<ThreadCard {machine} {project} {thread} {now} showProject={false} showMachine={false} showDone />{/snippet}
@@ -419,18 +419,6 @@
   .head:hover .project-actions,
   .head:focus-within .project-actions {
     opacity: 1;
-  }
-  .fold {
-    display: grid;
-    grid-template-rows: 0fr;
-    transition: grid-template-rows var(--dur-3) var(--ease-out-quint);
-  }
-  .fold.expanded {
-    grid-template-rows: 1fr;
-  }
-  .rows {
-    min-height: 0;
-    overflow: hidden;
   }
   .none {
     padding: 4px 10px;

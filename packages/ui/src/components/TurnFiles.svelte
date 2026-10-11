@@ -70,7 +70,7 @@
 <section class="turn-files" data-testid="turn-files" aria-label={strings.chat.turnFiles}>
   <header>
     <button type="button" class="ghost small fold" data-testid="turn-files-toggle" aria-expanded={open} onclick={() => (open = !open)}>
-      <ChevronRight size={14} class={open ? 'chevron expanded' : 'chevron'} />
+      <ChevronRight size={14} class={open ? 'fold-caret open' : 'fold-caret'} />
       <span class="ui-label">{strings.chat.turnFiles}</span>
       <span class="count ui-label">{files.length}</span>
       {#if diffs.length > 0}{@render counts(lines.total)}{/if}
@@ -129,7 +129,7 @@
           <button type="button" class="folder-row" data-testid="turn-file-folder" aria-expanded={open}
             style:--depth={depth} title={node.name}
             onclick={() => expanded[node.key] = !open}>
-            <ChevronRight size={14} class={open ? 'chevron expanded' : 'chevron'} />
+            <ChevronRight size={14} class={open ? 'fold-caret open' : 'fold-caret'} />
             {#if open}<FolderOpen size={14} strokeWidth={1.75} />{:else}<Folder size={14} strokeWidth={1.75} />{/if}
             <span class="folder ui-label">{node.name}</span>
             <span class="count ui-label">{node.count}</span>
@@ -214,8 +214,7 @@
     padding: 0 6px;
     font-weight: 500;
   }
-  .fold :global(.chevron) { flex: none; color: var(--color-muted-foreground); transition: transform var(--dur-2); }
-  .fold :global(.expanded) { transform: rotate(90deg); }
+  .fold :global(.fold-caret) { color: var(--color-muted-foreground); }
   .lines {
     display: inline-flex;
     flex: none;
@@ -311,8 +310,7 @@
     color: var(--color-muted-foreground);
   }
   .folder-row :global(svg) { flex: none; }
-  .folder-row :global(.chevron) { transition: transform var(--dur-2); }
-  .folder-row :global(.expanded) { transform: rotate(90deg); }
+  .folder-row :global(.fold-caret) { color: inherit; }
   .folder-row:hover { background: var(--color-hover); }
   .folder-row:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
 
