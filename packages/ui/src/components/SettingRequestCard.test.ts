@@ -68,7 +68,8 @@ test('Apply writes the setting through settings.set, the card closes as applied 
     await unmount(mounted!);
     const host = store.openThread!.messages.find((message) => message.parts.some((part) => part.type === 'question' && part.questionId === questionId)) as Message;
     mounted = mount(AssistantMessage, { target: document.body, props: { store, threadId: host.threadId, message: host, signedOut: null, showModel: false } });
-    flushSync();
+    // The timeline loads the card with the first one it draws.
+    await vi.waitFor(() => expect(document.querySelector('[data-testid=setting-card]')).not.toBeNull());
     expect(query('[data-testid=setting-card]').getAttribute('data-outcome')).toBe('applied');
     expect(query('[data-testid=setting-subject]').textContent).toBe('CPU cap for all agents: 60%');
   } finally {

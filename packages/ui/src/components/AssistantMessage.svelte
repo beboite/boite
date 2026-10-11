@@ -12,7 +12,7 @@
   import PermissionCard from './PermissionCard.svelte';
   import PlanCard from './PlanCard.svelte';
   import QuestionCard from './QuestionCard.svelte';
-  import SettingRequestCard from './SettingRequestCard.svelte';
+  import SettingRequestCard from './SettingRequestCardLoader.svelte';
   import Prose from './Prose.svelte';
   import ChatFile from './ChatFile.svelte';
   import InlineView from './InlineView.svelte';

@@ -6,7 +6,7 @@
   import { dockRoom, questionDock } from '../lib/question-dock.svelte';
   import { ignoreQuestions, replyOf, repliesOf, sendAnswer, writeAnswer } from '../lib/question-reply.svelte';
   import QuestionCard from './QuestionCard.svelte';
-  import SettingRequestCard from './SettingRequestCard.svelte';
+  import SettingRequestCard from './SettingRequestCardLoader.svelte';
   import { settingHeading } from '../lib/setting-requests';
 
   let { store, reserveInComposer = false, onroom }: {
