@@ -126,6 +126,8 @@
       {#if codeError || workspace.error}<p class="error" role="alert">{codeError || workspace.error}</p>{/if}
     </form>
   {/if}
+  <!-- A computer's browser pastes the link; a phone has its camera and the code, and nothing else. -->
+  {#if !mobile}
   <div class="reveal" class:open inert={!open}>
     <div>
       <section class="card add" data-testid="machine-add-card" aria-label={strings.machines.add}>
@@ -177,6 +179,8 @@
       </section>
     </div>
   </div>
+
+  {/if}
 
   {#if scanning && QrScanner}
     <QrScanner accept={(text) => parsePairingLink(text) !== null} onresult={(text) => void scanned(text)} onclose={() => (scanning = false)} />

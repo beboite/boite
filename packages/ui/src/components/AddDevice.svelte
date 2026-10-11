@@ -20,7 +20,8 @@
 
   let qr = $state('');
   $effect(() => {
-    const url = invite?.url;
+    // The phone's part only: the invitation a computer joins with stays in the copied link, and out of a denser code.
+    const url = invite?.url.split('#')[0];
     if (!url) {
       qr = '';
       return;

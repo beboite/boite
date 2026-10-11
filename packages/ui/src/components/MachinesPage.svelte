@@ -156,7 +156,8 @@
     </section>
   {/if}
 
-    {#if !groupStore.owner}<PairMachine {mobile} bind:this={pairingForm} />{/if}
+    <!-- A device of a group has nothing to add: its group brings every machine. One that reaches none adds itself here. -->
+    {#if !groupStore.owner && !workspace.machines.some(machine => machine.store.connection === 'ready')}<PairMachine {mobile} bind:this={pairingForm} />{/if}
     {#each groupStores as owner (owner.group?.id ?? 'ungrouped')}
     <GroupCard store={owner} {mobile} migration={owner === groupStores[0] ? migration : undefined}>
     <div class="machines">
@@ -185,7 +186,7 @@
             </div>
             <div class="actions">
               {#if machine.store.pairingRequired}
-                <button class="ghost small" data-testid="machine-repair" onclick={() => { if (groupStore.owner) void repair(); else pairingForm?.startAdding(); }}><ScanLine size={15} /><span class="ui-label">{strings.mobile.pairAgain}</span></button>
+                <button class="ghost small" data-testid="machine-repair" onclick={() => void repair()}><ScanLine size={15} /><span class="ui-label">{strings.mobile.pairAgain}</span></button>
               {:else if machine.store.connection === 'closed'}
                 <button class="ghost icon-only" aria-label={strings.common.refresh} title={strings.common.refresh} onclick={() => void machine.store.connect()}><RefreshCw size={15} /></button>
               {/if}

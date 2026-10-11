@@ -161,6 +161,73 @@
             onblur={() => void rename()} onkeydown={(event) => { if (event.key === 'Escape') { event.preventDefault(); editing = false; } else if (event.key === 'Enter') { event.preventDefault(); void rename(); } }} />
         </form>
       {:else if store.owner}
+        <button class="ghost group-name" data-testid="group-rename-start" title={strings.group.rename} onclick={() => { name = group!.name; editingId = group!.id; editing = true; }}>{group.name}</button>
+      {:else}{group.name}{/if}
+      <InfoTip topic={strings.group.heading} text={strings.group.intro} />
+    </h2>
+    {@render children?.()}
+    {#if children && loopback}<p class="hint">{strings.group.loopback}</p>{/if}
+    {@render progress()}
+    <ul class="members" aria-label={strings.group.members}>
+      {#each members.filter(core => !children || !workspace.machines.some(machine => GroupLinks.coreOf(machine) === core.coreId)) as core (core.coreId)}
+        {@const state = status(core)}
+        <li data-testid="group-member" data-core-id={core.coreId}>
+          <div class="row">
+            <span class="logo"><MachineIcon os={core.os} size={18} /></span>
+            <span class="identity">
+              <span class="name">{core.name}</span>
+              {#if core.addresses[0]}<span class="address">{core.addresses[0]}</span>{/if}
+            </span>
+            {#if state.label}<span class="status" class:ready={state.ready}>{state.label}</span>{/if}
+            {#if store.owner && core.coreId !== group.self}
+              <button type="button" class="ghost icon-only" data-testid="group-member-remove" aria-label={strings.group.remove} title={strings.group.remove} onclick={() => void remove(core)}><Trash2 size={15} /></button>
+            {/if}
+          </div>
+          {#if state.hint}<p class="hint">{state.hint}</p>{/if}
+          {#if core.coreId === group.self && loopback}<p class="hint">{strings.group.loopback}</p>{/if}
+        </li>
+      {/each}
+    </ul>
+    {#if group.devices.length > 0}
+      <ul class="members devices" aria-label={strings.group.members} data-testid="group-devices">
+        {#each group.devices as device (device.id)}
+          {@const Icon = deviceIcon(device)}
+          {@const note = addedOn(device)}
+          <li data-testid="group-device" data-device-id={device.id}>
+            <div class="row">
+              <span class="logo"><Icon size={17} /></span>
+              <span class="identity">
+                <span class="name">{deviceName(device)}{#if group.device === device.id}<span class="tag">{strings.group.thisDevice}</span>{/if}</span>
+                {#if note}<span class="address">{note}</span>{/if}
+              </span>
+              {#if store.owner}
+                <button type="button" class="ghost icon-only" data-testid="group-device-remove" aria-label={strings.group.revokeDevice} title={strings.group.revokeDevice} onclick={() => void revoke(device)}><Trash2 size={15} /></button>
+              {/if}
+            </div>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+    {#if store.owner}
+      {#if source && others.length > 0}
+        <label class="sync">
+          <input type="checkbox" data-testid="group-sync" checked={synced} disabled={targets.length === 0}
+            onchange={(event) => toggleSync(event.currentTarget)} />
+          <span>{fill(strings.group.syncAll, { source: source.label })}</span>
+          <InfoTip topic={strings.group.heading} text={strings.group.syncAllHint} />
+        </label>
+      {/if}
+      {@render ways()}
+      {#if !alone}
+        <div class="buttons end">
+          <button type="button" class="ghost leave" data-testid="group-leave" onclick={() => void leave()}>
+            <LogOut size={14} />{strings.group.leave}
+          </button>
+        </div>
+      {/if}
+    {/if}
+  </section>
+{:else if store.owner}
   <section class="card group" class:mobile data-testid="group-card" id="settings-group">
     <h2>{strings.group.heading}<InfoTip topic={strings.group.heading} text={strings.group.intro} /></h2>
     {@render children?.()}
@@ -219,8 +286,7 @@
   form.rename { margin: 0; flex: 1; min-width: 0; }
   .rename input { width: 100%; font-weight: 600; }
   .migration-errors { color: var(--color-danger); font-size: var(--text-sm); overflow-wrap: anywhere; }
-  form,
-  .invitation {
+  form {
     display: flex;
     flex-direction: column;
     gap: 6px;
@@ -316,7 +382,6 @@
   }
   .devices {
     margin-top: 8px;
-    padding-top: 8px;
   }
   .tag {
     margin-left: 8px;
