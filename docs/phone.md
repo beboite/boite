@@ -73,9 +73,13 @@ for the firewall rule on Windows, restarts and shows the new link. A core the
 desktop app did not start keeps a sentence asking for a restart of Boite there
 (`LanReach.svelte`; `?fake=1&lan=off` mints loopback links).
 
-Without `--port`, the core reuses the port in `core.json`. If it is taken, the
-core chooses another and logs it; a phone then needs a new link. An explicit
-`--port` fails when occupied. A listener on all interfaces puts the machine's
+Without `--port`, the core reuses the port in `core.json`. A first run, or one
+whose port another program took, tries 7337 to 7346 (7347 to 7356 for
+`--channel dev`, `PREFERRED_PORTS` in `server.ts`), then any free port, and logs
+the move; a phone then needs a new link. The fixed ports sit below 49152:
+Windows lends 49152 to 65535 to outgoing connections and Hyper-V reserves blocks
+of it at boot, so a random port from there could be gone at the next start. An
+explicit `--port` fails when occupied. A listener on all interfaces puts the machine's
 LAN address in pairing links, rather than loopback.
 
 ### Windows Defender Firewall
