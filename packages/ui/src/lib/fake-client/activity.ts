@@ -1,5 +1,5 @@
 /** A thread's goal, loop and task list, and the timer that runs them. */
-import { attachmentError, RpcErrorCode, type AgentTask, type GoalReview, type Thread, type ThreadActivity, type Turn } from '@boite/contracts';
+import { attachmentError, RpcErrorCode, type AgentTask, type Thread, type ThreadActivity, type Turn } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { refusal } from './shared';
 import { workflowAnswer, workflowChild } from './delegation';
@@ -20,9 +20,11 @@ function reviewsOf(ctx: FakeContext) {
   return map;
 }
 
-function startReview(ctx: FakeContext, thread: Thread, review: GoalReview): void {
+function startReview(ctx: FakeContext, thread: Thread): void {
   const running = reviewsOf(ctx);
-  if (running.has(thread.id) || !thread.activity?.goal) return;
+  // The live review: a task list or a loop may have replaced `thread.activity` since the run was scheduled.
+  const review = thread.activity?.goal?.review;
+  if (running.has(thread.id) || !thread.activity?.goal || review?.phase !== 'reviewing') return;
   const round = review.verdicts.length + 1;
   const objective = thread.activity.goal.objective;
   const route = { id: 'conversation', name: 'Conversation', providerId: thread.providerId, accountId: thread.accountId, model: thread.model, effort: thread.effort };
@@ -87,8 +89,8 @@ function scheduleActivity(ctx: FakeContext, threadId: string, delay = 0): void {
       if (activity.loop?.status === 'active') scheduleActivity(ctx, threadId, Math.max(0, (activity.loop.nextRunAt ?? Date.now()) - Date.now()));
       return;
     }
-    const review = kind === 'goal' ? activity.goal!.review : undefined;
-    if (review?.phase === 'reviewing') { startReview(ctx, thread, review); return; }
+    if (kind === 'goal' && thread.activity?.goal?.review?.phase === 'reviewing') { startReview(ctx, thread); return; }
+    const review = kind === 'goal' ? thread.activity?.goal?.review : undefined;
     try {
       const key = `${threadId}:${kind}`;
       const turn = ctx.startTurn(threadId, kind === 'goal' ? activity.goal!.objective : activity.loop!.prompt, ctx.activityAttachments.get(key) ?? [], undefined, kind);

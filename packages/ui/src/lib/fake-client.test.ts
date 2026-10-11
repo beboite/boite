@@ -910,6 +910,7 @@ test('a fake reviewed goal fails its first review, works on the finding and pass
   const { id: threadId } = await newThread(client);
   await client.call('threads.activity.set', { threadId, goal: { objective: 'Rename the empty state', review: true } });
   for (let i = 0; i < 100 && !(await client.call('threads.get', { threadId })).activity?.goal?.review?.reviewerThreadId; i++) await vi.advanceTimersByTimeAsync(50);
+  expect((await client.call('threads.get', { threadId })).activity?.goal?.review?.reviewerThreadId).toBeTruthy();
   // A task list replaces the activity with a copy while the reviewer works; its verdict still lands.
   await client.call('threads.tasks.set', { threadId, tasks: [{ id: '1', text: 'Rename', status: 'in_progress' }] });
   await vi.runAllTimersAsync();
@@ -920,6 +921,20 @@ test('a fake reviewed goal fails its first review, works on the finding and pass
   expect(review).toMatchObject({ phase: 'working', reviewerThreadId: null, delivered: 1 });
   for (const verdict of review.verdicts) expect((await client.call('threads.get', { threadId: verdict.threadId })).parentThreadId).toBe(threadId);
   expect(thread.messages.filter(m => m.role === 'user').map(m => m.parts[0]?.type === 'text' && m.parts[0].text)).toEqual(['/goal2 Rename the empty state', '/goal2 Rename the empty state']);
+});
+
+test('a task list set after the fake claim, before its review starts, still gets a verdict', async ({ createClient }) => {
+  vi.useFakeTimers();
+  const client = await createClient({ delayMs: 1 });
+  const { id: threadId } = await newThread(client);
+  await client.call('threads.activity.set', { threadId, goal: { objective: 'Rename the empty state', review: true } });
+  const claimed = async () => { const review = (await client.call('threads.get', { threadId })).activity?.goal?.review; return review?.phase === 'reviewing' && !review.reviewerThreadId; };
+  for (let i = 0; i < 400 && !(await claimed()); i++) await vi.advanceTimersByTimeAsync(5);
+  expect(await claimed()).toBe(true);
+  // The run that starts the review was scheduled on the activity this copy replaces.
+  await client.call('threads.tasks.set', { threadId, tasks: [{ id: '1', text: 'Rename', status: 'in_progress' }] });
+  await vi.runAllTimersAsync();
+  expect((await client.call('threads.get', { threadId })).activity?.goal).toMatchObject({ status: 'complete', review: { verdicts: [{ verdict: 'fail' }, { verdict: 'pass' }] } });
 });
 
 async function newThread(client: FakeClient, projectId = 'p-boite') {
