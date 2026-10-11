@@ -69,7 +69,7 @@
    */
   const away = (machine: Machine): 'offline' | 'lost' | null => {
     if (machine.store.pairingRequired) return null;
-    const health = machineHealth(machine, primary);
+    const health = machineHealth(machine, workspace.active);
     return health === 'offline' || health === 'lost' ? health : null;
   };
 
