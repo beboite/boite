@@ -1,18 +1,26 @@
 /*
- * The devices of a group, as a member's push sees them: which of the keys this
- * machine issued through the group stand for a device another member paired,
- * and which device ids are this machine's own.
+ * The devices of a group, as a member's push sees them. A device subscribes
+ * to notifications on the machine whose page it installed; the others send
+ * theirs to that machine, which pushes them with its own key. A device key
+ * says which machine that is in the roster (`push`); a pairing of the older
+ * kind is the machine it paired with.
  */
 import type { CoordinationPeer } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { homeOf } from './roster.ts';
 
 /**
- * The device a key this machine issued through the group stands for, when that
- * device was paired with another member that still is one: the page it
- * installed, and its push subscription, are on that member.
+ * The device a session of this machine stands for, when its notifications go
+ * through another member that still is one: the page it installed, and its
+ * push subscription, are on that member.
  */
 export function deviceElsewhere(core: Core, sessionId: string): { home: CoordinationPeer; device: string } | null {
+  const keyed = core.group.deviceOf(sessionId);
+  if (keyed !== undefined) {
+    const at = core.group.pushHome(keyed);
+    const home = at === undefined ? undefined : core.group.peers().find((peer) => peer.coreId === at);
+    return home === undefined ? null : { home, device: keyed };
+  }
   const member = core.group.issuedFor(sessionId);
   if (member === undefined || !member.startsWith('device:')) return null;
   const device = member.slice('device:'.length);
@@ -22,10 +30,12 @@ export function deviceElsewhere(core: Core, sessionId: string): { home: Coordina
   return home === undefined ? null : { home, device };
 }
 
-/** This machine's session for a device the roster lists as its own; null for any other id. */
+/** This machine's session for a device whose notifications the roster says come through here; null for any other id. */
 export function ownDevice(core: Core, device: unknown): string | null {
   const group = core.group.view('owner');
-  if (typeof device !== 'string' || group === null || homeOf(device) !== group.self) return null;
+  if (typeof device !== 'string' || group === null) return null;
+  if (/^[0-9a-f]{64}$/.test(device)) return core.group.pushHome(device) === group.self ? core.group.sessionOfDevice(device) ?? null : null;
+  if (homeOf(device) !== group.self) return null;
   if (!group.devices.some((entry) => entry.id === device)) return null;
   return device.slice(device.indexOf(':') + 1);
 }

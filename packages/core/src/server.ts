@@ -393,8 +393,12 @@ export function startServer(options: ServerOptions): RunningServer {
   const peerRequests = new Set<Promise<Response>>();
   const refusals = new Refusals();
   // A client of this machine carried to another member of its group: its key here, never an agent's, opens the way.
-  const relays = new RelayHub(core, (token) => {
-    const identity = authenticateToken(core, token);
+  const relays = new RelayHub(core, (credential) => {
+    if (typeof credential !== 'string') {
+      // A device of the group carried to another member: its signature for this machine, never one made for another.
+      try { return { sessionId: core.group.authenticateDevice(credential, { name: 'pwa', version: '' }).sessionId }; } catch { return null; }
+    }
+    const identity = authenticateToken(core, credential);
     return identity === null || identity.principal === 'agent' ? null : { sessionId: identity.sessionId };
   }, { helloTimeoutMs, helloMaxBytes: PREAUTH_FRAME_MAX_BYTES });
   core.relays = relays;
@@ -490,6 +494,7 @@ export function startServer(options: ServerOptions): RunningServer {
           return new Response('too many connections waiting for hello', { status: 503 });
         }
         const connection = new ServerConnection(core, !isLoopbackHost(request.headers.get('host')));
+        connection.dialed = { origin, host: request.headers.get('host') };
         if (self.upgrade(request, { data: { connection, peer } })) return undefined;
         return new Response('expected a websocket upgrade', { status: 400 });
       }

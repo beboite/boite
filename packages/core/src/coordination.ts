@@ -27,7 +27,7 @@ export const SWEEP_PROBES = [
 export const WAIT_MAX_MS = 300_000;
 export { coordinationUrl, letterPrompt, STEWARD_LETTER_TTL_MS };
 type Row = { data: string; fingerprint: string | null };
-type Operation = 'directory' | 'deliver' | 'receipt' | 'search' | 'read' | 'group.sync' | 'group.push';
+type Operation = 'directory' | 'deliver' | 'receipt' | 'search' | 'read' | 'group.sync' | 'group.push' | 'group.redeem';
 type Envelope = { from: string; to: string; at: number; nonce: string; operation: Operation; payload: unknown };
 
 export class Coordination {
@@ -799,7 +799,7 @@ export class Coordination {
       else rate.floor = Math.max(rate.floor ?? 0, envelope.at);
       if (rate.count > 120) return new Response('peer rate limit', { status: 429 });
     } catch { return new Response('invalid signed message', { status: 403 }); }
-    const groupOnly = envelope.operation === 'group.sync' || envelope.operation === 'group.push'; // the group's own: sealed, from a member
+    const groupOnly = envelope.operation === 'group.sync' || envelope.operation === 'group.push' || envelope.operation === 'group.redeem'; // the group's own: sealed, from a member
     if (this.core.group.removedPeer(peer.coreId) !== null && (groupOnly || !this.trusted().some(p => p.coreId === peer.coreId))) {
       return this.signed({ nonce: envelope.nonce, error: 'this machine was removed from the group', gone: true }, 410, sealing);
     }
@@ -841,7 +841,8 @@ export class Coordination {
           result = letter;
         } else if (envelope.operation === 'group.sync') result = this.core.group.receive(peer, envelope.payload);
         else if (envelope.operation === 'group.push') result = this.core.push.relayed(peer, envelope.payload);
-        else throw invalidParams('operation: expected directory, deliver, receipt, search, read, group.sync or group.push');
+        else if (envelope.operation === 'group.redeem') result = this.core.group.redeemFor(peer, envelope.payload);
+        else throw invalidParams('operation: expected directory, deliver, receipt, search, read, group.sync, group.push or group.redeem');
       } catch (reason) {
         status = reason instanceof RpcFailure ? 400 : 500;
         error = reason instanceof RpcFailure ? reason.message : 'Machine could not process the request';

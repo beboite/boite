@@ -419,7 +419,7 @@ test('a phone paired with one member reaches the others as a device, and one rev
   const ticket = await phone.call('group.ticket', { coreId: id(b) });
   const deviceId = `${id(a)}:${phone.session!.id}`;
   expect(parseTicket(ticket.ticket).payload).toMatchObject({ sub: `device:${deviceId}`, role: 'device' });
-  expect(a.core.group.view('owner')?.devices).toEqual([{ id: deviceId, name: 'pwa', role: 'device' }]);
+  expect(a.core.group.view('owner')?.devices).toEqual([{ id: deviceId, name: 'pwa', role: 'device', by: id(a), legacy: true }]);
   const onB = await connect(b.url, '', { ticket: ticket.ticket, client: { name: 'pwa', version: '1' } });
   expect(onB.principal).toBe('session');
   await expect(onB.call('projects.add', { path: b.dataDir })).rejects.toThrow('owner only');

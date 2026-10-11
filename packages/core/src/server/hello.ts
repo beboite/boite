@@ -6,7 +6,21 @@ import { messageOf } from '../errors.ts';
 import { NONCE_MAX, NONCE_MIN, nonceProblem, principalOf, type Identity } from '../sessions.ts';
 import type { ServerConnection } from './connection.ts';
 
-export function hello(core: Core, connection: ServerConnection, id: number | string, method: string, rawParams: unknown): void {
+export async function hello(core: Core, connection: ServerConnection, id: number | string, method: string, rawParams: unknown): Promise<void> {
+  // A device being admitted waits on another member when only that one knows its code: nothing else is read meanwhile.
+  if (connection.greeting) {
+    connection.close(RpcCloseCode.Unauthorized, 'hello in progress');
+    return;
+  }
+  connection.greeting = true;
+  try {
+    await greet(core, connection, id, method, rawParams);
+  } finally {
+    connection.greeting = false;
+  }
+}
+
+async function greet(core: Core, connection: ServerConnection, id: number | string, method: string, rawParams: unknown): Promise<void> {
   if (method !== 'hello') {
     connection.sendResponse({
       jsonrpc: '2.0',
@@ -17,7 +31,7 @@ export function hello(core: Core, connection: ServerConnection, id: number | str
     return;
   }
   const params = rawParams as
-    | { token?: unknown; grant?: unknown; ticket?: unknown; nonce?: unknown; protocolVersion?: unknown; client?: { name?: unknown; version?: unknown; device?: unknown } }
+    | { token?: unknown; grant?: unknown; ticket?: unknown; nonce?: unknown; device?: unknown; protocolVersion?: unknown; client?: { name?: unknown; version?: unknown; device?: unknown } }
     | undefined;
   const refuse = (message: string, reason: string): void => {
     connection.sendResponse({ jsonrpc: '2.0', id, error: { code: RpcErrorCode.Unauthorized, message } });
@@ -26,12 +40,14 @@ export function hello(core: Core, connection: ServerConnection, id: number | str
   const token = typeof params?.token === 'string' ? params.token : null;
   const grant = typeof params?.grant === 'string' ? params.grant : null;
   const ticket = typeof params?.ticket === 'string' ? params.ticket : null;
+  const device = typeof params?.device === 'object' && params.device !== null ? params.device as Record<string, unknown> : null;
   const client = {
     name: typeof params?.client?.name === 'string' ? params.client.name : 'unknown',
     version: typeof params?.client?.version === 'string' ? params.client.version : '',
   };
 
   let session: ReturnType<typeof core.sessions.exchange> | undefined;
+  let admitted: string | undefined;
   let identity: Identity;
   // Absent, a grant is strictly one-shot. Present, a nonce must be usable, or
   // the client would believe a retry is safe when it is not.
@@ -59,7 +75,24 @@ export function hello(core: Core, connection: ServerConnection, id: number | str
     connection.close(RpcCloseCode.ProtocolMismatch, 'protocol version mismatch');
     return true;
   };
-  if (ticket !== null && token === null && grant === null) {
+  if (device !== null && token === null && ticket === null) {
+    // One key for every member of the group: admitted with a grant, then let in on its signature.
+    if (wrongProtocol()) return;
+    try {
+      if (grant !== null) {
+        const nonce = typeof params?.nonce === 'string' ? params.nonce : null;
+        const done = await core.group.admitDevice(grant, device, client, nonce);
+        admitted = done.deviceId;
+        identity = { principal: principalOf(done.role), sessionId: done.sessionId, threadId: null };
+      } else {
+        const done = core.group.authenticateDevice(device, client);
+        identity = { principal: principalOf(done.role), sessionId: done.sessionId, threadId: null };
+      }
+    } catch (error) {
+      refuse(messageOf(error), grant === null ? 'bad device signature' : 'bad grant');
+      return;
+    }
+  } else if (ticket !== null && token === null && grant === null) {
     // Like a grant, a ticket is spent once: the protocol is checked first.
     if (wrongProtocol()) return;
     try {
@@ -85,7 +118,7 @@ export function hello(core: Core, connection: ServerConnection, id: number | str
     if (found === null) { refuse('the token is wrong', 'bad token'); return; }
     identity = found;
   } else {
-    refuse('hello takes a token, a grant or a group ticket, one of the three', 'bad hello');
+    refuse('hello takes a token, a grant, a group ticket or a device signature', 'bad hello');
     return;
   }
   if (wrongProtocol()) return;
@@ -93,6 +126,8 @@ export function hello(core: Core, connection: ServerConnection, id: number | str
   connection.sentFrom = sentFromOf(identity, client.name, params?.client?.device, connection.remote);
   connection.clientName = client.name;
   connection.authenticated = true;
+  // A page of this machine, served where its addresses do not say: the group learns that origin.
+  if (identity.principal !== 'agent') servedOrigin(core, connection);
   connection.sendResponse({
     jsonrpc: '2.0',
     id,
@@ -100,11 +135,26 @@ export function hello(core: Core, connection: ServerConnection, id: number | str
       core: core.info(),
       principal: identity.principal,
       ...(session === undefined ? {} : { session: { id: session.id, token: session.token } }),
+      ...(admitted === undefined ? {} : { device: admitted }),
       // The agent learns which thread it is in from its own hello, so the CLI
       // needs nothing but the token to name it.
       ...(identity.threadId === null ? {} : { threadId: identity.threadId }),
     },
   });
+}
+
+/** The socket came from a page whose origin names the host it asked for: this machine is served there. */
+function servedOrigin(core: Core, connection: ServerConnection): void {
+  const { origin, host } = connection.dialed;
+  if (origin === null || host === null) return;
+  try {
+    const url = new URL(origin);
+    if ((url.protocol !== 'https:' && url.protocol !== 'http:') || url.origin !== origin || url.host !== host.toLowerCase()) return;
+    if (/^(127\.0\.0\.1|localhost|\[::1\])$/.test(url.hostname)) return;
+    core.group.servedFrom(origin);
+  } catch {
+    // Not an origin: nothing learned.
+  }
 }
 
 /**

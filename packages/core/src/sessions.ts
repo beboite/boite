@@ -116,6 +116,10 @@ export class SessionStore {
   /** Canonical code to the grant it names. */
   private readonly codes = new Map<string, { grant: string; expiresAt: number }>();
   private codeFailures = 0;
+  /** Grants a device key redeemed, by grant: the same device asking again, after a lost answer, is answered the same. */
+  private readonly redeemed = new Map<string, { deviceId: string; role: PairingRole; expiresAt: number }>();
+  /** The codes of those grants, so the retry of a typed code is no wrong code. */
+  private readonly redeemedCodes = new Map<string, { grant: string; expiresAt: number }>();
 
   constructor(private readonly core: Core) {}
 
@@ -200,6 +204,34 @@ export class SessionStore {
   }
 
   /**
+   * A grant, or a code naming one, spent by a device key: its role, once. The
+   * device that spent it asking again before the grant would have expired
+   * gets the same answer, so a lost answer costs no new link; anybody else is
+   * refused as for a used link. The device's key is its own retry nonce.
+   */
+  redeem(grant: string, deviceId: string, nonce: string | null = null, now = Date.now()): PairingRole {
+    const problem = nonce === null ? null : nonceProblem(nonce);
+    if (problem !== null) throw invalidParams(problem, { field: 'nonce', min: NONCE_MIN, max: NONCE_MAX });
+    this.sweep(now);
+    const typed = grant;
+    const canonical = typed.length <= 16 ? normalizePairingCode(typed) : null;
+    const again = canonical === null ? undefined : this.redeemedCodes.get(canonical);
+    grant = again?.grant ?? this.resolveCode(grant);
+    const known = this.grants.get(grant);
+    if (known === undefined) {
+      const done = this.redeemed.get(grant);
+      if (done !== undefined && done.deviceId === deviceId) return done.role;
+      if (typed.length <= 16 && normalizePairingCode(typed) !== null) throw unauthorized('the pairing code is wrong, expired, or was already used');
+      throw unauthorized('the pairing link was already used, expired, or never issued');
+    }
+    this.grants.delete(grant);
+    for (const [code, entry] of this.codes) if (entry.grant === grant) this.redeemedCodes.set(code, entry);
+    this.dropCodes(grant);
+    this.redeemed.set(grant, { deviceId, role: known.role, expiresAt: known.expiresAt });
+    return known.role;
+  }
+
+  /**
    * A session of this core's own for a client something already vouched for:
    * a grant just exchanged, or a group member's ticket.
    */
@@ -269,6 +301,12 @@ export class SessionStore {
     }
     for (const [code, entry] of this.codes) {
       if (entry.expiresAt <= now) this.codes.delete(code);
+    }
+    for (const [grant, entry] of this.redeemed) {
+      if (entry.expiresAt <= now) this.redeemed.delete(grant);
+    }
+    for (const [code, entry] of this.redeemedCodes) {
+      if (entry.expiresAt <= now) this.redeemedCodes.delete(code);
     }
   }
 
