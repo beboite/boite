@@ -447,7 +447,7 @@ export function startServer(options: ServerOptions): RunningServer {
           const peer = preauthPeer(self.requestIP(request)?.address ?? null, request.headers.get('host'));
           const refusal = peer === null ? null : preauthRefusal(waitingPeers(), peer);
           if (refusal !== null) {
-            core.log('warn', `refused a relayed websocket: ${refusal}`);
+            core.log('warn', `refused a relayed websocket: ${refusal}`, { source: 'connections', event: 'connection.preauth-refused' });
             return new Response('too many connections waiting for hello', { status: 503 });
           }
           const pipe = relays.pipe(relayed.coreId, peer);
