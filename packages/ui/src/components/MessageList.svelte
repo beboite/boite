@@ -12,6 +12,7 @@
   import AgentMessageGroup from './AgentMessageGroup.svelte';
   import { agentMailFor, groupAgentMail, withAgentMail } from '../lib/agent-mail';
   import DelegationActivity from './DelegationActivity.svelte';
+  import { teamLaunches } from '../lib/delegation-progress';
   import UserMessage from './UserMessage.svelte';
   import ImageViewer from './ImageViewer.svelte';
   import { provideViewerHost, type Gallery } from '../lib/media-gallery';
@@ -76,22 +77,22 @@
     return account?.status === 'unauthenticated' && store.usableAccountOf(account.providerId, account.id) === null ? account : null;
   });
   const team = $derived(delegation?.rootThreadId === threadId ? delegation.agents : []);
-  const teamRowId = $derived(`delegation:${threadId}`);
+  /** One card per launch, where it happened; children outside the held page wait for theirs. */
+  const launches = $derived(new Map(teamLaunches(team, messages, store.openThread?.id === threadId && store.openThread.messagesBefore !== null, store.openThread?.id === threadId && (store.openThread.messagesAfter ?? null) !== null).map(launch => [launch.id, launch])));
   /** The runs this thread started, each a card where it began. */
   const workflowRows = $derived(new Map(store.workflowsOf(threadId).filter(run => run.rootThreadId === threadId).map(run => [`workflow:${run.id}`, run])));
   /** The turns of the thread this list shows, open or delegated. */
   const shownTurns = $derived(store.openThread?.id === threadId ? store.openThread.turns : store.delegationThread?.id === threadId ? store.delegationThread.turns : []);
+  /** Rows that follow the message sharing their millisecond: agent mail and a launch card, anchored with `<=`. */
+  const after = (row: Message) => row.id.startsWith('coordination:') || row.id.startsWith('delegation:');
   const grouped = $derived.by(() => {
-    if (mail.length === 0 && team.length === 0 && workflowRows.size === 0 && memoryRows.size === 0) return { timeline: messages, groups: new Map() };
-    const activity: Message[] = team.length ? [{
-      id: teamRowId, threadId, turnId: teamRowId, role: 'system', parts: [], state: 'complete',
-      createdAt: Math.min(...team.map(agent => agent.thread.createdAt))
-    }] : [];
+    if (mail.length === 0 && launches.size === 0 && workflowRows.size === 0 && memoryRows.size === 0) return { timeline: messages, groups: new Map() };
+    const activity: Message[] = [...launches.values()].map(({ id, createdAt }) => ({ id, threadId, turnId: id, role: 'system', parts: [], state: 'complete', createdAt }));
     const runs: Message[] = [...workflowRows].map(([id, run]) => ({ id, threadId, turnId: id, role: 'system', parts: [], state: 'complete', createdAt: run.createdAt }));
     const memory: Message[] = [...memoryRows].map(([id, event]) => ({ id, threadId, turnId: id, role: 'system', parts: [], state: 'complete', createdAt: event.at }));
     // Output that already existed in this millisecond precedes its exchange.
     const rows = [...withAgentMail(messages, mail, threadId, shownTurns), ...activity, ...runs, ...memory].sort((a, b) =>
-      a.createdAt - b.createdAt || Number(a.id.startsWith('coordination:')) - Number(b.id.startsWith('coordination:')) || a.id.localeCompare(b.id));
+      a.createdAt - b.createdAt || Number(after(a)) - Number(after(b)) || a.id.localeCompare(b.id));
     return groupAgentMail(rows, mail);
   });
   /** A turn's views go after its answer, and wait for a turn still running to end (`placeViews`). */
@@ -775,8 +776,8 @@
           data-testid={row.first ? 'message' : 'message-rest'}
           data-role={group ? 'agent-mail' : message.role}
         >
-          {#if message.id === teamRowId}
-            <DelegationActivity {store} agents={team} />
+          {#if launches.has(message.id)}
+            <DelegationActivity {store} agents={launches.get(message.id)!.agents} />
           {:else if workflowRows.has(message.id)}
             <WorkflowActivity {store} run={workflowRows.get(message.id)!} />
           {:else if group}
