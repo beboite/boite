@@ -150,8 +150,9 @@ pub fn run() {
         // has nothing left to do. Automation never raises a window, and
         // neither does a login start finding Boite already running.
         Ok(None) => {
-            eprintln!("[shell] another shell already owns this data directory; asking it to show its window and exiting");
+            eprintln!("[shell] another shell already owns this data directory; exiting");
             if !hidden() && !at_login {
+                eprintln!("[shell] asking the running shell to show its window");
                 if let Err(error) = instance::wake(&directory) {
                     eprintln!("[shell] Boite is already running, but it could not be asked to show its window: {error}");
                 }

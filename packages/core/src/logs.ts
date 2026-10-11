@@ -381,7 +381,6 @@ function turnAgent(turn: RpcEvents['turn.started']): Pick<LogContext, 'providerI
 
 function validDuration(value: unknown): value is number { return typeof value === 'number' && Number.isFinite(value) && value >= 0; }
 
-/** Newest first; records of one instant keep their write order. */
 /** Above the lines any file can hold, so a file's rank never reaches the next one's. */
 const LINES_PER_FILE = 10_000_000;
 
