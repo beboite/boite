@@ -10,7 +10,6 @@
   import { fill, strings } from '../lib/strings';
   import MachineIcon from './MachineIcon.svelte';
   import GroupCard from './GroupCard.svelte';
-  import PairingCard from './PairingCard.svelte';
   import PhoneSettings from './PhoneSettings.svelte';
   import MachineSettings from './MachineSettings.svelte';
   import MainMachine from './MainMachine.svelte';
@@ -257,8 +256,7 @@
   <MainMachine />
 
   {#if !mobile}
-    <!-- A phone pairs from the computer, never from itself: both cards are the desktop's. -->
-    <PairingCard store={workspace.active} />
+    <!-- How a phone reaches this machine, and its app: the desktop's to set up. -->
     <PhoneSettings store={workspace.active} />
   {/if}
 </div>

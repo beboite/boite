@@ -22,18 +22,19 @@
     try { QrScanner ??= (await import('./QrScanner.svelte')).default; scanning = true; }
     catch { workspace.error = strings.phone.dialogOffline; adding = true; }
   }
-  /** A code that reads as a pairing link connects at once; the machine names itself and the card renames it. */
+  /** A code that reads as a link to add a device connects at once; the machine names itself and the card renames it. */
   async function scanned(text: string) {
     scanning = false;
     link = text;
-    adding = true;
+    if (!mobile) adding = true;
     await add();
   }
 
   /**
-   * A code typed in the installed app pairs it with the core that serves this
-   * page. The camera app would hand a link to Safari, whose storage the
-   * home-screen app does not share; a code typed here stays here.
+   * A code typed in the installed app goes to the machine that serves this
+   * page, which asks the other machines of its group when it did not draw
+   * that code itself. The camera app would hand a link to Safari, whose
+   * storage the home-screen app does not share; a code typed here stays here.
    */
   const codeOrigin = window.__TAURI_INTERNALS__ === undefined && /^https?:$/.test(location.protocol) ? location.origin : null;
   let codeOpen = $state(false);
@@ -69,6 +70,8 @@
   let target = $derived(workspace.linkTarget(link));
   export function startAdding() {
     workspace.error = null;
+    // A phone adds itself with its camera: the code, not a link to paste.
+    if (mobile) { void startScanning(); return; }
     adding = true;
     requestAnimationFrame(() => linkInput?.focus());
   }
@@ -100,9 +103,10 @@
         <!-- A phone has a camera and the other machine draws a code: no link to copy across. -->
         {#if mobile}<button class="primary add-open" data-testid="machine-scan" disabled={busy} onclick={() => void startScanning()}><ScanLine size={15} /><span class="ui-label">{strings.machines.scan}</span></button>{/if}
         {#if mobile && codeOrigin}<button class="add-open" data-testid="machine-code-open" aria-expanded={codeOpen} onclick={toggleCode}><KeyRound size={15} /><span class="ui-label">{strings.machines.typeCode}</span></button>{/if}
-        {#if !open}<button class:primary={!mobile} class="add-open" data-testid="machine-add-open" onclick={startAdding}><Plus size={15} /><span class="ui-label">{mobile ? strings.machines.pasteLink : strings.machines.add}</span></button>{/if}
+        {#if !open && !mobile}<button class="primary add-open" data-testid="machine-add-open" onclick={startAdding}><Plus size={15} /><span class="ui-label">{strings.machines.add}</span></button>{/if}
       </div>
     {/if}
+  {#if mobile && !codeOpen && workspace.error}<p class="error" role="alert">{workspace.error}</p>{/if}
   {#if codeOpen && codeOrigin}
     <form class="card code-form" data-testid="machine-code-form" onsubmit={(e) => { e.preventDefault(); void pairCode(); }}>
       <label>{strings.machines.codeLabel}<input

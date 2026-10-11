@@ -1,4 +1,5 @@
 import { RELEASE_VERSION } from './release';
+import type { DeviceKey } from './device-key';
 import {
   PROTOCOL_VERSION,
   RPC_CHUNK_MARK,
@@ -8,6 +9,7 @@ import {
   RpcErrorCode,
   type ClientName,
   type CoreInfo,
+  type DeviceHello,
   type Principal,
   type RpcError,
   type RpcEventName,
@@ -108,7 +110,15 @@ export interface WsClientOptions {
    * nothing is sent then, since the hello carries this client's key for the
    * machine at the end and would hand it to a member it is no longer paired with.
    */
-  relay?: () => string | null;
+  relay?: () => string | DeviceHello | null;
+  /**
+   * This device's key, for a machine of its group: every hello carries a
+   * signature made for `coreId`. With `grant`, the key is admitted to the
+   * group instead, and `onDevice` hears the device id and the machine's id.
+   */
+  signer?: { key: () => Promise<DeviceKey>; coreId: string | null };
+  /** A grant just admitted this device's key: its id, and the id of the machine that let it in. */
+  onDevice?: (device: string, coreId: string) => unknown;
   /** Returning false refuses the key: the client closes instead of using it. */
   onSession?: (session: Session) => unknown;
   /**
@@ -285,7 +295,7 @@ function browserSocket(url: string): SocketLike {
 }
 
 export class WsClient implements ObservableClient {
-  #options: Required<Omit<WsClientOptions, 'clientName' | 'version' | 'device' | 'grant' | 'ticket' | 'paired' | 'relay' | 'onSession' | 'onRevoked' | 'onUnauthorized'>> & {
+  #options: Required<Omit<WsClientOptions, 'clientName' | 'version' | 'device' | 'grant' | 'ticket' | 'paired' | 'relay' | 'signer' | 'onDevice' | 'onSession' | 'onRevoked' | 'onUnauthorized'>> & {
     clientName: ClientName;
     version: string;
     device: () => string | null;
@@ -302,7 +312,9 @@ export class WsClient implements ObservableClient {
   #nonce: string;
   /** The token is a pairing's session key, so a hello it no longer opens is a revoke. */
   #paired: boolean;
-  #relay: (() => string | null) | null;
+  #relay: (() => string | DeviceHello | null) | null;
+  #signer: { key: DeviceKey | null; ready: Promise<DeviceKey>; coreId: string | null } | null;
+  #onDevice: ((device: string, coreId: string) => unknown) | null;
   #onSession: ((session: Session) => unknown) | null;
   #onRevoked: (() => void) | null;
   #onUnauthorized: ((error: RpcFailure) => void) | null;
@@ -341,7 +353,14 @@ export class WsClient implements ObservableClient {
     this.#grant = options.grant ?? null;
     this.#ticket = options.ticket ?? null;
     this.#nonce = this.#grant === null ? '' : pairingNonce();
-    this.#paired = options.paired ?? (options.grant !== undefined || options.ticket !== undefined);
+    this.#signer = null;
+    if (options.signer !== undefined) {
+      const signer: { key: DeviceKey | null; ready: Promise<DeviceKey>; coreId: string | null } = { key: null, ready: options.signer.key(), coreId: options.signer.coreId };
+      void signer.ready.then((key) => { signer.key = key; }, () => undefined);
+      this.#signer = signer;
+    }
+    this.#onDevice = options.onDevice ?? null;
+    this.#paired = options.paired ?? (options.grant !== undefined || options.ticket !== undefined || this.#signer !== null);
     this.#relay = options.relay ?? null;
     this.#onSession = options.onSession ?? null;
     this.#onRevoked = options.onRevoked ?? null;
@@ -550,6 +569,16 @@ export class WsClient implements ObservableClient {
         this.#scheduleRetry();
       };
       socket.onopen = () => {
+        // The device key loads beside the socket: the hello waits for it, once.
+        const signer = this.#signer;
+        if (signer !== null && signer.key === null) {
+          signer.ready.then(() => { if (this.#socket === socket && !settled) socket.onopen?.(); }, () => {
+            this.#manuallyClosed = true;
+            fail('this device could not read or make its key');
+            socket.close();
+          });
+          return;
+        }
         const grant = this.#grant ?? this.#ticket;
         // The relay's key goes on the hello that opens the socket only: the member takes it out there,
         // and a liveness hello later would carry it to the machine at the end.
@@ -570,7 +599,18 @@ export class WsClient implements ObservableClient {
             }
             // A key is only taken from a core that was shown a grant or a ticket: one that answers a
             // plain token with a new key has no business handing it, and is not written down as paired.
-            if (result.session && grant !== null) {
+            // A device key the core just let into its group: from here on every hello is signed for that machine.
+            if (result.device && grant !== null && this.#signer !== null && result.core.coreId) {
+              this.#grant = null;
+              this.#paired = true;
+              this.#signer.coreId = result.core.coreId;
+              if (this.#onDevice?.(result.device, result.core.coreId) === false) {
+                this.#manuallyClosed = true;
+                fail('the device could not be added here');
+                socket.close();
+                return;
+              }
+            } else if (result.session && grant !== null) {
               // The grant is spent: from here on this client is its session.
               this.#grant = null;
               this.#ticket = null;
@@ -634,9 +674,15 @@ export class WsClient implements ObservableClient {
 
   #helloParams(): RpcParams<'hello'> {
     const device = this.#options.device();
+    const signer = this.#signer;
+    const key = signer?.key ?? null;
+    const credential: Partial<RpcParams<'hello'>> = signer !== null && key !== null && this.#grant !== null
+      ? { grant: this.#grant, nonce: this.#nonce, device: key.admit(this.#grant, device ?? this.#options.clientName) }
+      : signer !== null && key !== null && signer.coreId !== null ? { device: key.hello(signer.coreId) }
+      : this.#ticket !== null ? { ticket: this.#ticket }
+      : this.#grant === null ? { token: this.#options.token } : { grant: this.#grant, nonce: this.#nonce };
     return {
-      ...(this.#ticket !== null ? { ticket: this.#ticket }
-        : this.#grant === null ? { token: this.#options.token } : { grant: this.#grant, nonce: this.#nonce }),
+      ...credential,
       protocolVersion: PROTOCOL_VERSION,
       client: { name: this.#options.clientName, version: this.#options.version, ...(device ? { device } : {}) }
     };

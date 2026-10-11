@@ -13,7 +13,7 @@
    * administrator, for a rule that covers every network.
    */
   let { store }: { store: Store } = $props();
-  const text = strings.settings.pairing.firewall;
+  const text = strings.group.firewall;
 
   let status = $state<FirewallStatus | null>(null);
   let busy = $state(false);

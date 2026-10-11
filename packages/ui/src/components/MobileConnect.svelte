@@ -19,12 +19,12 @@
     <p>{store.pairingRequired ? strings.mobile.pairBody : strings.mobile.offlineBody}</p>
   </div>
   {#if store.pairingRequired}
+    <!-- One way in: the code another machine of the group shows, scanned or typed. -->
     <section class="pairing" aria-label={strings.mobile.pairingRequired}>
-      <div class="step"><Monitor size={18} /><p>{strings.mobile.pairStep}</p></div>
       <PairMachine mobile {onpaired} />
-      <p class="installed" data-testid="mobile-pair-hint">{installed() ? strings.mobile.scanInApp : strings.mobile.pairInstalled}</p>
     </section>
     <p class="privacy"><ShieldCheck size={16} /><span>{strings.mobile.pairPrivacy}</span></p>
+    {#if installed()}<p class="installed" data-testid="mobile-pair-hint">{strings.mobile.scanInApp}</p>{/if}
   {:else}
     <button class="primary retry" data-testid="mobile-reconnect" disabled={store.connection === 'connecting'} onclick={() => void store.connect()}><RefreshCw size={16} /><span class="ui-label">{store.connection === 'connecting' ? strings.connection.connecting : strings.common.refresh}</span></button>
     <button class="ghost manage" onclick={() => store.showSettings('machines')}><span class="ui-label">{strings.connection.manage}</span></button>
@@ -39,11 +39,8 @@
   h1 { margin: 0 0 12px; max-width: 300px; font-size: 26px; line-height: 1.18; font-weight: 600; letter-spacing: -0.7px; }
   p { margin: 0; font-size: var(--text-sm); line-height: 1.6; color: var(--color-muted-foreground); }
   .pairing { padding: 18px; border: 1px solid var(--color-edge); border-radius: var(--radius-xl); background: var(--color-surface); }
-  .step { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 18px; }
-  .step :global(svg) { flex: none; margin-top: 3px; color: var(--color-muted-foreground); }
-  .step p { color: var(--color-foreground); }
   .pairing :global(.pair-machine) { margin-bottom: 0; }
-  .installed { padding-top: 16px; border-top: 1px solid var(--color-border); font-size: var(--text-xs); }
+  .installed { margin: 0 4px; font-size: var(--text-xs); }
   .privacy { display: flex; align-items: flex-start; gap: 8px; margin: 18px 4px; font-size: var(--text-xs); }
   .privacy :global(svg) { flex: none; margin-top: 2px; }
   .host { display: flex; align-items: center; justify-content: center; gap: 7px; font-size: var(--text-xs); margin-top: 26px; }

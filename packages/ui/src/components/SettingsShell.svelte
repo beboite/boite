@@ -89,7 +89,6 @@ import { workspace } from '../lib/workspace.svelte';
     ],
     machines: [
       { id: 'machines', label: strings.machines.heading },
-      { id: 'devices', label: strings.settings.pairing.heading },
       { id: 'phone', label: strings.phone.heading }
     ],
     advanced: [
@@ -153,8 +152,8 @@ import { workspace } from '../lib/workspace.svelte';
     ['resources', 'quiet', strings.settings.muteAgents],
     ['resources', 'limits', strings.settings.memoryProtection],
     ['resources', 'tasks', strings.settings.reapOrphans],
-    ['machines', 'devices', strings.settings.listenOnLan],
-    ['machines', 'devices', strings.settings.pairing.mint],
+    ['machines', 'phone', strings.settings.listenOnLan],
+    ['machines', 'machines', strings.group.addDevice],
     ['machines', 'phone', strings.phone.publicUrl],
     ['machines', 'machines', strings.machines.main],
     ['advanced', 'execution', strings.settings.warmProcessMinutes]

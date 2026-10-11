@@ -512,7 +512,8 @@ export class Workspace {
     // A machine the group brought is written back as one: another window may have dropped its entry meanwhile.
     if (!endpoint.grant && !endpoint.ticket && !endpoint.local)
       upsertEnvironment({
-        url: machine.id, token: endpoint.token, paired: endpoint.paired ?? false, label: machine.label,
+        url: machine.id, token: endpoint.token, paired: endpoint.paired ?? endpoint.signs !== undefined, label: machine.label,
+        ...(endpoint.signs === undefined ? {} : { signs: endpoint.signs }),
         ...(machine.coreId === undefined ? {} : { coreId: machine.coreId }),
         ...(machine.groupId === undefined ? {} : { groupId: machine.groupId }),
         ...(machine.epoch === undefined ? {} : { epoch: machine.epoch })

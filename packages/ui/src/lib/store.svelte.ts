@@ -234,28 +234,26 @@ export class Store {
   // Pairing: store/pairing.svelte.ts
   // -------------------------------------------------------------------------
 
-  get pairing() { return this.#ctx.pairing.pairing; }
-  set pairing(value) { this.#ctx.pairing.pairing = value; }
+  get deviceInvite() { return this.#ctx.pairing.deviceInvite; }
+  set deviceInvite(value) { this.#ctx.pairing.deviceInvite = value; }
   get sessions() { return this.#ctx.pairing.sessions; }
   set sessions(value) { this.#ctx.pairing.sessions = value; }
 
-  mintPairing(...args: Parameters<Pairing['mintPairing']>) { return this.#ctx.pairing.mintPairing(...args); }
-  closePairing() { return this.#ctx.pairing.closePairing(); }
+  addDevice() { return this.#ctx.pairing.addDevice(); }
+  closeDeviceInvite() { return this.#ctx.pairing.closeDeviceInvite(); }
+  revokeDevice(id: string) { return this.#ctx.pairing.revokeDevice(id); }
   loadSessions(...args: Parameters<Pairing['loadSessions']>) { return this.#ctx.pairing.loadSessions(...args); }
   revokeSession(...args: Parameters<Pairing['revokeSession']>) { return this.#ctx.pairing.revokeSession(...args); }
   get group() { return this.#ctx.pairing.group; }
   set group(value) { this.#ctx.pairing.group = value; }
   get groupKnown() { return this.#ctx.pairing.groupKnown; }
   set groupKnown(value) { this.#ctx.pairing.groupKnown = value; }
-  get groupInvite() { return this.#ctx.pairing.groupInvite; }
-  set groupInvite(value) { this.#ctx.pairing.groupInvite = value; }
   loadGroup(...args: Parameters<Pairing['loadGroup']>) { return this.#ctx.pairing.loadGroup(...args); }
   createGroup(...args: Parameters<Pairing['createGroup']>) { return this.#ctx.pairing.createGroup(...args); }
   renameGroup(...args: Parameters<Pairing['renameGroup']>) { return this.#ctx.pairing.renameGroup(...args); }
   joinGroup(...args: Parameters<Pairing['joinGroup']>) { return this.#ctx.pairing.joinGroup(...args); }
   leaveGroup(...args: Parameters<Pairing['leaveGroup']>) { return this.#ctx.pairing.leaveGroup(...args); }
   removeFromGroup(...args: Parameters<Pairing['removeFromGroup']>) { return this.#ctx.pairing.removeFromGroup(...args); }
-  inviteToGroup(...args: Parameters<Pairing['inviteToGroup']>) { return this.#ctx.pairing.inviteToGroup(...args); }
 
   // -------------------------------------------------------------------------
   // Layout, navigation and notifications: store/layout.svelte.ts
