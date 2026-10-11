@@ -207,8 +207,12 @@
   .foot :global(button.icon) { width: auto; }
   .foot :global(.machines .menu),
   .foot :global(.machines .trigger) { width: 100%; height: 100%; }
-  /* A machine filter names the machine: that button keeps its text's width. */
-  .foot :global(.machines.filtered) { flex: 0 1 auto; }
+  /* With one machine the wrapper stays, empty, for its connection state: out
+     of the row, or it would still take a gap. */
+  .foot :global(.machines:not(:has(.trigger))) { display: none; }
+  /* A machine filter names the machine: that button keeps its text's width,
+     up to MachineStatus's own cap. */
+  .foot :global(.machines.filtered) { flex: 0 1 auto; max-width: 160px; }
   .foot :global(.machines.filtered .trigger) { width: auto; max-width: 100%; }
   .foot :global(button.icon.active) { background: var(--color-active); color: var(--color-foreground); }
 
