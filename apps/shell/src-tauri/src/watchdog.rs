@@ -130,7 +130,7 @@ impl Seen {
     }
 }
 
-/// Notes the event the main thread is handling. Two atomic stores, no allocation.
+/// Notes the event the main thread is handling. One atomic store, no allocation.
 pub(crate) fn saw(event: Seen) {
     let index = SEEN.iter().position(|known| *known == event).unwrap_or(SEEN.len() - 1);
     EVENT.store(pack(index, since_start()), Ordering::Release);

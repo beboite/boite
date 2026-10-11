@@ -19,4 +19,9 @@ test('a git read is logged as a timeout only when its deadline fired', async () 
   const hung = gitCore(new Promise<number>(() => undefined));
   await expect(git(hung.core, 'thr_git', process.cwd(), ['status'], 20)).rejects.toThrow('did not answer within');
   expect(hung.events.filter(event => event === 'git.timeout')).toHaveLength(1);
+  // A timeout log that throws still lets the timeout be reported.
+  const broken = gitCore(new Promise<number>(() => undefined));
+  (broken.core.logs as unknown as { warn: () => never }).warn = () => { throw new Error('log store broken'); };
+  (broken.core.logs as unknown as { record: () => never }).record = () => { throw new Error('log store broken'); };
+  await expect(git(broken.core, 'thr_git', process.cwd(), ['status'], 20)).rejects.toThrow('did not answer within');
 });

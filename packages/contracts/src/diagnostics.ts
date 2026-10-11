@@ -657,6 +657,23 @@ const REPORT_MESSAGE_CHARS = 20_000;
 const REPORT_RECORD_KEYS = ['level', 'at', 'source', 'event', 'message', 'threadId', 'durationMs', 'data'] as const;
 
 /** `secrets` are redacted from `data` before its strings are cut, so a cut never splits one. */
+/** The fields each diagnostics method takes; anything else is refused by name, on the core and the fake alike. */
+export const DIAGNOSTICS_PARAMS = {
+  'diagnostics.summary': ['threadId', 'since'],
+  'diagnostics.export': ['threadId', 'since', 'focusThreadId', 'limit'],
+  'diagnostics.issue': ['threadId', 'title', 'description', 'includeLogs', 'submit'],
+} as const;
+
+/** An object of only the method's fields, its thread ids plain text and `since` a time; the method checks the rest. */
+export function validateDiagnosticsParams(raw: unknown, method: keyof typeof DIAGNOSTICS_PARAMS): void {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(`${method} params: expected an object`);
+  const params = raw as Record<string, unknown>;
+  const keys: readonly string[] = DIAGNOSTICS_PARAMS[method];
+  for (const key of Object.keys(params)) if (!keys.includes(key)) throw new Error(`${method} ${key}: expected one of ${keys.join(', ')}`);
+  for (const key of ['threadId', 'focusThreadId']) if (params[key] !== undefined) plainText(params[key], `${method} ${key}`);
+  if (params.since !== undefined && (typeof params.since !== 'number' || !Number.isFinite(params.since) || params.since < 0)) throw new Error(`${method} since: expected a time in milliseconds`);
+}
+
 export function validateDiagnosticReport(raw: unknown, secrets: readonly string[] = []): DiagnosticReportRecord[] {
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('diagnostics.report params: expected an object');
   for (const key of Object.keys(raw)) if (key !== 'records') throw new Error(`diagnostics.report ${key}: expected only records`);

@@ -7,7 +7,7 @@
  * owner leaves Settings > Diagnostics > agent access on. Both print one line
  * per record, oldest first, so the output reads as a story.
  */
-import { chmodSync, existsSync, writeFileSync } from 'node:fs';
+import { closeSync, fchmodSync, openSync, writeFileSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { formatLogLine, formatLogTime, LOG_LEVELS, LOG_ORIGINS, type CoreLogLevel, type CoreLogRecord, type CoreLogsQuery, type DiagnosticSummary, type LogOrigin } from '@boite/contracts';
 import { readFileSync } from 'node:fs';
@@ -146,10 +146,13 @@ export async function logsCommand(args: string[], client: CoreClient, threadId: 
     let written: string | null = null;
     if (options.out) {
       written = isAbsolute(options.out) ? options.out : resolve(cwd, options.out);
-      // `mode` applies only to a new file: an existing one is made private before it gets the export.
-      if (existsSync(written)) chmodSync(written, 0o600);
-      writeFileSync(written, result.text, { mode: 0o600 });
-      chmodSync(written, 0o600);
+      // One descriptor: a folder fails at open and is never touched, and an existing file is
+      // made private through the same descriptor before the export goes into it.
+      const fd = openSync(written, 'w', 0o600);
+      try {
+        fchmodSync(fd, 0o600);
+        writeFileSync(fd, result.text);
+      } finally { closeSync(fd); }
     }
     const { text: _text, ...rest } = result;
     print([

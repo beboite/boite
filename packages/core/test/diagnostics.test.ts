@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createLogAnonymizer, formatLogDuration, formatLogLine, parseLogRecord, RpcErrorCode, validateDiagnosticReport } from '@boite/contracts';
@@ -288,6 +288,14 @@ test('the CLI prints records oldest first, filters by time and level, and export
     expect(await run(['logs', '--mine', '--min-level', 'warn'], agentEnv)).toContain('first warning');
     expect(await run(['logs', 'problems'], agentEnv)).toContain('1x error core/test/test.second');
     mkdirSync(join(harness.dataDir, 'out'));
+    // A folder given as --out fails to open and keeps its permissions.
+    if (process.platform !== 'win32') {
+      const before = statSync(join(harness.dataDir, 'out')).mode & 0o777;
+      expect(await runCli(['logs', 'export', '--out', 'out'], { env: agentEnv, cwd: harness.dataDir, out: () => undefined, err: () => undefined })).not.toBe(0);
+      expect(statSync(join(harness.dataDir, 'out')).mode & 0o777).toBe(before);
+    }
+    // The core refuses a field the method does not take, by name.
+    await expect(owner.call('diagnostics.summary', { thread: 'x' } as never)).rejects.toMatchObject({ rpc: { code: RpcErrorCode.InvalidParams } });
     const exported = await run(['logs', 'export', '--out', 'out/report.txt'], agentEnv);
     expect(exported).toContain(`written: ${join(harness.dataDir, 'out', 'report.txt')}`);
     expect(readFileSync(join(harness.dataDir, 'out', 'report.txt'), 'utf8')).toContain('## Timeline');

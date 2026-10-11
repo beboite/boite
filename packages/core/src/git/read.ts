@@ -50,7 +50,8 @@ async function bounded<T>(spawned: { proc: { kill(): void } }, cwd: string, args
   const late = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
       spawned.proc.kill();
-      onLate();
+      // A log that throws must not keep the timeout from being reported.
+      try { onLate(); } catch { /* the rejection below still runs */ }
       reject(refused(`git ${args[0] ?? ''} did not answer within ${timeoutMs / 1000} s in ${cwd}`, { args, cwd }));
     }, timeoutMs);
   });

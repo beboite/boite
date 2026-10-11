@@ -101,7 +101,8 @@ test('fake diagnostics: summary, export and issue for the owner; report for the 
     expect(exported.name).toMatch(/^boite-diagnostics-\d{8}-\d{6}\.txt$/);
     expect(exported.text).toContain('## Timeline');
     expect(exported.bytes).toBe(new TextEncoder().encode(exported.text).length);
-    for (const params of [null, { limit: 0 }, { limit: 20_001 }, { limit: 1.5 }]) await expect(client.call('diagnostics.export', params as never)).rejects.toMatchObject({ code: RpcErrorCode.InvalidParams });
+    for (const params of [null, { limit: 0 }, { limit: 20_001 }, { limit: 1.5 }, { focus: 'thr_1' }, { since: -1 }, { threadId: 'a\nb' }]) await expect(client.call('diagnostics.export', params as never)).rejects.toMatchObject({ code: RpcErrorCode.InvalidParams });
+    for (const params of [[], { thread: 'x' }]) await expect(client.call('diagnostics.summary', params as never)).rejects.toMatchObject({ code: RpcErrorCode.InvalidParams });
 
     const draft = await client.call('diagnostics.issue', { title: 'The window froze', description: 'It froze while C:\\Users\\you\\code was open.' });
     expect(draft).toMatchObject({ repository: 'beboite/boite', url: null, gh: 'missing', error: null });

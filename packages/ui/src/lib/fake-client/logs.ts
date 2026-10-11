@@ -1,6 +1,6 @@
 import {
   createLogAnonymizer, formatLogLine, formatLogTime, ISSUE_REPOSITORY, logLevelAtLeast, logMatches, normalizeCoreLogText, normalizeLogData, validateCoreLogsQuery, validateDiagnosticReport,
-  validateDiagnosticsLogsQuery, RpcErrorCode,
+  validateDiagnosticsLogsQuery, validateDiagnosticsParams, RpcErrorCode,
   type CoreLogLevel, type CoreLogRecord, type DiagnosticProblem, type DiagnosticsExport, type DiagnosticSummary, type DiagnosticThread, type LogAnonymizer, type RpcEventName, type RpcEvents,
 } from '@boite/contracts';
 import { RpcFailure } from '../client';
@@ -161,7 +161,7 @@ export function logMethods(ctx: FakeContext): Pick<FakeMethods, DiagnosticMethod
         && (family === null || (record.threadId === undefined ? query.scope !== 'thread' : family.has(record.threadId))), query.limit).map(record => names.record(record));
     },
     'diagnostics.summary': async params => {
-      if (params === null || typeof params !== 'object') throw invalid(new Error('diagnostics.summary params: expected an object'));
+      try { validateDiagnosticsParams(params, 'diagnostics.summary'); } catch (error) { throw invalid(error); }
       gate();
       const since = typeof params.since === 'number' && Number.isFinite(params.since) ? params.since : Date.now() - DAY_MS;
       const names = anonymizer();
@@ -169,7 +169,7 @@ export function logMethods(ctx: FakeContext): Pick<FakeMethods, DiagnosticMethod
       return summarize(newestFirst(record => record.at >= since && (family === null || record.threadId === undefined || family.has(record.threadId)), EXPORT_LIMIT).map(record => names.record(record)), since, names, family);
     },
     'diagnostics.export': async params => {
-      if (params === null || typeof params !== 'object') throw invalid(new Error('diagnostics.export params: expected an object'));
+      try { validateDiagnosticsParams(params, 'diagnostics.export'); } catch (error) { throw invalid(error); }
       gate();
       const since = typeof params.since === 'number' && Number.isFinite(params.since) && params.since >= 0 ? params.since : Date.now() - DAY_MS;
       const limit = params.limit === undefined ? EXPORT_LIMIT : params.limit;
@@ -177,7 +177,7 @@ export function logMethods(ctx: FakeContext): Pick<FakeMethods, DiagnosticMethod
       return exportBundle(since, limit, familyOf(params.focusThreadId));
     },
     'diagnostics.issue': async params => {
-      if (params === null || typeof params !== 'object') throw invalid(new Error('diagnostics.issue params: expected an object'));
+      try { validateDiagnosticsParams(params, 'diagnostics.issue'); } catch (error) { throw invalid(error); }
       gate();
       const title = typeof params.title === 'string' ? params.title.trim() : '';
       if (title.length < 4 || title.length > 200 || /[\x00-\x1f\x7f]/.test(title)) throw invalid(new Error('diagnostics.issue title: expected 4 to 200 characters on one line'));

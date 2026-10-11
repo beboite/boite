@@ -4,7 +4,7 @@ import { chmod, mkdir, open, readdir, unlink, writeFile } from 'node:fs/promises
 import { arch, cpus, freemem, homedir, hostname, platform, release, totalmem, userInfo, version as osVersion } from 'node:os';
 import { join } from 'node:path';
 import {
-  AGENT_SUBMIT_REFUSED, createLogAnonymizer, formatLogDuration, formatLogLine, formatLogTime, ISSUE_REPOSITORY, logLevelAtLeast, logMatches, validateDiagnosticsLogsQuery,
+  AGENT_SUBMIT_REFUSED, createLogAnonymizer, formatLogDuration, formatLogLine, formatLogTime, ISSUE_REPOSITORY, logLevelAtLeast, logMatches, validateDiagnosticsLogsQuery, validateDiagnosticsParams,
   type CoreLogLevel, type CoreLogRecord, type DiagnosticEnvironment, type DiagnosticProblem, type DiagnosticReportRecord, type DiagnosticsExport, type DiagnosticsExportParams,
   type DiagnosticsIssue, type DiagnosticsIssueParams, type DiagnosticsLogsQuery, type DiagnosticSummary, type DiagnosticThread, type LogAnonymizer, type LogData, type ThreadSummary,
 } from '@boite/contracts';
@@ -45,7 +45,8 @@ export class Diagnostics {
     if (!/^[0-9a-f]{32}$/.test(this.#salt)) {
       this.#salt = randomBytes(16).toString('hex');
       void mkdir(this.core.logs.directory, { recursive: true, mode: 0o700 })
-        .then(() => writeFile(file, `${this.#salt}\n`, { mode: 0o600 }))
+        // `mode` applies only to a new file: one replaced here (invalid, or from an older install) is made private too.
+        .then(() => writeFile(file, `${this.#salt}\n`, { mode: 0o600 }).then(() => chmod(file, 0o600)))
         .catch(error => this.core.logs.warn(`the anonymization salt could not be saved: ${messageOf(error)}`, { source: 'diagnostics', event: 'diagnostics.salt-failed' }));
     }
     return this.#salt;
@@ -136,6 +137,7 @@ export class Diagnostics {
   }
 
   async summary(params: { threadId?: string; since?: number }, connection?: Connection): Promise<DiagnosticSummary> {
+    try { validateDiagnosticsParams(params, 'diagnostics.summary'); } catch (error) { throw invalidParams((error as Error).message); }
     this.gate(connection, params.threadId);
     const since = typeof params.since === 'number' && Number.isFinite(params.since) ? params.since : Date.now() - DAY_MS;
     const family = this.reach(params.threadId);
@@ -200,7 +202,7 @@ export class Diagnostics {
   }
 
   async export(params: DiagnosticsExportParams, connection?: Connection): Promise<DiagnosticsExport> {
-    if (params === null || typeof params !== 'object') throw invalidParams('diagnostics.export params: expected an object');
+    try { validateDiagnosticsParams(params, 'diagnostics.export'); } catch (error) { throw invalidParams((error as Error).message); }
     const agent = this.gate(connection, params.threadId);
     const since = typeof params.since === 'number' && Number.isFinite(params.since) && params.since >= 0 ? params.since : Date.now() - DAY_MS;
     const limit = params.limit === undefined ? EXPORT_LIMIT : params.limit;
@@ -269,7 +271,7 @@ export class Diagnostics {
   private redact(line: string): string { return this.core.logs.redact(line); }
 
   async issue(params: DiagnosticsIssueParams, connection?: Connection): Promise<DiagnosticsIssue> {
-    if (params === null || typeof params !== 'object') throw invalidParams('diagnostics.issue params: expected an object');
+    try { validateDiagnosticsParams(params, 'diagnostics.issue'); } catch (error) { throw invalidParams((error as Error).message); }
     this.gate(connection, params.threadId);
     const title = typeof params.title === 'string' ? params.title.trim() : '';
     if (title.length < 4 || title.length > 200 || /[\x00-\x1f\x7f]/.test(title)) throw invalidParams('diagnostics.issue title: expected 4 to 200 characters on one line');
