@@ -6,10 +6,12 @@
   import { fill, strings } from '../lib/strings';
   import type { Choice, PickPatch, Store } from '../lib/store.svelte';
   import { formatTokens } from '../lib/tokens';
+  import { modelLogoId, modelMakerName } from '../lib/provider-logos';
   import { isLive, runProgress } from '../lib/workflow-view';
   import EffortSlider from './EffortSlider.svelte';
   import DelegationTranscript from './DelegationTranscript.svelte';
   import ModelPicker from './ModelPicker.svelte';
+  import ProviderLogo from './ProviderLogo.svelte';
   import StatusMark from './StatusMark.svelte';
   import AgentElapsed from './AgentElapsed.svelte';
   import NativeAgents from './NativeAgents.svelte';
@@ -34,6 +36,11 @@
   let native = $derived((view?.nativeAgents ?? []).filter(agent => agent.source !== 'process'));
   let processes = $derived((view?.nativeAgents ?? []).filter(agent => agent.source === 'process'));
   let selected = $derived(agents.find(agent => agent.thread.id === store.delegationSelectedAgentId) ?? null);
+  let liveAgents = $derived(agents.filter(agent => agentProgress(agent).active));
+  /** Finished subagents, the most recent first: the one that just reported is the one to read. */
+  let doneAgents = $derived(agents.filter(agent => !agentProgress(agent).active).sort((a, b) => endOf(b) - endOf(a)));
+  let liveRuns = $derived(runs.filter(isLive));
+  let doneRuns = $derived(runs.filter(entry => !isLive(entry)));
   let busy = $derived(agents.some(agent => ['queued', 'running', 'waiting'].includes(agent.thread.status)) || runs.some(isLive));
 
   $effect(() => {
@@ -85,12 +92,37 @@
     patchProfile(profile, { providerId, accountId, model, effort: patch.effort ?? store.defaultEffortOf(providerId, accountId, model) });
   }
 
-  /** Harness, model and reasoning level, the way the composer's picker names them. */
-  function routeLabel(agent: (typeof agents)[number]): string {
+  type Agent = (typeof agents)[number];
+
+  function endOf(agent: Agent): number {
+    const progress = agentProgress(agent);
+    return progress.finishedAt ?? progress.startedAt;
+  }
+
+  /**
+   * Harness, model and reasoning level, the way the composer's picker names
+   * them. The row shows the model's own mark, labelled with its maker, and the
+   * model's name; the harness stays in the route's tooltip.
+   */
+  function routeOf(agent: Agent) {
     const thread = agent.thread;
     const model = store.modelOf({ providerId: thread.providerId, accountId: thread.accountId, model: thread.model, effort: thread.effort, permissionMode: 'default', speed: null });
+    const provider = store.providerOf(thread.providerId)?.name ?? thread.providerId;
+    const name = model?.name ?? thread.model ?? strings.thread.defaultModel;
     const effort = thread.effort ? model?.effort?.levels.find(level => level.id === thread.effort)?.label ?? thread.effort : null;
-    return [store.providerOf(thread.providerId)?.name ?? thread.providerId, model?.name ?? thread.model ?? strings.thread.defaultModel, effort].filter(Boolean).join(' · ');
+    const logo = modelLogoId(thread.providerId, thread.model ?? model?.id);
+    return { provider, maker: modelMakerName(logo, thread.providerId) ?? provider, name, effort, logo, label: [provider, name, effort].filter(Boolean).join(' · ') };
+  }
+
+  function tokensOf(agent: Agent): number | null {
+    const usage = agent.lastTurn?.usage;
+    return usage ? usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheWriteTokens : null;
+  }
+
+  /** Completed goes without saying under Finished; a stop or a failure does not. */
+  function outcomeOf(agent: Agent): string | null {
+    const status = agentProgress(agent).status;
+    return status === 'stopped' ? strings.delegation.stoppedStatus : status === 'error' ? strings.delegation.failedStatus : null;
   }
 
   async function openChild(): Promise<void> {
@@ -100,6 +132,46 @@
     await store.open(id);
   }
 </script>
+
+{#snippet runRow(entry: (typeof runs)[number])}
+  {@const progress = runProgress(entry)}
+  <button type="button" class="member" data-testid="delegation-run" data-run-id={entry.id} onclick={() => showRun(entry.id)}>
+    <span class="avatar run"><Workflow size={16} strokeWidth={1.75} /><span class="dot"><WorkflowMark status={entry.status} run /></span></span>
+    <span class="member-main">
+      <strong class="title"><span class="ui-label">{entry.name}</span></strong>
+      <span class="route"><span class="ui-label">{fill(strings.workflow.steps, { done: String(progress.done), total: String(progress.total) })}</span></span>
+    </span>
+    <span class="meta">
+      {#if !isLive(entry)}<span class="outcome ui-label" data-status={entry.status}>{strings.workflow.status[entry.status]}</span>{/if}
+      <AgentElapsed startedAt={entry.createdAt} finishedAt={entry.finishedAt} active={entry.status === 'running'} />
+    </span>
+  </button>
+{/snippet}
+
+{#snippet member(agent: Agent)}
+  {@const progress = agentProgress(agent)}
+  {@const route = routeOf(agent)}
+  {@const tokens = tokensOf(agent)}
+  {@const outcome = outcomeOf(agent)}
+  <button type="button" class="member" class:selected={selected?.thread.id === agent.thread.id} data-testid="delegation-member" data-agent-id={agent.thread.id} onclick={() => void store.selectDelegatedAgent(agent.thread.id)}>
+    <span class="avatar" role="img" aria-label={route.maker} title={route.maker}>
+      <ProviderLogo providerId={route.logo} size={20} />
+      {#if progress.active}<span class="dot"><StatusMark status={agent.thread.status} /></span>{/if}
+    </span>
+    <span class="member-main">
+      <strong class="title"><span class="ui-label">{agent.thread.title}</span></strong>
+      <span class="route" data-testid="delegation-member-route" title={route.label}>
+        <span class="model ui-label">{route.name}</span>{#if route.effort}<span class="effort ui-label">{route.effort}</span>{/if}
+      </span>
+    </span>
+    <span class="meta">
+      {#if outcome}<span class="outcome ui-label" data-status={progress.status}>{outcome}</span>{/if}
+      <AgentElapsed startedAt={progress.startedAt} finishedAt={progress.finishedAt} active={progress.active} />
+      {#if tokens !== null}<span class="tokens ui-label">{formatTokens(tokens)} {strings.units.tokens}</span>{/if}
+    </span>
+    {#if agent.result}<span class="result"><span>{agent.result}</span></span>{/if}
+  </button>
+{/snippet}
 
 <section class="delegation" data-testid="delegation-surface">
   {#if run}
@@ -158,33 +230,27 @@
     {:else if view}
       <div class="team" class:detail={selected !== null}>
         <div class="members" aria-label={strings.delegation.heading}>
-          {#each runs as entry (entry.id)}
-            {@const progress = runProgress(entry)}
-            <button type="button" class="member" data-testid="delegation-run" data-run-id={entry.id} onclick={() => showRun(entry.id)}>
-              <WorkflowMark status={entry.status} run />
-              <span class="member-main"><strong class="workflow-name"><Workflow size={13} strokeWidth={1.75} /><span class="ui-label">{entry.name}</span></strong></span>
-              <span class="status ui-label">{strings.workflow.status[entry.status]}</span>
-              <span class="member-usage">{fill(strings.workflow.steps, { done: String(progress.done), total: String(progress.total) })} · <AgentElapsed startedAt={entry.createdAt} finishedAt={entry.finishedAt} active={entry.status === 'running'} /></span>
-            </button>
-          {/each}
-          {#each agents as agent (agent.thread.id)}
-            {@const progress = agentProgress(agent)}
-            <button type="button" class="member" class:selected={selected?.thread.id === agent.thread.id} data-testid="delegation-member" data-agent-id={agent.thread.id} onclick={() => void store.selectDelegatedAgent(agent.thread.id)}>
-              <StatusMark status={agent.thread.status} />
-              <span class="member-main"><strong>{agent.thread.title}</strong><small data-testid="delegation-member-route">{routeLabel(agent)}</small></span>
-              <span class="status ui-label">{progress.status === 'done' ? strings.delegation.doneStatus : progress.status === 'stopped' ? strings.delegation.stoppedStatus : strings.threadStatus[agent.thread.status]}</span>
-              <span class="task">{agent.task}</span>
-              <span class="member-usage"><AgentElapsed startedAt={progress.startedAt} finishedAt={progress.finishedAt} active={progress.active} />{#if agent.lastTurn?.usage} · {formatTokens(agent.lastTurn.usage.inputTokens + agent.lastTurn.usage.outputTokens + agent.lastTurn.usage.cacheReadTokens + agent.lastTurn.usage.cacheWriteTokens)} {strings.units.tokens}{/if}</span>
-              {#if agent.result}<span class="result">{agent.result}</span>{/if}
-            </button>
-          {/each}
+          {#if liveRuns.length || liveAgents.length}
+            <section class="group" data-testid="delegation-active">
+              <h3 class="group-head"><span class="ui-label">{strings.delegation.activeSection}</span><span class="count">{liveRuns.length + liveAgents.length}</span></h3>
+              {#each liveRuns as entry (entry.id)}{@render runRow(entry)}{/each}
+              {#each liveAgents as agent (agent.thread.id)}{@render member(agent)}{/each}
+            </section>
+          {/if}
+          {#if doneRuns.length || doneAgents.length}
+            <section class="group" data-testid="delegation-finished">
+              <h3 class="group-head"><span class="ui-label">{strings.delegation.finishedSection}</span><span class="count">{doneRuns.length + doneAgents.length}</span></h3>
+              {#each doneRuns as entry (entry.id)}{@render runRow(entry)}{/each}
+              {#each doneAgents as agent (agent.thread.id)}{@render member(agent)}{/each}
+            </section>
+          {/if}
         </div>
 
         {#if selected}
           <article class="detail-pane" data-testid="delegation-detail">
             <header>
               <button type="button" class="ghost small icon back" aria-label={strings.delegation.backToTeam} onclick={() => void store.selectDelegatedAgent(null)}><ArrowLeft size={15} /></button>
-              <div><strong>{selected.thread.title}</strong><small>{selected.task}</small></div>
+              <div><strong>{selected.thread.title}</strong><small>{routeOf(selected).label}</small></div>
               <button type="button" class="quiet small" data-testid="delegation-open-thread" onclick={() => void openChild()}><span class="ui-label">{strings.delegation.openThread}</span></button>
               {#if ['queued', 'running', 'waiting'].includes(selected.thread.status)}<button type="button" class="danger small" onclick={() => void store.stopDelegatedAgent(selected.thread.id)}><Square size={11} fill="currentColor" /><span class="ui-label">{strings.delegation.stop}</span></button>{/if}
             </header>
@@ -213,7 +279,6 @@
   .spacer { flex: 1; }
   .settings { flex: none; padding: 4px 16px 14px; }
   .profiles-head { margin-top: 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-  .member-usage { grid-column: 2 / -1; display: flex; flex-wrap: wrap; gap: 0 4px; font-variant-numeric: tabular-nums; }
   .error { margin: 12px 16px; color: var(--color-danger); font-size: var(--text-sm); }
   .team:not(.detail) { flex: none; }
   .switch-row { min-height: var(--control-lg); padding: 6px 0; display: flex; align-items: center; gap: 14px; }
@@ -230,21 +295,30 @@
   .pause { margin-top: 10px; }
   .team { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr; }
   .team.detail { grid-template-columns: minmax(160px, .42fr) minmax(0, 1fr); }
-  .members { min-height: 0; padding: 8px; overflow-y: auto; }
   .team.detail .members { border-right: 1px solid var(--color-border); }
-  .member { width: 100%; height: auto; padding: 9px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 2px 7px; border: 1px solid transparent; border-radius: var(--radius-md); background: transparent; text-align: left; }
+  .members { min-height: 0; padding: 4px 8px 10px; overflow-y: auto; }
+  .group + .group { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--color-border); }
+  .group-head { padding: 10px 9px 6px; display: flex; align-items: center; gap: 6px; color: var(--color-muted-foreground); font-size: var(--text-xs); font-weight: 600; }
+  .group-head .count { padding: 1px 6px; border-radius: 999px; background: var(--color-surface-3); font-variant-numeric: tabular-nums; font-weight: 500; }
+  .member { width: 100%; height: auto; padding: 10px 9px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 0 10px; border: 1px solid transparent; border-radius: var(--radius-md); background: transparent; text-align: left; }
+  .member + .member { margin-top: 2px; }
   .member:hover, .member.selected { background: var(--color-hover); border-color: var(--color-border); }
-  .member-main strong, .member-main small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .member-main strong { font-size: var(--text-sm); }
-  .member-main .workflow-name { display: flex; align-items: center; gap: 5px; }
-  .workflow-name :global(svg) { flex: none; }
-  .workflow-name .ui-label { overflow: hidden; text-overflow: ellipsis; }
-  .member-main small, .status, .member-usage { color: var(--color-muted-foreground); font-size: var(--text-xs); }
-  .status { display: inline-block; }
-  .status::first-letter { text-transform: uppercase; }
-  .task, .result { grid-column: 2 / -1; font-size: var(--text-xs); line-height: 1.4; display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
-  .task { color: var(--color-muted-foreground); line-clamp: 2; -webkit-line-clamp: 2; }
-  .result { margin-top: 3px; padding: 5px 7px; line-clamp: 4; -webkit-line-clamp: 4; border-left: 2px solid var(--color-edge); background: var(--color-surface-2); white-space: pre-wrap; }
+  .avatar { position: relative; width: 30px; height: 30px; display: grid; place-items: center; border-radius: var(--radius-md); background: var(--color-surface-2); border: 1px solid var(--color-border); }
+  .avatar.run { color: var(--color-muted-foreground); }
+  .avatar .dot { position: absolute; right: -3px; bottom: -3px; display: grid; place-items: center; padding: 2px; border-radius: 50%; background: var(--color-background); }
+  .member-main { min-width: 0; display: grid; gap: 6px; padding-top: 1px; }
+  .title { min-width: 0; font-size: var(--text-sm); font-weight: 600; }
+  .title .ui-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .route { min-width: 0; display: flex; align-items: center; gap: 6px; color: var(--color-muted-foreground); font-size: var(--text-xs); }
+  .model { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-foreground); font-weight: 500; }
+  .effort { flex: none; padding: 3px 6px; border-radius: var(--radius-sm); background: var(--color-surface-3); color: var(--color-muted-foreground); }
+  .meta { display: grid; justify-items: end; gap: 6px; padding-top: 2px; color: var(--color-muted-foreground); font-size: var(--text-xs); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .outcome { font-weight: 500; }
+  .outcome[data-status='error'], .outcome[data-status='failed'] { color: var(--color-danger); }
+  .result { grid-column: 2 / -1; margin-top: 8px; padding: 6px 9px; border-radius: var(--radius-sm); background: var(--color-surface-2); color: color-mix(in srgb, var(--color-foreground) 82%, transparent); font-size: var(--text-xs); line-height: 1.45; }
+  .result > span { display: -webkit-box; -webkit-box-orient: vertical; line-clamp: 3; -webkit-line-clamp: 3; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .team.detail .result, .team.detail .meta { display: none; }
+  .team.detail .member { grid-template-columns: auto minmax(0, 1fr); }
   .detail-pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
   .detail-pane > header { flex: none; min-height: 48px; padding: 7px 9px; display: flex; align-items: center; gap: 7px; border-bottom: 1px solid var(--color-border); }
   .detail-pane > header > div { flex: 1; min-width: 0; }
