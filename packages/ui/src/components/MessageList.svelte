@@ -32,7 +32,7 @@
   import WorkflowActivity from './WorkflowActivity.svelte';
   import { dockRoom } from '../lib/question-dock.svelte';
   import { glides } from '../lib/motion';
-  import { BottomEdge, BottomGlide, PointerHold, keysUp, typingKey, watchWheel, wheelsUp } from '../lib/timeline-follow';
+  import { BottomEdge, BottomGlide, PointerHold, keysUp, pointedTurn, typingKey, watchWheel, wheelsUp } from '../lib/timeline-follow';
   import { selectionClicks } from '../lib/selection-clicks';
   import { editWhole, pullNewer, pullOlder } from '../lib/reading-window';
   import { ReadingAnchor, type RowAnchor } from '../lib/reading-anchor';
@@ -578,6 +578,8 @@
    *  "Jump to latest" starts, whose scroll events neither unpin the list nor bring the button back. */
   const hold = new PointerHold(), glide = new BottomGlide(), edge = new BottomEdge();
   function press(event: PointerEvent | TouchEvent) { releaseNavigation(); hold.press(event); }
+  /** The turn whose answer is under the pointer: its summary shows from any of its messages (`pointedTurn`). */
+  let pointed = $state<string | null>(null);
   /** Whether the list keeps to the bottom right now: pinned, and nobody is moving it. */
   const following = () => pinned && !navigationTarget && !glide.active && !hold.held;
 
@@ -714,10 +716,6 @@
     windowStats.turnFiles += 1;
     return visibleTurnFiles(messages, thread.turns, new Set(closingTurns.split('\0')), thread.cwd, chatPrefs.groupChanges, fileCache);
   });
-  /** Everything the agent wrote in a turn, its tool cards left out: what the turn's copy button takes. */
-  function answerOf(turnId: string): string {
-    return turnAnswer(messages, turnId);
-  }
 
   /**
    * Edit, retry and fork go through the core's rewind and fork, which a
@@ -753,7 +751,7 @@
     hasOlder={store.messagesBefore !== null} loading={store.loadingOlder} loadOlder={() => { if (viewport) { releaseNavigation(); viewport.scrollTop = 0; pinned = false; loadAbove(viewport); } }} />{/if}
   <!-- Input releases restored and navigation anchors; programmatic corrections keep them. -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="timeline" bind:this={viewport} use:watchWheel={onwheel} use:selectionClicks {onscroll} ontouchstart={press} onpointerdown={press} onkeydown={releaseNavigation} style:padding-top="{20 + promptLead}px" style:overflow-anchor={timeline.at(-1)?.state === 'streaming' ? 'none' : undefined} data-testid="timeline" data-media-gallery>
+  <div class="timeline" bind:this={viewport} use:watchWheel={onwheel} use:selectionClicks {onscroll} ontouchstart={press} onpointerdown={press} onpointerover={(event) => { pointed = pointedTurn(event); }} onpointerleave={() => { pointed = null; }} onkeydown={releaseNavigation} style:padding-top="{20 + promptLead}px" style:overflow-anchor={timeline.at(-1)?.state === 'streaming' ? 'none' : undefined} data-testid="timeline" data-media-gallery>
     <div class="column" bind:this={column}>
       <!-- paging: the one line the top of the list shows while a page is in flight. -->
       {#if store.loadingOlder}<p class="loading-older" data-testid="loading-older">{strings.chat.loadingOlder}</p>{/if}
@@ -774,7 +772,7 @@
           data-seam={joined}
           style:margin-top={joined && `calc(var(--chat-${joined}-gap) - var(--chat-message-gap))`}
           data-testid={row.first ? 'message' : 'message-rest'}
-          data-role={group ? 'agent-mail' : message.role}
+          data-role={group ? 'agent-mail' : message.role} data-turn={message.turnId}
         >
           {#if launches.has(message.id)}
             <DelegationActivity {store} agents={launches.get(message.id)!.agents} />
@@ -799,10 +797,10 @@
               loadDiffs={() => Promise.all(filesByTurn.get(turn.id)!.deferred.map(source => store.loadToolOutput(threadId, source.messageId, source.toolId))).then(() => {})} />
           {/if}
           {#if turn && closes}
-            <MessageTurnSummary {store} {threadId} {turn} turns={shownTurns} message={source ?? message} {messages}>
+            <MessageTurnSummary {store} {threadId} {turn} turns={shownTurns} message={source ?? message} {messages} pointed={pointed === turn.id}>
               {#snippet actions()}
                 <MessageActions
-                  text={() => answerOf(turn.id)}
+                  text={() => turnAnswer(messages, turn.id)}
                   retry={atRest && store.openThread?.turns.at(-1)?.id === turn.id ? () => void retry(turn.id) : undefined}
                   fork={branchable && !store.openThread?.incognito && source && source.state !== 'streaming' ? (worktree) => void store.fork(source.id, { worktree }) : undefined}
                 />

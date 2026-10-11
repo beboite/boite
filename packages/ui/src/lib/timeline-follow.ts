@@ -144,3 +144,12 @@ export class BottomGlide {
     clearTimeout(this.#timer);
   }
 }
+
+/**
+ * The turn of the answer under the pointer, or null off every answer. A Claude
+ * turn is many messages and only the last one carries the summary with the
+ * time it finished: the list shows that summary while any of them is pointed at.
+ */
+export function pointedTurn(event: Event): string | null {
+  return (event.target as Element | null)?.closest?.('article.message:not(.user)')?.getAttribute('data-turn') ?? null;
+}
