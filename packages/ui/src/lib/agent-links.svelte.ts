@@ -2,7 +2,7 @@
  * Agent links between the machines this app holds owner connections to.
  * Two owner machines ready at the same time are linked for agent coordination
  * without a click, once per pair until one of them reconnects. A pair the user
- * unlinked stays unlinked until the user links it again by hand.
+ * unlinked in an earlier version stays unlinked.
  */
 import { untrack } from 'svelte';
 import type { CoordinationPeer } from '@boite/contracts';
@@ -23,24 +23,7 @@ function unlinkedPairs(): Set<string> {
   } catch { return new Set(); }
 }
 
-function saveUnlinked(pairs: Set<string>): void {
-  try { localStorage.setItem(UNLINKED_KEY, JSON.stringify([...pairs])); } catch { /* session only */ }
-}
-
-/** The user removed a link between these two cores: the automatic link leaves them alone. */
-export function rememberUnlinked(coreA: string, coreB: string): void {
-  const pairs = unlinkedPairs();
-  pairs.add(pairOf(coreA, coreB));
-  saveUnlinked(pairs);
-}
-
-/** The user linked these two cores by hand: an earlier removal no longer holds. */
-export function forgetUnlinked(coreA: string, coreB: string): void {
-  const pairs = unlinkedPairs();
-  if (pairs.delete(pairOf(coreA, coreB))) saveUnlinked(pairs);
-}
-
-export function isUnlinked(coreA: string, coreB: string): boolean {
+function isUnlinked(coreA: string, coreB: string): boolean {
   return unlinkedPairs().has(pairOf(coreA, coreB));
 }
 
@@ -64,7 +47,7 @@ function reachableIdentity(machine: Machine, identity: CoordinationPeer, bridge 
  * Each core trusts the other, then both check the link in both directions.
  * A failure puts back what either core trusted before and throws.
  */
-export async function linkMachines(a: Machine, b: Machine): Promise<void> {
+async function linkMachines(a: Machine, b: Machine): Promise<void> {
   let trustedA = false;
   let trustedB = false;
   let aIdentity: CoordinationPeer | null = null;
@@ -108,17 +91,9 @@ function machinePair(a: Machine, b: Machine): string {
 }
 
 class AgentAutoLink {
-  /** Why a pair of machines (by machine ids) could not be linked, until it reconnects. */
-  failures = $state<Record<string, string>>({});
-  /** Bumped after a link is made, so a screen showing the links reads them again. */
-  version = $state(0);
   #tried = new Set<string>();
   #running = false;
   #again = false;
-
-  failureOf(a: Machine, b: Machine): string | undefined {
-    return this.failures[machinePair(a, b)];
-  }
 
   async sweep(): Promise<void> {
     const ready = ownerMachines();
@@ -126,10 +101,7 @@ class AgentAutoLink {
     const ids = new Set(ready.map(machine => machine.id));
     // A machine that dropped is tried again when it comes back: its identity or address may have changed.
     for (const key of [...this.#tried]) {
-      if (key.split('\0').some(id => !ids.has(id))) {
-        this.#tried.delete(key);
-        if (key in this.failures) { const { [key]: _gone, ...rest } = this.failures; this.failures = rest; }
-      }
+      if (key.split('\0').some(id => !ids.has(id))) this.#tried.delete(key);
     }
     if (this.#running) { this.#again = true; return; }
     this.#running = true;
@@ -162,17 +134,15 @@ class AgentAutoLink {
         || b.store.group?.cores.some(core => core.coreId === left.coreId) === true;
       const linked = peersA.some(peer => peer.coreId === right.coreId) && peersB.some(peer => peer.coreId === left.coreId);
       if (grouped && !linked) {
-        // No relay through this app: said under Agent links, and tried again when one of the two reconnects.
+        // No relay through this app: tried again when one of the two reconnects.
         if (!await bridgeMachines(a, b, left.coreId, right.coreId)) throw new Error(fill(strings.machines.agentLinkAddressRequired, { machine: b.label }));
       } else if (linked) {
         await bridgeMachines(a, b, left.coreId, right.coreId);
         // Persisted trust is configuration, not proof that either signed route still works.
         await Promise.all([a.store.checkCoordinationPeer(right.coreId), b.store.checkCoordinationPeer(left.coreId)]);
       } else await linkMachines(a, b);
-      this.version += 1;
-    } catch (cause) {
-      this.failures = { ...this.failures, [key]: cause instanceof Error ? cause.message : String(cause) };
-      this.version += 1;
+    } catch {
+      // Tried again when one of the two reconnects.
     }
   }
 
@@ -191,7 +161,6 @@ class AgentAutoLink {
   reset(): void {
     closeBridges();
     this.#tried.clear();
-    this.failures = {};
   }
 }
 

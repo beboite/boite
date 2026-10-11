@@ -10,7 +10,7 @@
    * Shuffle for a new one, and one row per part where every choice is drawn
    * on the robot itself, so nothing has to be read.
    */
-  let { robot, onpick, compact = false }: { robot: Robot; onpick: (robot: Robot) => void; compact?: boolean } = $props();
+  let { robot, onpick }: { robot: Robot; onpick: (robot: Robot) => void } = $props();
   const labels = $derived(strings.agents.robot);
   const rows: Exclude<RobotPart, 'family'>[] = ['shape', 'color', 'eyes', 'top'];
 
@@ -19,7 +19,7 @@
   }
 </script>
 
-<div class="robot-picker" class:compact data-testid="robot-picker">
+<div class="robot-picker" data-testid="robot-picker">
   <div class="stage">
     <span class="portrait"><RobotFace {robot} /></span>
     <button type="button" class="small" onclick={shuffle} data-testid="robot-shuffle"><Dices size={14} strokeWidth={1.75} />{labels.shuffle}</button>
@@ -70,8 +70,6 @@
   .option.on, .swatch.on { border-color: var(--color-accent); box-shadow: 0 0 0 2px var(--color-accent-soft); }
   .thumb { width: 32px; height: 32px; display: block; border-radius: 50%; overflow: hidden; flex: none; }
   .swatch { width: 28px; height: 28px; padding: 0; border-radius: 50%; border: 2px solid var(--color-surface); background: var(--swatch); }
-  .compact .portrait { width: 88px; height: 88px; }
-  .compact .thumb { width: 28px; height: 28px; }
   @media (max-width: 720px) {
     .robot-picker { grid-template-columns: 1fr; justify-items: center; }
     .parts { width: 100%; }

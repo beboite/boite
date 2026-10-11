@@ -2,11 +2,7 @@
   import type { ThreadStatus } from '@boite/contracts';
   import { strings } from '../lib/strings';
 
-  let {
-    status,
-    unread = false,
-    testid
-  }: { status: ThreadStatus; unread?: boolean; testid?: string } = $props();
+  let { status, unread = false }: { status: ThreadStatus; unread?: boolean } = $props();
 
   let label = $derived(unread && status === 'idle' ? strings.sidebar.unread : strings.threadStatus[status]);
 </script>
@@ -16,7 +12,6 @@
   class:unread={unread && status === 'idle'}
   title={label}
   aria-label={label}
-  data-testid={testid}
   data-status={status}
 ></span>
 

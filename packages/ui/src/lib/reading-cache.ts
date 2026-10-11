@@ -30,15 +30,6 @@ function partChars(part: MessagePart): number {
   }
 }
 
-/**
- * Whether a timeline left behind is small enough to keep for a quick return.
- * It stops at the first message past the cap, and never walks a timeline with
- * too many messages to be kept anyway.
- */
-export function fitsReadingCache(messages: readonly Message[]): boolean {
-  return readingCacheBytes(messages) <= READING_CACHE_BYTES;
-}
-
 /** Stops at the per-thread bound; cache accounting never serializes whole messages. */
 export function readingCacheBytes(messages: readonly Message[]): number {
   if (messages.length > READING_CACHE_MESSAGES) return READING_CACHE_BYTES + 1;

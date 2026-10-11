@@ -5,7 +5,6 @@
   import type { AgentsView } from '../../lib/agents.svelte';
   import { dateTime, describeSchedule, routineName, routineState, spent } from '../../lib/schedule';
   import { fill, strings } from '../../lib/strings';
-  import AgentAvatar from './AgentAvatar.svelte';
   import AgentSchedule from './AgentSchedule.svelte';
 
   /**
@@ -13,13 +12,7 @@
    * last run went with the way into that run's thread. Run now, pause and edit
    * sit under it; editing opens the same form that planned it.
    */
-  let { view, routine, showAgent = false, onopenagent }: {
-    view: AgentsView;
-    routine: AgentRoutine;
-    /** Names the agent, where the list mixes several. */
-    showAgent?: boolean;
-    onopenagent?: (agentId: string) => void;
-  } = $props();
+  let { view, routine }: { view: AgentsView; routine: AgentRoutine } = $props();
   let editing = $state(false);
   const labels = $derived(strings.agents);
   const t = $derived(strings.agents.when);
@@ -45,9 +38,7 @@
 {:else}
   <article class="card routine-card" data-state={standing.kind} data-testid="routine-{routine.id}">
     <header>
-      {#if showAgent && agent}
-        <button type="button" class="ghost routine-agent" onclick={() => onopenagent?.(agent.id)} title={agent.name}><AgentAvatar kind="profile" id={agent.id} name={agent.name} avatar={agent.avatar} size={28} /></button>
-      {:else}<span class="routine-icon"><CalendarClock size={16} strokeWidth={1.75} /></span>{/if}
+      <span class="routine-icon"><CalendarClock size={16} strokeWidth={1.75} /></span>
       <div class="routine-text">
         <strong>{routine.name}</strong>
         <span class="routine-when">{describeSchedule(routine.schedule)}</span>

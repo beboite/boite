@@ -656,7 +656,7 @@
   --palette-light-amethyst-live: #866325;
 }
 
-.answer-bubble, .reply-pending .typing {
+.answer-bubble {
   background: var(--color-surface-2);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-bubble);
@@ -1673,8 +1673,7 @@ html[data-theme='grain'] body::after {
   }
 
   html[data-theme='grain'] .chat,
-  html[data-theme='grain'] .settings > section,
-  html[data-theme='grain'] .first-run {
+  html[data-theme='grain'] .settings > section {
     background: color-mix(in oklab, var(--color-background) 62%, transparent);
   }
 }
@@ -1722,8 +1721,7 @@ html[data-glass] #app {
     background: color-mix(in oklab, var(--color-surface) 80%, transparent);
   }
 
-  html[data-glass] .chat,
-  html[data-glass] .first-run {
+  html[data-glass] .chat {
     background: color-mix(in oklab, var(--color-background) 90%, transparent);
   }
 }
