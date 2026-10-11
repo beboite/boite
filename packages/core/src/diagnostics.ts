@@ -336,7 +336,7 @@ export class Diagnostics {
   /** A client's own errors. Bounded per connection, so a render loop cannot flood the files. */
   report(raw: unknown, connection: Connection): { accepted: number } {
     let records: DiagnosticReportRecord[];
-    try { records = validateDiagnosticReport(raw); } catch (error) { throw invalidParams((error as Error).message); }
+    try { records = validateDiagnosticReport(raw, this.core.logs.secrets); } catch (error) { throw invalidParams((error as Error).message); }
     const minute = Math.floor(Date.now() / 60_000);
     const budget = this.#reports.get(connection.id);
     const used = budget?.minute === minute ? budget.count : 0;

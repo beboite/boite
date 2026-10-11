@@ -76,6 +76,8 @@ export class DiagnosticsReporter {
   #sending = false;
   #off = false;
   #offlineSince: number | null = null;
+  /** The first connect is no drop: only a socket that was ready once can be lost. */
+  #wasReady = false;
   #stops: (() => void)[] = [];
 
   constructor(client: Client, timers: Timers = browserTimers) {
@@ -91,6 +93,7 @@ export class DiagnosticsReporter {
   /** Starts the socket watch and the call watch on this client. Returns the stop. */
   start(): () => void {
     this.#watchCalls();
+    this.#wasReady = this.#client.state === 'ready';
     if ('onState' in this.#client) this.#stops.push((this.#client as ObservableClient).onState(state => this.#onState(state)));
     return () => this.stop();
   }
@@ -158,7 +161,9 @@ export class DiagnosticsReporter {
 
   #onState(state: ClientState): void {
     const now = this.#timers.now();
-    if (state === 'connecting' && this.#offlineSince === null) {
+    if (state === 'ready' && !this.#wasReady) {
+      this.#wasReady = true;
+    } else if (state === 'connecting' && this.#wasReady && this.#offlineSince === null) {
       this.#offlineSince = now;
       this.push('warn', 'connection', 'ui.disconnected', 'The connection to the core dropped; reconnecting');
     } else if (state === 'ready' && this.#offlineSince !== null) {

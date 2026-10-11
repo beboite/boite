@@ -537,7 +537,8 @@ export function registerProviderMethods(core: Core): void {
         });
         return output;
       }, (error: unknown) => {
-        core.logs.warn(`Reading the version of ${name} failed: ${error instanceof Error ? error.message : String(error)}`, { source: 'providers', event: 'provider.version-failed', durationMs: performance.now() - at, data: { program: name } });
+        // The message names the program by its full path; the log names only the file.
+        core.logs.warn(`Reading the version of ${name} failed: ${(error instanceof Error ? error.message : String(error)).split(program).join(name)}`, { source: 'providers', event: 'provider.version-failed', durationMs: performance.now() - at, data: { program: name } });
         throw error;
       });
     },

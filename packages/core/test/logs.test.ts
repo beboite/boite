@@ -169,6 +169,19 @@ describe('bounded persistent diagnostics', () => {
     } finally { await reader.close(); rmSync(directory, { recursive: true, force: true }); }
   });
 
+  test('a file past the read cap answers with its newest records, the ones at its end', async () => {
+    const directory = temporary();
+    mkdirSync(join(directory, 'logs'), { recursive: true });
+    const now = Date.now();
+    // About 2.5 MiB, past the 2 MiB a read takes: a file written under a larger limit.
+    const lines = Array.from({ length: 10_000 }, (_, index) => JSON.stringify({ id: `old:${index}`, runId: 'old', at: now - 10_000_000 + index * 1000, level: 'info', source: 'test', event: 'big', message: `line ${index} ${'x'.repeat(200)}` }));
+    writeFileSync(join(directory, 'logs', 'core.0.ndjson'), `${lines.join('\n')}\n`, { mode: 0o600 });
+    const reader = new DiagnosticLogs(directory);
+    try {
+      expect((await reader.query({ limit: 1 }))[0]?.id).toBe('old:9999');
+    } finally { await reader.close(); rmSync(directory, { recursive: true, force: true }); }
+  });
+
   test('a missing file between rotated ones does not hide the older files behind it', async () => {
     const directory = temporary();
     const now = Date.now();

@@ -57,7 +57,7 @@ export class DiagnosticLogs {
   private readonly activeTurns = new Map<string, { turnId: string; startedAt: number }>();
   private readonly processTurns = new Map<string, string>();
 
-  constructor(dataDir: string, private readonly secrets: readonly string[] = [], private readonly report: (message: string) => void = message => console.error(message), private readonly fileBytes = LOG_FILE_BYTES) {
+  constructor(dataDir: string, readonly secrets: readonly string[] = [], private readonly report: (message: string) => void = message => console.error(message), private readonly fileBytes = LOG_FILE_BYTES) {
     this.directory = join(dataDir, 'logs');
     // Startup performs only bounded metadata operations. History is read on demand.
     this.ready = this.initialize().catch(error => { this.failed = true; this.failure(error); });
@@ -340,8 +340,11 @@ export class DiagnosticLogs {
     try { handle = await open(path, 'r'); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error; }
     try {
-      const buffer = Buffer.alloc(Math.min((await handle.stat()).size, Math.max(this.fileBytes, LOG_FILE_BYTES)));
-      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+      // Past the cap, the tail: a file is appended to, so its newest records are last.
+      // A line cut at the start of the window fails to parse and is skipped.
+      const size = (await handle.stat()).size;
+      const buffer = Buffer.alloc(Math.min(size, Math.max(this.fileBytes, LOG_FILE_BYTES)));
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, size - buffer.length);
       const records: CoreLogRecord[] = [];
       for (const line of buffer.subarray(0, bytesRead).toString('utf8').split('\n')) {
         // A crash can leave an incomplete final line; other records still answer.

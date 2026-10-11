@@ -51,6 +51,8 @@ test('the anonymizer replaces paths, names, addresses and private hosts and keep
 test('a name equal to a placeholder word leaves the placeholders whole', () => {
   const anonymizer = createLogAnonymizer({ salt: 'fixed-salt', user: 'email', hostname: 'host.lan' });
   expect(anonymizer.text('mail me@example.com from host.lan')).toBe('mail <email> from <host>');
+  // An account label is a whole word too: `ann` leaves `banner` alone.
+  expect(createLogAnonymizer({ salt: 'fixed-salt', extra: ['ann'] }).text('banner by ann')).toMatch(/^banner by <private:[0-9a-f]{6}>$/);
 });
 
 test('a thread folder beside a project, sharing only its name prefix, gets its own placeholder', () => {
@@ -78,6 +80,9 @@ test('a stored line from any origin parses, bounds its fields and formats on one
   const leaky = parseLogRecord(JSON.stringify({ id: 'a', runId: 'r', at: 1, level: 'warn', source: 's', event: 'e', message: 'Authorization: Bearer abcdefghijklmnop123456 with hunter2-value', data: { note: 'hunter2-value' } }), 'shell', ['hunter2-value'])!;
   expect(JSON.stringify(leaky)).not.toContain('abcdefghijklmnop123456');
   expect(JSON.stringify(leaky)).not.toContain('hunter2-value');
+  // A secret across the message bound is redacted before the cut, not left as a prefix.
+  const long = parseLogRecord(JSON.stringify({ id: 'a', runId: 'r', at: 1, level: 'warn', source: 's', event: 'e', message: `${'x'.repeat(4090)} straddling-secret-value` }), 'shell', ['straddling-secret-value'])!;
+  expect(long.message).not.toContain('stra');
   expect(parseLogRecord('{"id":1}')).toBeNull();
   expect(parseLogRecord('{"broken')).toBeNull();
   expect(parseLogRecord(JSON.stringify({ id: 'a', runId: 'r', at: 1, level: 'info', source: 's', event: 'e', message: 'm' }))!.origin).toBe('core');

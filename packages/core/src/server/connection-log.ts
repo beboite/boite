@@ -28,7 +28,8 @@ export function clientField(value: unknown, max = 40, fallback = 'unknown'): str
 export function describeConnection(connection: ServerConnection): { principal: string; client: string; remote: boolean } {
   return {
     principal: connection.authenticated ? connection.identity.principal : 'unauthenticated',
-    client: connection.sentFrom?.client ?? connection.clientName,
+    // Chosen by the client's hello or forwarded by a relay: never raw in a line.
+    client: clientField(connection.sentFrom?.client ?? connection.clientName, 100),
     remote: connection.remote,
   };
 }
@@ -53,7 +54,8 @@ export function logHelloAccepted(core: Core, connection: ServerConnection, clien
   });
 }
 
-export function logHelloRefused(core: Core, connection: ServerConnection, reason: string, clientName: string): void {
+export function logHelloRefused(core: Core, connection: ServerConnection, reason: string, rawClientName: string): void {
+  const clientName = clientField(rawClientName, 100);
   core.logs.warn(`Connection ${connection.id} from ${clientName}${connection.remote ? ' over the network' : ' on this machine'} was refused at hello: ${reason}`, {
     source: 'connections', event: 'connection.hello-refused', data: { connectionId: connection.id, reason, client: clientName, remote: connection.remote },
   });
@@ -85,7 +87,8 @@ export function logRpcTiming(core: Core, connection: ServerConnection, rawMethod
   // The client names the method, unknown ones included: never raw in a line.
   const method = clientField(rawMethod, 100, '(none)');
   if (failure !== null) {
-    core.logs.debug(`${method} refused with code ${failure.code}: ${failure.message}`, {
+    // A refusal often echoes the value the client sent.
+    core.logs.debug(`${method} refused with code ${failure.code}: ${clientField(failure.message, 300, '(no message)')}`, {
       source: 'rpc', event: 'rpc.refused', requestId, threadId, durationMs: ms,
       data: { method, code: failure.code, principal: connection.identity.principal },
     });

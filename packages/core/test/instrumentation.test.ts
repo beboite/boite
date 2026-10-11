@@ -6,7 +6,7 @@ import { connect } from '../src/client.ts';
 import type { Core } from '../src/core.ts';
 import { forgetStderr, noteStderr, STDERR_TAIL_CHARS, stderrTail } from '../src/drivers/stderr-tail.ts';
 import type { SpawnedChild } from '../src/procs.ts';
-import { clientField, closeLevel, logRpcTiming, slowRpcLevel } from '../src/server/connection-log.ts';
+import { clientField, closeLevel, describeConnection, logHelloRefused, logRpcTiming, slowRpcLevel } from '../src/server/connection-log.ts';
 import { noteReady } from '../src/drivers/driver-log.ts';
 import { isoTime, noteClaudeMessage } from '../src/drivers/claude/diagnostics.ts';
 import { detectionLogger } from '../src/providers/install-log.ts';
@@ -30,15 +30,12 @@ test('an agent process that crashes leaves one warning with its exit code and th
   for (let index = 0; index < 30; index += 1) noteStderr(threadId, `line ${index} ${'x'.repeat(40)}`);
   noteStderr(threadId, 'fatal: the model refused the session');
   const { core, records } = recordingCore();
-  const child = spawn(process.execPath, ['-e', 'process.exit(3)'], { stdio: ['pipe', 'pipe', 'pipe'] }) as unknown as SpawnedChild;
+  // A stand-in child: on macOS CI a real one sometimes delivered neither `exit` nor `close`
+  // within 10 s, and this test is about the record, not the runtime's process events.
+  const child = Object.assign(new EventEmitter(), { pid: 4243 }) as unknown as SpawnedChild;
   watchProviderProcess(core, child, '/home/someone/.local/bin/claude', { threadId, turnId: 'trn_1', providerId: 'claude', resume: true });
-  // A driver ends stdin and reads both streams; so does this test.
-  child.stdin?.end();
-  child.stdout?.resume();
-  child.stderr?.resume();
-  // The record is what counts, whichever of `close` or `exit` wrote it.
-  const until = Date.now() + 10_000;
-  while (!records.some(record => record.context.event === 'driver.process.crashed') && Date.now() < until) await Bun.sleep(20);
+  child.emit('exit', 3, null);
+  child.emit('close', 3, null);
   const crashed = records.find(record => record.context.event === 'driver.process.crashed');
   expect(crashed?.level).toBe('warn');
   const data = crashed?.context.data as Record<string, unknown>;
@@ -61,6 +58,8 @@ test('a program that cannot start leaves only its failure, never a start', async
   while (records.length === 0 && Date.now() < until) await Bun.sleep(20);
   await Bun.sleep(50);
   expect(records.map(record => record.context.event)).toEqual(['driver.process.spawn-failed']);
+  // The error code, never the spawn message that holds the full path.
+  expect(records[0]?.message).toBe('claude for claude could not start (ENOENT)');
 });
 
 test('a stop the core asked for is no crash, and old stderr does not describe a new failure', () => {
@@ -203,8 +202,12 @@ test('a method name the client chose cannot forge a line in a refused or slow RP
   const connection = { identity: { principal: 'owner', threadId: null } } as never;
   logRpcTiming(core, connection, 'nope\n2026-10-10 ERROR core forged', 'r1', 3, { code: -32601, message: 'unknown method' } as never);
   logRpcTiming(core, connection, 'slow\u2028forged', 'r2', 12_000, null);
+  // A refusal echoing the client's value, and the client's own name at hello.
+  logRpcTiming(core, connection, 'push.subscribe', 'r3', 3, { code: -32602, message: 'home.name: bad\n2026-10-10 ERROR core forged' } as never);
+  logHelloRefused(core, { id: 'c1', remote: false } as never, 'bad token', 'app\n2026-10-10 ERROR core forged');
+  expect(describeConnection({ authenticated: false, remote: false, clientName: 'app\u2028forged' } as never).client).toBe('appforged');
   for (const record of records) expect(`${record.message}${JSON.stringify(record.context.data)}`).not.toMatch(/[\n\u2028]/);
-  expect(records.map(record => record.context.event)).toEqual(['rpc.refused', 'rpc.slow']);
+  expect(records.map(record => record.context.event)).toEqual(['rpc.refused', 'rpc.slow', 'rpc.refused', 'connection.hello-refused']);
 });
 
 test('a process that reports its exit but never closes is still logged, with its exit time', async () => {

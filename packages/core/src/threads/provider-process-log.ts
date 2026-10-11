@@ -53,9 +53,11 @@ export function watchProviderProcess(core: Core, child: SpawnedChild, command: s
   child.once('error', (error) => {
     if (reported) return;
     reported = true;
-    core.logs.warn(`${program} for ${who.providerId} could not start: ${error.message}`, {
+    // The code and not the message: `spawn /home/<name>/... ENOENT` names the user.
+    const code = (error as NodeJS.ErrnoException).code ?? null;
+    core.logs.warn(`${program} for ${who.providerId} could not start${code ? ` (${code})` : ''}`, {
       ...base, event: 'driver.process.spawn-failed', durationMs: performance.now() - startedAt,
-      data: { program, version, code: (error as NodeJS.ErrnoException).code ?? null },
+      data: { program, version, code },
     });
   });
   // `close` and not `exit`: stderr is drained by then, so the tail holds the last line.

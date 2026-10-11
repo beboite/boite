@@ -96,8 +96,13 @@ test('a method the class gets later still runs while the reporter watches calls'
 
 test('a reconnection reports the time offline, and a core without the method turns reporting off', async () => {
   const client = new StubClient();
+  client.state = 'connecting';
   const reporter = new DiagnosticsReporter(client as never, timers());
   const stop = reporter.start();
+  // The first connect, as the store starts the reporter before it, is no drop.
+  client.become('connecting');
+  client.become('ready');
+  expect(reporter.queued).toHaveLength(0);
   client.become('connecting');
   await vi.advanceTimersByTimeAsync(12_400);
   // Nothing leaves while the socket is away.

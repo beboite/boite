@@ -373,7 +373,7 @@ export function createLogAnonymizer(context: LogAnonymizeContext): LogAnonymizer
   };
   // A hyphen ends a name: `meetsu-notes.txt` and `secret-game-backup` keep only their suffix.
   const replaceWords = combined(words, '(?!\\w)', match => match.toLowerCase(), '(^|[^\\w.])');
-  const replaceExtras = combined(extras, '', match => match.toLowerCase());
+  const replaceExtras = combined(extras, '(?!\\w)', match => match.toLowerCase(), '(^|[^\\w.])');
 
   const text = (raw: string): string => {
     let value = replacePaths(raw);
@@ -460,7 +460,7 @@ export function parseLogRecord(line: string, fallbackOrigin: LogOrigin = 'core',
   const record: CoreLogRecord = {
     id: raw.id.slice(0, LOG_CONTEXT_CHARS), runId: raw.runId.slice(0, LOG_CONTEXT_CHARS), at: raw.at, level: raw.level as CoreLogLevel,
     origin: LOG_ORIGINS.includes(raw.origin as LogOrigin) ? raw.origin as LogOrigin : fallbackOrigin,
-    source: bounded(raw.source) ?? 'core', event: bounded(raw.event) ?? 'core.log', message: normalizeCoreLogText(raw.message.slice(0, LOG_MESSAGE_CHARS), secrets),
+    source: bounded(raw.source) ?? 'core', event: bounded(raw.event) ?? 'core.log', message: normalizeCoreLogText(raw.message, secrets),
   };
   for (const key of ['threadId', 'turnId', 'requestId', 'providerId', 'model', 'parentThreadId'] as const) { const value = bounded(raw[key]); if (value !== undefined) record[key] = value; }
   if (typeof raw.durationMs === 'number' && Number.isFinite(raw.durationMs) && raw.durationMs >= 0) record.durationMs = raw.durationMs;
@@ -641,25 +641,32 @@ export interface DiagnosticReportRecord {
   data?: LogData;
 }
 
-export function validateDiagnosticReport(raw: unknown): DiagnosticReportRecord[] {
+const REPORT_RECORD_KEYS = ['level', 'at', 'source', 'event', 'message', 'threadId', 'durationMs', 'data'] as const;
+
+/** `secrets` are redacted from `data` before its strings are cut, so a cut never splits one. */
+export function validateDiagnosticReport(raw: unknown, secrets: readonly string[] = []): DiagnosticReportRecord[] {
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('diagnostics.report params: expected an object');
+  for (const key of Object.keys(raw)) if (key !== 'records') throw new Error(`diagnostics.report ${key}: expected only records`);
   const records = (raw as { records?: unknown }).records;
   if (!Array.isArray(records) || records.length < 1 || records.length > 50) throw new Error('diagnostics.report records: expected 1 to 50 records');
   return records.map((entry, index) => {
     const field = `diagnostics.report records[${index}]`;
     if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) throw new Error(`${field}: expected an object`);
     const value = entry as Record<string, unknown>;
+    // A misspelled field would silently lose the record's correlation.
+    for (const key of Object.keys(value)) if (!(REPORT_RECORD_KEYS as readonly string[]).includes(key)) throw new Error(`${field}.${key}: expected one of ${REPORT_RECORD_KEYS.join(', ')}`);
     const record: DiagnosticReportRecord = {
       level: level(value.level, `${field}.level`), at: timestamp(value.at, `${field}.at`),
       source: plainText(value.source, `${field}.source`, 60), event: plainText(value.event, `${field}.event`, 100),
-      message: typeof value.message === 'string' && value.message.length > 0 ? value.message.slice(0, LOG_MESSAGE_CHARS) : (() => { throw new Error(`${field}.message: expected text`); })(),
+      // Whole: the core redacts its secrets before it bounds the text, so a cut never splits one.
+      message: typeof value.message === 'string' && value.message.length > 0 ? value.message : (() => { throw new Error(`${field}.message: expected text`); })(),
     };
     if (value.threadId !== undefined) record.threadId = plainText(value.threadId, `${field}.threadId`);
     if (value.durationMs !== undefined) {
       if (typeof value.durationMs !== 'number' || !Number.isFinite(value.durationMs) || value.durationMs < 0) throw new Error(`${field}.durationMs: expected milliseconds`);
       record.durationMs = value.durationMs;
     }
-    const data = normalizeLogData(value.data);
+    const data = normalizeLogData(value.data, secrets);
     if (data) record.data = data;
     return record;
   });

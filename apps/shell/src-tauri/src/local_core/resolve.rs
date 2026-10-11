@@ -23,7 +23,12 @@ fn running_child(state: &CoreState) -> Option<Arc<AtomicBool>> {
     let status = match polled {
         Ok(None) => return guard.as_ref().map(|spawned| spawned.ready.clone()),
         Ok(Some(status)) => Some(status),
-        Err(_) => None,
+        Err(error) => {
+            // As before this log existed, the child counts as gone; the record says why.
+            let pid = guard.as_ref().map(|spawned| spawned.child.id());
+            shell_log::warn("core", "shell.core.wait-failed", format!("could not check whether the core is still running ({error}); starting another"), json!({ "pid": pid }));
+            None
+        }
     };
     let spawned = guard.take()?;
     drop(guard);
