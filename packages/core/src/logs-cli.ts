@@ -10,7 +10,7 @@
 import { closeSync, fchmodSync, openSync, writeFileSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { formatLogLine, formatLogTime, LOG_LEVELS, LOG_ORIGINS, type CoreLogLevel, type CoreLogRecord, type CoreLogsQuery, type DiagnosticSummary, type LogOrigin } from '@boite/contracts';
-import { readFileSync, statSync } from 'node:fs';
+import { readSync } from 'node:fs';
 import type { CoreClient } from './client.ts';
 import { Usage } from './cli-args.ts';
 
@@ -56,7 +56,7 @@ export function parseSince(raw: string, now = Date.now()): number {
   }
   const at = Date.parse(raw);
   if (!Number.isFinite(at)) throw new Usage(`--since expects 30m, 2h, 1d or a date, got ${raw}`);
-  return at;
+  return Math.max(0, at);
 }
 
 const FLAG_NAMES: Record<keyof LogFlags, string> = {
@@ -185,8 +185,10 @@ export async function logsCommand(args: string[], client: CoreClient, threadId: 
   if (options.level && options.minLevel) throw new Usage('--level and --min-level filter the same field: give one of them');
   if (agent) {
     if (options.level || options.turn || options.anonymize) throw new Usage('--level, --turn and --anonymize are the owner\'s; an agent uses --min-level, --since, --search and --mine');
+    // Refused, not cut: an agent would not know it missed the older records it asked for.
+    if (options.limit !== undefined && options.limit > 500) throw new Usage('an agent reads up to 500 records per call: narrow with --since or --search, or ask for --limit 500');
     const records = await client.call('diagnostics.logs', {
-      threadId, scope: options.mine ? 'thread' : 'app', limit: Math.min(options.limit ?? 100, 500),
+      threadId, scope: options.mine ? 'thread' : 'app', limit: options.limit ?? 100,
       minLevel: options.minLevel ?? 'info',
       ...(options.since === undefined ? {} : { since: options.since }), ...(options.origin ? { origin: options.origin } : {}), ...(options.search ? { search: options.search } : {}),
     });
@@ -216,14 +218,22 @@ export async function issueCommand(args: string[], client: CoreClient, threadId:
   let description = options.description;
   if (options.descriptionFile) {
     const file = isAbsolute(options.descriptionFile) ? options.descriptionFile : resolve(cwd, options.descriptionFile);
-    // The core takes 20000 characters: a log or a dump given by mistake is refused before it is read.
-    let size = 0;
-    try { size = statSync(file).size; } catch { /* readFileSync below says why */ }
-    if (size > 256 * 1024) throw new Usage(`--description-file ${options.descriptionFile} is ${Math.round(size / 1024)} KiB; a description is at most 20000 characters`);
-    try { description = readFileSync(file, 'utf8'); }
-    catch (error) { throw new Usage(`--description-file ${options.descriptionFile} cannot be read: ${(error as NodeJS.ErrnoException).code ?? (error as Error).message}`); }
+    // At most 256 KiB and one byte are read, through one descriptor: a log or a dump given by
+    // mistake, even one swapped in after a check, never lands whole in memory.
+    const limit = 256 * 1024;
+    let bytes: Buffer;
+    try {
+      const fd = openSync(file, 'r');
+      try {
+        const buffer = Buffer.alloc(limit + 1);
+        bytes = buffer.subarray(0, readSync(fd, buffer, 0, buffer.length, 0));
+      } finally { closeSync(fd); }
+    } catch (error) { throw new Usage(`--description-file ${options.descriptionFile} cannot be read: ${(error as NodeJS.ErrnoException).code ?? (error as Error).message}`); }
+    if (bytes.length > limit) throw new Usage(`--description-file ${options.descriptionFile} is over 256 KiB; a description is at most 20000 characters`);
+    description = bytes.toString('utf8');
   }
   if (!description) throw new Usage('issue needs --description or --description-file');
+  if (description.trim().length > 20_000) throw new Usage(`the description has ${description.trim().length} characters; the issue takes at most 20000`);
   const result = await client.call('diagnostics.issue', {
     ...(agent ? { threadId } : {}), title: options.title, description, includeLogs: !options.noLogs, submit: action === 'submit',
   });

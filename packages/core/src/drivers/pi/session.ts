@@ -627,8 +627,7 @@ export class PiSession {
         break;
       }
       case 'auto_retry_start': {
-        const count = (value: unknown): number | null => typeof value === 'number' ? value : null;
-        const attempt = count(message['attempt']), maxAttempts = count(message['maxAttempts']), retryAfterMs = count(message['delayMs']);
+        const attempt = numberOf(message['attempt']), maxAttempts = numberOf(message['maxAttempts']), retryAfterMs = numberOf(message['delayMs']);
         turn.ctx.reportProgress?.('retrying', `${attempt ?? '?'}/${maxAttempts ?? '?'}`);
         turn.ctx.diagnostic?.('warn', `pi request failed, retry ${attempt ?? '?'} of ${maxAttempts ?? '?'} in ${retryAfterMs ?? '?'} ms: ${textOf(message['errorMessage'])}`, {
           event: 'driver.api.retry', data: { attempt, maxAttempts, retryAfterMs },

@@ -289,7 +289,8 @@ export class TerminalStore {
       (code) => code,
       () => null,
     ).then((code) => {
-      this.core.logs.record(code === 0 || code === null ? 'info' : 'warn', `Terminal ${id} (${shellName}) exited with code ${code ?? 'unknown'} after ${Math.round((Date.now() - openedAt) / 1000)} s`, {
+      // A shell exits with its last command's status: a failed `false; exit` is a routine close.
+      this.core.logs.info(`Terminal ${id} (${shellName}) exited with code ${code ?? 'unknown'} after ${Math.round((Date.now() - openedAt) / 1000)} s`, {
         source: 'terminals', event: 'terminal.exited', ...owner, durationMs: Date.now() - openedAt, data: { id, shell: shellName, exitCode: code },
       });
       clearTimeout(fallback);

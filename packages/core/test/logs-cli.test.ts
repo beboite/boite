@@ -63,6 +63,9 @@ describe('the CLI prints records oldest first, filters by time and level, and ex
   test('an agent reads its own family and the grouped problems', async () => {
     expect(await run(['logs', '--mine', '--min-level', 'warn'], agentEnv)).toContain('first warning');
     expect(await run(['logs', 'problems'], agentEnv)).toContain('1x error core/test/test.second');
+    // Past what an agent may read, it is told so rather than handed the newest 500.
+    expect(await refusal(['logs', '--limit', '1000'], agentEnv)).toContain('an agent reads up to 500 records');
+    expect(await refusal(['issue', 'draft', '--title', 'The window froze', '--description', 'x'.repeat(20_001)], agentEnv)).toContain('at most 20000');
   });
 
   test('a folder given as --out fails to open and keeps its permissions; the core refuses an unknown field', async () => {

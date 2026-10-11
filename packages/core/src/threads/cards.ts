@@ -373,6 +373,7 @@ export class ThreadCards {
       this.asyncCards.delete(id);
       this.closeUnanswered(pending.request);
       asyncGone ||= pending.request.async === true;
+      logCard(this.core, pending.request, 'question.cancelled', 'Question cancelled because the turn ended', { async: pending.request.async === true, by: 'turn end' });
       this.core.bus.emit('question.answered', { questionId: id, threadId, answer: null });
       pending.resolve(null);
     }

@@ -44,7 +44,8 @@ export function watchProviderProcess(core: Core, child: SpawnedChild, command: s
   const startedAt = performance.now();
   // Wall time, as `noteStderr` stamps lines: only what this process printed describes its end.
   const startedWall = Date.now();
-  const base = { source: who.providerId, threadId: who.threadId, ...(who.turnId === undefined ? {} : { turnId: who.turnId }) };
+  // The provider this process runs, named here: the thread may have switched to another since.
+  const base = { source: who.providerId, providerId: who.providerId, threadId: who.threadId, ...(who.turnId === undefined ? {} : { turnId: who.turnId }) };
   const started = (): void => core.logs.info(`Started ${program}${version ? ` ${version}` : ''} for ${who.providerId}, pid ${child.pid ?? 'unknown'}, ${who.resume ? 'resuming its saved session' : 'new session'}`, {
     ...base, event: 'driver.process.started', data: { program, version, pid: child.pid ?? null, resume: who.resume },
   });

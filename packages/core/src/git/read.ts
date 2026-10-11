@@ -71,7 +71,7 @@ export async function git(core: Core, threadId: ThreadId, cwd: string, args: str
     new Response(spawned.proc.stderr).text(),
     spawned.exited,
   ]), timeoutMs, () => logGitTimeout(core, threadId, args, timeoutMs, at));
-  logGit(core, threadId, args, code, performance.now() - at, stderr);
+  try { logGit(core, threadId, args, code, performance.now() - at, stderr); } catch { /* A diagnostic storage failure must not break reads. */ }
   return { code, stdout, stderr };
 }
 
@@ -92,7 +92,7 @@ async function gitBytes(core: Core, threadId: ThreadId, cwd: string, args: strin
     new Response(spawned.proc.stderr).text(),
     spawned.exited,
   ]), GIT_READ_TIMEOUT_MS, () => logGitTimeout(core, threadId, args, GIT_READ_TIMEOUT_MS, at));
-  logGit(core, threadId, args, code, performance.now() - at, stderr);
+  try { logGit(core, threadId, args, code, performance.now() - at, stderr); } catch { /* A diagnostic storage failure must not break reads. */ }
   return { code, data: new Uint8Array(buffer) };
 }
 

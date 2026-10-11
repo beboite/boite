@@ -372,8 +372,15 @@ export function startServerOnStickyPort(
     }
   }
   // The last refusal is named: a host that cannot be bound fails every port the same way, which "taken" would hide.
-  server.core.log('warn', `ports ${candidates.join(', ')} refused the server (${messageOf(last)}), listening on another`, { source: 'startup', event: 'startup.port-fallback', data: { previousPort, port: 0 } });
-  return startServer({ ...server, port: 0 });
+  // The bound port is logged, not the 0 asked for; a host no port accepts is logged before it throws.
+  let started: RunningServer;
+  try { started = startServer({ ...server, port: 0 }); }
+  catch (error) {
+    server.core.log('warn', `ports ${candidates.join(', ')} refused the server (${messageOf(last)}), and so did any other port`, { source: 'startup', event: 'startup.port-fallback', data: { previousPort, port: null } });
+    throw error;
+  }
+  server.core.log('warn', `ports ${candidates.join(', ')} refused the server (${messageOf(last)}), listening on ${started.port}`, { source: 'startup', event: 'startup.port-fallback', data: { previousPort, port: started.port } });
+  return started;
 }
 
 export function startServer(options: ServerOptions): RunningServer {
