@@ -37,9 +37,11 @@ export interface TeamLaunch {
  * after the same message share a card, placed where the first of them started,
  * and it stays there once they finish. A child older than every held message
  * belongs to history not loaded yet (`olderUnloaded`); it shows when that page
- * arrives, never at the top of the newer one.
+ * arrives, never at the top of the newer one. Likewise a child newer than every
+ * held message waits for the newer page when the window stops short of the end
+ * (`newerUnloaded`).
  */
-export function teamLaunches(agents: readonly DelegatedAgent[], messages: readonly { id: string; createdAt: number }[], olderUnloaded: boolean): TeamLaunch[] {
+export function teamLaunches(agents: readonly DelegatedAgent[], messages: readonly { id: string; createdAt: number }[], olderUnloaded: boolean, newerUnloaded = false): TeamLaunch[] {
   const launches = new Map<string, TeamLaunch>();
   for (const agent of [...agents].sort((a, b) => a.thread.createdAt - b.thread.createdAt)) {
     const at = agent.thread.createdAt;
@@ -52,6 +54,7 @@ export function teamLaunches(agents: readonly DelegatedAgent[], messages: readon
     }
     const anchor = messages[low - 1];
     if (!anchor && olderUnloaded) continue;
+    if (low === messages.length && newerUnloaded) continue;
     const id = `delegation:${anchor?.id ?? 'start'}`;
     const launch = launches.get(id);
     if (launch) launch.agents.push(agent);

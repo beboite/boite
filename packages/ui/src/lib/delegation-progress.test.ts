@@ -19,7 +19,7 @@ test('only successful finished turns count as completed, with active status taki
   } finally { client.close(); }
 });
 
-test('each launch gets its own card after the message it followed, and older history waits for its page', async () => {
+test('each launch gets its own card after the message it followed, and history outside the window waits for its page', async () => {
   const client = new FakeClient({ delayMs: 0, delegationDemo: true });
   try {
     await client.connect();
@@ -33,5 +33,8 @@ test('each launch gets its own card after the message it followed, and older his
     const before = at(second, 50);
     expect(teamLaunches([before, early], messages, false).map(launch => launch.id)).toEqual(['delegation:start', 'delegation:m1']);
     expect(teamLaunches([before, early], messages, true).map(launch => launch.id)).toEqual(['delegation:m1']);
+    const future = at(second, 350);
+    expect(teamLaunches([early, future], messages, false, true).map(launch => launch.id)).toEqual(['delegation:m1']);
+    expect(teamLaunches([early, future], messages, false, false).map(launch => launch.id)).toEqual(['delegation:m1', 'delegation:m3']);
   } finally { client.close(); }
 });
