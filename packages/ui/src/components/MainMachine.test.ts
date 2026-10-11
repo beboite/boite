@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import { FakeClient } from '../lib/fake-client';
-import { readMainMachine } from '../lib/endpoint';
+import { MAIN_STORAGE_KEY, readMainMachine } from '../lib/endpoint';
 import { Store, store as primary } from '../lib/store.svelte';
 import { strings } from '../lib/strings';
 import { workspace, type Machine } from '../lib/workspace.svelte';
@@ -61,4 +61,27 @@ test('a device picks the machine it opens on among the ones it reaches, and goes
   await pick(strings.machines.mainLast);
   expect(readMainMachine()).toBeNull();
   expect(trigger()!.textContent).toContain(strings.machines.mainLast);
+});
+
+test('the desktop app has no main machine: no row, and a choice saved earlier opens nothing', async () => {
+  const machines: Machine[] = [];
+  for (const [id, label] of [['https://laptop.test', 'Laptop'], ['https://server.test', 'Server']] as const) {
+    const store = new Store();
+    store.attach(new FakeClient({ delayMs: 0 }));
+    await store.connect();
+    stores.push(store);
+    machines.push({ id, label, store });
+  }
+  localStorage.setItem(MAIN_STORAGE_KEY, JSON.stringify({ url: 'https://server.test' }));
+  window.__TAURI_INTERNALS__ = {} as typeof window.__TAURI_INTERNALS__;
+  try {
+    workspace.machines = machines;
+    mounted = mount(MainMachine, { target: document.body });
+    await settle();
+    expect(document.querySelector('[data-testid="main-machine"]')).toBeNull();
+    expect(readMainMachine()).toBeNull();
+  } finally {
+    delete window.__TAURI_INTERNALS__;
+  }
+  expect(readMainMachine()).toEqual({ url: 'https://server.test' });
 });
