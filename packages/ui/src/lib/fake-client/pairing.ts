@@ -38,7 +38,9 @@ export function pairingMethods(ctx: FakeContext) {
       const role = params?.role ?? 'device';
       const short = role === 'owner' && params?.short === true;
       const expiresAt = ctx.now() + (short ? PAIRING_CODE_TTL_MS : 10 * 60 * 1000);
-      const origin = ctx.settings.publicUrl ?? 'http://192.168.1.20:8777';
+      // `?lan=off` is a fresh install: the core listens on itself until the setting is on.
+      const lanOff = typeof location !== 'undefined' && new URLSearchParams(location.search).get('lan') === 'off' && !ctx.settings.listenOnLan;
+      const origin = ctx.settings.publicUrl ?? (lanOff ? 'http://127.0.0.1:8777' : 'http://192.168.1.20:8777');
       return {
         url: `${origin}/?grant=${grant}`,
         grant,
