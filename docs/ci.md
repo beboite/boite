@@ -133,7 +133,7 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 591,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,482,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,500,000 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 3,760,000 |
 
@@ -165,8 +165,9 @@ limits were 4,466,000 and 3,744,000, the branch measured 4,469,022 and
 
 On 2026-10-11 the Windows job measured 4,475,822 UI bytes for the latency pass
 on top of `4762402b`: the idle warm-up of the pages, the kept Agents view, the
-optimistic pin and archive and the single permission answer. The UI limit rises
-to 4,482,000.
+optimistic pin and archive and the single permission answer. Merged with
+`daff9a53`, whose limit was 4,500,000, it measured about 4,488,600 UI bytes on
+Linux, within that limit.
 
 On 2026-10-10, `bun run build:ui` with Bun 1.4.2 measured 4,420,649 UI bytes at
 `feeb393b` and 4,425,557 with close confirmation and typed agent archival.

@@ -280,7 +280,7 @@ test('a pinned conversation follows its answer on every frame, and a wheel turne
   // A streaming answer shows whole paragraphs, so the echo is made of short ones.
   await page.evaluate(`(() => {
     const input = document.querySelector('[data-testid=composer-input]');
-    input.value = 'A paragraph long enough to wrap across the conversation column, sent back word for word.\\n\\n'.repeat(48);
+    input.value = 'A paragraph long enough to wrap across the conversation column, sent back word for word.\\n\\n'.repeat(96);
     input.dispatchEvent(new Event('input', { bubbles: true }));
   })()`);
   await page.click('[data-testid=composer-send]');
@@ -319,8 +319,45 @@ test('a pinned conversation follows its answer on every frame, and a wheel turne
   await page.evaluate('new Promise((done) => setTimeout(done, 400))');
   // The answer keeps growing below; the text being read stays where the wheel put it.
   expect(Math.abs((await page.evaluate<number>(`document.querySelector('${timeline}').scrollTop`)) - left)).toBeLessThanOrEqual(1);
-  await page.click(jump);
-  await page.waitFor(`!document.querySelector('${jump}') && (() => { const t = document.querySelector('${timeline}'); return t.scrollHeight - t.clientHeight - t.scrollTop < 2; })()`);
+
+  // Wheeled back down to the bottom while the answer grows, the list takes it back without the button:
+  // the stream moves the bottom between the wheel's last step and its scroll event.
+  // Before, the list stayed loose a few px above a bottom that each streamed line moved, until a notch hit it exactly.
+  const missed: number[] = [];
+  for (let notch = 0; notch < 40 && await page.evaluate<boolean>(`!!document.querySelector('${jump}')`); notch += 1) {
+    await page.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: box.x, y: box.y, deltaX: 0, deltaY: 120 });
+    await page.evaluate('new Promise((done) => setTimeout(done, 100))');
+    const loose = await page.evaluate<number | null>(`(() => { const t = document.querySelector('${timeline}'); const gap = t.scrollHeight - t.clientHeight - t.scrollTop; return document.querySelector('${jump}') && gap < 80 ? gap : null; })()`);
+    if (loose !== null) missed.push(loose);
+  }
+  expect(missed).toEqual([]);
+  await page.waitFor(`!document.querySelector('${jump}')`, 2_000);
+  expect(await page.evaluate<boolean>(`!!document.querySelector('${timeline} .prose.live')`)).toBe(true);
+  const rejoined = await page.evaluate<number[]>(`new Promise((done) => {
+    const box = document.querySelector('${timeline}');
+    const gaps = [];
+    const watch = new ResizeObserver(() => gaps.push(box.scrollHeight - box.clientHeight - box.scrollTop));
+    watch.observe(document.querySelector('${timeline} .prose.live'));
+    setTimeout(() => { watch.disconnect(); done(gaps); }, 500);
+  })`);
+  expect(rejoined.length).toBeGreaterThan(2);
+  expect(Math.max(...rejoined)).toBeLessThanOrEqual(1);
+
+  // A key that scrolls nothing, such as a copy, leaves the bottom where it is.
+  await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Control', code: 'ControlLeft', windowsVirtualKeyCode: 17, modifiers: 2 });
+  await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'c', code: 'KeyC', windowsVirtualKeyCode: 67, modifiers: 2 });
+  await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'c', code: 'KeyC', windowsVirtualKeyCode: 67, modifiers: 2 });
+  await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Control', code: 'ControlLeft', windowsVirtualKeyCode: 17 });
+  const copied = await page.evaluate<number[]>(`new Promise((done) => {
+    const box = document.querySelector('${timeline}');
+    const gaps = [];
+    const watch = new ResizeObserver(() => gaps.push(box.scrollHeight - box.clientHeight - box.scrollTop));
+    watch.observe(document.querySelector('${timeline} .prose.live'));
+    setTimeout(() => { watch.disconnect(); done(gaps); }, 400);
+  })`);
+  expect(copied.length).toBeGreaterThan(2);
+  expect(Math.max(...copied)).toBeLessThanOrEqual(1);
+  expect(await page.evaluate<boolean>(`!document.querySelector('${jump}')`)).toBe(true);
 
   // A busy phone delivers the passive touchstart after the scroll it started: a rise with no
   // input event yet, inside the 80 px tolerance, leaves following all the same. The finger moves

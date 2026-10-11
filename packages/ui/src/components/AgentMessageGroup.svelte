@@ -1,71 +1,95 @@
 <script lang="ts">
-  import { BellRing, ChevronRight, CornerDownLeft, Forward, UserCog } from '@lucide/svelte';
-  import type { AgentMail, AgentMailGroup } from '../lib/agent-mail';
+  import { ArrowDownLeft, ArrowUpRight, BellRing, ChevronRight } from '@lucide/svelte';
+  import { discussionsOf, hierarchyOf, whereOf, type AgentMailGroup } from '../lib/agent-mail';
   import { count } from '../lib/format';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
+  import AgentAvatar from './AgentAvatar.svelte';
 
+  /**
+   * A burst of agent mail in the timeline: one row per conversation it went to
+   * or came from, in the order they started, with what was last said. A row
+   * opens that discussion in the panel, on the burst's first letter.
+   */
   let { store, group }: { store: Store; group: AgentMailGroup } = $props();
-  /** Letters from the steward and notices about watched threads get rows of their own, apart from agents' mail. */
-  type Kind = 'outgoing' | 'incoming' | 'steward' | 'notice';
-  const kinds: Kind[] = ['outgoing', 'steward', 'incoming', 'notice'];
-  function kindOf(entry: AgentMail): Kind {
-    if (entry.direction === 'outgoing') return 'outgoing';
-    return entry.letter.origin === 'notice' ? 'notice' : entry.letter.origin === 'steward' ? 'steward' : 'incoming';
-  }
-  function label(kind: Kind, size: number): string {
-    const one = size === 1;
-    const text = kind === 'outgoing' ? one ? strings.agentMessages.forwardedOne : strings.agentMessages.forwardedMany
-      : kind === 'steward' ? one ? strings.agentMessages.stewardOne : strings.agentMessages.stewardMany
-      : kind === 'notice' ? one ? strings.agentMessages.noticeOne : strings.agentMessages.noticeMany
-      : one ? strings.agentMessages.receivedOne : strings.agentMessages.receivedMany;
-    return fill(text, { count: count(size) });
-  }
-  /** The threads on the other end of a row, each named once in the order they wrote. */
-  function names(entries: AgentMail[]): string {
-    const titles = entries.map(entry => (entry.direction === 'outgoing' ? entry.letter.toTitle : entry.letter.from.title).trim());
-    return [...new Set(titles.filter(Boolean))].join(', ');
-  }
+  /** Past this many conversations, the rest is one line that opens the list. */
+  const SHOWN = 4;
+  let notices = $derived(group.entries.filter(entry => entry.letter.origin === 'notice'));
+  let discussions = $derived(discussionsOf(group.entries.filter(entry => entry.letter.origin !== 'notice'), store)
+    .sort((a, b) => a.entries[0]!.letter.createdAt - b.entries[0]!.letter.createdAt || a.key.localeCompare(b.key)));
 </script>
 
 <div class="exchanges" data-testid="agent-message-group" data-group-id={group.id}>
-  {#each kinds as kind}
-    {@const entries = group.entries.filter(entry => kindOf(entry) === kind)}
-    {@const who = kind === 'outgoing' || kind === 'incoming' ? names(entries) : ''}
-    {@const direction = kind === 'outgoing' ? 'outgoing' : 'incoming'}
-    {#if entries.length}
-      <button type="button" class="summary" class:received={kind === 'incoming'} class:steward={kind === 'steward'} class:notice={kind === 'notice'}
-        data-testid="agent-message-summary" data-direction={direction} data-kind={kind} data-count={entries.length}
-        title={strings.agentMessages.open}
-        onclick={() => store.panel.openMessages(entries[0]!.letter.id, direction)}>
-        <span class="arrow" aria-hidden="true">
-          {#if kind === 'outgoing'}<Forward size={16} strokeWidth={1.75} />
-          {:else if kind === 'steward'}<UserCog size={16} strokeWidth={1.75} />
-          {:else if kind === 'notice'}<BellRing size={14} strokeWidth={1.75} />
-          {:else}<CornerDownLeft size={16} strokeWidth={1.75} />{/if}
+  {#each discussions.slice(0, SHOWN) as discussion (discussion.key)}
+    {@const tag = hierarchyOf(discussion)}
+    {@const where = whereOf(discussion)}
+    {@const last = discussion.last}
+    <button type="button" class="discussion" class:steward={discussion.steward}
+      data-testid="agent-discussion-row" data-peer={discussion.key} data-count={discussion.entries.length}
+      title={strings.agentMessages.open}
+      onclick={() => store.panel.openMessages(discussion.key, discussion.entries[0]!.letter.id)}>
+      <AgentAvatar title={discussion.title} providerId={discussion.providerId} status={discussion.status} steward={discussion.steward} size={28} />
+      <span class="body">
+        <span class="top">
+          <strong class="title" data-testid="agent-discussion-title">{discussion.title}</strong>
+          {#if tag}<span class="tag" data-relation={tag}>{strings.agentMessages.relation[tag]}</span>{/if}
+          {#if where}<span class="where">{where}</span>{/if}
         </span>
-        <span class="content">
-          <span data-testid="agent-message-label">{label(kind, entries.length)}</span>
-          {#if who}<span class="who" data-testid="agent-message-who">{who}</span>{/if}
+        <span class="preview" data-testid="agent-discussion-preview">
+          {#if last.direction === 'outgoing'}<ArrowUpRight size={12} strokeWidth={2} aria-label={strings.agentMessages.mine} />{/if}
+          <span>{last.letter.text}</span>
         </span>
-        <ChevronRight size={14} strokeWidth={1.75} aria-hidden="true" />
-      </button>
-    {/if}
+      </span>
+      <span class="counts" title={fill(strings.agentMessages.sentReceived, { sent: count(discussion.sent), received: count(discussion.received) })}>
+        {#if discussion.sent}<span class="count"><ArrowUpRight size={12} strokeWidth={2} aria-hidden="true" />{count(discussion.sent)}</span>{/if}
+        {#if discussion.received}<span class="count in"><ArrowDownLeft size={12} strokeWidth={2} aria-hidden="true" />{count(discussion.received)}</span>{/if}
+      </span>
+      <ChevronRight size={14} strokeWidth={1.75} aria-hidden="true" />
+    </button>
   {/each}
+  {#if discussions.length > SHOWN}
+    <button type="button" class="line" data-testid="agent-discussion-more" onclick={() => store.panel.openMessages()}>
+      {fill(strings.agentMessages.more, { count: count(discussions.length - SHOWN) })}
+    </button>
+  {/if}
+  {#if notices.length}
+    <button type="button" class="line notice" data-testid="agent-message-summary" data-kind="notice" data-count={notices.length}
+      onclick={() => new Set(notices.map(entry => entry.peer)).size === 1 ? store.panel.openMessages(notices[0]!.peer, notices[0]!.letter.id) : store.panel.openMessages()}>
+      <BellRing size={14} strokeWidth={1.75} aria-hidden="true" />
+      {fill(notices.length === 1 ? strings.agentMessages.noticeOne : strings.agentMessages.noticeMany, { count: count(notices.length) })}
+    </button>
+  {/if}
 </div>
 
 <style>
-  .exchanges { display: flex; flex-direction: column; gap: 8px; }
-  .summary { display: flex; align-items: center; justify-content: flex-start; gap: 9px; width: fit-content; max-width: 92%; height: auto; min-height: var(--control); padding: 9px 12px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); border-bottom-left-radius: var(--radius-sm); background: var(--color-surface-2); color: var(--color-muted-foreground); box-shadow: var(--shadow-e1); text-align: left; font-size: var(--text-sm); white-space: normal; }
-  .summary:hover { background: var(--color-hover); color: var(--color-foreground); }
-  .received { margin-left: auto; border-color: var(--color-accent); border-bottom-left-radius: var(--radius-lg); border-bottom-right-radius: var(--radius-sm); background: var(--color-accent-soft); }
-  .received .arrow { color: var(--color-accent); }
-  .steward { border-color: color-mix(in oklch, var(--color-steward) 45%, transparent); border-left: 2px solid var(--color-steward); background: var(--color-steward-soft); }
-  .steward .arrow { color: var(--color-steward); }
-  .notice { min-height: 0; padding: 4px 10px; border-color: transparent; border-left: 2px solid var(--color-border); border-radius: var(--radius-sm); background: transparent; box-shadow: none; font-size: var(--text-xs); }
-  .notice .content { color: var(--color-muted-foreground); }
-  .arrow { display: flex; flex: none; }
-  .content { display: flex; flex-direction: column; gap: 4px; color: var(--color-foreground); overflow-wrap: anywhere; }
-  .who { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; font-size: var(--text-xs); color: var(--color-muted-foreground); }
-  @media (max-width: 720px) { .summary { min-height: var(--touch-target); } }
+  .exchanges { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+  .discussion {
+    display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 10px;
+    width: min(100%, 560px); height: auto; min-height: var(--control); padding: 8px 10px 8px 9px;
+    border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface-2);
+    color: var(--color-muted-foreground); box-shadow: var(--shadow-e1); text-align: left; font-size: var(--text-sm); white-space: normal;
+    transition: background var(--dur-1) var(--ease-out-quint), border-color var(--dur-1) var(--ease-out-quint), transform var(--dur-1) var(--ease-out-quint);
+  }
+  .discussion:hover { background: var(--color-surface-3); border-color: var(--color-edge); color: var(--color-foreground); }
+  .discussion:active { transform: scale(0.99); }
+  .discussion.steward { border-left: 2px solid var(--color-steward); }
+  .body { min-width: 0; display: grid; gap: 2px; }
+  /* The title keeps its line; the tag and the place wrap under it when the row is narrow. */
+  .top { min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; }
+  .title { flex: 0 1 auto; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-foreground); font-weight: 600; }
+  .tag { flex: none; padding: 1px 6px; border-radius: var(--radius-full); background: var(--color-accent-soft); color: var(--color-accent); font-size: var(--text-xs); font-weight: 500; }
+  .steward .tag { background: var(--color-steward-soft); color: var(--color-steward); }
+  .where { flex: 1 1 0; min-width: 6ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-xs); }
+  .preview { min-width: 0; display: flex; align-items: center; gap: 4px; font-size: var(--text-xs); }
+  .preview :global(svg) { flex: none; }
+  .preview > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .counts { display: flex; gap: 6px; font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
+  .count { display: inline-flex; align-items: center; gap: 2px; }
+  .count.in { color: var(--color-accent); }
+  .line { display: inline-flex; align-items: center; gap: 6px; height: auto; min-height: 0; padding: 4px 10px; border: 0; border-left: 2px solid var(--color-border); border-radius: var(--radius-sm); background: transparent; color: var(--color-muted-foreground); font-size: var(--text-xs); }
+  .line:hover { color: var(--color-foreground); background: var(--color-hover); }
+  @media (max-width: 720px) {
+    .discussion { width: 100%; min-height: var(--touch-target); }
+    .line { min-height: var(--touch-target); }
+  }
 </style>
