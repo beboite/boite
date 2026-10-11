@@ -1,10 +1,11 @@
-import type { ThreadId, Usage, UsageHistory, UsageHistoryRow, UsageHistoryThread } from '@boite/contracts';
+import type { ThreadId, TokenRates, Usage, UsageHistory, UsageHistoryRow, UsageHistoryThread, UsagePrice } from '@boite/contracts';
 
 /**
  * The ledger `?fake=1` answers `usage.history` from: about a hundred days of
  * several providers, with a weekday rhythm, derived from the calendar day so a
  * reload draws the same page. It follows the core's contract: input excludes
- * the cache reads and a provider that reports no price has a null cost.
+ * the cache reads, a model with public rates is priced at them, and a model
+ * without rates or a reported cost has a null cost.
  */
 
 /** A turn the fake itself finished during this session. */
@@ -18,9 +19,16 @@ export interface FakeFinishedTurn {
   usage: Usage;
 }
 
+/** The rates the core's price list gives these models, USD per million tokens. */
+function rated(model: string, name: string, input: number, output: number, cacheRead: number, cacheWrite: number): UsagePrice {
+  const rates: TokenRates = { input, output, cacheRead, cacheWrite };
+  return { model, name, rates };
+}
+
 interface Profile {
   providerId: string;
-  models: { id: string | null; share: number }[];
+  /** `price` is what the core prices the model at; a reported cost stands in where it has none. */
+  models: { id: string | null; share: number; price?: UsagePrice; reported?: TokenRates }[];
   /** Turns on a busy weekday. */
   perDay: number;
   /** Days before today the provider was first used. */
@@ -29,8 +37,6 @@ interface Profile {
   idle: number;
   /** Tokens per turn: input without cache, output, cache read, cache write. */
   tokens: [number, number, number, number];
-  /** USD per million tokens, same order. Null when the provider reports no price. */
-  price: [number, number, number, number] | null;
   /** The threads its turns land in, most recent first. */
   threads: { id: ThreadId; title: string }[];
 }
@@ -38,9 +44,15 @@ interface Profile {
 const PROFILES: Profile[] = [
   {
     providerId: 'claude',
-    models: [{ id: 'claude-opus-5', share: 0.55 }, { id: 'claude-sonnet-5', share: 0.35 }, { id: 'claude-haiku-4-5-20251001', share: 0.1 }],
+    // Claude Code writes its cache for an hour, twice the input rate.
+    models: [
+      { id: 'claude-opus-5-5', share: 0.45, price: rated('claude-opus-5-5', 'Claude Opus 5.5', 4, 20, 0.2, 8) },
+      { id: 'claude/claude-opus-5-5', share: 0.15, price: rated('claude-opus-5-5', 'Claude Opus 5.5', 4, 20, 0.2, 8) },
+      { id: 'claude-sonnet-5-5', share: 0.3, price: rated('claude-sonnet-5-5', 'Claude Sonnet 5.5', 2, 10, 0.1, 4) },
+      { id: 'claude-haiku-5-5', share: 0.1, price: rated('claude-haiku-5-5', 'Claude Haiku 5.5', 0.1, 0.5, 0.01, 0.2) },
+    ],
     perDay: 42, since: 104, idle: 0.03,
-    tokens: [2_600, 1_800, 61_000, 7_200], price: [5, 25, 0.5, 6.25],
+    tokens: [2_600, 1_800, 61_000, 7_200],
     threads: [
       { id: 't-trace', title: 'Finish the trace tab' },
       { id: 'u-claude-panel', title: 'Right panel with changes and files' },
@@ -53,9 +65,9 @@ const PROFILES: Profile[] = [
   },
   {
     providerId: 'codex',
-    models: [{ id: 'gpt-5.5-codex', share: 0.75 }, { id: null, share: 0.25 }],
+    models: [{ id: 'gpt-6.1-sol', share: 0.75, price: rated('gpt-6.1-sol', 'GPT-6.1 Sol', 2, 10, 0.1, 2.5) }, { id: null, share: 0.25 }],
     perDay: 22, since: 92, idle: 0.1,
-    tokens: [8_400, 2_300, 39_000, 0], price: null,
+    tokens: [8_400, 2_300, 39_000, 0],
     threads: [
       { id: 't-scheduler', title: 'Port the scheduler' },
       { id: 'u-codex-install', title: 'Managed Codex install' },
@@ -65,9 +77,9 @@ const PROFILES: Profile[] = [
   },
   {
     providerId: 'opencode',
-    models: [{ id: null, share: 1 }],
+    models: [{ id: null, share: 1, reported: { input: 0.6, output: 2.5, cacheRead: 0.15, cacheWrite: 0 } }],
     perDay: 8, since: 71, idle: 0.3,
-    tokens: [5_800, 1_300, 21_000, 0], price: [0.6, 2.5, 0.15, 0],
+    tokens: [5_800, 1_300, 21_000, 0],
     threads: [
       { id: 't-bench', title: 'Bench against legacy' },
       { id: 'u-opencode-acp', title: 'ACP permission cards' },
@@ -77,7 +89,7 @@ const PROFILES: Profile[] = [
     providerId: 'grok',
     models: [{ id: 'grok-code-fast-2', share: 1 }],
     perDay: 10, since: 37, idle: 0.25,
-    tokens: [7_200, 1_600, 18_000, 0], price: null,
+    tokens: [7_200, 1_600, 18_000, 0],
     threads: [
       { id: 'u-grok-search', title: 'Workspace search ranking' },
       { id: 'u-grok-titles', title: 'Shorter thread titles' },
@@ -87,26 +99,26 @@ const PROFILES: Profile[] = [
     providerId: 'antigravity',
     models: [{ id: null, share: 1 }],
     perDay: 5, since: 23, idle: 0.5,
-    tokens: [9_500, 2_100, 12_000, 0], price: null,
+    tokens: [9_500, 2_100, 12_000, 0],
     threads: [{ id: 'u-antigravity-quota', title: 'Antigravity quota reader' }],
   },
   {
     providerId: 'pi',
-    models: [{ id: 'claude-sonnet-5', share: 1 }],
+    models: [{ id: 'claude-sonnet-5-5', share: 1, price: rated('claude-sonnet-5-5', 'Claude Sonnet 5.5', 2, 10, 0.1, 2.5) }],
     perDay: 4, since: 58, idle: 0.55,
-    tokens: [3_100, 1_200, 26_000, 3_000], price: [3, 15, 0.3, 3.75],
+    tokens: [3_100, 1_200, 26_000, 3_000],
     threads: [{ id: 't-descriptors', title: 'Review the descriptor loader' }],
   },
   {
     providerId: 'antigravity-cli', models: [{ id: 'default', share: 1 }],
     perDay: 7, since: 19, idle: 0.25,
-    tokens: [4_000, 1_400, 19_000, 0], price: null,
+    tokens: [4_000, 1_400, 19_000, 0],
     threads: [{ id: 'u-agy-models', title: 'Discover the CLI models' }],
   },
   {
     providerId: 'muse', models: [{ id: 'default', share: 1 }],
     perDay: 6, since: 17, idle: 0.2,
-    tokens: [3_500, 1_500, 15_000, 0], price: null,
+    tokens: [3_500, 1_500, 15_000, 0],
     threads: [{ id: 'u-muse-tools', title: 'Map the Muse tools' }],
   },
 ];
@@ -154,6 +166,7 @@ interface Group {
   reported: number;
   priced: number;
   usage: Usage;
+  price: UsagePrice | null;
 }
 
 /** What one calendar day of the seed spent, as groups of turns sharing a thread and a model. */
@@ -180,13 +193,13 @@ function seededDay(day: Date, today: Date, now: number): Group[] {
       const reported = turns - (draw() < 0.3 ? 1 : 0);
       const scale = reported * (0.75 + draw() * 0.5);
       const [input, output, cacheRead, cacheWrite] = profile.tokens.map((tokens) => Math.round(tokens * scale)) as [number, number, number, number];
-      const price = profile.price;
+      const rates = model.price?.rates ?? model.reported ?? null;
       const usage: Usage = {
         inputTokens: input,
         outputTokens: output,
         cacheReadTokens: cacheRead,
         cacheWriteTokens: cacheWrite,
-        costUsdEquivalent: price === null ? null : (input * price[0] + output * price[1] + cacheRead * price[2] + cacheWrite * price[3]) / 1_000_000,
+        costUsdEquivalent: rates === null ? null : (input * rates.input + output * rates.output + cacheRead * rates.cacheRead + cacheWrite * rates.cacheWrite) / 1_000_000,
       };
       groups.push({
         at: day.getTime() + Math.min(DAY - 1, (13 + index) * 3_600_000),
@@ -197,8 +210,9 @@ function seededDay(day: Date, today: Date, now: number): Group[] {
         model: model.id,
         turns,
         reported,
-        priced: price === null ? 0 : reported,
+        priced: rates === null ? 0 : reported,
         usage,
+        price: model.price ?? null,
       });
     }
   });
@@ -217,7 +231,7 @@ export function fakeUsageHistory(edges: number[], options: { seeded: boolean; fi
     }
   }
   for (const turn of options.finished) {
-    groups.push({ ...turn, turns: 1, reported: 1, priced: turn.usage.costUsdEquivalent === null ? 0 : 1, usage: { ...turn.usage } });
+    groups.push({ ...turn, turns: 1, reported: 1, priced: turn.usage.costUsdEquivalent === null ? 0 : 1, usage: { ...turn.usage }, price: null });
   }
 
   const rows = new Map<string, UsageHistoryRow>();
@@ -228,7 +242,7 @@ export function fakeUsageHistory(edges: number[], options: { seeded: boolean; fi
     let bucket = 0;
     while (edges[bucket + 1]! <= group.at) bucket += 1;
     const key = `${bucket}\u0000${group.providerId}\u0000${group.model ?? ''}`;
-    const row = rows.get(key) ?? { bucket, providerId: group.providerId, model: group.model, turns: 0, reported: 0, priced: 0, usage: emptyUsage() };
+    const row = rows.get(key) ?? { bucket, providerId: group.providerId, model: group.model, turns: 0, reported: 0, priced: 0, usage: emptyUsage(), price: group.price };
     row.turns += group.turns;
     row.reported += group.reported;
     row.priced += group.priced;

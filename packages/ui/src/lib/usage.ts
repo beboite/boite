@@ -1,5 +1,5 @@
-import type { Usage, UsageHistory, UsageHistoryThread } from '@boite/contracts';
-import { strings } from './strings';
+import type { Usage, UsageHistory, UsageHistoryThread, UsagePrice } from '@boite/contracts';
+import { fill, strings } from './strings';
 import { formatTokens } from './tokens';
 import { count } from './format';
 import { formatLocale } from './i18n.svelte';
@@ -100,6 +100,32 @@ export function reportedValue(metric: UsageMetric, value: number, coverage: { tu
   return formatMetric(metric, value);
 }
 
+/** A per-million rate as precise as the price list writes it: `$4`, `$0.2`, `$0.125`. */
+export function formatRate(value: number): string {
+  return dollars(value, 0, 3);
+}
+
+/**
+ * Where a model's cost comes from, for the "i" beside its name: the public
+ * rates it was priced at, the agent's own figure, or nothing.
+ */
+export function priceNote(row: { price: UsagePrice | null; priced: number; reported: number }): string {
+  const price = row.price;
+  // Rates price nothing without tokens: Grok reports none.
+  if (row.reported === 0 && row.priced === 0) return strings.usage.noTokens;
+  if (price !== null) {
+    const { input, output, cacheRead, cacheWrite } = price.rates;
+    return fill(strings.usage.rates, {
+      model: price.name,
+      input: formatRate(input),
+      output: formatRate(output),
+      cacheRead: formatRate(cacheRead),
+      cacheWrite: formatRate(cacheWrite),
+    });
+  }
+  return row.priced > 0 ? strings.usage.reportedCost : strings.usage.noRates;
+}
+
 /** A shorter label for an axis: `2M` rather than `2.0M`, `$2.5`, `$1.5k`. */
 export function formatTick(metric: UsageMetric, value: number): string {
   if (metric === 'tokens') return formatMetric(metric, value).replace(/\.0(?=[kMB]$)/, '');
@@ -136,6 +162,8 @@ export interface ModelRow extends UsageTotals {
   providerId: string;
   model: string | null;
   value: number;
+  /** The public rates the core priced this model at, null when it had none. */
+  price: UsagePrice | null;
 }
 
 export interface DayRow extends UsageTotals {
@@ -184,6 +212,15 @@ export function seriesFor(providerIds: Iterable<string>): { series: UsageSeries[
   return { series, keyOf: (providerId) => keys.get(providerId) ?? OTHER };
 }
 
+/**
+ * A model id without its own provider's prefix: a delegated thread records
+ * `claude/claude-opus-5-5` where the picker records `claude-opus-5-5`, and both
+ * ran the same model.
+ */
+export function ownModel(providerId: string, model: string | null): string | null {
+  return model?.startsWith(`${providerId}/`) ? model.slice(providerId.length + 1) : model;
+}
+
 export function summarize(history: UsageHistory, metric: UsageMetric, providerIds: Iterable<string> = []): UsageView {
   const { series, keyOf } = seriesFor([...providerIds, ...history.rows.map((row) => row.providerId)]);
   const buckets: UsageBucket[] = history.edges.slice(0, -1).map((start, index) => ({
@@ -221,10 +258,12 @@ export function summarize(history: UsageHistory, metric: UsageMetric, providerId
     serie.value += value;
     addTotals(total, row.turns, row.reported, row.priced, row.usage);
     total.value += value;
-    const modelKey = `${row.providerId}\u0000${row.model ?? ''}`;
-    const model = models.get(modelKey) ?? { ...emptyTotals(), providerId: row.providerId, model: row.model, value: 0 };
+    const id = ownModel(row.providerId, row.model);
+    const modelKey = `${row.providerId}\u0000${id ?? ''}`;
+    const model = models.get(modelKey) ?? { ...emptyTotals(), providerId: row.providerId, model: id, value: 0, price: null };
     addTotals(model, row.turns, row.reported, row.priced, row.usage);
     model.value += value;
+    model.price ??= row.price ?? null;
     models.set(modelKey, model);
     const day = days[row.bucket]!;
     addTotals(day, row.turns, row.reported, row.priced, row.usage);

@@ -21,8 +21,9 @@ export interface UsageSumRow extends UsageSums {
 
 export interface UsageThreadRow extends UsageSums {
   thread_id: string;
-  /** The provider the turns of this row ran on; a thread that switched has one row per provider. */
+  /** The provider and model the turns of this row ran on; a thread that switched has one row per pair. */
   provider_id: string;
+  model: string | null;
   title: string;
   project_id: string | null;
   thread_provider_id: string;
@@ -63,22 +64,23 @@ export function usageByBucket(db: Database, edges: readonly number[]): UsageSumR
 }
 
 /**
- * The same sums per thread and provider over `[from, to)`, with what a list
- * needs to name each thread.
+ * The same sums per thread, provider and model over `[from, to)`, with what a
+ * list needs to name each thread.
  */
 export function usageByThread(db: Database, from: number, to: number): UsageThreadRow[] {
   return db
     .query(
       `WITH x AS (
          SELECT t.thread_id, t.usage,
-           COALESCE(json_extract(t.execution, '$.providerId'), th.provider_id, '') AS provider_id
+           COALESCE(json_extract(t.execution, '$.providerId'), th.provider_id, '') AS provider_id,
+           CASE WHEN t.execution IS NULL THEN th.model ELSE json_extract(t.execution, '$.model') END AS model
          FROM turns t LEFT JOIN threads th ON th.id = t.thread_id
          WHERE t.finished_at >= ? AND t.finished_at < ?
        )
-       SELECT x.thread_id, x.provider_id, COALESCE(th.title, '') AS title, th.project_id,
+       SELECT x.thread_id, x.provider_id, x.model, COALESCE(th.title, '') AS title, th.project_id,
          COALESCE(th.provider_id, '') AS thread_provider_id, COALESCE(th.archived, 0) AS archived, ${USAGE_SUMS}
        FROM x LEFT JOIN threads th ON th.id = x.thread_id
-       GROUP BY x.thread_id, x.provider_id`,
+       GROUP BY x.thread_id, x.provider_id, x.model`,
     )
     .all(from, to) as UsageThreadRow[];
 }

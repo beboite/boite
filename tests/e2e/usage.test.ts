@@ -96,9 +96,20 @@ test('the desktop page charts each day by provider, reads a column on hover and 
 
   await page.click('[data-testid=usage-metric-cost]');
   await page.waitFor(`document.querySelector('[data-testid=usage-unpriced]')`);
-  expect(await page.text('[data-testid=usage-unpriced]')).toContain('Codex');
+  // Codex's own model has public rates now; Grok reports no tokens to price.
+  expect(await page.text('[data-testid=usage-unpriced]')).toContain('Grok');
+  expect(await page.text('[data-testid=usage-unpriced]')).not.toContain('Codex');
   expect(await page.text('[data-testid=usage-total]')).toMatch(/^\$/);
   await capture('usage-desktop-cost.png');
+
+  // One row for a model recorded with and without its provider prefix, and its rates one "i" away.
+  expect(await page.text('[data-testid=usage-breakdown]')).not.toContain('claude/claude-opus-5-5');
+  await page.evaluate(`document.querySelector('[data-testid=usage-breakdown]').scrollIntoView({ block: 'center' })`);
+  await page.click('[data-testid=usage-breakdown] tbody tr:first-child [data-testid=usage-price]');
+  await page.waitFor(`document.querySelector('[data-testid=usage-price-text]')`);
+  expect(await page.text('[data-testid=usage-price-text]')).toContain('public API rates, per million tokens');
+  await capture('usage-desktop-price.png');
+  await page.click('[data-testid=usage-breakdown] tbody tr:first-child [data-testid=usage-price]');
 
   await page.click('[data-testid=usage-metric-tokens]');
   await page.click('[data-testid=usage-range-7]');
@@ -136,7 +147,7 @@ test('the phone page fits 390 px and is reachable from the phone settings list',
   expect(await page.text('[data-testid=usage-breakdown]')).not.toContain('Antigravity CLI default');
   await page.evaluate(`document.querySelector('[data-testid=usage-page]').scrollIntoView({ block: 'start' })`);
   await page.click('[data-testid=usage-metric-cost]');
-  await page.waitFor(`document.querySelector('[data-testid=usage-total]')?.textContent === 'No cost reported'`);
+  await page.waitFor(`document.querySelector('[data-testid=usage-total]')?.textContent === 'No price'`);
   expect(await count('[data-testid=usage-chart]')).toBe(0);
   expect(await fits()).toBe(true);
   await capture('usage-phone-muse-unpriced.png');
@@ -154,6 +165,15 @@ test('the phone page fits 390 px and is reachable from the phone settings list',
   expect(tip.right).toBeLessThanOrEqual(390);
   await capture('usage-phone-tooltip.png');
   await mouse(2, 2);
+
+  await page.evaluate(`document.querySelector('[data-testid=usage-breakdown]').scrollIntoView({ block: 'center' })`);
+  await page.click('[data-testid=usage-breakdown] tbody tr:first-child [data-testid=usage-price]');
+  await page.waitFor(`document.querySelector('[data-testid=usage-price-text]')`);
+  const rates = await box('[data-testid=usage-price-text]');
+  expect(rates.left).toBeGreaterThanOrEqual(0);
+  expect(rates.right).toBeLessThanOrEqual(390);
+  await capture('usage-phone-price.png');
+  await page.click('[data-testid=usage-breakdown] tbody tr:first-child [data-testid=usage-price]');
 
   await viewport(390, 3000, true);
   await capture('usage-phone-full-dark.png');
