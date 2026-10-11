@@ -58,6 +58,8 @@ for (const [name, width, height, touch] of [['desktop', 1280, 900, false], ['pho
       await capture('hover-prompt');
       expect(await page.evaluate<string>(opacity(stamp))).toBe('1');
       expect(await page.evaluate<string>(opacity(ticks))).toBe('1');
+      // A prompt shows its own time, not the summary its turn closes on.
+      expect(await page.evaluate<string>(opacity(summary))).toBe('0');
       // A Claude turn is many messages: pointing at an earlier one shows the summary the last one closes on.
       await page.evaluate(`(() => {
         const thread = ${store}.openThread, at = thread.messages.findLastIndex(message => message.role === 'assistant'), last = thread.messages[at];
