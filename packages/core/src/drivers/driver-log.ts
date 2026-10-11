@@ -61,7 +61,7 @@ export function noteReady<T>(
   const resume = ctx.sessionId !== null;
   const abandoned = (): void => {
     const elapsed = Date.now() - at;
-    ctx.diagnostic?.('debug', `${agent} session open was abandoned after ${elapsed} ms: the turn was stopped before the session opened`, { event: 'driver.session.open-abandoned', durationMs: elapsed, data: { resume } });
+    ctx.diagnostic?.('debug', `${agent} session open was abandoned after ${elapsed} ms: the turn was stopped, or the session closed, before it opened`, { event: 'driver.session.open-abandoned', durationMs: elapsed, data: { resume } });
   };
   const failed = (error: unknown): never => {
     // A driver that must throw on a stop marks the error, so a normal stop is no warning.

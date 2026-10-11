@@ -260,11 +260,14 @@ export class Stewards {
         this.line(target.id, `Deleted by ${by}.`);
         await this.core.threads.remove(target.id);
         return { thread: null };
-      case 'stop':
-        this.core.logs.info('Stop requested by a steward', { source: 'turns', event: 'turn.stop-asked', threadId: target.id, data: { principal: 'steward', stewardThreadId: params.threadId } });
+      case 'stop': {
         this.core.activity.pauseAll(target.id);
-        if (this.core.threads.stopTurn(target.id)) this.line(target.id, `Stopped by ${by}.`);
+        const stopped = this.core.threads.stopTurn(target.id);
+        // The same fields as an owner's or an agent's stop in threads/rpc.ts: a steward is an agent principal.
+        this.core.logs.info(`Stop requested by the steward ${params.threadId}: ${stopped ? 'a turn was stopped' : 'nothing was running'}`, { source: 'turns', event: 'turn.stop-asked', threadId: target.id, data: { principal: 'agent', client: null, stopped, stewardThreadId: params.threadId } });
+        if (stopped) this.line(target.id, `Stopped by ${by}.`);
         break;
+      }
       case 'rename': {
         const title = typeof params.title === 'string' ? params.title.trim() : '';
         if (title.length === 0 || title.length > 120) throw invalidParams(`${method}.title: expected 1 to 120 characters`);

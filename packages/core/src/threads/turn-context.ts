@@ -63,7 +63,7 @@ export class TurnContexts {
         if (context?.kind === 'provider-output') noteStderr(threadId, message);
         this.core.log(level, message, { ...context, source: provider.id, threadId });
       },
-      diagnostic: (level, message, context) => this.core.logs.record(level, message, { ...context, source: provider.id, threadId }),
+      diagnostic: (level, message, context) => { try { this.core.logs.record(level, message, { ...context, source: provider.id, threadId }); } catch { /* A diagnostic storage failure must not break the driver. */ } },
       authenticationFailed: () => this.core.accounts.authenticationFailed(account.id),
       commands: list => { if (current()) this.threads.agentState.noteCommands(threadId, list); },
       context: use => { if (current()) this.threads.agentState.noteContext(threadId, use); },
@@ -313,7 +313,7 @@ export class TurnContexts {
         if (context?.kind === 'provider-output') noteStderr(threadId, message);
         this.core.log(level, message, { ...context, source: provider.id, threadId, turnId: turn.id });
       },
-      diagnostic: (level, message, context) => this.core.logs.record(level, message, { ...context, source: provider.id, threadId, turnId: turn.id }),
+      diagnostic: (level, message, context) => { try { this.core.logs.record(level, message, { ...context, source: provider.id, threadId, turnId: turn.id }); } catch { /* A diagnostic storage failure must not break a turn. */ } },
       commands: (list: AgentCommand[]) => {
         if ((this.threads.require(threadId).sessionGeneration ?? 0) === (thread.sessionGeneration ?? 0)) this.threads.agentState.noteCommands(threadId, list);
       },

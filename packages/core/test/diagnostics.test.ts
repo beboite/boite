@@ -14,7 +14,7 @@ test('the anonymizer replaces paths, names, addresses and private hosts and keep
     projects: [{ path: '/home/meetsu/projects/secret-game', name: 'secret-game' }, { path: 'D:\\Dev\\Factory', name: 'Factory' }], extra: ['Work Account'],
   });
   const text = anonymizer.text([
-    'spawn failed in /home/meetsu/projects/secret-game/src/main.rs and D:\\\\Dev\\\\Factory\\\\Cargo.toml',
+    'spawn failed in /home/meetsu/projects/secret-game/src/main.rs and D:\\Dev\\Factory\\Cargo.toml',
     'data at /home/meetsu/.local/share/boite2/logs, config ~/.claude and /home/other/x, C:\\Users\\nuno\\AppData',
     'secret-game crashed on nuno-x870 for meetsu@example.com via Work Account',
     'GET https://api.anthropic.com/v1/messages 529, https://git.net.tasbem.ch/nuno/brain.git refused, https://github.com/klNuno/boite/pull/3 and https://github.com/beboite/boite/issues/9',
@@ -145,8 +145,10 @@ test('agents read anonymized diagnostics of the app and their own family, until 
       expect((await owner.call('diagnostics.export', {})).path).not.toBeNull();
       expect(summary.environment.providers.some(provider => provider.id === 'echo')).toBe(true);
       await owner.call('settings.set', { agentLogAccess: false });
-      try { await agent.call('diagnostics.logs', { threadId }); throw new Error('accepted while off'); }
-      catch (error) { expect((error as Error).message).toContain('turned off agent access'); }
+      for (const [method, params] of [['diagnostics.logs', { threadId }], ['diagnostics.summary', { threadId }], ['diagnostics.export', { threadId }], ['diagnostics.issue', { threadId, title: 'The window froze', description: 'x' }]] as const) {
+        try { await agent.call(method, params as never); throw new Error(`${method} accepted while off`); }
+        catch (error) { expect((error as Error).message).toContain('turned off agent access'); }
+      }
     } finally { agent.close(); }
   } finally { await harness.stop(); }
 });

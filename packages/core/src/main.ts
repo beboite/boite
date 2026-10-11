@@ -502,7 +502,7 @@ export function main(argv: string[]): void {
       // An address the operator named is the only one this core answers on.
       server = startServerOnStickyPort({ core, host, port: flags.port, explicitPort: flags.portExplicit, previousPort: previous.port, preferredPorts: PREFERRED_PORTS[flags.channel], tailnet: !flags.hostExplicit });
     } catch (error) {
-      core.logs.error(`The server could not listen on ${host}:${flags.port}: ${messageOf(error)}`, { source: 'startup', event: 'startup.listen-failed', data: { port: flags.port, explicitPort: flags.portExplicit } });
+      try { core.logs.error(`The server could not listen on ${host}:${flags.port}: ${messageOf(error)}`, { source: 'startup', event: 'startup.listen-failed', data: { port: flags.port, explicitPort: flags.portExplicit } }); } catch { /* The refusal below still runs. */ }
       const deadline = setTimeout(() => { unlock(); refuseToStart(error); }, SHUTDOWN_TIMEOUT_MS);
       deadline.unref();
       void core.close()
@@ -561,9 +561,12 @@ export function main(argv: string[]): void {
         return now;
       };
       const running = core.scheduler.state();
-      core.logs.info(`Shutdown started with ${running.running.length} running and ${running.queued.length} queued turns`, {
-        source: 'core', event: 'core.shutdown.started', data: { running: running.running.length, queued: running.queued.length, exitCode: typeof process.exitCode === 'number' ? process.exitCode : null },
-      });
+      // A log that throws must not keep the shutdown from arming its deadline.
+      try {
+        core.logs.info(`Shutdown started with ${running.running.length} running and ${running.queued.length} queued turns`, {
+          source: 'core', event: 'core.shutdown.started', data: { running: running.running.length, queued: running.queued.length, exitCode: typeof process.exitCode === 'number' ? process.exitCode : null },
+        });
+      } catch { /* shutdown goes on */ }
       let stepAt = shutdownAt;
       // A driver that never answers its stop must not hold the process open, and
       // a rejection anywhere in the chain must not skip unlock() and the exit.
@@ -586,7 +589,9 @@ export function main(argv: string[]): void {
           process.exit(typeof process.exitCode === 'number' ? process.exitCode : 0);
         });
     };
-    const signalled = (signal: string, next: string): void => core.logs.info(`Received ${signal}: ${next}`, { source: 'core', event: 'core.signal', data: { signal } });
+    const signalled = (signal: string, next: string): void => {
+      try { core.logs.info(`Received ${signal}: ${next}`, { source: 'core', event: 'core.signal', data: { signal } }); } catch { /* Logging must not block shutdown. */ }
+    };
     process.on('SIGINT', () => { signalled('SIGINT', stopping ? 'exiting now' : 'shutting down'); shutdown(); });
     // What a service manager sends for a restart, an update or a reboot. The
     // first one hands the running turns to the next core: each ends its tool

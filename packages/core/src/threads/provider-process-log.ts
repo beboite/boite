@@ -54,7 +54,8 @@ export function watchProviderProcess(core: Core, child: SpawnedChild, command: s
   else started();
   let reported = false;
   child.once('error', (error) => {
-    if (reported) return;
+    // Only a spawn that never started: an error after it (a failed kill) leaves its exit record to come.
+    if (reported || child.pid !== undefined) return;
     reported = true;
     // The code and not the message: `spawn /home/<name>/... ENOENT` names the user.
     const code = (error as NodeJS.ErrnoException).code ?? null;
