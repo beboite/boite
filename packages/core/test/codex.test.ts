@@ -1459,11 +1459,13 @@ describe('codex driver', () => {
 
     const first = await client.call('providers.probe', { providerId: 'codex-fake', accountId });
     expect(first.models.map((model) => model.id)).toContain('fake-smart');
-    // The picker has its list while the agent is still shutting down.
-    expect(harness?.core.procs.liveCount(threadId)).toBe(1);
+    // The picker has its list while the agent is still shutting down. Only
+    // Linux is sure to deliver the SIGTERM the fixture delays its exit on.
+    const exiting = process.platform === 'linux';
+    if (exiting) expect(harness?.core.procs.liveCount(threadId)).toBe(1);
     // A list already read is answered from the cache, not after that exit.
     expect((await client.call('providers.probe', { providerId: 'codex-fake', accountId })).probedAt).toBe(first.probedAt);
-    expect(harness?.core.procs.liveCount(threadId)).toBe(1);
+    if (exiting) expect(harness?.core.procs.liveCount(threadId)).toBe(1);
 
     // One process per account at a time: a refresh starts once the first has exited.
     await client.call('providers.probe', { providerId: 'codex-fake', accountId, refresh: true });

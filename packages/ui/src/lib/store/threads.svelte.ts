@@ -21,7 +21,7 @@ import type { StoreContext } from './context';
 import { RpcErrorCode } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { strings } from '../strings';
-import { archiveWhile, keepArchived, pinNow } from './optimistic';
+import { archiveWhile, keepArchived, pinWhile } from './optimistic';
 
 /** What a rewind hands back to the composer: the removed message's content, and how the agent forgets it. */
 export type RewoundMessage = Omit<ThreadRewind, 'thread'>;
@@ -666,15 +666,15 @@ export class Threads {
     const client = this.ctx.client;
     const clientGeneration = this.ctx.clientGeneration;
     if (!client) return;
-    const undo = pinNow([this.threads.find((t) => t.id === threadId), this.openThread?.id === threadId ? this.openThread : null], pinned);
     try {
-      const summary = await client.call('threads.pin', { threadId, pinned });
+      const shown = [this.threads.find((t) => t.id === threadId), this.openThread?.id === threadId ? this.openThread : null];
+      const summary = await pinWhile(shown, pinned, client.call('threads.pin', { threadId, pinned }));
       if (!this.ctx.currentClient(client, clientGeneration)) return;
       this.upsertThread(summary);
       const open = this.openThread;
       if (open && open.id === threadId) open.pinned = summary.pinned;
     } catch (error) {
-      if (this.ctx.currentClient(client, clientGeneration)) { undo(); this.ctx.fail(error); }
+      if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
     }
   }
 

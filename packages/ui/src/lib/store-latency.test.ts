@@ -64,6 +64,22 @@ test('a pin shows before the core answers and is taken back on a refusal', async
   } finally { store.detach(); client.close(); }
 });
 
+test('pin then unpin, both refused in their order, ends where it started', async () => {
+  const { store, client } = await ready();
+  try {
+    await store.open('t-trace');
+    const { held } = hold(client, 'threads.pin');
+    const pin = store.pin('t-trace', true);
+    const unpin = store.pin('t-trace', false);
+    held[0]!.reject(refused());
+    await pin;
+    held[1]!.reject(refused());
+    await unpin;
+    expect(store.threads.find((t) => t.id === 't-trace')?.pinned).toBe(false);
+    expect(store.openThread?.pinned).toBe(false);
+  } finally { store.detach(); client.close(); }
+});
+
 test('a second answer to a permission while the first is out sends nothing, and a refusal allows another try', async () => {
   const { store, client } = await ready();
   try {

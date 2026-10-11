@@ -77,7 +77,7 @@
     try {
       const provider = owner.providerOf(instance.providerId);
       if (!provider) return;
-      const native = ['claude-sdk', 'acp', 'codex-appserver', 'muse', 'pi', 'agy'].includes(provider.protocol);
+      const native = agentListed(provider.protocol);
       // A row from a list the core already gave lands now: a refresh still
       // reading behind it changes nothing, and the core keeps that list meanwhile.
       if (requested !== undefined && (owner.catalogHas(instance.providerId, instance.accountId, requested)

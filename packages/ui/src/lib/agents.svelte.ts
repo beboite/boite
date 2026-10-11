@@ -289,6 +289,8 @@ export class AgentsView {
       this.off?.(); this.off = null;
       this.client = this.store.client;
       this.forgetHistory();
+      // What this view last drew stays on screen until the new snapshot lands.
+      if (this.snapshot) this.seen = absorb(EMPTY, this.snapshot);
       this.listen();
     }
     this.dirty = true;

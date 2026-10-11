@@ -10,11 +10,34 @@ import type { ThreadSummary } from '@boite/contracts';
 /** Rows an archive hides while the core has not answered: an older `thread.updated` must not show them again. */
 const archiving = new WeakSet<object>();
 
-/** Sets `pinned` on each target now; the undo restores only a target nothing newer has set since. */
-export function pinNow(targets: ({ pinned?: boolean } | null | undefined)[], pinned: boolean): () => void {
-  const before = targets.filter((t) => t != null).map((target) => ({ target, was: target.pinned }));
-  for (const { target } of before) target.pinned = pinned;
-  return () => { for (const { target, was } of before) if (target.pinned === pinned) target.pinned = was; };
+/** Per row or open thread: the last flag the core confirmed and the newest pin still out. */
+const pins = new WeakMap<object, { confirmed: boolean | undefined; newest: number; out: number }>();
+
+/**
+ * Sets `pinned` on each target while `call` is out. Only the newest pin of a
+ * target puts anything back on a refusal, and what it puts back is the last
+ * flag the core confirmed, so two opposite taps both refused end where they
+ * started. The rejection goes on to the caller, whichever connection it was.
+ */
+export async function pinWhile<T>(targets: ({ pinned?: boolean } | null | undefined)[], pinned: boolean, call: Promise<T>): Promise<T> {
+  const mine = targets.filter((t) => t != null).map((target) => {
+    const state = pins.get(target) ?? { confirmed: target.pinned, newest: 0, out: 0 };
+    if (state.out === 0) state.confirmed = target.pinned;
+    state.out++;
+    pins.set(target, state);
+    target.pinned = pinned;
+    return { target, state, token: ++state.newest };
+  });
+  try {
+    const answer = await call;
+    for (const { state } of mine) state.confirmed = pinned;
+    return answer;
+  } catch (error) {
+    for (const { target, state, token } of mine) if (token === state.newest) target.pinned = state.confirmed;
+    throw error;
+  } finally {
+    for (const { state } of mine) state.out--;
+  }
 }
 
 /**
