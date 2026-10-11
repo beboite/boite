@@ -84,7 +84,8 @@ it, and the menu's last row, Choose the buttons, leads back to the switches.
 
 The launcher and the new-surface menu offer one Browser card, and `boite
 browse <url>` opens its page as a new tab of that same browser. Only `boite
-preview` opens a Preview tab, in the shell's child webview. A card says nothing
+preview`, and `boite browse` of a local HTML file, which calls it, open a
+Preview tab, in the shell's child webview. A card says nothing
 below its name, and a kind this client cannot open has no card; the
 new-surface menu still lists it, greyed, with the reason.
 

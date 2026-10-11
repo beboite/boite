@@ -315,7 +315,9 @@ opens the file at line 12. A `show`, `diff`, `browse` or `open` answers
 `shown: no ...` when nobody was watching: the request still lands on the
 thread's panel and is there when the thread is next opened. `browse` opens its
 page as a new tab of the conversation's browser instead, which becomes the
-active tab of `boite browser`; a client brings it forward when it next watches.
+active tab of `boite browser`. A client watching the conversation brings it
+forward; one that opens the conversation later finds it among the tabs without
+the panel opening on it.
 
 `thread move` accepts a project ID, unique name or absolute registered folder.
 Ambiguous names are refused with matching IDs. It moves only the authenticated
