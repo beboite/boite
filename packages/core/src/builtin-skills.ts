@@ -1,4 +1,4 @@
-import { lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
@@ -82,6 +82,23 @@ function kind(path: string, wanted: 'file' | 'directory'): boolean {
   try { const stat = lstatSync(path); return wanted === 'file' ? stat.isFile() : stat.isDirectory(); } catch { return false; }
 }
 
+/**
+ * Whether the file holds exactly `text`. An agent can rewrite it, even swap it
+ * between two calls: one descriptor, opened without following a link, gives the
+ * size and the bytes, and never more than `text` and one byte are read.
+ */
+function holds(path: string, text: string): boolean {
+  const expected = Buffer.from(text, 'utf8');
+  let fd: number;
+  try { fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0)); } catch { return false; }
+  try {
+    if (fstatSync(fd).size !== expected.length) return false;
+    const buffer = Buffer.alloc(expected.length + 1);
+    const read = readSync(fd, buffer, 0, buffer.length, 0);
+    return read === expected.length && buffer.subarray(0, read).equals(expected);
+  } finally { closeSync(fd); }
+}
+
 /** Writes each skill when missing or different, and returns where each lives. A write that fails leaves that skill out. */
 export function ensureBuiltinSkills(dataDir: string, onError: (message: string) => void = () => {}): { name: string; description: string; path: string }[] {
   const listed: { name: string; description: string; path: string }[] = [];
@@ -93,8 +110,7 @@ export function ensureBuiltinSkills(dataDir: string, onError: (message: string) 
       // Anything but a plain folder and file there (a link, a folder named SKILL.md) is replaced.
       if (!kind(directory, 'directory')) rmSync(directory, { recursive: true, force: true });
       if (!kind(path, 'file')) rmSync(path, { recursive: true, force: true });
-      // The size first: an agent can rewrite this file, and a huge one must not be read whole.
-      if (!kind(path, 'file') || lstatSync(path).size !== Buffer.byteLength(text) || readFileSync(path, 'utf8') !== text) {
+      if (!kind(path, 'file') || !holds(path, text)) {
         mkdirSync(directory, { recursive: true });
         writeFileSync(path, text);
       }

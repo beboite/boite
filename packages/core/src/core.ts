@@ -355,7 +355,7 @@ export class Core {
     this.logs.record('info', `Core ${this.version} started in ${Date.now() - this.startedAt} ms, ${process.platform} ${process.arch}, Bun ${process.versions.bun ?? 'unknown'}`, {
       source: 'core', event: 'core.started', durationMs: Date.now() - this.startedAt,
       data: { version: this.version, channel: this.channel, os: process.platform, arch: process.arch, bun: process.versions.bun ?? null, pid: process.pid, cliShim: this.cliDir !== null, trace: this.procs.capability().mode },
-    }, this.startedAt);
+    });
   }
 
   setEndpoint(host: string, port: number): void {

@@ -287,6 +287,7 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
     'journal-check': async () => {
       if (rest.length !== 0 && rest.length !== 2) throw new Usage('journal-check expects no arguments or a cursor table and rowid');
       const cursor = rest.length ? { table: rest[0] as import('@boite/contracts').JournalInspectionTable, afterRowid: Number(rest[1]) } : null;
+      if (parsed.limit !== undefined && parsed.limit > 200) throw new Usage('journal-check takes --limit up to 200');
       const result = await client.call('journal.inspect', { cursor, limit: parsed.limit ?? 100 });
       print([`checked: ${result.checked}; issues: ${result.issues.length}; more: ${result.truncated ? 'yes' : 'no'}`,
         ...result.issues.map(issue => `${issue.table} row ${issue.rowId}: ${issue.code} (${issue.field}: ${issue.expected})`),
@@ -310,7 +311,8 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
       print(result.lines, result.value);
     },
     // `boite --limit 5 logs` parsed them as globals: they come first, so the command's own flags still win.
-    logs: () => logsCommand([...(parsed.limit === undefined ? [] : ['--limit', String(parsed.limit)]), ...(parsed.level === undefined ? [] : ['--level', parsed.level]), ...rest], client, threadId, agentCaller, io.cwd, print),
+    // A global `--level` yields to the command's own `--min-level`, which it would otherwise override.
+    logs: () => logsCommand([...(parsed.limit === undefined ? [] : ['--limit', String(parsed.limit)]), ...(parsed.level === undefined || rest.includes('--min-level') ? [] : ['--level', parsed.level]), ...rest], client, threadId, agentCaller, io.cwd, print),
     issue: () => issueCommand(rest, client, threadId, agentCaller, io.cwd, print),
     server: async () => {
       const action = rest[0] ?? 'check';

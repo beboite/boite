@@ -287,7 +287,7 @@ export class AgentBrowser {
       this.#core.logs.record(identify ? 'info' : 'debug', `Agent browser started for profile ${profile} in ${Math.round(performance.now() - at)} ms`, { source: 'browser', event: 'browser.started', durationMs: performance.now() - at, data: { profile, hosted, program: found === null ? 'desktop app' : found.path?.split(/[\\/]/).pop() ?? null } });
       return engine;
     } catch (error) {
-      this.#core.logs.warn(`Agent browser for profile ${profile} did not start after ${Math.round(performance.now() - at)} ms: ${error instanceof Error ? error.message : String(error)}`, { source: 'browser', event: 'browser.start-failed', durationMs: performance.now() - at, data: { profile, hosted } });
+      this.#core.logs.record(identify ? 'warn' : 'debug', `Agent browser for profile ${profile} did not start after ${Math.round(performance.now() - at)} ms: ${error instanceof Error ? error.message : String(error)}`, { source: 'browser', event: 'browser.start-failed', durationMs: performance.now() - at, data: { profile, hosted } });
       throw error;
     }
   }

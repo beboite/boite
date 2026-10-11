@@ -165,4 +165,6 @@ test('page errors and a frozen interface go to the first machine, with the page 
   stopFirst();
   stopSecond();
   expect(cleanStack('x'.repeat(400), '')?.length).toBe(300);
+  // A query goes; a question mark that ends a message stays.
+  expect(cleanStack('Error: failed? at /a.js?v=3:1:2', '')).toBe('Error: failed? at /a.js:1:2');
 });

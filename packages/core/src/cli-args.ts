@@ -22,7 +22,7 @@ export interface Parsed {
   last?: number;
   before?: number;
   limit?: number;
-  level?: 'info' | 'warn' | 'error';
+  level?: 'debug' | 'info' | 'warn' | 'error';
   /** `threads --project`: one project by id, name or folder. */
   project?: string;
   /** `threads --archived`: the archived threads instead. */
@@ -77,12 +77,13 @@ export function parse(argv: string[]): Parsed {
     else if (arg === '--core') parsed.core = next();
     else if (arg === '--limit') {
       const value = number(arg, next());
-      if (!Number.isInteger(value) || value < 1 || value > 200) throw new Usage('--limit needs an integer from 1 to 200');
+      // The widest any command takes (`boite logs`); a command with a lower cap checks its own.
+      if (!Number.isInteger(value) || value < 1 || value > 1000) throw new Usage('--limit needs an integer from 1 to 1000');
       parsed.limit = value;
     }
     else if (arg === '--level') {
       const value = next();
-      if (value !== 'info' && value !== 'warn' && value !== 'error') throw new Usage('--level expects info, warn or error');
+      if (value !== 'debug' && value !== 'info' && value !== 'warn' && value !== 'error') throw new Usage('--level expects debug, info, warn or error');
       parsed.level = value;
     }
     else if (arg === '--thread') parsed.thread = next();

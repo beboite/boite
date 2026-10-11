@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createLogAnonymizer, formatLogDuration, formatLogLine, parseLogRecord, RpcErrorCode } from '@boite/contracts';
+import { createLogAnonymizer, formatLogDuration, formatLogLine, parseLogRecord, RpcErrorCode, validateDiagnosticReport } from '@boite/contracts';
 import { connect } from '../src/client.ts';
 import { parse } from '../src/cli-args.ts';
 import { runCli } from '../src/cli.ts';
@@ -88,6 +88,10 @@ test('a stored line from any origin parses, bounds its fields and formats on one
   const long = parseLogRecord(JSON.stringify({ id: 'a', runId: 'r', at: 1, level: 'warn', source: 's', event: 'e', message: `${'x'.repeat(4090)} straddling-secret-value` }), 'shell', ['straddling-secret-value'])!;
   expect(long.message).not.toContain('stra');
   expect(parseLogRecord('{"id":1}')).toBeNull();
+  // A client's own source and event are redacted like its message, on the way in and when read back.
+  const [named] = validateDiagnosticReport({ records: [{ level: 'warn', at: 1, source: 'tok-9f8e7d6c5b', event: 'ui.tok-9f8e7d6c5b', message: 'm' }] }, ['tok-9f8e7d6c5b']);
+  expect(JSON.stringify(named)).not.toContain('tok-9f8e7d6c5b');
+  expect(JSON.stringify(parseLogRecord(JSON.stringify({ id: 'a', runId: 'r', at: 1, level: 'info', source: 'tok-9f8e7d6c5b', event: 'e', message: 'm' }), 'ui', ['tok-9f8e7d6c5b']))).not.toContain('tok-9f8e7d6c5b');
   expect(parseLogRecord(JSON.stringify({ id: '', runId: 'r', at: 1, level: 'info', source: 's', event: 'e', message: 'm' }))).toBeNull();
   expect(parseLogRecord(JSON.stringify({ id: 'a', runId: 'r', at: -5, level: 'info', source: 's', event: 'e', message: 'm' }))).toBeNull();
   expect(parseLogRecord('{"broken')).toBeNull();
@@ -296,5 +300,12 @@ test('records about a thread name its agent, and a guide session lists the built
     rmSync(skill!.path); mkdirSync(join(skill!.path, 'inside'), { recursive: true });
     expect(builtinSkills(harness.dataDir)[0]?.name).toBe('boite-report-issue');
     expect(readFileSync(skill!.path, 'utf8')).toStartWith('---\nname: boite-report-issue\n');
+    // Rewritten by an agent, same size or not, it is written back.
+    const original = readFileSync(skill!.path, 'utf8');
+    for (const tampered of ['x'.repeat(original.length), `${original}more`]) {
+      writeFileSync(skill!.path, tampered);
+      builtinSkills(harness.dataDir);
+      expect(readFileSync(skill!.path, 'utf8')).toBe(original);
+    }
   } finally { await harness.stop(); }
 });

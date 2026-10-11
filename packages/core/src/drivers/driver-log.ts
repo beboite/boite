@@ -24,8 +24,8 @@ export function errorCodeOf(info: unknown): string | null {
   if (typeof info === 'string') return info.slice(0, 80);
   if (typeof info === 'number' && Number.isFinite(info)) return String(info);
   if (info !== null && typeof info === 'object' && !Array.isArray(info)) {
-    const [key] = Object.keys(info);
-    return key === undefined ? null : key.slice(0, 80);
+    const keys = Object.keys(info);
+    return keys.length === 1 ? keys[0]!.slice(0, 80) : null;
   }
   return null;
 }

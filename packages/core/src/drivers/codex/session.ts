@@ -582,8 +582,10 @@ export class CodexSession {
         const willRetry = params['willRetry'] === true;
         const text = error?.message ?? 'the codex agent reported an error';
         const info = (error as { codexErrorInfo?: unknown } | undefined)?.codexErrorInfo;
-        turn.ctx.diagnostic?.('warn', `Codex reported ${errorCodeOf(info) ?? 'an error'}${httpStatusOf(info) === null ? '' : ` (HTTP ${httpStatusOf(info)})`}${willRetry ? ', it retries' : ', no retry'}: ${text}`, {
-          event: willRetry ? 'driver.api.retry' : 'driver.api.error', data: { code: errorCodeOf(info), status: httpStatusOf(info), willRetry },
+        const code = errorCodeOf(info);
+        const status = httpStatusOf(info);
+        turn.ctx.diagnostic?.('warn', `Codex reported ${code ?? 'an error'}${status === null ? '' : ` (HTTP ${status})`}${willRetry ? ', it retries' : ', no retry'}: ${text}`, {
+          event: willRetry ? 'driver.api.retry' : 'driver.api.error', data: { code, status, willRetry },
         });
         // `turn/completed` says whether the turn survived it, so this is a line
         // in the log and never the turn's own outcome.

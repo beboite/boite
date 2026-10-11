@@ -462,7 +462,7 @@ export function parseLogRecord(line: string, fallbackOrigin: LogOrigin = 'core',
   const record: CoreLogRecord = {
     id: bounded(raw.id) ?? '', runId: bounded(raw.runId) ?? '', at: raw.at, level: raw.level as CoreLogLevel,
     origin: LOG_ORIGINS.includes(raw.origin as LogOrigin) ? raw.origin as LogOrigin : fallbackOrigin,
-    source: bounded(raw.source) ?? 'core', event: bounded(raw.event) ?? 'core.log', message: normalizeCoreLogText(raw.message, secrets),
+    source: bounded(normalizeCoreLogText(raw.source, secrets)) ?? 'core', event: bounded(normalizeCoreLogText(raw.event, secrets)) ?? 'core.log', message: normalizeCoreLogText(raw.message, secrets),
   };
   for (const key of ['threadId', 'turnId', 'requestId', 'providerId', 'model', 'parentThreadId'] as const) { const value = bounded(raw[key]); if (value !== undefined) record[key] = value; }
   if (typeof raw.durationMs === 'number' && Number.isFinite(raw.durationMs) && raw.durationMs >= 0) record.durationMs = raw.durationMs;
@@ -661,7 +661,8 @@ export function validateDiagnosticReport(raw: unknown, secrets: readonly string[
     for (const key of Object.keys(value)) if (!(REPORT_RECORD_KEYS as readonly string[]).includes(key)) throw new Error(`${field}.${key}: expected one of ${REPORT_RECORD_KEYS.join(', ')}`);
     const record: DiagnosticReportRecord = {
       level: level(value.level, `${field}.level`), at: timestamp(value.at, `${field}.at`),
-      source: plainText(value.source, `${field}.source`, 60), event: plainText(value.event, `${field}.event`, 100),
+      // Chosen by the client like the message: redacted too, then bounded.
+      source: normalizeCoreLogText(plainText(value.source, `${field}.source`, 60), secrets).slice(0, 60), event: normalizeCoreLogText(plainText(value.event, `${field}.event`, 100), secrets).slice(0, 100),
       // Whole: the core redacts its secrets before it bounds the text, so a cut never splits one.
       message: typeof value.message === 'string' && value.message.length > 0 && value.message.length <= REPORT_MESSAGE_CHARS ? value.message : (() => { throw new Error(`${field}.message: expected 1 to ${REPORT_MESSAGE_CHARS} characters`); })(),
     };

@@ -23,7 +23,8 @@ export function noteStderr(threadId: string, line: string, at = Date.now()): voi
   tails.delete(threadId);
   tails.set(threadId, lines);
   if (tails.size > THREADS_KEPT) tails.delete(tails.keys().next().value!);
-  lines.push({ at, text: text.slice(0, STDERR_TAIL_CHARS) });
+  // The end of a long line: that is where the error usually names its cause.
+  lines.push({ at, text: text.slice(-STDERR_TAIL_CHARS) });
   if (lines.length > LINES_KEPT) lines.splice(0, lines.length - LINES_KEPT);
 }
 

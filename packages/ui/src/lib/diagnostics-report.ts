@@ -44,7 +44,7 @@ export function cleanStack(stack: string | undefined, origin: string = typeof lo
   if (!stack) return undefined;
   let text = stack;
   if (origin && origin !== 'null') text = text.split(origin).join('');
-  text = text.replace(/\?[^\s:)]*/g, '').replace(/[ \t]+/g, ' ').trim();
+  text = text.replace(/\?[^\s:)]+/g, '').replace(/[ \t]+/g, ' ').trim();
   return text.length === 0 ? undefined : text.slice(0, STACK_CHARS);
 }
 

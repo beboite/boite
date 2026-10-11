@@ -207,7 +207,9 @@ export class MobileDevices {
       if (target) await this.#shutdown(target);
       this.#lives.set(deviceId, (this.#lives.get(deviceId) ?? 0) + 1);
       this.#boots.delete(deviceId);
-      this.#core.logs.info(`Device ${deviceId} shut down from the Device panel`, { source: 'devices', event: 'device.shutdown', threadId: params.threadId, data: { deviceId } });
+      // Only a device that had a serial or UDID was powered off; one without was only closed.
+      if (target) this.#core.logs.info(`Device ${deviceId} shut down from the Device panel`, { source: 'devices', event: 'device.shutdown', threadId: params.threadId, data: { deviceId } });
+      else this.#core.logs.info(`Device ${deviceId} closed from the Device panel; it had nothing running to power off`, { source: 'devices', event: 'device.closed', threadId: params.threadId, data: { deviceId } });
       this.#emulators.get(deviceId)?.kill();
       for (const [threadId, open] of this.#sessions) if (open.delete(deviceId)) this.#changed(threadId);
       this.#forget(deviceId);

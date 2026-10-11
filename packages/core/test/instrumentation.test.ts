@@ -7,7 +7,7 @@ import type { Core } from '../src/core.ts';
 import { forgetStderr, noteStderr, STDERR_TAIL_CHARS, stderrTail } from '../src/drivers/stderr-tail.ts';
 import type { SpawnedChild } from '../src/procs.ts';
 import { clientField, closeLevel, describeConnection, logHelloRefused, logRpcTiming, slowRpcLevel } from '../src/server/connection-log.ts';
-import { noteReady } from '../src/drivers/driver-log.ts';
+import { errorCodeOf, noteReady } from '../src/drivers/driver-log.ts';
 import { isoTime, noteClaudeMessage } from '../src/drivers/claude/diagnostics.ts';
 import { detectionLogger } from '../src/providers/install-log.ts';
 import { logLoginState } from '../src/account-log.ts';
@@ -81,6 +81,13 @@ test('a stop the core asked for is no crash, and old stderr does not describe a 
   expect(stderrTail(crowd[0]!)).toBeNull();
   for (const thread of [...crowd, 'thr_busy', 'thr_newcomer']) forgetStderr(thread);
   expect(programName('C:\\Users\\Someone\\AppData\\codex.exe')).toBe('codex');
+  // A long line keeps its end, where the cause usually is.
+  noteStderr('thr_long', `${'noise '.repeat(200)}fatal: quota exceeded`);
+  expect(stderrTail('thr_long')?.endsWith('fatal: quota exceeded')).toBe(true);
+  forgetStderr('thr_long');
+  // Only a one-key object names its code; `{ code, message }` is no code at all.
+  expect(errorCodeOf({ usageLimitExceeded: {} })).toBe('usageLimitExceeded');
+  expect(errorCodeOf({ code: 1, message: 'x' })).toBeNull();
   expect(gitSubcommand(['-c', 'core.fsmonitor=', 'worktree', 'add', '-b', 'branch', '/path'])).toBe('worktree add');
   expect(gitSubcommand(['status', '--porcelain=v1'])).toBe('status');
 });
