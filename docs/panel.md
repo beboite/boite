@@ -71,8 +71,8 @@ it, and the menu's last row, Choose the buttons, leads back to the switches.
 
 | Surface  | Tab      | What it shows                                                                 |
 | -------- | -------- | ----------------------------------------------------------------------------- |
-| Browser  | many     | the user's own pages, in a shell child webview with persistent cookies; test fixtures use an iframe |
-| Agent browser | one | the conversation's browser tabs on its machine, a webview of the Windows desktop app on its own core, frames elsewhere, covered until Show except a tab the owner opens there; see [browser.md](browser.md) |
+| Browser  | one      | the conversation's browser, the one its agent drives: a webview of the Windows desktop app on its own core, frames from the thread's machine elsewhere, covered until Show except a tab the owner opens there; see [browser.md](browser.md) |
+| Preview  | many     | a `boite preview` page, in a shell child webview with persistent cookies, where preview comments pick elements; test fixtures use an iframe |
 | Changes  | one      | `git.status` of the working directory, a file's diff on click                 |
 | Files    | one      | the working directory as a tree, `files.list` one directory at a time         |
 | File     | per path | a text editor with save, an image viewer with zoom and pan, a video or audio player |
@@ -82,8 +82,15 @@ it, and the menu's last row, Choose the buttons, leads back to the switches.
 | Trace    | one      | the thread's processes, see [trace.md](trace.md)                              |
 | Device   | one      | the simulators and emulators open in the thread, covered until Show, see [devices.md](devices.md) |
 
+The launcher and the new-surface menu offer one Browser card, and `boite
+browse <url>` opens its page as a new tab of that same browser. Only `boite
+preview`, and `boite browse` of a local HTML file, which calls it, open a
+Preview tab, in the shell's child webview. A card says nothing
+below its name, and a kind this client cannot open has no card; the
+new-surface menu still lists it, greyed, with the reason.
+
 The iframe bridge belongs to browser test fixtures; ordinary web clients have
-no native Browser surface. [Portability](portability.md#remaining-gaps) records
+no native Preview surface. [Portability](portability.md#remaining-gaps) records
 the Linux shell's system-browser fallback.
 
 The address field accepts public hosts, local development addresses such as
@@ -277,7 +284,10 @@ The `boite` CLI ([cli.md](cli.md)) calls `panel.open` with a surface: a file
 at a line, the changes, one file's diff, a url, the tree, the trace, the tasks,
 a workflow run.
 The core validates it and emits `panel.requested` on every client subscribed
-to the thread. The store opens that surface on that thread's panel, and opens
+to the thread, except for a url: that one opens as a new tab of the
+conversation's browser, and each client's browser watcher brings the Browser
+surface forward. Only `artifacts.preview` sends a `browser` surface, with its
+artifact, to the panel itself. The store opens that surface on that thread's panel, and opens
 the panel itself when the thread is the one on screen. A thread nobody is
 watching keeps the request on its panel for the next open.
 
@@ -286,8 +296,8 @@ watching keeps the request on its panel for the next open.
 `panel` toggles the panel, `browser`, `changes`, `files`, `tasks` and `trace`
 open their surface, `close-surface` closes the active tab. The defaults are in
 [keybindings.md](keybindings.md). With the launcher showing, a single letter
-opens a surface: A, B, C, D, F, K, M, T, W. M opens Messages, D the Device
-surface and W the Agent browser.
+opens a surface: A, B, C, D, F, K, M, T. M opens Messages, D the Device
+surface and B the Browser, the conversation's.
 
 ## Experimental PR review
 

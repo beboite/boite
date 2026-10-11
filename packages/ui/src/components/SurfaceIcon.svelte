@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Activity, AppWindow, FileText, FolderTree, GitCompare, Globe, ListChecks, MessageSquare, Smartphone, UsersRound } from '@lucide/svelte';
+  import { Activity, FileText, FolderTree, GitCompare, Globe, ListChecks, MessageSquare, Smartphone, UsersRound } from '@lucide/svelte';
   import type { SurfaceKind } from '../lib/right-panel.svelte';
 
   /** The icon of a kind of surface, on its tab and on its launcher card. */
@@ -18,12 +18,11 @@
   <FolderTree {size} strokeWidth={1.75} />
 {:else if kind === 'file'}
   <FileText {size} strokeWidth={1.75} />
-{:else if kind === 'agent-browser'}
-  <AppWindow {size} strokeWidth={1.75} />
 {:else if kind === 'device'}
   <Smartphone {size} strokeWidth={1.75} />
 {:else if kind === 'tasks'}
   <ListChecks {size} strokeWidth={1.75} />
 {:else}
+  <!-- Both browsers: the conversation's and a preview page. -->
   <Globe {size} strokeWidth={1.75} />
 {/if}

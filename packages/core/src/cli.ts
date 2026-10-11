@@ -53,7 +53,7 @@ ${CONTROL_HELP}
   attach <file>                  publish a file in chat, up to 512 MB
   show <file>[:line]             open a file in the panel, at a line
   diff [file]                    open the changes, or one file's diff
-  browse <url>                   open a url in the panel's browser
+  browse <url>                   open a url in a new tab of this conversation's browser
   browser help                   inspect, test and capture the built-in browser
   device help                    open an iOS Simulator or Android emulator in the
                                  user's Device panel, capture and drive it

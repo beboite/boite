@@ -68,7 +68,7 @@ A chord is modifiers, then one key, joined with `+`, case and spaces ignored.
 | `palette` | `mod+k` | The command palette, also the command button at the foot of the sidebar |
 | `sidebar` | `mod+s` | Fold or unfold the thread sidebar |
 | `panel` | `mod+alt+b` | The right panel, on an open thread |
-| `browser` | `mod+shift+j` | The browser surface, in the shell |
+| `browser` | `mod+shift+j` | The conversation's browser, on every client |
 | `changes` | `mod+shift+c` | The changes surface, the working tree of the thread |
 | `files` | `mod+shift+f` | The files surface, the tree of the working directory |
 | `tasks` | `mod+shift+k` | The tasks surface, the agent's list and the project's |

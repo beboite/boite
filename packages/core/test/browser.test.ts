@@ -117,6 +117,19 @@ real('an agent opens, reads and drives a page in the browser of its own machine'
   expect(((await agent.call('browser.command', { threadId, action: { kind: 'status' } })).value as { tabs: unknown[] }).tabs).toEqual([]);
 }, 150_000);
 
+real('boite browse opens its page as a new tab of the conversation browser, not in a panel of its own', async () => {
+  const mine = await agent.call('browser.command', { threadId, action: { kind: 'open', url: url() } });
+  await owner.call('threads.subscribe', { threadId });
+  const panels: unknown[] = [];
+  owner.on('panel.requested', (event) => { if (event.threadId === threadId) panels.push(event); });
+  expect(await agent.call('panel.open', { threadId, surface: { kind: 'browser', url: url('/shop') } })).toEqual({ shown: true });
+  const status = (await agent.call('browser.command', { threadId, action: { kind: 'status' } })).value as { tabs: Array<{ tabId: string; url: string; active: boolean }> };
+  // The agent's own page stays where it was; the new tab is the active one.
+  expect(status.tabs).toMatchObject([{ tabId: mine.tabId, url: url(), active: false }, { url: url('/shop'), active: true }]);
+  await Bun.sleep(100);
+  expect(panels).toEqual([]);
+}, 150_000);
+
 real('a viewer watching while the agent changes the page size never puts the old size back', async () => {
   const { tabId } = await agent.call('browser.command', { threadId, action: { kind: 'open', url: url() } });
   await owner.call('threads.subscribe', { threadId });

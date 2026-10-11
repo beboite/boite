@@ -393,7 +393,7 @@ export class FakeClient implements ObservableClient {
       ...stewardMethods(ctx, () => methods),
       ...groupMethods(ctx),
       ...todoMethods(ctx),
-      ...workdirMethods(ctx),
+      ...workdirMethods(ctx, () => methods),
       ...browserMethods(ctx),
       ...devicesMethods(ctx),
       ...pullRequestMethods(ctx),
