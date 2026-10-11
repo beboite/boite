@@ -160,7 +160,10 @@ test.each([
   store.editComposerText('t-parser', 'An unrelated reply');
   expect(await store.flushDrafts()).toBe(true);
   const checkpoint = vi.mocked(writeDraftJournal).mock.calls.at(-1)![1] as typeof durable;
-  expect(checkpoint.drafts['"p-boite"']?.input.text).toBe(expected);
+  // Text typed before the read is a draft of its own: the saved one survives beside it.
+  const texts = Object.values(checkpoint.drafts as Record<string, { draft: { projectId: string }; input: { text: string } }>)
+    .filter(entry => entry.draft.projectId === 'p-boite').map(entry => entry.input.text);
+  expect(texts.toSorted()).toEqual([...new Set([expected, 'Previously saved input'])].toSorted());
   vi.mocked(readDraftJournal).mockResolvedValue(checkpoint);
   const recovered = await ready('deferred-read');
   recovered.startDraft('p-boite');
@@ -222,17 +225,20 @@ test('unresolved attachment placeholders cannot reach a turn or create a thread'
   expect(store.error).toBe(strings.errors.draftAttachment);
 });
 
-test('moving a draft cannot overwrite another project draft', async () => {
+test('moving a draft into a project that has one keeps both', async () => {
   const store = await ready();
   const [a, b] = store.projects;
   store.startDraft(a!.id);
   store.editComposerText('draft', 'First');
+  const first = store.draft!.id!;
   store.startDraft(b!.id);
   store.editComposerText('draft', 'Second');
+  const second = store.draft!.id!;
   store.setDraftProject(a!.id);
-  expect(store.draft?.projectId).toBe(b!.id);
-  expect(store.error).toBe(strings.errors.draftExists);
-  store.startDraft(a!.id);
+  expect(store.draft).toMatchObject({ projectId: a!.id, id: second });
+  expect(store.error).toBeNull();
+  expect(store.draftEntries.map(entry => [entry.id, entry.projectId, entry.text])).toEqual([[second, a!.id, 'Second'], [first, a!.id, 'First']]);
+  store.startDraft(undefined, { draftId: first });
   expect(store.composerStates.draft?.text).toBe('First');
 });
 
@@ -459,4 +465,115 @@ test('an incognito draft starts a hidden conversation that leaving erases, and t
   expect(store.draft?.incognito).toBeUndefined();
   expect((await store.client!.call('threads.list', {})).some(row => row.id === thread.id)).toBe(false);
   expect(await store.client!.call('threads.deleted', {})).toEqual([]);
+});
+
+test('a project holds several drafts: each reopens by id and a new Store restores both', async () => {
+  const store = await ready('several');
+  const [a] = store.projects;
+  store.startDraft(a!.id);
+  store.editComposerText('draft', 'One');
+  const one = store.draft!.id!;
+  store.startDraft(a!.id, { fresh: true });
+  expect(store.composerStates.draft?.text ?? '').toBe('');
+  store.editComposerText('draft', 'Two');
+  const two = store.draft!.id!;
+  expect(two).not.toBe(one);
+  expect(store.draftEntries).toEqual([
+    { id: two, projectId: a!.id, text: 'Two', active: true },
+    { id: one, projectId: a!.id, text: 'One', active: false }
+  ]);
+  store.startDraft(undefined, { draftId: one });
+  expect(store.draft?.id).toBe(one);
+  expect(store.composerStates.draft?.text).toBe('One');
+  // Typing does not reorder the list.
+  store.editComposerText('draft', 'One, longer');
+  expect(store.draftEntries.map(entry => [entry.id, entry.active])).toEqual([[two, false], [one, true]]);
+  // Unnamed, the project resumes its most recently parked draft.
+  store.startDraft(undefined, { draftId: two });
+  store.startDraft(null);
+  store.startDraft(a!.id);
+  expect(store.draft?.id).toBe(two);
+  expect(await store.flushDrafts()).toBe(true);
+  vi.mocked(readDraftJournal).mockResolvedValue(vi.mocked(writeDraftJournal).mock.lastCall![1]);
+  const restored = await ready('several');
+  expect(restored.draftEntries.filter(entry => entry.projectId === a!.id).map(entry => [entry.id, entry.text])).toEqual([[two, 'Two'], [one, 'One, longer']]);
+  restored.startDraft(undefined, { draftId: one });
+  expect(restored.composerStates.draft?.text).toBe('One, longer');
+  restored.startDraft(undefined, { draftId: two });
+  expect(restored.composerStates.draft?.text).toBe('Two');
+});
+
+test('a fresh draft keeps an empty open draft of the same project and parks a written one', async () => {
+  const store = await ready();
+  const [a, b] = store.projects;
+  store.startDraft(a!.id);
+  const empty = store.draft!.id;
+  store.startDraft(a!.id, { fresh: true });
+  expect(store.draft?.id).toBe(empty);
+  store.startDraft(b!.id, { fresh: true });
+  expect(store.draft).toMatchObject({ projectId: b!.id });
+  expect(store.draft?.id).not.toBe(empty);
+  store.editComposerText('draft', 'Written');
+  const written = store.draft!.id;
+  store.startDraft(b!.id, { fresh: true });
+  expect(store.draft?.id).not.toBe(written);
+  expect(store.draftEntries.map(entry => entry.text)).toEqual(['Written']);
+});
+
+test('discarding a draft drops it from the list and the journal, and empties the open one in place', async () => {
+  const store = await ready('discard');
+  const [a] = store.projects;
+  store.startDraft(a!.id);
+  store.editComposerText('draft', 'Parked');
+  const parked = store.draft!.id!;
+  store.startDraft(a!.id, { fresh: true });
+  store.editComposerText('draft', 'Open');
+  const open = store.draft!.id!;
+  store.discardDraft(parked);
+  expect(store.draftEntries.map(entry => entry.id)).toEqual([open]);
+  store.discardDraft(open);
+  expect(store.draftEntries).toEqual([]);
+  expect(store.draft?.projectId).toBe(a!.id);
+  expect(store.draft?.id).not.toBe(open);
+  expect(store.composerStates.draft?.text).toBe('');
+  expect(await store.flushDrafts()).toBe(true);
+  const journal = vi.mocked(writeDraftJournal).mock.lastCall![1] as { drafts: Record<string, unknown> };
+  expect(journal.drafts).toEqual({});
+  vi.mocked(readDraftJournal).mockResolvedValue(journal);
+  expect((await ready('discard')).draftEntries).toEqual([]);
+});
+
+test('a journal entry keyed by its project restores with that key as its id and is written back there', async () => {
+  vi.mocked(readDraftJournal).mockResolvedValue({ updatedAt: 1, inputs: {}, drafts: {
+    '"p-boite"': { draft: { projectId: 'p-boite', worktree: false }, input: { text: 'Legacy draft', attachments: [], queued: [] } }
+  } });
+  const store = await ready('legacy-key');
+  expect(store.draftEntries).toEqual([{ id: '"p-boite"', projectId: 'p-boite', text: 'Legacy draft', active: expect.any(Boolean) }]);
+  store.startDraft('p-boite');
+  expect(store.draft?.id).toBe('"p-boite"');
+  store.editComposerText('draft', 'Legacy draft, edited');
+  store.startDraft('p-boite', { fresh: true });
+  store.editComposerText('draft', 'A second one');
+  expect(await store.flushDrafts()).toBe(true);
+  const journal = vi.mocked(writeDraftJournal).mock.lastCall![1] as { drafts: Record<string, { input: { text: string } }> };
+  expect(journal.drafts['"p-boite"']?.input.text).toBe('Legacy draft, edited');
+  expect(Object.values(journal.drafts).map(entry => entry.input.text).toSorted()).toEqual(['A second one', 'Legacy draft, edited']);
+});
+
+test('sending one draft of a project keeps the others, and Ctrl+Enter opens a fresh one', async () => {
+  const store = await ready();
+  const [a] = store.projects;
+  store.startDraft(a!.id);
+  store.editComposerText('draft', 'Keep me');
+  const kept = store.draft!.id!;
+  store.startDraft(a!.id, { fresh: true });
+  store.editComposerText('draft', 'Send me');
+  expect(await store.submitAndDraft('Send me', store.defaultChoice()!)).toBe(true);
+  expect(store.draft?.projectId).toBe(a!.id);
+  expect(store.draft?.id).not.toBe(kept);
+  expect(store.composerStates.draft?.text ?? '').toBe('');
+  expect(store.draftEntries.map(entry => [entry.id, entry.text])).toEqual([[kept, 'Keep me']]);
+  store.startDraft(undefined, { draftId: kept });
+  expect(await store.submit('Keep me', store.defaultChoice()!)).toBe(true);
+  expect(store.draftEntries).toEqual([]);
 });

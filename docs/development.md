@@ -208,8 +208,9 @@ families with pending work or input, and uses the recoverable deletion flow belo
 
 Settings > General > Conversations offers Group working threads,
 stored on this device; phone settings offer the same switch under device
-preferences. The sidebar's Display options menu, which also chooses Projects or Recent, offers the same switches
-with their scope and stays open while adjusting multiple options.
+preferences. The sidebar's Display options panel (`DisplayOptions.svelte`) offers the
+same switches under the view and project order choices, each scope behind its "i",
+and stays open while adjusting multiple options.
 It moves running, queued and background work to a collapsed section above Done
 in Recent and behind each project's working counter in Projects. Turning it
 off keeps those conversations in the main list in both views.
@@ -217,7 +218,11 @@ Pins, unsent drafts, failures and requests for
 the user's answer remain visible. Phone search temporarily shows matching
 working conversations in the main list. Keyboard thread shortcuts follow the
 expanded rows in their displayed order. Merged-PR archiving feeds Done through
-the core check below; its PR link appears under the completed title.
+the core check below; its PR link, `#428 merged`, appears under the completed title
+and opens the pull request. A done or archived row reads like a thread row
+(provider, title, time) without the project a project section already names; it
+has no menu button: a right click, or a long press on a phone (`lib/long-press.ts`),
+opens its menu, and restoring sits in the time's place under the pointer.
 
 Projects shows projects with any active conversation or a draft, including
 projects whose conversations are all working. Each project header has separate
@@ -227,16 +232,19 @@ includes running, queued and background work. Pins and unsent
 drafts stay visible while Working is folded and appear once when expanded;
 questions and failures stay in the main list. Done and Archived read only that project's
 archived summaries when expanded, with the same reading and restore actions as
-Recent. Idle projects holds empty projects and projects whose conversations
-are all archived, as compact rows in a closed fold below the main list. Archived
-projects sits under it with the same rows, on desktop and phone. Choosing an idle
-row starts a draft there; choosing an archived row restores the project, then
-starts a draft. Each row also archives (idle) or restores and removes (archived)
-without opening anything, and an idle row takes a dragged thread. An idle project
+Recent. One closed fold below the main list, on desktop and phone, holds every
+project the list leaves out (`ProjectShelf.svelte`): idle ones, empty or with
+every conversation archived, then archived projects, a step quieter and marked
+with the archive glyph. It reads Idle projects or Archived projects while it holds
+one kind, Other projects once it holds both. Choosing an idle row starts a draft
+there; choosing an archived row restores the project, then starts a draft. Under
+the pointer a row archives (idle) or restores and removes (archived) without
+opening anything; its full menu opens with a right click or a long press, and an
+idle row takes a dragged thread. An idle project
 with done or archived conversations shows those counts on its row; each unfolds
 that history under it. Creating or restoring a conversation or starting a draft
 returns its project to the main list.
-Group idle projects, in settings and the Projects grouping menu, can be disabled
+Group idle projects, in settings and the Display options panel, can be disabled
 to keep every project in its normal order. Both grouping preferences persist on
 the device. Expansion follows the owning project between desktop and phone for
 the current session. Phone search exposes matching
@@ -777,8 +785,20 @@ The core validates bytes and writes sanitized, content-addressed copies under
 `<dataDir>/attachments/`. Copies survive resume and are currently not removed
 by archive or project removal. Timeline cards download those copies. Composer
 `[Image N]` references follow attachment order, preview inline and renumber after
-removal. A new image accepted during send belongs to the next draft. Refused
-sends retain input, attachments and edits made while sending.
+removal. Copying or cutting a reference carries its picture
+(`lib/composer-clipboard.ts`): pasted into another composer, on any machine, the
+picture joins that prompt and the reference takes its number there; pasted back
+into the same composer, only the text goes in. A new image accepted during send
+belongs to the next draft. Refused sends retain input, attachments and edits made
+while sending.
+
+Undo in the composer is the app's, never the textarea's (`lib/composer-history.ts`):
+Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z and the context menu walk one history per draft or
+thread, up to 200 steps, holding the text, its pictures, its page references and
+the selection. Typing groups by word, pause and direction; deleting a selection,
+paste, cut, a picture added or removed and every text the app writes are steps
+of their own, so deleting everything and typing by mistake comes back in two
+undos, pictures included. A sent prompt clears that history.
 
 Original file links in the local desktop thread may open through the system
 application, with executable links retaining their explicit local behavior.

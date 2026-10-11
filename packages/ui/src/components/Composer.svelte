@@ -7,12 +7,15 @@
   import { attachFiles } from '../lib/composer-attachments';
   import { rewindComposerEdit } from '../lib/composer-edit';
   import { fitHeight, selfSizing } from '../lib/composer-size';
-  import { editComposerInput, insertImageReference, removeImageReferences, trackImageSend } from '../lib/composer-images';
+  import { editComposerInput, insertImageReference, removeImageReferences, touchesImageReference, trackImageSend } from '../lib/composer-images';
+  import { checkpoint, editKind, recordEdit, redoStep, resetHistory, settled, undoStep, type ComposerSnapshot } from '../lib/composer-history';
+  import { copiedFrom, copyImages, fitCopy, pastesAsText } from '../lib/composer-clipboard';
+  import { acceptAttachments } from '../lib/attachments';
   import { unresolvedAssetId } from '../lib/draft-attachments';
   import { focusWithin } from '../lib/focus';
   import { touchScreen } from '../lib/device';
   import { ignoreQuestions, repliesOf, replyTarget, sendAnswer } from '../lib/question-reply.svelte';
-  import { emptyBox, returnPrompt, sentPrompts, textEntries, type SentPrompt } from '../lib/composer-queue';
+  import { emptyBox, returnPrompt, sentPrompts, textEntries, type ComposerState, type SentPrompt } from '../lib/composer-queue';
   import { rankItems, type PaletteItem } from '../lib/palette';
   import { clearStash, DRAFT_STASH_KEY, readStash, writeStash } from '../lib/prefs';
   import { claudeKeywords, promptSegments } from '../lib/message-display';
@@ -324,11 +327,21 @@
   function oninput(event: Event) {
     const input = event as InputEvent;
     const element = event.currentTarget as HTMLTextAreaElement;
+    const before = pendingEdit && { ...pendingEdit };
     if (pendingEdit && pendingEdit.start === pendingEdit.end && input.inputType?.startsWith('delete')) {
       if (input.inputType.endsWith('Backward')) pendingEdit.start = element.selectionStart;
       else pendingEdit.end += Math.max(0, text.length - element.value.length);
     }
-    const whole = editComposerInput(store, key, element, input.inputType === 'historyUndo' || input.inputType === 'historyRedo', pendingEdit);
+    // A host whose undo could not be cancelled already rewrote the box: the old path keeps its references.
+    const nativeUndo = input.inputType === 'historyUndo' || input.inputType === 'historyRedo';
+    const state = stateForInput();
+    // The state still holds the text before this edit: that is the step undo returns to.
+    if (!nativeUndo) {
+      const kind = touchesImageReference(state.text, state.attachments, pendingEdit) ? 'big' : editKind(input.inputType, pendingEdit);
+      recordEdit(state, kind, before, input.data ?? null);
+    }
+    const whole = editComposerInput(store, key, element, nativeUndo, pendingEdit);
+    settled(state);
     pendingEdit = undefined;
     recall = null;
     // Typing is proof the box has the keyboard, whatever the focus event did.
@@ -344,8 +357,9 @@
     if (state && (state.selection?.start !== start || state.selection?.end !== end)) state.selection = { start, end };
   }
 
-  /** Writes a recalled or restored prompt in, caret at its end. */
+  /** Writes a recalled or restored prompt in, caret at its end. One undo step, with whatever else the caller changes. */
   function put(value: string, at = value.length) {
+    checkpoint(stateForInput());
     setText(value);
     const el = box;
     if (el) {
@@ -354,6 +368,93 @@
     }
     caret = at;
     requestAnimationFrame(grow);
+  }
+
+  /** The box's own selection, or null before it exists. */
+  function selection() {
+    return box ? { start: box.selectionStart, end: box.selectionEnd } : undefined;
+  }
+
+  /**
+   * Ctrl+Z and Ctrl+Y (or Ctrl+Shift+Z), and the context menu's Undo: the
+   * composer's history, never the textarea's, which a written value wipes and
+   * which never held the attachments (`lib/composer-history.ts`).
+   */
+  function travel(back: boolean) {
+    const state = stateForInput();
+    const step = back ? undoStep(state, selection()) : redoStep(state, selection());
+    if (step) restoreStep(state, step);
+  }
+
+  /** Text, pictures, page references and selection exactly as the step held them. */
+  function restoreStep(state: ComposerState, step: ComposerSnapshot) {
+    state.attachments = [...step.attachments];
+    state.previewReferences = [...step.previewReferences];
+    // Persists the draft at once; the references it would re-derive are the step's own.
+    store.editComposerText(key, step.text);
+    state.previewReferences = [...step.previewReferences];
+    const end = Math.min(step.text.length, step.selection.end), start = Math.min(end, step.selection.start);
+    state.selection = { start, end };
+    if (box) { box.value = step.text; box.setSelectionRange(start, end); }
+    caret = end;
+    recall = null;
+    settled(state);
+    if (!sizesItself) grow(); else syncInput();
+  }
+
+  /** The box's text after an edit the composer made itself, with the caret after `at` unless a reference took more. */
+  function writeEdit(state: ComposerState, value: string, edit: { start: number; end: number }, at: number) {
+    if (!box) return;
+    box.value = value;
+    const whole = editComposerInput(store, key, box, false, edit);
+    if (whole === null) { box.setSelectionRange(at, at); state.selection = { start: at, end: at }; caret = at; } else caret = whole;
+    settled(state);
+    recall = null;
+    if (!sizesItself) grow(); else syncInput();
+  }
+
+  /**
+   * A copy or cut that takes `[Image 2]` takes its picture too (`lib/composer-clipboard.ts`).
+   * A cut is then the composer's own edit: one undo step, the reference and its picture going together.
+   */
+  function copySelection(event: ClipboardEvent, cut: boolean) {
+    if (!box) return;
+    const state = stateForInput(), start = box.selectionStart, end = box.selectionEnd;
+    if (!copyImages(event.clipboardData, state, start, end)) return;
+    event.preventDefault();
+    if (!cut) return;
+    recordEdit(state, 'big', { start, end });
+    writeEdit(state, state.text.slice(0, start) + state.text.slice(end), { start, end }, start);
+  }
+
+  /**
+   * Pasting a copy of ours into another composer, here or on another machine,
+   * brings its pictures and renumbers their references. Where they already
+   * stand under the same numbers, the browser's own paste is enough.
+   */
+  function pasteImages(event: ClipboardEvent): boolean {
+    const copied = copiedFrom(event.clipboardData);
+    if (!copied || !box) return false;
+    const state = stateForInput();
+    if (pastesAsText(copied, state)) return false;
+    event.preventDefault();
+    const start = box.selectionStart, end = box.selectionEnd;
+    recordEdit(state, 'big', { start, end });
+    // An answer's files reach the agent as paths, so it takes images whatever the provider reads.
+    const attachmentProvider = reply ? null : provider;
+    const fitted = fitCopy(copied, state.attachments, (incoming) => {
+      if (incoming.length === 0) return [];
+      if (attachmentProvider && !attachmentProvider.capabilities.images) {
+        store.error = fill(strings.composer.attachNoImages, { provider: attachmentProvider.name });
+        return [];
+      }
+      const result = acceptAttachments(state.attachments, incoming);
+      if (result.refused !== null) store.error = result.refused;
+      return incoming.filter((item) => result.accepted.includes(item));
+    });
+    state.attachments = fitted.attachments;
+    writeEdit(state, state.text.slice(0, start) + fitted.text + state.text.slice(end), { start, end }, start + fitted.text.length);
+    return true;
   }
 
   /**
@@ -383,7 +484,11 @@
     const images = attachments;
     const references = previewReferences;
     if (reply) {
-      if (canSend && await sendAnswer(store, reply)) { recall = null; requestAnimationFrame(grow); }
+      if (canSend && await sendAnswer(store, reply)) {
+        const answered = store.composerStates[key];
+        if (answered) resetHistory(answered);
+        recall = null; requestAnimationFrame(grow);
+      }
       return;
     }
     if (!canSend || !choice) return;
@@ -401,6 +506,7 @@
         offline ? { choice: $state.snapshot(sendChoice) } : undefined);
       state.editing = null;
       emptyBox(state);
+      resetHistory(state);
       recall = null;
       requestAnimationFrame(grow);
       return;
@@ -409,7 +515,8 @@
     const finishImageSend = trackImageSend(state, prompt, images);
     // The box empties and the prompt joins the timeline now; the core's answer only ticks its receipts. A `/goal` writes no message.
     const local = edited ? edited.local : inputStore.stageSend(inputKey, prompt, images, references);
-    if (local) { emptyBox(state); recall = null; requestAnimationFrame(grow); }
+    // Undo never brings back a prompt that left.
+    if (local) { emptyBox(state); resetHistory(state); recall = null; requestAnimationFrame(grow); }
     // A rewind can finish after navigation: the replacement belongs to the
     // captured thread and machine, whichever conversation is on screen now.
     const accepted = await (editedThread
@@ -418,7 +525,7 @@
         ? inputStore.submitAndDraft(prompt, sendChoice, images, references)
         : inputStore.submit(prompt, sendChoice, images, references));
     if (accepted && editedThread && nextDraft && inputStore.openThread?.id === inputKey) {
-      inputStore.startDraft(editedThread.projectId);
+      inputStore.startDraft(editedThread.projectId, { fresh: true });
       inputStore.draftChoice = { ...sendChoice };
     }
     finishImageSend(accepted);
@@ -426,6 +533,7 @@
     if (accepted && !local) {
       if (state.text === prompt) state.text = '';
       if (state.attachments === images) state.attachments = [];
+      if (state.text === '') resetHistory(state);
       state.paused = false;
     } else if (!accepted && local) { inputStore.unstageSend(local); returnPrompt(state, prompt, images, references); }
     if (accepted) recall = null;
@@ -447,7 +555,12 @@
     const inputStore = store;
     readingFiles += 1;
     try {
-      await attachFiles(inputStore, files, state, attachmentProvider, () => {
+      // Each picture that arrives is one undo step, its reference in the text included.
+      const holder = {
+        get attachments() { return state.attachments; },
+        set attachments(value: Attachment[]) { checkpoint(state); state.attachments = value; }
+      };
+      await attachFiles(inputStore, files, holder, attachmentProvider, () => {
         if (inputStore.composerStates[inputKey] === state) insertImageReference(inputStore, inputKey);
       });
     } finally { readingFiles -= 1; }
@@ -458,7 +571,7 @@
       .filter((item) => item.kind === 'file')
       .map((item) => item.getAsFile())
       .filter((file): file is File => file !== null);
-    if (files.length === 0) return;
+    if (files.length === 0) { pasteImages(event); return; }
     // The text of a clipboard that also carries an image stays out of the box.
     event.preventDefault();
     void take(files);
@@ -481,6 +594,7 @@
 
   function removeAttachment(at: number) {
     const state = stateForInput();
+    checkpoint(state);
     // The keyboard's remove button goes with its chip, so the focus comes back to
     // the box. A tap leaves it where it was: focusing the box would open a phone's keyboard.
     const refocus = focusWithin(box?.closest('[data-testid="composer"]'));
@@ -556,6 +670,7 @@
   /** Leaves edit mode: the box empties, nothing was rewound. */
   function cancelEdit() {
     const state = stateForInput();
+    checkpoint(state);
     state.editing = null;
     state.attachments = [];
     state.previewReferences = [];
@@ -569,6 +684,7 @@
     if (!state || state.sending || text.length > 0 || attachments.length > 0 || previewReferences.length > 0) return;
     const entry = store.restoreQueued(key, at);
     if (!entry) return;
+    checkpoint(state);
     state.attachments = entry.attachments;
     recall = null;
     restorePrompt(entry.text, entry.previewReferences ?? []);
@@ -582,6 +698,7 @@
     if (next < 0) {
       recall = null;
       const state = stateForInput();
+      checkpoint(state);
       state.previewReferences = [];
       if (state.editing) { state.editing = null; state.attachments = []; }
       put('');
@@ -609,6 +726,7 @@
       recall = null;
       // The text set aside is plain text: the next prompt typed is not an edit of a sent one.
       const state = stateForInput();
+      checkpoint(state);
       if (state.editing) { state.editing = null; state.attachments = []; }
       put('');
       return;
@@ -672,6 +790,13 @@
   function onkeydown(event: KeyboardEvent) {
     if (event.isComposing) return;
     const meta = event.ctrlKey || event.metaKey;
+    // Ahead of the modifier return below: the box's undo is the composer's, never the textarea's.
+    const letter = event.key?.toLowerCase();
+    if (meta && !event.altKey && (letter === 'z' || letter === 'y') && !store.isKey(event, 'send-and-draft') && !store.isKey(event, 'stash')) {
+      event.preventDefault();
+      travel(letter === 'z' && !event.shiftKey);
+      return;
+    }
     // The two composer chords come from the keyboard table, like the app's.
     if (store.isKey(event, 'send-and-draft')) {
       event.preventDefault();
@@ -751,7 +876,12 @@
       class:highlighted
       bind:this={box}
       value={text}
-      onbeforeinput={() => { pendingEdit = box ? { start: box.selectionStart, end: box.selectionEnd } : undefined; }}
+      onbeforeinput={(event) => {
+        if (event.inputType === 'historyUndo' || event.inputType === 'historyRedo') { event.preventDefault(); travel(event.inputType === 'historyUndo'); return; }
+        pendingEdit = selection();
+      }}
+      oncopy={(event) => copySelection(event, false)}
+      oncut={(event) => copySelection(event, true)}
       {oninput}
       {onkeydown}
       {onpaste}
@@ -843,8 +973,28 @@
     transition: border-color var(--dur-3) var(--ease-out-quint), box-shadow var(--dur-3) var(--ease-out-quint);
   }
 
-  /* Focus tints the hairline with the accent and lays a faint halo of it around the box. */
-  .composer:focus-within { border-color: var(--color-composer-focus); box-shadow: var(--composer-rest), 0 0 0 3px var(--color-composer-halo); }
+  /* Focus lights the edge with the accent, bright along the top and fading down the sides, and lays a
+     soft bloom of it under the box rather than a hard ring around it. */
+  .composer::before {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    z-index: 2;
+    padding: 1px;
+    border-radius: inherit;
+    background: var(--composer-edge);
+    -webkit-mask: linear-gradient(black, black) content-box, linear-gradient(black, black);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(black, black) content-box, linear-gradient(black, black);
+    mask-composite: exclude;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--dur-3) var(--ease-out-quint);
+  }
+  /* The gradient draws the whole edge; without color-mix it is transparent and the plain accent hairline stays. */
+  .composer:focus-within { border-color: var(--color-composer-focus); box-shadow: var(--composer-rest), var(--composer-glow); }
+  @supports (color: color-mix(in oklch, red 50%, blue)) { .composer:focus-within { border-color: transparent; } }
+  .composer:focus-within::before { opacity: 1; }
 
   .input-wrap { position: relative; }
 

@@ -103,7 +103,7 @@ test('done and archived threads are separate lists with their own counts', async
   expect([...document.querySelectorAll('[data-testid=done-thread]')].map(row => (row as HTMLElement).dataset.threadId)).toEqual(['t-trace']);
 });
 
-test('a done thread is deleted from its own menu, opened by right click or by its button', async () => {
+test('a done thread is deleted from its own menu, opened by right click or a long press', async () => {
   const source = await ready('first');
   const props = $state({ entries: entries(), now: Date.now(), header: false, open: true });
   mounted = mount(RecentDone, { target: document.body, props });
@@ -114,9 +114,25 @@ test('a done thread is deleted from its own menu, opened by right click or by it
   row.dispatchEvent(rightClick);
   // The browser's own menu, the one a link would get, stays shut.
   expect(rightClick.defaultPrevented).toBe(true);
-  expect(contextMenu.current?.items.filter(item => !item.separator).map(item => item.id)).toEqual(['open', 'restore', 'copy', 'delete']);
+  expect(contextMenu.current?.items.filter(item => !item.separator).map(item => item.id)).toEqual(['open', 'restore', 'pr', 'copy', 'delete']);
   contextMenu.close();
-  click('[data-thread-id=t-trace] [data-testid=done-thread-menu]');
+  // No menu button on the row: a finger held on it opens the same menu, and the click that ends the press opens nothing.
+  expect(row.querySelector('[data-testid=done-thread-menu]')).toBeNull();
+  vi.useFakeTimers();
+  const touch = (type: string) => {
+    const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX: 14, clientY: 14 });
+    Object.defineProperties(event, { pointerType: { value: 'touch' }, isPrimary: { value: true } });
+    return event;
+  };
+  row.querySelector('[data-testid=done-thread-open]')!.dispatchEvent(touch('pointerdown'));
+  vi.advanceTimersByTime(499);
+  expect(contextMenu.current).toBeNull();
+  vi.advanceTimersByTime(1);
+  vi.useRealTimers();
+  expect(contextMenu.current?.items.filter(item => !item.separator).map(item => item.id)).toEqual(['open', 'restore', 'pr', 'copy', 'delete']);
+  const select = vi.spyOn(source.store, 'open');
+  click('[data-thread-id=t-trace] [data-testid=done-thread-open]');
+  expect(select).not.toHaveBeenCalled();
   const removals = vi.spyOn(source.client, 'call');
   // Picked twice before the core answers: one request, no refusal banner.
   const pick = contextMenu.current!.onpick;

@@ -1,0 +1,40 @@
+import { afterEach, expect, test } from 'vitest';
+import { FakeClient } from './fake-client';
+import { Store } from './store.svelte';
+import { agentsAtWork, workingThreads } from './work-counts';
+
+const stores: Store[] = [];
+afterEach(() => { for (const store of stores.splice(0)) { store.client?.close(); store.detach(); } });
+
+async function ready() {
+  const store = new Store();
+  store.attach(new FakeClient({ delayMs: 0 }));
+  await store.connect();
+  stores.push(store);
+  return store;
+}
+
+test('the switch counts the conversations at work on every machine, and says when one needs the user', async () => {
+  const first = await ready(), second = await ready();
+  const calm = (store: Store) => { store.threads = store.threads.map(thread => ({ ...thread, status: 'idle', openQuestions: 0, backgroundWork: null, unread: false })); };
+  calm(first); calm(second);
+  expect(workingThreads([first, second])).toEqual({ count: 0, waiting: false });
+  first.threads = first.threads.map(thread => thread.id === 't-scheduler' ? { ...thread, status: 'running' } : thread);
+  second.threads = second.threads.map(thread => thread.id === 't-scheduler' ? { ...thread, status: 'queued' } : thread);
+  expect(workingThreads([first, second])).toEqual({ count: 2, waiting: false });
+  second.threads = second.threads.map(thread => thread.id === 't-bench' ? { ...thread, status: 'waiting' } : thread);
+  expect(workingThreads([first, second])).toEqual({ count: 3, waiting: true });
+  // A thread in an archived project is out of the list, so out of the count.
+  second.projects = second.projects.map(project => project.id === second.threads.find(thread => thread.id === 't-bench')!.projectId ? { ...project, archived: true } : project);
+  expect(workingThreads([first, second]).waiting).toBe(false);
+});
+
+test('a steward mid-turn counts once among the agents at work', async () => {
+  const store = await ready();
+  store.threads = store.threads.map(thread => ({ ...thread, status: thread.id === 't-scheduler' ? 'running' : 'idle', openQuestions: 0 }));
+  expect(agentsAtWork([store])).toEqual({ count: 0, waiting: false });
+  store.stewards = [{ threadId: 't-scheduler', projectIds: [], allProjects: true, capabilities: [], grantedAt: 0 }] as never;
+  expect(agentsAtWork([store])).toEqual({ count: 1, waiting: false });
+  store.stewards = [...store.stewards!, { threadId: 't-scheduler', projectIds: ['p-boite'], allProjects: false, capabilities: [], grantedAt: 0 }] as never;
+  expect(agentsAtWork([store]).count).toBe(1);
+});

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Archive, ArchiveRestore, CheckCheck, Ellipsis, FolderX, Trash2 } from '@lucide/svelte';
+  import { Archive, ArchiveRestore, CheckCheck, FolderX, Trash2 } from '@lucide/svelte';
   import type { Project, ThreadId } from '@boite/contracts';
   import { count as formatCount, projectName } from '../lib/format';
   import { archiveProjectWithUndo, confirmRemoveProject, projectMenu } from '../lib/project-menu';
@@ -9,26 +9,30 @@
   import { fill, strings } from '../lib/strings';
   import { dropKey, takesDrop, threadDrag } from '../lib/thread-move.svelte';
   import { workspace, type Machine } from '../lib/workspace.svelte';
+  import { longPress } from '../lib/long-press';
   import FoldHeader from './FoldHeader.svelte';
   import MachineIcon from './MachineIcon.svelte';
   import ProjectTile from './ProjectTile.svelte';
   import RecentDone from './RecentDone.svelte';
 
   /**
-   * A fold under the project list, one compact row per project. `idle` holds
-   * projects with no open conversation, `archived` those put out of the list.
-   * Choosing a row starts a conversation there, restoring an archived project
-   * first; the row's own buttons archive, restore or remove without opening
-   * anything. An idle project that still has done or archived conversations
-   * shows their counts, which unfold that history under its row. With several
-   * machines the rows group under their machine. `onopen` runs once a draft or
-   * a conversation opens from the fold, so the phone can show it. `onrows`
-   * receives the history conversations drawn, in order, for Alt+digit.
+   * One fold under the project list for every project it does not show: the
+   * idle ones, with no open conversation, then the archived ones, a step
+   * quieter and marked with the archive glyph. One compact row per project;
+   * choosing it starts a conversation there, restoring an archived project
+   * first. A row's quick action shows under the pointer (archive an idle
+   * project, restore or remove an archived one) and its full menu opens with
+   * a right click or a long press. An idle project that still has done or
+   * archived conversations shows their counts, which unfold that history
+   * under its row. With several machines the rows group under their machine.
+   * `onopen` runs once a draft or a conversation opens from the fold, so the
+   * phone can show it. `onrows` receives the history conversations drawn, in
+   * order, for Alt+digit.
    */
   type Row = { store: Store; threadId: ThreadId };
-  let { kind, entries, multi, now, scrollRoot, onopen, onrows }: {
-    kind: ProjectShelfKind;
-    entries: ProjectEntry[];
+  let { idle = [], archived = [], multi, now, scrollRoot, onopen, onrows }: {
+    idle?: ProjectEntry[];
+    archived?: ProjectEntry[];
     multi: boolean;
     now: number;
     scrollRoot?: HTMLElement;
@@ -37,23 +41,32 @@
   } = $props();
   const history = ['done', 'archived'] as const;
   const uid = $props.id();
-  const open = $derived(projectThreadView.shelf[kind]);
+  const open = $derived(projectThreadView.shelfOpen);
+  const total = $derived(idle.length + archived.length);
+  /** Named for what it holds: both kinds, or the one there is. */
+  const label = $derived(idle.length && archived.length ? strings.sidebar.otherProjects : idle.length ? strings.sidebar.idleProjects : strings.sidebar.archivedProjects);
   /** Rows render from the first opening on, so a fold nobody opens loads no project icons. */
   let visited = $state(false);
   $effect.pre(() => { if (open) visited = true; });
   /** The row whose action is in flight, so a second click cannot race it. */
   let busy = $state<string | null>(null);
 
+  const byName = (a: Project, b: Project) => projectName(a).localeCompare(projectName(b));
   let groups = $derived.by(() => {
-    const byMachine = new Map<string, { machine: Machine; projects: Project[] }>();
-    for (const { machine, project } of entries) {
-      const group = byMachine.get(machine.id) ?? { machine, projects: [] };
-      group.projects.push(project);
-      byMachine.set(machine.id, group);
+    const byMachine = new Map<string, { machine: Machine; idle: Project[]; archived: Project[] }>();
+    for (const [kind, entries] of [['idle', idle], ['archived', archived]] as const) {
+      for (const { machine, project } of entries) {
+        const group = byMachine.get(machine.id) ?? { machine, idle: [], archived: [] };
+        group[kind].push(project);
+        byMachine.set(machine.id, group);
+      }
     }
-    return [...byMachine.values()].map((group) => ({
-      ...group,
-      projects: [...group.projects].sort((a, b) => projectName(a).localeCompare(projectName(b)))
+    return [...byMachine.values()].map(group => ({
+      machine: group.machine,
+      rows: [
+        ...group.idle.sort(byName).map(project => ({ kind: 'idle' as ProjectShelfKind, project })),
+        ...group.archived.sort(byName).map(project => ({ kind: 'archived' as ProjectShelfKind, project }))
+      ]
     }));
   });
 
@@ -70,7 +83,7 @@
   }
   let reported: Row[] = [];
   $effect(() => {
-    const visible = !open || kind !== 'idle' ? [] : groups.flatMap(({ machine, projects }) => projects.flatMap(project => history.flatMap(list => {
+    const visible = !open ? [] : groups.flatMap(({ machine, rows }) => rows.flatMap(({ kind, project }) => kind !== 'idle' ? [] : history.flatMap(list => {
       const entry = { machine, project };
       return archiveCount(project, list) > 0 && projectThreadView.isOpen(entry, list) ? historyRows[historyKey(entry, list)] ?? [] : [];
     })));
@@ -89,7 +102,7 @@
     }
   }
 
-  function start(event: MouseEvent, machine: Machine, project: Project) {
+  function start(event: MouseEvent, kind: ProjectShelfKind, machine: Machine, project: Project) {
     const owner = machine.store;
     // No conversation can start in a folder that is gone: the menu offers what can still be done with it.
     if (kind === 'idle' && project.missing === true) return projectMenu(event, owner, project);
@@ -102,33 +115,34 @@
   }
 
   /** What choosing the row does, above the folder it points at: the machine is already the group's header. */
-  function rowTitle(project: Project): string {
+  function rowTitle(kind: ProjectShelfKind, project: Project): string {
     if (project.missing === true) return kind === 'idle' ? strings.sidebar.projectMissing : `${strings.sidebar.restoreProject} ${projectName(project)}`;
     return fill(kind === 'idle' ? strings.sidebar.newThreadIn : strings.sidebar.restoreAndStart, { project: projectName(project) });
   }
 </script>
 
-{#if entries.length > 0}
-  <section class="shelf" data-testid="{kind}-projects">
-    <FoldHeader label={kind === 'idle' ? strings.sidebar.idleProjects : strings.sidebar.archivedProjects} count={entries.length} {open}
-      controls={uid} testid="{kind}-projects-toggle" onclick={() => (projectThreadView.shelf[kind] = !open)} />
+{#if total > 0}
+  <section class="shelf" data-testid="project-shelf">
+    <FoldHeader {label} count={total} {open} controls={uid} testid="project-shelf-toggle" onclick={() => (projectThreadView.shelfOpen = !open)} />
     <div id={uid} class="motion-fold" class:expanded={open} inert={!open}><div>
       {#if visited}
-        {#each groups as { machine, projects } (machine.id)}
+        {#each groups as { machine, rows } (machine.id)}
           {#if multi}
-            <div class="machine" data-testid="{kind}-projects-machine" title={machine.label}>
+            <div class="machine" data-testid="project-shelf-machine" title={machine.label}>
               <MachineIcon icon={machine.icon} os={machine.store.core?.os} size={11} />
               <span class="machine-name ui-label">{machine.label}</span>
             </div>
           {/if}
           <ul>
-            {#each projects as project (project.id)}
+            {#each rows as { kind, project }, index (`${kind}:${project.id}`)}
               {@const here = key(machine, project)}
               {@const entry = { machine, project }}
               {@const kept = kind === 'idle' ? history.filter(list => archiveCount(project, list) > 0) : []}
               {@const controls = `${uid}-${encodeURIComponent(here)}`}
               <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
               <li
+                class={kind}
+                class:first-archived={kind === 'archived' && index > 0 && rows[index - 1]?.kind === 'idle'}
                 data-testid="{kind}-project"
                 data-project-id={project.id}
                 data-machine-id={machine.id}
@@ -138,29 +152,31 @@
                 class:drop={kind === 'idle' && threadDrag.over === here}
                 aria-label={kind === 'idle' && threadDrag.over === here ? fill(strings.threadMove.dropHere, { project: projectName(project) }) : undefined}
                 oncontextmenu={(event) => projectMenu(event, machine.store, project)}
+                use:longPress
               >
                 <div class="row">
                   <button
                     type="button"
                     class="ghost main"
                     data-testid="{kind}-project-open"
-                    title={`${rowTitle(project)}\n${project.path}`}
+                    title={`${rowTitle(kind, project)}\n${project.path}`}
                     disabled={busy !== null}
-                    onclick={(event) => start(event, machine, project)}
+                    onclick={(event) => start(event, kind, machine, project)}
                   >
                     <span class="tile" aria-hidden="true"><ProjectTile {project} store={machine.store} size={16} /></span>
                     <span class="name ui-label" class:gone={project.missing === true}>{projectName(project)}</span>
                     {#if project.missing === true}<span class="missing" title={strings.sidebar.projectMissing}><FolderX size={13} aria-label={strings.sidebar.projectMissing} /></span>{/if}
                   </button>
                   {#each kept as list (list)}
-                    {@const total = archiveCount(project, list)}
-                    {@const label = fill(list === 'done' ? strings.sidebar.projectDoneThreads : strings.sidebar.projectArchivedThreads, { count: String(total), project: projectName(project) })}
-                    <button type="button" class="ghost counter {list}" class:active={projectThreadView.isOpen(entry, list)} data-testid="project-{list}-toggle" data-count={total}
-                      title={label} aria-label={label} aria-expanded={projectThreadView.isOpen(entry, list)} aria-controls="{controls}-{list}"
+                    {@const count = archiveCount(project, list)}
+                    {@const listLabel = fill(list === 'done' ? strings.sidebar.projectDoneThreads : strings.sidebar.projectArchivedThreads, { count: String(count), project: projectName(project) })}
+                    <button type="button" class="ghost counter {list}" class:active={projectThreadView.isOpen(entry, list)} data-testid="project-{list}-toggle" data-count={count}
+                      title={listLabel} aria-label={listLabel} aria-expanded={projectThreadView.isOpen(entry, list)} aria-controls="{controls}-{list}"
                       onclick={() => projectThreadView.toggle(entry, list)}>
-                      {#if list === 'done'}<CheckCheck size={12} aria-hidden="true" />{:else}<Archive size={12} aria-hidden="true" />{/if}<span class="ui-label">{formatCount(total)}</span>
+                      {#if list === 'done'}<CheckCheck size={12} aria-hidden="true" />{:else}<Archive size={12} aria-hidden="true" />{/if}<span class="ui-label">{formatCount(count)}</span>
                     </button>
                   {/each}
+                  {#if kind === 'archived'}<span class="archived-mark" title={strings.sidebar.archivedProject} aria-label={strings.sidebar.archivedProject}><Archive size={12} /></span>{/if}
                   <span class="actions">
                     {#if kind === 'idle'}
                       {#if project.kind !== 'drafts'}
@@ -174,14 +190,6 @@
                           onclick={() => void run(machine, project, () => archiveProjectWithUndo(machine.store, project))}><Archive size={13} /></button
                         >
                       {/if}
-                      <button
-                        type="button"
-                        class="ghost small icon"
-                        data-testid="idle-project-menu"
-                        title={strings.sidebar.projectMenu}
-                        aria-label={`${strings.sidebar.projectMenu}: ${projectName(project)}`}
-                        onclick={(event) => projectMenu(event, machine.store, project)}><Ellipsis size={14} /></button
-                      >
                     {:else}
                       <button
                         type="button"
@@ -312,6 +320,16 @@
     flex: none;
     gap: 2px;
   }
+  /* An archived project reads a step quieter than an idle one and carries the archive glyph; under the pointer it wakes. */
+  li.archived .row { color: var(--color-subtle); }
+  li.archived .tile { opacity: 0.5; }
+  li.archived .row:hover, li.archived .row:focus-within { color: var(--color-foreground); }
+  li.archived .row:hover .tile, li.archived .row:focus-within .tile { opacity: 1; }
+  /* The first archived row leaves a little air and a hairline after the idle ones. */
+  li.first-archived { margin-top: 5px; padding-top: 5px; border-top: 1px solid var(--color-border); border-radius: 0; }
+  .archived-mark { display: flex; flex: none; padding: 0 6px; color: var(--color-subtle); }
+  .row:hover .archived-mark, .row:focus-within .archived-mark { display: none; }
+  li { -webkit-touch-callout: none; }
   .actions button {
     border-color: transparent;
   }

@@ -1,30 +1,49 @@
 <script lang="ts">
-  import { ArchiveRestore, Ellipsis } from '@lucide/svelte';
+  import { ArchiveRestore, Folder, GitMerge, GitPullRequest, GitPullRequestClosed } from '@lucide/svelte';
   import type { ThreadSummary } from '@boite/contracts';
   import type { ProjectEntry } from '../lib/project-view.svelte';
   import { restoreThread } from '../lib/archive';
   import { contextMenu } from '../lib/context-menu.svelte';
   import { separator } from '../lib/menu';
   import { canDeleteThread, deleteThread } from '../lib/thread-removal';
-  import { ago, exactTime, projectName } from '../lib/format';
+  import { agentLabel, ago, exactTime, projectName } from '../lib/format';
   import { fill, strings } from '../lib/strings';
   import { workspace } from '../lib/workspace.svelte';
-  import ProjectTile from './ProjectTile.svelte';
+  import { longPress } from '../lib/long-press';
+  import MachineIcon from './MachineIcon.svelte';
+  import ProviderLogo from './ProviderLogo.svelte';
 
-  let { entry, now, showMachine = false, onopen }: {
+  /**
+   * A done or archived conversation, drawn like a thread row: the provider,
+   * the title, when it was last used, and under it the pull request it ended
+   * with, which opens on the forge. No menu button: a right click, or a long
+   * press on a phone, opens the row's menu. Restoring stays one hover away.
+   */
+  let { entry, now, showMachine = false, showProject = false, onopen }: {
     entry: ProjectEntry & { thread: ThreadSummary };
     now: number;
     showMachine?: boolean;
+    /** Only in a list that spans several projects: under a project's header it would repeat it. */
+    showProject?: boolean;
     onopen?: () => void;
   } = $props();
   let restoring = $state(false);
   let deleting = $state(false);
+  const owner = $derived(entry.machine.store);
+  const thread = $derived(entry.thread);
+  const open = $derived(workspace.active === owner && owner.openThread?.id === thread.id);
+  const agent = $derived(agentLabel(owner, thread));
+  /** The merge that archived it, else the pull request its branch last had. */
+  const pr = $derived(thread.archiveReason?.type === 'pr-merged'
+    ? { number: thread.archiveReason.number, url: thread.archiveReason.url, state: 'MERGED' as const }
+    : thread.pullRequest ?? null);
+  const prLabel = $derived(pr ? fill(pr.state === 'MERGED' ? strings.sidebar.prMerged : pr.state === 'CLOSED' ? strings.sidebar.prClosed : strings.sidebar.prOpen, { number: String(pr.number) }) : '');
+  const meta = $derived(showProject || pr !== null);
 
   async function restore(): Promise<void> {
     if (restoring || deleting) return;
-    const owner = entry.machine.store;
     restoring = true;
-    try { await restoreThread(owner, entry.thread.id); }
+    try { await restoreThread(owner, thread.id); }
     catch (error) { owner.error = error instanceof Error ? error.message : String(error); }
     finally { restoring = false; }
   }
@@ -34,36 +53,35 @@
    */
   async function remove(): Promise<void> {
     if (deleting || restoring) return;
-    const owner = entry.machine.store;
     deleting = true;
     let removed = false;
-    try { removed = await deleteThread(owner, entry.thread); }
+    try { removed = await deleteThread(owner, thread); }
     catch (error) { owner.error = error instanceof Error ? error.message : String(error); }
     finally { if (!removed) deleting = false; }
   }
-  function open(): void {
+  function select(): void {
     // Being deleted, or gone already: there is no thread left to open.
     if (deleting) return;
     onopen?.();
-    void workspace.select(entry.machine.store, entry.thread.id);
+    void workspace.select(owner, thread.id);
   }
   /** The row's own menu, over the whole card: the pull request link under it would otherwise show the browser's. */
   function menu(event: MouseEvent): void {
-    const owner = entry.machine.store;
-    const thread = entry.thread;
     const offline = owner.connection !== 'ready';
     contextMenu.open(
       event,
       [
         { id: 'open', label: strings.sidebar.open, disabled: deleting },
         { id: 'restore', label: strings.sidebar.reopenThread, disabled: restoring || deleting || offline },
+        ...(pr ? [{ id: 'pr', label: prLabel, title: pr.url }] : []),
         // On hover: a worktree path printed beside the label squeezes it into a column of letters.
         { id: 'copy', label: strings.sidebar.copyPath, title: thread.cwd },
         ...(canDeleteThread(thread) ? [separator(), { id: 'delete', label: strings.sidebar.delete, danger: true, disabled: restoring || deleting || offline }] : [])
       ],
       (action) => {
-        if (action === 'open') open();
+        if (action === 'open') select();
         if (action === 'restore') void restore();
+        if (action === 'pr' && pr) window.open(pr.url, '_blank', 'noopener,noreferrer');
         if (action === 'copy') void owner.copy(thread.cwd);
         if (action === 'delete') void remove();
       }
@@ -72,43 +90,114 @@
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="done-thread" data-testid="done-thread" data-thread-id={entry.thread.id} data-machine-id={entry.machine.id} oncontextmenu={menu}>
-  <button type="button" class="ghost read" data-testid="done-thread-open" title={entry.thread.title} disabled={deleting}
-    onclick={open}>
-    <span class="title ui-label">{entry.thread.title}</span>
-    <span class="detail"><ProjectTile project={entry.project} store={entry.machine.store} size={14} /><span>{projectName(entry.project)}{#if showMachine} · {entry.machine.label}{/if}</span>
-      <time datetime={new Date(entry.thread.updatedAt).toISOString()} title={exactTime(entry.thread.updatedAt)}>{ago(entry.thread.updatedAt, now)}</time>
+<div class="done-thread" class:open class:meta data-testid="done-thread" data-thread-id={thread.id} data-machine-id={entry.machine.id} oncontextmenu={menu} use:longPress>
+  <button type="button" class="ghost row" data-testid="done-thread-open" title={thread.title} disabled={deleting} onclick={select}>
+    <span class="headline">
+      {#if showMachine}
+        <span class="machine" title={entry.machine.label} aria-label={entry.machine.label}><MachineIcon icon={entry.machine.icon} os={owner.core?.os} /></span>
+      {/if}
+      <span class="provider" title={agent} aria-label={agent}><ProviderLogo providerId={thread.providerId} size={12} /></span>
+      <span class="title ui-label">{thread.title}</span>
+      <time datetime={new Date(thread.updatedAt).toISOString()} title={exactTime(thread.updatedAt)}>{ago(thread.updatedAt, now)}</time>
     </span>
   </button>
-  <button type="button" class="ghost icon restore" data-testid="done-thread-restore" title={strings.sidebar.reopenThread}
-    aria-label={fill(strings.sidebar.reopenNamedThread, { title: entry.thread.title })}
-    disabled={restoring || deleting || entry.machine.store.connection !== 'ready'} onclick={() => void restore()}><ArchiveRestore size={14} /></button>
-  <button type="button" class="ghost icon actions" data-testid="done-thread-menu" title={strings.sidebar.threadMenu}
-    aria-label={strings.sidebar.threadMenu} onclick={menu}><Ellipsis size={15} /></button>
-  {#if entry.thread.archiveReason?.type === 'pr-merged'}
-    <a class="reason" data-testid="done-thread-merged" href={entry.thread.archiveReason.url} target="_blank" rel="noopener noreferrer">{fill(strings.settings.archived.mergedReason, { number: String(entry.thread.archiveReason.number) })}</a>
+  {#if meta}
+    <div class="metadata">
+      {#if showProject}<span class="project-name" title={entry.project.path}><Folder size={12} /><span class="ui-label">{projectName(entry.project)}</span></span>{/if}
+      {#if pr}
+        <a class="pr {pr.state.toLowerCase()}" data-testid="done-thread-pr" data-state={pr.state} href={pr.url} target="_blank" rel="noopener noreferrer" title={pr.url}>
+          {#if pr.state === 'MERGED'}<GitMerge size={12} />{:else if pr.state === 'CLOSED'}<GitPullRequestClosed size={12} />{:else}<GitPullRequest size={12} />{/if}<span class="ui-label">{prLabel}</span>
+        </a>
+      {/if}
+    </div>
   {/if}
+  <button type="button" class="ghost small icon restore" data-testid="done-thread-restore" title={strings.sidebar.reopenThread}
+    aria-label={fill(strings.sidebar.reopenNamedThread, { title: thread.title })}
+    disabled={restoring || deleting || owner.connection !== 'ready'} onclick={() => void restore()}><ArchiveRestore size={14} /></button>
 </div>
 
 <style>
-  .done-thread { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; border-radius: var(--radius-md); }
+  .done-thread {
+    position: relative;
+    border-radius: var(--radius-md);
+    transition: background var(--dur-2) var(--ease-out-quint);
+    -webkit-touch-callout: none;
+  }
   .done-thread:hover, .done-thread:focus-within { background: var(--color-hover); }
-  .read { flex-direction: column; align-items: stretch; min-width: 0; width: 100%; height: auto; padding: 10px; gap: 6px; background: transparent; text-align: left; }
-  .title { color: var(--color-muted-foreground); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--text-sm); }
-  .detail { display: flex; align-items: center; min-width: 0; gap: 5px; color: var(--color-subtle); font-size: var(--text-xs); }
-  .detail > span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-  time { flex: none; margin-left: auto; }
-  .restore, .actions { flex: none; color: var(--color-muted-foreground); }
-  /* Like a thread row: the menu button shows with the pointer or the keyboard on the row. */
-  .actions { margin-right: 4px; opacity: 0; }
-  .done-thread:hover .actions, .done-thread:focus-within .actions { opacity: 1; }
-  /* No hover to reveal it on a touch screen, whatever its width. */
-  @media (hover: none), (pointer: coarse) { .actions { opacity: 1; } }
-  .reason { grid-column: 1 / -1; padding: 0 10px 8px; color: var(--color-subtle); font-size: var(--text-xs); text-underline-offset: 2px; }
+  .done-thread.open { background: var(--color-active); }
+  .row {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+    height: auto;
+    min-height: var(--row);
+    padding: 8px 10px;
+    gap: 7px;
+    background: transparent;
+  }
+  /* The pull request line sits over the row's bottom padding, so the whole card stays one target, as on a thread row. */
+  .meta .row { min-height: calc(var(--row) + 22px); padding: 9px 10px 28px; }
+  .row:hover:not(:disabled) { background: transparent; }
+  .row:active:not(:disabled) { transform: none; }
+  .headline { display: flex; align-items: center; min-width: 0; min-height: 1lh; gap: 8px; }
+  .provider, .machine { display: inline-flex; align-items: center; flex: none; color: var(--color-muted-foreground); }
+  /* Finished work reads a step quieter than the live rows above it, and wakes under the pointer. */
+  .provider { opacity: .7; }
+  .title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--color-muted-foreground);
+    font-weight: 400;
+    transition: color var(--dur-2) var(--ease-out-quint);
+  }
+  .done-thread:hover .title, .done-thread:focus-within .title, .done-thread.open .title { color: var(--color-foreground); }
+  .done-thread:hover .provider, .done-thread:focus-within .provider { opacity: 1; }
+  time { flex: none; color: var(--color-subtle); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
+  .metadata {
+    position: absolute;
+    left: 10px;
+    right: 10px;
+    bottom: 9px;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-width: 0;
+    pointer-events: none;
+    font-size: var(--text-xs);
+    color: var(--color-muted-foreground);
+  }
+  .project-name { display: flex; flex: 1; align-items: center; gap: 4px; min-width: 0; }
+  .project-name span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .metadata :global(svg) { flex: none; }
+  .pr {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: 4px;
+    pointer-events: auto;
+    color: var(--color-success);
+    text-decoration: none;
+    border-radius: var(--radius-sm);
+  }
+  .pr.merged { color: var(--color-accent); }
+  .pr.closed { color: var(--color-danger); }
+  .pr:hover span, .pr:focus-visible span { text-decoration: underline; text-underline-offset: 3px; }
+  /* Restoring takes the time's place under the pointer, the way a thread row shows its menu. */
+  .restore { position: absolute; top: 5px; right: 5px; opacity: 0; background: var(--color-surface-2); color: var(--color-muted-foreground); }
+  .done-thread:hover .restore, .done-thread:focus-within .restore { opacity: 1; }
+  .done-thread:hover time, .done-thread:focus-within time { opacity: 0; }
+  /* No hover on a touch screen: the time stays, restoring is in the long-press menu. */
+  @media (hover: none), (pointer: coarse) {
+    .restore { display: none; }
+    .done-thread:hover time, .done-thread:focus-within time { opacity: 1; }
+  }
   @media (max-width: 720px) {
-    .read { min-height: 68px; }
-    .title { white-space: normal; overflow-wrap: anywhere; font-size: var(--text-base); }
-    .restore, .actions { min-width: var(--touch-target); min-height: var(--touch-target); }
-    .actions { opacity: 1; }
+    .row { min-height: var(--touch-target); }
+    .title { font-size: var(--text-base); }
   }
 </style>

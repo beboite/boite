@@ -629,22 +629,23 @@ export class Workspace {
     if (saved) storeEndpoint(saved);
   }
 
-  async select(target: Store, threadId?: string, projectId?: string): Promise<void> {
+  /** `fresh`: a project's new draft rather than the last one written there. */
+  async select(target: Store, threadId?: string, projectId?: string, options: { fresh?: boolean } = {}): Promise<void> {
     this.selecting += 1;
     try {
-      await this.#select(target, threadId, projectId);
+      await this.#select(target, threadId, projectId, options);
     } finally {
       this.selecting -= 1;
     }
   }
 
-  async #select(target: Store, threadId?: string, projectId?: string): Promise<void> {
+  async #select(target: Store, threadId: string | undefined, projectId: string | undefined, options: { fresh?: boolean }): Promise<void> {
     ++this.#generation;
     this.#moveTo(target);
     target.showChat();
     target.visible = true;
     if (threadId) await target.open(threadId);
-    else if (projectId) target.startDraft(projectId);
+    else if (projectId) target.startDraft(projectId, options.fresh ? { fresh: true } : {});
     else if (target.openThread) await target.open(target.openThread.id);
     else await target.openWhereLeft();
   }

@@ -33,6 +33,8 @@
   const count = $derived(entries.reduce((total, { project }) => total + archiveCount(project, kind), 0));
   const rows = $derived(loaded.filter(({ thread, project, machine }) => !query || [thread.title, projectName(project), thread.branch, machine.label].some(value => value?.toLocaleLowerCase().includes(query))));
   const multi = $derived(new Set(entries.map(entry => entry.machine.id)).size > 1);
+  /** Under one project's header its name would only repeat it; the Recent list of every project names it. */
+  const spans = $derived(entries.length > 1);
   $effect(() => {
     const notify = onrows;
     const visible = open ? rows.map(entry => ({ store: entry.machine.store, threadId: entry.thread.id })) : [];
@@ -79,8 +81,8 @@
 {#snippet completedRows()}
     {#if loading}<p class="hint" role="status"><span class="ui-label">{strings.app.loading}</span></p>{/if}
     {#if failed}<div class="hint" role="status"><span class="ui-label">{strings.sidebar.doneLoadFailed}</span><button type="button" class="ghost small" data-testid="recent-done-retry" onclick={() => retry++}><span class="ui-label">{strings.sidebar.doneRetry}</span></button></div>{/if}
-    <WindowList items={rows} keyOf={entry => JSON.stringify([entry.machine.id, entry.thread.id])} {scrollRoot} estimate={60} {measurements}>
-      {#snippet row(entry)}<DoneThread {entry} {now} showMachine={multi} {onopen} />{/snippet}
+    <WindowList items={rows} keyOf={entry => JSON.stringify([entry.machine.id, entry.thread.id])} {scrollRoot} estimate={44} {measurements}>
+      {#snippet row(entry)}<DoneThread {entry} {now} showMachine={multi} showProject={spans} {onopen} />{/snippet}
     </WindowList>
     {#if !loading && !failed && !rows.length}<p class="hint"><span class="ui-label">{strings.sidebar.noMatch}</span></p>{/if}
 {/snippet}

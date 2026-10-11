@@ -46,9 +46,9 @@ test('steward settings, letters, notices and agent prompts read apart from the u
       await page.evaluate(`${store}.open(${JSON.stringify(ids.target)})`);
       await page.waitFor(`${store}.openThread?.id === ${JSON.stringify(ids.target)} && !!document.querySelector('[data-testid=agent-prompt]') && !!document.querySelector('[data-testid=agent-message-summary][data-kind=steward]')`);
       if (name === 'desktop') {
-        // Who looks after what shows without opening anything: the steward among the agents in charge,
-        // its picture on the projects it covers, and its name on the header of a thread it covers.
-        await page.waitFor(`!!document.querySelector('[data-testid=steward-at-work][data-thread-id=${JSON.stringify(ids.steward)}]')`);
+        // Who looks after what shows without opening anything: its picture on the projects it covers,
+        // and its name on the header of a thread it covers.
+        await page.waitFor(`!!document.querySelector('[data-testid=project-steward][data-thread-id=${JSON.stringify(ids.steward)}]')`);
         expect(await page.evaluate(`document.querySelectorAll('[data-testid=project-steward][data-thread-id=${JSON.stringify(ids.steward)}]').length`)).toBeGreaterThan(0);
         await page.waitFor('!!document.querySelector("[data-testid=thread-steward-chip]")');
         await page.evaluate(still);

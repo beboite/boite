@@ -40,6 +40,13 @@ export interface LoginState {
 /** A thread that exists only in the UI until its first message is sent. */
 export interface Draft {
   /**
+   * Which draft this is: a project can hold several. Absent only on drafts
+   * made before ids existed, which are keyed by their project instead.
+   */
+  id?: string;
+  /** When the draft was opened, which orders the list of drafts, newest first. */
+  createdAt?: number;
+  /**
    * Null is the drafts project before the core made it: the first send asks
    * for it with `projects.drafts`, so opening the app writes nothing to disk.
    */
@@ -545,6 +552,7 @@ export class Store {
 
   get composerStates() { return this.#ctx.composer.composerStates; }
   get draftEntries() { return this.#ctx.drafts.entries; }
+  discardDraft(id: string) { return this.#ctx.drafts.discard(id); }
   get draftsReadable() { return this.#ctx.drafts.readable; }
   flushDrafts() { return this.#ctx.drafts.flush(); }
   set composerStates(value) { this.#ctx.composer.composerStates = value; }

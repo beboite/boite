@@ -972,7 +972,7 @@ test('uninstalled setup starts without account-dependent demo state', async ({ c
   expect(await client.call('scheduler.get', {})).toMatchObject({ running: [], queued: [] });
   // No folder yet: the app lands on a draft in the drafts, which nothing has made.
   expect(store.projects).toEqual([]);
-  expect(store.draft).toEqual({ projectId: null, worktree: false });
+  expect(store.draft).toMatchObject({ projectId: null, worktree: false, id: expect.any(String) });
   expect((await client.call('sessions.list', {})).length).toBeGreaterThan(0);
 });
 

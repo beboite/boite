@@ -227,12 +227,12 @@ owns HTTPS/pairing setup; [server deployment](server.md) owns host reachability.
 
 ## Two views
 
-The sidebar's Display options menu (the sliders icon) chooses between Projects
+The sidebar's Display options panel (the sliders icon) chooses between Projects
 and Recent, above its grouping switches. Projects is the default. Projects
 appear by recent user activity, using the latest accepted user message among
 their visible threads, or creation time when no message exists. Assistant
-output and title changes leave that order alone. The order button under the
-switch toggles to Custom order; then drag project headers to rearrange them,
+output and title changes leave that order alone. The panel's Project order
+choice switches to Custom; then drag project headers to rearrange them,
 with the mouse or, on a phone, after holding a header still for a moment; a
 line shows where the project lands and Escape cancels. Their menus also offer Move project up and Move
 project down, including on a phone. Switching back to recent activity keeps

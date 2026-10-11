@@ -12,7 +12,7 @@ let running: Record<string, unknown> | null = null;
 afterEach(() => {
   if (running) unmount(running, { outro: false });
   running = null;
-  projectThreadView.shelf = { idle: false, archived: false };
+  projectThreadView.shelfOpen = false;
   contextMenu.close();
   vi.restoreAllMocks();
   document.body.innerHTML = '';
@@ -34,17 +34,17 @@ test('the archived fold restores a project alone from its button, or restores it
   const store = { ...iconless, archiveProject };
   running = mount(ProjectShelf, {
     target: document.body,
-    props: { kind: 'archived', entries: [{ machine: { id: 'local', label: 'This machine', store } as never, project: project({ archived: true }) }], multi: false, now: 0, onopen: onstart }
+    props: { archived: [{ machine: { id: 'local', label: 'This machine', store } as never, project: project({ archived: true }) }], multi: false, now: 0, onopen: onstart }
   });
   flushSync();
-  const toggle = document.querySelector<HTMLButtonElement>('[data-testid=archived-projects-toggle]')!;
+  const toggle = document.querySelector<HTMLButtonElement>('[data-testid=project-shelf-toggle]')!;
   expect(toggle.querySelector('.label')?.textContent).toBe('Archived projects');
   expect(toggle.querySelector('.fold-count')?.textContent).toBe('1');
   expect(document.querySelector('[data-testid=archived-project-restore]')).toBeNull();
   toggle.click();
   flushSync();
   // One machine: no machine header, and a paired device gets no remove button.
-  expect(document.querySelector('[data-testid=archived-projects-machine]')).toBeNull();
+  expect(document.querySelector('[data-testid=project-shelf-machine]')).toBeNull();
   expect(document.querySelector('[data-testid=archived-project-remove]')).toBeNull();
 
   click('[data-testid=archived-project-restore]');
@@ -65,8 +65,7 @@ test('archived projects with matching ids show their machines and restore on the
   running = mount(ProjectShelf, {
     target: document.body,
     props: {
-      kind: 'archived',
-      entries: [
+      archived: [
         { machine: { id: 'local', label: 'Workstation', store: { ...iconless, archiveProject: localRestore } } as never, project: project({ archived: true }) },
         { machine: { id: 'remote', label: 'Build server', store: { ...iconless, archiveProject: remoteRestore } } as never, project: project({ archived: true }) }
       ],
@@ -75,10 +74,10 @@ test('archived projects with matching ids show their machines and restore on the
     }
   });
   flushSync();
-  click('[data-testid=archived-projects-toggle]');
+  click('[data-testid=project-shelf-toggle]');
   flushSync();
   const rows = document.querySelectorAll('[data-testid=archived-project]');
-  expect([...document.querySelectorAll('[data-testid=archived-projects-machine]')].map(h => h.textContent?.trim())).toEqual(['Workstation', 'Build server']);
+  expect([...document.querySelectorAll('[data-testid=project-shelf-machine]')].map(h => h.textContent?.trim())).toEqual(['Workstation', 'Build server']);
   expect([...rows].map(r => r.getAttribute('data-machine-id'))).toEqual(['local', 'remote']);
   click('[data-testid=archived-project-restore]', rows[1]!);
   await settle();
@@ -92,10 +91,10 @@ test('the owner removes an archived project only after confirming, on the owning
   const machine = { id: 'local', label: 'Workstation', store: { ...iconless, owner: true, archiveProject: vi.fn(), removeProject } };
   running = mount(ProjectShelf, {
     target: document.body,
-    props: { kind: 'archived', entries: [{ machine: machine as never, project: project({ archived: true }) }], multi: false, now: 0 }
+    props: { archived: [{ machine: machine as never, project: project({ archived: true }) }], multi: false, now: 0 }
   });
   flushSync();
-  click('[data-testid=archived-projects-toggle]');
+  click('[data-testid=project-shelf-toggle]');
   flushSync();
 
   const refuse = vi.spyOn(confirm, 'ask').mockResolvedValueOnce(false);
@@ -119,8 +118,7 @@ test('an idle project starts a thread on its own machine when chosen, and archiv
   running = mount(ProjectShelf, {
     target: document.body,
     props: {
-      kind: 'idle',
-      entries: [
+      idle: [
         { machine: { id: 'local', label: 'Workstation', store: local } as never, project: project() },
         { machine: { id: 'remote', label: 'Build server', store: remote } as never, project: project() }
       ],
@@ -130,11 +128,11 @@ test('an idle project starts a thread on its own machine when chosen, and archiv
     }
   });
   flushSync();
-  const toggle = document.querySelector<HTMLButtonElement>('[data-testid=idle-projects-toggle]')!;
+  const toggle = document.querySelector<HTMLButtonElement>('[data-testid=project-shelf-toggle]')!;
   expect(toggle.querySelector('.label')?.textContent).toBe('Idle projects');
   toggle.click();
   flushSync();
-  expect(projectThreadView.shelf.idle).toBe(true);
+  expect(projectThreadView.shelfOpen).toBe(true);
   const rows = document.querySelectorAll('[data-testid=idle-project]');
   // An idle row takes a dragged thread like a project section does; an archived one never does.
   expect(rows[0]!.hasAttribute('data-thread-drop')).toBe(true);
@@ -156,13 +154,43 @@ test('an idle project whose folder is gone opens its menu instead of starting a 
   const open = vi.spyOn(contextMenu, 'open').mockImplementation(() => {});
   running = mount(ProjectShelf, {
     target: document.body,
-    props: { kind: 'idle', entries: [{ machine: { id: 'local', label: 'Workstation', store: { ...iconless, projects: [] } } as never, project: project({ missing: true }) }], multi: false, now: 0 }
+    props: { idle: [{ machine: { id: 'local', label: 'Workstation', store: { ...iconless, projects: [] } } as never, project: project({ missing: true }) }], multi: false, now: 0 }
   });
   flushSync();
-  click('[data-testid=idle-projects-toggle]');
+  click('[data-testid=project-shelf-toggle]');
   flushSync();
   click('[data-testid=idle-project-open]');
   await settle();
   expect(open).toHaveBeenCalledOnce();
   expect(select).not.toHaveBeenCalled();
+});
+
+test('one fold holds idle projects, then archived ones a step quieter, under a name for both', async () => {
+  const store = { ...iconless, projects: [], owner: true, archiveProject: vi.fn(async () => true) };
+  const machine = { id: 'local', label: 'Workstation', store } as never;
+  running = mount(ProjectShelf, {
+    target: document.body,
+    props: {
+      idle: [{ machine, project: project({ id: 'p-zeta', name: 'zeta' }) }, { machine, project: project({ id: 'p-alpha', name: 'alpha' }) }],
+      archived: [{ machine, project: project({ id: 'p-old', name: 'aardvark', archived: true }) }],
+      multi: false,
+      now: 0
+    }
+  });
+  flushSync();
+  const toggle = document.querySelector<HTMLButtonElement>('[data-testid=project-shelf-toggle]')!;
+  expect(toggle.querySelector('.label')?.textContent).toBe('Other projects');
+  expect(toggle.querySelector('.fold-count')?.textContent).toBe('3');
+  toggle.click();
+  flushSync();
+  // Idle first, by name, then archived: an archived name earlier in the alphabet still comes after them.
+  const rows = [...document.querySelectorAll<HTMLElement>('[data-testid=project-shelf] li')];
+  expect(rows.map(row => row.dataset.projectName)).toEqual(['alpha', 'zeta', 'aardvark']);
+  expect(rows.map(row => row.dataset.testid)).toEqual(['idle-project', 'idle-project', 'archived-project']);
+  expect(rows[2]!.classList.contains('first-archived')).toBe(true);
+  // No menu button on a row: its menu is a right click or a long press away.
+  expect(document.querySelector('[data-testid=idle-project-menu]')).toBeNull();
+  const open = vi.spyOn(contextMenu, 'open').mockImplementation(() => {});
+  rows[2]!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+  expect(open).toHaveBeenCalledOnce();
 });
