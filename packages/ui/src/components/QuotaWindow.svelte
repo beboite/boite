@@ -18,22 +18,22 @@
 </script>
 
 <div class="window" data-tone={quotaTone(limit.usedPercent)} data-window-id={limit.id}>
-  <span class="name">{name}</span>
-  <span class="left">{fill(strings.quotas.remaining, { percent: tenth(left) })}</span>
+  <span class="window-name">{name}</span>
+  <span class="window-left">{fill(strings.quotas.remaining, { percent: tenth(left) })}</span>
   <span class="track" class:stale role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={left} aria-label="{owner} {name}" aria-busy={busy}><span class="fill" style:width="{left}%"></span></span>
   {#if limit.resetsAt !== null}<small class="reset" title={exactTime(limit.resetsAt)}><RotateCcw size={11} aria-hidden="true" /><span class="ui-label">{fill(strings.quotas.resets, { time: quotaResetTime(limit.resetsAt) })}</span></small>{/if}
 </div>
 
 <style>
   .window { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 5px 8px; font-size: var(--text-sm); }
-  .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
-  .left { font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 600; }
+  .window-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+  .window-left { font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 600; }
   .track, .reset { grid-column: 1 / -1; }
   .track { display: block; height: var(--quota-bar, 5px); border-radius: var(--radius-sm); background: var(--color-surface-3); overflow: hidden; filter: saturate(1); transition: filter var(--dur-3) var(--ease-out-quint); }
   .fill { display: block; height: 100%; border-radius: var(--radius-sm); background: var(--color-success); transition: width var(--dur-3) var(--ease-out-quint), background-color var(--dur-3) var(--ease-out-quint); }
-  [data-tone='low'] .left { color: var(--color-live); }
+  [data-tone='low'] .window-left { color: var(--color-live); }
   [data-tone='low'] .fill { background: var(--color-live); }
-  [data-tone='out'] .left { color: var(--color-danger); }
+  [data-tone='out'] .window-left { color: var(--color-danger); }
   [data-tone='out'] .track { background: color-mix(in srgb, var(--color-danger) 15%, var(--color-surface-3)); }
   .reset { display: flex; align-items: center; gap: 5px; color: var(--color-muted-foreground); font-size: var(--text-xs); }
   .reset :global(svg) { flex: none; opacity: 0.7; }
