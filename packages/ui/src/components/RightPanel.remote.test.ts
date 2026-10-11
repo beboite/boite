@@ -61,7 +61,7 @@ test('a paired phone offers the agent browser, and only a tab the agent opens br
   expect(button('launch-agent-browser').disabled).toBe(false);
   // Changes and files are read-only on a phone; tasks and the trace stay the owner's.
   expect(button('launch-files').disabled).toBe(false);
-  expect(button('launch-tasks').disabled).toBe(true);
+  expect(document.querySelector('[data-testid=launch-tasks]')).toBeNull();
 
   // A tab already open when the conversation opens does not pull the panel out.
   await agent(client, 'https://example.com/docs');

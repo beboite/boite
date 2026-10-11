@@ -84,8 +84,9 @@ it, and the menu's last row, Choose the buttons, leads back to the switches.
 
 The launcher and the new-surface menu offer one Browser card, and `boite
 browse <url>` opens its page as a new tab of that same browser. Only `boite
-preview` opens a page in the desktop's own webview. A card says nothing below
-its name; one that cannot open on this client says why in its tooltip.
+preview` opens a Preview tab, in the shell's child webview. A card says nothing
+below its name, and a kind this client cannot open has no card; the
+new-surface menu still lists it, greyed, with the reason.
 
 The iframe bridge belongs to browser test fixtures; ordinary web clients have
 no native Preview surface. [Portability](portability.md#remaining-gaps) records
@@ -282,7 +283,10 @@ The `boite` CLI ([cli.md](cli.md)) calls `panel.open` with a surface: a file
 at a line, the changes, one file's diff, a url, the tree, the trace, the tasks,
 a workflow run.
 The core validates it and emits `panel.requested` on every client subscribed
-to the thread. The store opens that surface on that thread's panel, and opens
+to the thread, except for a url: that one opens as a new tab of the
+conversation's browser, and each client's browser watcher brings the Browser
+surface forward. Only `artifacts.preview` sends a `browser` surface, with its
+artifact, to the panel itself. The store opens that surface on that thread's panel, and opens
 the panel itself when the thread is the one on screen. A thread nobody is
 watching keeps the request on its panel for the next open.
 

@@ -313,7 +313,9 @@ thread's working directory; the core refuses the rest by name. `show src/a.ts:12
 opens the file at line 12. A `show`, `diff`, `browse` or `open` answers
 `shown: yes` when a client subscribed to the thread received the request, and
 `shown: no ...` when nobody was watching: the request still lands on the
-thread's panel and is there when the thread is next opened.
+thread's panel and is there when the thread is next opened. `browse` opens its
+page as a new tab of the conversation's browser instead, which becomes the
+active tab of `boite browser`; a client brings it forward when it next watches.
 
 `thread move` accepts a project ID, unique name or absolute registered folder.
 Ambiguous names are refused with matching IDs. It moves only the authenticated
@@ -486,4 +488,5 @@ Paths with spaces are quoted. An explicit `BOITE_CLI_DIR` overrides lookup;
 a directory without the expected shim refuses startup.
 
 The `panel.open` request becomes a `panel.requested` event on every client
-subscribed to the thread; [panel.md](panel.md) says what the UI does with it.
+subscribed to the thread, except a url, which opens a browser tab and sends no
+event; [panel.md](panel.md) says what the UI does with it.

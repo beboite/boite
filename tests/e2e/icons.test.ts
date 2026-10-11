@@ -49,7 +49,7 @@ test('no button shows its icon smaller than it was drawn', async () => {
   await page.click(id('panel-toggle'));
   await page.waitFor(`document.querySelector('${id('panel-launcher')}')`);
   for (const kind of ['agents', 'trace', 'changes', 'files', 'tasks']) {
-    if (await page.evaluate<boolean>(`document.querySelector('${id(`launch-${kind}`)}').disabled`)) continue;
+    if (!await page.evaluate<boolean>(`!!document.querySelector('${id(`launch-${kind}`)}')`)) continue;
     await page.click(id(`launch-${kind}`));
     await page.waitFor(`document.querySelector('${id('panel-tab')}[data-kind="${kind}"]')`);
     found.push(...await squeezed(`panel ${kind}`));

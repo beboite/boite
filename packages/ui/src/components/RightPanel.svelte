@@ -2,9 +2,7 @@
   import { onMount, untrack } from 'svelte';
   import { ChevronLeft, ChevronRight, Maximize2, Minimize2, Plus, X, GripHorizontal, PanelsTopLeft } from '@lucide/svelte';
   import { floatingPanel, RESIZE_DIRECTIONS } from '../lib/floating-panel';
-  import { DEFAULT_BROWSER_PROFILE, PRIVATE_BROWSER_PROFILE } from '@boite/contracts';
   import { browserBridge } from '../lib/browser-bridge';
-  import { browserProfiles } from '../lib/browser-profiles.svelte';
   import { stripOverflows } from '../lib/strip-overflow';
   import { contextMenu } from '../lib/context-menu.svelte';
   import { controlMenu, CONTROLS_SECTION } from '../lib/controls';
@@ -233,24 +231,14 @@
     launch(card.kind);
   }
 
-  /** The profiles a new browser tab can open in besides the default one, where this window paints pages. */
-  function profileItems(kind: SurfaceKind) {
-    if (kind !== 'browser' || !browserBridge.paints || !available(kind)) return [];
-    const others = [DEFAULT_BROWSER_PROFILE, ...browserProfiles.list.map((profile) => profile.id)].filter((id) => id !== browserProfiles.defaultId);
-    return [
-      ...others.map((id) => ({ id: PROFILE_PICK + id, label: fill(strings.browserProfiles.newTabIn, { name: browserProfiles.name(id) }) })),
-      { id: PROFILE_PICK + PRIVATE_BROWSER_PROFILE, label: strings.browserProfiles.newPrivateTab }
-    ];
-  }
-  const PROFILE_PICK = 'browser-profile:';
 
   let menuItems = $derived([
-    ...offeredCards().flatMap((card) => [{
+    ...offeredCards().map((card) => ({
       id: card.kind,
       label: kindName(card.kind),
       disabled: !available(card.kind),
       ...(available(card.kind) ? {} : { hint: unavailable() })
-    }, ...profileItems(card.kind)]),
+    })),
     // The way back to a kind this device put away.
     separator('sep-customize'),
     { id: CUSTOMIZE, label: strings.controls.customize }
@@ -258,7 +246,6 @@
 
   function pickNew(id: string): void {
     if (id === CUSTOMIZE) store.showSettings('appearance', CONTROLS_SECTION);
-    else if (id.startsWith(PROFILE_PICK)) panel.open('browser', undefined, id.slice(PROFILE_PICK.length));
     else launch(id as SurfaceKind);
   }
 </script>

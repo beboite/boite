@@ -1092,8 +1092,12 @@ shellTest('native preview references attach to the composer and highlight from s
     // The client points the address at the host it reaches the core by: read the page it opened.
     const deadline = Date.now() + 20_000;
     while (!url) {
-      const targets = (await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json()) as { type: string; url: string }[];
-      url = targets.find(target => target.type === 'page' && target.url.endsWith('/preview-fixture.html'))?.url ?? '';
+      try {
+        const targets = (await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json()) as { type: string; url: string }[];
+        url = targets.find(target => target.type === 'page' && target.url.endsWith('/preview-fixture.html'))?.url ?? '';
+      } catch {
+        // The debugging port can miss a beat; the deadline decides.
+      }
       if (!url && Date.now() > deadline) throw new Error('the preview page never opened');
       if (!url) await Bun.sleep(POLL_MS);
     }

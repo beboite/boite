@@ -100,7 +100,8 @@ test('a phone reads a file as wrapped lines and is offered no save', async () =>
 
 test('tasks stay the owner\'s on a phone', async () => {
   await phone(390);
-  expect(button('launch-tasks').disabled).toBe(true);
+  // A kind the phone cannot open has no card at all.
+  expect(document.querySelector('[data-testid=launch-tasks]')).toBeNull();
   expect(button('launch-changes').disabled).toBe(false);
   expect(button('launch-files').disabled).toBe(false);
 });

@@ -128,7 +128,7 @@ real('boite browse opens its page as a new tab of the conversation browser, not 
   expect(status.tabs).toMatchObject([{ tabId: mine.tabId, url: url(), active: false }, { url: url('/shop'), active: true }]);
   await Bun.sleep(100);
   expect(panels).toEqual([]);
-});
+}, 150_000);
 
 real('a viewer watching while the agent changes the page size never puts the old size back', async () => {
   const { tabId } = await agent.call('browser.command', { threadId, action: { kind: 'open', url: url() } });

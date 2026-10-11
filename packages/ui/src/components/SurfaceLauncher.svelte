@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { SurfaceKind } from '../lib/right-panel.svelte';
   import { strings } from '../lib/strings';
-  import { offeredCards, kindName, unavailable } from '../lib/surface-labels';
+  import { offeredCards, kindName } from '../lib/surface-labels';
   import SurfaceIcon from './SurfaceIcon.svelte';
 
   /** The empty panel: one card per kind of surface, each with the letter that opens it. */
@@ -18,7 +18,8 @@
     /** Where the cards come back from once every one is put away. */
     oncustomize: () => void;
   } = $props();
-  let cards = $derived(offeredCards());
+  // A kind this client cannot open has no card: no line under a card to say why.
+  let cards = $derived(offeredCards().filter((card) => available(card.kind)));
 </script>
 
 <div class="launcher" data-testid="panel-launcher">
@@ -30,14 +31,10 @@
     </div>
   {/if}
   <div class="cards">
-    <!-- A card that cannot open stays and says why in its tooltip: the rest
-         read what a paired device is refused. -->
     {#each cards as card (card.kind)}
       <button
         type="button"
         class="card"
-        disabled={!available(card.kind)}
-        title={available(card.kind) ? undefined : unavailable()}
         data-testid="launch-{card.kind}"
         onclick={() => onlaunch(card.kind)}
         oncontextmenu={(event) => onmenu(event, card.kind)}

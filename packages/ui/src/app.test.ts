@@ -1152,7 +1152,7 @@ test('the header button opens the panel on its launcher, which opens the changes
   await waitFor(() => document.querySelector('[data-testid=panel-launcher]') !== null);
   expect(query('[data-testid=panel-toggle]').getAttribute('aria-pressed')).toBe('true');
   expect(document.querySelector('[data-testid=trace-panel]')).toBeNull();
-  for (const kind of ['browser', 'changes', 'files', 'tasks', 'trace']) {
+  for (const kind of ['agent-browser', 'changes', 'files', 'tasks', 'trace']) {
     expect(document.querySelector(`[data-testid=launch-${kind}]`)).not.toBeNull();
   }
 
