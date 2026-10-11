@@ -130,6 +130,8 @@ test('slow RPC thresholds: debug from 1 s, warn from 10 s except for methods tha
   expect(closeLevel(4001, 'hello timed out', false, 'unauthenticated', true)).toBe('warn');
   // A client that closes with the core's words is a normal close.
   expect(closeLevel(4001, 'hello timed out', false, 'unauthenticated')).toBe('debug');
+  // Nor can a stranger mint a warning with an abnormal code of its own before hello.
+  expect(closeLevel(1011, '', false, 'unauthenticated')).toBe('debug');
 });
 
 test('a connection logs who it was, how long it lived and who closed it; a refused hello says why', async () => {

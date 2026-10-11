@@ -86,10 +86,11 @@ export class Scheduler {
 
     for (const entry of this.queue.values()) {
       if (entry.threadId !== threadId) continue;
+      // The queue entry first, as `start` and `drain` write it: file order then follows time order.
+      this.recordQueued(entry);
       this.core.logs.info(`Queued turn removed before it started, after waiting ${Math.round((Date.now() - entry.queuedAt) / 1000)} s${entry.waiting ? ` (${entry.waiting})` : ''}`, {
         source: 'scheduler', event: 'turn.stop-requested', threadId, turnId: entry.turnId, data: { state: 'queued', waiting: entry.waiting ?? null },
       });
-      this.recordQueued(entry);
       this.core.threads.markQueuedStopped(entry.turnId);
       this.queue.delete(entry.turnId);
       this.emitUpdated();

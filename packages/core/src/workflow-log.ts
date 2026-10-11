@@ -2,8 +2,9 @@ import type { WorkflowRun } from '@boite/contracts';
 import type { Core } from './core.ts';
 
 /**
- * Every status change of a workflow run, its steps and their instances, as
- * one log line each. The run record is saved whole on every change, so the
+ * Every status change of a workflow run and its steps, and every instance
+ * that starts, fails or finishes, as one log line each (an instance halted or
+ * sent back to waiting shows in its step's change and its next run). The run record is saved whole on every change, so the
  * transitions are found by comparing it with what the last save held. Error
  * texts stay out: a step's error is its turn's raw error, which can echo the
  * prompt; `turn.failed` carries the diagnostic cause.

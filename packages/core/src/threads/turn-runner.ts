@@ -149,7 +149,7 @@ export class TurnRunner {
       // After settlement: a diagnostic failure must not skip the moves, wakes and flushes below.
       try {
         const tail = stderrTail(threadId, undefined, undefined, running.startedAt ?? 0);
-        if (tail !== null) this.core.logs.warn(`The agent printed ${tail.length} characters on stderr before turn ${turnId} failed; they are in data.stderrTail and stay on this machine`, { source: thread.providerId, event: 'turn.failed.stderr', threadId, turnId, data: { stderrTail: tail } });
+        if (tail !== null) this.core.logs.warn(`The agent's last ${tail.length} characters on stderr before turn ${turnId} failed are in data.stderrTail and stay on this machine`, { source: thread.providerId, event: 'turn.failed.stderr', threadId, turnId, data: { stderrTail: tail } });
       } catch { /* the turn's own record above already says it failed */ }
     }
     if (!next) return;

@@ -314,7 +314,13 @@ export class PushStore {
   };
 
   private async deliver(sessionId: string, payload: PushPayload): Promise<void> {
-    const keys = await this.keys();
+    let keys: Awaited<ReturnType<typeof this.keys>>;
+    try { keys = await this.keys(); }
+    catch (error) {
+      // The callers log a delivery failure as detail: this cause is said here, once.
+      this.core.logs.warn(`Web Push keys could not be read or created: ${error instanceof Error ? error.message : String(error)}`, { source: 'push', event: 'push.failed', ...(payload.threadId ? { threadId: payload.threadId } : {}), data: { sessionId, stage: 'keys' } });
+      throw error;
+    }
     if (this.closed || !this.core.journal.getSession(sessionId)) return;
     const subscription = this.subscriptions()[sessionId];
     if (!subscription) return;

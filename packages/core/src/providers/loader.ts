@@ -528,7 +528,8 @@ export function registerProviderMethods(core: Core): void {
   core.bus.onAny((name, payload) => {
     if (name !== 'providers.updated' || !settledOnce) return;
     const result = payload as ProviderLoadResult;
-    logDetection(result.loaded, result.rejected.length);
+    // Runs inside every emit, the installer's `updated` callback included, where a throw reads as a failed install.
+    try { logDetection(result.loaded, result.rejected.length); } catch { /* Logging must not break installs or announces. */ }
   });
   // One fingerprint for every change found behind a list, so the next one is not announced twice.
   const announce = (after: string): void => {

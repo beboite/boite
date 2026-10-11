@@ -40,10 +40,12 @@ export function describeConnection(connection: ServerConnection): { principal: s
  * Only the core's own hello timeout counts: a client sending those words is not one.
  */
 export function closeLevel(code: number, reason: string, authenticated: boolean, principal: string, byCore = false): 'debug' | 'info' | 'warn' {
-  const abnormal = code === 1006 || code === 1009 || code === 1011 || code === 1013 || (byCore && code === RpcCloseCode.Unauthorized && reason === 'hello timed out');
-  if (abnormal) return 'warn';
+  const helloTimedOut = byCore && code === RpcCloseCode.Unauthorized && reason === 'hello timed out';
+  // A stranger picks its own close code: before hello, only the core's own timeout is worth a warning.
+  if (!authenticated && !helloTimedOut) return 'debug';
+  if (helloTimedOut || code === 1006 || code === 1009 || code === 1011 || code === 1013) return 'warn';
   // Every `boite` call from an agent opens and closes a socket: that is detail.
-  return principal === 'agent' || !authenticated ? 'debug' : 'info';
+  return principal === 'agent' ? 'debug' : 'info';
 }
 
 export function logHelloAccepted(core: Core, connection: ServerConnection, clientVersion: string): void {

@@ -148,10 +148,10 @@ export class TurnAttempts {
       this.core.journal.putTurn(state.running);
       const attemptAt = performance.now();
       const why = because;
-      this.core.logs.info(`Attempt ${attempt} (${why}) on ${provider.id} ${state.thread.model ?? 'default model'}, ${state.thread.sessionId === null ? 'new session' : 'resuming session'}, permission mode ${permissions.mode}`, {
+      quiet(() => this.core.logs.info(`Attempt ${attempt} (${why}) on ${provider.id} ${state.thread.model ?? 'default model'}, ${state.thread.sessionId === null ? 'new session' : 'resuming session'}, permission mode ${permissions.mode}`, {
         source: 'turns', event: 'turn.attempt.started', threadId, turnId, providerId: provider.id, ...(state.thread.model ? { model: state.thread.model } : {}),
         data: { attempt, why, protocol: provider.protocol, accountId: account.id, resume: state.thread.sessionId !== null, permissionMode: permissions.mode, effort: state.thread.effort ?? null, speed: state.thread.speed ?? null },
-      });
+      }));
       const handle = driver.startTurn(context);
       this.handles.set(threadId, handle);
       permissions.attach(handle);
@@ -293,16 +293,16 @@ export class TurnAttempts {
     const left = Promise.withResolvers<null>();
     this.paused.set(threadId, { providerId: provider.id, leave: () => left.resolve(null) });
     const pausedAt = performance.now();
-    this.core.logs.info(`Turn paused between two tool calls while ${provider.id} updates`, { source: 'turns', event: 'turn.paused-for-update', threadId, turnId });
+    quiet(() => this.core.logs.info(`Turn paused between two tool calls while ${provider.id} updates`, { source: 'turns', event: 'turn.paused-for-update', threadId, turnId }));
     this.threads.noteSystem(threadId, turnId, `Paused between two tool calls while ${provider.name} updates.`, `Paused while ${provider.name} updates`, 'turn.pausedForUpdate');
     try {
       // Taken before the update can learn of this pause: it may settle in the same tick.
       const settled = this.core.updates.resumeOf(provider.id);
       this.core.updates.turnPaused(provider.id);
       const resume = await Promise.race([settled, left.promise]);
-      this.core.logs.info(resume === null ? 'Turn paused for an update was stopped before the update ended' : `Turn resumes after ${provider.id} updated`, {
+      quiet(() => this.core.logs.info(resume === null ? 'Turn paused for an update was stopped before the update ended' : `Turn resumes after ${provider.id} updated`, {
         source: 'turns', event: 'turn.resumed-after-update', threadId, turnId, durationMs: performance.now() - pausedAt, data: { resumed: resume !== null },
-      });
+      }));
       return resume === null || this.stopRequested.has(threadId) || this.core.stopping || this.core.journal.isClosed() ? null : resume;
     } finally {
       this.paused.delete(threadId);
@@ -382,10 +382,15 @@ export class TurnAttempts {
 /** One line per driver attempt: how it ended and, for a failure, the cause the driver gave. */
 function logAttemptEnd(core: Core, threadId: ThreadId, turnId: TurnId, attempt: number, result: TurnResult, ms: number): void {
   const cause = result.status === 'error' ? `: ${result.diagnosticError ?? result.error ?? 'no reason given'}` : '';
-  core.logs.record(result.status === 'error' ? 'warn' : 'info', `Attempt ${attempt} ended ${result.status} after ${Math.round(ms / 100) / 10} s${result.sessionLost ? ', the agent lost its session' : ''}${cause}`, {
+  quiet(() => core.logs.record(result.status === 'error' ? 'warn' : 'info', `Attempt ${attempt} ended ${result.status} after ${Math.round(ms / 100) / 10} s${result.sessionLost ? ', the agent lost its session' : ''}${cause}`, {
     source: 'turns', event: 'turn.attempt.finished', threadId, turnId, durationMs: ms,
     data: { attempt, status: result.status, sessionLost: result.sessionLost === true, ...(result.usage ? { outputTokens: result.usage.outputTokens } : {}) },
-  });
+  }));
+}
+
+/** A diagnostic storage failure must not break a turn: its result, its retries or its pause. */
+function quiet(write: () => void): void {
+  try { write(); } catch { /* the turn goes on without the record */ }
 }
 
 /** Native attempts belong to one visible turn, including their reported usage. */

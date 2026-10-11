@@ -56,7 +56,7 @@ export function hello(core: Core, connection: ServerConnection, id: number | str
   }
   const wrongProtocol = (): boolean => {
     if (params?.protocolVersion === PROTOCOL_VERSION) return false;
-    logHelloRefused(core, connection, `protocol version ${typeof params?.protocolVersion === 'number' ? params.protocolVersion : 'missing'}, this core speaks ${PROTOCOL_VERSION}`, clientName);
+    logHelloRefused(core, connection, `protocol version ${params?.protocolVersion === undefined ? 'missing' : typeof params.protocolVersion === 'number' ? params.protocolVersion : clientField(String(params.protocolVersion), 20)}, this core speaks ${PROTOCOL_VERSION}`, clientName);
     connection.sendResponse({
       jsonrpc: '2.0', id, error: {
         code: RpcErrorCode.InvalidParams, message: `protocolVersion must be ${PROTOCOL_VERSION}`,
