@@ -135,6 +135,13 @@ export function providerLogoOf(providerId: string): ProviderLogo | null {
   return providerLogos[providerId] ?? providerLogos[sameMark[providerId] ?? gatewayNames[providerId] ?? ''] ?? null;
 }
 
+const makerNames: Record<string, string> = { claude: 'Anthropic', codex: 'OpenAI', grok: 'xAI', muse: 'Meta' };
+
+/** The company a `modelLogoId` mark stands for, or null when the mark is the harness's own. */
+export function modelMakerName(logoId: string, providerId: string): string | null {
+  return logoId === providerId ? null : makerNames[logoId] ?? null;
+}
+
 /**
  * The mark of the company behind a model, whatever harness runs it: OpenCode
  * running `anthropic/claude-opus-5-5` shows Claude's mark, Claude Code running

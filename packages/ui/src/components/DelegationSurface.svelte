@@ -6,7 +6,7 @@
   import { fill, strings } from '../lib/strings';
   import type { Choice, PickPatch, Store } from '../lib/store.svelte';
   import { formatTokens } from '../lib/tokens';
-  import { modelLogoId } from '../lib/provider-logos';
+  import { modelLogoId, modelMakerName } from '../lib/provider-logos';
   import { isLive, runProgress } from '../lib/workflow-view';
   import EffortSlider from './EffortSlider.svelte';
   import DelegationTranscript from './DelegationTranscript.svelte';
@@ -101,8 +101,8 @@
 
   /**
    * Harness, model and reasoning level, the way the composer's picker names
-   * them. The row shows the model's own mark and its name; the harness stays in
-   * the mark's label.
+   * them. The row shows the model's own mark, labelled with its maker, and the
+   * model's name; the harness stays in the route's tooltip.
    */
   function routeOf(agent: Agent) {
     const thread = agent.thread;
@@ -110,7 +110,8 @@
     const provider = store.providerOf(thread.providerId)?.name ?? thread.providerId;
     const name = model?.name ?? thread.model ?? strings.thread.defaultModel;
     const effort = thread.effort ? model?.effort?.levels.find(level => level.id === thread.effort)?.label ?? thread.effort : null;
-    return { provider, name, effort, logo: modelLogoId(thread.providerId, thread.model ?? model?.id), label: [provider, name, effort].filter(Boolean).join(' · ') };
+    const logo = modelLogoId(thread.providerId, thread.model ?? model?.id);
+    return { provider, maker: modelMakerName(logo, thread.providerId) ?? provider, name, effort, logo, label: [provider, name, effort].filter(Boolean).join(' · ') };
   }
 
   function tokensOf(agent: Agent): number | null {
@@ -153,7 +154,7 @@
   {@const tokens = tokensOf(agent)}
   {@const outcome = outcomeOf(agent)}
   <button type="button" class="member" class:selected={selected?.thread.id === agent.thread.id} data-testid="delegation-member" data-agent-id={agent.thread.id} onclick={() => void store.selectDelegatedAgent(agent.thread.id)}>
-    <span class="avatar" role="img" aria-label={route.provider} title={route.provider}>
+    <span class="avatar" role="img" aria-label={route.maker} title={route.maker}>
       <ProviderLogo providerId={route.logo} size={20} />
       {#if progress.active}<span class="dot"><StatusMark status={agent.thread.status} /></span>{/if}
     </span>

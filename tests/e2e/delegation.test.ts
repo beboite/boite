@@ -65,7 +65,8 @@ test('the phone can open the same team and inspect its retained result', async (
   await page.click('[data-testid="delegation-member"]');
   await page.waitFor('document.querySelector("[data-testid=delegation-surface]")?.getBoundingClientRect().width > 200');
   expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
-  expect(await page.text('[data-testid="delegation-surface"]')).toContain('Review parser boundaries');
+  // The task now shows only as the transcript's first message, which loads after the click.
+  await page.waitFor('document.querySelector("[data-testid=delegation-surface]")?.textContent.includes("Review parser boundaries")');
   await page.waitFor('document.getAnimations().every(animation => animation.playState !== "running" || animation.effect?.getTiming().iterations === Infinity)');
   await page.screenshot(join(import.meta.dir, '.artifacts/delegation-phone.png'));
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 500, deviceScaleFactor: 1, mobile: true });

@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { modelLogoId } from './provider-logos';
+import { modelLogoId, modelMakerName } from './provider-logos';
 
 test('a model shows the mark of its maker, whichever harness runs it', () => {
   expect(modelLogoId('opencode', 'anthropic/claude-opus-5-5')).toBe('claude');
@@ -9,4 +9,7 @@ test('a model shows the mark of its maker, whichever harness runs it', () => {
   // Nothing recognised, or the provider's default model: the harness's own mark.
   expect(modelLogoId('opencode', 'moonshot/kimi-k3')).toBe('opencode');
   expect(modelLogoId('pi', null)).toBe('pi');
+  // The mark's label names the maker only when it is not the harness itself.
+  expect(modelMakerName('claude', 'opencode')).toBe('Anthropic');
+  expect(modelMakerName('claude', 'claude')).toBeNull();
 });
