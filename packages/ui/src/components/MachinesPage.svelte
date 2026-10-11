@@ -4,7 +4,7 @@
   import { GroupLinks } from '../lib/group-links.svelte';
   import InfoTip from './InfoTip.svelte';
   import { ArrowUpRight, ChevronDown, RefreshCw, Settings2, Trash2, ScanLine } from '@lucide/svelte';
-  import { isThisPC, machineHealth, workspace, machineIcons, type Machine } from '../lib/workspace.svelte';
+  import { machineHealth, workspace, machineIcons, type Machine } from '../lib/workspace.svelte';
   import { store as primary } from '../lib/store.svelte';
   import { confirm } from '../lib/confirm.svelte';
   import { fill, strings } from '../lib/strings';
@@ -63,10 +63,15 @@
    * a server switched off: its card goes grey and keeps only what works without
    * it, its name, its icon and its removal. The client still retries behind it
    * and the card comes back by itself. A machine that refused this device's key
-   * keeps its own repair flow instead.
+   * keeps its own repair flow instead. One the user depended on (`lost`: this
+   * PC, the window's own machine, a turn still running there) stays a warning,
+   * in red with its error, as the footer's machine menu shows it.
    */
-  const away = (machine: Machine): boolean => !machine.store.pairingRequired
-    && ['offline', 'lost'].includes(machineHealth(machine, primary));
+  const away = (machine: Machine): 'offline' | 'lost' | null => {
+    if (machine.store.pairingRequired) return null;
+    const health = machineHealth(machine, primary);
+    return health === 'offline' || health === 'lost' ? health : null;
+  };
 
   /** Boite on that machine and its agents, as the one word its row shows. */
   function updates(machine: Machine): MachineUpdateState | null {
@@ -173,10 +178,10 @@
       {#each machinesOf(owner) as machine (machine.id)}
         {@const coreId = GroupLinks.coreOf(machine)}
         {@const state = updates(machine)}
-        {@const gone = away(machine)}
+        {@const gone = away(machine) !== null}
         {@const open = !gone && detailed(machine)}
         {@const carrier = GroupLinks.carrier(machine, workspace.machines)}
-        <section data-core-id={coreId} class="machine-card" class:away={gone} data-testid="machine-card" data-group-member={coreId && owner.group?.cores.some(core => core.coreId === coreId) ? "true" : undefined} data-machine-id={machine.id} data-away={gone || undefined}>
+        <section data-core-id={coreId} class="machine-card" class:away={gone} class:lost={away(machine) === 'lost'} data-testid="machine-card" data-group-member={coreId && owner.group?.cores.some(core => core.coreId === coreId) ? "true" : undefined} data-machine-id={machine.id} data-away={away(machine) ?? undefined}>
           <div class="main">
             <button
               class="ghost logo"
@@ -260,7 +265,7 @@
           {#if mobile && machine.store.pairingRequired && (machine.store.error === strings.errors.unpaired || machine.store.error === strings.errors.revoked)}
             <p class="pair-hint">{strings.mobile.pairInstalled}</p>
           <!-- A remote machine switched off has nothing to explain; this PC's own core failing to start does. -->
-          {:else if machine.store.error && (!gone || isThisPC(machine))}<p class="error">{machine.store.error}</p>{/if}
+          {:else if machine.store.error && away(machine) !== 'offline'}<p class="error">{machine.store.error}</p>{/if}
         </section>
       {/each}
     </div>
@@ -403,6 +408,8 @@
   .away .machine-name { color: var(--color-muted-foreground); }
   .away .dot { background: var(--color-subtle); }
   .away .status { color: var(--color-subtle); }
+  .lost .dot { background: var(--color-danger); }
+  .lost .status { color: var(--color-danger); }
   /* What the machine has to say about its updates, after its connection. */
   .updates { color: var(--color-muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .updates::before { content: '·'; margin-right: 6px; color: var(--color-subtle); }
