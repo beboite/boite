@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { chmod, mkdir, open, readdir, unlink, writeFile } from 'node:fs/promises';
 import { arch, cpus, freemem, homedir, hostname, platform, release, totalmem, userInfo, version as osVersion } from 'node:os';
 import { join } from 'node:path';
@@ -44,11 +44,16 @@ export class Diagnostics {
     try { this.#salt = readFileSync(file, 'utf8').trim(); } catch { this.#salt = ''; }
     if (!/^[0-9a-f]{32}$/.test(this.#salt)) {
       this.#salt = randomBytes(16).toString('hex');
-      void mkdir(this.core.logs.directory, { recursive: true, mode: 0o700 })
+      // Synchronous, once per installation: an unawaited write could still be open when the core
+      // stops and its folder goes, which Windows refuses (EBUSY) and Bun 1.4.2 crashed around.
+      try {
+        mkdirSync(this.core.logs.directory, { recursive: true, mode: 0o700 });
+        writeFileSync(file, `${this.#salt}\n`, { mode: 0o600 });
         // `mode` applies only to a new file: one replaced here (invalid, or from an older install) is made private too.
-        // Not on Windows, which has no Unix modes, and where Bun 1.4.2 corrupted its heap around this unawaited chmod.
-        .then(() => writeFile(file, `${this.#salt}\n`, { mode: 0o600 }).then(() => process.platform === 'win32' ? undefined : chmod(file, 0o600)))
-        .catch(error => this.core.logs.warn(`the anonymization salt could not be saved: ${messageOf(error)}`, { source: 'diagnostics', event: 'diagnostics.salt-failed' }));
+        if (process.platform !== 'win32') chmodSync(file, 0o600);
+      } catch (error) {
+        this.core.logs.warn(`the anonymization salt could not be saved: ${messageOf(error)}`, { source: 'diagnostics', event: 'diagnostics.salt-failed' });
+      }
     }
     return this.#salt;
   }
