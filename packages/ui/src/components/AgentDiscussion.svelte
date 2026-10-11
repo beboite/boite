@@ -127,7 +127,7 @@
     </button>
     <AgentAvatar title={discussion.title} providerId={discussion.providerId} status={discussion.status} steward={discussion.steward} size={32} />
     <div class="who">
-      <strong data-testid="agent-discussion-heading">{discussion.title}</strong>
+      <strong data-testid="agent-discussion-heading" tabindex="-1">{discussion.title}</strong>
       <span class="facts">
         {#if tag}<span class="tag" class:steward={discussion.steward} data-relation={tag}>{strings.agentMessages.relation[tag]}</span>{/if}
         {#if where}<span class="where" data-testid="agent-discussion-where">{where}</span>{/if}
@@ -193,6 +193,7 @@
   @container messages (max-width: 640px) { .back { display: inline-flex; } }
   header { flex: none; min-height: 52px; padding: 8px 8px 8px 10px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--color-border); }
   .who { flex: 1; min-width: 0; display: grid; gap: 3px; }
+  .who strong:focus { outline: none; }
   .who strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-sm); }
   .facts { min-width: 0; display: flex; align-items: center; gap: 6px; color: var(--color-muted-foreground); font-size: var(--text-xs); }
   .facts > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

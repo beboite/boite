@@ -68,7 +68,7 @@ typed sits on the right under "You", a subagent's result is labelled "Result",
 and the steward's letters keep the steward's color on the left. Letters of one
 side a few minutes apart share one time stamp, a silence of twenty minutes gets
 a line of its own, and a reply to an earlier letter quotes it. Two checkmarks
-mark an outgoing letter the other core received; an unconfirmed, expired or
+mark an outgoing letter that was received or delivered; an unconfirmed, expired or
 rejected letter shows that state, and a tap shows the reason. The header names
 the other agent, its model and what it declared it works on, and opens its
 thread. Cross-machine links use the connected machine's core identity; an

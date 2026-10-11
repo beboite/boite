@@ -296,7 +296,7 @@ watching keeps the request on its panel for the next open.
 `panel` toggles the panel, `browser`, `changes`, `files`, `tasks` and `trace`
 open their surface, `close-surface` closes the active tab. The defaults are in
 [keybindings.md](keybindings.md). With the launcher showing, a single letter
-opens a surface: A, B, C, D, F, K, M, T. M opens Messages, D the Device
+opens a surface: A, B, C, D, F, K, M, T. M opens Discussions, D the Device
 surface and B the Browser, the conversation's.
 
 ## Experimental PR review

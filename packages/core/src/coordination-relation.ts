@@ -45,7 +45,9 @@ export function senderContext(core: Core, localCore: string, threadId: string): 
   return letter => {
     const relation = relationOf(core, localCore, threadId, letter.from);
     const local = relation !== 'machine';
-    const about = letter.from.resources.trim() ? excerpt(letter.from.resources) : local ? openingRequest(core, letter.from.threadId) : undefined;
+    // A row older than its field, or a peer that left it out, must not stop delivery.
+    const resources = typeof letter.from.resources === 'string' ? letter.from.resources.trim() : '';
+    const about = resources ? excerpt(resources) : local ? openingRequest(core, letter.from.threadId) : undefined;
     const answered = letter.replyTo
       ? core.journal.db.query("SELECT data FROM coordination_letters WHERE id = ? AND thread_id = ? AND direction = 'out'").get(letter.replyTo, threadId) as { data: string } | null
       : null;

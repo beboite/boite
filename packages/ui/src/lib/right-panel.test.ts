@@ -39,6 +39,14 @@ describe('the right panel', () => {
     expect(new RightPanelStore().for('t-1').active).toMatchObject({ kind: 'agents', runId: 'wfr_2' });
   });
 
+  test('a messages tab stored before discussions comes back on the list, without its letter', () => {
+    window.localStorage.setItem(PANEL_STORAGE_KEY, JSON.stringify({ version: PANEL_VERSION, threads: { 't-1': { isOpen: true, activeSurfaceId: 'messages', surfaces: [{ id: 'messages', kind: 'messages', mailDirection: 'incoming', letterId: 'old-letter' }] } } }));
+
+    const active = new RightPanelStore().for('t-1').active!;
+
+    expect([active.kind, active.peer, active.letterId]).toEqual(['messages', undefined, undefined]);
+  });
+
   test('a layout stored with a workflow tab of its own comes back as the subagents tab', () => {
     window.localStorage.setItem(PANEL_STORAGE_KEY, JSON.stringify({ version: PANEL_VERSION, threads: { 't-1': { isOpen: true, activeSurfaceId: 'workflow', surfaces: [{ id: 'agents', kind: 'agents' }, { id: 'workflow', kind: 'workflow', runId: 'wfr_1' }, { id: 'trace', kind: 'trace' }] } } }));
 

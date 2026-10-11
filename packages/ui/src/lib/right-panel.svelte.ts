@@ -160,8 +160,9 @@ function parse(raw: string): Record<string, PanelState> {
         ...(typeof path === 'string' ? { path } : {}),
         ...(typeof line === 'number' && Number.isFinite(line) ? { line } : {}),
         ...(typeof runId === 'string' ? { runId } : {}),
+        // A letter only means something inside its discussion: a tab stored before discussions comes back on the list.
         ...(typeof peer === 'string' ? { peer } : {}),
-        ...(typeof letterId === 'string' ? { letterId } : {})
+        ...(typeof peer === 'string' && typeof letterId === 'string' ? { letterId } : {})
       });
     }
     const stored = (value as PanelState).activeSurfaceId;

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import { ArrowUpRight, MessagesSquare } from '@lucide/svelte';
   import { agentMailFor, discussionsOf, hierarchyOf, whereOf } from '../lib/agent-mail';
   import type { BoundPanel, Surface } from '../lib/right-panel.svelte';
@@ -32,11 +32,27 @@
     return () => clearInterval(timer);
   });
   const open = (peer?: string) => panel.update(surface.id, { peer, letterId: undefined });
+  let rows = $state<HTMLDivElement>();
+  /**
+   * A narrow panel swaps the list and the discussion: focus follows into the
+   * discussion's heading, and back onto the row it came from. A second click on
+   * the open row closes it, the way back from a wide panel.
+   */
+  function choose(peer: string): void {
+    const closing = peer === surface.peer;
+    open(closing ? undefined : peer);
+    if (!closing) void tick().then(() => rows?.parentElement?.querySelector<HTMLElement>('[data-testid=agent-discussion-heading]')?.focus());
+  }
+  function back(): void {
+    const from = surface.peer;
+    open(undefined);
+    void tick().then(() => [...(rows?.querySelectorAll<HTMLElement>('[data-testid=agent-discussion]') ?? [])].find(row => row.dataset.peer === from)?.focus());
+  }
 </script>
 
 <section class="mail" data-testid="agent-messages-surface">
 <div class="split" class:detail={current !== undefined}>
-  <div class="discussions" data-testid="agent-discussions">
+  <div class="discussions" data-testid="agent-discussions" bind:this={rows}>
     {#if discussions.length === 0}
       <div class="no-mail"><MessagesSquare size={24} strokeWidth={1.5} aria-hidden="true" /><p>{strings.agentMessages.empty}</p></div>
     {:else}
@@ -46,7 +62,7 @@
         {@const last = discussion.last.letter}
         <button type="button" class="row" class:selected={discussion === current} class:steward={discussion.steward}
           data-testid="agent-discussion" data-peer={discussion.key} aria-current={discussion === current ? 'true' : undefined}
-          onclick={() => open(discussion.key)}>
+          onclick={() => choose(discussion.key)}>
           <AgentAvatar title={discussion.title} providerId={discussion.providerId} status={discussion.status} steward={discussion.steward} size={34} />
           <span class="main">
             <span class="line">
@@ -72,7 +88,7 @@
     {/if}
   </div>
   {#if current}
-    <AgentDiscussion {store} discussion={current} letterId={surface.letterId} onback={() => open(undefined)} />
+    <AgentDiscussion {store} discussion={current} letterId={surface.letterId} onback={back} />
   {/if}
 </div>
 </section>

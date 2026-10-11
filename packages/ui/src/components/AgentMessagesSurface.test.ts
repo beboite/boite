@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from 'vitest';
-import { flushSync, mount, unmount } from 'svelte';
+import { flushSync, mount, tick, unmount } from 'svelte';
 import type { AgentLetter } from '@boite/contracts';
 import AgentMessagesSurface from './AgentMessagesSurface.svelte';
 import { RightPanelStore } from '../lib/right-panel.svelte';
@@ -9,7 +9,7 @@ import { workspace } from '../lib/workspace.svelte';
 let component: ReturnType<typeof mount> | undefined;
 afterEach(async () => { if (component) await unmount(component); component = undefined; document.body.innerHTML = ''; });
 
-test('the tab lists one discussion per conversation, opens its back and forth live, reaches the remote thread and goes back', () => {
+test('the tab lists one discussion per conversation, opens its back and forth live, reaches the remote thread and goes back', async () => {
   const self = { coreId: 'local-core', threadId: 'same-thread-id' };
   // Thread ids collide between machines: the remote one shares this thread's id.
   const remote = { coreId: 'remote-core', threadId: 'same-thread-id' };
@@ -46,8 +46,11 @@ test('the tab lists one discussion per conversation, opens its back and forth li
 
   rows()[1]!.click();
   flushSync();
+  await tick();
   expect(panel.active).toMatchObject({ peer: 'remote-core/same-thread-id' });
   const view = document.querySelector<HTMLElement>('[data-testid=agent-discussion-view]')!;
+  // Focus follows into the discussion, where a narrow panel shows it alone.
+  expect(document.activeElement?.getAttribute('data-testid')).toBe('agent-discussion-heading');
   expect(view.querySelector('[data-testid=agent-discussion-heading]')?.textContent).toBe('Remote deployment');
   expect([...view.querySelectorAll<HTMLElement>('[data-testid=agent-discussion-message]')].map(node => [node.dataset.letterId, node.classList.contains('right')]))
     .toEqual([['in', true], ['out', false]]);
@@ -65,6 +68,16 @@ test('the tab lists one discussion per conversation, opens its back and forth li
 
   document.querySelector<HTMLButtonElement>('[data-testid=agent-discussion-back]')!.click();
   flushSync();
+  await tick();
   expect(panel.active).toMatchObject({ peer: undefined });
   expect(document.querySelector('[data-testid=agent-discussion-view]')).toBeNull();
+  // Back lands on the row it came from.
+  expect((document.activeElement as HTMLElement | null)?.dataset.peer).toBe('remote-core/same-thread-id');
+  // A wide panel has no back arrow: a second click on the open row closes it.
+  rows()[0]!.click();
+  flushSync();
+  expect(panel.active).toMatchObject({ peer: 'remote-core/same-thread-id' });
+  rows()[0]!.click();
+  flushSync();
+  expect(panel.active).toMatchObject({ peer: undefined });
 });
