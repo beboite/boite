@@ -193,7 +193,8 @@
     promptTarget = null;
     stopLift();
     endGlide(false);
-    if (event && !typingKey(event)) { pinned = false; if (keysUp(event, viewport)) leftBottom = true; }
+    // Only a key that scrolls up leaves the bottom: a copy or a Tab moves nothing, so no scroll event would ever take it back.
+    if (event && !typingKey(event) && keysUp(event, viewport)) { pinned = false; leftBottom = true; }
   }
   onDestroy(stopLift);
   const activePrompt = $derived.by(() => {
@@ -538,8 +539,11 @@
     scrolledHeight = height;
     // Pulled up by a finger or the scrollbar thumb, the list leaves the bottom as the wheel does.
     if (hold.held && box.scrollTop < scrollTop - 1) leftBottom = true;
-    const rose = edge.rose(box);
-    const movedDown = box.scrollTop > scrollTop + 1;
+    const moved = edge.moved(box);
+    const rose = moved < -1;
+    // The reader going down: `scrollTop` alone lags the follows the observer makes, and the edge alone
+    // counts the corrections this list writes for a remeasured row.
+    const descended = moved > 1 && box.scrollTop > scrollTop + 1;
     scrollTop = box.scrollTop;
     viewHeight = box.clientHeight;
     if (navigationTarget || promptTarget) return;
@@ -552,7 +556,9 @@
     }
     // A busy phone delivers the touchstart after its scroll: a rise off the bottom is the reader too.
     if (rose && pinned && distance > 1) leftBottom = true;
-    if (distance <= 1 && movedDown) leftBottom = false;
+    // Scrolled down into the tolerance, the reader is back: the very bottom is a moving target while
+    // an answer streams, and the line it adds between the wheel's last step and this event missed it.
+    if (descended && atBottom(box)) leftBottom = false;
     // A card shrinking can clamp scrollTop before new output grows the list again.
     pinned = !cutBelow && !leftBottom && (atBottom(box) || (pinned && resized && !hold.held));
     if (anchors.restoring) pinned = false;
