@@ -31,9 +31,11 @@ test('the starting thread shows the thread it started and the answer that came b
   await page.waitFor(`!!document.querySelector('[data-testid="thread-row"][data-thread-id="${callerId}"]')`);
   await page.click(`[data-testid="thread-row"][data-thread-id="${callerId}"]`);
   await page.waitFor('document.querySelector("[data-testid=spawn-marker][data-direction=to]")?.textContent.includes("Blog post for 2.4")');
-  await page.waitFor(`document.querySelector('[data-testid=agent-message-summary][data-direction=incoming]')`, 15_000);
-  await page.click('[data-testid=agent-message-summary][data-direction=incoming]');
-  await page.waitFor(`[...document.querySelectorAll('[data-testid=forwarded-agent-message][data-direction=incoming]')].some(el => el.textContent.includes('Blog post for 2.4: done'))`, 15_000);
+  // The real core says how the two threads relate: this one started the other.
+  const row = `[data-testid=agent-discussion-row][data-peer="here/${startedId}"]`;
+  await page.waitFor(`document.querySelector(${JSON.stringify(row)})?.textContent.includes('Started from here')`, 15_000);
+  await page.click(row);
+  await page.waitFor(`[...document.querySelectorAll('[data-testid=agent-discussion-message][data-direction=incoming]')].some(el => el.textContent.includes('Blog post for 2.4: done'))`, 15_000);
   await page.click('[data-testid=panel-close]');
   await page.waitFor(`!document.querySelector('[data-testid=right-panel]')`);
   expect(await page.text('[data-testid=spawn-marker][data-direction=to]')).toContain('Website');

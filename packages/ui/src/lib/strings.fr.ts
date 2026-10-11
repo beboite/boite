@@ -1152,12 +1152,21 @@ export const fr: Translation = {
   },
 
   agentMessages: {
-    heading: 'Messages',
-    open: 'Ouvrir les messages', filter: 'Filtrer les messages des agents',
-    all: 'Tous', sent: 'Envoyés', received: 'Reçus', empty: 'Aucun message ici pour le moment.',
-    forwardedOne: '1 message transmis', forwardedMany: '{count} messages transmis',
-    receivedOne: '1 message reçu', receivedMany: '{count} messages reçus',
-    stewardOne: '1 message du gardien', stewardMany: '{count} messages du gardien',
+    heading: 'Discussions',
+    open: 'Ouvrir la discussion', back: 'Toutes les discussions', openThread: 'Ouvrir cette conversation',
+    empty: 'Aucune discussion avec un autre agent pour le moment.',
+    one: '1 message', many: '{count} messages',
+    sentReceived: '{sent} envoyés, {received} reçus',
+    mine: 'Cet agent',
+    you: 'Vous',
+    result: 'Résultat',
+    about: 'Travaille sur',
+    replyTo: 'En réponse à',
+    more: '+{count} autres',
+    relation: {
+      starter: 'A lancé cette conversation', started: 'Lancée d\'ici', parent: 'Parent', child: 'Sous-agent',
+      steward: 'Gardien', stewarded: 'Sous sa garde', project: 'Même projet', 'other-project': 'Autre projet', machine: 'Autre machine'
+    },
     noticeOne: '1 avis de conversation', noticeMany: '{count} avis de conversation'
   },
   coordination: {
@@ -1173,11 +1182,6 @@ export const fr: Translation = {
     sent: '{used} envoyés cette heure', woken: '{used} réveils cette heure',
     directory: 'Contacts autorisés', refresh: 'Actualiser', directoryEmpty: "Aucune conversation volontaire n'est disponible dans ce projet.", unavailable: 'Contacts indisponibles',
     details: "Afficher l'échange",
-    receivedFrom: 'Reçu de', sentTo: 'Votre agent a envoyé à',
-    userSentTo: 'Vous avez envoyé à', userMessageVia: 'Message utilisateur via',
-    stewardFrom: 'Du gardien', stewardSentTo: 'Le gardien a envoyé à',
-    noticeFrom: 'Avis de {title}',
-    receivedStatus: 'Reçu',
     machineNotConnected: 'Connectez cette machine dans les réglages pour ouvrir son fil.',
     status: {
       queued: "En attente d'envoi", received: 'Reçu par le cœur destinataire', delivered: "Transmis à l'agent destinataire",

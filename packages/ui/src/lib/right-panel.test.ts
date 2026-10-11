@@ -87,14 +87,17 @@ describe('the right panel', () => {
     expect(second.id).toMatch(/^browser:[a-f0-9]{32}$/);
   });
 
-  test('exchange summaries reuse one messages tab and retain their filter and destination after reload', () => {
+  test('discussion rows reuse one messages tab and retain the open discussion and letter after reload', () => {
     const { bound } = panel();
-    bound.openMessages('incoming-first', 'incoming');
+    bound.openMessages('here/t-deploy', 'incoming-first');
     bound.open('files');
-    bound.openMessages('outgoing-next', 'outgoing');
+    bound.openMessages('core-build/t-bench', 'outgoing-next');
     expect(bound.surfaces.map(surface => surface.kind)).toEqual(['messages', 'files']);
-    expect(bound.active).toMatchObject({ kind: 'messages', letterId: 'outgoing-next', mailDirection: 'outgoing' });
-    expect(new RightPanelStore().for('t-1').active).toMatchObject({ kind: 'messages', letterId: 'outgoing-next', mailDirection: 'outgoing' });
+    expect(bound.active).toMatchObject({ kind: 'messages', peer: 'core-build/t-bench', letterId: 'outgoing-next' });
+    expect(new RightPanelStore().for('t-1').active).toMatchObject({ kind: 'messages', peer: 'core-build/t-bench', letterId: 'outgoing-next' });
+    // The list of discussions: no discussion, no letter.
+    bound.openMessages();
+    expect(bound.active).toMatchObject({ kind: 'messages', peer: undefined, letterId: undefined });
     bound.close('messages');
     expect(bound.active?.kind).toBe('files');
     expect(bound.surfaces.some(surface => surface.kind === 'messages')).toBe(false);

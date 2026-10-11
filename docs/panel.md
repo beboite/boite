@@ -274,9 +274,9 @@ real working directory is inside its project or the core's worktree folder
 `todos.remove` and a todo's `done` are the owner's alone, and `todos.updated`
 goes to the owner and to the agents of that project. A paired phone has the
 Panel button too, and its menu offers Changes, Files (read-only, no Save),
-Subagents and Messages; Tasks and the trace stay the owner's. The Messages tab
-uses the same coordination and delegation reads as the chat and fills the
-screen on a phone.
+Subagents and Discussions; Tasks and the trace stay the owner's. The
+Discussions tab uses the same coordination and delegation reads as the chat and
+fills the screen on a phone.
 
 ## What the agent can ask
 

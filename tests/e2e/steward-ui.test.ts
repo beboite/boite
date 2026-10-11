@@ -44,7 +44,7 @@ test('steward settings, letters, notices and agent prompts read apart from the u
       await page.click('[data-testid=coordination-close]');
 
       await page.evaluate(`${store}.open(${JSON.stringify(ids.target)})`);
-      await page.waitFor(`${store}.openThread?.id === ${JSON.stringify(ids.target)} && !!document.querySelector('[data-testid=agent-prompt]') && !!document.querySelector('[data-testid=agent-message-summary][data-kind=steward]')`);
+      await page.waitFor(`${store}.openThread?.id === ${JSON.stringify(ids.target)} && !!document.querySelector('[data-testid=agent-prompt]') && !!document.querySelector('[data-testid=agent-discussion-row].steward')`);
       if (name === 'desktop') {
         // Who looks after what shows without opening anything: the steward among the agents in charge,
         // its picture on the projects it covers, and its name on the header of a thread it covers.
@@ -62,8 +62,8 @@ test('steward settings, letters, notices and agent prompts read apart from the u
       await page.evaluate('document.querySelector("[data-testid=agent-prompt]").scrollIntoView({ block: "start" })');
       await page.evaluate(still);
       await page.screenshot(out(`target-${name}`));
-      await page.click('[data-testid=agent-message-summary][data-kind=steward]');
-      await page.waitFor('!!document.querySelector("[data-testid=agent-messages-surface] .forwarded.steward")');
+      await page.click('[data-testid=agent-discussion-row].steward');
+      await page.waitFor('!!document.querySelector("[data-testid=agent-messages-surface] [data-testid=agent-discussion-message].steward")');
       await page.evaluate(still);
       await page.screenshot(out(`target-letters-${name}`));
       await page.click('[data-testid=panel-close]');
