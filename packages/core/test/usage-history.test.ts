@@ -99,6 +99,8 @@ test('usage.history splits providers and models, counts unreported turns and tak
   journal.putTurn(turn(echo, day + 2, usage(7, 3), { providerId: 'claude', model: null }));
   journal.putTurn(turn(echo, day + 3, null, { providerId: 'claude', model: null }));
   journal.putTurn(turn(codex, day + 4, usage(1000, 50, 800), { providerId: 'codex', model: 'gpt-5' }));
+  // A listed model with no usage reported stays unpriced rather than $0.
+  journal.putTurn(turn(codex, day + 4, null, { providerId: 'codex', model: 'gpt-5-mini' }));
   // Saved before execution snapshots: counted under the thread's provider and model.
   journal.putTurn(turn(codex, day + 5, usage(100, 10, 40), null));
 
@@ -113,18 +115,20 @@ test('usage.history splits providers and models, counts unreported turns and tak
     cacheRead: row.usage.cacheReadTokens,
     cost: row.usage.costUsdEquivalent,
   }));
+  const gpt5 = priceOf('gpt-5')!.rates;
   expect(rows).toEqual([
     { at: '2:claude:null', turns: 2, reported: 1, priced: 0, input: 7, cacheRead: 0, cost: null },
     { at: '2:claude:opus', turns: 2, reported: 2, priced: 2, input: 30, cacheRead: 0, cost: 0.75 },
-    // gpt-5 has public rates: the 200 uncached input, 50 output and 800 cache reads at $1.25, $10 and $0.125.
-    { at: '2:codex:gpt-5', turns: 1, reported: 1, priced: 1, input: 200, cacheRead: 800, cost: (200 * 1.25 + 50 * 10 + 800 * 0.125) / 1_000_000 },
+    // gpt-5 has public rates: the 200 uncached input, 50 output and 800 cache reads.
+    { at: '2:codex:gpt-5', turns: 1, reported: 1, priced: 1, input: 200, cacheRead: 800, cost: expect.closeTo((200 * gpt5.input + 50 * gpt5.output + 800 * gpt5.cacheRead) / 1_000_000, 12) },
+    { at: '2:codex:gpt-5-mini', turns: 1, reported: 0, priced: 0, input: 0, cacheRead: 0, cost: null },
     { at: '2:codex:gpt-legacy', turns: 1, reported: 1, priced: 0, input: 60, cacheRead: 40, cost: null },
   ]);
 
   const byThread = Object.fromEntries(history.threads.map((thread) => [thread.threadId, thread]));
   expect(byThread[echo.id]).toMatchObject({ title: 'Echo work', providerId: 'echo', archived: false, turns: 4 });
   expect(byThread[echo.id]?.usage).toEqual({ inputTokens: 37, outputTokens: 13, cacheReadTokens: 0, cacheWriteTokens: 0, costUsdEquivalent: 0.75 });
-  expect(byThread[codex.id]).toMatchObject({ title: 'Codex work', providerId: 'codex', archived: true, turns: 2 });
+  expect(byThread[codex.id]).toMatchObject({ title: 'Codex work', providerId: 'codex', archived: true, turns: 3 });
   expect(byThread[codex.id]?.usage.inputTokens).toBe(260);
 });
 

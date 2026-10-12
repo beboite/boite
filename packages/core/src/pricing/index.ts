@@ -22,7 +22,8 @@ function listed(model: string): [string, (number | null)[]] | null {
   id = id.slice(id.lastIndexOf('/') + 1).replace(/^(?:anthropic|openai|google|xai|meta)\./, '');
   for (const strip of [null, EFFORT, DATED, CODEX]) {
     if (strip !== null) id = id.replace(strip, '');
-    const found = MODELS[id];
+    // `toString` or `constructor` must not find Object.prototype's.
+    const found = Object.hasOwn(MODELS, id) ? MODELS[id] : undefined;
     if (found !== undefined) return [id, found];
   }
   return null;

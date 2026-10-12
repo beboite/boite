@@ -10,7 +10,7 @@ test('a model id resolves through provider prefixes, effort and date suffixes an
   // A Codex build is priced as its model; a smaller variant is not.
   expect(priceOf('gpt-5.1-codex-max')?.model).toBe('gpt-5.1');
   expect(priceOf('gpt-5.1-codex-mini')?.model).not.toBe('gpt-5.1');
-  for (const id of [null, '', '  ', 'default', 'house-model']) expect(priceOf(id)).toBeNull();
+  for (const id of [null, '', '  ', 'default', 'house-model', 'toString', '__proto__']) expect(priceOf(id)).toBeNull();
 });
 
 test('Claude Code writes an hour of cache at twice the input rate, other harnesses and makers keep the listed rate', () => {
