@@ -208,9 +208,12 @@ test('no push about a thread someone is looking at and uses, on the PC or the ph
     await delivered(3);
     // Looking away without having used the thread since sends what waited.
     await desktop.call('threads.focus', { threadId, attentive: true, idleMs: 0 });
+    const heldFrom = Date.now();
     finish(threadId);
     await Bun.sleep(5);
-    await desktop.call('threads.focus', { threadId, attentive: true, idleMs: 20 });
+    // The last use is dated before the news, however long the runner took to
+    // get here: a fixed 20 ms fell after it on a slow runner and dropped it as seen.
+    await desktop.call('threads.focus', { threadId, attentive: true, idleMs: Date.now() - heldFrom + 20 });
     await delivered(3);
     desktop.close();
     await delivered(4);
