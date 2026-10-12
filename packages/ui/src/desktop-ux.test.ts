@@ -188,7 +188,7 @@ test('the palette and the project menu reach the archive, its list already read'
   await waitFor(() => store.page === 'settings' && document.querySelector('[data-testid=archived-list]') !== null);
 });
 
-test('Ctrl+Shift+T brings back the threads archived here, newest first, and opens each', async () => {
+test('Ctrl+Shift+T brings back the thread archived last on the machine, from this window or another, and opens it', async () => {
   await mountOnFake();
   expect(await archiveThread(store, 't-trace')).toBe(true);
   expect(await archiveThread(store, 't-descriptors')).toBe(true);
@@ -201,6 +201,15 @@ test('Ctrl+Shift+T brings back the threads archived here, newest first, and open
   runCommand(store, 'reopen-thread', false);
   await waitFor(() => store.openThread?.id === 't-trace');
   expect(store.threads.find((t) => t.id === 't-trace')?.archived).toBe(false);
+
+  // Archived here, then another computer archives a thread later: that one is the last.
+  expect(await archiveThread(store, 't-trace')).toBe(true);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await store.client!.call('threads.archive', { threadId: 't-descriptors', archived: true });
+  await waitFor(() => !store.threads.some((t) => t.id === 't-descriptors' && !t.archived));
+  runCommand(store, 'reopen-thread', false);
+  await waitFor(() => store.openThread?.id === 't-descriptors');
+  expect(store.threads.find((t) => t.id === 't-trace')).toBeUndefined();
 });
 
 test('the scheduler never says Saved after a refused save, and refuses an out-of-range value itself', async () => {

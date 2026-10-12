@@ -79,6 +79,7 @@ export async function sweepMergedPrFixtures(ctx: FakeContext): Promise<number> {
     const reason: ThreadArchiveReason = { type: 'pr-merged', number: proof.number, url: proof.url, archivedAt: ctx.now() };
     thread.archived = true;
     thread.doneAt = Date.now();
+    thread.archivedAt = thread.doneAt;
     thread.archiveReason = reason;
     ctx.touch(thread);
     const project = ctx.projects.find(project => project.id === thread.projectId)!;

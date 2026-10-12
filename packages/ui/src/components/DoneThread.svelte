@@ -2,6 +2,7 @@
   import { ArchiveRestore, Folder, GitMerge, GitPullRequest, GitPullRequestClosed } from '@lucide/svelte';
   import type { ThreadSummary } from '@boite/contracts';
   import type { ProjectEntry } from '../lib/project-view.svelte';
+  import { archivedTime } from '../lib/archive';
   import { contextMenu } from '../lib/context-menu.svelte';
   import { separator } from '../lib/menu';
   import { canDeleteThread } from '../lib/thread-removal';
@@ -15,7 +16,7 @@
 
   /**
    * A done or archived conversation, drawn like a thread row: the provider,
-   * the title, when it was last used, and under it the pull request it ended
+   * the title, when it was put away, and under it the pull request it ended
    * with, which opens on the forge. No menu button: a right click, or a long
    * press on a phone, opens the row's menu. Restoring stays one hover away.
    */
@@ -88,7 +89,7 @@
       <span class="title ui-label">{thread.title}</span>
       <!-- The project shows below, outside the button: named here too, so two same-titled threads read apart. -->
       {#if showProject}<span class="visually-hidden">{projectName(entry.project)}</span>{/if}
-      <time datetime={new Date(thread.updatedAt).toISOString()} title={exactTime(thread.updatedAt)}>{ago(thread.updatedAt, now)}</time>
+      <time datetime={new Date(archivedTime(thread)).toISOString()} title={exactTime(archivedTime(thread))}>{ago(archivedTime(thread), now)}</time>
     </span>
   </button>
   {#if meta}

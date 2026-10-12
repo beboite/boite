@@ -43,6 +43,9 @@ prerequisites, adjacent runtime files and shell E2E coverage.
   permits paired devices. Record the reason beside the permission.
 - The shell owns windows, the tray, native dialogs and core startup. Execution
   and application logic belong in the core.
+- Reach the main window through `window::main_window`. Tauri's
+  `get_webview_window` returns `None` once a browser surface is a child
+  webview of that window.
 - UI colors, radii and durations come from `app.css`, strings from
   `lib/strings.ts`, which serves them in the language the app speaks. Write
   English in `lib/strings.en.ts` and mirror it in every translation
