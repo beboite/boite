@@ -421,6 +421,16 @@ is separate ([updates](updates.md)). The server uses `dev`; use separate Compose
 volumes ([server](server.md)). The signed or reused APK is required too;
 [Android](android.md) owns the host, signing and reuse rules.
 
+## The phone app's address
+
+`app.yml` builds the UI on `main` when `packages/ui/`, `packages/contracts/` or
+the workflow change, or by hand, and deploys it with GitHub Pages to the
+repository's custom domain, `APP_ORIGIN` in the contracts
+([phone](phone.md#the-app-on-its-own-address)). It packs the site itself so
+`/.well-known/assetlinks.json` ships, which `upload-pages-artifact` would leave
+out as a hidden folder. Pages must use GitHub Actions as its source, and the
+domain's DNS names `beboite.github.io`.
+
 ## Pull request reviews
 
 `.coderabbit.yaml` enables advisory reviews and chat replies, excluding drafts

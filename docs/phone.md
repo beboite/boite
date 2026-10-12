@@ -161,7 +161,7 @@ core joins the group ([groups](groups.md#using-it)).
 ### The app on its own address
 
 The phone app can also be a page no machine serves: `APP_ORIGIN` in the
-contracts, `https://beboite.github.io`. Every core accepts sockets from it, as
+contracts, `https://boite.mtsu.dev`. Every core accepts sockets from it, as
 it does the desktop shell's, so nothing is set on any machine for it; a core's
 `BOITE_APP_ORIGIN` names another one, for a fork that serves its own, and must
 be an `https` origin or the core does not start. There the app opens on its way
@@ -170,6 +170,14 @@ the machine's address, typed beside it (`boite.example.com`, or a full
 `http://` address), since the page's own address is no machine's; that machine
 passes the code on when another one drew it. The first machine added becomes
 the one the app shows and opens on next time; the group brings the others.
+
+That address serves files and nothing else: `.github/workflows/app.yml`
+publishes the UI build there with GitHub Pages on every change of the UI or the
+contracts on `main`, `/.well-known/assetlinks.json` included. A phone downloads
+the page once and its service worker keeps it; conversations, prompts and
+sockets go from the phone to the machines, never to that address. Whoever
+controls the address controls the code the phone runs, as whoever signs the APK
+does.
 
 Notifications are enabled on the machine the app shows, which becomes the
 device's push home. Every push to a device of the group names the machine its

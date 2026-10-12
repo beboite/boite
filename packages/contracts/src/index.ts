@@ -2901,7 +2901,7 @@ export interface DeviceInvite {
  * `BOITE_APP_ORIGIN` and the UI's `VITE_BOITE_APP_ORIGIN` name another one, for
  * tests and for a fork that serves its own.
  */
-export const APP_ORIGIN = 'https://beboite.github.io';
+export const APP_ORIGIN = 'https://boite.mtsu.dev';
 
 /** The fragment key of a device link that carries a machine's group invitation. */
 export const DEVICE_LINK_JOIN = 'join';
