@@ -17,7 +17,7 @@ import type { GroupStore } from '../group.ts';
 import { newToken } from '../ids.ts';
 import { principalOf as principalOfRole, type ClientIdentity, type Identity } from '../sessions.ts';
 import { ticketAddresses } from './addresses.ts';
-import { deviceAdmissionInput, deviceId, deviceKey, deviceSigned, type DeviceKeyEntry } from './device-keys.ts';
+import { deviceAdmissionInput, deviceId, deviceKey, deviceSigned, LEGACY_MAX, type DeviceKeyEntry } from './device-keys.ts';
 import { checkRoster, clockOf, DEVICE_ENTRIES_MAX, homeOf, liveCores, liveDeviceKeys, liveDevices, peerOf, reachOf, type DeviceEntry, type Roster } from './roster.ts';
 import { encodeTicket, parseTicket, ticketSigningInput } from './ticket.ts';
 
@@ -25,8 +25,7 @@ import { encodeTicket, parseTicket, ticketSigningInput } from './ticket.ts';
 const CLOCK_SKEW_MS = 60_000;
 /** Live devices a group holds at a time. */
 export const DEVICES_MAX = 200;
-/** Older pairings one device key may take over: what `checkDeviceKey` reads back. */
-const LEGACY_MAX = 32;
+
 /** How far a device's hello may be dated from this machine's clock. */
 const DEVICE_HELLO_SKEW_MS = 2 * 60_000;
 /** Device hello nonces remembered at once; past it, hellos are refused until the oldest expire. */

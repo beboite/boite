@@ -226,7 +226,7 @@ export class GroupLinks {
     const signedAnchors = anchors.filter((machine) => signsFor(machine.id) !== undefined && machine.store.group != null);
     const listed = signedAnchors.flatMap((machine) => machine.store.group!.cores.flatMap((core) => usableAddresses(core.addresses, this.#secure())
       .filter((address) => signedAnchors.every((other) => other.store.group!.id !== machine.store.group!.id
-        || other.store.group!.cores.some((listedCore) => listedCore.coreId === core.coreId && listedCore.addresses.includes(address))))));
+        || other.store.group!.cores.some((listedCore) => listedCore.coreId === core.coreId && usableAddresses(listedCore.addresses, this.#secure()).includes(address))))));
     // Written even empty: a device out of every group follows no link on the word of an old roster.
     rememberGroupAddresses(listed);
 

@@ -166,9 +166,9 @@ export class PushStore {
     all[id] = subscription;
     this.core.journal.append({ type: 'push.subscribed', threadId: null, version: 1, payload: { sessionId: id } }, () => {
       this.core.journal.setSetting(SUBSCRIPTIONS, all);
-      // With the subscription, never before it: the others send its notifications here from then on.
-      if (keyed !== undefined) this.core.group.clients.pushedHere(keyed);
     });
+    // Once the subscription is written, never before, and outside its transaction: the others send its notifications here from then on.
+    if (keyed !== undefined) this.core.group.clients.pushedHere(keyed);
     return { ok: true } as const;
   }
 
