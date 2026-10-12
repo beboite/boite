@@ -133,7 +133,7 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 593,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,581,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,584,000 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 3,912,000 |
 
@@ -224,6 +224,12 @@ Merged with `87fca361`, whose settings cards raised `main`'s limits by 15,000
 UI bytes, 2,000 entry bytes and 12,000 core bytes, the branch measured
 4,567,439 UI bytes and 3,891,447 core bytes on Linux on 2026-10-12, and its
 limits take the same increases: 4,581,000, 593,000 and 3,912,000.
+
+On 2026-10-12 on Linux, `main` at `bafe8898` measured 4,579,818 UI bytes. Priced
+usage rows measured 4,581,495: the UI gains 1,677 bytes for the rate notes and
+their English and French sentences, so the UI limit rises to 4,584,000. The
+core, with its table of public API rates, measured 3,908,480 bytes, under the
+unchanged 3,912,000.
 
 On 2026-10-03, fresh builds of `e1f00a3` measured 2,695,204 core bytes and 3,932,309
 UI bytes. The orchestration additions measured 3,228,444 and 3,943,301 bytes:
