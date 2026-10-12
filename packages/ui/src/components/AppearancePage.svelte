@@ -11,7 +11,7 @@
   import { readTheme, setTheme, THEME_STORAGE_KEY, type Theme } from '../lib/theme';
   import { COLORS_EVENT } from '../lib/theme-colors';
   import { readChatWidth, setChatWidth, type ChatWidth } from '../lib/chat-width';
-  import { readTerminalCursor, setTerminalCursor, type TerminalCursor } from '../lib/terminal-cursor';
+  import { readTerminalCursor, readTerminalGpu, setTerminalCursor, setTerminalGpu, type TerminalCursor } from '../lib/terminal-cursor';
   import { matchingPreset, work, type PanelStart, type Profile, type StartIn } from '../lib/work-prefs.svelte';
   import ThemeColors from './ThemeColors.svelte';
   import { controlGroups } from '../lib/control-groups';
@@ -103,6 +103,7 @@
   }
 
   let terminalCursor = $state<TerminalCursor>(untrack(() => readTerminalCursor()));
+  let terminalGpu = $state(untrack(() => readTerminalGpu()));
   let cursors = $derived<{ id: TerminalCursor; label: string }[]>([
     { id: 'bar', label: strings.settings.terminalCursorBar },
     { id: 'block', label: strings.settings.terminalCursorBlock },
@@ -223,6 +224,11 @@
         {/each}
       </div>
     </div>
+    <label class="switch-row">
+      <span class="text ui-label" title={strings.settings.terminalGpuHint}>{strings.settings.terminalGpu}</span>
+      <input type="checkbox" role="switch" checked={terminalGpu} data-testid="terminal-gpu"
+        onchange={(event) => { terminalGpu = event.currentTarget.checked; setTerminalGpu(terminalGpu); }} />
+    </label>
     <label class="switch-row">
       <span class="text ui-label">{strings.settings.groupChanges}</span>
       <input type="checkbox" role="switch" checked={chatPrefs.groupChanges} data-testid="chat-group-changes" onchange={event => setChatPref('groupChanges', event.currentTarget.checked)} />

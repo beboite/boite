@@ -924,6 +924,41 @@ test('Ctrl+J opens the shell of the thread under the chat, hides it again, and i
   expect(store.terminalShown(threadId)).toBe(false);
 });
 
+test('a marked shell shows where it is and how its last command ended, and Ctrl+Shift+H brings a past command back to the prompt', async ({ app: _app }) => {
+  await waitFor(() => store.openThread !== null);
+  const thread = store.openThread!;
+  const id = `terminal:${thread.id}`;
+  document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', ctrlKey: true, bubbles: true, cancelable: true }));
+  await waitFor(() => document.activeElement?.classList.contains('xterm-helper-textarea') === true);
+  expect(query('[data-testid=terminal-cwd]').textContent).toBe(thread.cwd);
+
+  // The fake shell marks each command as the core's integrated PowerShell does; `fail…` ends badly.
+  store.writeTerminal(id, 'git status\r');
+  store.writeTerminal(id, 'fail-build\r');
+  await waitFor(() => document.querySelector('[data-testid=terminal-status]')?.classList.contains('failed') === true);
+
+  const keys = vi.spyOn(store, 'writeTerminal');
+  const screen = document.activeElement!;
+  expect(screen.dispatchEvent(new KeyboardEvent('keydown', { key: 'H', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }))).toBe(false);
+  const items = () => [...document.querySelectorAll('[data-testid=terminal-history-item]')].map((item) => item.textContent?.trim());
+  await waitFor(() => items().length === 2);
+  expect(items()).toEqual(['fail-build', 'git status']);
+
+  const input = query<HTMLInputElement>('[data-testid=terminal-history-input]');
+  input.value = 'git';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  await waitFor(() => items().length === 1);
+  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+  await waitFor(() => document.querySelector('[data-testid=terminal-history]') === null);
+  // The line typed so far is emptied first, then the command goes in and runs.
+  expect(keys.mock.calls.map((call) => call[1])).toEqual(['\x05\x15', 'git status', '\r']);
+  await waitFor(() => document.activeElement?.classList.contains('xterm-helper-textarea') === true);
+  keys.mockRestore();
+
+  query<HTMLButtonElement>('[data-testid=terminal-close]').click();
+  await waitFor(() => document.querySelector('[data-testid=terminal-drawer]') === null);
+});
+
 test('OpenCode signs in from a terminal with its login command typed in, and closing it rechecks the account', async ({ app: _app }) => {
   query<HTMLButtonElement>('[data-testid=nav-settings]').click();
   await waitFor(() => document.querySelector('[data-testid=settings-tab-accounts]') !== null);

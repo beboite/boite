@@ -302,7 +302,7 @@ export function accountMethods(ctx: FakeContext) {
       const id = `login:${account.id}`;
       const cwd = account.isolationDir ?? 'C:\\Users\\you';
       if (!ctx.terminals.has(id)) {
-        ctx.terminals.set(id, { cwd, output: `PS ${cwd}> & ${provider.id} auth login\r\n${FAKE_LOGIN_MENU}`, line: '' });
+        ctx.terminals.set(id, { cwd, output: `PS ${cwd}> & ${provider.id} auth login\r\n${FAKE_LOGIN_MENU}`, line: '', history: [] });
       }
       const shell = ctx.terminals.get(id)!;
       return { id, cwd: shell.cwd, output: shell.output };

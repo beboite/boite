@@ -33,7 +33,11 @@ const OWNER_COMMANDS = new Set<string>([
   'terminal-new',
   'terminal-split',
   'terminal-split-vertical',
-  'terminal-close'
+  'terminal-close',
+  'terminal-find',
+  'terminal-history',
+  'terminal-previous-command',
+  'terminal-next-command'
 ]);
 
 /** True while this row is a command the agent reported, not one of Boite's. */
@@ -139,6 +143,10 @@ export function commandLabel(id: KeybindingCommand): string {
     case 'terminal-split': return strings.keyboard.commands.terminalSplit;
     case 'terminal-split-vertical': return strings.keyboard.commands.terminalSplitVertical;
     case 'terminal-close': return strings.keyboard.commands.terminalClose;
+    case 'terminal-find': return strings.keyboard.commands.terminalFind;
+    case 'terminal-history': return strings.keyboard.commands.terminalHistory;
+    case 'terminal-previous-command': return strings.keyboard.commands.terminalPreviousCommand;
+    case 'terminal-next-command': return strings.keyboard.commands.terminalNextCommand;
     case 'reopen-thread': return strings.keyboard.commands.reopenThread;
     case 'copy-answer': return strings.keyboard.commands.copyAnswer;
     case 'find': return strings.keyboard.commands.find;

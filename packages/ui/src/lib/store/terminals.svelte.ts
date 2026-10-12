@@ -32,6 +32,8 @@ export class Terminals {
 
   /** The screens of the shells this client opened, by terminal id. One lives until its shell ends. */
   private readonly sessions = new Map<string, TerminalSession>();
+  /** Moves when a screen is made or ends, so what reads `session()` sees the new one. */
+  private screens = $state(0);
 
   constructor(private readonly ctx: StoreContext) {}
 
@@ -41,10 +43,39 @@ export class Terminals {
     if (session === undefined) {
       session = new TerminalSession(this.ctx.store, id, start, () => {
         if (this.sessions.get(id) === session) this.sessions.delete(id);
+        this.screens++;
       });
       this.sessions.set(id, session);
+      this.screens++;
     }
     return session;
+  }
+
+  /** The screen of a shell this client draws, for what the drawer shows about it. */
+  session(id: string): TerminalSession | null {
+    void this.screens;
+    return this.sessions.get(id) ?? null;
+  }
+
+  private withSession(id: string, act: (session: TerminalSession) => boolean): boolean {
+    const session = this.sessions.get(id);
+    return session === undefined ? false : act(session);
+  }
+
+  /**
+   * The shell's recent commands, newest first. Null on a core that predates
+   * `terminals.history`, which the list says instead of showing it empty.
+   */
+  async terminalHistory(id: string): Promise<string[] | null> {
+    const client = this.ctx.client;
+    if (!client) return null;
+    try {
+      return (await client.call('terminals.history', { id })).commands;
+    } catch (error) {
+      if (error instanceof RpcFailure && error.code === RpcErrorCode.MethodNotFound) return null;
+      this.ctx.fail(error);
+      return [];
+    }
   }
 
   /** The keyboard to a shell's screen, once it is drawn. */
@@ -305,6 +336,10 @@ export class Terminals {
       case 'terminal-split': return this.splitTerminal(threadId, 'row');
       case 'terminal-split-vertical': return this.splitTerminal(threadId, 'column');
       case 'terminal-close': void this.closeTerminal(id); return true;
+      case 'terminal-find': return this.withSession(id, (session) => { session.openSearch(); return true; });
+      case 'terminal-history': return this.withSession(id, (session) => { session.openHistory(); return true; });
+      case 'terminal-previous-command': return this.withSession(id, (session) => session.jump(-1));
+      case 'terminal-next-command': return this.withSession(id, (session) => session.jump(1));
       default: return false;
     }
   }

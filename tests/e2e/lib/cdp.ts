@@ -93,6 +93,11 @@ export interface BrowserOptions {
   experiments?: string[];
   /** Extra Chromium switches, such as the fake camera a scan test reads its code from. */
   args?: string[];
+  /**
+   * Terminals draw on the GPU, as on a user's device. Off by default: the DOM
+   * renderer puts the screen's text in `.xterm-rows`, which most tests read.
+   */
+  terminalGpu?: boolean;
 }
 
 /** How a browser that never got as far as its page fails: the only failures `launch` tries again. */
@@ -254,6 +259,9 @@ export class BrowserPage {
       await page.send('Runtime.enable', {});
       await page.send('Network.enable', {});
       if (options.showTour !== true) await page.send('Page.addScriptToEvaluateOnNewDocument', { source: SEEN_TOUR });
+      if (options.terminalGpu !== true) {
+        await page.send('Page.addScriptToEvaluateOnNewDocument', { source: `try { localStorage.setItem('boite.terminalGpu', 'off'); } catch {}` });
+      }
       if (options.experiments !== undefined) {
         const stored = JSON.stringify(JSON.stringify(options.experiments));
         await page.send('Page.addScriptToEvaluateOnNewDocument', { source: `try { localStorage.setItem('boite.experiments', ${stored}); } catch {}` });

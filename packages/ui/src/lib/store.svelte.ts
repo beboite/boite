@@ -370,6 +370,8 @@ export class Store {
   terminalExited(...args: Parameters<Terminals['terminalExited']>) { return this.#ctx.terminals.terminalExited(...args); }
   focusShell(...args: Parameters<Terminals['focusShell']>) { return this.#ctx.terminals.focusShell(...args); }
   terminalCommand(...args: Parameters<Terminals['terminalCommand']>) { return this.#ctx.terminals.terminalCommand(...args); }
+  terminalScreen(...args: Parameters<Terminals['session']>) { return this.#ctx.terminals.session(...args); }
+  terminalHistory(...args: Parameters<Terminals['terminalHistory']>) { return this.#ctx.terminals.terminalHistory(...args); }
 
   // -------------------------------------------------------------------------
   // Models and the composer's choice: store/models.svelte.ts

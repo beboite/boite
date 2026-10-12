@@ -35,3 +35,32 @@ export function setTerminalCursor(cursor: TerminalCursor): void {
   }
   document.documentElement.dataset['terminalCursor'] = cursor;
 }
+
+/**
+ * Whether terminals draw on the GPU (WebGL), per device. On by default; off
+ * draws with xterm's DOM renderer, for a GPU or driver that draws badly. It
+ * applies to screens opened after the change. Stamped as
+ * `data-terminal-gpu` on `<html>` while off.
+ */
+export const TERMINAL_GPU_STORAGE_KEY = 'boite.terminalGpu';
+
+let gpuPicked: boolean | undefined;
+
+export function readTerminalGpu(): boolean {
+  if (gpuPicked !== undefined) return gpuPicked;
+  try {
+    return window.localStorage.getItem(TERMINAL_GPU_STORAGE_KEY) !== 'off';
+  } catch {
+    return true;
+  }
+}
+
+export function setTerminalGpu(on: boolean): void {
+  gpuPicked = on;
+  try {
+    if (on) window.localStorage.removeItem(TERMINAL_GPU_STORAGE_KEY);
+    else window.localStorage.setItem(TERMINAL_GPU_STORAGE_KEY, 'off');
+  } catch {
+    /* a browser that refuses storage still changes the next screens */
+  }
+}
