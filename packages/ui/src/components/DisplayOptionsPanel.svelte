@@ -78,7 +78,7 @@
   <div class="option" class:disabled>
     <label class="option-label" for={id}><span class="glyph" aria-hidden="true"><Glyph size={15} /></span><span class="ui-label" id="{id}-name">{label}</span></label>
     <InfoTip text={hint} topic={label} testid={`${prefix}display-hint-${value}`} />
-    <button {id} type="button" role="switch" aria-labelledby="{id}-name" class="switch" class:on={checked} aria-checked={checked} data-value={value} {disabled} {onclick}><span class="knob" aria-hidden="true"></span></button>
+    <button {id} type="button" role="switch" aria-labelledby="{id}-name" class="switch" class:on={checked} aria-checked={checked} data-value={value} {disabled} {onclick}></button>
   </div>
 {/snippet}
 
@@ -203,33 +203,11 @@
   .option-label span:last-child { min-width: 0; overflow-wrap: anywhere; line-height: 1.3; padding: 6px 0; }
   .glyph { display: inline-flex; flex: none; color: var(--color-muted-foreground); }
   .option :global(.info-tip) { flex: none; margin: 0 4px 0 0; }
-  .switch {
-    position: relative;
-    flex: none;
-    width: 32px;
-    height: 20px;
-    padding: 0;
-    border: 1px solid var(--color-edge);
-    border-radius: var(--radius-full);
-    background: var(--color-surface-3);
-    transition: background var(--dur-2) var(--ease-out-quint), border-color var(--dur-2) var(--ease-out-quint);
-  }
-  .knob {
-    position: absolute;
-    top: 2px;
-    left: 2px;
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    background: var(--color-muted-foreground);
-    transition: transform var(--dur-2) var(--ease-out-quint), background var(--dur-2) var(--ease-out-quint);
-  }
-  /* The app's switch (app.css), a size down for a panel row. */
-  .switch.on { background: var(--color-foreground); border-color: var(--color-foreground); }
-  .switch.on .knob { transform: translateX(12px); background: var(--color-background); }
+  /* The app's one switch (app.css) and its knob, a size down for a panel row. */
+  .switch { --switch-width: 32px; --switch-height: 20px; }
   .switch:hover:not(:disabled):not(.on) { border-color: var(--color-muted-foreground); }
   .switch:focus-visible { outline: 2px solid var(--color-foreground); outline-offset: 2px; }
-  @media (prefers-reduced-motion: reduce) { .switch, .knob, .segment { transition: none; } }
+  @media (prefers-reduced-motion: reduce) { .switch, .switch::after, .segment { transition: none; } }
   @media (max-width: 720px) {
     .panel { width: auto; padding: 10px 8px max(10px, env(safe-area-inset-bottom)); }
     .segment { height: 36px; }
