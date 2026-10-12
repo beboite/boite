@@ -1,9 +1,15 @@
 import { APP_ORIGIN, withoutTrailingSlashes } from '@boite/contracts';
 
-/** An override as the browser writes origins: trimmed, lower case, no slash after it. */
+/** An override as the browser writes origins, or nothing for one the cores would refuse: https, no path, query or credentials. */
 function named(value: unknown): string | undefined {
   if (typeof value !== 'string' || !value.trim()) return undefined;
-  try { return new URL(withoutTrailingSlashes(value.trim())).origin; } catch { return undefined; }
+  try {
+    const url = new URL(withoutTrailingSlashes(value.trim()));
+    if (url.protocol !== 'https:' || url.username || url.password || url.pathname !== '/' || url.search || url.hash) return undefined;
+    return url.origin;
+  } catch {
+    return undefined;
+  }
 }
 
 /**

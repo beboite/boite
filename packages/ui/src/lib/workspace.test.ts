@@ -4,6 +4,7 @@ import { Store, store as primary } from './store.svelte';
 import { FakeClient } from './fake-client';
 import { upsertEnvironment } from './endpoint';
 import * as endpoints from './endpoint';
+import * as appOrigin from './app-origin';
 
 let workspace: Workspace | undefined;
 afterEach(() => {
@@ -97,6 +98,28 @@ test('a pairing link replaces the key of a machine that never stopped connecting
   expect(connect).toHaveBeenCalledWith({ url, grant: 'g2', token: '' });
   expect(w.error).toBeNull();
   expect(w.machines).toHaveLength(1);
+});
+
+test('on the app\'s own address the first machine added is the page\'s, even after a first add that failed left it detached', async () => {
+  const { w, a } = await setup();
+  vi.spyOn(appOrigin, 'appPage').mockReturnValue(true);
+  a.endpointUrl = null;
+  a.localCore = false;
+  w.machines = [{ id: 'local', label: 'Local', store: a }];
+  const attempts: Store[] = [];
+  vi.spyOn(Store.prototype, 'connectEndpoint').mockImplementation(async function (this: Store, endpoint: endpoints.Endpoint) {
+    attempts.push(this);
+    this.endpointUrl = endpoint.url;
+    // The first, a ticket, opens nothing; the second answers.
+    this.connection = attempts.length === 1 ? 'closed' : 'ready';
+  });
+  expect(await w.add({ url: 'https://first.test', token: '', ticket: 't' }, 'First', true)).toBe(false);
+  // The page's store was tried and left out of the list, its address still set.
+  expect(attempts[0]).toBe(a);
+  expect(w.machines.some((machine) => machine.store === a)).toBe(false);
+  expect(await w.add({ url: 'https://second.test', token: '', signs: 'f'.repeat(64) }, 'Second', true)).toBe(true);
+  expect(attempts[1]).toBe(a);
+  expect(w.machines.find((machine) => machine.store === a)?.id).toBe('https://second.test');
 });
 
 test('a second machine never takes a name already listed, and a link says which machine it reaches', async () => {

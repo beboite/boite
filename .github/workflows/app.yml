@@ -30,6 +30,8 @@ jobs:
   # Phones run what lands here: only a commit whose CI passed is published.
   ci:
     name: CI passed
+    # A dispatch from another branch builds only: its commit has no CI on main to wait for.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 110
     permissions:
