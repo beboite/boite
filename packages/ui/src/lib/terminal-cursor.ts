@@ -39,8 +39,7 @@ export function setTerminalCursor(cursor: TerminalCursor): void {
 /**
  * Whether terminals draw on the GPU (WebGL), per device. On by default; off
  * draws with xterm's DOM renderer, for a GPU or driver that draws badly. It
- * applies to screens opened after the change. Stamped as
- * `data-terminal-gpu` on `<html>` while off.
+ * applies to screens opened after the change.
  */
 export const TERMINAL_GPU_STORAGE_KEY = 'boite.terminalGpu';
 

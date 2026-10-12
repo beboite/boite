@@ -12,7 +12,7 @@
  * takes from `HISTFILE`: tests use them to keep away from the user's.
  */
 
-import { existsSync, mkdirSync, openSync, readSync, closeSync, fstatSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, readFileSync, readSync, closeSync, fstatSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, posix, win32 } from 'node:path';
 import type { TerminalShell } from '@boite/contracts';
@@ -126,12 +126,28 @@ export function integrate(
   const dir = join(dataDir, 'shell-integration');
   const file = join(dir, 'boite.bash');
   try {
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(file, BASH_INTEGRATION, { encoding: 'utf8', mode: 0o644 });
+    writeIfChanged(dir, file, BASH_INTEGRATION);
   } catch {
     return { shell, integrated: false };
   }
   return { shell: { ...shell, args: [...shell.args, '--rcfile', file, '-i'] }, integrated: true };
+}
+
+/**
+ * The script in place, rewritten only when it differs, through a temporary
+ * file and a rename: a second shell opening at the same moment must never
+ * find it truncated while the first bash is still reading it.
+ */
+function writeIfChanged(dir: string, file: string, text: string): void {
+  try {
+    if (readFileSync(file, 'utf8') === text) return;
+  } catch {
+    // Not written yet.
+  }
+  mkdirSync(dir, { recursive: true });
+  const temporary = `${file}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+  writeFileSync(temporary, text, { encoding: 'utf8', mode: 0o644 });
+  renameSync(temporary, file);
 }
 
 /** Where a shell keeps its history when it did not say: bash's default, PSReadLine's default. */
@@ -177,9 +193,11 @@ export class HistoryAnnounce {
 }
 
 /**
- * The commands of a history file, newest first and each once. PSReadLine ends
- * every line but the last of a multi-line command with a backtick; bash with
- * HISTTIMEFORMAT puts `#<seconds>` lines between commands.
+ * The commands of a history file, newest first and each once. PSReadLine
+ * writes a newline inside a command as a backtick and a line break, and reads
+ * it back by dropping that one backtick: a line the user ended with their own
+ * continuation backtick is saved with two and keeps one here, as PSReadLine
+ * recalls it. Bash with HISTTIMEFORMAT puts `#<seconds>` lines between commands.
  */
 export function parseHistory(text: string, kind: TerminalShell['kind'], max = HISTORY_COMMANDS): string[] {
   const lines = text.replace(/\r\n?/g, '\n').split('\n');

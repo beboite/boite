@@ -68,7 +68,8 @@ export class Terminals {
    */
   async terminalHistory(id: string): Promise<string[] | null> {
     const client = this.ctx.client;
-    if (!client) return null;
+    // Offline is not an older core: the list is just empty until the machine is back.
+    if (!client) return [];
     try {
       return (await client.call('terminals.history', { id })).commands;
     } catch (error) {

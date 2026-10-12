@@ -358,13 +358,14 @@ export class TerminalSession {
 
   async #load(): Promise<void> {
     const family = fontFamily();
-    const [{ Terminal }, { FitAddon }, { WebLinksAddon }, { SearchAddon }, { Unicode11Addon }, webgl] = await Promise.all([
+    // The extras are optional: a chunk that fails to load leaves the screen without
+    // GPU drawing, find or wide characters, never without a screen.
+    const [{ Terminal }, { FitAddon }, { WebLinksAddon }, searchModule, unicodeModule, webgl] = await Promise.all([
       import('@xterm/xterm'),
       import('@xterm/addon-fit'),
       import('@xterm/addon-web-links'),
-      import('@xterm/addon-search'),
-      import('@xterm/addon-unicode11'),
-      // A browser without WebGL keeps the DOM renderer; a failed chunk is no reason to show nothing.
+      import('@xterm/addon-search').catch(() => null),
+      import('@xterm/addon-unicode11').catch(() => null),
       readTerminalGpu() ? import('@xterm/addon-webgl').catch(() => null) : null,
       fontReady(family)
     ]);
@@ -398,21 +399,24 @@ export class TerminalSession {
       theme: theme()
     });
     const fit = new FitAddon();
-    const search = new SearchAddon({ highlightLimit: 2000 });
     term.loadAddon(fit);
-    term.loadAddon(search);
     term.loadAddon(new WebLinksAddon((_event, uri) => void openExternal(uri)));
-    const unicode = new Unicode11Addon();
-    term.loadAddon(unicode);
-    // Emoji and East Asian text two cells wide, as the shell counts them.
-    term.unicode.activeVersion = '11';
+    if (unicodeModule !== null) {
+      term.loadAddon(new unicodeModule.Unicode11Addon());
+      // Emoji and East Asian text two cells wide, as the shell counts them.
+      term.unicode.activeVersion = '11';
+    }
     this.#term = term;
     this.#fit = fit;
-    this.#search = search;
-    const results = search.onDidChangeResults(({ resultIndex, resultCount }) => {
-      this.searchResults = this.#query.length === 0 ? null : { index: resultIndex, count: resultCount };
-    });
-    this.#cleanups.push(() => results.dispose());
+    if (searchModule !== null) {
+      const search = new searchModule.SearchAddon({ highlightLimit: 2000 });
+      term.loadAddon(search);
+      this.#search = search;
+      const results = search.onDidChangeResults(({ resultIndex, resultCount }) => {
+        this.searchResults = this.#query.length === 0 ? null : { index: resultIndex, count: resultCount };
+      });
+      this.#cleanups.push(() => results.dispose());
+    }
     this.#listenToShell(term);
     term.attachCustomKeyEventHandler((event) => this.#key(event));
     const input = term.onData((data) => {
@@ -646,8 +650,13 @@ export class TerminalSession {
     if (state.windowsPty) term.options.windowsPty = { backend: 'conpty', buildNumber: state.windowsPty.buildNumber };
     this.#muted++;
     // The replay marks every command again, on the lines it draws them.
-    for (const mark of this.#marks) mark.decoration?.dispose();
+    // Drained first: disposing a marker takes it out of `#marks` from its own listener.
+    const old = this.#marks;
     this.#marks = [];
+    for (const mark of old) {
+      mark.decoration?.dispose();
+      mark.marker.dispose();
+    }
     this.running = false;
     term.reset();
     term.write(output, () => {

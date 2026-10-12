@@ -955,6 +955,15 @@ test('a marked shell shows where it is and how its last command ended, and Ctrl+
   await waitFor(() => document.activeElement?.classList.contains('xterm-helper-textarea') === true);
   keys.mockRestore();
 
+  // Escape from the list's close button closes the list and stays there: on the page it would stop a turn.
+  query<HTMLButtonElement>('[data-testid=terminal-history-open]').click();
+  await waitFor(() => document.querySelector('[data-testid=terminal-history-close]') !== null);
+  const close = query<HTMLButtonElement>('[data-testid=terminal-history-close]');
+  close.focus();
+  const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+  expect(close.dispatchEvent(escape)).toBe(false);
+  await waitFor(() => document.querySelector('[data-testid=terminal-history]') === null);
+
   query<HTMLButtonElement>('[data-testid=terminal-close]').click();
   await waitFor(() => document.querySelector('[data-testid=terminal-drawer]') === null);
 });

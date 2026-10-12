@@ -41,7 +41,14 @@ export function parseCwdProperty(data: string): string | null {
 export function parseFileUrl(data: string): string | null {
   if (!data.startsWith('file://')) return null;
   try {
-    const path = decodeURIComponent(new URL(data).pathname);
+    const raw = new URL(data).pathname;
+    let path: string;
+    try {
+      path = decodeURIComponent(raw);
+    } catch {
+      // A literal `%` the shell did not encode, `/tmp/100%`: the path as it came.
+      path = raw;
+    }
     // `file:///C:/Users` is a Windows path: the leading slash is the URL's, not the drive's.
     return /^\/[A-Za-z]:/.test(path) ? path.slice(1) : path;
   } catch {

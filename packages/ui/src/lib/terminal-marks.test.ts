@@ -17,6 +17,7 @@ describe('terminal marks', () => {
     expect(parseFileUrl('file://host/home/me/my%20dir')).toBe('/home/me/my dir');
     expect(parseFileUrl('file:///C:/Users/me')).toBe('C:/Users/me');
     expect(parseFileUrl('not a url')).toBeNull();
+    expect(parseFileUrl('file://host/tmp/100%')).toBe('/tmp/100%');
     expect(baseName('/home/me/project/')).toBe('project');
     expect(baseName('C:\\Users\\me')).toBe('me');
     expect(baseName('C:\\')).toBe('C:\\');

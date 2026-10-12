@@ -13,34 +13,40 @@
   let { session }: { session: TerminalSession } = $props();
 
   let input = $state<HTMLInputElement | undefined>(undefined);
+  let bar = $state<HTMLDivElement | undefined>(undefined);
   let query = $state('');
 
   onMount(() => {
     input?.focus();
     input?.select();
+    const node = bar;
+    node?.addEventListener('keydown', onEscape);
+    return () => node?.removeEventListener('keydown', onEscape);
   });
 
   function step(backwards: boolean) {
     session.find(query, backwards);
   }
 
+  /** Enter in the field: up the scrollback first, what was printed last is at the bottom already. */
   function onkeydown(event: KeyboardEvent) {
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      // Up the scrollback first: what was printed last is at the bottom already.
-      step(!event.shiftKey);
-    } else if (event.key === 'Escape') {
-      // Taken here, so the page's Escape does not stop a running turn.
-      event.preventDefault();
-      event.stopPropagation();
-      session.closeSearch();
-    }
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    step(!event.shiftKey);
+  }
+
+  /** Escape from the field or a button: taken here, so the page's Escape does not stop a running turn. */
+  function onEscape(event: KeyboardEvent) {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    event.stopPropagation();
+    session.closeSearch();
   }
 
   let results = $derived(session.searchResults);
 </script>
 
-<div class="find" role="search" data-testid="terminal-find">
+<div class="find" role="search" bind:this={bar} data-testid="terminal-find">
   <input
     bind:this={input}
     bind:value={query}

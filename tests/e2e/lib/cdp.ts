@@ -260,7 +260,8 @@ export class BrowserPage {
       await page.send('Network.enable', {});
       if (options.showTour !== true) await page.send('Page.addScriptToEvaluateOnNewDocument', { source: SEEN_TOUR });
       if (options.terminalGpu !== true) {
-        await page.send('Page.addScriptToEvaluateOnNewDocument', { source: `try { localStorage.setItem('boite.terminalGpu', 'off'); } catch {}` });
+        // Only on a fresh profile: a test that turns the GPU on and reloads keeps its choice.
+        await page.send('Page.addScriptToEvaluateOnNewDocument', { source: `try { if (localStorage.getItem('boite.terminalGpu') === null) localStorage.setItem('boite.terminalGpu', 'off'); } catch {}` });
       }
       if (options.experiments !== undefined) {
         const stored = JSON.stringify(JSON.stringify(options.experiments));

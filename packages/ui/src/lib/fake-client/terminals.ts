@@ -62,7 +62,10 @@ export function terminalMethods(ctx: FakeContext) {
             closeTerminal(ctx, params.id);
             return { ok: true };
           }
-          if (typed.length === 0) {
+          if (params.id.startsWith('login:')) {
+            // A sign-in shell starts without the integration, as the core's does: no marks.
+            echo += `\r\n${typed.length > 0 ? `${typed}\r\n` : ''}PS ${shell.cwd}> `;
+          } else if (typed.length === 0) {
             echo += `\r\n${MARK}D;0\x07${prompt(shell.cwd)}`;
           } else {
             shell.history.push(typed);

@@ -13,6 +13,8 @@
    * edit, Escape goes back to the shell.
    */
   let { store, session }: { store: Store; session: TerminalSession } = $props();
+  /** One per list: two panes of a split can show theirs at once. */
+  const listId = $props.id();
 
   let input = $state<HTMLInputElement | undefined>(undefined);
   let list = $state<HTMLUListElement | undefined>(undefined);
@@ -42,12 +44,17 @@
     session.useCommand(command, run);
   }
 
+  /** Escape from anywhere in the list, the close button included: the page's Escape would stop a turn. */
+  function onEscape(event: KeyboardEvent) {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    event.stopPropagation();
+    session.closeHistory();
+  }
+
+  /** The search field's keys: the arrows walk the list, Enter picks. */
   function onkeydown(event: KeyboardEvent) {
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      event.stopPropagation();
-      session.closeHistory();
-    } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
       if (shown.length === 0) return;
       const step = event.key === 'ArrowDown' ? 1 : -1;
@@ -67,7 +74,7 @@
   }
 </script>
 
-<div class="history" role="dialog" aria-label={strings.terminal.history} data-testid="terminal-history">
+<div class="history" role="dialog" tabindex="-1" aria-label={strings.terminal.history} onkeydown={onEscape} data-testid="terminal-history">
   <div class="search">
     <History size={14} strokeWidth={1.75} />
     <input
@@ -76,7 +83,7 @@
       {onkeydown}
       placeholder={strings.terminal.historySearch}
       aria-label={strings.terminal.historySearch}
-      aria-controls="terminal-history-list"
+      aria-controls={listId}
       spellcheck="false"
       autocomplete="off"
       data-testid="terminal-history-input"
@@ -93,7 +100,7 @@
   {:else if shown.length === 0}
     <p class="note" role="status">{strings.terminal.historyNone}</p>
   {:else}
-    <ul id="terminal-history-list" role="listbox" bind:this={list} aria-label={strings.terminal.history}>
+    <ul id={listId} role="listbox" bind:this={list} aria-label={strings.terminal.history}>
       {#each shown as command, index (command)}
         {@const line = firstLine(command)}
         <li role="option" aria-selected={index === selected} data-testid="terminal-history-item">
