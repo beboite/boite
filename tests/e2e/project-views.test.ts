@@ -2,7 +2,7 @@ import { mobileAction } from './lib/mobile.ts';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp.ts';
-import { setProjectOrder, showThreadView } from './lib/views.ts';
+import { showThreadView } from './lib/views.ts';
 import { startUi } from './lib/ui.ts';
 
 let server: { close(): Promise<void> };
@@ -87,11 +87,14 @@ test('copy path stays readable with a long working directory in conversation men
     await capture(`copy-path-${opener}.png`);
     expect(await page.evaluate(`(() => { const e = document.querySelector('${copy}'); return e.scrollWidth <= e.clientWidth; })()`)).toBe(true);
     expect(await page.evaluate(`document.querySelector('${copy}').textContent.trim()`)).toBe('Copier le chemin');
+    // Each opener writes its own copy: the previous one must not answer for it.
+    await page.evaluate(`navigator.clipboard.writeText('')`);
     await page.click(copy);
     await page.waitFor(`!document.querySelector('${menu}')`);
-    // The menu closes before the asynchronous clipboard write lands.
-    await page.waitFor(`navigator.clipboard.readText().then(text => text === ${JSON.stringify(cwd)})`).catch(() => {});
-    expect(await page.evaluate(`navigator.clipboard.readText()`)).toBe(cwd);
+    // The menu closes at once and the copy it fired lands afterwards: the
+    // clipboard write is asynchronous and nothing awaits it. Read on a slow
+    // runner right after the close, the clipboard was still empty.
+    await page.waitFor(`navigator.clipboard.readText().then(text => text === ${JSON.stringify(cwd)})`);
   }
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1300, height: 850, deviceScaleFactor: 1, mobile: false });
   await page.send('Emulation.setFocusEmulationEnabled', { enabled: false });
@@ -106,7 +109,8 @@ test('projects follow user activity, then keep a dragged custom order after relo
   const activityOrder = await keys();
   await page.evaluate(`(() => { const s = globalThis.__boiteTest.workspace.machines[0].store; s.threads = s.threads.map(t => ({...t, updatedAt: Date.now() + 10000})); })()`);
   expect(await keys()).toEqual(activityOrder);
-  await setProjectOrder(page, 'manual');
+  await page.click(id('project-sort'));
+  expect(await page.evaluate(`document.querySelector('${id('project-sort')}').dataset.order`)).toBe('manual');
   const before = await keys();
   await page.click(id('project-menu'));
   expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('context-menu')} [data-value]')).map(e => e.dataset.value)`)).toEqual(['new', 'copy', 'archived', 'manage']);
@@ -130,9 +134,9 @@ test('projects follow user activity, then keep a dragged custom order after relo
   await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...points.to, button: 'left', buttons: 0, clickCount: 1 });
   await page.waitFor(`JSON.stringify(Array.from(document.querySelectorAll('${id('project')}')).map(e => JSON.stringify([e.dataset.machineId, e.dataset.projectId]))) === ${JSON.stringify(JSON.stringify([before[3]!, ...before.slice(0, 3)]))}`);
   expect(await keys()).toEqual([before[3]!, ...before.slice(0, 3)]);
-  await setProjectOrder(page, 'recent');
+  await page.click(id('project-sort'));
   expect(await keys()).toEqual(activityOrder);
-  await setProjectOrder(page, 'manual');
+  await page.click(id('project-sort'));
   expect(await keys()).toEqual([before[3]!, ...before.slice(0, 3)]);
   await capture('project-order-desktop.png');
   await page.navigate(url);
