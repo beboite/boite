@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import { untrack } from 'svelte';
   import { AppWindow, EyeOff, Globe, Plus, X } from '@lucide/svelte';
   import type { AgentBrowserStatus, AgentBrowserTab } from '@boite/contracts';
@@ -62,14 +63,14 @@
       if (reply.tabId && picked === before) picked = reply.tabId;
       // The user opened it himself: no cover over his own page.
       liveViews.show('agent-browser', key);
-    } catch (cause) { failure = cause instanceof Error ? cause.message : String(cause); }
+    } catch (cause) { failure = errorText(cause); }
     finally { opening = false; }
   }
   async function closeTab(tab: AgentBrowserTab) {
     const client = store.client;
     if (!client) return;
     try { await client.call('browser.command', { threadId, tabId: tab.tabId, action: { kind: 'close' } }); }
-    catch (cause) { failure = cause instanceof Error ? cause.message : String(cause); }
+    catch (cause) { failure = errorText(cause); }
   }
   function pick(tab: AgentBrowserTab) { picked = tab.tabId; drafting = false; failure = ''; }
 
@@ -93,7 +94,7 @@
         }, (cause) => {
           if (stopped) return;
           if (attempt < 4) retry = setTimeout(() => ask(attempt + 1), 1000);
-          else failure = cause instanceof Error ? cause.message : String(cause);
+          else failure = errorText(cause);
         });
       };
       ask(0);
@@ -153,7 +154,7 @@
         <p class="muted">{fill(strings.agentBrowser.newTabHint, { machine })}</p>
         <div class="omnibox">
           <input bind:this={field} bind:value={address} data-testid="agent-browser-start-address" type="text" inputmode="url" enterkeyhint="go" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="4096" aria-label={strings.remoteBrowser.address} placeholder={strings.remoteBrowser.addressPlaceholder} />
-          <button type="submit" class="primary small" disabled={!address.trim() || opening}><span class="ui-label">{strings.agentBrowser.open}</span></button>
+          <button type="submit" class="primary small" disabled={!address.trim() || opening}><span class="ui-label">{strings.common.open}</span></button>
         </div>
         {#if failure}<p class="failure" role="alert">{failure}</p>{/if}
       </form>

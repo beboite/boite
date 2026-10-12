@@ -280,6 +280,25 @@ describe('journal', () => {
     expect(journal.db.query('PRAGMA user_version').get()).toEqual({ user_version: SCHEMA_VERSION });
   });
 
+  test('a schema 32 journal gains the archive time, kept only while archived', () => {
+    const thread = { id: 'thr_archived', projectId: 'prj', title: 'Old', titleSource: 'user', providerId: 'echo', accountId: 'acc', model: null, effort: null, cwd: dir, branch: null, permissionMode: 'default', status: 'idle', unread: false, archived: true, pinned: false, sessionId: null, load: null, context: null, createdAt: 1, updatedAt: 2 } as const;
+    journal.putThread(thread);
+    journal.db.exec('ALTER TABLE threads DROP COLUMN archived_at; PRAGMA user_version = 32;');
+    journal.close();
+    journal = new Journal(file);
+    expect(journal.getThread(thread.id)?.archivedAt).toBeUndefined();
+    journal.putThread({ ...thread, archivedAt: 7 });
+    expect(journal.getThread(thread.id)?.archivedAt).toBe(7);
+    journal.putThread({ ...thread, archived: false, archivedAt: 7 });
+    expect(journal.getThread(thread.id)?.archivedAt).toBeUndefined();
+    // Deleting a live thread archives it first; undoing that drops the time with the flag.
+    journal.stageThreadDeletion(thread.id, [{ ...thread, archived: false }]);
+    journal.putThread({ ...thread, archivedAt: 9 });
+    journal.restoreDeletedThreads(thread.id);
+    expect(journal.db.query('SELECT archived, archived_at FROM threads WHERE id = ?').get(thread.id)).toEqual({ archived: 0, archived_at: null });
+    expect(journal.db.query('PRAGMA user_version').get()).toEqual({ user_version: SCHEMA_VERSION });
+  });
+
   test('the schema version is stamped and WAL is on', () => {
     const version = journal.db.query('PRAGMA user_version').get() as { user_version: number };
     expect(version.user_version).toBe(SCHEMA_VERSION);

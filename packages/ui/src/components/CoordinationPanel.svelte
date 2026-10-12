@@ -131,7 +131,7 @@
         <header>
           <h3 id="coordination-directory">{strings.coordination.directory}</h3>
            <button class="ghost small" data-testid="coordination-refresh" disabled={store.coordinationLoading} onclick={() => void store.loadCoordination(threadId, true)}>
-            <RefreshCw size={13} /><span class="ui-label">{strings.coordination.refresh}</span>
+            <RefreshCw size={13} /><span class="ui-label">{strings.common.refresh}</span>
           </button>
         </header>
         {#if (store.coordinationDirectory?.agents.length ?? 0) === 0}

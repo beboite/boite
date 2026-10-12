@@ -308,23 +308,3 @@ class MarkdownList {
     return html;
   }
 }
-
-/** Where the caret goes when the text ends on a block that closes in several tags. */
-const TAILS = ['</li></ul>', '</li></ol>', '</code></pre>', '</td></tr></tbody></table>', '</p></blockquote>'];
-
-/**
- * Puts a caret inside the last block `renderMarkdown` produced, so it blinks at
- * the end of the text instead of on a line of its own under it: a sibling of a
- * `<p>` would start a new line. A part with no text yet gets a paragraph to
- * carry it. Escaped content can hold no `</`, so the last one closes the block.
- */
-export function withCaret(html: string, caret: string): string {
-  if (html.length === 0) return `<p>${caret}</p>`;
-  for (const tail of TAILS) {
-    if (html.endsWith(tail)) return `${html.slice(0, -tail.length)}${caret}${tail}`;
-  }
-  if (html.endsWith('<hr>')) return `${html}<p>${caret}</p>`;
-  const close = html.lastIndexOf('</');
-  if (close < 0) return `${html}${caret}`;
-  return `${html.slice(0, close)}${caret}${html.slice(close)}`;
-}

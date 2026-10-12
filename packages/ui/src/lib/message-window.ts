@@ -44,24 +44,19 @@ export function gapChanged(node: HTMLElement, seam: string | null, rest: boolean
   return measured !== undefined && Number(measured) !== slotGap(seam, rest);
 }
 /** A prompt's picture before it is opened: `UserMessage`'s thumbnail height. */
-export const THUMB_HEIGHT = 240;
-/** What a picture adds besides itself: the row's margin and the frame. */
+export const THUMB_HEIGHT = 88;
+/** What the pictures' row adds besides them: its margin and the frames. */
 const THUMB_ROW = 10;
 
 /**
- * What a message is worth before it is measured. A prompt's pictures count
- * their thumbnails on top of `ESTIMATE`, at the height their size gives when a
- * light page sent one: a screenshot taken for 80 px became 330 once on
- * screen, and everything below the reader moved by the difference.
+ * What a message is worth before it is measured. A prompt's pictures add their
+ * one row of thumbnails on top of `ESTIMATE`: left out, a prompt with
+ * screenshots grew once on screen, and everything below the reader moved by
+ * the difference.
  */
 export function estimateSlot(message: Message): number {
-  if (message.role !== 'user') return ESTIMATE;
-  let pictures = 0;
-  for (const part of message.parts) {
-    if (part.type !== 'image') continue;
-    pictures += (part.width && part.height ? Math.min(THUMB_HEIGHT, part.height) : THUMB_HEIGHT) + THUMB_ROW;
-  }
-  return ESTIMATE + pictures;
+  if (message.role !== 'user' || !message.parts.some(part => part.type === 'image')) return ESTIMATE;
+  return ESTIMATE + THUMB_HEIGHT + THUMB_ROW;
 }
 
 // -- the running totals ------------------------------------------------------

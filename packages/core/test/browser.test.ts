@@ -171,7 +171,19 @@ async function fakeHost(name = 'shell') {
   socket.addEventListener('message', event => void app.call('browser.hostReply', { profile: 'default', messages: [String(event.data)] }).catch(() => {}));
   return {
     app, relayed,
-    async close() { app.close(); socket.close(); browser.kill(); await browser.exited; rmSync(dir, { recursive: true, force: true }); },
+    async close() {
+      app.close();
+      // A kill ends the browser process alone: on Windows its helpers keep the
+      // profile open a moment longer, and removing it then fails with EBUSY.
+      // Browser.close ends them first, as the core closes its own browsers.
+      const stuck = setTimeout(() => browser.kill(), 10_000);
+      if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 2 ** 31 - 1, method: 'Browser.close', params: {} }));
+      else browser.kill();
+      await browser.exited;
+      clearTimeout(stuck);
+      socket.close();
+      rmSync(dir, { recursive: true, force: true });
+    },
   };
 }
 

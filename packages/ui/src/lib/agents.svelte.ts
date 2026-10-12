@@ -1,5 +1,7 @@
+import { errorText } from './errors';
 import type { AgentEntityKind, AgentsSnapshot, RpcParams, RpcResult, AgentsRpcMethods, AgentHistoryCursor, AgentHistoryKind, AgentRecord, AgentsHistoryPage, AgentConversationMessage, AgentMission, AgentScope, AgentTeam, ThreadSummary } from '@boite/contracts';
 import type { Store } from './store.svelte';
+import { agentThreadLive } from './agent-directory.svelte';
 
 export type AgentEntryKind = Extract<AgentEntityKind, 'profile' | 'group' | 'team' | 'mission'>;
 export type AgentSelection = { kind: AgentEntryKind; id: string };
@@ -121,8 +123,6 @@ export function agentChats(snapshot: AgentsSnapshot, messages: AgentConversation
   return [...chats.values()].sort((a, b) => b.at - a.at || a.name.localeCompare(b.name));
 }
 
-const LIVE: ReadonlySet<ThreadSummary['status']> = new Set(['running', 'queued', 'waiting']);
-
 /**
  * The thread each conversation's agents work in right now, keyed like the
  * chat list: what a row's state and a conversation's live line read, so an
@@ -139,7 +139,7 @@ export function liveThreads(snapshot: AgentsSnapshot, threads: readonly ThreadSu
     if (!held || rank(thread) < rank(held)) live.set(key, thread);
   };
   for (const thread of threads) {
-    if (!thread.agentSessionId || !LIVE.has(thread.status) || thread.archived) continue;
+    if (!agentThreadLive(thread)) continue;
     const session = snapshot.sessions.find(s => s.id === thread.agentSessionId);
     if (!session) continue;
     put(chatKey('profile', session.agentId), thread);
@@ -305,7 +305,7 @@ export class AgentsView {
         const snapshot = await client?.call('agents.snapshot', {});
         if (snapshot && !this.disposed && client === this.store.client) { this.accept(snapshot); this.loadError = ''; }
       }
-    } catch (error) { if (!this.disposed) this.loadError = String(error instanceof Error ? error.message : error); }
+    } catch (error) { if (!this.disposed) this.loadError = errorText(error); }
   }
   /**
    * More records than a window holds can arrive between two snapshots. The new
@@ -360,7 +360,7 @@ export class AgentsView {
       if (this.disposed || client !== this.store.client || generation !== this.generation[params.kind]) return;
       this.seen = absorb(this.seen, page);
       this.older = { ...this.older, [key]: page.more };
-    } catch (error) { if (!this.disposed) this.error = error instanceof Error ? error.message : String(error); }
+    } catch (error) { if (!this.disposed) this.error = errorText(error); }
     finally { this.loadingOlder = null; }
   }
   /** Fills a view that shows fewer than `enough` records once, when older ones exist. A failure is not retried. */
@@ -378,7 +378,7 @@ export class AgentsView {
       const result = await this.store.client.call(method, $state.snapshot(params) as RpcParams<M>);
       await this.refresh();
       return result;
-    } catch (error) { this.error = error instanceof Error ? error.message : String(error); return null; }
+    } catch (error) { this.error = errorText(error); return null; }
     finally { this.pending = false; }
   }
   close(): void { this.disposed = true; this.off?.(); }

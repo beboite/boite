@@ -43,6 +43,8 @@ export class ServerConnection implements Connection {
   private closed = false;
   private readonly closeListeners = new Set<() => void>();
   private congestionTimer: ReturnType<typeof setTimeout> | null = null;
+  /** What the socket held at the last write or drain that left it congested: a later drain below it took bytes. */
+  private congestionMark = 0;
   private pacedBytes = 0;
   private catchUpBytes = 0;
   private readonly catchUp = new Set<string>();
@@ -263,6 +265,7 @@ export class ServerConnection implements Connection {
   private markCongested(): void {
     if (this.closed) return;
     this.congested = true;
+    this.congestionMark = this.bufferedAmount();
     this.congestionTimer ??= setTimeout(() => this.close(1013, 'connection remained congested; reconnect'), this.congestionTimeoutMs);
   }
 
@@ -270,6 +273,7 @@ export class ServerConnection implements Connection {
     if (this.congestionTimer !== null) clearTimeout(this.congestionTimer);
     this.congestionTimer = null;
     this.congested = false;
+    this.congestionMark = 0;
   }
 
   private write(frame: unknown, serialized?: string): number {
@@ -329,7 +333,18 @@ export class ServerConnection implements Connection {
       this.markCongested();
       if (this.outbox !== null) return;
     }
-    if (this.bufferedAmount() > 0) return;
+    const buffered = this.bufferedAmount();
+    if (buffered > 0) {
+      // One large frame, a 12 MB page, leaves a slow link a slice per drain with
+      // nothing left to pump: a drain that took bytes restarts the clock as a
+      // chunked answer's slices do. A drain with as much still queued is no progress.
+      if (buffered < this.congestionMark) {
+        if (this.congestionTimer !== null) clearTimeout(this.congestionTimer);
+        this.congestionTimer = null;
+        this.markCongested();
+      }
+      return;
+    }
     // The bus holds up to 16 ms of text the journal flush below folds into the
     // part. Dispatched now, while still congested, it lands in the catch-up
     // rather than arriving after the part as a second copy.

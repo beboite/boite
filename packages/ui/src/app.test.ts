@@ -1034,7 +1034,7 @@ test('the composer wears the context meter, a compaction is a divider, and a tur
   await waitFor(() => document.querySelector('[data-testid=context-popup]') !== null);
   expect(query('[data-testid=context-popup]').textContent).toContain(count(31000));
   expect(query('[data-testid=compaction-part]').textContent?.replace(/\s+/g, ' ').trim()).toBe(
-    'Context compacted, 184k to 31k tokens'
+    'Context compacted, 184K to 31K tokens'
   );
 
   const input = query<HTMLTextAreaElement>('[data-testid=composer-input]');
@@ -1748,7 +1748,7 @@ test('a tool card stays folded while its input arrives and reveals parsed detail
 
   await waitFor(() => card.dataset.streaming === 'false');
   expect(card.querySelector('[data-testid=tool-toggle]')?.getAttribute('aria-expanded')).toBe('false');
-  expect(card.querySelector('.fold')?.classList.contains('open')).toBe(false);
+  expect(card.querySelector('.disclosure-fold')?.classList.contains('open')).toBe(false);
   expect(card.querySelector('.line')?.textContent).toBe('Ran 1 command');
 
   card.querySelector<HTMLButtonElement>('[data-testid=tool-toggle]')?.click();

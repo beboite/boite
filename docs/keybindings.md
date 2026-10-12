@@ -96,7 +96,7 @@ A chord is modifiers, then one key, joined with `+`, case and spaces ignored.
 | `pair` | none | General, where a phone pairs |
 | `theme-dark`, `theme-light`, `theme-system` | none | The theme |
 | `archive` | none | Archive the open thread |
-| `reopen-thread` | `mod+shift+t` | Restore the thread archived last and open it: those archived in this window first, newest first, then the machine's most recent one |
+| `reopen-thread` | `mod+shift+t` | Restore the thread archived last and open it, by the core's archive time: one put away from another computer, the phone or an agent counts too, an automatic archive after a merged PR does not |
 | `copy-answer` | `mod+alt+c` | Copy the open thread's last answer |
 | `find` | `mod+f` | Search the open thread; Enter and Shift+Enter walk the matches, Escape closes |
 | `thread-1` to `thread-9` | `alt+1` to `alt+9` | Open the thread in that row of the sidebar, counted from the top of what it shows |

@@ -2,6 +2,7 @@
   import { LoaderCircle, Radar } from '@lucide/svelte';
   import type { ThreadSummary } from '@boite/contracts';
   import { backgroundLabel } from '../lib/background';
+  import { secondClock } from '../lib/clock.svelte';
   import { ago, elapsed, exactTime } from '../lib/format';
   import { fill, strings } from '../lib/strings';
   import { threadState } from '../lib/thread-state';
@@ -31,15 +32,8 @@
     : kind === 'monitoring' ? thread.requestSince ?? thread.backgroundWork?.since ?? null
     : kind === 'delegating' ? subagents?.since ?? null
     : live ? thread.backgroundWork?.since ?? null : null);
-  /** The row's own second, only while the agent works: the list's clock ticks far slower. */
-  let tick = $state(Date.now());
-  $effect(() => {
-    if (!live || since === null) return;
-    tick = Date.now();
-    const timer = setInterval(() => { tick = Date.now(); }, 1000);
-    return () => clearInterval(timer);
-  });
-  let spent = $derived(since === null ? null : elapsed(Math.max(tick, now) - since));
+  /** Counting time reads the second clock, only while the agent works: the list's clock ticks far slower. */
+  let spent = $derived(since === null ? null : elapsed(Math.max(secondClock.now, now) - since));
   let label = $derived.by(() => {
     if (kind === null) return null;
     if (kind === 'working') return spent === null ? strings.sidebar.state.working : fill(strings.sidebar.state.workingFor, { elapsed: spent });
@@ -125,8 +119,6 @@
     flex: none;
     animation: pulse 1.6s var(--ease-out-quint) infinite;
   }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
   /* An endless loop stops under reduced motion; the ring keeps its colour. */
   @media (prefers-reduced-motion: reduce) { .state :global(.spinner), .state :global(.pulse) { animation: none; } }
   :global(html[data-motion='reduced']) .state :global(.spinner),

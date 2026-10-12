@@ -89,13 +89,8 @@ export const PANEL_DEFAULT = 360;
 export const PANEL_MIN = 300;
 /** The chat column never drops under this, whatever the drag asks for. */
 export const SIBLING_MIN = 360;
-/** Past this the panel is an inline column; under it, a sheet over the chat. */
-export const PANEL_INLINE_MIN_VIEWPORT = 981;
 
 export const AGENTS_SURFACE_ID = 'agents';
-
-/** Past this the changes surface puts its diff beside the list rather than under it. */
-export const CHANGES_SPLIT_MIN = 900;
 
 /** A browser surface walks the interface zoom's own ladder (`lib/zoom.ts`). */
 export { ZOOM_DEFAULT, ZOOM_STEPS, stepZoom } from './zoom';

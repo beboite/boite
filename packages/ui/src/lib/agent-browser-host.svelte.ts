@@ -1,3 +1,4 @@
+import { errorText } from './errors';
 import { untrack } from 'svelte';
 import type { Store } from './store.svelte';
 import { workspace } from './workspace.svelte';
@@ -28,7 +29,7 @@ export function hostAgentBrowser(store: Store): () => void {
     await relay.start();
     if (!stopped) agentHost.active = true;
   }).catch(cause => {
-    console.warn(`[browser] this app could not host the agent browser: ${cause instanceof Error ? cause.message : String(cause)}`);
+    console.warn(`[browser] this app could not host the agent browser: ${errorText(cause)}`);
   });
   return () => { stopped = true; agentHost.active = false; relay?.stop(); };
 }

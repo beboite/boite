@@ -151,7 +151,7 @@ test('offline and paired machines cannot be edited and a removed target never fa
   flushSync();
   // Out of reach, the row folds its details away: nothing there works without the machine.
   expect(document.querySelector('[data-machine-id="target"] [data-testid="machine-details-toggle"]')).toBeNull();
-  expect(query('[data-machine-id="target"] [data-testid="machine-settings-open"]').closest<HTMLElement>('.reveal')!.inert).toBe(true);
+  expect(query('[data-machine-id="target"] [data-testid="machine-settings-open"]').closest<HTMLElement>('.disclosure-fold')!.inert).toBe(true);
   target.store.connection = 'ready';
   flushSync();
   query<HTMLButtonElement>('[data-machine-id="target"] [data-testid="machine-settings-open"]').click();

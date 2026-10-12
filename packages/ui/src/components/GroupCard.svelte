@@ -194,7 +194,7 @@
             <input id="{uid}-invite" class="mono" data-testid="group-invite-code" readonly spellcheck="false" autocomplete="off"
               value={store.groupInvite.invite} onfocus={(event) => event.currentTarget.select()} />
             <button type="button" data-testid="group-invite-copy" onclick={() => void copyInvite()}>
-              {#if copied}<Check size={14} />{strings.group.copied}{:else}<Copy size={14} />{strings.group.copy}{/if}
+              {#if copied}<Check size={14} />{strings.group.copied}{:else}<Copy size={14} />{strings.common.copy}{/if}
             </button>
           </div>
           <p class="hint">{strings.group.inviteHint}</p>

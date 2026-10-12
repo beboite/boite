@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ChevronRight, ShieldCheck, ShieldQuestion, ShieldX } from '@lucide/svelte';
+  import { ShieldCheck, ShieldQuestion, ShieldX } from '@lucide/svelte';
   import type { PermissionRequest } from '@boite/contracts';
   import { json } from '../lib/format';
   import { strings } from '../lib/strings';
@@ -77,8 +77,8 @@
     {/if}
   {/if}
   {#if request}
-    <details class="technical">
-      <summary><ChevronRight size={12} strokeWidth={2} /><span class="ui-label">{strings.chat.permissionTechnical}</span></summary>
+    <details class="technical disclosure">
+      <summary><span class="ui-label">{strings.chat.permissionTechnical}</span></summary>
       <p class="tool mono">{toolName}</p>
       <pre class="mono" data-testid="permission-input">{json(request.input)}</pre>
     </details>
@@ -170,19 +170,9 @@
 
   .subject { color: var(--color-foreground); }
 
-  .technical summary {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-size: var(--text-xs);
-    color: var(--color-subtle);
-    cursor: pointer;
-    list-style: none;
-  }
-
-  .technical summary::-webkit-details-marker { display: none; }
-  .technical summary :global(svg) { transition: transform var(--dur-2) var(--ease-out-quint); }
-  .technical[open] summary :global(svg) { transform: rotate(90deg); }
+  /* The shared disclosure, at the size of the card's small print. */
+  .technical summary { gap: 4px; min-height: 0; font-size: var(--text-xs); font-weight: 400; color: var(--color-subtle); }
+  .technical summary::before { width: 12px; height: 12px; }
   .technical .tool { margin: 6px 0 4px; font-size: var(--text-xs); color: var(--color-muted-foreground); }
   .resolved .technical { display: none; }
   @media (max-width: 720px) {

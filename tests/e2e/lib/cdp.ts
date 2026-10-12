@@ -165,7 +165,7 @@ export class BrowserPage {
     socket.addEventListener('close', () => {
       for (const pending of this.#pending.values()) {
         clearTimeout(pending.timer);
-        pending.reject(new Error('the devtools socket closed'));
+        pending.reject(new Error('the devtools socket closed, the browser exited or was killed (bun test kills every process a file started when one of its tests or hooks times out)'));
       }
       this.#pending.clear();
     });
@@ -315,6 +315,13 @@ export class BrowserPage {
   /** The one place raw devtools JSON is handled. */
   send(method: string, params: Record<string, unknown>, timeoutMs = CALL_TIMEOUT_MS): Promise<unknown> {
     if (this.#closed) return Promise.reject(new Error('the browser is closed'));
+    // A send on a closed socket is dropped without an error, and each call then
+    // waited out its whole timeout: after `bun test` killed the browser of a
+    // file whose test timed out, every later test of that file spent 20 s on a
+    // "Runtime.evaluate timed out" that looked like a hung renderer.
+    if (this.#socket.readyState !== WebSocket.OPEN) {
+      return Promise.reject(new Error(`the devtools socket closed before ${method}: the browser exited or was killed. bun test kills every process a file started when one of its tests or hooks times out, so look for the file's first failure`));
+    }
     const id = this.#nextId++;
     return new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {

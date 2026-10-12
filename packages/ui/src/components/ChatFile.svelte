@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import { onMount, tick } from 'svelte';
   import { Check, Download, FileText, Image, Film, Music2, Maximize2, RefreshCw, X } from '@lucide/svelte';
   import { ATTACHMENT_MAX_BYTES, FILE_TICKET_TTL_MS, imageSize, type MessagePart } from '@boite/contracts';
@@ -96,7 +97,7 @@
     if (!directory || !path || opening) return;
     opening = true;
     try { await openLocalFile(directory, path); }
-    catch (reason) { error = reason instanceof Error ? reason.message : String(reason); }
+    catch (reason) { error = errorText(reason); }
     finally { opening = false; }
   }
 
@@ -113,7 +114,7 @@
       if (file?.type === 'artifact') await loadArtifact();
       saved = (body ? await saveAttachment(name, body, andOpen) : await saveAttachmentUrl(name, url, andOpen))?.path ?? '';
       error = '';
-    } catch (reason) { error = reason instanceof Error ? reason.message : String(reason); }
+    } catch (reason) { error = errorText(reason); }
     finally { saving = false; }
     return true;
   }
@@ -257,7 +258,7 @@
         <div class="media-fallback" role="status" data-testid="media-fallback">{#if video}<Film size={28} />{:else}<FileText size={28} />{/if}<p>{video ? strings.artifacts.videoFailed : strings.artifacts.mediaFailed}</p>
           <div class="fallback-actions">
             {#if video}<a class="ghost small download-label" href={url} download={name} onclick={download} data-testid="media-fallback-download"><Download size={14} /><span class="ui-label">{strings.artifacts.download}</span></a>{/if}
-            {#if !unplayable}<button type="button" class="ghost small" onclick={load}><RefreshCw size={14} /><span class="ui-label">{strings.artifacts.retry}</span></button>{/if}
+            {#if !unplayable}<button type="button" class="ghost small" onclick={load}><RefreshCw size={14} /><span class="ui-label">{strings.common.retry}</span></button>{/if}
           </div>
         </div>
       {:else}
@@ -280,7 +281,7 @@
       {#if image}<Image size={18} />{:else if video}<Film size={18} />{:else if audio}<Music2 size={18} />{:else}<FileText size={20} />{/if}
       <span class="label"><span class="filename">{name}</span><small>{loading ? strings.artifacts.loading : saving ? strings.artifacts.saving : saved ? strings.artifacts.saved : [bytes(size), dimensions || (box ? `${box.width} × ${box.height}` : ''), duration ? millis(duration * 1000) : ''].filter(Boolean).join(' · ')}</small></span>
     </button>
-    {#if directory}<button class="ghost small" type="button" onclick={open} disabled={opening} data-testid="artifact-open"><span class="ui-label">{strings.artifacts.open}</span></button>{/if}
+    {#if directory}<button class="ghost small" type="button" onclick={open} disabled={opening} data-testid="artifact-open"><span class="ui-label">{strings.common.open}</span></button>{/if}
     {#if url || (file?.type === 'file' && file.dataDeferred)}
       {#if deferredImage}<button class="ghost small" type="button" onclick={() => { imageRequested = true; if (waiting) void load(); }} data-testid="artifact-load-image"><span class="ui-label">{strings.artifacts.loadImage}</span></button>
       {:else if rich && previewable && !inlineMedia}<button class="ghost small" type="button" onclick={() => expanded = !expanded} aria-expanded={expanded} data-testid="artifact-preview"><span class="ui-label">{strings.artifacts.preview}</span></button>{/if}
@@ -288,7 +289,7 @@
     {/if}
     {#if onclose}<button class="ghost small icon" type="button" onclick={onclose} aria-label={strings.artifacts.close}><X size={16} /></button>{/if}
   </div>
-  {#if error}<div class="error" role="alert"><p>{error}</p><button type="button" class="ghost small" onclick={load} disabled={loading}><span class="ui-label">{strings.artifacts.retry}</span></button></div>{/if}
+  {#if error}<div class="error" role="alert"><p>{error}</p><button type="button" class="ghost small" onclick={load} disabled={loading}><span class="ui-label">{strings.common.retry}</span></button></div>{/if}
 </section>
 {#if viewing}<ImageViewer items={viewing.items} index={viewing.index} onclose={() => viewing = null} />{/if}
 

@@ -11,6 +11,8 @@
  * `history.back()` lands in a later task, and an entry pushed before it lands
  * would be the one it pops. A push therefore waits for the pops in flight.
  */
+import { secureId } from './secure-id';
+
 const live = new Set<string>();
 let pops = 0;
 let queued: (() => void)[] = [];
@@ -43,7 +45,7 @@ function listen(): void {
 export function mobileOverlay(close: () => void): () => void {
   if (!window.matchMedia('(max-width: 720px)').matches) return () => {};
   listen();
-  const id = Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('');
+  const id = secureId();
   let depth = 0;
   let pushed = false;
   let cancelled = false;

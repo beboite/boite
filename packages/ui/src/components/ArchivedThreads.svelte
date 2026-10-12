@@ -1,12 +1,14 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import DoneRetentionSetting from './DoneRetentionSetting.svelte';
   import { RotateCcw, Trash2 } from '@lucide/svelte';
   import { DEFAULT_THREAD_DONE_RETENTION_DAYS, type ThreadId, type ThreadSummary } from '@boite/contracts';
   import InfoTip from './InfoTip.svelte';
   import DeletedThreads from './DeletedThreads.svelte';
-  import { archivedThreads, restoreThread } from '../lib/archive';
+  import { archivedThreads, archivedTime } from '../lib/archive';
   import { SnapshotReads } from '../lib/store/snapshot-reads';
-  import { canDeleteThread, deleteThread } from '../lib/thread-removal';
+  import { canDeleteThread } from '../lib/thread-removal';
+  import { ThreadRestore } from '../lib/thread-restore.svelte';
   import { ago, exactTime, projectName } from '../lib/format';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
@@ -22,7 +24,7 @@
    */
   let threads = $state<ThreadSummary[] | null>(null);
   let loading = $state(false);
-  let restoring = $state<ThreadId | null>(null);
+  const lock = new ThreadRestore();
   /** One automatic ask per connection: a failed read leaves the button for another user ask. */
   let asked = false;
   const removed = new Set<ThreadId>();
@@ -36,7 +38,7 @@
     threads = null;
     loading = false;
     restored = [];
-    restoring = null;
+    lock.reset();
     asked = false;
     removed.clear();
     rows.clear();
@@ -59,7 +61,7 @@
   function reconcile(summary: ThreadSummary) {
     const held = rows.has(summary.id);
     const keep = !removed.has(summary.id) && !summary.parentThreadId &&
-      (summary.archived || (held && (restoring === summary.id || restored.includes(summary.id))));
+      (summary.archived || (held && (lock.restoring === summary.id || lock.deleting === summary.id || restored.includes(summary.id))));
     reads.change(summary.id, keep ? summary : null);
     if (threads === null) return;
     // Load samples from unrelated active threads must not rebuild the archive.
@@ -71,7 +73,16 @@
     }
     if (summary.archived) restored = restored.filter(id => id !== summary.id);
     rows.add(summary.id);
-    threads = held ? threads.map(row => row.id === summary.id ? summary : row) : [summary, ...threads];
+    const prior = threads.find(row => row.id === summary.id);
+    // A row keeps its place while its archive time stands: a load sample or a restore moves nothing.
+    if (prior && (!summary.archived || archivedTime(prior) === archivedTime(summary))) {
+      threads = threads.map(row => row.id === summary.id ? summary : row);
+      return;
+    }
+    // A newcomer, or a row archived again, takes its place by archive time: one put away earlier elsewhere does not jump to the top.
+    const rest = threads.filter(row => row.id !== summary.id);
+    const at = rest.findIndex(row => archivedTime(row) < archivedTime(summary));
+    threads = at < 0 ? [...rest, summary] : [...rest.slice(0, at), summary, ...rest.slice(at)];
   }
 
   $effect(() => {
@@ -79,10 +90,6 @@
     asked = true;
     void load();
   });
-
-  function fail(error: unknown) {
-    store.error = error instanceof Error ? error.message : String(error);
-  }
 
   async function load() {
     const client = store.client;
@@ -92,12 +99,12 @@
     try {
       const answer = await archivedThreads(store);
       if (store.client === client && store.clientGeneration === generation && read.active) {
-        threads = read.apply(answer, threads ?? []).filter(t => !removed.has(t.id)).sort((a, b) => b.updatedAt - a.updatedAt);
+        threads = read.apply(answer, threads ?? []).filter(t => !removed.has(t.id)).sort((a, b) => archivedTime(b) - archivedTime(a));
         rows.clear();
         for (const thread of threads) rows.add(thread.id);
       }
     } catch (error) {
-      if (store.client === client && store.clientGeneration === generation) fail(error);
+      if (store.client === client && store.clientGeneration === generation) store.error = errorText(error);
     } finally {
       read.cancel();
       if (store.client === client && store.clientGeneration === generation) loading = false;
@@ -108,19 +115,10 @@
   let restored = $state<ThreadId[]>([]);
 
   async function restore(thread: ThreadSummary) {
-    const client = store.client;
-    const generation = store.clientGeneration;
-    restoring = thread.id;
-    try {
-      const summary = await restoreThread(store, thread.id);
-      if (store.client !== client || store.clientGeneration !== generation) return;
-      threads = threads?.map(row => row.id === summary.id ? summary : row) ?? null;
-      restored = [...restored, thread.id];
-    } catch (error) {
-      if (store.client === client && store.clientGeneration === generation) fail(error);
-    } finally {
-      restoring = null;
-    }
+    const summary = await lock.restore(store, thread.id);
+    if (!summary) return;
+    threads = threads?.map(row => row.id === summary.id ? summary : row) ?? null;
+    restored = [...restored, thread.id];
   }
 
   function projectOf(thread: ThreadSummary): string {
@@ -129,12 +127,7 @@
   }
 
   async function remove(thread: ThreadSummary) {
-    restoring = thread.id;
-    try {
-      if (await deleteThread(store, thread)) threads = threads?.filter(t => t.id !== thread.id) ?? null;
-    } finally {
-      restoring = null;
-    }
+    if (await lock.remove(store, thread)) threads = threads?.filter(t => t.id !== thread.id) ?? null;
   }
 </script>
 
@@ -161,20 +154,20 @@
           {#if thread.doneAt != null && (store.settings?.threadDoneRetentionDays ?? DEFAULT_THREAD_DONE_RETENTION_DAYS) > 0}
             <span class="subtle expiry" data-testid="done-expires">{fill(strings.settings.archived.deletesAt, { date: exactTime(thread.doneAt + (store.settings?.threadDoneRetentionDays ?? DEFAULT_THREAD_DONE_RETENTION_DAYS) * 86_400_000) })}</span>
           {/if}
-          <span class="subtle meta" title={exactTime(thread.updatedAt)}>{projectOf(thread)} · {ago(thread.updatedAt)}</span>
+          <span class="subtle meta" title={exactTime(archivedTime(thread))}>{projectOf(thread)} · {ago(archivedTime(thread))}</span>
           {#if restored.includes(thread.id)}
             <button type="button" class="small" data-testid="archived-open" onclick={() => void workspace.select(store, thread.id)}>
-              <span class="ui-label">{strings.settings.archived.open}</span>
+              <span class="ui-label">{strings.common.open}</span>
             </button>
           {:else}
-            <button type="button" class="small" data-testid="archived-restore" disabled={restoring !== null} onclick={() => void restore(thread)}>
+            <button type="button" class="small" data-testid="archived-restore" disabled={lock.busy} onclick={() => void restore(thread)}>
               <RotateCcw size={14} /><span class="ui-label">{strings.settings.archived.restore}</span>
             </button>
           {/if}
           {#if canDeleteThread(thread)}
             <button type="button" class="ghost small danger" data-testid="archived-delete"
-              aria-label={strings.sidebar.delete} title={strings.sidebar.delete} disabled={restoring !== null}
-              onclick={() => void remove(thread)}><Trash2 size={14} /><span class="ui-label">{strings.sidebar.delete}</span></button>
+              aria-label={strings.common.delete} title={strings.common.delete} disabled={lock.busy}
+              onclick={() => void remove(thread)}><Trash2 size={14} /><span class="ui-label">{strings.common.delete}</span></button>
           {/if}
         </li>
       {/each}

@@ -250,7 +250,7 @@
   .eyes { transform-box: fill-box; transform-origin: center; }
   [data-state='idle'] .eyes { animation: robot-blink 4.6s infinite; }
   [data-state='working'] .eyes { animation: robot-glance 2.4s ease-in-out infinite; }
-  [data-state='working'] .led { animation: robot-pulse 1.2s ease-in-out infinite; }
+  [data-state='working'] .led { animation: pulse 1.2s ease-in-out infinite; }
   [data-state='waiting'] .whole { animation: robot-hop 1.8s ease-in-out infinite; }
   /* A jelly at work squishes on the spot. */
   [data-family='jelly'][data-state='working'] .whole { transform-origin: 32px 62px; animation: robot-squish 0.9s ease-in-out infinite; }
@@ -258,7 +258,6 @@
   @keyframes robot-blink { 0%, 92%, 100% { transform: scaleY(1); } 95% { transform: scaleY(0.12); } }
   @keyframes robot-glance { 0%, 20% { transform: translateX(0); } 30%, 50% { transform: translateX(-2.2px); } 60%, 80% { transform: translateX(2.2px); } 90%, 100% { transform: translateX(0); } }
   @keyframes robot-hop { 0%, 70%, 100% { transform: translateY(0); } 80% { transform: translateY(-3px); } 90% { transform: translateY(0.5px); } }
-  @keyframes robot-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
   @media (prefers-reduced-motion: reduce) {
     .eyes, .led, .whole { animation: none !important; }
   }

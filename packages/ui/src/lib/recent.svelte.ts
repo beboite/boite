@@ -1,4 +1,4 @@
-import type { ThreadSummary } from '@boite/contracts';
+import { threadActive, type ThreadSummary } from '@boite/contracts';
 import type { Store } from './store.svelte';
 import { hasUnsentDraft } from './composer-queue';
 import { archiveThread } from './archive';
@@ -52,7 +52,7 @@ export function workingThread(store: Pick<Store, 'subagents'>, thread: ThreadSum
 
 /** Marking done never interrupts a turn or discards input; Archive is a separate menu action. */
 export function canMarkDone(store: Store, thread: ThreadSummary): boolean {
-  return !thread.archived && store.connection === 'ready' && !['running', 'waiting', 'queued'].includes(thread.status)
+  return !thread.archived && store.connection === 'ready' && !threadActive(thread.status)
     && !thread.backgroundWork?.kinds.length && !thread.pendingMove && !store.moveBlocked(thread.id)
     && !hasUnsentDraft(store.composerStates[thread.id]);
 }

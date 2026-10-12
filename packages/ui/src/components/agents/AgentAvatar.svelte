@@ -2,6 +2,8 @@
   import { Target, Users } from '@lucide/svelte';
   import type { AgentProfile } from '@boite/contracts';
   import { avatarText, robotOf, tintOf } from '../../lib/robots';
+  import { threadTone } from '../../lib/thread-state';
+  import StatusMark from '../StatusMark.svelte';
   import RobotFace from './RobotFace.svelte';
 
   /**
@@ -44,7 +46,7 @@
   {:else}
     <span class="ui-label">{avatarText(name, avatar)}</span>
   {/if}
-  {#if status === 'running' || status === 'waiting'}<i data-status={status}></i>{/if}
+  {#if status === 'running' || status === 'waiting'}<StatusMark {...threadTone(status)} corner />{/if}
 </span>
 
 <style>
@@ -57,8 +59,6 @@
   .agent-avatar-stack.robot { background: none; }
   .agent-avatar-stack[data-slot='0'] { top: 0; left: 0; }
   .agent-avatar-stack[data-slot='1'] { right: 0; bottom: 0; }
-  /* The dot only while it works or waits, at most a third of a small picture. */
-  .agent-avatar i { position: absolute; right: -1px; bottom: -1px; width: clamp(7px, calc(var(--size) * 0.28), 11px); height: clamp(7px, calc(var(--size) * 0.28), 11px); border-radius: 50%; box-shadow: 0 0 0 2px var(--ring, var(--color-surface)); }
-  .agent-avatar i[data-status='running'] { background: var(--color-accent); }
-  .agent-avatar i[data-status='waiting'] { background: var(--color-live); }
+  /* The status mark only while it works or waits, at most a third of a small picture. */
+  .agent-avatar { --mark-size: clamp(6px, calc(var(--size) * 0.24), 9px); }
 </style>

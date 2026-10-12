@@ -1,3 +1,4 @@
+import { errorText } from './errors';
 import { strings } from './strings';
 
 export type UpdateChannel = 'stable' | 'nightly';
@@ -79,10 +80,6 @@ const systemClock: UpdateClock = {
   setInterval: (callback, delay) => window.setInterval(callback, delay),
   clearInterval: (handle) => window.clearInterval(handle as number)
 };
-
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 function tauriBackend(): AppUpdateBackend {
   const invoke = async <T>(command: string, args?: Record<string, unknown>): Promise<T> => {
@@ -309,7 +306,7 @@ export class AppUpdater {
     try {
       return await this.#backend.cancelInstall();
     } catch (error) {
-      if (generation === this.#generation) this.snapshot = { ...this.snapshot, error: message(error) };
+      if (generation === this.#generation) this.snapshot = { ...this.snapshot, error: errorText(error) };
       return false;
     } finally {
       if (generation === this.#generation) this.cancelling = false;
@@ -342,7 +339,7 @@ export class AppUpdater {
 
   #fail(error: unknown, generation: number): void {
     if (generation !== this.#generation) return;
-    this.snapshot = { ...this.snapshot, phase: 'error', error: message(error), supported: this.snapshot.supported || this.#isShell() };
+    this.snapshot = { ...this.snapshot, phase: 'error', error: errorText(error), supported: this.snapshot.supported || this.#isShell() };
   }
 
   #pump(generation: number): void {

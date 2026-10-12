@@ -2,10 +2,11 @@
   import { ArchiveRestore, Folder, GitMerge, GitPullRequest, GitPullRequestClosed } from '@lucide/svelte';
   import type { ThreadSummary } from '@boite/contracts';
   import type { ProjectEntry } from '../lib/project-view.svelte';
-  import { restoreThread } from '../lib/archive';
+  import { archivedTime } from '../lib/archive';
   import { contextMenu } from '../lib/context-menu.svelte';
   import { separator } from '../lib/menu';
-  import { canDeleteThread, deleteThread } from '../lib/thread-removal';
+  import { canDeleteThread } from '../lib/thread-removal';
+  import { ThreadRestore } from '../lib/thread-restore.svelte';
   import { agentLabel, ago, exactTime, projectName } from '../lib/format';
   import { fill, strings } from '../lib/strings';
   import { workspace } from '../lib/workspace.svelte';
@@ -15,7 +16,7 @@
 
   /**
    * A done or archived conversation, drawn like a thread row: the provider,
-   * the title, when it was last used, and under it the pull request it ended
+   * the title, when it was put away, and under it the pull request it ended
    * with, which opens on the forge. No menu button: a right click, or a long
    * press on a phone, opens the row's menu. Restoring stays one hover away.
    */
@@ -27,8 +28,8 @@
     showProject?: boolean;
     onopen?: () => void;
   } = $props();
-  let restoring = $state(false);
-  let deleting = $state(false);
+  const lock = new ThreadRestore();
+  const deleting = $derived(lock.deleting !== null);
   const owner = $derived(entry.machine.store);
   const thread = $derived(entry.thread);
   const open = $derived(workspace.active === owner && owner.openThread?.id === thread.id);
@@ -40,24 +41,12 @@
   const prLabel = $derived(pr ? fill(pr.state === 'MERGED' ? strings.sidebar.prMerged : pr.state === 'CLOSED' ? strings.sidebar.prClosed : strings.sidebar.prOpen, { number: String(pr.number) }) : '');
   const meta = $derived(showProject || pr !== null);
 
-  async function restore(): Promise<void> {
-    if (restoring || deleting) return;
-    restoring = true;
-    try { await restoreThread(owner, thread.id); }
-    catch (error) { owner.error = error instanceof Error ? error.message : String(error); }
-    finally { restoring = false; }
+  function restore(): void {
+    void lock.restore(owner, thread.id);
   }
-  /**
-   * The row stays until the list reloads: the lock is kept on success so a
-   * second pick cannot ask the core again and raise an error banner.
-   */
-  async function remove(): Promise<void> {
-    if (deleting || restoring) return;
-    deleting = true;
-    let removed = false;
-    try { removed = await deleteThread(owner, thread); }
-    catch (error) { owner.error = error instanceof Error ? error.message : String(error); }
-    finally { if (!removed) deleting = false; }
+  /** The row stays until the list reloads, its lock with it. */
+  function remove(): void {
+    void lock.remove(owner, thread, true);
   }
   function select(): void {
     // Being deleted, or gone already: there is no thread left to open.
@@ -71,19 +60,19 @@
     contextMenu.open(
       event,
       [
-        { id: 'open', label: strings.sidebar.open, disabled: deleting },
-        { id: 'restore', label: strings.sidebar.reopenThread, disabled: restoring || deleting || offline },
+        { id: 'open', label: strings.common.open, disabled: deleting },
+        { id: 'restore', label: strings.sidebar.reopenThread, disabled: lock.busy || offline },
         ...(pr ? [{ id: 'pr', label: prLabel, title: pr.url }] : []),
         // On hover: a worktree path printed beside the label squeezes it into a column of letters.
         { id: 'copy', label: strings.sidebar.copyPath, title: thread.cwd },
-        ...(canDeleteThread(thread) ? [separator(), { id: 'delete', label: strings.sidebar.delete, danger: true, disabled: restoring || deleting || offline }] : [])
+        ...(canDeleteThread(thread) ? [separator(), { id: 'delete', label: strings.common.delete, danger: true, disabled: lock.busy || offline }] : [])
       ],
       (action) => {
         if (action === 'open') select();
-        if (action === 'restore') void restore();
+        if (action === 'restore') restore();
         if (action === 'pr' && pr) window.open(pr.url, '_blank', 'noopener,noreferrer');
         if (action === 'copy') void owner.copy(thread.cwd);
-        if (action === 'delete') void remove();
+        if (action === 'delete') remove();
       }
     );
   }
@@ -100,7 +89,7 @@
       <span class="title ui-label">{thread.title}</span>
       <!-- The project shows below, outside the button: named here too, so two same-titled threads read apart. -->
       {#if showProject}<span class="visually-hidden">{projectName(entry.project)}</span>{/if}
-      <time datetime={new Date(thread.updatedAt).toISOString()} title={exactTime(thread.updatedAt)}>{ago(thread.updatedAt, now)}</time>
+      <time datetime={new Date(archivedTime(thread)).toISOString()} title={exactTime(archivedTime(thread))}>{ago(archivedTime(thread), now)}</time>
     </span>
   </button>
   {#if meta}
@@ -115,7 +104,7 @@
   {/if}
   <button type="button" class="ghost small icon restore" data-testid="done-thread-restore" title={strings.sidebar.reopenThread}
     aria-label={fill(strings.sidebar.reopenNamedThread, { title: thread.title })}
-    disabled={restoring || deleting || owner.connection !== 'ready'} onclick={() => void restore()}><ArchiveRestore size={14} /></button>
+    disabled={lock.busy || owner.connection !== 'ready'} onclick={restore}><ArchiveRestore size={14} /></button>
 </div>
 
 <style>

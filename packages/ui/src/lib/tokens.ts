@@ -1,13 +1,5 @@
 import type { ContextUse } from '@boite/contracts';
 
-/** `512`, `84k`, `1.2M`: what a token count reads as in a chip. */
-export function formatTokens(count: number): string {
-  if (count < 1_000) return String(Math.round(count));
-  if (count < 1_000_000) return `${Math.round(count / 1_000)}k`;
-  const millions = count / 1_000_000;
-  return `${millions < 10 ? millions.toFixed(1) : Math.round(millions)}M`;
-}
-
 /** The meter's percentage, whole, capped at 100. Null when the agent named no window. */
 export function contextPercent(context: ContextUse): number | null {
   if (context.window === null || context.window <= 0) return null;
