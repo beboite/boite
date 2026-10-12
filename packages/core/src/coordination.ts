@@ -124,7 +124,7 @@ export class Coordination {
     catch (error) {
       if (error instanceof RpcFailure) throw error;
       const source = this.core.info().hostname ?? 'Boite';
-      this.core.log('warn', `agent link ${source} -> ${peer.name} at ${peer.url}: ${messageOf(error)}`);
+      this.core.log('warn', `agent link ${source} -> ${peer.name} at ${peer.url}: ${messageOf(error)}`, { source: 'coordination', event: 'coordination.link-failed' });
       throw unavailable(`${source} could not verify the agent link to ${peer.name} at ${peer.url}. Check that both machines can reach each other's HTTPS address.`);
     }
     return { ok: true };

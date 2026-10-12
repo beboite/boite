@@ -3,6 +3,8 @@ import type { WorkflowsRpcMethods, WorkflowsRpcEvents } from './workflows';
 import type { BrowserRpcMethods, BrowserRpcEvents, BrowserProfile } from './browser';
 import type { PullRequestsRpcMethods, PullRequestsRpcEvents } from './pull-requests';
 import type { MobileDevicesRpcMethods, MobileDevicesRpcEvents } from './mobile-devices';
+import type { CoreLogContext, CoreLogLevel, CoreLogRecord, CoreLogsQuery, DiagnosticsRpcMethods } from './diagnostics';
+export * from './diagnostics';
 export * from './pull-requests';
 export * from './browser';
 export * from './browser-remote';
@@ -1452,6 +1454,8 @@ export type MessagePart =
       answer?: QuestionAnswer | null;
       /** Asked without stopping: see `QuestionRequest.async`. */
       async?: boolean;
+      /** A settings card: see `QuestionRequest.setting`. */
+      setting?: SettingAsk;
     }
   /**
    * The agent compacted its context mid-turn: what it held before, what is
@@ -1707,6 +1711,8 @@ export interface QuestionAnswer {
    * not kept here: the core wrote them to its disk and told the agent the paths.
    */
   attachments?: AnswerAttachment[];
+  /** On a settings card the user changed: the value the setting holds now. */
+  value?: unknown;
 }
 
 /** A file given with an answer: what the card shows once it is answered. */
@@ -1736,6 +1742,11 @@ export interface QuestionRequest {
    * is running or as the next prompt when none is.
    */
   async?: boolean;
+  /**
+   * A settings card (`settings.request`): the agent asks for a change, or
+   * points at a page. `text` is its reason. Always asynchronous.
+   */
+  setting?: SettingAsk;
   createdAt: Timestamp;
 }
 
@@ -1971,6 +1982,11 @@ export interface Settings {
    * Missing on older cores, which read as on.
    */
   asyncQuestions?: boolean;
+  /**
+   * Agents may read this machine's anonymized diagnostics and draft an issue
+   * from them (`boite logs`, `boite issue`). Missing reads as on.
+   */
+  agentLogAccess?: boolean;
   /**
    * The model that writes every thread's title after its first answer. Null
    * or missing: each thread's own provider on its small model
@@ -3280,77 +3296,7 @@ export interface ServerUpdateStatus {
   error: string | null;
 }
 
-export type CoreLogLevel = 'info' | 'warn' | 'error';
-
-/** Raw provider output reaches only owner live observers; diagnostic history retains a placeholder. */
-export interface CoreLogContext {
-  source?: string;
-  event?: string;
-  threadId?: ThreadId;
-  turnId?: TurnId;
-  requestId?: string;
-  kind?: 'provider-output';
-}
-
-/** A bounded diagnostic, with no transcript, RPC payload or process arguments. */
-export interface CoreLogRecord {
-  id: string;
-  runId: string;
-  at: Timestamp;
-  level: CoreLogLevel;
-  source: string;
-  event: string;
-  message: string;
-  threadId?: ThreadId;
-  turnId?: TurnId;
-  requestId?: string;
-}
-
-export interface CoreLogsQuery {
-  /** Defaults to 100; an integer from 1 to 200. Results are newest first. */
-  limit?: number;
-  threadId?: ThreadId;
-  level?: CoreLogLevel;
-}
-
-/** Real and in-memory cores share the same strict diagnostic query boundary. */
-export function validateCoreLogsQuery(raw: unknown): CoreLogsQuery & { limit: number } {
-  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('core.logs params: expected an object');
-  const query = raw as Record<string, unknown>;
-  for (const key of Object.keys(query)) if (!['limit', 'threadId', 'level'].includes(key)) throw new Error(`core.logs ${key}: expected limit, threadId or level`);
-  const limit = query.limit === undefined ? 100 : query.limit;
-  if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > 200) throw new Error('core.logs limit: expected an integer from 1 to 200');
-  if (query.threadId !== undefined && (typeof query.threadId !== 'string' || query.threadId.length < 1 || query.threadId.length > 200 || /[\x00-\x1f\x7f]/.test(query.threadId))) throw new Error('core.logs threadId: expected 1 to 200 characters without control characters');
-  if (query.level !== undefined && !['info', 'warn', 'error'].includes(query.level as string)) throw new Error('core.logs level: expected info, warn or error');
-  return { limit, ...(query.threadId === undefined ? {} : { threadId: query.threadId as string }), ...(query.level === undefined ? {} : { level: query.level as CoreLogLevel }) };
-}
-
-/** Owner-only live provider output keeps sign-in URLs usable. Never persist this text. */
-export function normalizeCoreLogOutput(text: string, secrets: readonly string[] = []): string {
-  let value = text;
-  for (const secret of secrets) if (secret.length > 0) value = value.split(secret).join('[redacted]');
-  return value.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '').slice(0, 4096);
-}
-
-/** Redact before bounding: cutting an Authorization value first could leave a secret prefix. */
-export function normalizeCoreLogText(text: string, secrets: readonly string[] = []): string {
-  const REDACTED = '[redacted]';
-  let value = text;
-  for (const secret of secrets) if (secret.length > 0) value = value.split(secret).join(REDACTED);
-  value = value
-    .replace(/((?:^|[^\w-])["']?[\w-]*(?:token|grant|secret|password|api[_-]?key|prompts?|attachments?|commandLine|arguments|params|content|messages|text|input|output)["']?\s*[:=]\s*)[\[{](?!redacted\])[\s\S]*/gi, `$1${REDACTED}`)
-    .replace(/\b(?:Authorization\s*[:=]\s*)?(?:Bearer|Basic)\s+[^\s,;"'<>]+/gi, REDACTED)
-    .replace(/\bAuthorization\s*[:=]\s*[^\r\n]+/gi, `Authorization: ${REDACTED}`)
-    .replace(/((?:^|[^\w-])["']?[\w-]*(?:token|grant|secret|password|api[_-]?key|prompt|attachments?|commandLine|arguments|params|content|messages|text|input|output)["']?\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;&}]+)/gi, `$1${REDACTED}`)
-    .replace(/\b(?:sk-[a-zA-Z0-9_-]{8,}|(?:ghp|github_pat)_[a-zA-Z0-9_]{8,})/g, REDACTED)
-    .replace(/(^|[^a-z0-9+.-])([a-z][a-z0-9+.-]*:\/\/[^\s<>"']+)/gi, (_match, prefix: string, raw: string) => prefix + raw
-      .replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/?#@]*@/i, `$1${REDACTED}@`)
-      // All query values and fragments are untrusted, including unfamiliar keys.
-      .replace(/[?#].*$/, `?${REDACTED}`));
-  return value.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '').slice(0, 4096);
-}
-
-export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, BrowserRpcMethods, PullRequestsRpcMethods, MobileDevicesRpcMethods {
+export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, BrowserRpcMethods, PullRequestsRpcMethods, MobileDevicesRpcMethods, DiagnosticsRpcMethods {
   /** Owner-only merged-PR visibility policy; absent defaults to enabled. Disabling reveals automatically hidden roots, retaining manual archives. */
   'projects.setAutoArchiveMergedPr': { params: { projectId: ProjectId; enabled: boolean }; result: Project };
   /** Owner-only, private bounded diagnostic history, including earlier runs. */
@@ -3594,6 +3540,11 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * `current`: the names `delegation.spawn` and `agent.move` accept.
    */
   'agent.projects': { params: { threadId: ThreadId }; result: AgentProject[] };
+  /**
+   * The settings an agent may ask about (`REQUESTABLE_SETTINGS`), each with
+   * its value and the page it sits on, so it reads before it proposes.
+   */
+  'agent.settings': { params: { threadId: ThreadId }; result: SettingReading[] };
   /**
    * The agent registers an existing folder as a project, as the owner does
    * from the sidebar, so `agent.spawn` and `agent.move` can name it. `path` is
@@ -4176,6 +4127,20 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
     params: { threadId: ThreadId; text: string; options?: string[]; multiple?: boolean };
     result: { questionId: RequestId };
   };
+  /**
+   * A settings card on the agent's thread (`boite settings request|open`),
+   * asked without stopping like `questions.ask`, with `reason` as its text.
+   * With `key` and `value` it proposes a change: refused for a key outside
+   * `REQUESTABLE_SETTINGS` (naming them), a value `settings.set` would refuse,
+   * the value already set, or a card already open on that key in the thread.
+   * The card settles when the setting changes, through Apply or the page; the
+   * agent reads `applied`, `changed` or `refuse`. With `page` it points at a
+   * page and the agent reads `open` or `refuse`.
+   */
+  'settings.request': {
+    params: SettingRequestParams;
+    result: { questionId: RequestId; setting: SettingAsk };
+  };
 
   'trace.get': { params: { threadId: ThreadId; limit?: number }; result: ProcessRecord[] };
   'resources.list': { params: Record<string, never>; result: ThreadResources[] };
@@ -4514,6 +4479,13 @@ export { AUTO_COMPACT_MOMENTS, AUTO_COMPACT_TOKENS, BROWSER_ORIGINS_MAX, checkSe
 import type { AutoCompact } from './settings-validation.ts';
 export { TITLE_MODEL_DEFAULTS, defaultTitleModel } from './title-models.ts';
 export { DEVICE_METHODS, DEVICE_EVENTS, AGENT_EVENTS } from './access.ts';
+export {
+  REQUESTABLE_SETTINGS, REQUESTABLE_SETTING_KEYS, SETTING_REASON_MAX, SETTINGS_PAGES, SETTINGS_SECTION_PATTERN,
+  checkSettingRequest, effectiveSetting, isRequestableSetting, isSettingsPage, readSettings, sameSetting, settingAnswerText, settledSetting,
+  type RequestableSetting, type SettingAsk, type SettingNormalizer, type SettingOutcome, type SettingPlace, type SettingReading, type SettingRequestCheck,
+  type SettingRequestParams, type SettingsPage,
+} from './setting-requests.ts';
+import type { SettingAsk, SettingReading, SettingRequestParams } from './setting-requests.ts';
 export { SPEECH_CATALOGUE, SPEECH_CUSTOM_ID, SPEECH_DEFAULT_MODEL, isSpeechModelId, speechUrlProblem, type SpeechCatalogueModel, type SpeechModelTier, type SpeechBackend } from './speech-models.ts';
 import type { SpeechModelTier, SpeechBackend } from './speech-models.ts';
 

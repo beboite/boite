@@ -107,7 +107,7 @@ export class GroupStore {
       try {
         this.roster = checkRoster(stored);
       } catch (error) {
-        core.log('error', `the stored group roster is unreadable and was ignored: ${messageOf(error)}`);
+        core.log('error', `the stored group roster is unreadable and was ignored: ${messageOf(error)}`, { source: 'group', event: 'group.roster-unreadable' });
       }
     }
     const sessions = core.journal.getSetting(SESSIONS_SETTING);
@@ -383,7 +383,7 @@ export class GroupStore {
         if (this.core.journal.getSession(sessionId) !== null) {
           // What a session stood for is forgotten only once the session is gone: a failure here leaves both, for the next start.
           try { this.core.sessions.revoke(sessionId); } catch (error) {
-            this.core.log('warn', `group: could not revoke session ${sessionId}: ${messageOf(error)}`);
+            this.core.log('warn', `group: could not revoke session ${sessionId}: ${messageOf(error)}`, { source: 'group', event: 'group.revoke-failed' });
             continue;
           }
         }
@@ -443,7 +443,7 @@ export class GroupStore {
       // What is kept must be a roster this core, and the others, can read back: bounds and admissions included.
       merged = checkRoster(mergeRosters(mine, theirs));
     } catch (error) {
-      this.core.log('error', `group: a roster from a member was not merged, the result would not be a valid roster: ${messageOf(error)}`);
+      this.core.log('error', `group: a roster from a member was not merged, the result would not be a valid roster: ${messageOf(error)}`, { source: 'group', event: 'group.merge-refused' });
       return;
     }
     const self = merged.cores.find((core) => core.coreId === this.selfId());
@@ -483,7 +483,7 @@ export class GroupStore {
     } catch (error) {
       // A member says, signed and sealed to this exchange, that this core was removed while it was away.
       if (error instanceof PeerGone && stillMember()) {
-        this.core.log('warn', `${entry.name} answered that this machine was removed from the group ${roster.name}`);
+        this.core.log('warn', `${entry.name} answered that this machine was removed from the group ${roster.name}`, { source: 'group', event: 'group.removed' });
         this.disband();
       }
       // Anything else is a machine that is off or unreachable: the next tick asks again.
@@ -521,7 +521,7 @@ export class GroupStore {
 
   private background(work: Promise<unknown>): void {
     const job = work.catch((error: unknown) => {
-      if (!this.closed) this.core.log('warn', `group: ${messageOf(error)}`);
+      if (!this.closed) this.core.log('warn', `group: ${messageOf(error)}`, { source: 'group', event: 'group.contact-failed' });
     });
     this.pending.add(job);
     void job.finally(() => this.pending.delete(job));
@@ -735,7 +735,7 @@ export class GroupStore {
         roster = this.admitCore(invite, parsed, body, signature, from);
       } catch (reason) {
         error = reason instanceof RpcFailure ? reason.message : 'the machine could not process the invitation';
-        if (!(reason instanceof RpcFailure)) this.core.log('warn', `group join failed: ${messageOf(reason)}`);
+        if (!(reason instanceof RpcFailure)) this.core.log('warn', `group join failed: ${messageOf(reason)}`, { source: 'group', event: 'group.join-failed' });
       }
       const answer = JSON.stringify({ nonce, publicKey: this.core.coordination.card().publicKey, roster, error } satisfies JoinReply);
       const signature = this.core.coordination.signature(Buffer.from(JOIN_SIGNING_PREFIX + answer)).toString('base64');

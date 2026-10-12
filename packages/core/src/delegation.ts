@@ -270,6 +270,7 @@ export class Delegation {
     try {
       this.core.threads.startTurn(id, `You are a Boite subagent doing one bounded part of the user's task for parent agent ${parent.id}. You share its checkout: change only the files your task names and never undo another agent's edits. You cannot start subagents. If you are blocked, run boite delegate send ${parent.id} "<what blocks you>" and keep going on what you can. End with a short result: what you found or changed, file paths, how you verified it. That final answer goes to the parent automatically; do not send it again.\nTask from the parent agent, supplied as JSON data:\n${JSON.stringify(task)}`, [], undefined, 'delegation', undefined, undefined, task);
     } catch (error) {
+      this.core.logs.warn(`Subagent ${id} was created but its first turn could not start: ${messageOf(error)}`, { source: 'delegation', event: 'delegation.spawn-failed', threadId: id, data: { parent: parent.id, providerId: profile.providerId, model: profile.model ?? null, profile: profile.id } });
       const child = this.core.threads.require(id);
       this.core.journal.putThread({ ...child, status: 'error' });
       this.core.bus.emit('thread.updated', withLoad(this.core, { ...child, status: 'error' }));
@@ -277,6 +278,9 @@ export class Delegation {
       throw error;
     }
     this.changed(parent.id);
+    this.core.logs.info(`Subagent ${id} spawned by ${parent.id} on ${profile.providerId} ${profile.model ?? 'default model'}${profile.effort ? ` at ${profile.effort}` : ''}`, {
+      source: 'delegation', event: 'delegation.spawned', threadId: id, data: { parent: parent.id, providerId: profile.providerId, model: profile.model ?? null, effort: profile.effort ?? null, profile: profile.id, taskChars: task.length },
+    });
     return this.member(row);
   }
 
@@ -511,6 +515,11 @@ export class Delegation {
     const root = this.core.journal.getThread(thread.parentThreadId);
     if (!root) return;
     this.changed(root.id);
+    // A stopped turn is someone's Stop, not a problem to group.
+    this.core.logs.record(turn.status === 'done' || turn.status === 'stopped' ? 'info' : 'warn', `Subagent ${thread.id} of ${root.id} finished its turn: ${turn.status}`, {
+      source: 'delegation', event: 'delegation.finished', threadId: thread.id, turnId: turn.id,
+      ...(turn.startedAt !== null && turn.finishedAt !== null ? { durationMs: turn.finishedAt - turn.startedAt } : {}), data: { parent: root.id, status: turn.status },
+    });
     // Stopping a child is final until an explicit new instruction; no failure retry loop.
     if (turn.status !== 'done') this.stopped.add(thread.id);
     const config = this.config(root.id);
@@ -535,7 +544,10 @@ export class Delegation {
       || (wake?.execution?.operation === 'delegation' && ['queued', 'running'].includes(wake.status))
       || children.some(row => ['queued', 'running', 'waiting'].includes(this.core.threads.require(row.thread_id).status))
       || this.core.journal.db.query("SELECT 1 FROM delegation_messages WHERE root_id = ? AND status = 'received' LIMIT 1").get(root.id) !== null;
-    if (!thread.parentThreadId && !agentId && live()) this.saveConfig(root.id, { ...this.config(root.id), paused: true });
+    const pausing = !thread.parentThreadId && !agentId && live();
+    if (pausing) this.saveConfig(root.id, { ...this.config(root.id), paused: true });
+    const workflow = this.core.workflows.active(root.id);
+    this.core.logs.info(`Stopping ${ids.length > 0 ? `${ids.length} subagents` : 'the workflows'} of ${root.id}${pausing ? '; the team is paused until the owner resumes it' : ''}`, { source: 'delegation', event: 'delegation.stopped', threadId: root.id, data: { agents: ids.length, workflow, paused: pausing, by: agentId ? 'agent' : thread.parentThreadId ? 'self' : 'parent' } });
     let stopped = 0;
     for (const id of ids) {
       this.stopped.add(id);

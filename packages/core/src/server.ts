@@ -14,6 +14,7 @@ import { parseRelayPath, RelayHub, type RelaySocketData } from './group/relay.ts
 import type { Connection } from './router.ts';
 import type { SocketData } from './server/connection.ts';
 import { ServerConnection } from './server/connection.ts';
+import { clientField, logConnectionClosed } from './server/connection-log.ts';
 import { handleFrame } from './server/frame.ts';
 import { authenticateToken } from './server/hello.ts';
 import { FrameQueue } from './server/frame-queue.ts';
@@ -363,16 +364,23 @@ export function startServerOnStickyPort(
   for (const port of candidates) {
     try {
       const started = startServer({ ...server, port });
-      if (previousPort !== null && port !== previousPort) server.core.log('warn', `port ${previousPort} of the previous run is taken, listening on ${port}`);
+      if (previousPort !== null && port !== previousPort) server.core.log('warn', `port ${previousPort} of the previous run is taken, listening on ${port}`, { source: 'startup', event: 'startup.port-fallback', data: { previousPort, port } });
       return started;
     } catch (error) {
       last = error;
-      if (port === previousPort) server.core.log('warn', `port ${previousPort} of the previous run is taken (${messageOf(error)})`);
+      if (port === previousPort) server.core.log('warn', `port ${previousPort} of the previous run is taken (${messageOf(error)})`, { source: 'startup', event: 'startup.port-taken', data: { previousPort } });
     }
   }
   // The last refusal is named: a host that cannot be bound fails every port the same way, which "taken" would hide.
-  server.core.log('warn', `ports ${candidates.join(', ')} refused the server (${messageOf(last)}), listening on another`);
-  return startServer({ ...server, port: 0 });
+  // The bound port is logged, not the 0 asked for; a host no port accepts is logged before it throws.
+  let started: RunningServer;
+  try { started = startServer({ ...server, port: 0 }); }
+  catch (error) {
+    server.core.log('warn', `ports ${candidates.join(', ')} refused the server (${messageOf(last)}), and so did any other port`, { source: 'startup', event: 'startup.port-fallback', data: { previousPort, port: null } });
+    throw error;
+  }
+  server.core.log('warn', `ports ${candidates.join(', ')} refused the server (${messageOf(last)}), listening on ${started.port}`, { source: 'startup', event: 'startup.port-fallback', data: { previousPort, port: started.port } });
+  return started;
 }
 
 export function startServer(options: ServerOptions): RunningServer {
@@ -461,13 +469,13 @@ export function startServer(options: ServerOptions): RunningServer {
           if (answer !== null) return answer;
           const origin = request.headers.get('origin');
           if (!allowedOrigin(origin)) {
-            core.log('warn', `refused a relayed websocket from origin ${origin ?? '(none)'}`);
+            core.log('warn', `refused a relayed websocket from origin ${origin === null ? '(none)' : clientField(origin, 100)}`, { source: 'connections', event: 'connection.origin-refused' });
             return new Response('forbidden origin', { status: 403 });
           }
           const peer = preauthPeer(self.requestIP(request)?.address ?? null, request.headers.get('host'));
           const refusal = peer === null ? null : preauthRefusal(waitingPeers(), peer);
           if (refusal !== null) {
-            core.log('warn', `refused a relayed websocket: ${refusal}`);
+            core.log('warn', `refused a relayed websocket: ${refusal}`, { source: 'connections', event: 'connection.preauth-refused' });
             return new Response('too many connections waiting for hello', { status: 503 });
           }
           const pipe = relays.pipe(relayed.coreId, peer);
@@ -480,13 +488,13 @@ export function startServer(options: ServerOptions): RunningServer {
       if (url.pathname === RPC_PATH) {
         const origin = request.headers.get('origin');
         if (!allowedOrigin(origin)) {
-          core.log('warn', `refused a websocket from origin ${origin ?? '(none)'}`);
+          core.log('warn', `refused a websocket from origin ${origin === null ? '(none)' : clientField(origin, 100)}`, { source: 'connections', event: 'connection.origin-refused' });
           return new Response('forbidden origin', { status: 403 });
         }
         const peer = preauthPeer(self.requestIP(request)?.address ?? null, request.headers.get('host'));
         const refusal = peer === null ? null : preauthRefusal(waitingPeers(), peer);
         if (refusal !== null) {
-          core.log('warn', `refused a websocket: ${refusal}`);
+          core.log('warn', `refused a websocket: ${refusal}`, { source: 'connections', event: 'connection.preauth-refused' });
           return new Response('too many connections waiting for hello', { status: 503 });
         }
         const connection = new ServerConnection(core, !isLoopbackHost(request.headers.get('host')));
@@ -552,11 +560,12 @@ export function startServer(options: ServerOptions): RunningServer {
 
       drain(socket) { if (!('relay' in socket.data)) socket.data.connection.drain(); },
 
-      close(socket) {
+      close(socket, code, reason) {
         if ('relay' in socket.data) {
           socket.data.relay.close(1000, 'client closed');
           return;
         }
+        logConnectionClosed(core, socket.data.connection, code, reason);
         core.procs.unwatchResources(socket.data.connection.id);
         core.coordination.bridge.disconnect(socket.data.connection.id);
         core.browser.disconnect(socket.data.connection.id);

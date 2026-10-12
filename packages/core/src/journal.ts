@@ -70,6 +70,8 @@ export class Journal {
   private readonly stream: StreamBuffer;
   private readonly onError: (message: string) => void;
   private closed = false;
+  /** The schema version found on disk and the one after migration, for the startup log. */
+  schema = { from: 0, to: 0 };
 
   constructor(file: string, options: JournalOptions = {}) {
     this.onError = options.onError ?? ((message) => console.error(message));
@@ -81,7 +83,7 @@ export class Journal {
       this.db.exec('PRAGMA busy_timeout = 5000');
       // A large transaction grows the WAL file; this lets it shrink back at the next checkpoint.
       this.db.exec('PRAGMA journal_size_limit = 33554432');
-      this.db.transaction(() => migrate(this.db, file))();
+      this.schema = this.db.transaction(() => migrate(this.db, file))();
       // An incognito conversation never outlives the core that held it.
       this.purgeIncognitoThreads();
     } catch (error) {

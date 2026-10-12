@@ -52,10 +52,13 @@ describe('claude driver: questions and background work', () => {
     fake.emit(sdk({ type: 'system', subtype: 'background_tasks_changed', session_id: sessionId, tasks: [] }));
     fake.emit(sdk({ type: 'system', subtype: 'task_notification', session_id: sessionId, task_id: 'bash-1', tool_use_id: 'toolu_bg', status: 'completed', output_file: '', summary: 'sleep 25 finished' }));
     fake.emit(init(sessionId));
+    fake.emit(sdk({ type: 'system', subtype: 'api_retry', session_id: sessionId, attempt: 1, max_retries: 10, retry_delay_ms: 500, error_status: 529, error: 'overloaded' }));
     fake.emit(assistant(sessionId, [{ type: 'text', text: 'FINISHED' }]));
     fake.emit(success(sessionId));
     await cleared;
     const turn = await woke;
+    // Output adopted before its turn opened is diagnosed once, not again when handed over.
+    expect(await harness.core.logs.select(record => record.event === 'driver.api.retry' && record.threadId === threadId, 10)).toHaveLength(1);
     expect(turn.status).toBe('done');
     expect(turn.execution?.operation).toBe('background');
     const messages = harness.core.journal.listMessages(threadId).filter((m) => m.turnId === turn.id);
