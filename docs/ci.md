@@ -177,6 +177,11 @@ bytes; merged with settings cards, 4,509,505, 590,714 and 3,766,024. The
 limits rise to 4,515,000, 593,000 and 3,772,000, the core keeping room for the
 Windows job's larger build.
 
+On 2026-10-12 on Linux with Bun 1.4.2, the latency pass (idle warm-up of the
+pages, kept Agents view, optimistic pin and archive, single permission answer)
+merged with `main` measured 4,513,690 UI bytes and a 591,872-byte entry chunk,
+within the limits above.
+
 On 2026-10-10, `bun run build:ui` with Bun 1.4.2 measured 4,420,649 UI bytes at
 `feeb393b` and 4,425,557 with close confirmation and typed agent archival.
 The dialogs, input binding and English/French sentences add 4,908 bytes. The UI

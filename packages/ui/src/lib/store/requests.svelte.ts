@@ -80,7 +80,32 @@ export class Requests {
   resolvePermission(id: RequestId): void { this.#permissions.change(id, null); this.pendingPermissions = this.pendingPermissions.filter(row => row.id !== id); }
   resolveQuestion(id: RequestId): void { this.#questions.change(id, null); this.pendingQuestions = this.pendingQuestions.filter(row => row.id !== id); }
 
-  async answerQuestion(
+  /**
+   * The answers out to the core, by request: a second tap while one is in
+   * flight gets the first one's outcome instead of sending again. Keys carry
+   * the kind, so a permission and a question never share one.
+   */
+  readonly #answering = new Map<string, Promise<boolean>>();
+
+  #once(key: string, send: () => Promise<boolean>): Promise<boolean> {
+    const inFlight = this.#answering.get(key);
+    if (inFlight) return inFlight;
+    const sent = send().finally(() => this.#answering.delete(key));
+    this.#answering.set(key, sent);
+    return sent;
+  }
+
+  answerQuestion(
+    threadId: ThreadId,
+    questionId: string,
+    optionIds: string[],
+    text?: string,
+    attachments: Attachment[] = []
+  ): Promise<boolean> {
+    return this.#once(`question:${questionId}`, () => this.#answerQuestion(threadId, questionId, optionIds, text, attachments));
+  }
+
+  async #answerQuestion(
     threadId: ThreadId,
     questionId: string,
     optionIds: string[],
@@ -108,7 +133,11 @@ export class Requests {
     }
   }
 
-  async skipQuestion(threadId: ThreadId, questionId: RequestId): Promise<boolean> {
+  skipQuestion(threadId: ThreadId, questionId: RequestId): Promise<boolean> {
+    return this.#once(`question:${questionId}`, () => this.#skipQuestion(threadId, questionId));
+  }
+
+  async #skipQuestion(threadId: ThreadId, questionId: RequestId): Promise<boolean> {
     const client = this.ctx.client;
     const generation = this.ctx.clientGeneration;
     if (!client) return false;
@@ -124,15 +153,28 @@ export class Requests {
     }
   }
 
-  async answer(requestId: string, decision: 'allow' | 'deny'): Promise<void> {
+  /**
+   * True once the core took the decision. False gives the card its buttons
+   * back, and the error is shown; a second call while the first is out sends
+   * nothing and answers what the first one does.
+   */
+  answer(requestId: string, decision: 'allow' | 'deny'): Promise<boolean> {
+    return this.#once(`permission:${requestId}`, () => this.#answerPermission(requestId, decision));
+  }
+
+  async #answerPermission(requestId: string, decision: 'allow' | 'deny'): Promise<boolean> {
     const client = this.ctx.client;
     const generation = this.ctx.clientGeneration;
-    if (!client) return;
+    if (!client) return false;
     try {
       await client.call('permissions.answer', { requestId, decision });
-      if (this.ctx.currentClient(client, generation)) this.resolvePermission(requestId);
+      // Another connection holds the card now: false hands its buttons back.
+      if (!this.ctx.currentClient(client, generation)) return false;
+      this.resolvePermission(requestId);
+      return true;
     } catch (error) {
       if (this.ctx.currentClient(client, generation)) this.ctx.fail(error);
+      return false;
     }
   }
 }
