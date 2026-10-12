@@ -159,6 +159,37 @@ machine it was added on; **Remove from the group** takes one out on every
 machine. A computer copies the same link and pastes it under **Join**: its own
 core joins the group ([groups](groups.md#using-it)).
 
+### The app on its own address
+
+The phone app can also be a page no machine serves: `APP_ORIGIN` in the
+contracts, `https://boite.mtsu.dev`. Every core accepts sockets from it, as
+it does the desktop shell's, so nothing is set on any machine for it. A fork
+that serves its own names it in `BOITE_APP_ORIGIN` on its cores, an `https`
+origin or the core does not start, and in `VITE_BOITE_APP_ORIGIN` when it builds
+its UI, which otherwise takes its own page for a machine's. There the app opens on its way
+in alone. A scanned code names the machine that drew it. A typed code goes with
+the machine's address, typed beside it (`boite.example.com`), since the page's
+own address is no machine's; that machine passes the code on when another one
+drew it. The page is HTTPS, so the machine's address has to be too: a browser
+blocks a plain `http://` socket from it, the device's own loopback excepted, and
+the app turns such an address, typed or scanned, down with a message instead of
+failing on the socket. The first machine added becomes
+the one the app shows and opens on next time; the group brings the others.
+
+That address serves files and nothing else: `.github/workflows/app.yml`
+publishes the UI build there with GitHub Pages on every change of the UI, the
+contracts or the build's dependencies on `main`, `/.well-known/assetlinks.json` included. A phone downloads
+the page once and its service worker keeps it; conversations, prompts and
+sockets go from the phone to the machines, never to that address. Whoever
+controls the address controls the code the phone runs, as whoever signs the APK
+does.
+
+Notifications are enabled on the machine the app shows, which becomes the
+device's push home. Every push to a device of the group names the machine its
+thread is on, so a tap opens the thread there whatever page the app runs.
+A machine reached only over plain HTTP is reached through a member that has
+HTTPS ([relay](groups.md#relay)), as from any HTTPS page.
+
 ### Older links
 
 `pairing.grant` still mints a link of the older kind, and `boite-core pair
@@ -392,8 +423,8 @@ account.
 JavaScript that Vite copies to `dist/sw.js` with one change, the build id in
 its cache name, and `lib/sw.ts` registers
 it after the first paint, never before: the registration must not delay what the
-user sees. It registers only where it helps, which is the core's own http(s)
-origin. The Tauri shell loads the identical build from `tauri://`, where the
+user sees. It registers only where it helps: an http(s) origin, the core's own
+or the app's ([its own address](#the-app-on-its-own-address)). The Tauri shell loads the identical build from `tauri://`, where the
 files are already on disk, and `?fake=1` runs on the in-memory client with no
 core behind it; both are skipped. A registration that fails is one
 `console.warn`, and the app runs on.

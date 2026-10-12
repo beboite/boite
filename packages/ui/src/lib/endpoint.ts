@@ -1,5 +1,6 @@
 import { errorText } from './errors';
 import { GRANT_QUERY_PARAM, PAIR_QUERY_PARAM, parseGroupRelayUrl, withoutTrailingSlashes, type DeviceHello } from '@boite/contracts';
+import { appPage } from './app-origin';
 import { heldDeviceKey } from './device-key';
 
 export interface Endpoint {
@@ -651,6 +652,8 @@ export async function fromTauri(): Promise<Endpoint | null> {
 }
 
 function fromOrigin(): Endpoint | null {
+  // The phone app's page is no machine's: nothing to connect to until a machine is added.
+  if (appPage()) return null;
   const protocol = window.location.protocol;
   if (protocol !== 'http:' && protocol !== 'https:') return null;
   return { url: withoutTrailingSlashes(window.location.origin), token: '' };

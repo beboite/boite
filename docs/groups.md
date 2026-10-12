@@ -218,7 +218,9 @@ Advanced) whose host is the one the socket asked for, outside loopback. It
 learns it before any hello, so the first page of a phone that holds no key yet
 already opens the way, and publishes up to four in the roster (`origins`). A
 machine behind a reverse proxy is thus accepted by the others without anything
-set on them. The origin check keeps arbitrary websites out; it grants nothing,
+set on them. Every core also accepts the phone app's own address
+(`APP_ORIGIN`, [phone](phone.md#the-app-on-its-own-address)), a page no machine
+serves. The origin check keeps arbitrary websites out; it grants nothing,
 since every socket still needs a credential at `hello`.
 
 ## Relay
@@ -542,8 +544,9 @@ address, where it is worth nothing once the member has given that address up.
 - A window trusts the machine that serves its page. A machine removed from
   the group that still serves the page a client opens decides what that page
   does, with every key saved under its address.
-- The page itself still comes from one machine. With that machine off, an
-  installed app opens from the copy its service worker kept, which needs an
+- A page served by a machine comes from that machine; the app's own address
+  ([phone](phone.md#the-app-on-its-own-address)) is no machine's. With the
+  page's machine off, an installed app opens from the copy its service worker kept, which needs an
   HTTPS address ([phone](phone.md#https-and-installation)); a page opened over
   plain HTTP does not load at all, and another member's address is another
   origin, which holds none of this device's storage, its key included.
@@ -551,8 +554,10 @@ address, where it is worth nothing once the member has given that address up.
   group: its origin is none of theirs. The Android app that opened one fixed
   machine's page was this case for anybody else's phone.
 - A typed code reaches the machine that drew it through the machine serving the
-  page. A page served elsewhere has nobody to send the code to: scan the QR
-  code there.
+  page, or, on the app's own address, through the machine whose address is
+  typed beside it. A page served by a machine outside the group reaches neither
+  way in, its origin being none of theirs: open the app's own address, or the
+  drawing machine's, and scan there.
 - A machine that runs a version from before device keys drops them from the
   roster it keeps and lets no device key in. Update every member.
 - A member that has not heard a removal stays exposed to the removed machine,

@@ -249,7 +249,9 @@ export class PushStore {
     const badge = this.badge(threadId);
     const subscriptions = this.subscriptions();
     for (const sessionId of Object.keys(subscriptions)) {
-      this.track(this.deliver(sessionId, { title, ...text, threadId, tag, badge }).catch(() => {
+      // A device of the group may run a page no machine serves: its push says which machine the thread is on.
+      const self = this.core.group.clients.deviceOf(sessionId) === undefined ? undefined : this.core.coordination.card().coreId;
+      this.track(this.deliver(sessionId, { title, ...text, threadId, tag, badge, ...(self === undefined ? {} : { core: self }) }).catch(() => {
         // `deliver` already wrote the warning with its cause: this one is detail.
         this.core.logs.debug('Web Push delivery failed; the conversation remains available in Boite', { source: 'push', event: 'push.delivery-failed' });
       }));

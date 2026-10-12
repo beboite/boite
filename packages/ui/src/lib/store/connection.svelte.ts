@@ -3,6 +3,7 @@ import { parseGroupRelayUrl, RpcErrorCode, type CoreInfo, type Principal, type T
 import { RpcFailure, WsClient, type Client, type ClientState, type ObservableClient } from '../client';
 import { confirm } from '../confirm.svelte';
 import { deviceLabel, noteThisComputer } from '../device';
+import { appPage } from '../app-origin';
 import { deviceKey, dropDeviceKey } from '../device-key';
 import { clearStoredEndpoint, droppedSince, relayKeyFor, rememberDevice, forgetGroupOf, readStoredEndpoint, rememberSession, refreshLocalEnvironment, removeBrought, fromTauri, shellEndpointError, parsePairingLink, readEnvironments, removeEnvironment, resolveEndpoint, servesThisPage, storeEndpoint, upsertEnvironment, type Endpoint, type StoredEnvironment } from '../endpoint';
 import { onboardingSeen } from '../onboarding';
@@ -177,6 +178,8 @@ export class Connection {
           // printed, or a start that never answered.
           const refusal = window.__TAURI_INTERNALS__ ? shellEndpointError() : null;
           if (refusal) s.error = fill(strings.errors.coreStart, { reason: refusal });
+          // The phone app before any machine: its screen is the way in.
+          if (appPage()) this.pairingRequired = true;
           this.booted = true;
           return;
         }

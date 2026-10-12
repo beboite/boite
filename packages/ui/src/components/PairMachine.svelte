@@ -5,6 +5,7 @@
   import { parsePairingLink } from '../lib/endpoint';
   import { fill, strings } from '../lib/strings';
   import InfoTip from './InfoTip.svelte';
+  import { appPage, reachableFromApp } from '../lib/app-origin';
   let { mobile = false, onpaired }: { mobile?: boolean; onpaired?: () => void } = $props();
   let link = $state(''),
     url = $state(''),
@@ -21,7 +22,7 @@
     workspace.error = null;
     try { QrScanner ??= (await import('./QrScanner.svelte')).default; scanning = true; }
     // The camera's code did not load: the letters are the other way in, opened in its place on a phone.
-    catch { workspace.error = strings.phone.dialogOffline; if (mobile && codeOrigin) codeOpen = true; else adding = true; }
+    catch { workspace.error = strings.phone.dialogOffline; if (mobile && canType) codeOpen = true; else adding = true; }
   }
   /** A code that reads as a link to add a device connects at once; the machine names itself and the card renames it. */
   async function scanned(text: string) {
@@ -37,7 +38,23 @@
    * that code itself. The camera app would hand a link to Safari, whose
    * storage the home-screen app does not share; a code typed here stays here.
    */
-  const codeOrigin = window.__TAURI_INTERNALS__ === undefined && /^https?:$/.test(location.protocol) ? location.origin : null;
+  // The phone app's page is no machine's: the code goes to the machine its owner names beside it.
+  const app = appPage();
+  const pageOrigin = !app && window.__TAURI_INTERNALS__ === undefined && /^https?:$/.test(location.protocol) ? location.origin : null;
+  let codeHost = $state('');
+  /** `boite.example.com`, with or without its scheme and port, as the machine's HTTPS address; plain http only on this device. */
+  function hostOrigin(text: string): string | null {
+    const trimmed = text.trim();
+    if (!trimmed) return null;
+    try {
+      const url = new URL(/^[a-z]+:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`);
+      return reachableFromApp(url.origin) ? url.origin : null;
+    } catch {
+      return null;
+    }
+  }
+  const codeOrigin = $derived(app ? hostOrigin(codeHost) : pageOrigin);
+  const canType = app || pageOrigin !== null;
   let codeOpen = $state(false);
   let code = $state('');
   let codeError = $state('');
@@ -49,7 +66,11 @@
     if (codeOpen) requestAnimationFrame(() => codeInput?.focus());
   }
   async function pairCode() {
-    if (busy || !codeOrigin) return;
+    if (busy) return;
+    if (!codeOrigin) {
+      codeError = strings.machines.hostInvalid;
+      return;
+    }
     const canonical = normalizePairingCode(code);
     if (!canonical) {
       codeError = strings.machines.codeInvalid;
@@ -85,6 +106,12 @@
   }
   async function add(manual = false) {
     if (busy) return;
+    // The app's page is HTTPS: a scanned code naming a plain http machine would only fail as a socket error.
+    const target = manual ? url.trim() : parsePairingLink(link)?.url;
+    if (app && target !== undefined && !reachableFromApp(target)) {
+      workspace.error = strings.machines.codeInsecure;
+      return;
+    }
     busy = true;
     try {
       const ok = manual
@@ -103,16 +130,29 @@
       <div class="head-actions">
         <!-- A phone has a camera and the other machine draws a code: no link to copy across. -->
         {#if mobile}<button class="primary add-open" data-testid="machine-scan" disabled={busy} onclick={() => void startScanning()}><ScanLine size={15} /><span class="ui-label">{strings.machines.scan}</span></button>{/if}
-        {#if mobile && codeOrigin}<button class="add-open" data-testid="machine-code-open" aria-expanded={codeOpen} onclick={toggleCode}><KeyRound size={15} /><span class="ui-label">{strings.machines.typeCode}</span></button>{/if}
+        {#if mobile && canType}<button class="add-open" data-testid="machine-code-open" aria-expanded={codeOpen} onclick={toggleCode}><KeyRound size={15} /><span class="ui-label">{strings.machines.typeCode}</span></button>{/if}
         {#if !open && !mobile}<button class="primary add-open" data-testid="machine-add-open" onclick={startAdding}><Plus size={15} /><span class="ui-label">{strings.machines.add}</span></button>{/if}
       </div>
     {/if}
   {#if mobile && !codeOpen && workspace.error}<p class="error" role="alert">{workspace.error}</p>{/if}
-  {#if codeOpen && codeOrigin}
+  {#if codeOpen && canType}
     <form class="card code-form" data-testid="machine-code-form" onsubmit={(e) => { e.preventDefault(); void pairCode(); }}>
+      {#if app}
+        <label>{strings.machines.hostLabel}<input
+            bind:value={codeHost}
+            data-testid="machine-code-host"
+            type="text"
+            inputmode="url"
+            autocapitalize="off"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder={strings.machines.hostPlaceholder}
+          /></label>
+      {/if}
       <label>{strings.machines.codeLabel}<input
           bind:this={codeInput}
           bind:value={code}
+          class="code-input"
           data-testid="machine-code"
           type="text"
           inputmode="text"
@@ -123,7 +163,7 @@
           placeholder={strings.machines.codePlaceholder}
         /></label>
       <p class="code-hint">{strings.machines.codeHint}</p>
-      <button type="submit" class="primary" data-testid="machine-code-submit" disabled={busy || !code.trim()}>{busy ? strings.machines.adding : strings.machines.connect}</button>
+      <button type="submit" class="primary" data-testid="machine-code-submit" disabled={busy || !code.trim() || (app && !codeHost.trim())}>{busy ? strings.machines.adding : strings.machines.connect}</button>
       {#if codeError || workspace.error}<p class="error" role="alert">{codeError || workspace.error}</p>{/if}
     </form>
   {/if}
@@ -207,6 +247,6 @@
   .mobile .add { padding: 16px; }
   .mobile form > button { width: 100%; }
   .code-form { padding: 16px; margin: 0 0 12px; }
-  .code-form input { font-family: var(--font-mono); font-size: var(--text-base); letter-spacing: 1.5px; text-transform: uppercase; }
+  .code-form .code-input { font-family: var(--font-mono); font-size: var(--text-base); letter-spacing: 1.5px; text-transform: uppercase; }
   .code-hint { margin: 0; font-size: var(--text-xs); color: var(--color-muted-foreground); }
 </style>

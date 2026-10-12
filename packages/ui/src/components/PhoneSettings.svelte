@@ -10,6 +10,7 @@
   import { installApp, installed, PUSH_ENABLED_KEY, worker } from '../lib/pwa';
   import { parseGroupRelayUrl } from '@boite/contracts';
   import { servesThisPage } from '../lib/endpoint';
+  import { appPage } from '../lib/app-origin';
   let { store, showServerSettings = true }: { store: Store; showServerSettings?: boolean } = $props();
   const uid = $props.id();
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
@@ -32,7 +33,8 @@
     const relay = store.endpointUrl === null ? null : parseGroupRelayUrl(store.endpointUrl);
     return relay !== null && servesThisPage(relay.member);
   });
-  let ownOrigin = $derived(!store.endpointUrl || servesThisPage(store.endpointUrl));
+  // The phone app's page is no machine's: the machine it shows takes its notifications and passes on the others'.
+  let ownOrigin = $derived(appPage() || !store.endpointUrl || servesThisPage(store.endpointUrl));
   let paired = $derived(store.sessions.some(session => session.current));
 
   $effect(() => {

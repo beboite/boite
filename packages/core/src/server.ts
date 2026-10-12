@@ -1,6 +1,6 @@
 import type { ServerWebSocket } from 'bun';
 import type { Channel, RpcEventName, RpcEvents, ThreadId } from '@boite/contracts';
-import { FILE_ROUTE, RPC_MAX_FRAME_BYTES, RPC_PATH, RpcCloseCode, VIEW_CONTENT_POLICY, VIEW_ROUTE, VIEW_SANDBOX } from '@boite/contracts';
+import { APP_ORIGIN, FILE_ROUTE, RPC_MAX_FRAME_BYTES, RPC_PATH, RpcCloseCode, VIEW_CONTENT_POLICY, VIEW_ROUTE, VIEW_SANDBOX } from '@boite/contracts';
 import { timingSafeEqual } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { hostname, networkInterfaces } from 'node:os';
@@ -66,6 +66,18 @@ export const PLACEHOLDER_HTML =
   '<!doctype html><meta charset="utf-8"><title>Boite core</title><p>Boite core is running; the UI is not built</p>';
 
 const SHELL_ORIGINS = ['tauri://localhost', 'http://tauri.localhost', 'https://tauri.localhost'];
+
+/** The phone app's origin (`APP_ORIGIN`), or the one `BOITE_APP_ORIGIN` names: a page no core serves, accepted by all. */
+export function appOrigin(env: Record<string, string | undefined> = process.env): string {
+  const named = env['BOITE_APP_ORIGIN']?.trim();
+  if (!named) return APP_ORIGIN;
+  try {
+    // Written in any case, with or without `:443` or a trailing slash, it is the same origin.
+    const url = new URL(named);
+    if (url.protocol === 'https:' && !url.username && !url.password && url.pathname === '/' && !url.search && !url.hash) return url.origin;
+  } catch { /* falls through */ }
+  throw new Error(`BOITE_APP_ORIGIN: expected an https origin such as ${APP_ORIGIN}, got ${named}`);
+}
 
 export interface ServerOptions {
   core: Core;
@@ -371,6 +383,8 @@ export function startServerOnStickyPort(
   options: ServerOptions & { explicitPort: boolean; previousPort: number | null; preferredPorts?: readonly number[] },
 ): RunningServer {
   const { explicitPort, previousPort, preferredPorts = PREFERRED_PORTS[options.core.channel], ...server } = options;
+  // Before any port is tried: a misspelt app address is no port taken.
+  appOrigin();
   if (explicitPort) return startServer(server);
   const candidates = [...new Set([...(previousPort === null ? [] : [previousPort]), ...preferredPorts])];
   let last: unknown = null;
@@ -400,6 +414,8 @@ export function startServer(options: ServerOptions): RunningServer {
   const core = options.core;
   const host = options.host ?? '127.0.0.1';
   const helloTimeoutMs = options.helloTimeoutMs ?? envTimeout() ?? DEFAULT_HELLO_TIMEOUT_MS;
+  // Read once, before anything is set up: a misspelt override stops the start rather than letting a page nobody meant in.
+  const app = appOrigin();
   const connections = new Set<ServerConnection>();
   const helloTimers = new Map<ServerConnection, ReturnType<typeof setTimeout>>();
   /** The counted peer of each open socket from another machine, until it closes. */
@@ -479,7 +495,7 @@ export function startServer(options: ServerOptions): RunningServer {
       const ownOrigin = (origin: string | null): boolean => isAllowedOrigin(origin, self.port ?? 0, hostname)
         || (origin !== null && (core.settings.get().browserOrigins?.includes(origin) === true || origin === core.settings.get().publicUrl));
       // A page served by one machine of the group opens its socket on the others.
-      const allowedOrigin = (origin: string | null): boolean => ownOrigin(origin) || (origin !== null && core.group.allowsOrigin(origin));
+      const allowedOrigin = (origin: string | null): boolean => ownOrigin(origin) || (origin !== null && (origin === app || core.group.allowsOrigin(origin)));
 
       const relayed = parseRelayPath(url.pathname);
       if (relayed !== null) {

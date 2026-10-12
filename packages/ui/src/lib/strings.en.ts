@@ -506,6 +506,9 @@ export const strings = {
     typeCode: 'Type the code', codeLabel: 'Code', codePlaceholder: 'ABCD-EFGH',
     codeHint: 'The 8-character code shown under the QR code, on any machine of your group.',
     codeInvalid: 'A code has 8 letters and digits, like ABCD-EFGH.',
+    hostLabel: 'Machine address', hostPlaceholder: 'boite.example.com',
+    hostInvalid: 'Type the HTTPS address of the machine that shows the code, like boite.example.com.',
+    codeInsecure: 'This code leads to a plain HTTP address, which the app cannot open. Show the code on a machine that has an HTTPS address.',
     scanHint: 'On any of your machines, open Settings, Machines, Add a device and point the camera at its QR code.',
     scanStarting: 'Starting the camera', scanClose: 'Close the camera',
     scanErrors: {
