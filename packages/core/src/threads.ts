@@ -475,7 +475,7 @@ export class ThreadStore {
       const state = archiveState(this.core.journal, thread.id);
       if (state.reason?.type !== 'pr-merged') continue;
       this.core.journal.setSetting(archiveStateKey(thread.id), { ...state, reason: undefined, generation: state.generation + 1 });
-      this.save({ ...thread, archived: false, doneAt: null }, 'thread.archived');
+      this.save({ ...thread, archived: false, doneAt: null, archivedAt: null }, 'thread.archived');
     }
   }
 

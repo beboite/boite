@@ -291,6 +291,11 @@ describe('journal', () => {
     expect(journal.getThread(thread.id)?.archivedAt).toBe(7);
     journal.putThread({ ...thread, archived: false, archivedAt: 7 });
     expect(journal.getThread(thread.id)?.archivedAt).toBeUndefined();
+    // Deleting a live thread archives it first; undoing that drops the time with the flag.
+    journal.stageThreadDeletion(thread.id, [{ ...thread, archived: false }]);
+    journal.putThread({ ...thread, archivedAt: 9 });
+    journal.restoreDeletedThreads(thread.id);
+    expect(journal.db.query('SELECT archived, archived_at FROM threads WHERE id = ?').get(thread.id)).toEqual({ archived: 0, archived_at: null });
     expect(journal.db.query('PRAGMA user_version').get()).toEqual({ user_version: SCHEMA_VERSION });
   });
 

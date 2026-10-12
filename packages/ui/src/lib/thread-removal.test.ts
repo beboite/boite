@@ -182,9 +182,10 @@ test('a paired phone deletes a conversation and undo brings it back', async () =
 
 test('reopening skips a thread the core archived itself after its PR merged', async () => {
   const store = await ready();
-  expect(await archiveThread(store, 't-trace')).toBe(true);
+  // The skipped thread is the newer one and the window's own: without the filter it wins on time and on a tie.
+  await store.client!.call('threads.archive', { threadId: 't-trace' });
   await new Promise((resolve) => setTimeout(resolve, 5));
-  await store.client!.call('threads.archive', { threadId: 't-descriptors' });
+  expect(await archiveThread(store, 't-descriptors')).toBe(true);
   const call = store.client!.call.bind(store.client!);
   vi.spyOn(store.client!, 'call').mockImplementation((async (method: string, params: unknown) => {
     const result = await call(method as never, params as never);

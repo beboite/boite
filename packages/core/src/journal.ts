@@ -332,7 +332,8 @@ export class Journal {
   restoreDeletedThreads(rootId: string): string[] {
     return this.db.transaction(() => {
       const rows = this.db.query('SELECT thread_id, archived FROM thread_deletions WHERE root_id = ?').all(rootId) as { thread_id: string; archived: number }[];
-      for (const row of rows) this.db.query('UPDATE threads SET archived = ? WHERE id = ?').run(row.archived, row.thread_id);
+      // A thread that was live before its deletion loses the archive time the deletion gave it.
+      for (const row of rows) this.db.query('UPDATE threads SET archived = ?1, archived_at = CASE WHEN ?1 = 0 THEN NULL ELSE archived_at END WHERE id = ?2').run(row.archived, row.thread_id);
       this.db.query('DELETE FROM thread_deletions WHERE root_id = ?').run(rootId);
       return rows.map(row => row.thread_id);
     })();
