@@ -69,10 +69,52 @@ then `/bin/sh`. `BOITE_TERMINAL_SHELL`, set in the core's environment, names
 another one; the core tests set it to `cmd.exe` or `/bin/sh`, so nothing they
 type lands in the user's PowerShell or bash history.
 
+## Shell integration
+
+A thread's bash and PowerShell start with a few lines from
+`packages/core/src/terminal-integration.ts`, the way VS Code and Windows
+Terminal mark a shell. Nothing is written into the user's files:
+
+- bash runs `--rcfile <dataDir>/shell-integration/boite.bash -i`. That file
+  sources `~/.bashrc` first (Debian's `/etc/bash.bashrc` still loads before
+  it), then wraps `PROMPT_COMMAND`, `PS1` and `PS0`. It also turns on
+  `histappend` and runs `history -a` at each prompt, so every command reaches
+  `~/.bash_history` as it runs and a second shell's up arrow finds it.
+- PowerShell 7 and Windows PowerShell get the script as `-NoExit
+  -EncodedCommand` after their profile, which no execution policy blocks. It
+  wraps `prompt`, whatever the profile set (oh-my-posh, starship), and
+  PSReadLine's `PSConsoleHostReadLine`.
+
+Each prompt then prints OSC 133 `A` where it starts and `B` where the input
+starts, `C` when a command runs and `D;<status>` when it ends; OSC 633
+`P;Cwd=<path>` reports the directory and, once, `P;HistoryFile=<path>` the
+history file. An empty line ends no command. cmd, sh, zsh, fish and a login
+bash (macOS's, which skips `--rcfile`) start as they are, and
+`BOITE_TERMINAL_INTEGRATION=0` turns the integration off. `TerminalState.shell`
+names the shell and says whether it is integrated.
+
+`terminals.history` reads the end of that history file (512 KiB), else the
+shell's default one (`HISTFILE` or `~/.bash_history`; PSReadLine's
+`ConsoleHost_history.txt`), and returns up to 500 commands, newest first and
+each once. PSReadLine's backtick continuations join into one command, bash's
+`#<seconds>` timestamp lines are skipped. A shell without a history file gets
+an empty list. PSReadLine takes its path from the profile folder and ignores
+`APPDATA`; `BOITE_TERMINAL_HISTORY` gives the integrated PowerShell another
+file, and the core tests use it with `HISTFILE` to stay out of the user's.
+
 ## The screen
 
 The owning Store keeps each xterm screen in `lib/terminal-session.svelte.ts` until
-the shell ends. Hiding the drawer or switching threads detaches its element;
+the shell ends.
+
+It draws on the GPU with xterm's WebGL renderer, loaded with the screen. A
+browser that refuses a WebGL context, or loses it, falls back to the DOM
+renderer for that screen and asks for no other. Settings, Appearance, "Draw
+terminals on the GPU" turns it off per device for the screens opened next. The
+cursor blink then comes from xterm's own timer rather than a CSS animation.
+Unicode 11 widths keep emoji and East Asian text at the two cells the shell
+counts. The end-to-end pages run the DOM renderer, whose rows they read, unless
+a test asks for `terminalGpu`. Hiding the drawer or switching threads detaches its element;
 reopening reuses the screen, scrollback, selection and full-screen program state.
 
 Reloading, opening another window or reconnecting replays the 256 KiB snapshot.
@@ -98,6 +140,31 @@ a shape still gets it. URLs and OSC 8 links open in the browser on a click.
 Refused keystrokes display their error. Reloading the same conversation
 preserves terminal focus; switching conversation or draft focuses the composer.
 
+With the shell integration, each command gets a dot in the margin left of its
+prompt, green when it ended with status 0, red otherwise (its tooltip says the
+code) and the accent, breathing, while it runs; the same colours tick the
+scrollbar. The header names the shell and follows its directory, a tab is
+named after the directory of its shells, and a dot after the name breathes
+while a command runs or turns red once the last one failed. The screen also
+reads OSC 7 `file://` reports and Windows Terminal's OSC 9;9, so a zsh or fish
+that sends them updates the directory too.
+
+The magnifier, or `Ctrl+Shift+F`, opens a find bar over the screen: matches are
+highlighted as the query is typed, on the screen and down the scrollbar, and
+Enter steps up the scrollback (Shift+Enter down). The clock, or
+`Ctrl+Shift+H`, opens the shell's recent commands (`terminals.history`) with a
+search that keeps every word in any order. Enter replaces what is typed at the
+prompt with the command and runs it, Shift+Enter leaves it there to edit. The
+line is emptied first with End and Ctrl+Home in PSReadLine on Windows, Ctrl+E
+and Ctrl+U in readline and PSReadLine's Emacs mode, Escape in cmd. The command
+goes in as a paste, bracketed when the shell asked for it. In the alternate
+screen the list types nothing. `Ctrl+Up` and `Ctrl+Down` scroll to the
+previous and next prompt.
+
+A right click copies the selection, or pastes when nothing is selected, as in
+Windows Terminal; Shift+right click keeps the browser's menu. Alt+click moves
+the prompt's cursor to the pointer.
+
 Full-screen programs get the alternate screen, colours and the mouse. On
 Windows the inbox ConPTY keeps a program's mouse modes to itself, so a click
 never reaches vim or htop there; the alternate screen and colours do.
@@ -111,9 +178,12 @@ plus its Shift/Alt chords and `Ctrl+,`.
 While a terminal has the keyboard, T3 Code's chords act on the drawer ahead of
 the app's: `Ctrl+N` opens a shell in a new tab, `Ctrl+D` splits beside,
 `Ctrl+Shift+D` splits below and `Ctrl+W` closes the shell. They no longer reach
-the shell prompt, so `Ctrl+D` does not end it; `exit` does. A full-screen
-program, in the alternate screen, still receives its Ctrl-letter keys. Settings,
-Keyboard rebinds or clears the four under Terminal ([keybindings.md](keybindings.md#the-commands)).
+the shell prompt, so `Ctrl+D` does not end it; `exit` does. `Ctrl+Shift+F`
+finds, `Ctrl+Shift+H` lists the recent commands, `Ctrl+Up` and `Ctrl+Down`
+jump between commands and reach the shell when it marks none. The up arrow and
+`Ctrl+R` stay the shell's own history. A full-screen program, in the alternate
+screen, still receives its Ctrl-letter keys. Settings, Keyboard rebinds or
+clears the eight under Terminal ([keybindings.md](keybindings.md#the-commands)).
 
 On Windows and Linux, `Ctrl+C` copies selected text or interrupts when there is no
 selection, `Ctrl+V` pastes, and `Ctrl+Backspace` deletes a word.

@@ -1687,7 +1687,17 @@ export const fr: Translation = {
     splitRight: 'Diviser à droite',
     splitDown: 'Diviser en bas',
     closeTab: "Fermer l'onglet",
-    resizePanes: 'Redimensionner la division'
+    resizePanes: 'Redimensionner la division',
+    find: 'Chercher dans le terminal',
+    history: 'Commandes récentes',
+    historySearch: 'Chercher une commande',
+    historyEmpty: "Aucune commande dans l'historique de ce shell pour l'instant",
+    historyNone: 'Aucune commande ne correspond',
+    historyOld: 'Cette machine a une version de Boite trop ancienne pour les lister',
+    historyLoading: "Lecture de l'historique",
+    historyHint: 'Entrée la lance, Maj+Entrée la met au prompt',
+    running: 'Une commande tourne',
+    failed: 'La dernière commande a échoué (code {code})'
   },
 
   trace: {
@@ -2013,6 +2023,8 @@ export const fr: Translation = {
     terminalCursorBar: 'Barre',
     terminalCursorBlock: 'Bloc',
     terminalCursorUnderline: 'Soulignement',
+    terminalGpuHint: "Défilement et affichage plus fluides. Désactivez-le si un terminal s'affiche mal sur cet appareil ; le changement vaut pour les terminaux ouverts ensuite.",
+    terminalGpu: 'Dessiner les terminaux avec le GPU',
     connection: 'Connexion',
     localCore: "Cette application tourne sur le cœur qu'elle a lancé sur cet ordinateur.",
     pair: 'Appairer',
@@ -2154,6 +2166,10 @@ export const fr: Translation = {
       terminalSplit: 'Diviser le terminal à droite',
       terminalSplitVertical: 'Diviser le terminal en bas',
       terminalClose: 'Fermer le terminal',
+      terminalFind: 'Chercher dans le terminal',
+      terminalHistory: 'Commandes récentes du shell',
+      terminalPreviousCommand: 'Aller à la commande précédente',
+      terminalNextCommand: 'Aller à la commande suivante',
       thread: 'Aller à la conversation {n}'
     }
   },

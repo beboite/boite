@@ -43,6 +43,12 @@ export const DEFAULT_BINDINGS: Record<KeybindingCommand, string | null> = {
   'terminal-split': 'mod+d',
   'terminal-split-vertical': 'mod+shift+d',
   'terminal-close': 'mod+w',
+  // Windows Terminal's find; the shell keeps Ctrl+F (forward a character) and Ctrl+R (its own search).
+  'terminal-find': 'mod+shift+f',
+  'terminal-history': 'mod+shift+h',
+  // VS Code's: from one command's prompt to the next, with the shell integration.
+  'terminal-previous-command': 'mod+up',
+  'terminal-next-command': 'mod+down',
   // The browser's key for the tab just closed: here the thread just archived.
   'reopen-thread': 'mod+shift+t',
   'copy-answer': 'mod+alt+c',
@@ -97,7 +103,10 @@ export function matchesChord(event: KeyboardEvent, chord: Chord, mac: boolean = 
  * of every other there: Ctrl+N opens a shell in a terminal and a thread
  * elsewhere, as in T3 Code.
  */
-export const TERMINAL_COMMANDS: readonly KeybindingCommand[] = ['terminal-new', 'terminal-split', 'terminal-split-vertical', 'terminal-close'];
+export const TERMINAL_COMMANDS: readonly KeybindingCommand[] = [
+  'terminal-new', 'terminal-split', 'terminal-split-vertical', 'terminal-close',
+  'terminal-find', 'terminal-history', 'terminal-previous-command', 'terminal-next-command'
+];
 
 /** Where a key was pressed: the page at large, or a terminal's screen. */
 export type KeyScope = 'app' | 'terminal';
@@ -191,7 +200,7 @@ export function chordFromEvent(event: KeyboardEvent, mac: boolean = isMac()): st
 export const COMMAND_GROUPS: { id: 'general' | 'surfaces' | 'terminal' | 'thread' | 'jump' | 'theme'; commands: KeybindingCommand[] }[] = [
   { id: 'general', commands: ['new-thread', 'palette', 'sidebar', 'panel', 'settings', 'providers', 'appearance', 'add-project', 'pair', 'import-session'] },
   { id: 'surfaces', commands: ['terminal', 'browser', 'changes', 'files', 'tasks', 'trace', 'close-surface'] },
-  { id: 'terminal', commands: ['terminal-new', 'terminal-split', 'terminal-split-vertical', 'terminal-close'] },
+  { id: 'terminal', commands: ['terminal-new', 'terminal-split', 'terminal-split-vertical', 'terminal-close', 'terminal-find', 'terminal-history', 'terminal-previous-command', 'terminal-next-command'] },
   { id: 'thread', commands: ['send-and-draft', 'stash', 'pin', 'rename', 'retitle', 'archive', 'reopen-thread', 'copy-answer', 'find'] },
   { id: 'jump', commands: ['thread-1', 'thread-2', 'thread-3', 'thread-4', 'thread-5', 'thread-6', 'thread-7', 'thread-8', 'thread-9'] },
   { id: 'theme', commands: ['theme-dark', 'theme-light', 'theme-system'] }
