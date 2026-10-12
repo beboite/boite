@@ -251,7 +251,7 @@ describe('terminals', () => {
       await waitFor(() => seen.text().includes('\x1b]133;B'), SHELL_MS);
       expect(seen.text()).toContain('\x1b]133;A');
       // The shell reports the directory it resolved: a temporary folder behind a symlink reads as its target.
-      expect(seen.text()).toContain(`\x1b]633;P;Cwd=${realpathSync(opened.cwd)}`);
+      expect(seen.text()).toContain(`\x1b]633;P;Cwd=${pwsh === null ? realpathSync(opened.cwd) : opened.cwd}`);
 
       // A failing command: C as it runs, then D with its status before the next prompt.
       const failing = pwsh === null ? 'ls /boite-missing-path' : 'cmd /c exit 3';
