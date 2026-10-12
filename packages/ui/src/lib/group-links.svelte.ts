@@ -221,7 +221,12 @@ export class GroupLinks {
     await this.#prune(informed, anchors);
     await this.#pruneSigned(anchors);
     // A link to one of these later asks nothing: they are this device's own group.
-    const listed = anchors.flatMap((machine) => signsFor(machine.id) === undefined ? [] : machine.store.group?.cores.flatMap((core) => core.addresses) ?? []);
+    // Only addresses a key could go to, and that every machine this device's key opens in that group lists:
+    // one of them holding an older or a forged roster vouches for nothing on its own.
+    const signedAnchors = anchors.filter((machine) => signsFor(machine.id) !== undefined && machine.store.group != null);
+    const listed = signedAnchors.flatMap((machine) => machine.store.group!.cores.flatMap((core) => usableAddresses(core.addresses, this.#secure())
+      .filter((address) => signedAnchors.every((other) => other.store.group!.id !== machine.store.group!.id
+        || other.store.group!.cores.some((listedCore) => listedCore.coreId === core.coreId && listedCore.addresses.includes(address))))));
     // Written even empty: a device out of every group follows no link on the word of an old roster.
     rememberGroupAddresses(listed);
 

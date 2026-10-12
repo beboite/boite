@@ -161,7 +161,14 @@ export function mergeDeviceKeys(local: readonly DeviceKeyEntry[], remote: readon
   const merged = new Map(local.map((entry) => [entry.id, entry] as const));
   for (const entry of remote) {
     const known = merged.get(entry.id);
-    if (known === undefined || wins(entry, known)) merged.set(entry.id, entry);
+    if (known === undefined) {
+      merged.set(entry.id, entry);
+      continue;
+    }
+    // The same key handed over on two members took over a pairing on each: both stay revoked with it.
+    const winner = wins(entry, known) ? entry : known;
+    const legacy = [...new Set([...(known.legacy ?? []), ...(entry.legacy ?? [])])].sort().slice(0, LEGACY_MAX);
+    merged.set(entry.id, legacy.length === 0 ? winner : { ...winner, legacy });
   }
   return [...merged.values()].sort((a, b) => a.id.localeCompare(b.id));
 }

@@ -164,9 +164,10 @@ export class PushStore {
     // A new pairing of the same browser replaces its old delivery destination.
     for (const [key, previous] of Object.entries(all)) if (previous.endpoint === subscription.endpoint) delete all[key];
     all[id] = subscription;
-    if (keyed !== undefined) this.core.group.clients.pushedHere(keyed);
     this.core.journal.append({ type: 'push.subscribed', threadId: null, version: 1, payload: { sessionId: id } }, () => {
       this.core.journal.setSetting(SUBSCRIPTIONS, all);
+      // With the subscription, never before it: the others send its notifications here from then on.
+      if (keyed !== undefined) this.core.group.clients.pushedHere(keyed);
     });
     return { ok: true } as const;
   }

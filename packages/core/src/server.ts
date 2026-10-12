@@ -511,9 +511,14 @@ export function startServer(options: ServerOptions): RunningServer {
         // A page of this machine, at an origin it trusts itself and that names the host the socket asked for:
         // this machine is served there, and the others of its group accept that origin from now on. Learned
         // before any hello, so a phone's first page, which holds no key yet, already opens the way to the others.
-        if (ownOrigin(origin)) servedOrigin(core, origin, request.headers.get('host'));
         const connection = new ServerConnection(core, !isLoopbackHost(request.headers.get('host')));
-        if (self.upgrade(request, { data: { connection, peer } })) return undefined;
+        if (self.upgrade(request, { data: { connection, peer } })) {
+          // A page of this machine, at an origin it trusts itself and that names the host the socket asked for:
+          // this machine is served there, and the others of its group accept that origin from now on. Learned at
+          // the upgrade, before any hello, so a phone's first page, which holds no key yet, already opens the way.
+          if (ownOrigin(origin)) servedOrigin(core, origin, request.headers.get('host'));
+          return undefined;
+        }
         return new Response('expected a websocket upgrade', { status: 400 });
       }
 

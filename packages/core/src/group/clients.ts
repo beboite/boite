@@ -23,7 +23,10 @@ import { encodeTicket, parseTicket, ticketSigningInput } from './ticket.ts';
 
 /** Clocks of two machines may differ by this much before a ticket is refused for its date. */
 const CLOCK_SKEW_MS = 60_000;
-const DEVICES_MAX = 200;
+/** Live devices a group holds at a time. */
+export const DEVICES_MAX = 200;
+/** Older pairings one device key may take over: what `checkDeviceKey` reads back. */
+const LEGACY_MAX = 32;
 /** How far a device's hello may be dated from this machine's clock. */
 const DEVICE_HELLO_SKEW_MS = 2 * 60_000;
 /** Device hello nonces remembered at once; past it, hellos are refused until the oldest expire. */
@@ -64,6 +67,7 @@ export class GroupClients {
     if (known?.removed) throw unauthorized('this device was removed from the group: it needs a new key, which the app makes when it is added again');
     const live = known !== undefined && liveDeviceKeys(roster).includes(known);
     const legacyIds = [...new Set([...(known?.legacy ?? []), ...legacy])].sort();
+    if (legacyIds.length > LEGACY_MAX) throw refused('this device key took over too many older pairings: add the device again, which makes it a new key');
     if (live && known!.role === role && JSON.stringify(known!.legacy ?? []) === JSON.stringify(legacyIds)) return known!;
     if (!live && liveDeviceKeys(roster).length >= DEVICES_MAX) throw refused(`a group holds at most ${DEVICES_MAX} devices; revoke one that is no longer used`);
     if (known === undefined && (roster.deviceKeys?.length ?? 0) >= DEVICE_ENTRIES_MAX) {
@@ -150,7 +154,12 @@ export class GroupClients {
     if (!this.isCode(code) || deviceKey(publicKey) === null || !deviceSigned(publicKey, deviceAdmitInput(code, publicKey), raw.sig)) {
       throw invalidParams('group.redeem: expected a code, a device key and its signature over the code');
     }
-    const role = this.group.core.sessions.redeem(code, deviceId(publicKey), null);
+    const id = deviceId(publicKey);
+    // Before the code is spent, as on this machine's own hello: a removed key leaves it good for the next one.
+    if (roster.deviceKeys?.some((device) => device.id === id && device.removed)) {
+      throw unauthorized('this device was removed from the group: it needs a new key, which the app makes when it is added again');
+    }
+    const role = this.group.core.sessions.redeem(code, id, null);
     this.admitKey(publicKey, typeof raw.name === 'string' ? raw.name : 'device', role);
     return { roster: this.group.require() };
   }
@@ -320,7 +329,9 @@ export class GroupClients {
       if (row === null) throw unauthorized('this session was revoked');
       role = row.role;
       // A client that came in through the group keeps the name it came in under.
-      sub = this.group.sessions[identity.sessionId] ?? `device:${this.enroll(identity.sessionId, row.client_name, role)}`;
+      const member = this.group.sessions[identity.sessionId];
+      if (member?.startsWith('key:')) throw refused('a device key says hello on the other machine itself: it needs no ticket');
+      sub = member ?? `device:${this.enroll(identity.sessionId, row.client_name, role)}`;
     }
     const expiresAt = Date.now() + GROUP_TICKET_TTL_MS;
     const ticket = encodeTicket(
