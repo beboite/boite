@@ -133,9 +133,9 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 593,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,640,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,823,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 3,935,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 3,951,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
@@ -207,6 +207,19 @@ the group merged with `main` at `5ee76431`: the signing chunk
 device rows. The UI limit rises to 4,640,000. The same job then measured
 3,927,501 core bytes: signed hellos, device admission and served origins
 (`group/clients.ts`, `group/device-keys.ts`). The core limit rises to 3,935,000.
+
+On 2026-10-12 on Linux with Bun 1.4.2, the terminal rewrite (#453) measured
+4,802,359 UI bytes, 593,425 for the entry chunk and 3,915,408 core bytes; the
+Windows job measured 3,915,831 core bytes. The xterm WebGL, search and Unicode
+11 addons are lazy chunks of 113,385, 31,879 and 24,853 bytes, loaded with the
+first terminal, never at startup. The find bar, the recent commands list and
+their English/French sentences make up the rest of the UI growth, and the bash
+and PowerShell integration scripts the core's. The limits rise to 594,000,
+4,810,000 and 3,925,000.
+
+Merged with `main` at `5feb7d82` on Linux it measured 4,814,973 UI bytes,
+556,942 for the entry chunk and 3,942,646 core bytes, after the device keys
+above. The UI limit rises to 4,823,000 and the core limit to 3,951,000.
 
 Several drafts per project, merged with settings cards at `87fca361`, measured
 4,536,091 UI bytes and a 590,215-byte entry chunk on Linux: the done rows and
