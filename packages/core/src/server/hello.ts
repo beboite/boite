@@ -2,12 +2,26 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { hostname } from 'node:os';
 import { CLIENT_DEVICE_MAX, PROTOCOL_VERSION, RpcCloseCode, RpcErrorCode, type SentFrom } from '@boite/contracts';
 import type { Core } from '../core.ts';
-import { messageOf } from '../errors.ts';
+import { messageOf, RpcFailure } from '../errors.ts';
 import { NONCE_MAX, NONCE_MIN, nonceProblem, principalOf, type Identity } from '../sessions.ts';
 import type { ServerConnection } from './connection.ts';
 import { clientField, logHelloAccepted, logHelloRefused } from './connection-log.ts';
 
-export function hello(core: Core, connection: ServerConnection, id: number | string, method: string, rawParams: unknown): void {
+export async function hello(core: Core, connection: ServerConnection, id: number | string, method: string, rawParams: unknown): Promise<void> {
+  // A device being admitted waits on another member when only that one knows its code: nothing else is read meanwhile.
+  if (connection.greeting) {
+    connection.close(RpcCloseCode.Unauthorized, 'hello in progress');
+    return;
+  }
+  connection.greeting = true;
+  try {
+    await greet(core, connection, id, method, rawParams);
+  } finally {
+    connection.greeting = false;
+  }
+}
+
+async function greet(core: Core, connection: ServerConnection, id: number | string, method: string, rawParams: unknown): Promise<void> {
   if (method !== 'hello') {
     logHelloRefused(core, connection, `the first frame was ${clientField(method, 60, 'not a method call')}, not hello`, 'unknown');
     connection.sendResponse({
@@ -19,7 +33,7 @@ export function hello(core: Core, connection: ServerConnection, id: number | str
     return;
   }
   const params = rawParams as
-    | { token?: unknown; grant?: unknown; ticket?: unknown; nonce?: unknown; protocolVersion?: unknown; client?: { name?: unknown; version?: unknown; device?: unknown } }
+    | { token?: unknown; grant?: unknown; ticket?: unknown; nonce?: unknown; device?: unknown; protocolVersion?: unknown; client?: { name?: unknown; version?: unknown; device?: unknown } }
     | undefined;
   const clientName = clientField(params?.client?.name);
   const refuse = (message: string, reason: string): void => {
@@ -30,12 +44,14 @@ export function hello(core: Core, connection: ServerConnection, id: number | str
   const token = typeof params?.token === 'string' ? params.token : null;
   const grant = typeof params?.grant === 'string' ? params.grant : null;
   const ticket = typeof params?.ticket === 'string' ? params.ticket : null;
+  const device = typeof params?.device === 'object' && params.device !== null ? params.device as Record<string, unknown> : null;
   const client = {
     name: typeof params?.client?.name === 'string' ? params.client.name : 'unknown',
     version: typeof params?.client?.version === 'string' ? params.client.version : '',
   };
 
   let session: ReturnType<typeof core.sessions.exchange> | undefined;
+  let admitted: string | undefined;
   let identity: Identity;
   // Absent, a grant is strictly one-shot. Present, a nonce must be usable, or
   // the client would believe a retry is safe when it is not.
@@ -65,11 +81,32 @@ export function hello(core: Core, connection: ServerConnection, id: number | str
     connection.close(RpcCloseCode.ProtocolMismatch, 'protocol version mismatch');
     return true;
   };
-  if (ticket !== null && token === null && grant === null) {
+  if (device !== null && token === null && ticket === null) {
+    // One key for every member of the group: admitted with a grant, then let in on its signature.
+    if (wrongProtocol()) return;
+    try {
+      if (grant !== null) {
+        const nonce = typeof params?.nonce === 'string' ? params.nonce : null;
+        const done = await core.group.clients.admitDevice(grant, device, client, nonce);
+        admitted = done.deviceId;
+        identity = { principal: principalOf(done.role), sessionId: done.sessionId, threadId: null };
+      } else {
+        const done = core.group.clients.authenticateDevice(device, client);
+        identity = { principal: principalOf(done.role), sessionId: done.sessionId, threadId: null };
+      }
+    } catch (error) {
+      // Only a removal is Unauthorized: a device not heard of yet, a clock that is off, a full group or a malformed
+      // key keeps its own code and field, so the app drops its key for none of them.
+      const failure = error instanceof RpcFailure ? error.toError() : { code: RpcErrorCode.Unauthorized, message: messageOf(error) };
+      connection.sendResponse({ jsonrpc: '2.0', id, error: failure });
+      connection.close(RpcCloseCode.Unauthorized, grant === null ? 'bad device signature' : 'bad grant');
+      return;
+    }
+  } else if (ticket !== null && token === null && grant === null) {
     // Like a grant, a ticket is spent once: the protocol is checked first.
     if (wrongProtocol()) return;
     try {
-      session = core.group.admit(ticket, client);
+      session = core.group.clients.admit(ticket, client);
     } catch (error) {
       refuse(messageOf(error), 'bad ticket');
       return;
@@ -91,7 +128,7 @@ export function hello(core: Core, connection: ServerConnection, id: number | str
     if (found === null) { refuse('the token is wrong', 'bad token'); return; }
     identity = found;
   } else {
-    refuse('hello takes a token, a grant or a group ticket, one of the three', 'bad hello');
+    refuse('hello takes a token, a grant, a group ticket or a device signature', 'bad hello');
     return;
   }
   if (wrongProtocol()) return;
@@ -107,6 +144,7 @@ export function hello(core: Core, connection: ServerConnection, id: number | str
       core: core.info(),
       principal: identity.principal,
       ...(session === undefined ? {} : { session: { id: session.id, token: session.token } }),
+      ...(admitted === undefined ? {} : { device: admitted }),
       // The agent learns which thread it is in from its own hello, so the CLI
       // needs nothing but the token to name it.
       ...(identity.threadId === null ? {} : { threadId: identity.threadId }),

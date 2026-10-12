@@ -81,7 +81,8 @@ type Upstream = WebSocket;
  * never an agent's. The session the key belongs to, null for the owner's
  * token; null altogether for anything else.
  */
-export type RelayAuthenticator = (token: string) => { sessionId: string | null } | null;
+/** The client's credential for this machine: its key, or a device's signature for this machine. */
+export type RelayAuthenticator = (credential: string | object) => { sessionId: string | null } | null;
 
 /** What the core sees of the server's relay: how many sockets it carries, and a way to drop those to former members. */
 export interface RelaySink {
@@ -282,9 +283,9 @@ export class RelayPipe {
     }
     const { relay, ...rest } = frame.params;
     // A failure here is this machine's, not the other member's: never Unauthorized, which the client would take for its key there being revoked.
-    const holder = typeof relay === 'string' && relay.length > 0 && relay.length <= 512 ? this.authenticate(relay) : null;
+    const holder = (typeof relay === 'string' && relay.length > 0 && relay.length <= 512) || (typeof relay === 'object' && relay !== null) ? this.authenticate(relay) : null;
     if (holder === null) {
-      this.refuse(id, RpcErrorCode.Refused, `${this.name()} carries to the other machines of its group only a client paired with it: hello relay must be this client's key for ${this.name()}`, 1008);
+      this.refuse(id, RpcErrorCode.Refused, `${this.name()} carries to the other machines of its group only a client paired with it: hello relay must be this client's key for ${this.name()}, or its device signature for it`, 1008);
       return;
     }
     this.authenticated = true;

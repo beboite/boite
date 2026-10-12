@@ -157,7 +157,8 @@ test('an archived thread comes back from Settings > General', async () => {
   expect(await archiveThread(store, 't-trace')).toBe(true);
   await waitFor(() => !store.threads.some((t) => t.id === 't-trace' && !t.archived));
   store.showSettings('general');
-  await waitFor(() => document.querySelector('[data-testid=archived-show]') !== null);
+  // The first Settings of the file loads its lazy chunk, which a loaded runner transforms slowly.
+  await waitFor(() => document.querySelector('[data-testid=archived-show]') !== null, 10_000);
   query<HTMLButtonElement>('[data-testid=archived-show]').click();
   await waitFor(() => document.querySelector('[data-testid=archived-restore]') !== null);
   expect(query('[data-testid=archived-list]').textContent).toContain('Finish the trace tab');

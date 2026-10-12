@@ -106,7 +106,6 @@ export function settingsSectionLabel(section: string, providers: readonly Provid
     limits: strings.protection.limits,
     tasks: strings.protection.tasks,
     machines: strings.machines.heading,
-    devices: settings.pairing.heading,
     phone: strings.phone.heading,
     execution: settings.execution,
     origins: strings.machines.browserOrigins,

@@ -8,8 +8,8 @@ import { connect } from '../../packages/core/src/client.ts';
 
 /*
  * The phone's way in on a real core: the Tailscale switch against a fake CLI
- * (never the machine's own), the pairing code, the owner QR code, and the
- * recovery screen a revoked phone gets, narrow and wide. Captures go to
+ * (never the machine's own), the code of "Add a device", a loopback link that
+ * draws none, and the recovery screen a removed phone gets, narrow and wide. Captures go to
  * `.artifacts`, or to `BOITE_E2E_CAPTURES` when set.
  */
 
@@ -17,6 +17,8 @@ const FAKE_CLI = join(import.meta.dir, '..', '..', 'packages', 'core', 'test', '
 const DNS = 'skoll-test.tail0000.ts.net';
 const captures = process.env['BOITE_E2E_CAPTURES'] ?? join(import.meta.dir, '.artifacts');
 const id = (name: string) => `[data-testid="${name}"]`;
+/** The link "Add a device" shows, as its panel carries it. */
+const LINK = `document.querySelector('[data-testid="add-device"]')?.dataset.link ?? ''`;
 
 let core: RunningCore;
 let desk: BrowserPage;
@@ -69,11 +71,11 @@ test('the Tailscale switch serves the core, the links follow it, and 443 held by
 
   await desk.click(id('tailscale-enable'));
   await desk.waitFor(`document.querySelector('${id('tailscale-access')}[data-state="on"]')`);
-  await desk.waitFor(`document.querySelector('${id('pairing-link')}')?.textContent.startsWith('https://${DNS}/?grant=')`);
-  expect(await desk.evaluate(`!!document.querySelector('${id('pairing-code')}')`)).toBe(true);
+  await desk.waitFor(`(${LINK}).startsWith('https://${DNS}/?grant=')`);
+  expect(await desk.evaluate(`!!document.querySelector('${id('add-device-code')}') && !!document.querySelector('${id('add-device-qr')}')`)).toBe(true);
   expect(readFileSync(`${statePath}.log`, 'utf8')).toContain(`serve --bg --https=443 http://127.0.0.1:${core.port}`);
-  await scrollTo(desk, id('pairing-card'));
-  await capture(desk, 'pairing-code-desktop.png');
+  await scrollTo(desk, id('add-device'));
+  await capture(desk, 'add-device-desktop.png');
   await scrollTo(desk, id('tailscale-access'));
   await capture(desk, 'tailscale-on-desktop.png');
 
@@ -83,8 +85,8 @@ test('the Tailscale switch serves the core, the links follow it, and 443 held by
   await desk.click(id('confirm-ok'));
   await desk.waitFor(`document.querySelector('${id('tailscale-access')}[data-state="off"]')`);
   expect(readFileSync(`${statePath}.log`, 'utf8')).toContain('serve --https=443 off');
-  await desk.click(id('pairing-mint'));
-  await desk.waitFor(`document.querySelector('${id('pairing-link')}')?.textContent.startsWith(${JSON.stringify(`${core.url}/?grant=`)})`);
+  await desk.click(id('group-add-device'));
+  await desk.waitFor(`(${LINK}).startsWith(${JSON.stringify(`${core.url}/?grant=`)})`);
 
   // Something else on 443: named, and replaced only after the dialog.
   writeState({ TCP: { 443: { HTTPS: true } }, Web: { [`${DNS}:443`]: { Handlers: { '/': { Proxy: 'http://127.0.0.1:17338' } } } } });
@@ -105,44 +107,34 @@ test('the Tailscale switch serves the core, the links follow it, and 443 held by
   await desk.waitFor(`document.querySelector('${id('tailscale-access')}[data-state="off"]')`);
 }, 90_000);
 
-test('an owner link is drawn only once confirmed on the computer, and a loopback link never is', async () => {
-  // This core listens on loopback: its link reaches nothing but this computer, so no QR code at all.
-  await scrollTo(desk, id('pairing-card'));
-  // The previous test leaves a loopback link on show: close it, so what follows is the new link's.
-  await desk.evaluate(`document.querySelector('${id('pairing-close')}')?.click()`);
-  await desk.waitFor(`!document.querySelector('${id('lan-reach')}')`);
-  await desk.click(id('pairing-mint'));
-  await desk.waitFor(`document.querySelector('${id('pairing-link')}')?.textContent.includes('127.0.0.1')`);
-  await desk.waitFor(`document.querySelector('${id('lan-reach')}')`);
-  expect(await desk.evaluate(`!document.querySelector('${id('pairing-qr')}') && !document.querySelector('${id('pairing-code')}')`)).toBe(true);
-  await desk.click(id('pairing-close'));
-  // With a public address the link reaches a phone, and the owner's QR code waits for the confirmation.
+test('a loopback link draws no code, and a public address draws one', async () => {
+  // This core listens on loopback: its link reaches nothing but this computer, so no QR code and no code.
+  await scrollTo(desk, id('group-card'));
+  // The previous test leaves a link on show: close it, so what follows is the new link's.
+  await desk.evaluate(`document.querySelector('${id('add-device-close')}')?.click()`);
+  await desk.waitFor(`!document.querySelector('${id('add-device')}')`);
+  await desk.click(id('group-add-device'));
+  await desk.waitFor(`(${LINK}).includes('127.0.0.1') && !!document.querySelector('${id('lan-reach')}')`);
+  expect(await desk.evaluate(`!document.querySelector('${id('add-device-qr')}') && !document.querySelector('${id('add-device-code')}')`)).toBe(true);
+  await desk.click(id('add-device-close'));
+  // With a public address the link reaches a phone: the code is drawn.
   const owner = await connect(core.url, core.token);
   await owner.call('settings.set', { publicUrl: 'https://boite.example.com' });
   try {
-    await desk.click(id('pairing-owner'));
-    await desk.click(id('pairing-mint'));
-    await desk.waitFor(`document.querySelector('${id('pairing-owner-qr')}')`);
-    expect(await desk.evaluate(`!!document.querySelector('${id('pairing-qr')}')`)).toBe(false);
-    await desk.click(id('pairing-owner-qr'));
-    await desk.waitFor(`document.querySelector('${id('confirm-dialog')}')`);
-    await capture(desk, 'owner-qr-confirm-desktop.png');
-    await desk.click(id('confirm-ok'));
-    await desk.waitFor(`document.querySelector('${id('pairing-qr')}') && document.querySelector('${id('pairing-code')}')`);
-    await scrollTo(desk, id('pairing-card'));
-    await capture(desk, 'owner-qr-desktop.png');
-    await desk.click(id('pairing-owner'));
-    await desk.click(id('pairing-close'));
+    await desk.click(id('group-add-device'));
+    await desk.waitFor(`(${LINK}).startsWith('https://boite.example.com/?grant=') && !!document.querySelector('${id('add-device-qr')} svg')`);
+    await desk.click(id('add-device-close'));
   } finally {
     await owner.call('settings.set', { publicUrl: null });
     owner.close();
   }
 }, 60_000);
 
-test('the installed phone app pairs from a typed code, and a revoked one gets the recovery screen, narrow and wide', async () => {
+test('the installed phone app is added with a typed code, and a removed one gets the recovery screen, narrow and wide', async () => {
   const phone = await BrowserPage.launch({ url: 'about:blank' });
   try {
     await phone.send('Emulation.setDeviceMetricsOverride', PHONE);
+    await phone.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
     // A home-screen app, as iOS says it: `navigator.standalone`.
     await phone.send('Page.addScriptToEvaluateOnNewDocument', { source: `Object.defineProperty(navigator, 'standalone', { value: true, configurable: true })` });
     await phone.navigate(`${core.url}/`);
@@ -152,7 +144,7 @@ test('the installed phone app pairs from a typed code, and a revoked one gets th
 
     const owner = await connect(core.url, core.token);
     try {
-      const minted = await owner.call('pairing.grant', {});
+      const minted = await owner.call('group.addDevice', {});
       await phone.click(id('machine-code-open'));
       await phone.waitFor(`document.querySelector('${id('machine-code')}')`);
       await phone.type(id('machine-code'), (minted.code ?? '').toLowerCase());
@@ -161,9 +153,11 @@ test('the installed phone app pairs from a typed code, and a revoked one gets th
       await phone.waitFor(`!document.querySelector('${id('mobile-connect')}')`, 20_000);
       const sessions = await owner.call('sessions.list', {});
       expect(sessions.map((session) => session.role)).toEqual(['device']);
+      const devices = (await owner.call('group.get', {}))?.devices ?? [];
+      expect(devices.map((device) => device.name)).toEqual(['phone']);
 
-      // Revoked from the computer: the recovery screen, not a stale page.
-      await owner.call('sessions.revoke', { sessionId: sessions[0]!.id });
+      // Removed from the group on the computer: the recovery screen, not a stale page.
+      await owner.call('group.revokeDevice', { id: devices[0]!.id });
       await phone.waitFor(`document.querySelector('${id('mobile-connect')}')`, 20_000);
       await capture(phone, 'recovery-revoked-phone.png');
       await phone.send('Emulation.setDeviceMetricsOverride', { width: 844, height: 390, deviceScaleFactor: 1, mobile: true });
@@ -174,7 +168,7 @@ test('the installed phone app pairs from a typed code, and a revoked one gets th
       await capture(phone, 'recovery-revoked-desktop.png');
 
       // From the wide screen too, a fresh code pairs again.
-      const again = await owner.call('pairing.grant', {});
+      const again = await owner.call('group.addDevice', {});
       await phone.click(id('machine-code-open'));
       await phone.waitFor(`document.querySelector('${id('machine-code')}')`);
       await phone.type(id('machine-code'), again.code ?? '');
