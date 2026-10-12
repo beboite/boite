@@ -171,9 +171,17 @@ test('production desktop and phone embed the dashboard through the real core wit
       if (!child) await Bun.sleep(25);
     }
     if (!child) throw new Error('The gateway iframe did not finish navigating within 5 seconds');
-    const world = await browser.send('Page.createIsolatedWorld', { frameId: child.frame.id }) as { executionContextId: number };
-    const content = await browser.send('Runtime.evaluate', { contextId: world.executionContextId, expression: 'document.querySelector("h1")?.textContent', returnByValue: true }) as { result: { value: string } };
-    expect(content.result.value).toBe('Subscription quotas');
+    // The frame reports its URL once the navigation commits, before its
+    // document is parsed: read the heading until it is there.
+    let heading: string | undefined;
+    while (Date.now() < deadline + 5_000) {
+      const world = await browser.send('Page.createIsolatedWorld', { frameId: child.frame.id }) as { executionContextId: number };
+      const content = await browser.send('Runtime.evaluate', { contextId: world.executionContextId, expression: 'document.querySelector("h1")?.textContent', returnByValue: true }) as { result: { value?: string } };
+      heading = content.result.value;
+      if (heading) break;
+      await Bun.sleep(25);
+    }
+    expect(heading).toBe('Subscription quotas');
     await browser.screenshot(join(process.env.BOITE_CAPTURE_DIR ?? join(import.meta.dir, '.artifacts'), 'boite-proxy-production-desktop.png'));
     await browser.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
     await browser.waitFor('document.querySelector("[data-testid=mobile-settings-detail]")');
