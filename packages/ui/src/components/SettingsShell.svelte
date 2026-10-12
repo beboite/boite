@@ -26,6 +26,7 @@
   import { providerGroups } from '../lib/provider-family';
 import { workspace } from '../lib/workspace.svelte';
   import { browserBridge } from '../lib/browser-bridge';
+  import { revealSettingsCard } from '../lib/settings-flash';
 
   let { store, onopenthread }: { store: Store; onopenthread?: () => void } = $props();
   const narrow = new MediaQuery('(max-width: 720px)');
@@ -236,10 +237,7 @@ import { workspace } from '../lib/workspace.svelte';
     if (!section || tab !== store.settingsTab) return;
     void section.request;
     void tick().then(() => {
-      const target = document.getElementById(`settings-${section.id}`);
-      if (!target) return;
-      jumping = Date.now();
-      target.scrollIntoView({ behavior: motion(), block: 'start' });
+      if (revealSettingsCard(section.id, section.flash === true, motion())) jumping = Date.now();
     });
   });
 </script>

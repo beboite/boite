@@ -1,12 +1,14 @@
 <script lang="ts">
   import { errorText } from '../lib/errors';
-  import { Check, ChevronDown, ChevronLeft, ChevronRight, Circle, CircleCheck, CircleDot, Hand, ListTodo, MessageCircleQuestionMark, Pause, Play, Repeat, Reply, Target, X } from '@lucide/svelte';
+  import { Check, ChevronDown, ChevronLeft, ChevronRight, Circle, CircleCheck, CircleDot, Hand, ListTodo, MessageCircleQuestionMark, Pause, Play, Repeat, Reply, Settings2, Target, X } from '@lucide/svelte';
   import { focusComposer } from '../lib/focus';
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
   import { dockRoom, questionDock } from '../lib/question-dock.svelte';
   import { ignoreQuestions, replyOf, repliesOf, sendAnswer, writeAnswer } from '../lib/question-reply.svelte';
   import QuestionCard from './QuestionCard.svelte';
+  import SettingRequestCard from './SettingRequestCardLoader.svelte';
+  import { settingHeading } from '../lib/setting-requests';
 
   let { store, reserveInComposer = false, onroom }: {
     store: Store;
@@ -149,11 +151,11 @@
     {#if shown}
       <div class="questions" data-testid="activity-questions" data-count={asked.length}>
         <div class="activity-row question-row">
-          <MessageCircleQuestionMark size={16} />
+          {#if shown.setting}<Settings2 size={16} />{:else}<MessageCircleQuestionMark size={16} />{/if}
           <button type="button" class="ghost objective question-toggle" aria-expanded={questionOpen}
             title={questionOpen ? strings.activity.questionFold : strings.activity.questionUnfold} data-testid="activity-question-toggle"
             onclick={() => (questionOpen = !questionOpen)}>
-            <span class="question-line ui-label">{questionOpen ? strings.chat.questionAsyncHeading : shown.text}</span>
+            <span class="question-line ui-label">{questionOpen ? (shown.setting ? settingHeading(shown.setting) : strings.chat.questionAsyncHeading) : shown.text}</span>
             <ChevronDown size={16} class={questionOpen ? 'turned' : ''} />
           </button>
           {#if replyOf(store, shown.id).replying}
@@ -174,6 +176,17 @@
             {#each asked as question (question.id)}
               {@const reply = replyOf(store, question.id)}
               <div hidden={question.id !== shown.id} data-testid="activity-question" data-question={question.id}>
+                {#if question.setting}
+                <SettingRequestCard
+                  {store}
+                  text={question.text}
+                  setting={question.setting}
+                  answer={null}
+                  pending
+                  docked
+                  respond={(optionId) => store.answerQuestion(question.threadId, question.id, [optionId])}
+                />
+                {:else}
                 <QuestionCard
                   text={question.text}
                   options={question.options}
@@ -190,6 +203,7 @@
                   skip={() => store.skipQuestion(question.threadId, question.id)}
                   onwrite={() => writeAnswer(store, question.id)}
                 />
+                {/if}
               </div>
             {/each}
           </div>

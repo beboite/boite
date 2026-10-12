@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { CircleAlert, FishingHook, MessageCircleQuestionMark } from '@lucide/svelte';
+  import { CircleAlert, FishingHook, MessageCircleQuestionMark, Settings2 } from '@lucide/svelte';
   import { showDockedQuestion } from '../lib/question-dock.svelte';
   import { replyOf, repliesOf, sendAnswer, writeAnswer } from '../lib/question-reply.svelte';
   import type { Account, MemoryEvent, Message } from '@boite/contracts';
@@ -11,6 +11,7 @@
   import PermissionCard from './PermissionCard.svelte';
   import PlanCard from './PlanCard.svelte';
   import QuestionCard from './QuestionCard.svelte';
+  import SettingRequestCard from './SettingRequestCardLoader.svelte';
   import Prose from './Prose.svelte';
   import ChatFile from './ChatFile.svelte';
   import InlineView from './InlineView.svelte';
@@ -123,10 +124,19 @@
       {:else if part.type === 'question' && part.async === true && (part.answer ?? null) === null && store.pendingQuestions.some((q) => q.id === part.questionId)}
         <!-- Waiting in the dock above the composer: here only a line that brings it up. -->
         <button type="button" class="ghost docked-question" data-testid="question-docked" title={strings.chat.questionOpen} onclick={() => showDockedQuestion(part.questionId)}>
-          <MessageCircleQuestionMark size={15} strokeWidth={1.75} />
+          {#if part.setting}<Settings2 size={15} strokeWidth={1.75} />{:else}<MessageCircleQuestionMark size={15} strokeWidth={1.75} />{/if}
           <span class="docked-text ui-label">{part.text}</span>
           <span class="docked-hint ui-label">{strings.chat.questionDocked}</span>
         </button>
+      {:else if part.type === 'question' && part.setting}
+        <SettingRequestCard
+          {store}
+          text={part.text}
+          setting={part.setting}
+          answer={part.answer ?? null}
+          pending={store.pendingQuestions.some((q) => q.id === part.questionId)}
+          respond={(optionId) => store.answerQuestion(message.threadId, part.questionId, [optionId])}
+        />
       {:else if part.type === 'question'}
         {@const asked = store.pendingQuestions.find((q) => q.id === part.questionId)}
         {@const reply = replyOf(store, part.questionId)}

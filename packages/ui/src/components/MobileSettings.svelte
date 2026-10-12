@@ -22,6 +22,8 @@
   import WorktreesCard from './WorktreesCard.svelte';
   import AutoCompactSettings from './AutoCompactSettings.svelte';
   import InfoTip from './InfoTip.svelte';
+  import { tick } from 'svelte';
+  import { revealSettingsCard } from '../lib/settings-flash';
 
   let { store, onopenthread }: { store: Store; onopenthread?: () => void } = $props();
   let phone = $state(false);
@@ -57,6 +59,13 @@
     if (page === 'phone' && store.connection === 'ready') void store.loadSessions();
   });
   function back() { phone = false; archived = false; store.showSettings(); }
+
+  // A settings card in a conversation opened this page to show one card: scroll to it and light it up.
+  $effect(() => {
+    const section = store.settingsSection;
+    if (!section?.flash) return;
+    void tick().then(() => revealSettingsCard(section.id, true, window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth'));
+  });
 </script>
 
 <!-- `settings` gives the detail pages the same grammar as the desktop ones. -->
