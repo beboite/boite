@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 import type { Usage, UsageHistory, UsageHistoryRow } from '@boite/contracts';
 import { fakeUsageHistory } from './fake-usage';
 import { setLocaleSetting } from './i18n.svelte';
-import { dayEdges, formatMetric, formatTick, modelName, niceScale, reportedValue, seriesFor, summarize, topThreads } from './usage';
+import { dayEdges, formatMetric, formatRate, formatTick, modelName, niceScale, ownModel, priceNote, reportedValue, seriesFor, summarize, topThreads } from './usage';
 
 function usage(inputTokens: number, outputTokens: number, cost: number | null = null): Usage {
   return { inputTokens, outputTokens, cacheReadTokens: 0, cacheWriteTokens: 0, costUsdEquivalent: cost };
@@ -94,10 +94,34 @@ describe('summarize', () => {
     expect(view.total).toMatchObject({ turns: 5, reported: 2, priced: 1, value: 0.5 });
     expect(view.unpriced).toEqual(['custom']);
     expect(reportedValue('tokens', 0, view.buckets[0]!.coverage['custom']!)).toBe('Not reported');
-    expect(reportedValue('cost', 0, view.buckets[0]!.coverage['custom']!)).toBe('No cost reported');
+    expect(reportedValue('cost', 0, view.buckets[0]!.coverage['custom']!)).toBe('No price');
     expect(reportedValue('tokens', 0, view.buckets[0]!.coverage['echo']!)).toBe('0');
     expect(reportedValue('cost', 0, { turns: 1, reported: 1, priced: 1 })).toBe('$0.00');
     expect(modelName('default', new Map([['muse\u0000default', 'Muse default'], ['antigravity-cli\u0000default', 'Antigravity CLI default']]), 'muse')).toBe('Muse default');
+  });
+
+  test('joins a model recorded with its provider prefix and says where each price comes from', () => {
+    const opus = { model: 'claude-opus-5-5', rates: { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 8 } };
+    const view = summarize({ edges: [0, 10], rows: [
+      { ...row(0, 'claude', 'claude-opus-5-5', 2, usage(10, 0, 1)), price: opus },
+      { ...row(0, 'claude', 'claude/claude-opus-5-5', 3, usage(20, 0, 2)), price: opus },
+      // Another provider's prefix is a different route, not this provider's model.
+      { ...row(0, 'claude', 'codex/gpt-6-luna', 1, usage(5, 0, 0.1)), price: null },
+      { ...row(0, 'opencode', 'house-model', 1, usage(5, 0)), priced: 0, price: null }
+    ], threads: [] }, 'cost');
+    expect(view.models.map((model) => [model.providerId, model.model, model.turns, model.value])).toEqual([
+      ['claude', 'claude-opus-5-5', 5, 3],
+      ['claude', 'codex/gpt-6-luna', 1, 0.1],
+      ['opencode', 'house-model', 1, 0]
+    ]);
+    expect(ownModel('claude', 'claude/claude-opus-5-5')).toBe('claude-opus-5-5');
+    expect(ownModel('claude', null)).toBeNull();
+    const [claude, luna, house] = view.models;
+    expect(priceNote(claude!)).toBe('Public API rates of claude-opus-5-5, per million tokens: input $4, output $20, cache read $0.2, cache write $8.');
+    expect(priceNote(luna!)).toBe('No public rate matches this model, so the cost is the one its agent reported.');
+    expect(priceNote(house!)).toBe('No public rate matches this model and its agent reported no cost.');
+    expect(priceNote({ price: opus, priced: 0, reported: 0 })).toBe('The agent reported no tokens for these turns, so they have no cost.');
+    expect(formatRate(0.125)).toBe('$0.125');
   });
 
   test('breaks down by model, largest first, and by day, newest first', () => {
@@ -160,7 +184,10 @@ describe('the fake ledger', () => {
     expect(fakeUsageHistory(edges, { seeded: true, finished: [], now })).toEqual(first);
     expect(new Set(first.rows.map((entry) => entry.providerId))).toEqual(new Set(['claude', 'codex', 'opencode', 'grok', 'antigravity', 'pi', 'antigravity-cli', 'muse']));
     expect(first.rows.every((entry) => entry.bucket >= 0 && entry.bucket < 90)).toBe(true);
-    expect(first.rows.filter((entry) => entry.providerId === 'codex').every((entry) => entry.usage.costUsdEquivalent === null && entry.priced === 0)).toBe(true);
+    // The core prices Codex's own model at its public rates; its default model has none.
+    const codex = first.rows.filter((entry) => entry.providerId === 'codex');
+    expect(codex.filter((entry) => entry.model === null).every((entry) => entry.usage.costUsdEquivalent === null && entry.priced === 0 && entry.price === null)).toBe(true);
+    expect(codex.filter((entry) => entry.model !== null).every((entry) => entry.price?.model === 'gpt-6.1-sol' && entry.priced === entry.reported)).toBe(true);
     expect(first.rows.some((entry) => entry.reported < entry.turns)).toBe(true);
     const filtered = fakeUsageHistory(edges, { seeded: true, finished: [], now, providerId: 'muse' });
     expect(filtered.rows.length).toBeGreaterThan(0);
@@ -171,7 +198,10 @@ describe('the fake ledger', () => {
   test('adds the turns this session finished and is empty on a fresh machine', () => {
     const turn = { at: now - 60_000, threadId: 't-new', title: 'New', projectId: 'p', providerId: 'echo', model: null, usage: usage(4, 4, 0.01) };
     const history = fakeUsageHistory(edges, { seeded: false, finished: [turn], now });
-    expect(history.rows).toEqual([{ bucket: 89, providerId: 'echo', model: null, turns: 1, reported: 1, priced: 1, usage: usage(4, 4, 0.01) }]);
+    expect(history.rows).toEqual([{ bucket: 89, providerId: 'echo', model: null, turns: 1, reported: 1, priced: 1, usage: usage(4, 4, 0.01), price: null }]);
     expect(history.threads.map((thread) => thread.threadId)).toEqual(['t-new']);
+    // A finished turn on a listed model is priced at its rates, whatever cost it carried.
+    const opus = { ...turn, providerId: 'claude', model: 'claude-opus-5-5', usage: usage(1_000_000, 0, 99) };
+    expect(fakeUsageHistory(edges, { seeded: false, finished: [opus], now }).rows[0]).toMatchObject({ priced: 1, price: { model: 'claude-opus-5-5' }, usage: { costUsdEquivalent: 4 } });
   });
 });

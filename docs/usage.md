@@ -4,8 +4,9 @@ Settings > Usage shows what the agents spent through Boite: tokens, the API
 equivalent cost and turns, per day, provider, model and thread. Settings >
 Limits is its own tab beside it, holding the subscription windows each provider
 last reported. Everything on the usage page comes from turns the core already
-recorded in its journal. Boite never estimates a token count or prices a turn
-itself.
+recorded in its journal. Boite never estimates a token count; it prices the
+reported tokens at each model's public API rates ([The API
+estimate](#the-api-estimate)).
 
 ## The page
 
@@ -27,8 +28,12 @@ itself.
   The chart also takes the keyboard focus: the arrow keys, Home and End move
   between days and a screen reader reads the same values.
 - Breakdown lists each model with its turns, tokens, input, output, cache and
-  cost. By day is the same table with one row per day that had a turn, which
-  doubles as the chart's table view.
+  cost. A model recorded with its provider's prefix, as a delegated thread
+  records `claude/claude-opus-5-5`, shares the row of the same model without
+  it. The "i" beside a model gives the public rates its tokens were priced at,
+  or says the cost is the one its agent reported. By day is the same table
+  with one row per day that had a turn, which doubles as the chart's table
+  view.
 - Top threads are the ten threads that spent the most by the chosen measure.
   A thread still in the sidebar opens on click; an archived one is marked.
 
@@ -230,10 +235,12 @@ them in SQLite:
   thread that switched models mid-conversation splits correctly. A turn recorded
   before schema 9 has no execution and falls back to its thread's provider and
   model.
-- `turns` counts every turn, `reported` the turns that carried a usage report,
-  and `priced` the turns whose report had a cost. A turn without usage adds a
-  turn and no tokens. `usage.costUsdEquivalent` is null when no turn of the row
-  was priced, so "no price" and "$0.00" stay different.
+- `turns` counts every turn and `reported` the turns that carried a usage
+  report. `priced` is every reported turn when the row's model has public
+  rates, else the turns whose agent reported a cost. A turn without usage adds
+  a turn and no tokens. `usage.costUsdEquivalent` is null when no turn of the
+  row was priced, so "no price" and "$0.00" stay different. `price` names the
+  model and the rates the row was priced at, null when none matched.
 - `threads` is the union of the top ten threads by tokens, by cost and by
   turns, unordered. The UI ranks them by the chosen measure.
 - An optional non-empty `providerId` filters execution providers before the
@@ -259,14 +266,59 @@ Codex's input, so for every provider `inputTokens` is uncached input and the
 four token fields add up to the total the page shows. `usage.get` still
 returns the raw reports.
 
-The cost is the provider's own figure: the Claude SDK's `total_cost_usd`, an
-ACP `usage_update` priced in USD, or pi's reported cost. Codex never reports
-one, and an ACP agent that sends no USD cost has none either. The API cost
-measure names those providers under the chart instead of counting them as free.
+### The API estimate
+
+The cost of a row is its tokens at the public API rates of the model its turns
+ran on. `packages/core/src/pricing/rates.json` lists those rates in USD per
+million tokens for the text models Anthropic, OpenAI, Google, xAI, DeepSeek,
+Moonshot, Z.ai, MiniMax, Mistral, Alibaba and Meta released since 2025, with
+the date it was generated. Each model is four numbers (input, output, cache
+read, cache write) because the table ships in the core bundle, which
+`scripts/ci/budgets.json` caps. `bun scripts/model-rates.ts` regenerates it from
+[models.dev](https://models.dev), the catalogue OpenCode prices with; a path
+argument reads a saved copy instead. `packages/core/src/pricing/index.ts`
+matches a model and computes the cost.
+
+- A model id matches without its route or variant: a provider prefix
+  (`claude/`, `codex/`, `anthropic/`), Bedrock's `anthropic.`, Vertex's
+  `@date`, a `[1m]` context tag, an effort suffix (`-high`, `-xhigh`, `-max`)
+  and a release date. A Codex build (`gpt-5.1-codex`, `gpt-5.1-codex-max`) is
+  priced as its model; a smaller one (`gpt-5.1-codex-mini`) is not.
+- Claude Code writes its prompt cache for an hour, and its transcripts show
+  nearly every write at that lifetime. Anthropic bills it at twice the input
+  rate, where the list gives the five-minute rate, so the Claude provider's
+  rows use twice the input rate. OpenCode and pi keep the listed rate.
+- A rate the list leaves out is the input rate, which is what a provider
+  without a cache discount bills.
+- Rates are the base tier. A request past a long-context threshold (Claude
+  Haiku 5.5 past 100K tokens, GPT-6 past 272K, Grok past 200K) costs more, and
+  the journal keeps one sum per turn, not each request's size, so such usage
+  is underestimated.
+- Tokens are what the agent reported for the turn. Claude's `usage` leaves out
+  a compaction summary and the CLI's own side requests, which its
+  `total_cost_usd` includes, so a Claude turn that reported no tokens costs
+  nothing here.
+- A model the list does not know, including a provider's default model
+  recorded as null, keeps the cost its agent reported: the Claude SDK's
+  `total_cost_usd`, an ACP `usage_update` priced in USD, or pi's reported cost.
+  A row with neither has no price, and the cost measure names its provider
+  under the chart instead of counting it as free. Grok reports no tokens, so
+  it stays unpriced even with rates.
+
+Rates come before a reported cost because the reported figures were wrong
+where they mattered. Codex and Grok report none. Claude's `total_cost_usd` is
+a running total the driver takes apart: when a resumed CLI restored less than
+the journal held, the turn used to be charged the whole restored total, and
+the journal's larger sum made the next resume do the same, so a long thread
+grew to several times what its tokens cost.
+
 Claude's `total_cost_usd` is a running total: it grows across the turns of a
 warm process, and a process that resumes a session restores it. The driver
 charges each turn the difference, reading the earlier turns of the session from
 the journal, and takes the total as it stands when the CLI started from zero.
+A resumed total below what the journal already charged means the CLI restored
+less than the journal holds: the turn's share is unknown, so it records no
+cost and the usage page prices its tokens.
 The ACP `usage_update` cost is the session's running total in the same way,
 and each turn is charged what it added. The driver measures from the last
 total the same process reported, in an earlier turn, between turns or while a
@@ -294,20 +346,30 @@ phone both pages are under Settings > Machines, as Usage and Limits.
 ## The fake client
 
 `?fake=1` draws a believable ledger from `packages/ui/src/lib/fake-usage.ts`:
-eight providers with their own models, rhythm and prices (none for Codex, Grok,
-Antigravity, Antigravity CLI and Muse Code), a few turns without usage, and threads that match the fake
-sidebar. Each day's numbers come from a generator seeded with the calendar date,
+eight providers with their own models, rhythm and prices. Claude, GPT-6.1 Sol
+and pi's Sonnet carry public rates, OpenCode's default model a reported cost,
+and Codex's default model, Grok, Antigravity, Antigravity CLI and Muse Code no
+price. One Claude model is recorded with its provider prefix, a few turns have
+no usage, and the threads match the fake sidebar. Each day's numbers come from a generator seeded with the calendar date,
 so a reload shows the same history. Turns finished in the fake session are
 added on top, and the uninstalled mode (`?fake=1&uninstalled=1`) starts empty.
 
 ## Tests
 
 - `packages/core/test/usage-history.test.ts`: edge boundaries, the provider and
-  model split, turns without usage, the Codex cache subtraction, legacy turns,
-  the top threads union, provider filtering, refused parameters and one real echo turn.
+  model split, turns without usage, the Codex cache subtraction, pricing at
+  public rates over an inflated reported cost, the hour cache write, the
+  reported fallback, legacy turns, the top threads union, provider filtering,
+  refused parameters and one real echo turn.
+- `packages/core/test/pricing.test.ts`: model id matching, the cache write
+  rates, missing rates and the price list's coverage.
+- `packages/core/test/claude.session.test.ts`: the warm running total, a
+  resumed CLI with and without its totals, and one that restored less than the
+  journal holds.
 - `packages/ui/src/lib/usage.test.ts`: day edges, axis steps, the fixed colour
   order, unused and custom providers, reporting coverage, provider-scoped model
-  names, the summaries and the fake ledger.
+  names, prefixed models sharing a row, the price notes, the summaries and the
+  fake ledger.
 - `packages/ui/src/components/UsagePage.test.ts`: read failures and retry,
   stale responses after range or machine changes, legacy provider identities,
   and older cores that ignore the provider filter.
