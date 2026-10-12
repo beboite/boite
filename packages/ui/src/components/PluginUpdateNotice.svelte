@@ -107,8 +107,7 @@
     padding: 10px 12px;
     border: 1px solid var(--color-border);
     border-radius: var(--radius-lg);
-    background: color-mix(in srgb, var(--color-surface-2) 96%, transparent);
-    backdrop-filter: blur(10px);
+    background: var(--color-surface-2);
     box-shadow: var(--shadow-e3);
     overflow: hidden;
     animation: rise var(--dur-3) var(--ease-out-quint);
