@@ -199,7 +199,8 @@ export class GroupLinks {
 
   /** The member of the group this machine is: what it says itself, or what the group said when it brought it. */
   static coreOf(machine: Machine): string | undefined {
-    return machine.store.group?.self ?? machine.coreId;
+    // A machine this device's key opens says which it is before it answered: the id its hellos are signed for.
+    return machine.store.group?.self ?? machine.coreId ?? signsFor(machine.id);
   }
 
   async reconcile(): Promise<void> {
