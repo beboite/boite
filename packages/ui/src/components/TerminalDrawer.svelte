@@ -1,11 +1,12 @@
 <script lang="ts">
-  import { ChevronDown, Columns2, Plus, Rows2, X } from '@lucide/svelte';
+  import { ChevronDown, Columns2, History, Plus, Rows2, Search, X } from '@lucide/svelte';
   import { onMount, untrack } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import { MAX_THREAD_TERMINALS, type ThreadId } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import { MAX_PANES, activeTab, paneNumber, panesOf, terminalIdOf, type TerminalTab } from '../lib/terminal-layout';
+  import { baseName } from '../lib/terminal-marks';
   import type TerminalView from './TerminalView.svelte';
 
   /**
@@ -38,6 +39,9 @@
   let more = $derived(layout !== null && store.terminalsMultiple() && panesOf(layout).length < MAX_THREAD_TERMINALS);
   let splits = $derived(more && !narrow.current && layout !== null && activeTab(layout).panes.length < MAX_PANES);
   let hideLabel = $derived(store.keyLabel('terminal'));
+  /** The screen with the keyboard: its shell, its live directory and whether a command runs. */
+  let screen = $derived(layout === null ? null : store.terminalScreen(layout.active));
+  let liveCwd = $derived(screen?.cwd ?? cwd);
 
   function readHeight(): number {
     try {
@@ -57,8 +61,31 @@
     return key ? `${label} (${key})` : label;
   }
 
+  /** A tab is named after the directory its shells are in, as Windows Terminal titles it, else by number. */
   function tabLabel(tab: TerminalTab): string {
-    return fill(strings.terminal.tab, { n: tab.panes.map((pane) => paneNumber(threadId, pane)).join(' | ') });
+    return tab.panes.map((pane) => {
+      const where = store.terminalScreen(pane)?.cwd;
+      return where ? baseName(where) : fill(strings.terminal.tab, { n: String(paneNumber(threadId, pane)) });
+    }).join(' | ');
+  }
+
+  function tabTitle(tab: TerminalTab): string {
+    return tab.panes.map((pane) => store.terminalScreen(pane)?.cwd ?? cwd).join('\n');
+  }
+
+  /** `running`, `failed` or nothing: the dot after a tab's or the drawer's name. */
+  function statusOf(panes: string[]): 'running' | 'failed' | null {
+    const screens = panes.map((pane) => store.terminalScreen(pane));
+    if (screens.some((entry) => entry?.running)) return 'running';
+    if (screens.some((entry) => entry?.lastExit !== null && entry?.lastExit !== undefined && entry.lastExit !== 0 && !entry.running)) return 'failed';
+    return null;
+  }
+
+  function statusTitle(panes: string[]): string {
+    const status = statusOf(panes);
+    if (status === 'running') return strings.terminal.running;
+    const failed = panes.map((pane) => store.terminalScreen(pane)).find((entry) => entry?.lastExit);
+    return status === 'failed' ? fill(strings.terminal.failed, { code: String(failed?.lastExit ?? '') }) : '';
   }
 
   function showTab(tab: TerminalTab): void {
@@ -151,12 +178,13 @@
           {#each tabs as tab (tab.id)}
             {@const selected = tab === shown}
             <div class="tab" class:selected data-testid="terminal-tab">
-              <button type="button" class="ghost label ui-label" role="tab" aria-selected={selected} title={cwd}
+              <button type="button" class="ghost label ui-label" role="tab" aria-selected={selected} title={tabTitle(tab)}
                 onclick={() => showTab(tab)}>
                 {#if tab.panes.length > 1}
                   {#if tab.direction === 'row'}<Columns2 size={13} strokeWidth={1.75} />{:else}<Rows2 size={13} strokeWidth={1.75} />{/if}
                 {/if}
                 {tabLabel(tab)}
+                {#if statusOf(tab.panes)}<span class="status {statusOf(tab.panes)}" title={statusTitle(tab.panes)} data-testid="terminal-status"></span>{/if}
               </button>
               <button type="button" class="ghost close" title={strings.terminal.closeTab} aria-label={strings.terminal.closeTab}
                 data-testid="terminal-tab-close" onclick={() => closeTab(tab)}>
@@ -166,10 +194,23 @@
           {/each}
         </div>
       {:else}
-        <span class="title ui-label">{strings.terminal.title}</span>
-        <span class="cwd ui-label" title={cwd}>{cwd}</span>
+        {@const status = layout === null ? null : statusOf([layout.active])}
+        <span class="title ui-label">{screen?.shell?.name ?? strings.terminal.title}</span>
+        <span class="cwd ui-label" title={liveCwd} data-testid="terminal-cwd">{liveCwd}</span>
+        {#if status}<span class="status {status}" title={statusTitle([layout!.active])} data-testid="terminal-status"></span>{/if}
       {/if}
       <span class="spacer"></span>
+      <button type="button" class="ghost icon" title={titled(strings.terminal.find, 'terminal-find')}
+        aria-label={strings.terminal.find} data-testid="terminal-find-open" disabled={screen === null}
+        onclick={() => screen?.openSearch()}>
+        <Search size={14} strokeWidth={1.75} />
+      </button>
+      <button type="button" class="ghost icon" title={titled(strings.terminal.history, 'terminal-history')}
+        aria-label={strings.terminal.history} data-testid="terminal-history-open" disabled={screen === null}
+        onclick={() => screen?.openHistory()}>
+        <History size={15} strokeWidth={1.75} />
+      </button>
+      <span class="divider" aria-hidden="true"></span>
       {#if more}
         <button type="button" class="ghost icon" title={titled(strings.terminal.new, 'terminal-new')}
           aria-label={strings.terminal.new} data-testid="terminal-new" onclick={() => store.newTerminal(threadId)}>
@@ -381,6 +422,37 @@
   .tab .close:hover { color: var(--color-foreground); }
 
   .spacer { flex: 1; }
+
+  .divider {
+    flex: none;
+    width: 1px;
+    height: 14px;
+    margin: 0 2px;
+    background: var(--color-border);
+  }
+
+  /* After a name: the accent breathing while a command runs, red once one failed. */
+  .status {
+    flex: none;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+  }
+
+  .status.running {
+    background: var(--color-accent);
+    animation: status-running 1.2s var(--ease-out-quint) infinite;
+  }
+
+  .status.failed { background: var(--ansi-red); }
+
+  @keyframes status-running {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  @media (prefers-reduced-motion: reduce) { .status.running { animation: none; } }
+  :global(html[data-motion='reduced']) .status.running { animation: none; }
 
   .icon {
     width: var(--control-sm);

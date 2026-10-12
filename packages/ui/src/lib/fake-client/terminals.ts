@@ -20,6 +20,13 @@ export function closeThreadTerminals(ctx: FakeContext, threadId: ThreadId): void
   for (const id of [...ctx.terminals.keys()]) if (isThreadTerminal(threadId, id)) closeTerminal(ctx, id);
 }
 
+const MARK = '\x1b]133;';
+
+/** The prompt of the core's integrated PowerShell: marked, with the directory it is in. */
+function prompt(cwd: string): string {
+  return `${MARK}A\x07\x1b]633;P;Cwd=${cwd}\x07PS ${cwd}> ${MARK}B\x07`;
+}
+
 export function terminalMethods(ctx: FakeContext) {
   return {
     'terminals.open': async (params) => {
@@ -29,9 +36,9 @@ export function terminalMethods(ctx: FakeContext) {
         throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `terminalId must be term-2 to term-${MAX_THREAD_TERMINALS}, not ${JSON.stringify(params.terminalId)}`, data: { field: 'terminalId', expected: `term-2 to term-${MAX_THREAD_TERMINALS}` } });
       }
       const id = threadTerminalId(thread.id, params.terminalId);
-      if (!ctx.terminals.has(id)) ctx.terminals.set(id, { cwd: thread.cwd, output: `PS ${thread.cwd}> `, line: '' });
+      if (!ctx.terminals.has(id)) ctx.terminals.set(id, { cwd: thread.cwd, output: prompt(thread.cwd), line: '', history: [] });
       const shell = ctx.terminals.get(id)!;
-      return { id, cwd: shell.cwd, output: shell.output, sequence: shell.sequence ?? 0 };
+      return { id, cwd: shell.cwd, output: shell.output, sequence: shell.sequence ?? 0, shell: { name: 'pwsh', kind: 'powershell' as const, integrated: true } };
     },
     'terminals.list': async (params) => {
       const thread = ctx.threads.get(params.threadId);
@@ -55,7 +62,17 @@ export function terminalMethods(ctx: FakeContext) {
             closeTerminal(ctx, params.id);
             return { ok: true };
           }
-          echo += `\r\n${typed.length > 0 ? `${typed}\r\n` : ''}PS ${shell.cwd}> `;
+          if (params.id.startsWith('login:')) {
+            // A sign-in shell starts without the integration, as the core's does: no marks.
+            echo += `\r\n${typed.length > 0 ? `${typed}\r\n` : ''}PS ${shell.cwd}> `;
+          } else if (typed.length === 0) {
+            echo += `\r\n${MARK}D;0\x07${prompt(shell.cwd)}`;
+          } else {
+            shell.history.push(typed);
+            // `fail` stands for any command that ends badly, so the red dot can be seen.
+            const status = typed.startsWith('fail') ? 1 : 0;
+            echo += `\r\n${MARK}C\x07${typed}\r\n${MARK}D;${status}\x07${prompt(shell.cwd)}`;
+          }
         } else if (char === '\x7f') {
           if (shell.line.length > 0) { shell.line = shell.line.slice(0, -1); echo += '\b \b'; }
         } else if (char >= ' ') {
@@ -73,6 +90,11 @@ export function terminalMethods(ctx: FakeContext) {
     'terminals.resize': async (params) => {
       if (!ctx.terminals.has(params.id)) throw ctx.notFound('terminal', params.id);
       return { ok: true };
+    },
+    'terminals.history': async (params) => {
+      const shell = ctx.terminals.get(params.id);
+      if (!shell) throw ctx.notFound('terminal', params.id);
+      return { commands: [...new Set([...shell.history].reverse())] };
     },
     'terminals.close': async (params) => {
       closeTerminal(ctx, params.id);

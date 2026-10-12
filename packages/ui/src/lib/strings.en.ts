@@ -1792,7 +1792,19 @@ export const strings = {
     splitRight: 'Split right',
     splitDown: 'Split down',
     closeTab: 'Close the tab',
-    resizePanes: 'Resize the split'
+    resizePanes: 'Resize the split',
+    find: 'Find in the terminal',
+    history: 'Recent commands',
+    historySearch: 'Search the commands',
+    historyEmpty: 'No command in this shell\'s history yet',
+    historyNone: 'No command matches',
+    historyOld: 'This machine runs an older Boite that cannot list them',
+    historyLoading: 'Reading the history',
+    /** Under the list: what the keys do with the command picked. */
+    historyHint: 'Enter runs it, Shift+Enter puts it at the prompt',
+    running: 'A command is running',
+    /** `exit 1`: the status of the last command, which failed. */
+    failed: 'The last command failed (exit {code})'
   },
 
   trace: {
@@ -2122,6 +2134,8 @@ export const strings = {
     terminalCursorBar: 'Bar',
     terminalCursorBlock: 'Block',
     terminalCursorUnderline: 'Underline',
+    terminalGpu: 'Draw terminals on the GPU',
+    terminalGpuHint: 'Smoother scrolling and output. Turn it off if a terminal draws badly on this device; it applies to terminals opened next.',
     connection: 'Connection',
     localCore: 'This app runs on the core it started on this computer.',
     pair: 'Pair',
@@ -2265,6 +2279,10 @@ export const strings = {
       terminalSplit: 'Split the terminal right',
       terminalSplitVertical: 'Split the terminal down',
       terminalClose: 'Close the terminal',
+      terminalFind: 'Find in the terminal',
+      terminalHistory: 'Recent commands of the shell',
+      terminalPreviousCommand: 'Go to the previous command',
+      terminalNextCommand: 'Go to the next command',
       /** `Go to thread 3`: the third row of the sidebar, as drawn. */
       thread: 'Go to thread {n}'
     }
