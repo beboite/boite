@@ -51,7 +51,7 @@ test('the click takes over the press: no second subscribe or page, and what stre
 });
 
 test('a press that never becomes a click gives its subscription back, and never one something else holds', async () => {
-  const { store, client, asked, landed } = await ready();
+  const { store, client, asked, landed, pages } = await ready();
   try {
     const release = store.preload('t-descriptors');
     await vi.waitFor(() => expect(client.coreSubscribers).toContain('t-descriptors'));
@@ -70,6 +70,8 @@ test('a press that never becomes a click gives its subscription back, and never 
     await store.selectDelegatedAgent('t-team-running');
     const child = store.preload('t-team-running');
     // Released only once its page answered, so a wrong give-back would have been sent by now.
+    // The panel's own read carries no limit: the one page counted is the press's.
+    expect(pages('t-team-running')).toHaveLength(1);
     await landed('t-team-running');
     child();
     for (let tick = 0; tick < 3; tick++) await new Promise(resolve => setTimeout(resolve, 0));
