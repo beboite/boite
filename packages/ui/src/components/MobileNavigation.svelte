@@ -29,6 +29,7 @@
   import ProjectThreadCounters from './ProjectThreadCounters.svelte';
   import ProjectShelf from './ProjectShelf.svelte';
   import DraftRow from './DraftRow.svelte';
+  import GroupLabel from './GroupLabel.svelte';
   import ProjectTile from './ProjectTile.svelte';
   import { projectKey, projectView, type ProjectEntry } from '../lib/project-view.svelte';
   import { activeProject, archiveCount, projectThreadView } from '../lib/project-threads.svelte';
@@ -145,8 +146,9 @@
     show('chat');
   }
   async function newThread() {
-    if (screen === 'threads' && workspace.view === 'recent' && selected) await workspace.select(selected.machine.store, undefined, selected.project.id);
-    else store.startDraft(project?.id);
+    // Always a new draft: one already written stays in the list, where it was.
+    if (screen === 'threads' && workspace.view === 'recent' && selected) await workspace.select(selected.machine.store, undefined, selected.project.id, { fresh: true });
+    else store.startDraft(project?.id, { fresh: true });
     show('chat');
   }
   /** The projects a project moves among: its own fold as drawn, or the one list a search shows. */
@@ -231,7 +233,7 @@
         {@const workingRows = groupRows.filter(row => workingThread(row.machine.store, row.thread))}
         {@const attentionRows = query || !recentPreferences.groupWorking ? groupRows : groupRows.filter(row => workingOpen ? !workingThread(row.machine.store, row.thread) : !groupWorkingThread(group.machine.store, row.thread))}
         {@const controls = `mobile-project-${encodeURIComponent(projectKey(group))}`}
-        {@const draft = group.machine.store.draftEntries.find(entry => entry.projectId === group.project.id)}
+        {@const drafts = group.machine.store.draftEntries.filter(entry => entry.projectId === group.project.id)}
         {#if !query || groupRows.length > 0 || doneOpen || archivedOpen}
         <section class="project-group" class:inactive={!activeProject(group)} data-testid="mobile-project-group" data-project-id={group.project.id} data-machine-id={group.machine.id}>
           <div class="project-heading">
@@ -244,27 +246,27 @@
               ]} onpick={action => projectView.step(foldOf(group), projectKey(group), action === 'up' ? -1 : 1)} label={strings.sidebar.customOrder} placement="bottom" variant="ghost" testid="mobile-project-order"><Ellipsis size={18} /></Menu>
             {/if}
           </div>
-          {#if draft && !query}<DraftRow owner={group.machine.store} entry={draft} />{/if}
+          {#if !query}{#each drafts as draft (draft.id)}<DraftRow owner={group.machine.store} entry={draft} onopen={() => show('chat')} />{/each}{/if}
           <WindowList items={attentionRows} keyOf={row => JSON.stringify([row.machine.id, row.thread.id])} {scrollRoot} estimate={77} measurements={measurements(projectKey(group))}>
             {#snippet row(entry)}{@render threadRow(entry)}{/snippet}
           </WindowList>
           <div id="{controls}-working" hidden={!workingOpen || !!query || workingRows.length === 0} data-testid="project-working">
             {#if workingOpen && !query && workingRows.length > 0}
-              <p class="group-label">{strings.sidebar.workingThreads}</p>
+              <GroupLabel kind="working" count={workingRows.length} />
               <WindowList items={workingRows} keyOf={row => JSON.stringify([row.machine.id, row.thread.id])} {scrollRoot} estimate={77} measurements={measurements(`${projectKey(group)}:working`)}>
                 {#snippet row(entry)}{@render threadRow(entry)}{/snippet}
               </WindowList>
             {/if}
           </div>
           <div id="{controls}-done" hidden={!doneOpen} data-testid="project-done">
-            {#if doneOpen}<p class="group-label">{strings.sidebar.doneThreads}</p>{/if}
+            {#if doneOpen}<GroupLabel kind="done" count={query ? undefined : archiveCount(group.project, 'done')} />{/if}
             <RecentDone entries={[group]} {scrollRoot} {now} {query} open={doneOpen} header={false} onopen={() => show('chat')} />
           </div>
           <div id="{controls}-archived" hidden={!archivedOpen} data-testid="project-archived">
-            {#if archivedOpen}<p class="group-label">{strings.sidebar.archivedGroup}</p>{/if}
+            {#if archivedOpen}<GroupLabel kind="archived" count={query ? undefined : archiveCount(group.project, 'archived')} />{/if}
             <RecentDone kind="archived" entries={[group]} {scrollRoot} {now} {query} open={archivedOpen} header={false} onopen={() => show('chat')} />
           </div>
-          {#if groupRows.length === 0 && !group.project.archivedThreads && !draft}<p class="empty">{strings.sidebar.noThreads}</p>{/if}
+          {#if groupRows.length === 0 && !group.project.archivedThreads && drafts.length === 0}<p class="empty">{strings.sidebar.noThreads}</p>{/if}
         </section>
         {/if}
       {/each}
@@ -272,8 +274,7 @@
       {@render projectRows(query ? groups : activeGroups)}
       {#if !query}
         {#if groups.length > 0 && activeGroups.length === 0}<p class="empty">{strings.sidebar.noActiveProjects}</p>{/if}
-        <ProjectShelf kind="idle" entries={otherGroups} multi={several} {now} {scrollRoot} onopen={() => show('chat')} />
-        <ProjectShelf kind="archived" entries={shelved} multi={several} {now} {scrollRoot} onopen={() => show('chat')} />
+        <ProjectShelf idle={otherGroups} archived={shelved} multi={several} {now} {scrollRoot} onopen={() => show('chat')} />
       {/if}
       <WindowList items={rows.filter(row => row.thread.projectId === null)} keyOf={row => JSON.stringify([row.machine.id, row.thread.id])} {scrollRoot} estimate={77} measurements={measurements('unassigned')}>
         {#snippet row(entry)}{@render threadRow(entry)}{/snippet}
@@ -349,7 +350,6 @@
     .project-group { border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); margin-bottom: 12px; overflow: hidden; }
     .project-heading { display: flex; align-items: center; padding: 8px 12px; gap: 8px; background: var(--color-surface-2); color: var(--color-muted-foreground); border-bottom: 1px solid var(--color-border); }
     .project-heading h2 { margin: 0; flex: 1; min-width: 0; font-size: var(--text-sm); overflow-wrap: anywhere; }
-    .group-label { margin: 0; padding: 8px 12px; border-top: 1px solid var(--color-border); color: var(--color-subtle); font-size: var(--text-xs); }
     .project-heading span { display: block; font-size: var(--text-xs); font-weight: 400; color: var(--color-muted-foreground); }
     .row { display: flex; align-items: center; border-bottom: 1px solid var(--color-border); padding-right: 4px; }
     .row:last-child { border-bottom: 0; }

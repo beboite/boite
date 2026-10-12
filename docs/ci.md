@@ -132,10 +132,10 @@ The tested installer becomes the release artifact.
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 591,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,475,000 |
+| UI entry chunk | 593,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,620,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 3,760,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 3,912,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
@@ -163,11 +163,94 @@ limits were 4,466,000 and 3,744,000, the branch measured 4,469,022 and
 3,749,375 on Linux, about 3,755,400 core bytes on Windows. The limits rise to
 4,475,000 and 3,760,000.
 
+On 2026-10-11 on Linux with Bun 1.4.2, `main` at `4762402b` measured 4,471,508
+UI bytes with a 581,473-byte entry chunk. Several drafts per project, the
+composer's own undo history and image-carrying copy, the work counts on the
+Threads/Agents switch, the merged project fold, thread-like done rows with long
+press and their English/French sentences measured 4,493,255 and 590,779: 21,747
+bytes in all, 9,306 of them in the entry chunk. The display options panel loads
+on its own (6,646 bytes of JavaScript, 3,613 of CSS) to keep the entry chunk
+under its unchanged 591,000. The Windows job measured the same UI total. The UI
+limit rises to 4,500,000. Merged with `5dd77e39` and its review fixes, the
+Windows job measured a 591,007-byte entry chunk at `b294a3da`, and the next
+fixes 591,270 on Linux. A done row now loads with the first done rows (5,167
+bytes of JavaScript, 3,113 of CSS): the entry chunk measured 587,071 and the UI
+4,496,036. Merged with `daff9a53`, whose agent discussions had raised the UI
+limit to 4,500,000 on their own, the Windows job measured 591,322 and
+4,508,531 at `a1bd2cc4`. The project fold's rows now load at its first opening
+or after the list has drawn (7,250 bytes of JavaScript, 3,406 of CSS): on Linux
+the entry chunk measured 585,204, under its unchanged 591,000, and the UI
+4,511,041. The UI limit rises to 4,525,000.
+
+Later on 2026-10-11 on Linux with Bun 1.4.2, `main` at `5dd77e39` measured
+4,472,003 UI bytes and 3,749,519 core bytes, and settings cards (`boite
+settings`) on top of it 4,495,656 and 3,760,802; the Windows job measured
+3,760,540 core bytes for an earlier head of that branch. The core gains 11,283
+bytes for the card checks, the CLI and MCP commands; the UI 23,653 for the
+card, which loads outside the entry chunk, its English and French sentences
+and the shared checks in contracts. The entry chunk grows 5,016 bytes, to
+586,462. The limits rise to 4,499,000 and 3,767,000. `main` at `da347f40`,
+whose agent mail had raised the UI limit to 4,500,000 without this table,
+measured 4,485,829 UI bytes, a 585,698-byte entry chunk and 3,754,727 core
+bytes; merged with settings cards, 4,509,505, 590,714 and 3,766,024. The
+limits rise to 4,515,000, 593,000 and 3,772,000, the core keeping room for the
+Windows job's larger build.
+
+On 2026-10-12 on Linux with Bun 1.4.2, the latency pass (idle warm-up of the
+pages, kept Agents view, optimistic pin and archive, single permission answer)
+merged with `main` measured 4,513,690 UI bytes and a 591,872-byte entry chunk,
+within the limits above.
+
+Several drafts per project, merged with settings cards at `87fca361`, measured
+4,536,091 UI bytes and a 590,215-byte entry chunk on Linux: the done rows and
+the project fold's rows load outside the entry chunk, which stays under 593,000.
+Merged with `bafe8898`, whose diagnostic logs had raised the UI limit to
+4,581,000, the branch measured 4,606,394 UI bytes, a 591,099-byte entry chunk
+and 3,901,792 core bytes on Linux the same day. The UI limit rises to
+4,620,000.
+
 On 2026-10-10, `bun run build:ui` with Bun 1.4.2 measured 4,420,649 UI bytes at
 `feeb393b` and 4,425,557 with close confirmation and typed agent archival.
 The dialogs, input binding and English/French sentences add 4,908 bytes. The UI
 total limit increases by 5,000 bytes to 4,429,000, leaving 3,443 bytes; entry
 and core limits stay unchanged.
+
+On 2026-10-10 the Windows CI job printed 4,321.8 KB of UI and 3,623.0 KB of
+core JavaScript for `main`, and 4,481,389 and 3,815,569 bytes for the
+diagnostic logs branch. The UI gains about 56 KB for the Diagnostics page, the
+report dialog, the client error reporter and their English/French sentences;
+the core about 106 KB for the instrumentation of every subsystem, the
+anonymizer, the export and the `boite logs` and `boite issue` commands. A local
+Linux build of the same head measured 3,823,800 core bytes. The UI total limit
+becomes 4,493,000 (this increase on top of `main`'s own) and the core JavaScript
+limit 3,826,000; entry and core
+bundle limits stay unchanged.
+Merged with `ed68bd94` (group relay, project search, plugin updates), a local
+Linux build of the branch measured 4,511,575 UI bytes and 3,843,682 core
+bytes, and the limits become 4,520,000 and 3,852,000. Merged with `ffd433a4`,
+whose firewall check had raised `main`'s limits by 6,000 and 4,000 bytes, the
+branch measured 4,516,117 and 3,851,614 on Linux on 2026-10-11, and its limits
+take the same increase: 4,526,000 and 3,856,000. Merged with `b8dc6c21`, whose pairing
+card raised `main`'s limits by the same 6,000 and 4,000 bytes again, the
+branch measured about 4,519,200 and 3,851,600 the same day, and its limits
+become 4,532,000 and 3,860,000. The review fixes that followed (redaction
+before bounding, strict diagnostics parameters, safer file writes) brought the
+core to about 3,859,000 bytes on Linux on 2026-10-11, under 1 KB from its
+limit, so the core JavaScript limit rises by 4,000 to 3,864,000.
+Merged with `0b13bd40` and `957768a8`, whose reviewed goals raised `main`'s
+limits by 9,000 and 16,000 bytes, the branch measured about 4,524,600 and
+3,868,100 on Linux on 2026-10-11, and its limits take the same increase:
+4,541,000 and 3,880,000.
+Merged with `e7b2b8c8`, whose agent mail raised `main`'s UI limit by 25,000
+bytes to 4,500,000, the branch's UI limit takes the same increase: 4,566,000.
+`main` kept its core limit while its own changes grew the merged core by about
+10,400 bytes: the branch measured about 4,542,500 UI bytes and 3,879,700 core
+bytes on Linux on 2026-10-12, 300 bytes under its core limit, which rises to
+3,900,000.
+Merged with `87fca361`, whose settings cards raised `main`'s limits by 15,000
+UI bytes, 2,000 entry bytes and 12,000 core bytes, the branch measured
+4,567,439 UI bytes and 3,891,447 core bytes on Linux on 2026-10-12, and its
+limits take the same increases: 4,581,000, 593,000 and 3,912,000.
 
 On 2026-10-03, fresh builds of `e1f00a3` measured 2,695,204 core bytes and 3,932,309
 UI bytes. The orchestration additions measured 3,228,444 and 3,943,301 bytes:

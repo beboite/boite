@@ -19,7 +19,6 @@ test('text and icons share a vertical centre across reading fonts, menus and pho
     ['[data-testid="composer-picker"]', '[data-testid="composer-picker"] .label'],
     ['[data-testid="composer-effort"]', '[data-testid="composer-effort"]'],
     ['[data-testid="composer-mode"]', '[data-testid="composer-mode"]'],
-    ['[data-testid="project-sort"]', '[data-testid="project-sort"]'],
   ];
   for (const font of ['inter', 'geist', 'plex', 'atkinson', 'figtree', 'source', 'dm', 'system']) {
     await page.evaluate(`(async () => {

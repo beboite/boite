@@ -73,11 +73,11 @@ async function missionJourney() {
     const run = (await c.call('agents.snapshot', {})).runs.find(r => r.status === 'running');
     await c.call('agents.decision.request', { threadId: run.threadId, prompt: 'Which prototype should I explore?', options: ['Puzzle', 'Simulation'], requestId: 'e2e_decision_request' });
   })()`);
-  // The thread list shows the agent waiting on the user; its thread says whose it is and leads back to it.
+  // The switch over the thread list counts the agent at work and turns to the waiting colour; its thread says whose it is and leads back to it.
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   await page.evaluate(`window.__boiteTest.workspace.active.showChat()`);
-  await page.waitFor(`document.querySelector('[data-testid="agents-at-work"]')?.textContent.includes('Mira')`);
-  await page.waitFor(`document.querySelector('[data-testid="agents-at-work"]').textContent.includes('Needs you')`);
+  await page.waitFor(`document.querySelector('[data-testid="agents-at-work"]')?.dataset.waiting === 'true'`);
+  expect(Number(await page.evaluate(`document.querySelector('[data-testid="agents-at-work"]').dataset.count`))).toBeGreaterThan(0);
   await capture('agents-at-work-desktop.png');
   await page.evaluate(`(async () => { const { workspace } = window.__boiteTest; const snap = await workspace.active.client.call('agents.snapshot', {}); const work = snap.work.find(w => w.id === snap.decisions.at(-1).workId); await workspace.active.open(snap.runs.find(r => r.id === work.runId).threadId); })()`);
   await page.waitFor(`document.querySelector('[data-testid="agent-owner-bar"]')?.textContent.includes('Mira runs this thread')`);

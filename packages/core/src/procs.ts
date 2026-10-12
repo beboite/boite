@@ -7,6 +7,7 @@ import type { Journal } from './journal.ts';
 import { MemoryGuard } from './memory-guard.ts';
 import type { MemoryProcess } from './memory-guard-logic.ts';
 import { processPlatform } from './platform/index.ts';
+import { type KnownProcess, type ProcessIdentity, unseenIdentity } from './process-identity.ts';
 import { stopGroup } from './platform/posix-kill.ts';
 import type { GuardStatus, NativeProcessExit, NativeProcessInfo, ProcessPlatform } from './platform/types.ts';
 import { ResourceCollection } from './resource-usage.ts';
@@ -78,17 +79,6 @@ interface Entry {
   usage(): { cpuMs: number; peakMemoryBytes: number } | null;
 }
 
-interface ProcessIdentity {
-  startedAt: number | null;
-  incarnation: string | null;
-}
-
-interface KnownProcess {
-  identity: ProcessIdentity;
-  incarnations: Set<string>;
-  recordedAt: number;
-}
-
 /** How far a value moves before the load is worth another `thread.updated`. */
 const CPU_EPSILON_PERCENT = 1;
 const MEMORY_EPSILON_BYTES = 1024 * 1024;
@@ -118,6 +108,8 @@ export interface ProcRegistryOptions {
    * background work); the core passes its own builder.
    */
   summarize?: (thread: ThreadSummary) => ThreadSummary;
+  /** Persists what the platform and the guards say, which the live log only names. */
+  diagnostic?: (message: string, context: { event: string; threadId?: ThreadId; data?: Record<string, string | number | null> }) => void;
 }
 
 /**
@@ -163,7 +155,7 @@ export class ProcRegistry {
     private readonly journal: Journal,
     private readonly bus: Bus,
     private readonly platform: ProcessPlatform = processPlatform,
-    options: ProcRegistryOptions = {},
+    private readonly options: ProcRegistryOptions = {},
   ) {
     this.memory = new MemoryGuard(bus, platform);
     this.resources = new ResourceCollection(platform);
@@ -184,8 +176,9 @@ export class ProcRegistry {
       exited: (threadId, pid, exit) => {
         this.onJobExited(threadId, pid, exit);
       },
-      note: (threadId, _message) => {
+      note: (threadId, message) => {
         this.bus.emit('core.log', { level: 'warn', message: 'the process platform reported a warning', source: 'process', event: 'platform.warning', threadId, at: Date.now() });
+        try { options.diagnostic?.(`Process platform: ${message}`, { event: 'platform.warning.detail', threadId }); } catch { /* Observability must not break the platform's callback. */ }
       },
       memoryLimit: (threadId, kind) => {
         this.memory.memoryLimit(threadId, kind);
@@ -213,8 +206,9 @@ export class ProcRegistry {
           at: Date.now(),
         });
       },
-      note: (_message) => {
+      note: (message) => {
         this.bus.emit('core.log', { level: 'warn', message: 'the process guard reported a warning', source: 'process', event: 'guard.warning', at: Date.now() });
+        try { options.diagnostic?.(`Focus and audio guard: ${message}`, { event: 'guard.warning.detail' }); } catch { /* Observability must not break the guard's callback. */ }
       },
     });
     this.loadTimer = setInterval(() => {
@@ -471,6 +465,10 @@ export class ProcRegistry {
 
     const attached = this.platform.attach(threadId, pid);
     if (!attached) this.unassigned.add(pid);
+    // The child already runs: a failing log must not leave it unregistered, out of the trace and of killTree.
+    if (!attached && this.capability().mode === 'events') {
+      try { this.options.diagnostic?.(`pid ${pid} could not join the job of its thread: no CPU cap, memory cap or tree kill applies to it`, { event: 'job.assign-failed', threadId, data: { pid } }); } catch { /* see above */ }
+    }
     if (control.startup && attached && this.platform.startup) {
       this.finishStartup(threadId);
       this.platform.startup(threadId, true);
@@ -597,7 +595,18 @@ export class ProcRegistry {
     return measured;
   }
 
+  /** When the core last asked each thread's processes to stop: a signal after that is its own stop, not a crash. */
+  private readonly stopsAsked = new Map<ThreadId, number>();
+  /** Whether the core asked this thread's processes to stop at or after `since` (wall time). */
+  stopAskedSince(threadId: ThreadId, since: number): boolean {
+    const at = this.stopsAsked.get(threadId);
+    return at !== undefined && at >= since;
+  }
+
   killTree(threadId: ThreadId): number {
+    this.stopsAsked.delete(threadId);
+    this.stopsAsked.set(threadId, Date.now());
+    if (this.stopsAsked.size > 1024) this.stopsAsked.delete(this.stopsAsked.keys().next().value!);
     this.finishStartup(threadId);
     const byPid = this.live.get(threadId);
     const entries = byPid === undefined ? [] : [...byPid.values()];
@@ -696,8 +705,8 @@ export class ProcRegistry {
       stopped.push(record.pid);
       this.bus.emit('core.log', {
         level: 'info',
-        message: `pid ${record.pid} was left running with no parent and was stopped`,
-        source: 'process', event: 'process.orphan-stopped', threadId,
+        message: `pid ${record.pid} (${record.exe.split(/[\\/]/).pop() || 'unknown'}) was left running with no parent and was stopped`,
+        source: 'process', event: 'process.orphan-stopped', threadId, data: { pid: record.pid, exe: record.exe.split(/[\\/]/).pop() || null },
         at: Date.now(),
       });
     }
@@ -881,15 +890,6 @@ function bornAfter(parent: Entry, child: Entry): boolean {
     catch { /* A platform without numeric native identities uses its birth clock. */ }
   }
   return nativeBirth(parent) > nativeBirth(child);
-}
-
-function unseenIdentity(next: ProcessIdentity, previous: KnownProcess): boolean {
-  if (next.incarnation !== null && previous.identity.incarnation !== null) {
-    return !previous.incarnations.has(next.incarnation);
-  }
-  // An unknown event is kept conservative: today's occupant cannot identify
-  // an earlier event for a short-lived process that has already exited.
-  return next.startedAt !== null && previous.identity.startedAt !== null && next.startedAt > previous.identity.startedAt;
 }
 
 function worthPushing(previous: ThreadLoad | undefined, next: ThreadLoad): boolean {

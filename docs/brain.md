@@ -73,6 +73,16 @@ session keeps the guide; a replacement session receives it again. The brain's
 own instructions still go every normal turn while sharing is enabled.
 Coordination and delegation add compact feature instructions. Full command
 formats stay behind `boite help` and `boite workflow help`.
+
+While agents may read diagnostics (`agentLogAccess`, on unless the owner turns
+it off), the guide also points at `boite logs problems` and lists Boite's
+built-in skills with their path. Built-in skills live in
+`packages/core/src/builtin-skills.ts` and are written to
+`<dataDir>/skills/<name>/SKILL.md` the first time a guide names them, and
+again when a new core ships a different text. Today there is one,
+`boite-report-issue`: read the app's anonymized logs, explain what failed,
+then draft a GitHub issue and submit it only on the user's yes
+([trace](trace.md#structured-diagnostics)).
 The Boite guide switch retains its saved preference independently of sharing.
 With the guide on, the separate `boite ask` note is not added, and with
 "Asynchronous questions" off, the guide leaves its `boite ask` line out. The

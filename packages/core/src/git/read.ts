@@ -5,6 +5,7 @@ import type { FileHandle } from 'node:fs/promises';
 import { lstat, open, readlink } from 'node:fs/promises';
 import type { Core } from '../core.ts';
 import { folderGone, messageOf, refused } from '../errors.ts';
+import { gitSubcommand, gitThread, logGit } from './git-log.ts';
 
 /**
  * What one side of a diff may weigh before it is refused outright. Well past
@@ -31,7 +32,8 @@ export const GIT_READ_TIMEOUT_MS = 30_000;
  */
 function spawnRead(core: Core, threadId: ThreadId, cwd: string, args: string[], needs: string) {
   try {
-    return core.procs.spawn(threadId, 'git', ['-c', 'core.fsmonitor=', ...args], { cwd, env: { GIT_OPTIONAL_LOCKS: '0' } });
+    // English messages whatever the locale (gettext reads LANGUAGE first): the log classifies git's failures by their text.
+    return core.procs.spawn(threadId, 'git', ['-c', 'core.fsmonitor=', ...args], { cwd, env: { GIT_OPTIONAL_LOCKS: '0', LANGUAGE: 'en' } });
   } catch (error) {
     // A spawn in a folder that is gone fails with the same ENOENT as a git that is not installed.
     if (!existsSync(cwd)) throw folderGone(cwd, { threadId, field: 'cwd' });
@@ -42,12 +44,15 @@ function spawnRead(core: Core, threadId: ThreadId, cwd: string, args: string[], 
 /**
  * Waits for `work`, and stops that one git by its own process when it has not
  * answered in time: the thread's other processes are the agent's, never touched.
+ * `onLate` runs only when the deadline fired, not for a read or exit failure.
  */
-async function bounded<T>(spawned: { proc: { kill(): void } }, cwd: string, args: string[], work: Promise<T>, timeoutMs = GIT_READ_TIMEOUT_MS): Promise<T> {
+async function bounded<T>(spawned: { proc: { kill(): void } }, cwd: string, args: string[], work: Promise<T>, timeoutMs = GIT_READ_TIMEOUT_MS, onLate: () => void = () => undefined): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const late = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
       spawned.proc.kill();
+      // A log that throws must not keep the timeout from being reported.
+      try { onLate(); } catch { /* the rejection below still runs */ }
       reject(refused(`git ${args[0] ?? ''} did not answer within ${timeoutMs / 1000} s in ${cwd}`, { args, cwd }));
     }, timeoutMs);
   });
@@ -60,23 +65,34 @@ async function bounded<T>(spawned: { proc: { kill(): void } }, cwd: string, args
 
 export async function git(core: Core, threadId: ThreadId, cwd: string, args: string[], timeoutMs = GIT_READ_TIMEOUT_MS): Promise<GitRun> {
   const spawned = spawnRead(core, threadId, cwd, args, 'reading the changes');
+  const at = performance.now();
   const [stdout, stderr, code] = await bounded(spawned, cwd, args, Promise.all([
     new Response(spawned.proc.stdout).text(),
     new Response(spawned.proc.stderr).text(),
     spawned.exited,
-  ]), timeoutMs);
+  ]), timeoutMs, () => logGitTimeout(core, threadId, args, timeoutMs, at));
+  try { logGit(core, threadId, args, code, performance.now() - at, stderr); } catch { /* A diagnostic storage failure must not break reads. */ }
   return { code, stdout, stderr };
+}
+
+/** A git read stopped at its deadline, under the same thread rule as `logGit`. */
+function logGitTimeout(core: Core, threadId: ThreadId, args: readonly string[], timeoutMs: number, at: number): void {
+  core.logs.warn(`git ${gitSubcommand(args)} gave no answer within ${timeoutMs / 1000} s and was stopped`, {
+    source: 'git', event: 'git.timeout', ...gitThread(threadId), durationMs: performance.now() - at, data: { subcommand: gitSubcommand(args), timeoutMs },
+  });
 }
 
 /** The same, for a blob: `git show` hands back bytes, and whether they are text is the question. */
 async function gitBytes(core: Core, threadId: ThreadId, cwd: string, args: string[]): Promise<{ code: number; data: Uint8Array }> {
   const spawned = spawnRead(core, threadId, cwd, args, 'reading a file at a ref');
+  const at = performance.now();
   // Drained with the rest, so a git that has something to say never blocks on a full pipe.
-  const [buffer, , code] = await bounded(spawned, cwd, args, Promise.all([
+  const [buffer, stderr, code] = await bounded(spawned, cwd, args, Promise.all([
     new Response(spawned.proc.stdout).arrayBuffer(),
     new Response(spawned.proc.stderr).text(),
     spawned.exited,
-  ]));
+  ]), GIT_READ_TIMEOUT_MS, () => logGitTimeout(core, threadId, args, GIT_READ_TIMEOUT_MS, at));
+  try { logGit(core, threadId, args, code, performance.now() - at, stderr); } catch { /* A diagnostic storage failure must not break reads. */ }
   return { code, data: new Uint8Array(buffer) };
 }
 

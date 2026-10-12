@@ -478,3 +478,89 @@ test('journal-check uses owner auth without a thread and refuses agent fallback'
   const scoped = await boite(['journal-check','--json']);
   expect(scoped.code).toBe(1); expect(scoped.err).toContain('owner-only outside');
 });
+
+describe('settings', () => {
+  const prompts = (): string[] => harness.core.journal.listMessages(threadId).filter((m) => m.role === 'user').map((m) => (m.parts[0]?.type === 'text' ? m.parts[0].text : ''));
+
+  test('lists what an agent may ask about, and a change card settles when the owner applies it', async () => {
+    const listed = await boite(['settings']);
+    expect(listed.code).toBe(0);
+    expect(listed.out).toContain('agentCpuCapPercent 75 resources#limits\n');
+    expect(listed.out).toContain('listenOnLan false machines#devices (changed from Settings only)');
+    expect(listed.out).not.toContain('subscriptionProxy');
+    expect(JSON.parse((await boite(['settings', 'agentCpuCapPercent', '--json'])).out)).toMatchObject({ key: 'agentCpuCapPercent', value: 75, sensitive: false });
+
+    const client = await harness.connect();
+    const first = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('turns.start', { threadId, prompt: 'hello' });
+    await first;
+
+    expect((await boite(['settings', 'request', 'agentCpuCapPercent', '60'])).code).toBe(2);
+    // The refusal names the keys, so an agent reading plain text can pick one.
+    expect((await boite(['settings', 'request', 'cpu', '60', '--why', 'x'])).err).toMatch(/not a setting an agent may ask about; the keys are .*agentCpuCapPercent/);
+    expect((await boite(['settings', 'request', 'agentCpuCapPercent', '75', '--why', 'x'])).err).toContain('already 75');
+    expect((await boite(['settings', 'request', 'agentCpuCapPercent', '"lots"', '--why', 'x'])).code).toBe(1);
+
+    const asked = await boite(['settings', 'request', 'agentCpuCapPercent', '60', '--why', 'Builds stall under the cap', '--json']);
+    expect(asked.code).toBe(0);
+    const { questionId } = JSON.parse(asked.out) as { questionId: string };
+    const [card] = await client.call('questions.list', { threadId });
+    expect(card).toMatchObject({ id: questionId, text: 'Builds stall under the cap', async: true, allowText: false, options: [{ id: 'refuse' }] });
+    expect(card?.setting).toEqual({ kind: 'change', key: 'agentCpuCapPercent', value: 60, previous: 75, page: 'resources', section: 'limits', sensitive: false });
+    expect((await boite(['settings', 'request', 'agentCpuCapPercent', '50', '--why', 'again'])).err).toContain('already open');
+    // Applied is the core's to say: an answer cannot claim it.
+    // Caught by hand: with `expect(...).rejects`, the next call crashed Bun 1.4.2 on Windows every time.
+    const claimed = await client.call('questions.answer', { threadId, questionId, optionIds: ['applied'] }).then(() => null, (error: unknown) => error);
+    expect(claimed instanceof Error ? claimed.message : String(claimed)).toContain('does not offer');
+
+    const next = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('settings.set', { agentCpuCapPercent: 60 });
+    await next;
+    expect(prompts()).toEqual(['hello', '> Builds stall under the cap\n\napplied: agentCpuCapPercent is now 60']);
+    const part = harness.core.journal.listMessages(threadId).flatMap((m) => m.parts).find((p) => p.type === 'question');
+    expect(part).toMatchObject({ setting: { key: 'agentCpuCapPercent' }, answer: { optionIds: ['applied'], value: 60 } });
+    expect(await client.call('questions.list', { threadId })).toEqual([]);
+  });
+
+  test('a card says when the user sets another value, refuses, or opens the page it points at', async () => {
+    const client = await harness.connect();
+    const first = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('turns.start', { threadId, prompt: 'hello' });
+    await first;
+    const ask = async (args: string[]): Promise<string> => {
+      const run = await boite([...args, '--json']);
+      expect(run.err).toBe('');
+      return (JSON.parse(run.out) as { questionId: string }).questionId;
+    };
+
+    await ask(['settings', 'request', 'agentMemoryBudgetPercent', '80', '--why', 'More room']);
+    let next = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('settings.set', { agentMemoryBudgetPercent: 70 });
+    await next;
+
+    const refused = await ask(['settings', 'request', 'warmProcessMinutes', '5', '--why', 'Faster follow-ups']);
+    next = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('questions.answer', { threadId, questionId: refused, optionIds: ['refuse'] });
+    await next;
+
+    expect((await boite(['settings', 'open', 'nowhere', '--why', 'x'])).err).toContain('not a Settings page');
+    // A second fragment is a typo, not another card.
+    expect((await boite(['settings', 'open', 'accounts#provider-claude#extra', '--why', 'x'])).code).toBe(2);
+    const opened = await ask(['settings', 'open', 'accounts#provider-claude', '--why', 'Sign in to Claude here']);
+    const [card] = await client.call('questions.list', { threadId });
+    expect(card?.setting).toEqual({ kind: 'open', page: 'accounts', section: 'provider-claude' });
+    next = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('questions.answer', { threadId, questionId: opened, optionIds: ['open'] });
+    await next;
+
+    const guarded = JSON.parse((await boite(['settings', 'request', 'focusGuard', 'false', '--why', 'Debug a window', '--json'])).out) as { setting: { sensitive: boolean } };
+    expect(guarded.setting.sensitive).toBe(true);
+
+    expect(prompts()).toEqual([
+      'hello',
+      '> More room\n\nchanged: the user set agentMemoryBudgetPercent to 70, not 80',
+      '> Faster follow-ups\n\nrefused: warmProcessMinutes stays 0',
+      '> Sign in to Claude here\n\nopened: the user opened Settings at accounts#provider-claude',
+    ]);
+  });
+});

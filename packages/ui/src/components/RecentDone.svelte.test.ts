@@ -3,12 +3,14 @@ import { flushSync, mount, unmount } from 'svelte';
 import { FakeClient } from '../lib/fake-client';
 import { Store } from '../lib/store.svelte';
 import type { ProjectEntry } from '../lib/project-view.svelte';
+import { projectName } from '../lib/format';
 import type { ThreadSummary } from '@boite/contracts';
 import RecentDone from './RecentDone.svelte';
 
 let mounted: ReturnType<typeof mount> | undefined;
 const sources: { client: FakeClient; store: Store; id: string }[] = [];
-const settle = async () => { for (let i = 0; i < 30; i++) { await Promise.resolve(); flushSync(); } };
+// The row component loads on its own with the first rows: loaded once here, later imports resolve in the same turn.
+const settle = async () => { await import('./DoneThread.svelte'); for (let i = 0; i < 30; i++) { await Promise.resolve(); flushSync(); } };
 afterEach(async () => {
   if (mounted) await unmount(mounted); mounted = undefined;
   for (const source of sources.splice(0)) { source.store.detach(); source.client.close(); }
@@ -37,6 +39,9 @@ test('Done loads only when expanded and restores the owning machine when thread 
   for (const call of calls) expect(call.mock.calls.filter(([method]) => method === 'threads.list')).toHaveLength(0);
   click('[data-testid=recent-done-toggle]'); await settle();
   expect(document.querySelectorAll('[data-testid=done-thread]')).toHaveLength(2);
+  // The project shows beside the row, and the row's button names it too, for a screen reader moving between buttons.
+  const project = projectName(entries()[0]!.project);
+  expect(document.querySelector('[data-machine-id=first][data-thread-id=t-trace] [data-testid=done-thread-open]')?.textContent).toContain(project);
   click('[data-machine-id=first][data-thread-id=t-trace] [data-testid=done-thread-restore]'); await settle();
   expect((await first.client.call('threads.get', { threadId: 't-trace' })).archived).toBe(false);
   expect((await second.client.call('threads.get', { threadId: 't-trace' })).archived).toBe(true);
@@ -118,7 +123,7 @@ test('archived threads are listed by when they were put away, not by their last 
   expect([...document.querySelectorAll('[data-testid=done-thread]')].map(row => (row as HTMLElement).dataset.threadId)).toEqual(['t-bench', 't-parser']);
 });
 
-test('a done thread is deleted from its own menu, opened by right click or by its button', async () => {
+test('a done thread is deleted from its own menu, opened by right click or a long press', async () => {
   const source = await ready('first');
   const props = $state({ entries: entries(), now: Date.now(), header: false, open: true });
   mounted = mount(RecentDone, { target: document.body, props });
@@ -129,9 +134,25 @@ test('a done thread is deleted from its own menu, opened by right click or by it
   row.dispatchEvent(rightClick);
   // The browser's own menu, the one a link would get, stays shut.
   expect(rightClick.defaultPrevented).toBe(true);
-  expect(contextMenu.current?.items.filter(item => !item.separator).map(item => item.id)).toEqual(['open', 'restore', 'copy', 'delete']);
+  expect(contextMenu.current?.items.filter(item => !item.separator).map(item => item.id)).toEqual(['open', 'restore', 'pr', 'copy', 'delete']);
   contextMenu.close();
-  click('[data-thread-id=t-trace] [data-testid=done-thread-menu]');
+  // No menu button on the row: a finger held on it opens the same menu, and the click that ends the press opens nothing.
+  expect(row.querySelector('[data-testid=done-thread-menu]')).toBeNull();
+  vi.useFakeTimers();
+  const touch = (type: string) => {
+    const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX: 14, clientY: 14 });
+    Object.defineProperties(event, { pointerType: { value: 'touch' }, isPrimary: { value: true } });
+    return event;
+  };
+  row.querySelector('[data-testid=done-thread-open]')!.dispatchEvent(touch('pointerdown'));
+  vi.advanceTimersByTime(499);
+  expect(contextMenu.current).toBeNull();
+  vi.advanceTimersByTime(1);
+  vi.useRealTimers();
+  expect(contextMenu.current?.items.filter(item => !item.separator).map(item => item.id)).toEqual(['open', 'restore', 'pr', 'copy', 'delete']);
+  const select = vi.spyOn(source.store, 'open');
+  click('[data-thread-id=t-trace] [data-testid=done-thread-open]');
+  expect(select).not.toHaveBeenCalled();
   const removals = vi.spyOn(source.client, 'call');
   // Picked twice before the core answers: one request, no refusal banner.
   const pick = contextMenu.current!.onpick;

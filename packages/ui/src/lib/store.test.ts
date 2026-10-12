@@ -745,7 +745,8 @@ test('a later navigation wins while the previous agent subscription is being rel
   const real = client.call.bind(client);
   vi.spyOn(client, 'call').mockImplementation(((method: string, params: { threadId?: string }) => {
     if (method === 'threads.unsubscribe' && params.threadId === 't-team-running') {
-      return new Promise(resolve => { release = () => { void real(method as never, params as never).then(resolve); }; });
+      // Nothing waits on this unsubscribe now: a close may drop it, and the store's catch must see that.
+      return new Promise((resolve, reject) => { release = () => { real(method as never, params as never).then(resolve, reject); }; });
     }
     return real(method as never, params as never);
   }) as typeof client.call);
@@ -972,7 +973,7 @@ test('uninstalled setup starts without account-dependent demo state', async ({ c
   expect(await client.call('scheduler.get', {})).toMatchObject({ running: [], queued: [] });
   // No folder yet: the app lands on a draft in the drafts, which nothing has made.
   expect(store.projects).toEqual([]);
-  expect(store.draft).toEqual({ projectId: null, worktree: false });
+  expect(store.draft).toEqual({ projectId: null, worktree: false, id: expect.any(String), createdAt: expect.any(Number) });
   expect((await client.call('sessions.list', {})).length).toBeGreaterThan(0);
 });
 

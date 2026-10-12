@@ -55,11 +55,14 @@ async function capture(name: string) {
 async function type(value: string) {
   await page.evaluate(`(() => { const el = document.querySelector('${id('composer-input')}'); el.value = ${JSON.stringify(value)}; el.dispatchEvent(new Event('input', {bubbles:true})); })()`);
 }
-async function leaveSettings() {
+/** Back to the chat; on a phone through the list, reopening the draft written as `draft` when there is one, else a new one. */
+async function leaveSettings(draft?: string) {
   if (await page.evaluate(`!!document.querySelector('${id('settings-back')}')`)) await page.click(id('settings-back'));
   else {
     await mobileAction(page, 'mobile-conversations');
-    await page.click(id('mobile-new'));
+    const row = `[...document.querySelectorAll('${id('draft-row')}')].find(row => row.title === ${JSON.stringify(draft ?? '')})`;
+    if (draft) { await page.waitFor(`!!${row}`); await page.evaluate(`${row}.click()`); }
+    else await page.click(id('mobile-new'));
   }
   await page.waitFor(`document.querySelector('${id('composer-input')}')`);
 }
@@ -246,7 +249,8 @@ test('Appearance hides Worktree on desktop and phone while preserving the draft 
   await page.click(id('control-composer.worktree'));
   await page.evaluate(`document.querySelector('${id('control-composer.worktree')}').scrollIntoView({block:'center'})`);
   await capture('speech-phone-appearance-worktree.png');
-  await leaveSettings();
+  // A new thread would open a draft of its own: the written one is reopened from its row.
+  await leaveSettings('Preserve this worktree draft.');
   await page.click(id('composer-options'));
   await page.waitFor(`document.querySelector('${id('composer-options-sheet')}')`);
   expect(await page.evaluate(`!!document.querySelector('${id('composer-options-worktree')}')`)).toBe(false);

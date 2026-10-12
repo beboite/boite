@@ -26,10 +26,10 @@
   import ProjectShelf from './ProjectShelf.svelte';
   import MachineStatus from './MachineStatus.svelte';
   import ThreadCard from './ThreadCard.svelte';
-  import AgentsAtWork from './AgentsAtWork.svelte';
   import AgentAvatar from './agents/AgentAvatar.svelte';
   import { stewardsOf } from '../lib/steward-view';
   import DraftRow from './DraftRow.svelte';
+  import GroupLabel from './GroupLabel.svelte';
   import MachineIcon from './MachineIcon.svelte';
   import ProjectTile from './ProjectTile.svelte';
   import RailFrame from './RailFrame.svelte';
@@ -117,6 +117,10 @@
         }).concat(idleRows)
     ).slice(0, 9);
   });
+  // The grants load once per connection, for the robots on the projects a steward covers; `stewards.changed` keeps them current.
+  $effect(() => {
+    for (const { store: owner } of visible) if (owner.connection === 'ready' && owner.stewards === null) untrack(() => void owner.loadStewards());
+  });
   $effect(() => {
     const timer = setInterval(() => (now = Date.now()), 30_000);
     return () => clearInterval(timer);
@@ -147,11 +151,10 @@
 <RailFrame {store} kind="sidebar" label={strings.sidebar.threads} testid="sidebar" drawer bind:scroller={scrollRoot} onscroll={() => { if (showRows && scrollRoot) savedScroll = scrollRoot.scrollTop; }}>
   {#snippet head()}<ProjectViews entries={groups} {store} />{/snippet}
     {#if showRows}
-    {#each visible as machine (machine.id)}<AgentsAtWork {machine} {now} showMachine={multi} />{/each}
     {#if groups.length === 0}<p class="empty">{strings.sidebar.noProjects}</p>{/if}
     {#if workspace.view === 'recent'}
       {#each visible as machine (machine.id)}
-        {#each machine.store.draftEntries.filter(entry => !selected || (selected.machine.id === machine.id && selected.project.id === entry.projectId)) as entry (entry.projectId)}
+        {#each machine.store.draftEntries.filter(entry => !selected || (selected.machine.id === machine.id && selected.project.id === entry.projectId)) as entry (entry.id)}
           <DraftRow owner={machine.store} {entry} />
         {/each}
       {/each}
@@ -174,7 +177,7 @@
       </div>
     {:else}
       {#each visible as machine (machine.id)}
-        {#each machine.store.draftEntries.filter(entry => entry.projectId === null) as entry (entry.projectId)}
+        {#each machine.store.draftEntries.filter(entry => entry.projectId === null) as entry (entry.id)}
           <DraftRow owner={machine.store} {entry} />
         {/each}
       {/each}
@@ -189,7 +192,7 @@
         {@const controls = `sidebar-project-${encodeURIComponent(projectKey(entry))}`}
         {@const collapsed = owner.isCollapsed(project.id)}
         {@const rollup = collapsed ? projectRollup(owner.threadsOf(project.id), thread => owner.subagents(thread.id)?.count ?? 0) : null}
-        {@const draftHere = owner.draftEntries.find(entry => entry.projectId === project.id)}
+        {@const draftsHere = owner.draftEntries.filter(entry => entry.projectId === project.id)}
         {@const dropKey = threadDropKey(machine.id, project.id)}
         {@const key = projectKey(entry)}
         <section
@@ -247,37 +250,36 @@
           </div>
           <div class="fold" class:expanded={!collapsed} inert={collapsed}>
             <div class="rows">
-              {#if draftHere}<DraftRow {owner} entry={draftHere} />{/if}
+              {#each draftsHere as draft (draft.id)}<DraftRow {owner} entry={draft} />{/each}
               <WindowList items={lists.attention} keyOf={thread => JSON.stringify([machine.id, thread.id])} {scrollRoot} active={!collapsed} estimate={34} measurements={measurements(JSON.stringify([machine.id, project.id]))}>
                 {#snippet row(thread)}<ThreadCard {machine} {project} {thread} {now} showProject={false} showMachine={false} showDone />{/snippet}
               </WindowList>
               <div id="{controls}-working" hidden={!workingOpen || lists.working.length === 0} data-testid="project-working">
                 {#if workingOpen && lists.working.length > 0}
-                  <p class="group-label">{strings.sidebar.workingThreads}</p>
+                  <GroupLabel kind="working" count={lists.working.length} />
                   <WindowList items={lists.working} keyOf={thread => JSON.stringify([machine.id, thread.id])} {scrollRoot} active={!collapsed} estimate={34} measurements={measurements(JSON.stringify([machine.id, project.id, 'working']))}>
                     {#snippet row(thread)}<ThreadCard {machine} {project} {thread} {now} showProject={false} showMachine={false} showDone />{/snippet}
                   </WindowList>
                 {/if}
               </div>
               <div id="{controls}-done" hidden={!doneOpen} data-testid="project-done">
-                {#if doneOpen}<p class="group-label">{strings.sidebar.doneThreads}</p>{/if}
+                {#if doneOpen}<GroupLabel kind="done" count={archiveCount(project, 'done')} />{/if}
                 <RecentDone entries={[entry]} {scrollRoot} {now} open={doneOpen && !collapsed} header={false}
                   onrows={doneObserver(entry, 'done')} />
               </div>
               <div id="{controls}-archived" hidden={!archivedOpen} data-testid="project-archived">
-                {#if archivedOpen}<p class="group-label">{strings.sidebar.archivedGroup}</p>{/if}
+                {#if archivedOpen}<GroupLabel kind="archived" count={archiveCount(project, 'archived')} />{/if}
                 <RecentDone kind="archived" entries={[entry]} {scrollRoot} {now} open={archivedOpen && !collapsed} header={false}
                   onrows={doneObserver(entry, 'archived')} />
               </div>
-              {#if lists.attention.length === 0 && lists.working.length === 0 && !project.archivedThreads && !draftHere}<p class="none">{strings.sidebar.noThreads}</p>{/if}
+              {#if lists.attention.length === 0 && lists.working.length === 0 && !project.archivedThreads && draftsHere.length === 0}<p class="none">{strings.sidebar.noThreads}</p>{/if}
             </div>
           </div>
         </section>
       {/each}
       {#if groups.length > 0 && activeGroups.length === 0}<p class="none">{strings.sidebar.noActiveProjects}</p>{/if}
       <div class="project-folds">
-        <ProjectShelf kind="idle" entries={otherGroups} {multi} {now} {scrollRoot} onrows={rows => idleRows = rows} />
-        <ProjectShelf kind="archived" entries={shelved} {multi} {now} {scrollRoot} />
+        <ProjectShelf idle={otherGroups} archived={shelved} {multi} {now} {scrollRoot} onrows={rows => idleRows = rows} />
       </div>
     {/if}
     {/if}
@@ -303,7 +305,6 @@
   }
   .recent-folds { margin-top: auto; padding-top: 12px; }
   .project-folds { margin-top: auto; }
-  .group-label { margin: 0; padding: 8px 10px 4px; color: var(--color-subtle); font-size: var(--text-xs); border-top: 1px solid var(--color-border); }
   .project {
     margin-bottom: 10px;
     padding: 4px;

@@ -1,11 +1,11 @@
 <script lang="ts">
+  import { hourMinute, longDay } from '../../lib/format';
   import { secureId } from '../../lib/secure-id';
   import { tick, untrack } from 'svelte';
   import { ArrowUp, CalendarClock, CircleCheck, CircleQuestionMark, CircleStop, Handshake, SquareArrowOutUpRight } from '@lucide/svelte';
   import type { AgentConversationMessage, AgentScope, ThreadSummary } from '@boite/contracts';
   import { chatKey, type AgentsView } from '../../lib/agents.svelte';
   import { fill, strings } from '../../lib/strings';
-  import { formatLocale } from '../../lib/i18n.svelte';
   import Prose from '../Prose.svelte';
   import AgentAvatar from './AgentAvatar.svelte';
   import AgentWorkCard from './AgentWorkCard.svelte';
@@ -74,8 +74,8 @@
     if (!work || work.messageId !== null || work.taskId !== null || work.purpose === 'compaction') return null;
     return view.snapshot?.routines.find(r => r.lastWorkId === work.id)?.name ?? '';
   }
-  const time = (at: number) => new Date(at).toLocaleTimeString(formatLocale(), { hour: '2-digit', minute: '2-digit' });
-  const day = (at: number) => new Date(at).toLocaleDateString(formatLocale(), { weekday: 'long', day: 'numeric', month: 'long' });
+  const time = hourMinute;
+  const day = longDay;
   const placeholder = $derived(agent ? fill(labels.messageTo, { name: agent.name }) : group ? fill(labels.messageTo, { name: group.name }) : labels.message);
 
   async function send() {

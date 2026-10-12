@@ -2,9 +2,10 @@
   import InfoTip from './InfoTip.svelte';
   import { onMount } from 'svelte';
   import { Download, Play, Puzzle, RefreshCw, RotateCw, ShieldAlert, Square, TriangleAlert } from '@lucide/svelte';
-  import type { PluginAppState, PluginPool, PluginPreview, PluginRejected, PluginState, RpcParams } from '@boite/contracts';
+  import type { PluginAppState, PluginPool, PluginPreview, PluginRejected, PluginState, PluginUpdates, RpcParams } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
+  import { relativeTime } from '../lib/format';
   import { confirm } from '../lib/confirm.svelte';
   import QuotaList from './QuotaList.svelte';
 
@@ -15,6 +16,7 @@
   let loaded = $state(false);
   let pools = $state<Record<string, PluginPool[]>>({});
   let busy = $state<Record<string, boolean>>({});
+  let checking = $state<Record<string, boolean>>({});
   let errors = $state<Record<string, string>>({});
   let error = $state('');
 
@@ -170,6 +172,32 @@
     }
   }
 
+  /** What the last look at the plugin's update source found, quietly: a source that failed or was ignored is no alarm. */
+  function updatesLine(updates: PluginUpdates): string {
+    if (updates.checking) return t.checkingUpdates;
+    if (updates.error) return fill(t.updateFailed, { error: updates.error });
+    if (updates.available) {
+      return fill(t.updateFound, { source: bare(updates.source.url), ref: updates.source.ref, commit: short(updates.available.commit), time: relativeTime(updates.available.checkedAt) });
+    }
+    if (updates.ignored) return fill(t.updateIgnored, { reason: updates.ignored });
+    return updates.checkedAt === null ? '' : fill(t.upToDate, { time: relativeTime(updates.checkedAt) });
+  }
+
+  /** Reads the plugin's update source now; the core answers with the state it leaves. */
+  async function checkUpdates(plugin: PluginState) {
+    const client = store.client;
+    if (!client || checking[plugin.id]) return;
+    checking[plugin.id] = true;
+    try {
+      for (const next of await client.call('plugins.checkUpdates', { id: plugin.id })) put(next);
+      delete errors[plugin.id];
+    } catch (cause) {
+      errors[plugin.id] = messageOf(cause);
+    } finally {
+      checking[plugin.id] = false;
+    }
+  }
+
   onMount(() => {
     const client = store.client;
     if (!client) return;
@@ -246,6 +274,15 @@
       <p class="meta">{t.recommendedBy} · <a href={plugin.homepage} target="_blank" rel="noreferrer">{t.source}</a></p>
     {:else if plugin.homepage}
       <p class="meta"><a href={plugin.homepage} target="_blank" rel="noreferrer">{t.source}</a></p>
+    {/if}
+    {#if plugin.updates && plugin.version !== null}
+      {@const updates = plugin.updates}
+      {@const line = updatesLine(updates)}
+      <div class="updates" data-testid="plugin-updates" data-plugin={plugin.id} data-available={updates.available?.version ?? ''}>
+        {#if line}<p class="hint" data-testid="plugin-updates-line">{line}</p>{/if}
+        <button class="quiet small" data-testid="plugin-check-updates" data-plugin={plugin.id} disabled={working || updates.checking || checking[plugin.id] === true || plugin.status === 'installing'}
+          onclick={() => void checkUpdates(plugin)}><RefreshCw size={14} /><span class="ui-label">{t.checkUpdates}</span></button>
+      </div>
     {/if}
     {#if plugin.error}<p class="bad" role="alert">{plugin.error}</p>{/if}
     {#if errors[plugin.id]}<p class="bad" role="alert">{errors[plugin.id]}</p>{/if}
@@ -439,6 +476,10 @@
   .meta a { color: var(--color-muted-foreground); overflow-wrap: anywhere; }
   .meta a:hover { color: var(--color-foreground); }
   .meta .mono { font-size: var(--text-xs); }
+  /* The update source's last word and the button that asks again, quiet whatever it says. */
+  .updates { display: flex; align-items: center; justify-content: space-between; gap: 4px 12px; flex-wrap: wrap; }
+  .updates .hint { flex: 1 1 220px; min-width: 0; overflow-wrap: anywhere; }
+  .updates button { gap: 6px; margin-left: auto; }
 
   .refusal { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--color-danger) 35%, var(--color-border)); border-radius: var(--radius-md); background: color-mix(in srgb, var(--color-danger) 6%, transparent); }
   .refusal-title { margin: 0; display: flex; align-items: center; gap: 6px; font-size: var(--text-sm); font-weight: 600; color: var(--color-danger); }

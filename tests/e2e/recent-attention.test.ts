@@ -142,7 +142,7 @@ test('a merged PR arrives in Done and project filtering and restoration follow t
   await page.waitFor(`!document.querySelector(${JSON.stringify(desktopRow(main, threadId))})`);
   await page.click(id('recent-done-toggle'));
   await page.waitFor(`document.querySelector(${JSON.stringify(inGroup('done', main, threadId))})`);
-  expect(await page.evaluate(`document.querySelector(${JSON.stringify(inGroup('done', main, threadId))}).querySelector('${id('done-thread-merged')}').getAttribute('href')`)).toBe('https://github.com/example/repo/pull/407');
+  expect(await page.evaluate(`document.querySelector(${JSON.stringify(inGroup('done', main, threadId))}).querySelector('${id('done-thread-pr')}').getAttribute('href')`)).toBe('https://github.com/example/repo/pull/407');
   await capture('recent-done-desktop.png');
   await page.click(id('project-filter'));
   await page.evaluate(`Array.from(document.querySelectorAll('${id('project-filter-menu')} [data-value]')).find(e => e.dataset.value === ${JSON.stringify(JSON.stringify(['http://builder.test', 'p-boite']))}).click()`);
