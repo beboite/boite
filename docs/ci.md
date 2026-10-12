@@ -135,7 +135,7 @@ The tested installer becomes the release artifact.
 | UI entry chunk | 593,000 |
 | UI files, excluding `.br` and `.gz` copies | 4,640,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 3,935,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 3,942,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
@@ -207,6 +207,11 @@ the group merged with `main` at `5ee76431`: the signing chunk
 device rows. The UI limit rises to 4,640,000. The same job then measured
 3,927,501 core bytes: signed hellos, device admission and served origins
 (`group/clients.ts`, `group/device-keys.ts`). The core limit rises to 3,935,000.
+
+Merged with `main` at `a0c02d16`, the app on its own address measured
+3,935,557 core bytes in the Windows job: the core accepts the app's origin and
+names the machine in a device's notifications. The core limit rises to
+3,942,000.
 
 Several drafts per project, merged with settings cards at `87fca361`, measured
 4,536,091 UI bytes and a 590,215-byte entry chunk on Linux: the done rows and
