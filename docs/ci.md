@@ -133,7 +133,7 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 593,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,620,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,630,000 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 3,912,000 |
 
@@ -208,6 +208,13 @@ Merged with `bafe8898`, whose diagnostic logs had raised the UI limit to
 4,581,000, the branch measured 4,606,394 UI bytes, a 591,099-byte entry chunk
 and 3,901,792 core bytes on Linux the same day. The UI limit rises to
 4,620,000.
+
+On 2026-10-12 on Linux with Bun 1.4.2, `main` at `8035c2f7` measured 4,608,637
+UI bytes and a 591,096-byte entry chunk. Edge scrollbars and load on press on
+top of it measured 4,625,475 and 591,725, as the Windows job did: 16,838 bytes
+in all. The scrollbar overlay (6,168), the press listener (3,575) and their
+starter (2,397) load only while a switch is on; the entry chunk gains 629. The
+UI limit rises to 4,630,000.
 
 On 2026-10-10, `bun run build:ui` with Bun 1.4.2 measured 4,420,649 UI bytes at
 `feeb393b` and 4,425,557 with close confirmation and typed agent archival.
