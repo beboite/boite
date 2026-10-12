@@ -282,6 +282,15 @@ pub(crate) fn build_main_window<R: Runtime>(
     Ok(window)
 }
 
+/// The main native window, whatever webviews it holds. Tauri's
+/// `get_webview_window` answers `None` for a window with more than one
+/// webview, and every browser surface is a child webview of this window: an
+/// agent's tab opened while the window waited in the tray left the tray, a
+/// second launch and the taskbar unable to show it (2026-10-12).
+pub(crate) fn main_window<R: Runtime>(app: &AppHandle<R>) -> Option<tauri::Window<R>> {
+    app.get_window(MAIN_LABEL)
+}
+
 /// The window is created hidden and only reaches the screen here: at start
 /// when `Reveal` says so, later from the tray or a second launch.
 pub(crate) fn show_main<R: Runtime>(app: &AppHandle<R>) {
@@ -292,7 +301,7 @@ pub(crate) fn show_main<R: Runtime>(app: &AppHandle<R>) {
     if hidden() {
         return;
     }
-    if let Some(window) = app.get_webview_window(MAIN_LABEL) {
+    if let Some(window) = main_window(app) {
         crate::watchdog::saw(crate::watchdog::Seen::Shown);
         crate::shell_log::info("window", "shell.window.show", "showing the main window",
             serde_json::json!({ "wasVisible": window.is_visible().unwrap_or(false), "wasMinimized": window.is_minimized().unwrap_or(false) }));
@@ -305,7 +314,7 @@ pub(crate) fn show_main<R: Runtime>(app: &AppHandle<R>) {
 }
 
 pub(crate) fn hide_main<R: Runtime>(app: &AppHandle<R>) {
-    if let Some(window) = app.get_webview_window(MAIN_LABEL) {
+    if let Some(window) = main_window(app) {
         crate::watchdog::saw(crate::watchdog::Seen::Hidden);
         crate::shell_log::info("window", "shell.window.hide", "hiding the main window to the tray", serde_json::json!({}));
         browser::park_all(app);
@@ -370,6 +379,20 @@ mod tests {
         let reveal = Reveal::default();
         reveal.stay_hidden();
         assert!(!reveal.painted() && !reveal.due() && !reveal.anyway(), "a start into the tray revealed the window");
+    }
+
+    #[test]
+    fn the_main_window_is_found_once_a_browser_surface_lives_in_it() {
+        use tauri::{LogicalPosition, LogicalSize, Manager, WebviewBuilder, WebviewUrl, WebviewWindowBuilder};
+        let app = tauri::test::mock_app();
+        let main = WebviewWindowBuilder::new(&app, super::MAIN_LABEL, WebviewUrl::default()).visible(false).build().unwrap();
+        assert!(super::main_window(app.handle()).is_some());
+        main.as_ref().window().add_child(WebviewBuilder::new("browser-agent-1", WebviewUrl::default()),
+            LogicalPosition::new(0.0, 0.0), LogicalSize::new(1.0, 1.0)).unwrap();
+        // Tauri's own lookup loses the window here, which is what kept it
+        // hidden in the tray on 2026-10-12.
+        assert!(app.get_webview_window(super::MAIN_LABEL).is_none());
+        assert_eq!(super::main_window(app.handle()).map(|window| window.label().to_owned()).as_deref(), Some(super::MAIN_LABEL));
     }
 }
 
