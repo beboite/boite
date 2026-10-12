@@ -1425,6 +1425,8 @@ export type MessagePart =
       answer?: QuestionAnswer | null;
       /** Asked without stopping: see `QuestionRequest.async`. */
       async?: boolean;
+      /** A settings card: see `QuestionRequest.setting`. */
+      setting?: SettingAsk;
     }
   /**
    * The agent compacted its context mid-turn: what it held before, what is
@@ -1680,6 +1682,8 @@ export interface QuestionAnswer {
    * not kept here: the core wrote them to its disk and told the agent the paths.
    */
   attachments?: AnswerAttachment[];
+  /** On a settings card the user changed: the value the setting holds now. */
+  value?: unknown;
 }
 
 /** A file given with an answer: what the card shows once it is answered. */
@@ -1709,6 +1713,11 @@ export interface QuestionRequest {
    * is running or as the next prompt when none is.
    */
   async?: boolean;
+  /**
+   * A settings card (`settings.request`): the agent asks for a change, or
+   * points at a page. `text` is its reason. Always asynchronous.
+   */
+  setting?: SettingAsk;
   createdAt: Timestamp;
 }
 
@@ -3562,6 +3571,11 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    */
   'agent.projects': { params: { threadId: ThreadId }; result: AgentProject[] };
   /**
+   * The settings an agent may ask about (`REQUESTABLE_SETTINGS`), each with
+   * its value and the page it sits on, so it reads before it proposes.
+   */
+  'agent.settings': { params: { threadId: ThreadId }; result: SettingReading[] };
+  /**
    * The agent registers an existing folder as a project, as the owner does
    * from the sidebar, so `agent.spawn` and `agent.move` can name it. `path` is
    * absolute; `name` defaults to the folder's name. A folder that is already a
@@ -4143,6 +4157,20 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
     params: { threadId: ThreadId; text: string; options?: string[]; multiple?: boolean };
     result: { questionId: RequestId };
   };
+  /**
+   * A settings card on the agent's thread (`boite settings request|open`),
+   * asked without stopping like `questions.ask`, with `reason` as its text.
+   * With `key` and `value` it proposes a change: refused for a key outside
+   * `REQUESTABLE_SETTINGS` (naming them), a value `settings.set` would refuse,
+   * the value already set, or a card already open on that key in the thread.
+   * The card settles when the setting changes, through Apply or the page; the
+   * agent reads `applied`, `changed` or `refuse`. With `page` it points at a
+   * page and the agent reads `open` or `refuse`.
+   */
+  'settings.request': {
+    params: SettingRequestParams;
+    result: { questionId: RequestId; setting: SettingAsk };
+  };
 
   'trace.get': { params: { threadId: ThreadId; limit?: number }; result: ProcessRecord[] };
   'resources.list': { params: Record<string, never>; result: ThreadResources[] };
@@ -4481,6 +4509,13 @@ export { AUTO_COMPACT_MOMENTS, AUTO_COMPACT_TOKENS, BROWSER_ORIGINS_MAX, checkSe
 import type { AutoCompact } from './settings-validation.ts';
 export { TITLE_MODEL_DEFAULTS, defaultTitleModel } from './title-models.ts';
 export { DEVICE_METHODS, DEVICE_EVENTS, AGENT_EVENTS } from './access.ts';
+export {
+  REQUESTABLE_SETTINGS, REQUESTABLE_SETTING_KEYS, SETTING_REASON_MAX, SETTINGS_PAGES, SETTINGS_SECTION_PATTERN,
+  checkSettingRequest, effectiveSetting, isRequestableSetting, isSettingsPage, readSettings, sameSetting, settingAnswerText, settledSetting,
+  type RequestableSetting, type SettingAsk, type SettingNormalizer, type SettingOutcome, type SettingPlace, type SettingReading, type SettingRequestCheck,
+  type SettingRequestParams, type SettingsPage,
+} from './setting-requests.ts';
+import type { SettingAsk, SettingReading, SettingRequestParams } from './setting-requests.ts';
 export { SPEECH_CATALOGUE, SPEECH_CUSTOM_ID, SPEECH_DEFAULT_MODEL, isSpeechModelId, speechUrlProblem, type SpeechCatalogueModel, type SpeechModelTier, type SpeechBackend } from './speech-models.ts';
 import type { SpeechModelTier, SpeechBackend } from './speech-models.ts';
 

@@ -9,6 +9,12 @@ import {
   type QuestionAnswer,
   type QuestionRequest,
   type RequestId,
+  type Settings,
+  type SettingAsk,
+  type SettingRequestParams,
+  checkSettingRequest,
+  settingAnswerText,
+  settledSetting,
   type ThreadId,
   type ThreadSummary,
   type Turn,
@@ -16,7 +22,7 @@ import {
 import { answerText, attachToAnswer } from '../attachments.ts';
 import type { Core } from '../core.ts';
 import type { PermissionTicket, QuestionAsk, QuestionTicket } from '../drivers/types.ts';
-import { notFound, refused } from '../errors.ts';
+import { notFound, refused, RpcFailure } from '../errors.ts';
 import { newId } from '../ids.ts';
 import type { ThreadStore } from '../threads.ts';
 import { nativeCommandPrompt } from './operations.ts';
@@ -178,6 +184,16 @@ export class ThreadCards {
 
     const answer: QuestionAnswer = text.length > 0 ? { optionIds: params.optionIds, text } : { optionIds: params.optionIds };
     if (files.length > 0) answer.attachments = attachToAnswer(this.core.dataDir, answer, files);
+    if (request.async === true) {
+      this.settleAsync(pending, answer);
+      return;
+    }
+    this.recordAnswer(request, answer);
+    setThreadStatus(this.core, request.threadId, this.waitingOn(request.threadId) ? 'waiting' : 'running');
+    pending.resolve(answer);
+  }
+
+  private recordAnswer(request: QuestionRequest, answer: QuestionAnswer): void {
     this.questions.delete(request.id);
     this.core.journal.append(
       {
@@ -189,15 +205,53 @@ export class ThreadCards {
       () => undefined,
     );
     this.core.bus.emit('question.answered', { questionId: request.id, threadId: request.threadId, answer });
-    if (request.async === true) {
-      this.foldAsyncCard(request.id, answer);
-      this.asyncChanged(request.threadId);
-      pending.resolve(answer);
-      this.threads.deferred.deliverAnswer(request.threadId, `> ${request.text}\n\n${answerTextOf(request, answer)}`);
-      return;
-    }
-    setThreadStatus(this.core, request.threadId, this.waitingOn(request.threadId) ? 'waiting' : 'running');
+  }
+
+  /** An asynchronous card answered: folded where it was drawn, and the answer goes to the agent as a message. */
+  private settleAsync(pending: PendingQuestion, answer: QuestionAnswer): void {
+    const request = pending.request;
+    this.recordAnswer(request, answer);
+    this.foldAsyncCard(request.id, answer);
+    this.asyncChanged(request.threadId);
     pending.resolve(answer);
+    this.threads.deferred.deliverAnswer(request.threadId, `> ${request.text}\n\n${answerTextOf(request, answer)}`);
+  }
+
+  /**
+   * `boite settings request|open`: a settings card, asked without stopping.
+   * The reason is the card's text. A change offers only Refuse as an answer:
+   * Apply is `settings.set`, the owner's, and `settleSettings` closes the card
+   * when the value moves, so a paired phone cannot answer "applied".
+   */
+  requestSetting(params: SettingRequestParams): { questionId: RequestId; setting: SettingAsk } {
+    const thread = this.threads.require(params.threadId);
+    if (thread.archived) throw refused('cannot ask on an archived thread', { threadId: thread.id });
+    const open = [...this.questions.values()].flatMap(entry => (entry.request.threadId === thread.id && entry.request.setting ? [entry.request.setting] : []));
+    const checked = checkSettingRequest(params, this.core.settings.get(), patch => {
+      try {
+        return { ok: true, patch: this.core.settings.normalize(patch) };
+      } catch (error) {
+        if (!(error instanceof RpcFailure)) throw error;
+        const field = (error.data as { field?: unknown } | undefined)?.field;
+        return { ok: false, message: error.message, field: typeof field === 'string' ? field : 'value' };
+      }
+    }, open);
+    if (!checked.ok) throw refused(checked.message, checked.data);
+    const { reason, setting, options } = checked;
+    const { questionId } = this.drawAsync(thread, { text: reason, options, allowText: false, multiple: false, async: true, setting });
+    return { questionId, setting };
+  }
+
+  /**
+   * The settings changed, from a card's Apply or from the page: every change
+   * card whose setting left the value it was asked from settles, as applied
+   * when it holds the proposed value and as changed when it holds another.
+   */
+  settleSettings(next: Settings): void {
+    for (const pending of [...this.questions.values()]) {
+      const answer = pending.request.setting === undefined ? null : settledSetting(pending.request.setting, next);
+      if (answer !== null) this.settleAsync(pending, answer);
+    }
   }
 
   /**
@@ -215,16 +269,20 @@ export class ThreadCards {
       throw refused('options must be at most 12 labels of 1 to 200 characters', { field: 'options' });
     }
     if (params.multiple !== undefined && typeof params.multiple !== 'boolean') throw refused('multiple must be a boolean', { field: 'multiple' });
-    const turns = this.core.journal.listTurns(thread.id);
-    const turn = turns.find(t => t.status === 'running') ?? turns.at(-1);
-    if (turn === undefined) throw refused('the thread has no turn to ask in yet', { threadId: thread.id });
-    const ask: QuestionAsk = {
+    return this.drawAsync(thread, {
       text,
       options: labels.map((label, index) => ({ id: String(index + 1), label: label.trim() })),
       allowText: true,
       multiple: params.multiple === true && labels.length > 1,
       async: true,
-    };
+    });
+  }
+
+  /** An asynchronous card drawn in the running turn, or under the last one, in a message of its own. */
+  private drawAsync(thread: ThreadSummary, ask: QuestionAsk): { questionId: RequestId } {
+    const turns = this.core.journal.listTurns(thread.id);
+    const turn = turns.find(t => t.status === 'running') ?? turns.at(-1);
+    if (turn === undefined) throw refused('the thread has no turn to ask in yet', { threadId: thread.id });
     const ticket = this.askQuestion(thread, turn, ask);
     const part: Extract<MessagePart, { type: 'question' }> = { type: 'question', questionId: ticket.questionId, ...ask, answer: null };
     const message: Message = { id: newId('msg_'), threadId: thread.id, turnId: turn.id, role: 'assistant', parts: [part], state: 'complete', createdAt: Date.now() };
@@ -293,6 +351,7 @@ export class ThreadCards {
       allowText: ask.allowText,
       multiple: ask.multiple,
       ...(ask.async === true ? { async: true } : {}),
+      ...(ask.setting === undefined ? {} : { setting: ask.setting }),
       createdAt: Date.now(),
     };
     let resolve: (answer: QuestionAnswer | null) => void = () => undefined;
@@ -408,6 +467,7 @@ export const ASK_INSTRUCTIONS = '\n\nBoite: to ask the user something without st
 
 /** What the agent reads for an answer: the labels picked, then what the user typed. */
 function answerTextOf(request: QuestionRequest, answer: QuestionAnswer): string {
+  if (request.setting !== undefined) return settingAnswerText(request.setting, answer);
   const labels = answer.optionIds.map(id => request.options.find(option => option.id === id)?.label ?? id);
   return [labels.join(', '), answerText(answer)].filter(line => line.length > 0).join('\n');
 }
