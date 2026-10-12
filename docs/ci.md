@@ -133,7 +133,7 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 593,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,630,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,620,000 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 3,912,000 |
 
@@ -214,7 +214,9 @@ UI bytes and a 591,096-byte entry chunk. Edge scrollbars and load on press on
 top of it measured 4,625,475 and 591,725, as the Windows job did: 16,838 bytes
 in all. The scrollbar overlay (6,168) and the press listener (3,575) load only
 while their switch is on; their starter (2,397) loads after mount, and the
-entry chunk gains 629. The UI limit rises to 4,630,000.
+entry chunk gains 629. Merged with `a0c02d16`, whose shared thread and agent
+code shrank the UI, the branch measured 4,602,452 and 554,651, within the
+unchanged 4,620,000 and 593,000.
 
 On 2026-10-10, `bun run build:ui` with Bun 1.4.2 measured 4,420,649 UI bytes at
 `feeb393b` and 4,425,557 with close confirmation and typed agent archival.
