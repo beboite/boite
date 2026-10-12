@@ -2319,6 +2319,14 @@ export const strings = {
     residentAgents: {
       title: 'Agents',
       hint: 'Resident agents with their own brain, missions and routines, from the sidebar. Agents you already made keep running while this is off'
+    },
+    edgeScrollbars: {
+      title: 'Edge scrollbars',
+      hint: 'Scrollbars take no room. Each one fades in as the pointer nears the edge of its area and can still be dragged. Mouse and pen only'
+    },
+    pressPreload: {
+      title: 'Load on press',
+      hint: 'A thread or page starts loading when you press it, before you release the click or lift your finger'
     }
   },
 

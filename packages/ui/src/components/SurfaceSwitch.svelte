@@ -55,7 +55,7 @@
       onclick={() => { if (current !== 'threads') store.showChat(); }}>
       <MessagesSquare size={13} /><span class="label ui-label">{strings.sidebar.threads}</span>{@render badge(threads, `${prefix}threads-at-work`)}
     </button>
-    <button type="button" class="ghost small view" class:chosen={current === 'agents'} aria-pressed={current === 'agents'} data-testid={`${prefix}view-agents`}
+    <button type="button" class="ghost small view" class:chosen={current === 'agents'} aria-pressed={current === 'agents'} data-testid={`${prefix}view-agents`} data-preload-view="agents"
       onclick={() => { if (current !== 'agents') store.showAgents(); }}>
       <Bot size={14} /><span class="label ui-label">{strings.sidebar.agents}</span>{@render badge(agents, `${prefix}agents-at-work`)}
     </button>

@@ -209,6 +209,15 @@ Merged with `bafe8898`, whose diagnostic logs had raised the UI limit to
 and 3,901,792 core bytes on Linux the same day. The UI limit rises to
 4,620,000.
 
+On 2026-10-12 on Linux with Bun 1.4.2, `main` at `8035c2f7` measured 4,608,637
+UI bytes and a 591,096-byte entry chunk. Edge scrollbars and load on press on
+top of it measured 4,625,475 and 591,725, as the Windows job did: 16,838 bytes
+in all. The scrollbar overlay (6,168) and the press listener (3,575) load only
+while their switch is on; their starter (2,397) loads after mount, and the
+entry chunk gains 629. Merged with `a0c02d16`, whose shared thread and agent
+code shrank the UI, the branch measured 4,602,452 and 554,651, within the
+unchanged 4,620,000 and 593,000.
+
 On 2026-10-10, `bun run build:ui` with Bun 1.4.2 measured 4,420,649 UI bytes at
 `feeb393b` and 4,425,557 with close confirmation and typed agent archival.
 The dialogs, input binding and English/French sentences add 4,908 bytes. The UI

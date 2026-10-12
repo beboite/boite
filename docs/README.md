@@ -29,7 +29,7 @@
 - [The agent's browser](browser.md): the headless browser an agent drives on its machine, watched from any device.
 - [Devices](devices.md): iOS Simulators and Android emulators the agent opens in the Device panel.
 - [Chat files and previews](chat-files.md): files an agent publishes, file links, inline previews, and the pages an agent draws in its answer.
-- [Experiments](experiments.md): browser comments, resident agents and other unfinished switches.
+- [Experiments](experiments.md): browser comments, resident agents, edge scrollbars, load on press and other unfinished switches.
 - [The thread terminal](terminal.md): the shell under the chat, and sign-ins that need one.
 - [The `boite` CLI](cli.md): what an agent runs to reach its thread and its panel.
 - [Titles](titles.md): automatic and manual conversation titles.

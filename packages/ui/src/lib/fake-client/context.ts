@@ -101,10 +101,22 @@ export interface FakeClientOptions {
   stewardDemo?: boolean;
   /** Who this client is. `'session'` makes it a paired phone, refused like one. */
   principal?: Principal;
+  /**
+   * A round trip, in milliseconds, each call waits half of on the way out and
+   * half on the way back, like a remote machine; `?fake=1&rtt=150` sets it.
+   * Pushed events are not delayed.
+   */
+  rttMs?: number;
   /** Stable public identity for multi-machine coordination tests. */
   coreId?: string;
   coreName?: string;
   publicUrl?: string;
+}
+
+function roundTrip(): number {
+  if (typeof location === 'undefined') return 0;
+  const rtt = Number(new URLSearchParams(location.search).get('rtt'));
+  return Number.isFinite(rtt) && rtt > 0 ? rtt : 0;
 }
 
 function tokenStream(): number | undefined {
@@ -233,6 +245,7 @@ export class FakeContext {
   seq = 0;
   readonly turnRequests = new Map<string, { content: string; turn: Turn; messageId: string }>();
   readonly delayMs: number;
+  readonly rttMs: number;
   readonly chunkSize: number | undefined;
   readonly long: boolean;
   readonly heavy: boolean;
@@ -279,6 +292,7 @@ export class FakeContext {
       principal: () => this.bus.principal,
     });
     this.delayMs = options.delayMs ?? 18;
+    this.rttMs = options.rttMs ?? roundTrip();
     this.chunkSize = options.chunkSize ?? tokenStream();
     this.long = options.long ?? false;
     this.heavy = options.heavy ?? false;
@@ -349,6 +363,11 @@ export class FakeContext {
 
   tick(): Promise<void> {
     return Promise.resolve();
+  }
+
+  /** One way of a call's trip: half the simulated round trip. */
+  leg(): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, this.rttMs / 2));
   }
 
   pause(): Promise<void> {

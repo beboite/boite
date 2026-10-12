@@ -112,7 +112,7 @@
     <section class="card flush" data-testid="resource-row" data-thread-id={entry.threadId}>
       <div class="head">
         <StatusMark {...threadTone(entry.status)} />
-        <button class="quiet title" onclick={() => void store.open(entry.threadId)}><span class="ui-label">{entry.title}</span></button>
+        <button class="quiet title" data-preload-thread={entry.threadId} onclick={() => void store.open(entry.threadId)}><span class="ui-label">{entry.title}</span></button>
         <span class="load" data-testid="resource-load">
           <span>{entry.load.processes} {strings.resources.processes}</span>
           <span>{cpu(entry.load.cpuPercent)}</span>

@@ -11,12 +11,13 @@ import type {
 } from '@boite/contracts';
 import { readingCacheBytes, READING_CACHE_BYTES } from '../reading-cache';
 import type { ToolPart } from '../tool-groups';
-import { INITIAL_MESSAGE_PAGE, MESSAGE_PAGE_MAX, forTransport } from '@boite/contracts';
+import { MESSAGE_PAGE_MAX, forTransport } from '@boite/contracts';
+import { askPage, ThreadPreloads } from './thread-preload';
 import { lightPage, NewerPages, setMessagesAfter, type ReadingPosition } from './reading-pages.svelte';
 export type { ReadingPosition } from './reading-pages.svelte';
 import { forgetArchivedThread } from '../archive-history';
 import { rightPanel } from '../right-panel.svelte';
-import { workingChildren, type WorkingChildren, lastIndexById, mergeResumed, patchRow, reconcileThread, resumeRequest, threadsByProject } from '../thread-rows';
+import { workingChildren, type WorkingChildren, lastIndexById, mergeResumed, patchRow, reconcileThread, threadsByProject } from '../thread-rows';
 import type { StoreContext } from './context';
 import { RpcErrorCode, threadActive } from '@boite/contracts';
 import { RpcFailure } from '../client';
@@ -47,6 +48,7 @@ export class Threads {
   loadingBytes = $state<{ threadId: ThreadId; received: number; total: number } | null>(null);
   /** The pages below a window opened around a reading position. */
   readonly newer: NewerPages;
+  readonly preloads: ThreadPreloads;
   /** The threads a `threads.retitle` is out for: their menu item waits. */
   retitling = $state<ThreadId[]>([]);
   /**
@@ -65,7 +67,8 @@ export class Threads {
   /** Refreshing this visit keeps disclosures; leaving it invalidates their pending fetches. */
   #toolOutputVisit = 0;
 
-  constructor(private readonly ctx: StoreContext) { this.newer = new NewerPages(ctx); }
+  constructor(private readonly ctx: StoreContext) { this.newer = new NewerPages(ctx); this.preloads = new ThreadPreloads(ctx, this); }
+  get openTarget(): ThreadId | null { return this.#openTarget; }
 
   async capabilities(threadId: ThreadId) {
     const client = this.ctx.client;
@@ -311,6 +314,8 @@ export class Threads {
     };
     const previousThread = this.openThread;
     const held = this.openThread?.id === threadId ? this.openThread : this.readingThreads.get(threadId);
+    // A press on this thread already asked for its page (`thread-preload.ts`): the open takes it over.
+    const preloaded = this.preloads.claim(threadId, client, held);
     const deselect = this.openThread?.id !== threadId && s.delegationSelectedAgentId && s.delegationSelectedAgentId !== threadId;
     // Paint a recent visit in this task. Its revalidation and subscription can
     // take a whole network round trip without holding the reader's text back.
@@ -320,7 +325,7 @@ export class Threads {
     this.loadingThreadId = held ? null : threadId;
     const deselected = deselect ? s.selectDelegatedAgent(null) : Promise.resolve();
     let loaded = false;
-    const summaryRead = this.ctx.threadReads.begin(threadId);
+    const summaryRead = preloaded?.summaryRead ?? this.ctx.threadReads.begin(threadId);
     let permissionRead: ReturnType<StoreContext['requests']['permissionRead']> | undefined;
     let questionRead: ReturnType<StoreContext['requests']['questionRead']> | undefined;
     try {
@@ -330,28 +335,13 @@ export class Threads {
       // were three quarters of a second before the last card was right, and the
       // messages waited behind a subscribe and an unsubscribe they do not need.
       const bundled = s.core?.features?.threadSnapshots === true;
-      const subscribed = bundled ? null : client.call('threads.subscribe', { threadId });
-      // A thread already in hand, open or among the recent ones, asks only for
-      // what it cannot vouch for: a reconnect on a long conversation used to
-      // download its last 120 messages again for the two that were new.
-      const resume = resumeRequest(threadId, held);
-      // A long thread left away from its end opens where the reader was: the
-      // page around the message at the top of their view, not the last one.
-      const features = s.core?.features;
-      const saved = held || !features?.readingPages ? undefined : this.readingPositions.get(threadId);
-      const around = saved && !saved.pinned ? saved.anchor?.id : undefined;
-      const fetched = client.call('threads.get', { ...resume, limit: held ? MESSAGE_PAGE_MAX : INITIAL_MESSAGE_PAGE, ...lightPage(this.ctx), ...(around ? { around } : {}),
-        ...(bundled ? {
-          sync: held?.messagesSync && held.messagesSync.from === resume.after ? held.messagesSync : true,
-          open: { ...(previous && previous !== threadId && previous !== delegation.delegationSubscribedThreadId ? { previous } : {}), ...(options.requests === false ? { requests: false } : {}), markRead: true }
-        } : {})
-      }, held || !features?.chunkedAnswers ? {} : {
-        // The loading view counts the page in as the core slices it.
-        onProgress: (received, total) => { if (newest() && this.loadingThreadId === threadId) this.loadingBytes = { threadId, received, total }; }
-      });
+      // A claimed press left the previous thread, the unread mark and the requests to this open.
+      const { subscribed, fetched, around } = preloaded ?? askPage(this.ctx, this, client, threadId, held,
+        { ...(previous && previous !== threadId && previous !== delegation.delegationSubscribedThreadId ? { previous } : {}), ...(options.requests === false ? { requests: false } : {}), markRead: true }, newest);
+      const bundledRequests = bundled && !preloaded;
       if (options.requests !== false) {
-        permissionRead = this.ctx.requests.permissionRead(client, threadId, bundled ? () => fetched.then(thread => thread.opened?.permissions ?? []) : undefined);
-        questionRead = this.ctx.requests.questionRead(client, threadId, bundled ? () => fetched.then(thread => thread.opened?.questions ?? []) : undefined);
+        permissionRead = this.ctx.requests.permissionRead(client, threadId, bundledRequests ? () => fetched.then(thread => thread.opened?.permissions ?? []) : undefined);
+        questionRead = this.ctx.requests.questionRead(client, threadId, bundledRequests ? () => fetched.then(thread => thread.opened?.questions ?? []) : undefined);
       }
       const permissionsAsked = permissionRead?.promise ?? Promise.resolve([]);
       const questionsAsked = questionRead?.promise ?? Promise.resolve([]);
@@ -372,7 +362,7 @@ export class Threads {
       this.subscribedThreadId = threadId;
       // A thread already left that the core will not let go of costs a few
       // events, not the open of this one.
-      const unsubscribed: Promise<unknown> = !bundled && previous && previous !== threadId && previous !== delegation.delegationSubscribedThreadId
+      const unsubscribed: Promise<unknown> = (!bundled || preloaded) && previous && previous !== threadId && previous !== delegation.delegationSubscribedThreadId && previous !== this.preloads.waitingThreadId
         ? client.call('threads.unsubscribe', { threadId: previous }).catch(() => undefined)
         : Promise.resolve();
       this.ctx.composer.settle(threadId);
@@ -395,6 +385,7 @@ export class Threads {
       // A window that now reaches the end says so, over the cursor a held copy had.
       if (held && thread.messagesAfter === undefined) delete held.messagesAfter;
       this.#show(held ? reconcileThread(held, thread) : thread, navigate, true);
+      this.preloads.done(preloaded);
       loaded = true;
       this.loadingThreadId = null;
       this.loadingBytes = null;
@@ -429,6 +420,7 @@ export class Threads {
       }
       await retire();
     } finally {
+      this.preloads.done(preloaded);
       summaryRead.cancel();
       permissionRead?.cancel();
       questionRead?.cancel();
@@ -826,7 +818,7 @@ export class Threads {
   }
 
   threadSnapshots(threadId: ThreadId): Set<Thread> {
-    return new Set([this.openThread, this.ctx.store.delegationThread].filter((thread): thread is Thread => !!thread && thread.id === threadId));
+    return new Set([this.openThread, this.ctx.store.delegationThread, ...this.preloads.pages()].filter((thread): thread is Thread => !!thread && thread.id === threadId));
   }
 
   messages(threadId: ThreadId, messageId: string): Set<Message> {
