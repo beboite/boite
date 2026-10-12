@@ -495,6 +495,7 @@ export function threadMethods(ctx: FakeContext) {
       const was = thread.archived;
       thread.archived = params.archived ?? true;
       thread.doneAt = thread.archived && params.onlyIfIdle === true ? thread.doneAt ?? Date.now() : null;
+      thread.archivedAt = thread.archived ? (was ? thread.archivedAt ?? null : Date.now()) : null;
       if (thread.archived) {
         delete thread.archiveReason;
         cancelFamilySideQuestions(ctx, thread.id);

@@ -3,7 +3,7 @@
   import type { ProjectEntry } from '../lib/project-view.svelte';
   import type { ThreadId, ThreadSummary } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
-  import { archivedThreads } from '../lib/archive';
+  import { archivedThreads, archivedTime } from '../lib/archive';
   import { projectName } from '../lib/format';
   import { strings } from '../lib/strings';
   import { archiveCount, archiveKindOf, type ArchiveKind } from '../lib/project-threads.svelte';
@@ -75,7 +75,7 @@
     }));
     const drawn = await row;
     if (revision !== current) return;
-    loaded = results.flatMap(result => result.status === 'fulfilled' ? result.value : []).sort((a, b) => b.thread.updatedAt - a.thread.updatedAt);
+    loaded = results.flatMap(result => result.status === 'fulfilled' ? result.value : []).sort((a, b) => archivedTime(b.thread) - archivedTime(a.thread));
     failed = !drawn || results.some(result => result.status === 'rejected');
     loading = false;
   }

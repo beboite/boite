@@ -4,7 +4,7 @@
   import { DEFAULT_THREAD_DONE_RETENTION_DAYS, type ThreadId, type ThreadSummary } from '@boite/contracts';
   import InfoTip from './InfoTip.svelte';
   import DeletedThreads from './DeletedThreads.svelte';
-  import { archivedThreads, restoreThread } from '../lib/archive';
+  import { archivedThreads, archivedTime, restoreThread } from '../lib/archive';
   import { SnapshotReads } from '../lib/store/snapshot-reads';
   import { canDeleteThread, deleteThread } from '../lib/thread-removal';
   import { ago, exactTime, projectName } from '../lib/format';
@@ -71,7 +71,16 @@
     }
     if (summary.archived) restored = restored.filter(id => id !== summary.id);
     rows.add(summary.id);
-    threads = held ? threads.map(row => row.id === summary.id ? summary : row) : [summary, ...threads];
+    const prior = threads.find(row => row.id === summary.id);
+    // A row keeps its place while its archive time stands: a load sample or a restore moves nothing.
+    if (prior && (!summary.archived || archivedTime(prior) === archivedTime(summary))) {
+      threads = threads.map(row => row.id === summary.id ? summary : row);
+      return;
+    }
+    // A newcomer, or a row archived again, takes its place by archive time: one put away earlier elsewhere does not jump to the top.
+    const rest = threads.filter(row => row.id !== summary.id);
+    const at = rest.findIndex(row => archivedTime(row) < archivedTime(summary));
+    threads = at < 0 ? [...rest, summary] : [...rest.slice(0, at), summary, ...rest.slice(at)];
   }
 
   $effect(() => {
@@ -92,7 +101,7 @@
     try {
       const answer = await archivedThreads(store);
       if (store.client === client && store.clientGeneration === generation && read.active) {
-        threads = read.apply(answer, threads ?? []).filter(t => !removed.has(t.id)).sort((a, b) => b.updatedAt - a.updatedAt);
+        threads = read.apply(answer, threads ?? []).filter(t => !removed.has(t.id)).sort((a, b) => archivedTime(b) - archivedTime(a));
         rows.clear();
         for (const thread of threads) rows.add(thread.id);
       }
@@ -161,7 +170,7 @@
           {#if thread.doneAt != null && (store.settings?.threadDoneRetentionDays ?? DEFAULT_THREAD_DONE_RETENTION_DAYS) > 0}
             <span class="subtle expiry" data-testid="done-expires">{fill(strings.settings.archived.deletesAt, { date: exactTime(thread.doneAt + (store.settings?.threadDoneRetentionDays ?? DEFAULT_THREAD_DONE_RETENTION_DAYS) * 86_400_000) })}</span>
           {/if}
-          <span class="subtle meta" title={exactTime(thread.updatedAt)}>{projectOf(thread)} · {ago(thread.updatedAt)}</span>
+          <span class="subtle meta" title={exactTime(archivedTime(thread))}>{projectOf(thread)} · {ago(archivedTime(thread))}</span>
           {#if restored.includes(thread.id)}
             <button type="button" class="small" data-testid="archived-open" onclick={() => void workspace.select(store, thread.id)}>
               <span class="ui-label">{strings.settings.archived.open}</span>

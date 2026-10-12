@@ -994,6 +994,12 @@ export interface ForkOrigin {
 export interface ThreadSummary {
   /** Date marked done, or automatically archived after a PR merge. Cleared on restore or manual archive. */
   doneAt?: Timestamp | null;
+  /**
+   * When the core last archived it, the order Ctrl+Shift+T and the archived
+   * list follow on every client. Null once restored; missing on threads
+   * archived by an older core, which fall back to `updatedAt`.
+   */
+  archivedAt?: Timestamp | null;
   forkOrigin?: ForkOrigin;
 
   /** Durable explanation for an automatic archive; absent for manual archives and restored conversations. */

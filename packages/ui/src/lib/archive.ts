@@ -1,5 +1,5 @@
 import { tick } from 'svelte';
-import { closed } from './archive-history';
+import { closed, forgetArchivedThread } from './archive-history';
 import type { ProjectId, ThreadId, ThreadSummary } from '@boite/contracts';
 import { focusComposer } from './focus';
 import { fill, strings } from './strings';
@@ -35,46 +35,66 @@ export async function archiveThread(store: Store, threadId: ThreadId, options: {
 
 /**
  * Brings back the thread archived last and opens it, like a browser reopens
- * the tab just closed. Those archived from this window come first, newest
- * first, skipping one already restored elsewhere; past them, or after a
- * reload, the machine's most recently archived thread. False when there is
- * none.
+ * the tab just closed. "Last" is the core's archive time, so a thread put away
+ * from another computer, the phone or an agent counts as much as one archived
+ * in this window; an automatic archive after a merged PR does not, nobody
+ * closed it. The machines this window archived on are asked too, and the
+ * newest of them wins. False when there is none.
  */
 export async function reopenLastArchived(store: Store): Promise<boolean> {
-  let target: { store: Store; threadId: ThreadId; undoId?: number } | undefined;
-  while ((target = closed.pop())) {
-    const summary = target.store.threads.find((t) => t.id === target!.threadId);
-    if (!summary || summary.archived) break;
+  const owners = [...new Set([store, ...closed.map((entry) => entry.store)])].map((owner) => {
+    const client = owner.client;
+    const generation = owner.clientGeneration;
+    return { owner, current: () => owner.client === client && owner.clientGeneration === generation };
+  });
+  // A machine that cannot answer has nothing to bring back; the active one's
+  // failure is shown only when no other machine had a thread either.
+  let failure: unknown;
+  const lists = await Promise.all(owners.map(async ({ owner, current }) => {
+    const threads = await archivedThreads(owner).catch((error: unknown) => {
+      if (owner === store && current()) failure = error;
+      return [];
+    });
+    return current() ? threads.filter((thread) => !thread.archiveReason).map((thread) => ({ store: owner, thread })) : [];
+  }));
+  // Two archives in the same millisecond: the one made later in this window wins.
+  const order = (c: Archived) => closed.findLastIndex((entry) => entry.store === c.store && entry.threadId === c.thread.id);
+  const newer = (a: Archived, b: Archived) =>
+    archivedTime(a.thread) !== archivedTime(b.thread) ? archivedTime(a.thread) > archivedTime(b.thread) : order(a) > order(b);
+  let target: Archived | undefined;
+  for (const candidate of lists.flat()) if (!target || newer(candidate, target)) target = candidate;
+  if (!target) {
+    if (failure !== undefined && owners[0]!.current()) store.error = failure instanceof Error ? failure.message : String(failure);
+    return false;
   }
-  const owner = target?.store ?? store;
-  const client = owner.client;
-  const clientGeneration = owner.clientGeneration;
-  const current = () => owner.client === client && owner.clientGeneration === clientGeneration;
+  const { store: owner, thread } = target;
+  const current = owners.find((entry) => entry.owner === owner)!.current;
   try {
-    if (!target) {
-      const [newest] = await archivedThreads(owner);
-      if (!current() || !newest) return false;
-      target = { store: owner, threadId: newest.id };
-    }
-    await restoreThread(target.store, target.threadId);
+    await restoreThread(owner, thread.id);
     if (!current()) return false;
-    await workspace.select(target.store, target.threadId);
+    // Back in the sidebar, its Undo toast and its place in this window's history go.
+    forgetArchivedThread(owner, thread.id);
+    await workspace.select(owner, thread.id);
     return true;
   } catch (error) {
-    if (current()) {
-      owner.error = error instanceof Error ? error.message : String(error);
-      if (target) closed.push({ ...target, undoId: target.undoId ?? 0 });
-    }
+    if (current()) owner.error = error instanceof Error ? error.message : String(error);
     return false;
   }
 }
 
-/** The archived threads of this machine, or of one project, read when asked for and never at startup. */
+type Archived = { store: Store; thread: ThreadSummary };
+
+/** When a thread was put away; a thread archived by an older core only has its last change. */
+export function archivedTime(thread: ThreadSummary): number {
+  return thread.archivedAt ?? thread.updatedAt;
+}
+
+/** The archived threads of this machine, or of one project, newest archived first, read when asked for and never at startup. */
 export async function archivedThreads(store: Store, projectId?: ProjectId): Promise<ThreadSummary[]> {
   const client = store.client;
   if (!client) return [];
   const all = await client.call('threads.list', projectId ? { projectId, includeArchived: true } : { includeArchived: true });
-  return all.filter((t) => t.archived && !t.parentThreadId).sort((a, b) => b.updatedAt - a.updatedAt);
+  return all.filter((t) => t.archived && !t.parentThreadId).sort((a, b) => archivedTime(b) - archivedTime(a));
 }
 
 /** Takes a thread out of the archive; its row comes back in the sidebar. */

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { RotateCcw, Trash2 } from '@lucide/svelte';
   import type { Project, ThreadId, ThreadSummary } from '@boite/contracts';
-  import { archivedThreads, restoreThread } from '../lib/archive';
+  import { archivedThreads, archivedTime, restoreThread } from '../lib/archive';
   import { canDeleteThread, deleteThread } from '../lib/thread-removal';
   import { ago, exactTime } from '../lib/format';
   import { fill, strings } from '../lib/strings';
@@ -85,7 +85,7 @@
                 <time datetime={new Date(thread.archiveReason.archivedAt).toISOString()} title={exactTime(thread.archiveReason.archivedAt)}>{ago(thread.archiveReason.archivedAt)}</time>
               </span>
             {/if}
-            <span class="when" title={exactTime(thread.updatedAt)}>{ago(thread.updatedAt)}</span>
+            <span class="when" title={exactTime(archivedTime(thread))}>{ago(archivedTime(thread))}</span>
             <button
               class="ghost small"
               data-testid="archived-drawer-restore"
