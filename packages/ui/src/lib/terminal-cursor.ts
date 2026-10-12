@@ -57,8 +57,8 @@ export function readTerminalGpu(): boolean {
 export function setTerminalGpu(on: boolean): void {
   gpuPicked = on;
   try {
-    if (on) window.localStorage.removeItem(TERMINAL_GPU_STORAGE_KEY);
-    else window.localStorage.setItem(TERMINAL_GPU_STORAGE_KEY, 'off');
+    // Stored either way: an empty key means "never chosen", which a fresh profile can default.
+    window.localStorage.setItem(TERMINAL_GPU_STORAGE_KEY, on ? 'on' : 'off');
   } catch {
     /* a browser that refuses storage still changes the next screens */
   }
