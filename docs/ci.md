@@ -132,10 +132,10 @@ The tested installer becomes the release artifact.
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 594,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,810,000 |
+| UI entry chunk | 593,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,823,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 3,925,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 3,951,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
@@ -201,6 +201,13 @@ pages, kept Agents view, optimistic pin and archive, single permission answer)
 merged with `main` measured 4,513,690 UI bytes and a 591,872-byte entry chunk,
 within the limits above.
 
+On 2026-10-12 the Windows job measured 4,623,852 UI bytes for device keys in
+the group merged with `main` at `5ee76431`: the signing chunk
+(`@noble/ed25519`, loaded at the first signature), Add a device and the group's
+device rows. The UI limit rises to 4,640,000. The same job then measured
+3,927,501 core bytes: signed hellos, device admission and served origins
+(`group/clients.ts`, `group/device-keys.ts`). The core limit rises to 3,935,000.
+
 On 2026-10-12 on Linux with Bun 1.4.2, the terminal rewrite (#453) measured
 4,802,359 UI bytes, 593,425 for the entry chunk and 3,915,408 core bytes; the
 Windows job measured 3,915,831 core bytes. The xterm WebGL, search and Unicode
@@ -210,6 +217,10 @@ their English/French sentences make up the rest of the UI growth, and the bash
 and PowerShell integration scripts the core's. The limits rise to 594,000,
 4,810,000 and 3,925,000.
 
+Merged with `main` at `5feb7d82` on Linux it measured 4,814,973 UI bytes,
+556,942 for the entry chunk and 3,942,646 core bytes, after the device keys
+above. The UI limit rises to 4,823,000 and the core limit to 3,951,000.
+
 Several drafts per project, merged with settings cards at `87fca361`, measured
 4,536,091 UI bytes and a 590,215-byte entry chunk on Linux: the done rows and
 the project fold's rows load outside the entry chunk, which stays under 593,000.
@@ -217,6 +228,15 @@ Merged with `bafe8898`, whose diagnostic logs had raised the UI limit to
 4,581,000, the branch measured 4,606,394 UI bytes, a 591,099-byte entry chunk
 and 3,901,792 core bytes on Linux the same day. The UI limit rises to
 4,620,000.
+
+On 2026-10-12 on Linux with Bun 1.4.2, `main` at `8035c2f7` measured 4,608,637
+UI bytes and a 591,096-byte entry chunk. Edge scrollbars and load on press on
+top of it measured 4,625,475 and 591,725, as the Windows job did: 16,838 bytes
+in all. The scrollbar overlay (6,168) and the press listener (3,575) load only
+while their switch is on; their starter (2,397) loads after mount, and the
+entry chunk gains 629. Merged with `a0c02d16`, whose shared thread and agent
+code shrank the UI, the branch measured 4,602,452 and 554,651, within the
+unchanged 4,620,000 and 593,000.
 
 On 2026-10-10, `bun run build:ui` with Bun 1.4.2 measured 4,420,649 UI bytes at
 `feeb393b` and 4,425,557 with close confirmation and typed agent archival.

@@ -17,7 +17,7 @@
 <div class="spawn" data-testid="spawn-marker" data-direction={direction}>
   <span class="rule"></span>
   {#if present}
-    <button type="button" class="ghost small label" data-testid="spawn-marker-open" title={strings.chat.openLinkedThread} onclick={() => void store.open(link.threadId)}><MessagesSquare size={13} /><span class="ui-label">{label}</span></button>
+    <button type="button" class="ghost small label" data-testid="spawn-marker-open" data-preload-thread={link.threadId} title={strings.chat.openLinkedThread} onclick={() => void store.open(link.threadId)}><MessagesSquare size={13} /><span class="ui-label">{label}</span></button>
   {:else}
     <span class="label"><MessagesSquare size={13} /><span class="ui-label">{label}</span></span>
   {/if}

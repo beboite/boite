@@ -693,7 +693,7 @@ test(
 );
 
 test(
-  'a second browser pairs on the one-time link, gets a key of its own, and the desktop can revoke it',
+  'a second browser is added on the one-time link with a device key of its own, and the desktop can remove it',
   async () => {
     // A fresh profile, like a phone: no stored endpoint, only the grant link the
     // owner minted for it.
@@ -702,9 +702,11 @@ test(
     try {
       await phone.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
       await phone.waitFor(`document.querySelector('[data-testid=status-connection]')?.dataset.state === 'ready'`, 30_000);
-      const stored = await phone.evaluate<{ url: string; token: string }>(`JSON.parse(localStorage.getItem('boite.core'))`);
-      expect(stored.token).toHaveLength(64);
-      expect(stored.token).not.toBe(core.token);
+      // What it keeps is its own device key and the machine it signs for, no key of the core's.
+      const stored = await phone.evaluate<{ url: string; token: string; signs?: string }>(`JSON.parse(localStorage.getItem('boite.core'))`);
+      expect(stored.token).toBe('');
+      expect(stored.signs).toMatch(/^[0-9a-f]{64}$/);
+      expect(await phone.evaluate<string>(`JSON.parse(localStorage.getItem('boite.device')).secret`)).toMatch(/^[A-Za-z0-9_-]{43}$/);
       expect(await phone.evaluate<string>('location.search')).toBe('');
       await phone.waitFor(`document.querySelector('[data-testid=mobile-menu]')`);
       await mobileAction(phone, 'mobile-settings');
@@ -730,7 +732,7 @@ test(
       // The desktop lists the phone and revokes it; the phone's socket closes and its key is dead.
       await page.click(testid('nav-settings'));
       await page.click(testid('settings-tab-machines'));
-      await page.waitFor(`document.querySelector('${testid('paired-devices')} li[data-session-id]')`, 30_000);
+      await page.waitFor(`document.querySelector('${testid('group-card')} ${testid('group-device')}')`, 30_000);
       const client = await connect(core.url, core.token);
       try {
         const sessions = await client.call('sessions.list', {});
@@ -739,10 +741,10 @@ test(
       } finally {
         client.close();
       }
-      await page.waitFor(`!document.querySelector('${testid('paired-devices')}')`, 30_000);
+      await page.waitFor(`!document.querySelector('${testid('group-device')}')`, 30_000);
       // The phone's reconnect is refused once, then it stops, drops its dead key and says why.
       await phone.waitFor(`document.querySelector('[data-testid=status-connection]')?.dataset.state === 'closed'`, 30_000);
-      await phone.waitFor(`document.querySelector('[data-testid=mobile-connect] [data-testid=machine-add-open]')`, 30_000);
+      await phone.waitFor(`document.querySelector('[data-testid=mobile-connect] [data-testid=machine-scan]')`, 30_000);
       expect(await phone.text('[data-testid=mobile-connect] h1')).toBe('Your Boite, on your phone');
       expect(await phone.evaluate(`document.querySelector('${testid('error-toast')}') === null`)).toBe(true);
       expect(await phone.evaluate<string | null>(`localStorage.getItem('boite.core')`)).toBeNull();

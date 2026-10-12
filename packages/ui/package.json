@@ -14,6 +14,8 @@
   "dependencies": {
     "@boite/contracts": "workspace:*",
     "@lucide/svelte": "1.48.0",
+    "@noble/ed25519": "3.2.0",
+    "@noble/hashes": "2.4.0",
     "@tauri-apps/api": "2.12.0",
     "@tauri-apps/plugin-dialog": "2.7.3",
     "@tauri-apps/plugin-opener": "2.5.5",

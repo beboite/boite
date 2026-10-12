@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import type { FirewallStatus, PairingGrant } from '@boite/contracts';
+import type { DeviceInvite, FirewallStatus } from '@boite/contracts';
 import type { Store } from '../lib/store.svelte';
-import PairingCard from './PairingCard.svelte';
+import AddDevice from './AddDevice.svelte';
+import PhoneSettings from './PhoneSettings.svelte';
 import { isLoopback } from './LanReach.svelte';
 
 let mounted: ReturnType<typeof mount> | undefined;
@@ -21,16 +22,17 @@ afterEach(async () => {
 const settle = async () => { for (let i = 0; i < 20; i++) { await Promise.resolve(); flushSync(); } };
 const ready: FirewallStatus = { state: 'ready', networks: ['public'], allowed: ['public'], blocked: [] };
 const unset: FirewallStatus = { state: 'unset', networks: ['public'], allowed: [], blocked: [] };
-const grant = (host: string): PairingGrant => ({ url: `http://${host}:7337/?grant=g`, grant: 'g', role: 'device', expiresAt: Date.now() + 600_000, code: 'K7QM-2222' });
+const invite = (origin: string): DeviceInvite => ({ url: `${origin}/?grant=g#join=boite-invite`, code: 'K7QM-2222', expiresAt: Date.now() + 600_000, codeExpiresAt: Date.now() + 300_000 });
+const tailscaleOff = { state: 'off', dnsName: null, url: null, servedTarget: null, target: 'http://127.0.0.1:7337', publicUrlMatches: false };
 
-/** The desktop app's own core, which listens on itself until the setting is on and a restart applied it. */
+/** "Add a device" on the desktop app's own core, which listens on itself until the setting is on and a restart applied it. */
 function card(localCore = true) {
   let listening = false;
   let allowed = false;
   const calls: string[] = [];
   const store = $state({
     owner: true, principal: 'owner', connection: 'ready', localCore, sessions: [],
-    pairing: grant('127.0.0.1') as PairingGrant | null,
+    deviceInvite: invite('http://127.0.0.1:7337') as DeviceInvite | null,
     settings: { listenOnLan: false, publicUrl: null },
     core: { endpoint: { host: '127.0.0.1', port: 7337 } },
     client: {
@@ -41,19 +43,20 @@ function card(localCore = true) {
         return allowed ? ready : unset;
       }),
     },
-    loadSessions: vi.fn(async () => {}),
-    mintPairing: vi.fn(async () => { store.pairing = grant(listening ? '192.168.1.52' : '127.0.0.1'); }),
+    addDevice: vi.fn(async () => { store.deviceInvite = invite(listening ? 'http://192.168.1.52:7337' : 'http://127.0.0.1:7337'); }),
+    closeDeviceInvite: vi.fn(() => { store.deviceInvite = null; }),
     saveSettings: vi.fn(async (patch: { listenOnLan?: boolean }) => { store.settings = { ...store.settings, ...patch }; return true; }),
   });
-  mounted = mount(PairingCard, { target: document.body, props: { store: store as unknown as Store } });
+  mounted = mount(AddDevice, { target: document.body, props: { store: store as unknown as Store } });
   return { store, calls };
 }
 
 test('a loopback link shows no QR code, and the button turns the network on, restarts, and shows a link a phone reaches', async () => {
   const { store, calls } = card();
   await settle();
-  expect(document.querySelector('[data-testid=pairing-qr]')).toBeNull();
-  expect(document.querySelector('[data-testid=pairing-code]')).toBeNull();
+  expect(document.querySelector('[data-testid=add-device]')).not.toBeNull();
+  expect(document.querySelector('[data-testid=add-device-qr]')).toBeNull();
+  expect(document.querySelector('[data-testid=add-device-code]')).toBeNull();
   document.querySelector<HTMLButtonElement>('[data-testid=lan-reach-button]')!.click();
   await settle();
   expect(store.settings.listenOnLan).toBe(true);
@@ -61,8 +64,9 @@ test('a loopback link shows no QR code, and the button turns the network on, res
   expect(document.querySelector('[data-testid=lan-reach]')?.getAttribute('data-phase')).toBe('restarting');
   await vi.advanceTimersByTimeAsync(1600);
   await settle();
-  expect(store.pairing?.url).toBe('http://192.168.1.52:7337/?grant=g');
+  expect(store.deviceInvite?.url).toBe('http://192.168.1.52:7337/?grant=g#join=boite-invite');
   expect(document.querySelector('[data-testid=lan-reach]')).toBeNull();
+  expect(document.querySelector('[data-testid=add-device-code]')?.textContent).toBe('K7QM-2222');
 });
 
 test('a core the desktop app did not start keeps the manual hint and no button', async () => {
@@ -77,13 +81,11 @@ test('isLoopback names the links that only reach the computer opening them', () 
   expect(['http://192.168.1.52:7337/?grant=a', 'https://boite.example.com/', 'not a url'].some(isLoopback)).toBe(false);
 });
 
-test('turning the network off restarts, settles on the bound address and re-mints the owner link with its code, even behind a public address', async () => {
-  const minted: [string, boolean | undefined][] = [];
-  const ownerGrant = (origin: string): PairingGrant => ({ url: `${origin}/?grant=g`, grant: 'g', role: 'owner', expiresAt: Date.now() + 600_000, code: 'K7QM-2222' });
+test('turning the network off restarts, settles on the bound address and draws the Add a device link again, even behind a public address', async () => {
   const store = $state({
-    owner: true, principal: 'owner', connection: 'ready', localCore: true, sessions: [],
+    owner: true, principal: 'owner', connection: 'ready', localCore: true, sessions: [], endpointUrl: null,
     // A public address: the link names neither loopback nor the LAN, whatever the core listens on.
-    pairing: ownerGrant('https://boite.example.com') as PairingGrant | null,
+    deviceInvite: invite('https://boite.example.com') as DeviceInvite | null,
     settings: { listenOnLan: true, publicUrl: 'https://boite.example.com' },
     core: { endpoint: { host: '0.0.0.0', port: 7337 } },
     client: { call: vi.fn(async (method: string) => {
@@ -91,16 +93,14 @@ test('turning the network off restarts, settles on the bound address and re-mint
         // The old core answers through its grace; the next one comes back bound as the setting says.
         setTimeout(() => { store.core = { endpoint: { host: store.settings.listenOnLan ? '0.0.0.0' : '127.0.0.1', port: 7337 } }; }, 2000);
       }
-      return ready;
+      return method === 'tailscale.status' ? tailscaleOff : ready;
     }) },
-    loadSessions: vi.fn(async () => {}),
-    // Pairing.mintPairing never throws: a failure becomes the store's error.
-    mintPairing: vi.fn(async (role: string, short?: boolean) => { minted.push([role, short]); store.pairing = ownerGrant('https://boite.example.com'); }),
+    // Pairing.addDevice never throws: a failure becomes the store's error.
+    addDevice: vi.fn(async () => { store.deviceInvite = invite('https://boite.example.com'); }),
     saveSettings: vi.fn(async (patch: { listenOnLan?: boolean }) => { store.settings = { ...store.settings, ...patch }; return true; }),
   });
-  mounted = mount(PairingCard, { target: document.body, props: { store: store as unknown as Store } });
+  mounted = mount(PhoneSettings, { target: document.body, props: { store: store as unknown as Store } });
   await settle();
-  (document.querySelector('[data-testid=pairing-options]') as HTMLDetailsElement).open = true;
   const lan = document.querySelector<HTMLInputElement>('[data-testid=setting-listen-on-lan]')!;
   lan.click();
   await settle();
@@ -109,10 +109,10 @@ test('turning the network off restarts, settles on the bound address and re-mint
   expect(lan.disabled).toBe(true);
   await vi.advanceTimersByTimeAsync(1600);
   await settle();
-  expect(minted).toEqual([]);
+  expect(store.addDevice).not.toHaveBeenCalled();
   await vi.advanceTimersByTimeAsync(1600);
   await settle();
-  expect(minted).toEqual([['owner', true]]);
+  expect(store.addDevice).toHaveBeenCalledTimes(1);
   expect(document.querySelector('[data-testid=lan-reach]')).toBeNull();
   expect(lan.disabled).toBe(false);
 });

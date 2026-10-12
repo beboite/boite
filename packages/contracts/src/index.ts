@@ -2314,7 +2314,11 @@ export interface CoreInfo {
     readingPages?: boolean;
     /** `threads.get` and `messages.list` take `compactToolParts`; `messages.toolPart` exists. No message is refused for its size then. */
     deferredToolParts?: boolean;
+    /** A device of its group says hello with a signature of its own device key (`hello` `device`). */
+    deviceKeys?: boolean;
   };
+  /** The fingerprint of this core's identity key: the id its group knows it by, and the one a device signs its hello for. */
+  coreId?: string;
   os: Os;
   /** The install this core belongs to. `--channel` on its command line decides. */
   channel: Channel;
@@ -2928,12 +2932,23 @@ export interface GroupCore {
   epoch: number;
 }
 
-/** A phone or another computer paired with one member, which the group lets reach every member. */
+/**
+ * A phone or a browser of the group. It holds one Ed25519 key, `id` is the
+ * fingerprint of it, and every member lets it in on a signature of that key
+ * (`hello` `device`). A device paired before device keys still shows here
+ * under `<home core id>:<session id>`, with `legacy`, until it next connects
+ * and sends its key.
+ */
 export interface GroupDevice {
-  /** `<home core id>:<session id>`: the member it paired with and its session there. */
   id: string;
   name: string;
   role: PairingRole;
+  /** The member that admitted it. */
+  by?: string;
+  /** When it was admitted, as the admitting member's clock said. */
+  addedAt?: Timestamp;
+  /** A pairing of the older kind, one key per member: it moves to a device key the next time it connects. */
+  legacy?: true;
 }
 
 /**
@@ -2947,8 +2962,49 @@ export interface Group {
   /** The core that answered. */
   self: string;
   cores: GroupCore[];
-  /** Left empty for a paired device, which only needs the machines. */
+  /** The phones and browsers of the group. A device reads only its own entry. */
   devices: GroupDevice[];
+  /** The id of the device that asked, when a device asked. */
+  device?: string;
+}
+
+/**
+ * What "Add a device" shows: one link, drawn as a QR code, and a short code
+ * under it. A phone scans the link or types the code: it is admitted to the
+ * group with its device key and reaches every member. A computer pastes the
+ * link: its core joins the group with the invitation the link carries after
+ * `#`. Both secrets are one-time and expire.
+ */
+export interface DeviceInvite {
+  url: string;
+  /** `XXXX-XXXX`, the same admission for a phone, typed. */
+  code: string;
+  expiresAt: Timestamp;
+  codeExpiresAt: Timestamp;
+}
+
+/** The fragment key of a device link that carries a machine's group invitation. */
+export const DEVICE_LINK_JOIN = 'join';
+
+/**
+ * What a device signs to say hello to one core: the core it means, the time and
+ * a one-time nonce. Nothing in it can be used on another core or twice.
+ */
+export function deviceHelloInput(coreId: string, at: number, nonce: string): string {
+  return `boite-device-hello\n${coreId}\n${at}\n${nonce}`;
+}
+
+/** What a device signs when it is admitted: the grant or code it redeems, so its key is proven held by the one who scanned. */
+export function deviceAdmitInput(grant: string, publicKey: string): string {
+  return `boite-device-admit\n${grant}\n${publicKey}`;
+}
+
+/** A device's signed hello for one core. */
+export interface DeviceHello {
+  id: string;
+  at: number;
+  nonce: string;
+  sig: string;
 }
 
 /**
@@ -3428,7 +3484,7 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'collaboration.bridge.forward': { params: { coreId: string; body: string; signature: string }; result: CoordinationBridgeResponse };
   /** Only the owner connection that received this request can complete it. */
   'collaboration.bridge.reply': { params: { requestId: string; response: CoordinationBridgeResponse }; result: { ok: true } };
-  /** The group this core belongs to, or null. A paired device reads the machines, never the devices. */
+  /** The group this core belongs to, or null. A paired device reads the machines and its own device entry. */
   'group.get': { params: Record<string, never>; result: Group | null };
   /** Starts a group with this core as its only member. Refused while it belongs to one. Owner only. */
   'group.create': { params: { name: string }; result: Group };
@@ -3444,6 +3500,21 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'group.remove': { params: { coreId: string }; result: Group };
   /** A ticket for the caller to connect to another member at its own role. */
   'group.ticket': { params: { coreId: string; url?: string }; result: GroupTicket };
+  /**
+   * "Add a device": one link and one code. A phone redeems it with its device
+   * key and joins the group; a computer pastes the link and its core joins.
+   * A core in no group starts one named after itself first. Owner only.
+   */
+  'group.addDevice': { params: Record<string, never>; result: DeviceInvite };
+  /** Takes a device out of the group: every member refuses it from then on. Owner only. */
+  'group.revokeDevice': { params: { id: string }; result: Group };
+  /**
+   * A client paired the older way, one key per member, hands over its device
+   * key: from then on it says hello with a signature on every member. The
+   * key it called with keeps working until it is revoked. A core in no group
+   * starts one named after itself first.
+   */
+  'group.enrollDevice': { params: { publicKey: string; name?: string; at: number; sig: string }; result: { id: string; group: Group } };
   'speech.status': { params: Record<string, never>; result: SpeechStatus };
   'speech.configure': { params: SpeechConfig & { groqKey?: string; openrouterKey?: string }; result: SpeechStatus };
   'speech.config': { params: Record<string, never>; result: SpeechConfig };
@@ -3550,7 +3621,13 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
        * it, takes it out and passes the rest of the hello on: the core at the
        * end never sees it.
        */
-      relay?: string;
+      relay?: string | DeviceHello;
+      /**
+       * A device of the group: its signature for this core (`deviceHelloInput`).
+       * With `grant`, the device being admitted: its public key and a
+       * signature over the grant (`deviceAdmitInput`), and `name` for the list.
+       */
+      device?: DeviceHello | { publicKey: string; name?: string; sig: string };
       protocolVersion: number;
       client: { name: string; version: string; device?: string };
     };
@@ -3558,6 +3635,8 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
       core: CoreInfo;
       principal: Principal;
       session?: { id: string; token: string };
+      /** The device id a grant just admitted. */
+      device?: string;
       /** The one thread an `agent` reaches. */
       threadId?: ThreadId;
     };

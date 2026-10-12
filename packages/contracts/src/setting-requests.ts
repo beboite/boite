@@ -48,7 +48,7 @@ export const REQUESTABLE_SETTINGS = {
   memoryProtection: { page: 'resources', section: 'limits', sensitive: true },
   reapOrphans: { page: 'resources', section: 'tasks', sensitive: false },
   autoUpdateHarnesses: { page: 'machines', section: 'machines', sensitive: false },
-  listenOnLan: { page: 'machines', section: 'devices', sensitive: true },
+  listenOnLan: { page: 'machines', section: 'phone', sensitive: true },
   publicUrl: { page: 'machines', section: 'phone', sensitive: true },
   browserOrigins: { page: 'advanced', section: 'origins', sensitive: true },
   warmProcessMinutes: { page: 'advanced', section: 'execution', sensitive: false },

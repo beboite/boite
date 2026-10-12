@@ -486,7 +486,7 @@ describe('settings', () => {
     const listed = await boite(['settings']);
     expect(listed.code).toBe(0);
     expect(listed.out).toContain('agentCpuCapPercent 75 resources#limits\n');
-    expect(listed.out).toContain('listenOnLan false machines#devices (changed from Settings only)');
+    expect(listed.out).toContain('listenOnLan false machines#phone (changed from Settings only)');
     expect(listed.out).not.toContain('subscriptionProxy');
     expect(JSON.parse((await boite(['settings', 'agentCpuCapPercent', '--json'])).out)).toMatchObject({ key: 'agentCpuCapPercent', value: 75, sensitive: false });
 

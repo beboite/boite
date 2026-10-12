@@ -123,9 +123,13 @@ test('two real cores pair, route turns independently, reconnect and survive a re
     await page.waitFor(`document.querySelector('${id('thread-title')}')?.textContent === 'Primary project'`);
     await page.click(id('nav-settings'));
     await page.click(id('settings-tab-machines'));
-    // Restore a legacy individual owner connection. The new UI folds it into the group automatically.
+    // Restore a legacy individual owner connection, as a desktop app paired before groups kept it: a key for that
+    // core alone. The new UI folds it into the group automatically.
     const grant = await b.call('pairing.grant', { role: 'owner' });
-    await page.evaluate(`globalThis.__boiteTest.workspace.pair(${JSON.stringify(grant.url)}, 'Remote')`);
+    const exchanged = await connect(second.url, '', { grant: grant.grant });
+    const key = exchanged.session!.token;
+    exchanged.close();
+    await page.evaluate(`globalThis.__boiteTest.workspace.add({ url: ${JSON.stringify(second.url)}, token: ${JSON.stringify(key)}, paired: true }, 'Remote')`);
     await page.waitFor(`document.querySelectorAll('[data-group-member="true"]').length === 2`);
     expect((await a.call('group.get', {}))?.id).toBe((await b.call('group.get', {}))?.id);
     expect(await page.evaluate(`document.querySelector('${id('machine-add-open')}') === null`)).toBe(true);
@@ -260,19 +264,17 @@ test('one invitation groups two real cores: the page connects the second by itse
     await page.click(id('nav-settings'));
     await page.click(id('settings-tab-machines'));
 
-    // One machine starts the group and mints an invitation.
-    await page.type(id('group-name'), 'Home');
-    await page.click(id('group-create'));
+    // Add a device on a machine in no group starts one, named after it, and gives the link a computer pastes.
+    await page.click(id('group-add-device'));
     await page.waitFor(`document.querySelectorAll('[data-group-member="true"], ${id('group-member')}').length === 1`);
-    expect((await a.call('group.get', {}))?.name).toBe('Home');
-    await page.click(id('group-invite'));
-    await page.waitFor(`document.querySelector('${id('group-invite-code')}')?.value.startsWith('boite-group:')`);
-    const invite = await page.evaluate<string>(`document.querySelector('${id('group-invite-code')}').value`);
+    expect((await a.call('group.get', {}))?.cores).toHaveLength(1);
+    await page.waitFor(`(document.querySelector('${id('add-device')}')?.dataset.link ?? '').includes('#join=')`);
+    const link = await page.evaluate<string>(`document.querySelector('${id('add-device')}').dataset.link`);
     await showGroup();
     await capture('group-invite-desktop.png');
 
-    // The other machine joins with it, as its own settings or `boite-core group join` would.
-    const joined = await b.call('group.join', { invite });
+    // The other machine pastes it under Join, as its own settings would; `boite-core group join` takes it too.
+    const joined = await b.call('group.join', { invite: link });
     expect(joined.cores).toHaveLength(2);
     // No pairing link for the second machine: the page was handed a key by it through the group.
     await page.waitFor(machines(2));

@@ -10,7 +10,6 @@
   import { fill, strings } from '../lib/strings';
   import MachineIcon from './MachineIcon.svelte';
   import GroupCard from './GroupCard.svelte';
-  import PairingCard from './PairingCard.svelte';
   import PhoneSettings from './PhoneSettings.svelte';
   import MachineSettings from './MachineSettings.svelte';
   import MainMachine from './MainMachine.svelte';
@@ -115,9 +114,13 @@
   });
 
   /** Sign-ins happen on the machine that keeps them: its own Providers page. */
+  /** The form already on the page takes it; a second one is drawn only when none is. */
+  const topForm = $derived(window.__TAURI_INTERNALS__ === undefined && groupStore.principal !== 'owner' && !workspace.machines.some(machine => machine.store.connection === 'ready'));
   async function repair() {
-    memberRepair = true;
-    await tick();
+    if (!topForm) {
+      memberRepair = true;
+      await tick();
+    }
     pairingForm?.startAdding();
   }
 
@@ -171,7 +174,8 @@
     </section>
   {/if}
 
-    {#if !groupStore.owner}<PairMachine {mobile} bind:this={pairingForm} />{/if}
+    <!-- A device of a group has nothing to add: its group brings every machine. One that reaches none adds itself here. -->
+    {#if topForm}<PairMachine {mobile} bind:this={pairingForm} />{/if}
     {#each groupStores as owner (owner.group?.id ?? 'ungrouped')}
     <GroupCard store={owner} {mobile} migration={owner === groupStores[0] ? migration : undefined}>
     <div class="machines">
@@ -201,7 +205,7 @@
             </div>
             <div class="actions">
               {#if machine.store.pairingRequired}
-                <button class="ghost small" data-testid="machine-repair" onclick={() => { if (groupStore.owner) void repair(); else pairingForm?.startAdding(); }}><ScanLine size={15} /><span class="ui-label">{strings.mobile.pairAgain}</span></button>
+                <button class="ghost small" data-testid="machine-repair" onclick={() => void repair()}><ScanLine size={15} /><span class="ui-label">{strings.mobile.pairAgain}</span></button>
               {:else if machine.store.connection === 'closed'}
                 <button class="ghost icon-only" aria-label={strings.common.refresh} title={strings.common.refresh} onclick={() => void machine.store.connect()}><RefreshCw size={15} /></button>
               {/if}
@@ -278,8 +282,7 @@
   <MainMachine />
 
   {#if !mobile}
-    <!-- A phone pairs from the computer, never from itself: both cards are the desktop's. -->
-    <PairingCard store={workspace.active} />
+    <!-- How a phone reaches this machine, and its app: the desktop's to set up. -->
     <PhoneSettings store={workspace.active} />
   {/if}
 </div>

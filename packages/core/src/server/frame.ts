@@ -24,7 +24,7 @@ export async function handleFrame(core: Core, connection: ServerConnection, raw:
   const method = typeof frame.method === 'string' ? frame.method : '';
 
   if (!connection.authenticated) {
-    hello(core, connection, id, method, frame.params);
+    await hello(core, connection, id, method, frame.params);
     return;
   }
 
