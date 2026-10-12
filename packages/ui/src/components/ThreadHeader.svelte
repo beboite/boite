@@ -197,7 +197,7 @@
       {/if}
 
       {#if thread?.parentThreadId}
-        <button type="button" class="chip parent" data-testid="delegation-back-parent" onclick={() => void store.open(thread!.parentThreadId!)}>
+        <button type="button" class="chip parent" data-testid="delegation-back-parent" data-preload-thread={thread!.parentThreadId} onclick={() => void store.open(thread!.parentThreadId!)}>
           <ArrowLeft size={13} strokeWidth={1.75} />
           <span class="ui-label">{strings.delegation.parent}</span>
         </button>

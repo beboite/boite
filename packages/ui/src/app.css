@@ -1552,6 +1552,67 @@ tr:last-child td {
   }
 }
 
+/* The edge-scrollbars experiment (lib/edge-scrollbars.ts): native bars take no
+   room and an overlay thumb fades in as the mouse nears a container's edge.
+   The script sets the class only for a fine pointer without forced colors, and
+   these selectors outrank the `*` rules above. */
+:root.edge-scrollbars,
+:root.edge-scrollbars * {
+  scrollbar-width: none;
+}
+
+:root.edge-scrollbars::-webkit-scrollbar,
+:root.edge-scrollbars ::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* A manual popover in the top layer, so thumbs also draw over open menus. */
+.edge-scrollbar-layer {
+  position: fixed;
+  inset: 0;
+  width: auto;
+  height: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  background: transparent;
+  pointer-events: none;
+  contain: strict;
+  z-index: 2147483647;
+}
+
+.edge-scrollbar-thumb {
+  position: absolute;
+  top: 0;
+  left: 0;
+  box-sizing: border-box;
+  border: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--color-scrollbar);
+  background-clip: padding-box;
+  opacity: 0;
+  pointer-events: none;
+  will-change: transform, opacity;
+  transition: background-color var(--dur-2) var(--ease-out-quint), border-width var(--dur-1) var(--ease-out-quint);
+}
+
+.edge-scrollbar-thumb[data-live] {
+  pointer-events: auto;
+}
+
+.edge-scrollbar-thumb[data-live]:hover {
+  background-color: var(--color-scrollbar-hover);
+  border-width: 1px;
+}
+
+.edge-scrollbar-thumb[data-active] {
+  background-color: var(--color-scrollbar-active);
+  border-width: 1px;
+}
+
 /* ------------------------------------------------------------------------- */
 /* The frame                                                                  */
 /* ------------------------------------------------------------------------- */

@@ -133,6 +133,7 @@
       title={`${strings.sidebar.settings}${store.keyHint('settings')}`}
       aria-label={strings.sidebar.settings}
       data-testid="nav-settings"
+      data-preload-view="settings"
       onclick={() => store.showSettings()}><Settings size={16} /></button
     >
   </div>

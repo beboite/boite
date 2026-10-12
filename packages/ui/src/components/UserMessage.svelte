@@ -121,7 +121,7 @@
       <span class="agent-source">
         <span class="agent-label">{strings.chat.promptFromAgent}</span>
         {#if starterPresent}
-          <button type="button" class="agent-link" data-testid="spawn-marker-open" title={strings.chat.openLinkedThread} onclick={() => void store.open(startedBy.threadId)}>{startedBy.title}</button>
+          <button type="button" class="agent-link" data-testid="spawn-marker-open" data-preload-thread={startedBy.threadId} title={strings.chat.openLinkedThread} onclick={() => void store.open(startedBy.threadId)}>{startedBy.title}</button>
         {:else}
           <strong>{startedBy.title}</strong>
         {/if}

@@ -293,7 +293,7 @@ export class Delegation {
     this.delegationSelectedAgentId = threadId;
     this.delegationThread = null;
     this.delegationSubscribedThreadId = null;
-    if (previous && previous !== threads.subscribedThreadId && previous !== threadId && previous !== keep) {
+    if (previous && !threads.preloads.holds(previous) && previous !== threadId && previous !== keep) {
       void client.call('threads.unsubscribe', { threadId: previous }).catch(() => undefined);
     }
     if (threadId === null) return;
@@ -307,7 +307,7 @@ export class Delegation {
         await subscribed;
         if (!current()) {
           // An open that took this thread over keeps its subscription.
-          if (this.delegationSelectedAgentId !== threadId && threads.subscribedThreadId !== threadId && threads.openThread?.id !== threadId) {
+          if (this.delegationSelectedAgentId !== threadId && !threads.preloads.holds(threadId) && threads.openThread?.id !== threadId) {
             await client.call('threads.unsubscribe', { threadId }).catch(() => undefined);
           }
           return;

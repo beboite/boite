@@ -155,6 +155,18 @@ preserves the Windows Bun 1.4.2 runs, tables and failed 1,000-start attempts fro
 2026-09-29 and 2026-09-30. These fixtures do not establish a supported real-agent
 count, provider quota, native shell performance or physical-phone behavior.
 
+## Load on press
+
+`bun test tests/e2e/press-preload.test.ts` opens sidebar threads in a hidden
+browser on the fake core with a simulated 200 ms round trip
+(`?fake=1&rtt=200`), the mouse button held 120 ms, and times the release to
+the thread's messages in hand, each sample on a fresh page with nothing cached.
+On 2026-10-12 in the Linux container, three runs of four samples each: a plain
+click had medians of 222, 230 and 232 ms, and the Load on press experiment 95,
+96 and 100 ms. The press saved about the 120 ms it was held, up to one round
+trip. The fake does not delay pushed events or model payload size, and a real
+core adds its own handling time to both paths.
+
 ## Naming a long conversation
 
 `bun run bench/retitle.ts` creates 5,000 messages containing about 40 MB of text

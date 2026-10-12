@@ -198,6 +198,7 @@
       data-testid="thread-row"
       data-thread-id={thread.id}
       data-machine-id={machine.id}
+      data-preload-thread={thread.id}
       data-status={thread.status}
       data-pinned={thread.pinned ? 'true' : undefined}
       title={thread.title}

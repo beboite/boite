@@ -606,7 +606,7 @@
         <div class="notice framed">
           <h1>{strings.app.noEndpointTitle}</h1>
           <p class="muted">{strings.app.noEndpointBody}</p>
-          <button type="button" class="primary" onclick={() => store.showSettings()}>
+          <button type="button" class="primary" data-preload-view="settings" onclick={() => store.showSettings()}>
             {strings.app.openSettings}
           </button>
         </div>

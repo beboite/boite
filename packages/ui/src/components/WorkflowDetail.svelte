@@ -101,7 +101,7 @@
       {#if instance.threadId}
         <div class="conversation-head">
           <p class="section-label">{strings.workflow.conversation}</p>
-          <button type="button" class="quiet small" data-testid="workflow-open-thread" onclick={() => void openThread(instance.threadId!)}><span class="ui-label">{strings.workflow.openThread}</span></button>
+          <button type="button" class="quiet small" data-testid="workflow-open-thread" data-preload-thread={instance.threadId} onclick={() => void openThread(instance.threadId!)}><span class="ui-label">{strings.workflow.openThread}</span></button>
         </div>
         {#if store.delegationThread?.id === instance.threadId}
           <div class="transcript"><DelegationTranscript messages={store.delegationThread.messages} /></div>

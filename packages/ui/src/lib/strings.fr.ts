@@ -2273,6 +2273,14 @@ export const fr: Translation = {
     residentAgents: {
       title: 'Agents',
       hint: 'Des agents résidents avec leur propre brain, leurs missions et leurs routines, depuis la barre latérale. Les agents déjà créés continuent de tourner quand ceci est désactivé'
+    },
+    edgeScrollbars: {
+      title: 'Barres de défilement au bord',
+      hint: 'Les barres de défilement ne prennent plus de place. Chacune apparaît quand le pointeur s’approche du bord de sa zone et reste déplaçable. Souris et stylet uniquement'
+    },
+    pressPreload: {
+      title: 'Chargement à l’appui',
+      hint: 'Une conversation ou une page commence à charger dès que vous appuyez dessus, avant de relâcher le clic ou de lever le doigt'
     }
   },
 
