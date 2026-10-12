@@ -13,3 +13,13 @@ export async function showThreadView(page: BrowserPage, view: 'projects' | 'rece
   await page.click(trigger);
   await page.waitFor(`!document.querySelector('${menu}')`);
 }
+
+/** Orders the projects by recent activity or by the user's own arrangement, from the same panel. */
+export async function setProjectOrder(page: BrowserPage, order: 'recent' | 'manual', prefix = ''): Promise<void> {
+  const trigger = `[data-testid=${prefix}grouping-options]`, menu = `[data-testid=${prefix}grouping-options-menu]`;
+  if (await page.evaluate(`document.querySelector('${trigger}')?.getAttribute('aria-expanded') !== 'true'`)) await page.click(trigger);
+  await page.click(`${menu} [data-value="order:${order}"]`);
+  await page.waitFor(`document.querySelector('${menu} [data-testid=${prefix}project-sort]')?.dataset.order === '${order}'`);
+  await page.click(trigger);
+  await page.waitFor(`!document.querySelector('${menu}')`);
+}

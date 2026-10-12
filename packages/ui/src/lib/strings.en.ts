@@ -194,7 +194,6 @@ export const strings = {
     createAgent: 'Create an agent', noAgents: 'No agents yet', more: 'More', noMatch: 'Nothing matches',
     noMessagesYet: 'No messages yet', noMissions: 'No missions yet', previewFrom: '{name}: {text}', unread: '{count} unread',
     backToChat: 'Back to the conversation', backTo: 'Back to {name}', editRoles: 'Edit roles', startChat: 'Start the conversation',
-    inCharge: 'Agents in charge',
     asks: '{name} asks you',
     planned: 'Planned tasks', plannedResult: 'Planned task',
     entrustTo: 'Entrust to an agent', entrustToName: 'Entrust to {name}', entrustedTo: 'Entrusted to {name}', takeBack: 'Take it back',
@@ -503,7 +502,7 @@ export const strings = {
   },
   machines: {
     heading: 'Machines', local: 'This PC', projects: 'Projects', recent: 'Recent',
-    dynamic: 'All machines', recentHint: 'Most recent user message first',
+    dynamic: 'All machines',
     intro: 'Each machine runs its own agents on its own files.',
     details: 'Details', address: 'Address', updateFailed: 'Update failed',
     label: 'Machine name', icon: 'Machine icon', icons: { desktop: 'Desktop', laptop: 'Laptop', server: 'Server', rack: 'Server rack', cloud: 'Cloud', cpu: 'Processor' }, link: 'Pairing link', add: 'Add machine', adding: 'Connecting', connect: 'Connect',
@@ -759,23 +758,37 @@ export const strings = {
     projectArchivedThreads: '{project}: {count} archived',
     /** The fold under the list for projects with no open conversation, and what choosing one does. */
     idleProjects: 'Idle projects',
+    /** The same fold once it also holds archived projects. */
+    otherProjects: 'Other projects',
+    archivedProject: 'Archived',
     groupingOptions: 'Display options',
     /** The sidebar's top switch between the thread list and the Agents page. */
     surface: 'Threads or agents',
     threads: 'Threads',
     agents: 'Agents',
+    /** The count beside Threads or Agents in that switch: what works now, and whether something there needs the user. */
+    surfaceWorking: '{count} at work',
+    surfaceWaiting: '{count} at work, something needs you',
     /** The two ways the display options can list threads. */
     projectsView: 'Projects',
-    projectsViewHint: 'Threads grouped under their project',
     recentView: 'Recent',
-    workingGroupingScope: 'Projects and Recent · This device',
-    otherGroupingScope: 'Projects · This device',
-    mergedPrScope: 'Project: {project}',
+    /** The display options panel: its sections, and the short names its rows use under them. */
+    displayView: 'View',
+    displayOrder: 'Project order',
+    displayGroup: 'Group',
+    groupWorkingRow: 'Working threads',
+    groupIdleRow: 'Idle projects',
+    customOrderShort: 'Custom',
+    autoArchiveMergedPrHint: 'A worktree conversation leaves the list for Done once its branch is merged. Its worktree, branch and history stay. Applies to this project.',
     noActiveProjects: 'No conversations need attention.',
     markDone: 'Mark done',
     doneToast: 'Marked "{title}" done',
     doneLoadFailed: 'Some completed threads could not be loaded.',
     doneRetry: 'Try again',
+    /** The pull request under a done or archived conversation, which opens it on the forge. */
+    prMerged: '#{number} merged',
+    prClosed: '#{number} closed',
+    prOpen: '#{number} open',
     reopenThread: 'Move to Recent',
     reopenNamedThread: 'Move "{title}" to Recent',
     doneNotice: 'This thread is done. Move it to Recent to continue.',
@@ -783,7 +796,6 @@ export const strings = {
     filterProject: 'Filter by project',
     recentOrder: 'Recent activity',
     customOrder: 'Custom order',
-    toggleOrder: 'Click again to switch project order',
     moveProjectUp: 'Move project up',
     moveProjectDown: 'Move project down',
     search: 'Search threads',
@@ -866,7 +878,9 @@ export const strings = {
     archivedToast: 'Archived "{title}"',
     undo: 'Undo',
     undoHint: 'Undo (Ctrl+Z)',
-    draft: 'New thread'
+    draft: 'New thread',
+    /** A draft row's menu: what is typed there and not sent goes. */
+    deleteDraft: 'Delete draft'
   },
 
   /** Moving a thread to another project: the menu entry, its project picker and the question about background work. */
@@ -2600,7 +2614,6 @@ export const strings = {
   errors: {
     draftStorage: 'This device could not save your draft. Keep this window open and copy your text before closing it.',
     draftAttachment: 'An attachment could not be read from storage. Reload to recover it, or remove it before sending.',
-    draftExists: 'This project already has a draft. Open or send it before moving another draft here.',
     prefix: 'Error',
     activityUnsupported: 'This core does not support goals or loops. Update Boite on {machine}, then reconnect. Your command has not been sent.',
     pullRequestUnsupported: 'Update Boite on the machine hosting this thread to show its pull request. This core does not support pull request lookup yet.',

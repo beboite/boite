@@ -155,6 +155,13 @@
     border-radius: var(--radius-sm);
     background: var(--color-scrim);
     color: var(--color-foreground);
+    transition: opacity var(--dur-2) var(--ease-out-quint), transform var(--dur-2) var(--ease-out-quint), background var(--dur-1) var(--ease-out-quint);
+  }
+
+  /* A pointer sees the cross on the picture it is over, or the keyboard on its chip; the rest of the strip stays clean. A touch screen has no hover and keeps it. */
+  @media (hover: hover) and (pointer: fine) {
+    .attachment .remove { opacity: 0; transform: scale(0.85); }
+    .attachment:hover .remove, .attachment:focus-within .remove { opacity: 1; transform: none; }
   }
 
   .attachment .remove:hover:not(:disabled) {

@@ -2,7 +2,7 @@ import { mobileAction } from './lib/mobile.ts';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp.ts';
-import { showThreadView } from './lib/views.ts';
+import { setProjectOrder, showThreadView } from './lib/views.ts';
 import { startUi } from './lib/ui.ts';
 
 let server: { close(): Promise<void> };
@@ -104,8 +104,7 @@ test('projects follow user activity, then keep a dragged custom order after relo
   const activityOrder = await keys();
   await page.evaluate(`(() => { const s = globalThis.__boiteTest.workspace.machines[0].store; s.threads = s.threads.map(t => ({...t, updatedAt: Date.now() + 10000})); })()`);
   expect(await keys()).toEqual(activityOrder);
-  await page.click(id('project-sort'));
-  expect(await page.evaluate(`document.querySelector('${id('project-sort')}').dataset.order`)).toBe('manual');
+  await setProjectOrder(page, 'manual');
   const before = await keys();
   await page.click(id('project-menu'));
   expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('context-menu')} [data-value]')).map(e => e.dataset.value)`)).toEqual(['new', 'copy', 'archived', 'manage']);
@@ -129,9 +128,9 @@ test('projects follow user activity, then keep a dragged custom order after relo
   await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...points.to, button: 'left', buttons: 0, clickCount: 1 });
   await page.waitFor(`JSON.stringify(Array.from(document.querySelectorAll('${id('project')}')).map(e => JSON.stringify([e.dataset.machineId, e.dataset.projectId]))) === ${JSON.stringify(JSON.stringify([before[3]!, ...before.slice(0, 3)]))}`);
   expect(await keys()).toEqual([before[3]!, ...before.slice(0, 3)]);
-  await page.click(id('project-sort'));
+  await setProjectOrder(page, 'recent');
   expect(await keys()).toEqual(activityOrder);
-  await page.click(id('project-sort'));
+  await setProjectOrder(page, 'manual');
   expect(await keys()).toEqual([before[3]!, ...before.slice(0, 3)]);
   await capture('project-order-desktop.png');
   await page.navigate(url);
