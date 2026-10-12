@@ -1,17 +1,17 @@
 <script lang="ts">
-  import { CircleAlert, FishingHook, MessageCircleQuestionMark } from '@lucide/svelte';
+  import { CircleAlert, FishingHook, MessageCircleQuestionMark, Settings2 } from '@lucide/svelte';
   import { showDockedQuestion } from '../lib/question-dock.svelte';
   import { replyOf, repliesOf, sendAnswer, writeAnswer } from '../lib/question-reply.svelte';
   import type { Account, MemoryEvent, Message } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
-  import { formatTokens } from '../lib/tokens';
-  import { count } from '../lib/format';
+  import { count, formatTokens, providerName } from '../lib/format';
   import { isNamedModel } from '../lib/model-order';
   import { planOf } from '../lib/plan';
   import PermissionCard from './PermissionCard.svelte';
   import PlanCard from './PlanCard.svelte';
   import QuestionCard from './QuestionCard.svelte';
+  import SettingRequestCard from './SettingRequestCardLoader.svelte';
   import Prose from './Prose.svelte';
   import ChatFile from './ChatFile.svelte';
   import InlineView from './InlineView.svelte';
@@ -76,7 +76,7 @@
 {#if showModel && message.role === 'assistant' && execution}
   {@const model = store.modelsOf(execution.providerId, execution.accountId).find((model) => model.id === execution.model)}
   <div class="model-attribution" data-testid="message-model">
-    {execution.model && isNamedModel(model ?? { id: execution.model, name: execution.model }) ? model?.name ?? execution.model : store.providerOf(execution.providerId)?.name}
+    {execution.model && isNamedModel(model ?? { id: execution.model, name: execution.model }) ? model?.name ?? execution.model : providerName(store, execution.providerId)}
   </div>
 {/if}
 {#if message.role === 'system' && from === 0}
@@ -119,15 +119,24 @@
           toolName={part.toolName}
           decision={part.decision}
           request={store.permissionRequests[part.requestId] ?? null}
-          answer={(decision) => void store.answer(part.requestId, decision)}
+          answer={(decision) => store.answer(part.requestId, decision)}
         />
       {:else if part.type === 'question' && part.async === true && (part.answer ?? null) === null && store.pendingQuestions.some((q) => q.id === part.questionId)}
         <!-- Waiting in the dock above the composer: here only a line that brings it up. -->
         <button type="button" class="ghost docked-question" data-testid="question-docked" title={strings.chat.questionOpen} onclick={() => showDockedQuestion(part.questionId)}>
-          <MessageCircleQuestionMark size={15} strokeWidth={1.75} />
+          {#if part.setting}<Settings2 size={15} strokeWidth={1.75} />{:else}<MessageCircleQuestionMark size={15} strokeWidth={1.75} />{/if}
           <span class="docked-text ui-label">{part.text}</span>
           <span class="docked-hint ui-label">{strings.chat.questionDocked}</span>
         </button>
+      {:else if part.type === 'question' && part.setting}
+        <SettingRequestCard
+          {store}
+          text={part.text}
+          setting={part.setting}
+          answer={part.answer ?? null}
+          pending={store.pendingQuestions.some((q) => q.id === part.questionId)}
+          respond={(optionId) => store.answerQuestion(message.threadId, part.questionId, [optionId])}
+        />
       {:else if part.type === 'question'}
         {@const asked = store.pendingQuestions.find((q) => q.id === part.questionId)}
         {@const reply = replyOf(store, part.questionId)}

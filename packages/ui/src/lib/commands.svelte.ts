@@ -158,8 +158,9 @@ export function runCommand(store: Store, id: string, inShell: boolean): void {
   switch (id) {
     case 'new-thread': {
       const selected = workspace.view === 'recent' ? projectView.selected(workspace.machines.flatMap(machine => machine.store.projects.filter(project => !project.archived).map(project => ({ machine, project })))) : undefined;
-      if (selected) void workspace.select(selected.machine.store, undefined, selected.project.id);
-      else { store.showChat(); store.startDraft(); }
+      // Always a new, empty draft: the project's other drafts stay where they are.
+      if (selected) void workspace.select(selected.machine.store, undefined, selected.project.id, { fresh: true });
+      else { store.showChat(); store.startDraft(undefined, { fresh: true }); }
       break;
     }
     case 'palette': store.paletteOpen = !store.paletteOpen; break;
@@ -182,7 +183,7 @@ export function runCommand(store: Store, id: string, inShell: boolean): void {
     case 'task-manager': store.showSettings('task-manager'); break;
     case 'archived': store.showSettings('general', 'archived'); break;
     case 'providers': store.showSettings('accounts'); break;
-    case 'pair': store.showSettings('machines', 'devices'); break;
+    case 'pair': store.showSettings('machines', 'machines'); void store.addDevice(); break;
     case 'tour': store.showChat(); openTour(); break;
     case 'theme-dark': setTheme('dark'); break;
     case 'theme-light': setTheme('light'); break;

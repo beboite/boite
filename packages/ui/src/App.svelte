@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from './lib/errors';
   import { onMount, untrack } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import { takeNotificationTarget } from './lib/endpoint';
@@ -9,7 +10,6 @@
   import UndoToast from './components/UndoToast.svelte';
   import NotificationCard from './components/NotificationCard.svelte';
   import ChatView from './components/ChatView.svelte';
-
   import ConfirmDialog from './components/ConfirmDialog.svelte';
   import ContextMenu from './components/ContextMenu.svelte';
   import DragGhost from './components/DragGhost.svelte';
@@ -36,7 +36,7 @@
   import { hostLocalAgentBrowser } from './lib/agent-browser-host.svelte';
   import type { Store } from './lib/store.svelte';
   import { tourRequested, tourSeen } from './lib/onboarding.svelte';
-  import { prefetchAllowed, prefetchNames, whenIdle } from './lib/prefetch';
+  import { prefetchAllowed, prefetchNames, warmPages, whenIdle } from './lib/prefetch';
   import { startTheme } from './lib/theme';
   import { setZoom, stepZoom, wantedZoom, ZOOM_DEFAULT, zoomKey } from './lib/zoom';
   import { appName, appUpdater } from './lib/app-update.svelte';
@@ -90,7 +90,8 @@
     ConnectFlow: () => import('./components/ConnectFlow.svelte'),
     Onboarding: () => import('./components/Onboarding.svelte'),
     // xterm.js and its stylesheet: only once a terminal is asked for.
-    TerminalView: () => import('./components/TerminalView.svelte')
+    TerminalView: () => import('./components/TerminalView.svelte'),
+    PluginUpdateNotice: () => import('./components/PluginUpdateNotice.svelte')
   };
   type Deferred = { [K in keyof typeof deferredLoaders]?: Awaited<ReturnType<(typeof deferredLoaders)[K]>>['default'] };
   let deferred = $state.raw<Deferred>({});
@@ -118,11 +119,11 @@
     const names = Object.keys(deferredLoaders) as (keyof Deferred)[];
     for (const name of prefetchNames(names, { tourSeen: tourSeen(), owner: store.owner })) need(name);
   }
-  // Once the first load has landed rather than against it, and only on a link
-  // that can spare the bytes (lib/prefetch.ts).
+  // Once the first load has landed rather than against it, and the rest only on a
+  // link that can spare the bytes (lib/prefetch.ts). The plugin update notice reads its own list, so it loads on any link.
   $effect(() => {
-    if (!store.booted || !prefetchAllowed()) return;
-    return whenIdle(needAll);
+    if (!store.booted) return;
+    return whenIdle(() => { if (!prefetchAllowed()) return need('PluginUpdateNotice'); needAll(); warmPages(store, experimentOn('resident-agents')); });
   });
   let WhipOverlay = $state<typeof import('./components/WhipOverlay.svelte').default>();
   $effect(() => {
@@ -361,7 +362,7 @@
   // every connected machine that wait on an answer or finished unread. The
   // installed app's icon badge carries the same count.
   $effect(() => {
-    const stores = workspace.machines.length ? workspace.machines.map((machine) => machine.store) : [store];
+    const stores = workspace.machinesOr(store).map((machine) => machine.store);
     const count = attentionCount(stores);
     const name = appName();
     document.title = count > 0 ? `(${count}) ${name}` : name;
@@ -500,7 +501,7 @@
     if (zoom !== null && !(event.target instanceof Element && event.target.closest('[data-testid=browser-surface]'))) {
       event.preventDefault();
       void setZoom(zoom === 0 ? ZOOM_DEFAULT : stepZoom(wantedZoom(), zoom)).catch((error: unknown) => {
-        store.error = error instanceof Error ? error.message : String(error);
+        store.error = errorText(error);
       });
       return;
     }
@@ -605,7 +606,7 @@
         <div class="notice framed">
           <h1>{strings.app.noEndpointTitle}</h1>
           <p class="muted">{strings.app.noEndpointBody}</p>
-          <button type="button" class="primary" onclick={() => store.showSettings()}>
+          <button type="button" class="primary" data-preload-view="settings" onclick={() => store.showSettings()}>
             {strings.app.openSettings}
           </button>
         </div>
@@ -678,7 +679,6 @@
     </div>
   {/if}
 
-
   {#if toast.shown}
     <div
       class="toast"
@@ -696,15 +696,15 @@
       />
     </div>
   {/if}
-  <UndoToast onerror={(error) => (store.error = error instanceof Error ? error.message : String(error))} />
+  <UndoToast onerror={(error) => (store.error = errorText(error))} />
   {#if store.booted && experimentOn('whip') && WhipOverlay}
-    <WhipOverlay onerror={(error) => (store.error = error instanceof Error ? error.message : String(error))} />
+    <WhipOverlay onerror={(error) => (store.error = errorText(error))} />
   {/if}
 </div>
 
 <ContextMenu />
 <DragGhost />
-{#if tour && deferred.Onboarding}{@const Onboarding = deferred.Onboarding}<Onboarding {store} />{/if}
+{#if tour && deferred.Onboarding}{@const Onboarding = deferred.Onboarding}<Onboarding {store} />{:else if deferred.PluginUpdateNotice}{@const PluginUpdateNotice = deferred.PluginUpdateNotice}<PluginUpdateNotice />{/if}
 {#if deferred.ProjectPicker}{@const ProjectPicker = deferred.ProjectPicker}<ProjectPicker {store} />{/if}
 <ConfirmDialog />
 {#if deferred.ImportDialog}{@const ImportDialog = deferred.ImportDialog}<ImportDialog {store} />{/if}

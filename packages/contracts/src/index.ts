@@ -3,6 +3,8 @@ import type { WorkflowsRpcMethods, WorkflowsRpcEvents } from './workflows';
 import type { BrowserRpcMethods, BrowserRpcEvents, BrowserProfile } from './browser';
 import type { PullRequestsRpcMethods, PullRequestsRpcEvents } from './pull-requests';
 import type { MobileDevicesRpcMethods, MobileDevicesRpcEvents } from './mobile-devices';
+import type { CoreLogContext, CoreLogLevel, CoreLogRecord, CoreLogsQuery, DiagnosticsRpcMethods } from './diagnostics';
+export * from './diagnostics';
 export * from './pull-requests';
 export * from './browser';
 export * from './browser-remote';
@@ -731,6 +733,33 @@ export interface PluginState {
   rejected: PluginRejected | null;
   /** The desktop app the plugin provides, null when it provides none. */
   app: PluginAppState | null;
+  /**
+   * Where Boite looks for this recommended plugin's newer releases, and what
+   * it last found there. Null when its entry names no update source. Absent
+   * from cores older than update sources.
+   */
+  updates?: PluginUpdates | null;
+}
+
+/**
+ * A recommended plugin's update source and its last check. The source is the
+ * reviewed list's, never the plugin's own: docs/plugins.md, Updating.
+ */
+export interface PluginUpdates {
+  /** The https repository and the ref whose `boite-plugin.json` is read. */
+  source: { url: string; ref: string };
+  /** A check is running now. */
+  checking: boolean;
+  /** When the last check finished, successful or not. */
+  checkedAt: Timestamp | null;
+  /** When the core checks again by itself, null when it does not. */
+  nextCheckAt: Timestamp | null;
+  /** A newer release the last check found and accepted; `availableVersion` then names it. */
+  available: { version: string; commit: string; checkedAt: Timestamp } | null;
+  /** Why the manifest read there was not offered: not newer, another id, no artifact here. Not an error. */
+  ignored: string | null;
+  /** Why the last check could not read the source. Checks back off after one. */
+  error: string | null;
 }
 
 /** What `plugins.inspect` read, shown to the owner before anything is downloaded. */
@@ -965,6 +994,12 @@ export interface ForkOrigin {
 export interface ThreadSummary {
   /** Date marked done, or automatically archived after a PR merge. Cleared on restore or manual archive. */
   doneAt?: Timestamp | null;
+  /**
+   * When the core last archived it, the order Ctrl+Shift+T and the archived
+   * list follow on every client. Null once restored; missing on threads
+   * archived by an older core, which fall back to `updatedAt`.
+   */
+  archivedAt?: Timestamp | null;
   forkOrigin?: ForkOrigin;
 
   /** Durable explanation for an automatic archive; absent for manual archives and restored conversations. */
@@ -1091,6 +1126,21 @@ export interface Usage {
   costUsdEquivalent: number | null;
 }
 
+/** Public API prices in US dollars per million tokens. */
+export interface TokenRates {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
+
+/** The public model a usage row was priced as, with the rates its tokens were charged. */
+export interface UsagePrice {
+  /** The id in the core's price list, such as `claude-opus-5-5`. */
+  model: string;
+  rates: TokenRates;
+}
+
 /**
  * The finished turns of one provider and model whose `finishedAt` falls in
  * `[edges[bucket], edges[bucket + 1])` of a `usage.history` call.
@@ -1104,14 +1154,21 @@ export interface UsageHistoryRow {
   turns: number;
   /** Turns among them that carried a usage report. */
   reported: number;
-  /** Turns among them that carried an API-equivalent price. */
+  /**
+   * Turns among them with an API-equivalent cost: every reported turn when the
+   * row has a `price`, else the turns whose agent reported a cost.
+   */
   priced: number;
   /**
    * Sums over the reported turns. `inputTokens` never includes the cache reads,
    * whatever the provider counts, so the four token fields add up to the tokens
-   * processed. `costUsdEquivalent` is null when no turn of the row was priced.
+   * processed. `costUsdEquivalent` is the tokens at `price`'s rates, or the sum
+   * of the costs the agent reported when no rate matched the model; null when
+   * neither gave one.
    */
   usage: Usage;
+  /** The public rates the row was priced at. Null when none matched its model; absent from an older core. */
+  price?: UsagePrice | null;
 }
 
 export interface UsageHistoryThread {
@@ -1425,6 +1482,8 @@ export type MessagePart =
       answer?: QuestionAnswer | null;
       /** Asked without stopping: see `QuestionRequest.async`. */
       async?: boolean;
+      /** A settings card: see `QuestionRequest.setting`. */
+      setting?: SettingAsk;
     }
   /**
    * The agent compacted its context mid-turn: what it held before, what is
@@ -1680,6 +1739,8 @@ export interface QuestionAnswer {
    * not kept here: the core wrote them to its disk and told the agent the paths.
    */
   attachments?: AnswerAttachment[];
+  /** On a settings card the user changed: the value the setting holds now. */
+  value?: unknown;
 }
 
 /** A file given with an answer: what the card shows once it is answered. */
@@ -1709,6 +1770,11 @@ export interface QuestionRequest {
    * is running or as the next prompt when none is.
    */
   async?: boolean;
+  /**
+   * A settings card (`settings.request`): the agent asks for a change, or
+   * points at a page. `text` is its reason. Always asynchronous.
+   */
+  setting?: SettingAsk;
   createdAt: Timestamp;
 }
 
@@ -1944,6 +2010,11 @@ export interface Settings {
    * Missing on older cores, which read as on.
    */
   asyncQuestions?: boolean;
+  /**
+   * Agents may read this machine's anonymized diagnostics and draft an issue
+   * from them (`boite logs`, `boite issue`). Missing reads as on.
+   */
+  agentLogAccess?: boolean;
   /**
    * The model that writes every thread's title after its first answer. Null
    * or missing: each thread's own provider on its small model
@@ -2239,7 +2310,11 @@ export interface CoreInfo {
     readingPages?: boolean;
     /** `threads.get` and `messages.list` take `compactToolParts`; `messages.toolPart` exists. No message is refused for its size then. */
     deferredToolParts?: boolean;
+    /** A device of its group says hello with a signature of its own device key (`hello` `device`). */
+    deviceKeys?: boolean;
   };
+  /** The fingerprint of this core's identity key: the id its group knows it by, and the one a device signs its hello for. */
+  coreId?: string;
   os: Os;
   /** The install this core belongs to. `--channel` on its command line decides. */
   channel: Channel;
@@ -2853,12 +2928,23 @@ export interface GroupCore {
   epoch: number;
 }
 
-/** A phone or another computer paired with one member, which the group lets reach every member. */
+/**
+ * A phone or a browser of the group. It holds one Ed25519 key, `id` is the
+ * fingerprint of it, and every member lets it in on a signature of that key
+ * (`hello` `device`). A device paired before device keys still shows here
+ * under `<home core id>:<session id>`, with `legacy`, until it next connects
+ * and sends its key.
+ */
 export interface GroupDevice {
-  /** `<home core id>:<session id>`: the member it paired with and its session there. */
   id: string;
   name: string;
   role: PairingRole;
+  /** The member that admitted it. */
+  by?: string;
+  /** When it was admitted, as the admitting member's clock said. */
+  addedAt?: Timestamp;
+  /** A pairing of the older kind, one key per member: it moves to a device key the next time it connects. */
+  legacy?: true;
 }
 
 /**
@@ -2872,8 +2958,49 @@ export interface Group {
   /** The core that answered. */
   self: string;
   cores: GroupCore[];
-  /** Left empty for a paired device, which only needs the machines. */
+  /** The phones and browsers of the group. A device reads only its own entry. */
   devices: GroupDevice[];
+  /** The id of the device that asked, when a device asked. */
+  device?: string;
+}
+
+/**
+ * What "Add a device" shows: one link, drawn as a QR code, and a short code
+ * under it. A phone scans the link or types the code: it is admitted to the
+ * group with its device key and reaches every member. A computer pastes the
+ * link: its core joins the group with the invitation the link carries after
+ * `#`. Both secrets are one-time and expire.
+ */
+export interface DeviceInvite {
+  url: string;
+  /** `XXXX-XXXX`, the same admission for a phone, typed. */
+  code: string;
+  expiresAt: Timestamp;
+  codeExpiresAt: Timestamp;
+}
+
+/** The fragment key of a device link that carries a machine's group invitation. */
+export const DEVICE_LINK_JOIN = 'join';
+
+/**
+ * What a device signs to say hello to one core: the core it means, the time and
+ * a one-time nonce. Nothing in it can be used on another core or twice.
+ */
+export function deviceHelloInput(coreId: string, at: number, nonce: string): string {
+  return `boite-device-hello\n${coreId}\n${at}\n${nonce}`;
+}
+
+/** What a device signs when it is admitted: the grant or code it redeems, so its key is proven held by the one who scanned. */
+export function deviceAdmitInput(grant: string, publicKey: string): string {
+  return `boite-device-admit\n${grant}\n${publicKey}`;
+}
+
+/** A device's signed hello for one core. */
+export interface DeviceHello {
+  id: string;
+  at: number;
+  nonce: string;
+  sig: string;
 }
 
 /**
@@ -3253,77 +3380,7 @@ export interface ServerUpdateStatus {
   error: string | null;
 }
 
-export type CoreLogLevel = 'info' | 'warn' | 'error';
-
-/** Raw provider output reaches only owner live observers; diagnostic history retains a placeholder. */
-export interface CoreLogContext {
-  source?: string;
-  event?: string;
-  threadId?: ThreadId;
-  turnId?: TurnId;
-  requestId?: string;
-  kind?: 'provider-output';
-}
-
-/** A bounded diagnostic, with no transcript, RPC payload or process arguments. */
-export interface CoreLogRecord {
-  id: string;
-  runId: string;
-  at: Timestamp;
-  level: CoreLogLevel;
-  source: string;
-  event: string;
-  message: string;
-  threadId?: ThreadId;
-  turnId?: TurnId;
-  requestId?: string;
-}
-
-export interface CoreLogsQuery {
-  /** Defaults to 100; an integer from 1 to 200. Results are newest first. */
-  limit?: number;
-  threadId?: ThreadId;
-  level?: CoreLogLevel;
-}
-
-/** Real and in-memory cores share the same strict diagnostic query boundary. */
-export function validateCoreLogsQuery(raw: unknown): CoreLogsQuery & { limit: number } {
-  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('core.logs params: expected an object');
-  const query = raw as Record<string, unknown>;
-  for (const key of Object.keys(query)) if (!['limit', 'threadId', 'level'].includes(key)) throw new Error(`core.logs ${key}: expected limit, threadId or level`);
-  const limit = query.limit === undefined ? 100 : query.limit;
-  if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > 200) throw new Error('core.logs limit: expected an integer from 1 to 200');
-  if (query.threadId !== undefined && (typeof query.threadId !== 'string' || query.threadId.length < 1 || query.threadId.length > 200 || /[\x00-\x1f\x7f]/.test(query.threadId))) throw new Error('core.logs threadId: expected 1 to 200 characters without control characters');
-  if (query.level !== undefined && !['info', 'warn', 'error'].includes(query.level as string)) throw new Error('core.logs level: expected info, warn or error');
-  return { limit, ...(query.threadId === undefined ? {} : { threadId: query.threadId as string }), ...(query.level === undefined ? {} : { level: query.level as CoreLogLevel }) };
-}
-
-/** Owner-only live provider output keeps sign-in URLs usable. Never persist this text. */
-export function normalizeCoreLogOutput(text: string, secrets: readonly string[] = []): string {
-  let value = text;
-  for (const secret of secrets) if (secret.length > 0) value = value.split(secret).join('[redacted]');
-  return value.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '').slice(0, 4096);
-}
-
-/** Redact before bounding: cutting an Authorization value first could leave a secret prefix. */
-export function normalizeCoreLogText(text: string, secrets: readonly string[] = []): string {
-  const REDACTED = '[redacted]';
-  let value = text;
-  for (const secret of secrets) if (secret.length > 0) value = value.split(secret).join(REDACTED);
-  value = value
-    .replace(/((?:^|[^\w-])["']?[\w-]*(?:token|grant|secret|password|api[_-]?key|prompts?|attachments?|commandLine|arguments|params|content|messages|text|input|output)["']?\s*[:=]\s*)[\[{](?!redacted\])[\s\S]*/gi, `$1${REDACTED}`)
-    .replace(/\b(?:Authorization\s*[:=]\s*)?(?:Bearer|Basic)\s+[^\s,;"'<>]+/gi, REDACTED)
-    .replace(/\bAuthorization\s*[:=]\s*[^\r\n]+/gi, `Authorization: ${REDACTED}`)
-    .replace(/((?:^|[^\w-])["']?[\w-]*(?:token|grant|secret|password|api[_-]?key|prompt|attachments?|commandLine|arguments|params|content|messages|text|input|output)["']?\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;&}]+)/gi, `$1${REDACTED}`)
-    .replace(/\b(?:sk-[a-zA-Z0-9_-]{8,}|(?:ghp|github_pat)_[a-zA-Z0-9_]{8,})/g, REDACTED)
-    .replace(/(^|[^a-z0-9+.-])([a-z][a-z0-9+.-]*:\/\/[^\s<>"']+)/gi, (_match, prefix: string, raw: string) => prefix + raw
-      .replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/?#@]*@/i, `$1${REDACTED}@`)
-      // All query values and fragments are untrusted, including unfamiliar keys.
-      .replace(/[?#].*$/, `?${REDACTED}`));
-  return value.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '').slice(0, 4096);
-}
-
-export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, BrowserRpcMethods, PullRequestsRpcMethods, MobileDevicesRpcMethods {
+export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, BrowserRpcMethods, PullRequestsRpcMethods, MobileDevicesRpcMethods, DiagnosticsRpcMethods {
   /** Owner-only merged-PR visibility policy; absent defaults to enabled. Disabling reveals automatically hidden roots, retaining manual archives. */
   'projects.setAutoArchiveMergedPr': { params: { projectId: ProjectId; enabled: boolean }; result: Project };
   /** Owner-only, private bounded diagnostic history, including earlier runs. */
@@ -3409,7 +3466,7 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'collaboration.bridge.forward': { params: { coreId: string; body: string; signature: string }; result: CoordinationBridgeResponse };
   /** Only the owner connection that received this request can complete it. */
   'collaboration.bridge.reply': { params: { requestId: string; response: CoordinationBridgeResponse }; result: { ok: true } };
-  /** The group this core belongs to, or null. A paired device reads the machines, never the devices. */
+  /** The group this core belongs to, or null. A paired device reads the machines and its own device entry. */
   'group.get': { params: Record<string, never>; result: Group | null };
   /** Starts a group with this core as its only member. Refused while it belongs to one. Owner only. */
   'group.create': { params: { name: string }; result: Group };
@@ -3425,6 +3482,21 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'group.remove': { params: { coreId: string }; result: Group };
   /** A ticket for the caller to connect to another member at its own role. */
   'group.ticket': { params: { coreId: string; url?: string }; result: GroupTicket };
+  /**
+   * "Add a device": one link and one code. A phone redeems it with its device
+   * key and joins the group; a computer pastes the link and its core joins.
+   * A core in no group starts one named after itself first. Owner only.
+   */
+  'group.addDevice': { params: Record<string, never>; result: DeviceInvite };
+  /** Takes a device out of the group: every member refuses it from then on. Owner only. */
+  'group.revokeDevice': { params: { id: string }; result: Group };
+  /**
+   * A client paired the older way, one key per member, hands over its device
+   * key: from then on it says hello with a signature on every member. The
+   * key it called with keeps working until it is revoked. A core in no group
+   * starts one named after itself first.
+   */
+  'group.enrollDevice': { params: { publicKey: string; name?: string; at: number; sig: string }; result: { id: string; group: Group } };
   'speech.status': { params: Record<string, never>; result: SpeechStatus };
   'speech.configure': { params: SpeechConfig & { groqKey?: string; openrouterKey?: string }; result: SpeechStatus };
   'speech.config': { params: Record<string, never>; result: SpeechConfig };
@@ -3487,6 +3559,12 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    */
   'plugins.app': { params: { id: string; action: 'start' | 'stop' | 'restart' }; result: PluginState };
   /**
+   * Reads the update source of one recommended plugin, or of every one that
+   * names a source, now. Answers once the reads finish; each changed state is
+   * also announced by `plugins.updated`. Installs nothing.
+   */
+  'plugins.checkUpdates': { params: { id?: string }; result: PluginState[] };
+  /**
    * Asks the owner's desktop windows to show a thread or an agent's page.
    * Emits `ui.reveal` to owner connections only, desktop-app plugins left
    * out; `delivered` counts them.
@@ -3525,7 +3603,13 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
        * it, takes it out and passes the rest of the hello on: the core at the
        * end never sees it.
        */
-      relay?: string;
+      relay?: string | DeviceHello;
+      /**
+       * A device of the group: its signature for this core (`deviceHelloInput`).
+       * With `grant`, the device being admitted: its public key and a
+       * signature over the grant (`deviceAdmitInput`), and `name` for the list.
+       */
+      device?: DeviceHello | { publicKey: string; name?: string; sig: string };
       protocolVersion: number;
       client: { name: string; version: string; device?: string };
     };
@@ -3533,6 +3617,8 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
       core: CoreInfo;
       principal: Principal;
       session?: { id: string; token: string };
+      /** The device id a grant just admitted. */
+      device?: string;
       /** The one thread an `agent` reaches. */
       threadId?: ThreadId;
     };
@@ -3561,6 +3647,11 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * `current`: the names `delegation.spawn` and `agent.move` accept.
    */
   'agent.projects': { params: { threadId: ThreadId }; result: AgentProject[] };
+  /**
+   * The settings an agent may ask about (`REQUESTABLE_SETTINGS`), each with
+   * its value and the page it sits on, so it reads before it proposes.
+   */
+  'agent.settings': { params: { threadId: ThreadId }; result: SettingReading[] };
   /**
    * The agent registers an existing folder as a project, as the owner does
    * from the sidebar, so `agent.spawn` and `agent.move` can name it. `path` is
@@ -4143,6 +4234,20 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
     params: { threadId: ThreadId; text: string; options?: string[]; multiple?: boolean };
     result: { questionId: RequestId };
   };
+  /**
+   * A settings card on the agent's thread (`boite settings request|open`),
+   * asked without stopping like `questions.ask`, with `reason` as its text.
+   * With `key` and `value` it proposes a change: refused for a key outside
+   * `REQUESTABLE_SETTINGS` (naming them), a value `settings.set` would refuse,
+   * the value already set, or a card already open on that key in the thread.
+   * The card settles when the setting changes, through Apply or the page; the
+   * agent reads `applied`, `changed` or `refuse`. With `page` it points at a
+   * page and the agent reads `open` or `refuse`.
+   */
+  'settings.request': {
+    params: SettingRequestParams;
+    result: { questionId: RequestId; setting: SettingAsk };
+  };
 
   'trace.get': { params: { threadId: ThreadId; limit?: number }; result: ProcessRecord[] };
   'resources.list': { params: Record<string, never>; result: ThreadResources[] };
@@ -4481,6 +4586,13 @@ export { AUTO_COMPACT_MOMENTS, AUTO_COMPACT_TOKENS, BROWSER_ORIGINS_MAX, checkSe
 import type { AutoCompact } from './settings-validation.ts';
 export { TITLE_MODEL_DEFAULTS, defaultTitleModel } from './title-models.ts';
 export { DEVICE_METHODS, DEVICE_EVENTS, AGENT_EVENTS } from './access.ts';
+export {
+  REQUESTABLE_SETTINGS, REQUESTABLE_SETTING_KEYS, SETTING_REASON_MAX, SETTINGS_PAGES, SETTINGS_SECTION_PATTERN,
+  checkSettingRequest, effectiveSetting, isRequestableSetting, isSettingsPage, readSettings, sameSetting, settingAnswerText, settledSetting,
+  type RequestableSetting, type SettingAsk, type SettingNormalizer, type SettingOutcome, type SettingPlace, type SettingReading, type SettingRequestCheck,
+  type SettingRequestParams, type SettingsPage,
+} from './setting-requests.ts';
+import type { SettingAsk, SettingReading, SettingRequestParams } from './setting-requests.ts';
 export { SPEECH_CATALOGUE, SPEECH_CUSTOM_ID, SPEECH_DEFAULT_MODEL, isSpeechModelId, speechUrlProblem, type SpeechCatalogueModel, type SpeechModelTier, type SpeechBackend } from './speech-models.ts';
 import type { SpeechModelTier, SpeechBackend } from './speech-models.ts';
 

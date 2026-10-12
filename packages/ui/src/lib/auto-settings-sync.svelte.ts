@@ -1,3 +1,4 @@
+import { errorText } from './errors';
 import { untrack } from 'svelte';
 import type { Machine } from './workspace.svelte';
 import type { SyncReport } from './settings-sync';
@@ -111,7 +112,7 @@ export class AutoSettingsSync {
         } while (pending && !stopped);
       } catch (error) {
         if (!stopped) {
-          const message = error instanceof Error ? error.message : String(error);
+          const message = errorText(error);
           target.store.error = sync && error instanceof sync.SyncFailure
             ? fill(strings.machines.syncStopped, { stage: strings.machines.syncStages[error.stage], error: message }) : message;
           this.failures.set(target.id, target.store.error);

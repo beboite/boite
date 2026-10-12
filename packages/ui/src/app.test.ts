@@ -161,7 +161,7 @@ test('Alt+digit reaches the history unfolded under an idle project, after the li
   try {
     await store.open('t-trace');
     await store.archive('t-descriptors', true);
-    projectThreadView.shelf.idle = true;
+    projectThreadView.shelfOpen = true;
     const row = '[data-testid=idle-project][data-project-id="p-notes"]';
     await waitFor(() => document.querySelector(`${row} [data-testid$=-toggle]`) !== null);
     query<HTMLButtonElement>(`${row} [data-testid$=-toggle]`).click();
@@ -169,7 +169,7 @@ test('Alt+digit reaches the history unfolded under an idle project, after the li
     await waitFor(() => sidebarRows.list.at(-1)?.threadId === 't-descriptors');
     expect(sidebarRows.list.map(entry => entry.threadId)).toEqual([...store.threadsOf('p-boite').map(() => expect.any(String)), 't-descriptors']);
   } finally {
-    projectThreadView.shelf = { idle: false, archived: false };
+    projectThreadView.shelfOpen = false;
     projectThreadView.done = [];
     projectThreadView.archived = [];
   }
@@ -990,7 +990,7 @@ test('the composer wears the context meter, a compaction is a divider, and a tur
   await waitFor(() => document.querySelector('[data-testid=context-popup]') !== null);
   expect(query('[data-testid=context-popup]').textContent).toContain(count(31000));
   expect(query('[data-testid=compaction-part]').textContent?.replace(/\s+/g, ' ').trim()).toBe(
-    'Context compacted, 184k to 31k tokens'
+    'Context compacted, 184K to 31K tokens'
   );
 
   const input = query<HTMLTextAreaElement>('[data-testid=composer-input]');
@@ -1704,7 +1704,7 @@ test('a tool card stays folded while its input arrives and reveals parsed detail
 
   await waitFor(() => card.dataset.streaming === 'false');
   expect(card.querySelector('[data-testid=tool-toggle]')?.getAttribute('aria-expanded')).toBe('false');
-  expect(card.querySelector('.fold')?.classList.contains('open')).toBe(false);
+  expect(card.querySelector('.disclosure-fold')?.classList.contains('open')).toBe(false);
   expect(card.querySelector('.line')?.textContent).toBe('Ran 1 command');
 
   card.querySelector<HTMLButtonElement>('[data-testid=tool-toggle]')?.click();
@@ -2106,44 +2106,35 @@ test('a failed account login can be dismissed and removed without restarting', a
   await waitFor(() => !store.accounts.some(account => account.id === 'a-claude-side'));
 });
 
-test('a pairing link can be closed and a fresh one created', async ({ app: _app }) => {
+test('Add a device can be closed and a fresh link drawn', async ({ app: _app }) => {
   store.showSettings('machines');
-  await waitFor(() => document.querySelector('[data-testid=pairing-mint]') !== null);
-  query<HTMLButtonElement>('[data-testid=pairing-mint]').click();
-  await waitFor(() => document.querySelector('[data-testid=pairing-link]') !== null);
-  const first = store.pairing!.grant;
-  query<HTMLButtonElement>('[data-testid=pairing-close]').click();
-  await waitFor(() => document.querySelector('[data-testid=pairing-link]') === null);
-  expect(store.pairing).toBeNull();
-  query<HTMLButtonElement>('[data-testid=pairing-mint]').click();
-  await waitFor(() => document.querySelector('[data-testid=pairing-link]') !== null);
-  expect(store.pairing!.grant).not.toBe(first);
+  await waitFor(() => document.querySelector('[data-testid=group-add-device]') !== null);
+  query<HTMLButtonElement>('[data-testid=group-add-device]').click();
+  await waitFor(() => document.querySelector('[data-testid=add-device]') !== null);
+  const first = store.deviceInvite!.url;
+  query<HTMLButtonElement>('[data-testid=add-device-close]').click();
+  await waitFor(() => document.querySelector('[data-testid=add-device]') === null);
+  expect(store.deviceInvite).toBeNull();
+  query<HTMLButtonElement>('[data-testid=group-add-device]').click();
+  await waitFor(() => document.querySelector('[data-testid=add-device]') !== null);
+  expect(store.deviceInvite!.url).not.toBe(first);
 });
 
-test('a phone link comes with a code; an owner link is drawn only once confirmed, with a code and five minutes', async ({ app: _app }) => {
+test('Add a device draws one QR code of the phone part and a short code under it', async ({ app: _app }) => {
   store.showSettings('machines');
-  await waitFor(() => document.querySelector('[data-testid=pairing-mint]') !== null);
-  query<HTMLButtonElement>('[data-testid=pairing-mint]').click();
-  await waitFor(() => document.querySelector('[data-testid=pairing-code]') !== null);
-  expect(query('[data-testid=pairing-code]').textContent).toMatch(/^[0-9A-Z]{4}-[0-9A-Z]{4}$/);
-  expect(document.querySelector('[data-testid=pairing-owner-qr]')).toBeNull();
-
-  query<HTMLInputElement>('[data-testid=pairing-owner]').click();
-  query<HTMLButtonElement>('[data-testid=pairing-mint]').click();
-  await waitFor(() => store.pairing?.role === 'owner');
-  expect(document.querySelector('[data-testid=pairing-qr]')).toBeNull();
-  expect(document.querySelector('[data-testid=pairing-code]')).toBeNull();
-  query<HTMLButtonElement>('[data-testid=pairing-owner-qr]').click();
-  await waitFor(() => document.querySelector('[data-testid=confirm-dialog]') !== null);
-  query<HTMLButtonElement>('[data-testid=confirm-ok]').click();
-  await waitFor(() => document.querySelector('[data-testid=pairing-qr]') !== null);
-  expect(store.pairing?.role).toBe('owner');
-  expect(store.pairing!.expiresAt - Date.now()).toBeLessThanOrEqual(5 * 60 * 1000);
-  expect(document.querySelector('[data-testid=pairing-code]')).not.toBeNull();
-  expect(document.querySelector('[data-testid=pairing-owner-qr]')).toBeNull();
+  await waitFor(() => document.querySelector('[data-testid=group-add-device]') !== null);
+  query<HTMLButtonElement>('[data-testid=group-add-device]').click();
+  await waitFor(() => document.querySelector('[data-testid=add-device-qr] svg') !== null);
+  expect(query('[data-testid=add-device-code]').textContent).toMatch(/^[0-9A-Z]{4}-[0-9A-Z]{4}$/);
+  // The phone's link and the invitation a computer joins with: one link, copied whole.
+  expect(store.deviceInvite!.url).toMatch(/^http:\/\/192\.168\.1\.20:8777\/\?grant=[^#]+#join=/);
+  // A machine in no group starts one of its own for the device.
+  await waitFor(() => store.group !== null);
+  expect(store.group!.cores.map(core => core.coreId)).toEqual([store.group!.self]);
+  expect(document.querySelector('[data-testid=lan-reach]')).toBeNull();
 });
 
-test('the Tailscale switch serves the core over HTTPS, pairing links follow it, and off undoes both', async ({ app: _app }) => {
+test('the Tailscale switch serves the core over HTTPS, the Add a device link follows it, and off undoes both', async ({ app: _app }) => {
   store.showSettings('machines');
   await waitFor(() => document.querySelector('[data-testid=tailscale-access][data-state=off]') !== null);
   expect(query('[data-testid=tailscale-state]').textContent).toContain('https://boite-pc.tail0d6070.ts.net');
@@ -2151,7 +2142,7 @@ test('the Tailscale switch serves the core over HTTPS, pairing links follow it, 
   await waitFor(() => document.querySelector('[data-testid=tailscale-access][data-state=on]') !== null);
   expect(store.settings?.publicUrl).toBe('https://boite-pc.tail0d6070.ts.net');
   // Turning it on mints the phone's link through the new address.
-  await waitFor(() => store.pairing?.url.startsWith('https://boite-pc.tail0d6070.ts.net/?grant=') === true);
+  await waitFor(() => store.deviceInvite?.url.startsWith('https://boite-pc.tail0d6070.ts.net/?grant=') === true);
   expect(document.querySelector('[data-testid=lan-reach]')).toBeNull();
 
   query<HTMLButtonElement>('[data-testid=tailscale-disable]').click();
@@ -2473,7 +2464,7 @@ const OWNER_ONLY_IN_SETTINGS = [
   '[data-testid=settings-tab-plugins]',
   '[data-testid=settings-tab-resources]',
   '[data-testid=setting-listen-on-lan]',
-  '[data-testid=pairing-mint]'
+  '[data-testid=group-add-device]'
 ];
 
 /** The palette ids that each end in a method a device may not call. */
@@ -2509,10 +2500,10 @@ test('a paired device is offered none of the affordances the core refuses it', a
   await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
 
   store.showSettings('machines');
-  await waitFor(() => document.querySelector('[data-testid=pairing-card]') !== null);
+  await waitFor(() => document.querySelector('[data-testid=phone-settings]') !== null);
   for (const selector of OWNER_ONLY_IN_SETTINGS) expect(document.querySelector(selector)).toBeNull();
-  // A screen that loses a control keeps the line saying whose app has it.
-  expect(document.body.textContent ?? '').toContain('This device is paired with a key of its own.');
+  // Neither a way to add a device nor a group to join: a device changes nothing in the group.
+  expect(document.querySelector('[data-testid=group-join-input]')).toBeNull();
   expect(store.error).toBeNull();
 });
 
@@ -2582,7 +2573,7 @@ test('the desktop still has every one of them', async ({ app: _app }) => {
   await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
 
   store.showSettings('machines');
-  await waitFor(() => document.querySelector('[data-testid=pairing-mint]') !== null);
+  await waitFor(() => document.querySelector('[data-testid=group-add-device]') !== null);
   for (const selector of OWNER_ONLY_IN_SETTINGS) expect(document.querySelector(selector)).not.toBeNull();
   store.showSettings('resources');
   await waitFor(() => document.querySelector('[data-testid=resources-page]') !== null);

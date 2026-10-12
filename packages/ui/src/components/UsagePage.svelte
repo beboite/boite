@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import { untrack } from 'svelte';
   import { ChevronDown, RefreshCw } from '@lucide/svelte';
   import type { UsageHistory, UsageHistoryThread } from '@boite/contracts';
@@ -11,6 +12,7 @@
     formatMetric,
     mergeHistories,
     modelName,
+    priceNote,
     reportedValue,
     seriesFor,
     summarize,
@@ -98,7 +100,7 @@
       const answered = results.flatMap((result) => result.status === 'fulfilled' ? [result.value] : []);
       failures = results.flatMap((result, index) => {
         if (result.status === 'fulfilled') return [];
-        const message = result.reason instanceof Error ? result.reason.message : String(result.reason);
+        const message = errorText(result.reason);
         return [named ? `${from[index]!.label}: ${message}` : message];
       });
       if (answered.length === 0) {
@@ -360,7 +362,10 @@
                     <tr>
                       <td class="who">
                         <span class="swatch" style:background={colorOf(row.providerId)}></span>
-                        <span><span class="model">{modelName(row.model, modelNames, row.providerId)}</span><small>{providerName(row.providerId)}</small></span>
+                        <span>
+                          <span class="model-line"><span class="model">{modelName(row.model, modelNames, row.providerId)}</span><InfoTip topic={fill(strings.usage.priceOf, { model: modelName(row.model, modelNames, row.providerId) })} text={priceNote(row)} testid="usage-price" /></span>
+                          <small>{providerName(row.providerId)}</small>
+                        </span>
                       </td>
                       {@render numbers(row)}
                     </tr>
@@ -423,7 +428,6 @@
   .refresh { margin-left: auto; width: var(--control); height: var(--control); padding: 0; }
   .filter-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 190px; }
   .refresh :global(.spinning) { animation: spin 900ms linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
   .failure { max-width: var(--settings-width); margin: 0 0 12px; color: var(--color-danger); font-size: var(--text-sm); }
   .body { max-width: var(--settings-width); transition: opacity var(--dur-2) var(--ease-out-quint); }
   .body.stale { opacity: 0.6; }
@@ -468,7 +472,8 @@
   td.muted { font-size: var(--text-sm); }
   .who { display: flex; align-items: center; gap: 10px; white-space: normal; }
   .who > span:last-child { display: grid; min-width: 0; }
-  .model { overflow: hidden; text-overflow: ellipsis; }
+  /* The "i" flows after the name's last word, so a narrow column keeps the name's width. */
+  .model-line { min-width: 0; overflow-wrap: anywhere; }
   .who small { color: var(--color-muted-foreground); font-size: var(--text-xs); }
   tbody tr:hover td { background: var(--color-hover); }
   @container (max-width: 560px) { .wide { display: none; } }

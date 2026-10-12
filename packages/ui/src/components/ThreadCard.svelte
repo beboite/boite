@@ -1,27 +1,19 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import { tick, untrack } from 'svelte';
-  import { Check, Ellipsis, Folder, FolderInput, GitBranch, GitPullRequest, PencilLine, Pin } from '@lucide/svelte';
+  import { Check, Ellipsis, Folder, FolderInput, GitBranch, GitPullRequest } from '@lucide/svelte';
   import type { Project, ThreadSummary } from '@boite/contracts';
   import type { Machine } from '../lib/workspace.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import { contextMenu } from '../lib/context-menu.svelte';
-  import { archiveThread } from '../lib/archive';
-  import { deleteThread } from '../lib/thread-removal';
-  import { moveBlocked, pendingLine, pickMoveItem, startThreadDrag, threadDrag } from '../lib/thread-move.svelte';
-  import { threadMenuItems } from '../lib/thread-menu';
+  import { canMove, moveBlocked, pendingLine, startThreadDrag, threadDrag } from '../lib/thread-move.svelte';
+  import { pickThreadAction, threadMenuItems } from '../lib/thread-menu';
   import { focusOnMount } from '../lib/actions';
   import { strings } from '../lib/strings';
+  import ThreadHeadline from './ThreadHeadline.svelte';
   import { knownPullRequest, lookupPullRequest, rememberPullRequest } from '../lib/pull-request';
-  import { agentLabel, projectName } from '../lib/format';
-  import { hasUnsentDraft } from '../lib/composer-queue';
+  import { projectName } from '../lib/format';
   import { canMarkDone, markDone } from '../lib/recent.svelte';
-  import MachineIcon from './MachineIcon.svelte';
-  import ProviderLogo from './ProviderLogo.svelte';
-  import ThreadState from './ThreadState.svelte';
-  import AgentAvatar from './agents/AgentAvatar.svelte';
-  import { agentDirectory } from '../lib/agent-directory.svelte';
-  import { stewardChip } from '../lib/steward';
-  import { pickEntrustItem } from '../lib/thread-entrust';
   let {
     machine,
     project,
@@ -47,20 +39,11 @@
   } = $props();
   let owner = $derived(machine.store);
   let open = $derived(workspace.active === owner && owner.openThread?.id === thread.id);
-  /** Only on a row the user left: the open thread shows its box. */
-  let draft = $derived(!open && hasUnsentDraft(owner.composerStates[thread.id]));
   let renaming = $state(false);
   let title = $state('');
   let pullRequest = $state<ThreadSummary['pullRequest']>(null);
   /** Only a project or pull request needs a second line; the machine and the provider stay beside the title. */
   let meta = $derived(showProject || pullRequest !== null);
-  /** The logo tells the rows apart; its tooltip names the provider and the model. */
-  let agent = $derived(agentLabel(owner, thread));
-  /** A persistent agent's thread wears that agent's picture where the provider's logo goes. */
-  /** An entrusted thread wears its agent's picture too. */
-  let runner = $derived(thread.agentSessionId || thread.parentThreadId ? agentDirectory(owner).ownerOf(thread) : agentDirectory(owner).entrustmentOf(thread.id)?.agent ?? null);
-  /** A steward's own thread wears the robot its id draws, the picture its projects show. */
-  let steward = $derived(owner.stewards?.find(grant => grant.threadId === thread.id) ?? null);
   // A move asked for while the turn runs, until the turn ends and applies it.
   let pending = $derived(pendingLine(thread));
   let doneAllowed = $derived(canMarkDone(owner, thread));
@@ -84,7 +67,7 @@
       if (!result.supported && manual) requestedOwner.error = strings.errors.pullRequestUnsupported;
     } catch (error) {
       // A lookup the user did not ask for fails quietly: no gh, no network, no banner.
-      if (revision === prRevision && manual) requestedOwner.error = error instanceof Error ? error.message : String(error);
+      if (revision === prRevision && manual) requestedOwner.error = errorText(error);
     } finally {
       if (revision === prRevision) prLoading = false;
     }
@@ -138,8 +121,8 @@
     await tick();
     row?.focus({ preventScroll: true });
   }
-  /** A top-level row moves to another project when dragged onto its section, unless a sub-thread still works. */
-  let movable = $derived(!thread.parentThreadId && !moveBlocked(owner, thread.id));
+  /** A row moves to another project when dragged onto its section, under the menu's rule, unless a sub-thread still works. */
+  let movable = $derived(canMove(thread) && !moveBlocked(owner, thread.id));
   function dragStart(event: PointerEvent) {
     if (movable) startThreadDrag(event, owner, { machineId: machine.id, threadId: thread.id, projectId: thread.projectId }, { title: thread.title, providerId: thread.providerId });
   }
@@ -147,19 +130,7 @@
     contextMenu.open(
       event,
       threadMenuItems(owner, thread, { open, showDone, prLoading }),
-      (action) => {
-        if (action === 'open') void workspace.select(owner, thread.id);
-        if (action === 'rename') rename();
-        if (action === 'retitle') void owner.retitle(thread.id);
-        if (action === 'pin') void owner.pin(thread.id, !thread.pinned);
-        if (action === 'pr') void refreshPr(true);
-        if (action === 'copy') void owner.copy(thread.cwd);
-        pickMoveItem(owner, thread, action);
-        pickEntrustItem(owner, thread, action);
-        if (action === 'done') void markDone(owner, thread);
-        if (action === 'archive') void archiveThread(owner, thread.id);
-        if (action === 'delete') void deleteThread(owner, thread);
-      }
+      (action) => pickThreadAction(owner, thread, action, { rename, refreshPr: () => void refreshPr(true) })
     );
   }
 </script>
@@ -198,37 +169,14 @@
       data-testid="thread-row"
       data-thread-id={thread.id}
       data-machine-id={machine.id}
+      data-preload-thread={thread.id}
       data-status={thread.status}
       data-pinned={thread.pinned ? 'true' : undefined}
       title={thread.title}
       onclick={() => void workspace.select(owner, thread.id)}
       ondblclick={rename}
     >
-      <span class="headline">
-        {#if showMachine}
-          <span class="machine" class:offline={owner.connection !== 'ready'}
-            title={`${machine.label} · ${strings.connection[owner.connection]}`} aria-label={machine.label}>
-            <MachineIcon icon={machine.icon} os={owner.core?.os} />
-          </span>
-        {/if}
-        {#if steward}
-          <span class="provider" data-testid="thread-steward" title={`${stewardChip(steward)} · ${agent}`} aria-label={stewardChip(steward)}>
-            <AgentAvatar kind="profile" id={thread.id} name={thread.title} size={16} />
-          </span>
-        {:else if runner}
-          <span class="provider" data-testid="thread-agent" title={`${runner.name} · ${agent}`} aria-label={runner.name}>
-            <AgentAvatar kind="profile" id={runner.id} name={runner.name} avatar={runner.avatar} size={16} />
-          </span>
-        {:else}
-          <span class="provider" data-testid="thread-provider" title={agent} aria-label={agent}>
-            <ProviderLogo providerId={thread.providerId} size={12} />
-          </span>
-        {/if}
-        <span class="title ui-label">{thread.title}</span>
-        {#if draft}<span class="draft" data-testid="thread-draft" title={strings.sidebar.unsentDraft} aria-label={strings.sidebar.unsentDraft}><PencilLine size={12} /></span>{/if}
-        {#if thread.pinned}<Pin size={12} />{/if}
-        <ThreadState {thread} {now} subagents={owner.subagents(thread.id)} />
-      </span>
+      <ThreadHeadline {owner} {thread} {now} {open} machine={showMachine ? machine : undefined} />
       {#if pending}
         <span class="pending" data-testid="thread-pending" title={pending}><FolderInput size={12} /><span class="ui-label">{pending}</span></span>
       {/if}
@@ -311,32 +259,6 @@
   .row:active:not(:disabled) {
     transform: none;
   }
-  .headline {
-    display: flex;
-    align-items: center;
-    min-height: 1lh; /* Keep the row stable when machine glyphs appear. */
-    gap: 8px;
-    min-width: 0;
-  }
-  .title {
-    flex: 1;
-    min-width: 0;
-    text-align: left;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    color: var(--color-foreground);
-    font-weight: 400;
-  }
-  .unread .title {
-    font-weight: 600;
-  }
-  /* A draft left in the box: the accent, so it reads as the user's own work waiting. */
-  .draft {
-    display: inline-flex;
-    flex: none;
-    color: var(--color-accent);
-  }
   /* A move waiting for the turn's end: the accent, like the marker the move leaves in the chat. */
   .pending {
     display: flex;
@@ -405,20 +327,6 @@
     flex: 0 1 auto;
     margin-left: auto;
   }
-  .provider {
-    display: inline-flex;
-    align-items: center;
-    flex: none;
-  }
-  .machine {
-    display: inline-flex;
-    align-items: center;
-    flex: none;
-    color: var(--color-muted-foreground);
-  }
-  .machine.offline {
-    color: var(--color-danger);
-  }
   .actions {
     position: absolute;
     right: 5px;
@@ -433,27 +341,27 @@
     opacity: 1;
   }
   /* The menu button takes the time's place; a state steps left of it and stays. */
-  .thread:hover .headline :global(.when:not(.state)),
-  .thread:focus-within .headline :global(.when:not(.state)) {
+  .thread:hover :global(.headline .when:not(.state)),
+  .thread:focus-within :global(.headline .when:not(.state)) {
     opacity: 0;
   }
-  .thread:hover .headline :global(.when.state),
-  .thread:focus-within .headline :global(.when.state) {
+  .thread:hover :global(.headline .when.state),
+  .thread:focus-within :global(.headline .when.state) {
     margin-right: 22px;
   }
-  .thread:has(.done):hover .headline :global(.when.state), .thread:has(.done):focus-within .headline :global(.when.state) { margin-right: 49px; }
-  .thread:has(.done):hover .headline :global(.when:not(.state)), .thread:has(.done):focus-within .headline :global(.when:not(.state)) { margin-right: 27px; }
+  .thread:has(.done):hover :global(.headline .when.state), .thread:has(.done):focus-within :global(.headline .when.state) { margin-right: 49px; }
+  .thread:has(.done):hover :global(.headline .when:not(.state)), .thread:has(.done):focus-within :global(.headline .when:not(.state)) { margin-right: 27px; }
   .rename {
     width: 100%;
     height: var(--row);
   }
   @media (max-width: 720px) {
     .done { opacity: 1; }
-    .thread:has(.done) .headline :global(.when) { margin-right: 49px; }
+    .thread:has(.done) :global(.headline .when) { margin-right: 49px; }
     .actions {
       opacity: 1;
     }
-    .headline :global(.when) {
+    .thread :global(.headline .when) {
       margin-right: 22px;
     }
   }

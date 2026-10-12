@@ -14,6 +14,7 @@ import { parseRelayPath, RelayHub, type RelaySocketData } from './group/relay.ts
 import type { Connection } from './router.ts';
 import type { SocketData } from './server/connection.ts';
 import { ServerConnection } from './server/connection.ts';
+import { clientField, logConnectionClosed } from './server/connection-log.ts';
 import { handleFrame } from './server/frame.ts';
 import { authenticateToken } from './server/hello.ts';
 import { FrameQueue } from './server/frame-queue.ts';
@@ -109,6 +110,19 @@ export function isAllowedOrigin(origin: string | null, port: number, host: strin
     return Object.values(networkInterfaces()).some((entries) => entries?.some((entry) => entry.address === name));
   } catch {
     return false;
+  }
+}
+
+/** The socket came from a page whose origin names the host it asked for, outside loopback: this machine is served there. */
+function servedOrigin(core: Core, origin: string | null, host: string | null): void {
+  if (origin === null || host === null || SHELL_ORIGINS.includes(origin)) return;
+  try {
+    const url = new URL(origin);
+    if ((url.protocol !== 'https:' && url.protocol !== 'http:') || url.origin !== origin || url.host !== host.trim().toLowerCase()) return;
+    if (isLoopbackHost(url.host)) return;
+    core.group.servedFrom(origin);
+  } catch {
+    // Not an origin: nothing learned.
   }
 }
 
@@ -363,16 +377,23 @@ export function startServerOnStickyPort(
   for (const port of candidates) {
     try {
       const started = startServer({ ...server, port });
-      if (previousPort !== null && port !== previousPort) server.core.log('warn', `port ${previousPort} of the previous run is taken, listening on ${port}`);
+      if (previousPort !== null && port !== previousPort) server.core.log('warn', `port ${previousPort} of the previous run is taken, listening on ${port}`, { source: 'startup', event: 'startup.port-fallback', data: { previousPort, port } });
       return started;
     } catch (error) {
       last = error;
-      if (port === previousPort) server.core.log('warn', `port ${previousPort} of the previous run is taken (${messageOf(error)})`);
+      if (port === previousPort) server.core.log('warn', `port ${previousPort} of the previous run is taken (${messageOf(error)})`, { source: 'startup', event: 'startup.port-taken', data: { previousPort } });
     }
   }
   // The last refusal is named: a host that cannot be bound fails every port the same way, which "taken" would hide.
-  server.core.log('warn', `ports ${candidates.join(', ')} refused the server (${messageOf(last)}), listening on another`);
-  return startServer({ ...server, port: 0 });
+  // The bound port is logged, not the 0 asked for; a host no port accepts is logged before it throws.
+  let started: RunningServer;
+  try { started = startServer({ ...server, port: 0 }); }
+  catch (error) {
+    server.core.log('warn', `ports ${candidates.join(', ')} refused the server (${messageOf(last)}), and so did any other port`, { source: 'startup', event: 'startup.port-fallback', data: { previousPort, port: null } });
+    throw error;
+  }
+  server.core.log('warn', `ports ${candidates.join(', ')} refused the server (${messageOf(last)}), listening on ${started.port}`, { source: 'startup', event: 'startup.port-fallback', data: { previousPort, port: started.port } });
+  return started;
 }
 
 export function startServer(options: ServerOptions): RunningServer {
@@ -393,8 +414,12 @@ export function startServer(options: ServerOptions): RunningServer {
   const peerRequests = new Set<Promise<Response>>();
   const refusals = new Refusals();
   // A client of this machine carried to another member of its group: its key here, never an agent's, opens the way.
-  const relays = new RelayHub(core, (token) => {
-    const identity = authenticateToken(core, token);
+  const relays = new RelayHub(core, (credential) => {
+    if (typeof credential !== 'string') {
+      // A device of the group carried to another member: its signature for this machine, never one made for another.
+      try { return { sessionId: core.group.clients.authenticateDevice(credential, { name: 'pwa', version: '' }).sessionId }; } catch { return null; }
+    }
+    const identity = authenticateToken(core, credential);
     return identity === null || identity.principal === 'agent' ? null : { sessionId: identity.sessionId };
   }, { helloTimeoutMs, helloMaxBytes: PREAUTH_FRAME_MAX_BYTES });
   core.relays = relays;
@@ -450,9 +475,11 @@ export function startServer(options: ServerOptions): RunningServer {
         return viewPage(core, url.pathname.slice(VIEW_ROUTE.length + 1));
       }
 
+      // What this machine trusts of its own accord: itself, the shell, and the addresses its owner gave it.
+      const ownOrigin = (origin: string | null): boolean => isAllowedOrigin(origin, self.port ?? 0, hostname)
+        || (origin !== null && (core.settings.get().browserOrigins?.includes(origin) === true || origin === core.settings.get().publicUrl));
       // A page served by one machine of the group opens its socket on the others.
-      const allowedOrigin = (origin: string | null): boolean => isAllowedOrigin(origin, self.port ?? 0, hostname)
-        || (origin !== null && (core.settings.get().browserOrigins?.includes(origin) === true || origin === core.settings.get().publicUrl || core.group.allowsOrigin(origin)));
+      const allowedOrigin = (origin: string | null): boolean => ownOrigin(origin) || (origin !== null && core.group.allowsOrigin(origin));
 
       const relayed = parseRelayPath(url.pathname);
       if (relayed !== null) {
@@ -461,13 +488,13 @@ export function startServer(options: ServerOptions): RunningServer {
           if (answer !== null) return answer;
           const origin = request.headers.get('origin');
           if (!allowedOrigin(origin)) {
-            core.log('warn', `refused a relayed websocket from origin ${origin ?? '(none)'}`);
+            core.log('warn', `refused a relayed websocket from origin ${origin === null ? '(none)' : clientField(origin, 100)}`, { source: 'connections', event: 'connection.origin-refused' });
             return new Response('forbidden origin', { status: 403 });
           }
           const peer = preauthPeer(self.requestIP(request)?.address ?? null, request.headers.get('host'));
           const refusal = peer === null ? null : preauthRefusal(waitingPeers(), peer);
           if (refusal !== null) {
-            core.log('warn', `refused a relayed websocket: ${refusal}`);
+            core.log('warn', `refused a relayed websocket: ${refusal}`, { source: 'connections', event: 'connection.preauth-refused' });
             return new Response('too many connections waiting for hello', { status: 503 });
           }
           const pipe = relays.pipe(relayed.coreId, peer);
@@ -480,17 +507,26 @@ export function startServer(options: ServerOptions): RunningServer {
       if (url.pathname === RPC_PATH) {
         const origin = request.headers.get('origin');
         if (!allowedOrigin(origin)) {
-          core.log('warn', `refused a websocket from origin ${origin ?? '(none)'}`);
+          core.log('warn', `refused a websocket from origin ${origin === null ? '(none)' : clientField(origin, 100)}`, { source: 'connections', event: 'connection.origin-refused' });
           return new Response('forbidden origin', { status: 403 });
         }
         const peer = preauthPeer(self.requestIP(request)?.address ?? null, request.headers.get('host'));
         const refusal = peer === null ? null : preauthRefusal(waitingPeers(), peer);
         if (refusal !== null) {
-          core.log('warn', `refused a websocket: ${refusal}`);
+          core.log('warn', `refused a websocket: ${refusal}`, { source: 'connections', event: 'connection.preauth-refused' });
           return new Response('too many connections waiting for hello', { status: 503 });
         }
+        // A page of this machine, at an origin it trusts itself and that names the host the socket asked for:
+        // this machine is served there, and the others of its group accept that origin from now on. Learned
+        // before any hello, so a phone's first page, which holds no key yet, already opens the way to the others.
         const connection = new ServerConnection(core, !isLoopbackHost(request.headers.get('host')));
-        if (self.upgrade(request, { data: { connection, peer } })) return undefined;
+        if (self.upgrade(request, { data: { connection, peer } })) {
+          // A page of this machine, at an origin it trusts itself and that names the host the socket asked for:
+          // this machine is served there, and the others of its group accept that origin from now on. Learned at
+          // the upgrade, before any hello, so a phone's first page, which holds no key yet, already opens the way.
+          if (ownOrigin(origin)) servedOrigin(core, origin, request.headers.get('host'));
+          return undefined;
+        }
         return new Response('expected a websocket upgrade', { status: 400 });
       }
 
@@ -552,11 +588,12 @@ export function startServer(options: ServerOptions): RunningServer {
 
       drain(socket) { if (!('relay' in socket.data)) socket.data.connection.drain(); },
 
-      close(socket) {
+      close(socket, code, reason) {
         if ('relay' in socket.data) {
           socket.data.relay.close(1000, 'client closed');
           return;
         }
+        logConnectionClosed(core, socket.data.connection, code, reason);
         core.procs.unwatchResources(socket.data.connection.id);
         core.coordination.bridge.disconnect(socket.data.connection.id);
         core.browser.disconnect(socket.data.connection.id);
@@ -617,6 +654,8 @@ export function startServer(options: ServerOptions): RunningServer {
     });
     // Desktop-app plugins the owner left enabled, now that they have an address to reach.
     core.plugins.startApps();
+    // Newer releases of installed recommended plugins, read a minute from now and every six hours.
+    core.plugins.startUpdateChecks();
   }, 0);
   core.subscribers = {
     hasSubscribers(threadId: ThreadId): boolean {

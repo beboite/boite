@@ -1,10 +1,12 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import InfoTip from './InfoTip.svelte';
   import { onMount } from 'svelte';
   import { Download, Play, Puzzle, RefreshCw, RotateCw, ShieldAlert, Square, TriangleAlert } from '@lucide/svelte';
-  import type { PluginAppState, PluginPool, PluginPreview, PluginRejected, PluginState, RpcParams } from '@boite/contracts';
+  import type { PluginAppState, PluginPool, PluginPreview, PluginRejected, PluginState, PluginUpdates, RpcParams } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
+  import { relativeTime } from '../lib/format';
   import { confirm } from '../lib/confirm.svelte';
   import QuotaList from './QuotaList.svelte';
 
@@ -15,6 +17,7 @@
   let loaded = $state(false);
   let pools = $state<Record<string, PluginPool[]>>({});
   let busy = $state<Record<string, boolean>>({});
+  let checking = $state<Record<string, boolean>>({});
   let errors = $state<Record<string, string>>({});
   let error = $state('');
 
@@ -29,7 +32,7 @@
   let installed = $derived(plugins.filter((plugin) => plugin.origin === 'url' || plugin.version !== null));
   let recommended = $derived(plugins.filter((plugin) => plugin.origin === 'recommended' && plugin.version === null));
 
-  const messageOf = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
+  const messageOf = (cause: unknown) => (errorText(cause));
   const short = (commit: string) => commit.slice(0, 7);
   const bare = (address: string) => address.replace(/^https:\/\//, '');
   const providerName = (id: string) => store.providers.find((provider) => provider.id === id)?.name ?? id;
@@ -170,6 +173,32 @@
     }
   }
 
+  /** What the last look at the plugin's update source found, quietly: a source that failed or was ignored is no alarm. */
+  function updatesLine(updates: PluginUpdates): string {
+    if (updates.checking) return t.checkingUpdates;
+    if (updates.error) return fill(t.updateFailed, { error: updates.error });
+    if (updates.available) {
+      return fill(t.updateFound, { source: bare(updates.source.url), ref: updates.source.ref, commit: short(updates.available.commit), time: relativeTime(updates.available.checkedAt) });
+    }
+    if (updates.ignored) return fill(t.updateIgnored, { reason: updates.ignored });
+    return updates.checkedAt === null ? '' : fill(t.upToDate, { time: relativeTime(updates.checkedAt) });
+  }
+
+  /** Reads the plugin's update source now; the core answers with the state it leaves. */
+  async function checkUpdates(plugin: PluginState) {
+    const client = store.client;
+    if (!client || checking[plugin.id]) return;
+    checking[plugin.id] = true;
+    try {
+      for (const next of await client.call('plugins.checkUpdates', { id: plugin.id })) put(next);
+      delete errors[plugin.id];
+    } catch (cause) {
+      errors[plugin.id] = messageOf(cause);
+    } finally {
+      checking[plugin.id] = false;
+    }
+  }
+
   onMount(() => {
     const client = store.client;
     if (!client) return;
@@ -225,7 +254,7 @@
             <button class="small" data-testid="plugin-update" data-plugin={plugin.id} disabled={working} onclick={() => void change(plugin, 'plugins.install')}><span class="ui-label">{fill(t.update, { version: `v${plugin.availableVersion}` })}</span></button>
           {/if}
           {#if plugin.status === 'error' || (plugin.status === 'rejected' && plugin.origin === 'recommended')}
-            <button class="small" data-testid="plugin-retry" data-plugin={plugin.id} disabled={working} onclick={() => void change(plugin, 'plugins.install')}><RefreshCw size={14} /><span class="ui-label">{plugin.status === 'error' ? t.retry : t.reinstall}</span></button>
+            <button class="small" data-testid="plugin-retry" data-plugin={plugin.id} disabled={working} onclick={() => void change(plugin, 'plugins.install')}><RefreshCw size={14} /><span class="ui-label">{plugin.status === 'error' ? strings.common.retry : t.reinstall}</span></button>
           {/if}
           <button class="ghost small" data-testid="plugin-uninstall" data-plugin={plugin.id} disabled={working} onclick={() => void change(plugin, 'plugins.uninstall')}><span class="ui-label">{t.remove}</span></button>
         {/if}
@@ -246,6 +275,15 @@
       <p class="meta">{t.recommendedBy} · <a href={plugin.homepage} target="_blank" rel="noreferrer">{t.source}</a></p>
     {:else if plugin.homepage}
       <p class="meta"><a href={plugin.homepage} target="_blank" rel="noreferrer">{t.source}</a></p>
+    {/if}
+    {#if plugin.updates && plugin.version !== null}
+      {@const updates = plugin.updates}
+      {@const line = updatesLine(updates)}
+      <div class="updates" data-testid="plugin-updates" data-plugin={plugin.id} data-available={updates.available?.version ?? ''}>
+        {#if line}<p class="hint" data-testid="plugin-updates-line">{line}</p>{/if}
+        <button class="quiet small" data-testid="plugin-check-updates" data-plugin={plugin.id} disabled={working || updates.checking || checking[plugin.id] === true || plugin.status === 'installing'}
+          onclick={() => void checkUpdates(plugin)}><RefreshCw size={14} /><span class="ui-label">{t.checkUpdates}</span></button>
+      </div>
     {/if}
     {#if plugin.error}<p class="bad" role="alert">{plugin.error}</p>{/if}
     {#if errors[plugin.id]}<p class="bad" role="alert">{errors[plugin.id]}</p>{/if}
@@ -278,7 +316,7 @@
       <div class="pools">
         <div class="pools-head">
           <h4 class="section-label"><span class="ui-label">{t.pools}</span><InfoTip topic={t.pools} text={t.cliScope} /></h4>
-          <button class="quiet small" data-testid="plugin-refresh" data-plugin={plugin.id} disabled={working} onclick={() => void loadPools(plugin.id, true)}><RefreshCw size={14} /><span class="ui-label">{t.refresh}</span></button>
+          <button class="quiet small" data-testid="plugin-refresh" data-plugin={plugin.id} disabled={working} onclick={() => void loadPools(plugin.id, true)}><RefreshCw size={14} /><span class="ui-label">{strings.common.refresh}</span></button>
         </div>
         {#each pools[plugin.id] ?? [] as pool (pool.provider)}
           <div class="pool" data-testid="plugin-pool" data-plugin={plugin.id} data-provider={pool.provider}>
@@ -299,7 +337,7 @@
                     <button class="ghost small" disabled={working} onclick={() => void accountAction(plugin, pool.provider, 'remove', account.email)}><span class="ui-label">{t.forget}</span></button>
                   </span>
                 </div>
-                <QuotaList bare rows={[{ accountId: account.email, providerId: pool.provider, providerName: account.email, label: '', enabled: true,
+                <QuotaList rows={[{ accountId: account.email, providerId: pool.provider, providerName: account.email, label: '', enabled: true,
                   status: account.checkedSecondsAgo === null ? 'unavailable' : 'ready', windows: account.windows,
                   checkedAt: account.checkedSecondsAgo === null ? null : Date.now() - account.checkedSecondsAgo * 1000, error: null }]} />
               </div>
@@ -390,7 +428,7 @@
             <p class="trust"><TriangleAlert size={15} strokeWidth={1.75} />{t.trust}</p>
           {/if}
           <div class="act end">
-            <button class="quiet small" data-testid="plugin-dismiss" onclick={() => { preview = null; }}><span class="ui-label">{preview.rejected ? t.dismiss : strings.common.cancel}</span></button>
+            <button class="quiet small" data-testid="plugin-dismiss" onclick={() => { preview = null; }}><span class="ui-label">{preview.rejected ? strings.common.dismiss : strings.common.cancel}</span></button>
             {#if preview.previewId && preview.manifest}
               <button class="primary small" data-testid="plugin-add" disabled={adding} onclick={() => void add()}><Download size={14} /><span class="ui-label">{fill(t.confirmAdd, { name: preview.manifest.name })}</span></button>
             {/if}
@@ -439,6 +477,10 @@
   .meta a { color: var(--color-muted-foreground); overflow-wrap: anywhere; }
   .meta a:hover { color: var(--color-foreground); }
   .meta .mono { font-size: var(--text-xs); }
+  /* The update source's last word and the button that asks again, quiet whatever it says. */
+  .updates { display: flex; align-items: center; justify-content: space-between; gap: 4px 12px; flex-wrap: wrap; }
+  .updates .hint { flex: 1 1 220px; min-width: 0; overflow-wrap: anywhere; }
+  .updates button { gap: 6px; margin-left: auto; }
 
   .refusal { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--color-danger) 35%, var(--color-border)); border-radius: var(--radius-md); background: color-mix(in srgb, var(--color-danger) 6%, transparent); }
   .refusal-title { margin: 0; display: flex; align-items: center; gap: 6px; font-size: var(--text-sm); font-weight: 600; color: var(--color-danger); }

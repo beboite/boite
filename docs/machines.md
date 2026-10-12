@@ -61,10 +61,10 @@ removed during startup. Paired remote connections are retained. The sidebar
 counter and project picker use the workspace's connected machine list.
 
 The machine list shows connection errors and lets you reopen a host or remove
-it. Remove machine asks first, then closes that host's socket and forgets its
-saved address and key, so connecting it again needs a new pairing link. It does
-not stop agents, remove files or revoke the key on the remote host. Use the remote
-core's paired-device list to revoke it. The primary core stays attached.
+it. Remove machine asks first, then closes that host's socket and forgets it on
+this device. It does not stop agents, remove files or take this device out of
+the group: **Remove from the group** on the device's row does that, on every
+machine. The primary core stays attached.
 
 If a machine goes offline, its known rows remain visible and its machine badge
 shows the disconnected state. Other hosts remain usable. WebSocket reconnection
@@ -115,12 +115,12 @@ PC's own core, or a machine whose last known threads still had a turn queued,
 running or waiting when the connection went.
 
 A key a remote core refuses is not retried: the machine shows as closed with
-the reason. A page opened on its own core with no key says the device holds
-none. Click the affected machine's **Pair again** control and paste a new
-pairing link from that machine. This replaces the key of a listed machine that
-is not connected, the page's own included, which cannot be removed. Device-only
-clients can also paste the link under **Add a machine**. Only a connected
-machine is refused as already connected.
+the reason. A page opened on its own core with no key says the device is not in
+its group yet. A phone then scans or types the code of **Add a device** from any
+machine of the group ([phone](phone.md#adding-a-phone)); a computer's browser
+pastes the copied link under **Add a machine**. Both are the affected machine's
+**Add again** control too. Only a connected machine is refused as already
+connected.
 
 The link decides which machine is reached; the name only labels it. Once a
 link is pasted the form names the host it reaches and the listed machine at
@@ -144,10 +144,11 @@ The row's word is the most pressing of what it finds: a failed update, then
 one in progress, then one available, then a check in progress, then Up to
 date. A row says nothing until something has answered.
 
-Phones and other devices has one button, Add a phone, which draws the QR code.
-Reachable on the local network and Full control sit under More options. Phone
-app keeps the Tailscale HTTPS switch in view and folds the address of a
-reverse proxy of one's own under Use another HTTPS address.
+The group card lists the machines, then the phones and browsers of the group,
+and has one button, **Add a device**, which draws the QR code and its code
+([groups](groups.md#using-it)). Phone app keeps the Tailscale HTTPS switch and
+Reachable on the local network in view, and folds the address of a reverse
+proxy of one's own under Use another HTTPS address.
 
 ## Agent links
 
@@ -209,8 +210,11 @@ behavior are documented there.
 ## Browser and phone connections
 
 The desktop shell is an allowed origin on every core. A browser or phone has
-the origin of the core serving its page. On each additional machine, add that
-exact origin to Machines, Allowed browser origins. Origins contain a scheme,
+the origin of the machine serving its page, which every machine of that
+machine's [group](groups.md#devices) accepts on its own: the addresses it gives
+and the origins its page was served at. A page served by something outside the
+group needs its exact origin under Advanced, Allowed browser origins, on each
+machine it opens a socket on. Origins contain a scheme,
 host and optional port, with no wildcard. A pasted address keeps only its
 origin: the core drops a trailing `/` or a path, since the browser's `Origin`
 header never carries one, and a line given twice is kept once. Save the list on
@@ -218,22 +222,21 @@ that core.
 Removing an origin blocks new connections from it; existing authenticated
 connections must be revoked separately if they should lose access immediately.
 
-The machines of a [group](groups.md) allow each other's addresses as origins,
-so this list is only needed outside one.
-
 The origin permission does not replace authentication. Every socket still needs
-its own valid token or one-time grant. HTTPS pages need secure WebSocket
-endpoints. [Phone setup](phone.md#https-and-installation)
-owns HTTPS/pairing setup; [server deployment](server.md) owns host reachability.
+its own credential: a device signature, a token, a one-time grant or a group
+ticket. HTTPS pages
+need secure WebSocket endpoints. [Phone setup](phone.md#https-and-installation)
+owns HTTPS and adding a phone; [server deployment](server.md) owns host
+reachability.
 
 ## Two views
 
-The sidebar's Display options menu (the sliders icon) chooses between Projects
+The sidebar's Display options panel (the sliders icon) chooses between Projects
 and Recent, above its grouping switches. Projects is the default. Projects
 appear by recent user activity, using the latest accepted user message among
 their visible threads, or creation time when no message exists. Assistant
-output and title changes leave that order alone. The order button under the
-switch toggles to Custom order; then drag project headers to rearrange them,
+output and title changes leave that order alone. The panel's Project order
+choice switches to Custom; then drag project headers to rearrange them,
 with the mouse or, on a phone, after holding a header still for a moment; a
 line shows where the project lands and Escape cancels. Their menus also offer Move project up and Move
 project down, including on a phone. Switching back to recent activity keeps

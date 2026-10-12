@@ -459,7 +459,8 @@ export class ThreadStore {
     if (!thread || thread.updatedAt !== expected.updatedAt || thread.cwd !== expected.cwd || thread.branch !== expected.branch || thread.projectId !== expected.projectId || state.generation !== generation || state.dismissed?.includes(proof.url) || !this.core.mergedPrArchive.eligible(thread)) return null;
     const archivedThread = this.core.bus.afterCommit(() => this.core.journal.db.transaction(() => {
       this.core.journal.setSetting(archiveStateKey(thread.id), { ...state, binding: proof, reason: { type: 'pr-merged', number: proof.number, url: proof.url, archivedAt: Date.now() } });
-      const saved = this.save({ ...thread, archived: true, doneAt: Date.now() }, 'thread.archived');
+      const now = Date.now();
+      const saved = this.save({ ...thread, archived: true, doneAt: now, archivedAt: now }, 'thread.archived');
       if (thread.projectId !== null) this.core.projects.announce(thread.projectId);
       return saved;
     })());
@@ -474,7 +475,7 @@ export class ThreadStore {
       const state = archiveState(this.core.journal, thread.id);
       if (state.reason?.type !== 'pr-merged') continue;
       this.core.journal.setSetting(archiveStateKey(thread.id), { ...state, reason: undefined, generation: state.generation + 1 });
-      this.save({ ...thread, archived: false, doneAt: null }, 'thread.archived');
+      this.save({ ...thread, archived: false, doneAt: null, archivedAt: null }, 'thread.archived');
     }
   }
 
@@ -497,7 +498,7 @@ export class ThreadStore {
       this.agentState.commands.delete(threadId);
       this.agentState.noteBackground(threadId, []);
       // Nobody answers a card on a thread put away, and no turn should start from one.
-      this.cards.clearQuestionsOf(threadId, true);
+      this.cards.clearQuestionsOf(threadId, true, 'archive');
       this.deferred.deferredAnswers.delete(threadId);
       this.deferred.consumed.delete(threadId);
       this.deferred.pendingWakes.delete(threadId);
@@ -515,7 +516,9 @@ export class ThreadStore {
       }
       // Keep deletion retryable until staging commits its tombstone and clears this date.
       const doneAt = archived && (onlyIfIdle || this.removing.has(threadId)) ? thread.doneAt ?? (onlyIfIdle ? Date.now() : null) : null;
-      const saved = this.save({ ...thread, archived, doneAt }, 'thread.archived');
+      // Archiving an archived thread again keeps its time: nothing new was put away.
+      const archivedAt = archived ? (thread.archived ? thread.archivedAt ?? null : Date.now()) : null;
+      const saved = this.save({ ...thread, archived, doneAt, archivedAt }, 'thread.archived');
       if (thread.archived !== archived && !thread.parentThreadId && thread.projectId !== null) this.core.projects.announce(thread.projectId);
       return saved;
     })());
@@ -859,20 +862,21 @@ export class ThreadStore {
     return this.cards.listPermissions(threadId);
   }
 
-  answerPermission(params: { requestId: RequestId; decision: 'allow' | 'deny' }): void {
-    this.cards.answerPermission(params);
+  /** `by` names who decided in the log: the user, or a steward acting for them. */
+  answerPermission(params: { requestId: RequestId; decision: 'allow' | 'deny' }, by = 'user'): void {
+    this.cards.answerPermission(params, by);
   }
 
   listQuestions(threadId?: ThreadId): QuestionRequest[] {
     return this.cards.listQuestions(threadId);
   }
 
-  answerQuestion(params: { threadId: ThreadId; questionId: RequestId; optionIds: string[]; text?: string; attachments?: Attachment[] }): void {
-    this.cards.answerQuestion(params);
+  answerQuestion(params: { threadId: ThreadId; questionId: RequestId; optionIds: string[]; text?: string; attachments?: Attachment[] }, by = 'user'): void {
+    this.cards.answerQuestion(params, by);
   }
 
-  skipQuestion(params: { threadId: ThreadId; questionId: RequestId }): void {
-    this.cards.skipQuestion(params);
+  skipQuestion(params: { threadId: ThreadId; questionId: RequestId }, by = 'user'): void {
+    this.cards.skipQuestion(params, by);
   }
 
   askAsync(params: { threadId: ThreadId; text: string; options?: string[]; multiple?: boolean }): { questionId: RequestId } {

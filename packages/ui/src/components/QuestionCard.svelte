@@ -106,8 +106,8 @@
       {/if}
       <span class="fold-caret" class:open aria-hidden="true"><ChevronRight size={12} /></span>
     </button>
-    <div class="fold" class:open inert={!open}>
-      <div class="clip">
+    <div class="disclosure-fold" class:open inert={!open}>
+      <div>
         {#if built}
           <div class="answer-detail">
             <p class="prompt" data-testid="question-text">{text}</p>
@@ -274,9 +274,6 @@
   .answered-row:hover:not(:disabled) { background: var(--color-surface-2); }
   .answered-row:active:not(:disabled) { transform: none; }
   .answered-row .glyph { flex: none; width: var(--activity-glyph); justify-content: center; }
-  .fold { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows var(--dur-3) var(--ease-out-quint), opacity var(--dur-3) var(--ease-out-quint); }
-  .fold.open { grid-template-rows: 1fr; opacity: 1; }
-  .clip { min-height: 0; overflow: hidden; }
   .answer-detail { margin: 4px 0 8px calc(var(--activity-padding) + var(--activity-glyph) / 2); padding: 4px var(--activity-padding) 4px calc(var(--activity-glyph) / 2 + var(--activity-gap)); border-left: 1px solid var(--color-border); font-size: var(--text-sm); }
   .answer-detail p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
   .answer-detail p + p { margin-top: 8px; color: var(--color-foreground); }

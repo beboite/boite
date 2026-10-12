@@ -6,7 +6,7 @@ import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import type { MessagePart, PermissionMode, RpcEvents, Settings } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
 import { Core } from '../src/core.ts';
-import { getDriver } from '../src/drivers/index.ts';
+import { getDriver, probedModelsOf } from '../src/drivers/index.ts';
 import { readCodexQuota } from '../src/drivers/codex.ts';
 import { codexQuotaDetails } from '../src/quota-details.ts';
 import { consumeCodexReset } from '../src/drivers/codex/models.ts';
@@ -18,7 +18,7 @@ import { countLogLines, countProcesses, readScriptedLog, writeScriptedProvider }
 /** The fake Codex app-server: a real ndjson JSON-RPC process over stdio, run by bun. */
 const FAKE_SERVER = fileURLToPath(new URL('./fixtures/codex-server.ts', import.meta.url));
 /** The fixture's environment switches a test may set; every one is cleared after it. */
-const FAKE_SWITCHES = ['CODEX_FAKE_NO_LIVE_SETTINGS', 'CODEX_FAKE_FORK_ERROR', 'CODEX_FAKE_FORK_SAME', 'CODEX_FAKE_LOST', 'CODEX_FAKE_DEAF', 'CODEX_FAKE_SLOW_START', 'CODEX_FAKE_HOOKS', 'CODEX_FAKE_INIT_FAILURES', 'CODEX_FAKE_INIT_ERROR', 'CODEX_FAKE_CRASH_ERROR', 'CODEX_FAKE_INIT_RPC_ERROR', 'CODEX_FAKE_LOGIN_WAIT', 'CODEX_FAKE_RESET_CREDITS', 'CODEX_FAKE_RESET_ERROR'];
+const FAKE_SWITCHES = ['CODEX_FAKE_NO_LIVE_SETTINGS', 'CODEX_FAKE_FORK_ERROR', 'CODEX_FAKE_FORK_SAME', 'CODEX_FAKE_LOST', 'CODEX_FAKE_DEAF', 'CODEX_FAKE_SLOW_START', 'CODEX_FAKE_HOOKS', 'CODEX_FAKE_INIT_FAILURES', 'CODEX_FAKE_INIT_ERROR', 'CODEX_FAKE_CRASH_ERROR', 'CODEX_FAKE_INIT_RPC_ERROR', 'CODEX_FAKE_LOGIN_WAIT', 'CODEX_FAKE_RESET_CREDITS', 'CODEX_FAKE_RESET_ERROR', 'CODEX_FAKE_SLOW_MODELS'];
 
 test('native collaboration is journalled and appears in Team without using Boite delegation', async () => {
   const client = await startCore();
@@ -1249,9 +1249,20 @@ describe('codex driver', () => {
     const turn = await client.call('turns.start', { threadId: thread.id, prompt: '[slow] Deploy' });
     await waitFor(() => fakeLog().includes('waiting for interrupt'));
 
+    // The core sends the difference between the turn and the latest selection, so
+    // changes made while one is still on its way to the app-server merge: a fast
+    // tier and its removal cancel out. Each one has to reach the server before the
+    // next is made, or a slow runner's round trip sends two requests instead of four.
+    const settingsSent = (): number => fakeLog().split('\n').filter(line => line.startsWith('turn/settings/update')).length;
+    const reached = async (count: number): Promise<void> => {
+      if (!old) await waitFor(() => settingsSent() === count);
+    };
     await client.call('threads.update', { threadId: thread.id, effort: 'high' });
+    await reached(1);
     await client.call('threads.update', { threadId: thread.id, speed: 'fast' });
+    await reached(2);
     await client.call('threads.update', { threadId: thread.id, speed: null });
+    await reached(3);
     await client.call('threads.update', { threadId: thread.id, effort: 'medium' });
     if (old) {
       // One refusal tells this app-server has no such request; nothing else is sent to it.
@@ -1449,6 +1460,49 @@ describe('codex driver', () => {
     const trace = await client.call('trace.get', { threadId: `probe:codex-fake:${accountId}` });
     expect(trace.every((row) => row.exitedAt !== null)).toBe(true);
     expect(countLines('model/list')).toBe(1);
+  });
+
+  test('a list already read is answered without a process, and a refresh reads it again', async () => {
+    const client = await startCore();
+    const { accountId } = await codexAccount(client);
+    const first = await client.call('providers.probe', { providerId: 'codex-fake', accountId });
+    expect(first.models.map((model) => model.id)).toContain('fake-smart');
+    expect((await client.call('providers.probe', { providerId: 'codex-fake', accountId })).probedAt).toBe(first.probedAt);
+    expect(countLines('model/list')).toBe(1);
+    await client.call('providers.probe', { providerId: 'codex-fake', accountId, refresh: true });
+    expect(countLines('model/list')).toBe(2);
+  });
+
+  test('a refresh keeps the last catalog for model checks until the agent answers', async () => {
+    const client = await startCore();
+    const { projectId, accountId } = await codexAccount(client);
+    await client.call('providers.probe', { providerId: 'codex-fake', accountId });
+
+    process.env['CODEX_FAKE_SLOW_MODELS'] = '1500';
+    let refreshed = false;
+    const refresh = client.call('providers.probe', { providerId: 'codex-fake', accountId, refresh: true }).then(() => { refreshed = true; });
+    await waitFor(() => countLines('model/list') === 2);
+    // Picked from the list on screen while the agent reads it again: no wait for that read.
+    const thread = await client.call('threads.create', {
+      projectId,
+      providerId: 'codex-fake',
+      accountId,
+      title: 'during the refresh',
+      model: 'fake-smart',
+    });
+    expect(thread.model).toBe('fake-smart');
+    expect(refreshed).toBe(false);
+    // So is a plain read of the list.
+    expect((await client.call('providers.probe', { providerId: 'codex-fake', accountId })).models.map((model) => model.id)).toContain('fake-smart');
+    expect(refreshed).toBe(false);
+    await refresh;
+
+    // A changed account still drops the list a refresh keeps.
+    const again = client.call('providers.probe', { providerId: 'codex-fake', accountId, refresh: true });
+    await waitFor(() => countLines('model/list') === 3);
+    await client.call('accounts.rename', { accountId, label: 'renamed' });
+    expect(probedModelsOf('codex-appserver', 'codex-fake', accountId)).toBeNull();
+    await again.catch(() => undefined);
   });
 
   test('creating a thread discovers its model without opening the picker and sends its effort', async () => {
@@ -1668,6 +1722,13 @@ describe('native Codex fork', () => {
     expect((await finished).status).toBe('done');
     return (await client.call('threads.get', { threadId })).messages.at(-1)!;
   }
+  // A cold source tears its agent process down after the turn finishes, and
+  // the child's exit releases its install lease later. Wait for both, so a
+  // lease left after a fork is the fork's own.
+  async function sourceIdle(threadId: string) {
+    await waitFor(() => harness!.core.procs.liveCount(threadId) === 0
+      && harness!.core.providers.installs.leaseCount('codex-fake') === 0);
+  }
   test('native boundary uses the recorded native turn, independent target session and runtime settings', async () => {
     const client = await startCore();
     const threadId = await codexThread(client);
@@ -1722,6 +1783,7 @@ describe('native Codex fork', () => {
   test('source selection changes during native preparation discard only the new session', async () => {
     const client = await startCore(); const threadId = await codexThread(client);
     const reply = await completed(client, threadId, 'First');
+    await sourceIdle(threadId);
     const before = harness!.core.threads.require(threadId);
     const count = harness!.core.journal.db.query('SELECT COUNT(*) AS count FROM threads').get();
     const driver = getDriver('codex-appserver');
@@ -1744,6 +1806,7 @@ describe('native Codex fork', () => {
     const client = await startCore(); const threadId = await codexThread(client);
     const reply = await completed(client, threadId, 'First');
     await completed(client, threadId, 'Later secret');
+    await sourceIdle(threadId);
     const source = harness!.core.threads.require(threadId);
     const count = harness!.core.journal.db.query('SELECT COUNT(*) AS count FROM threads').get();
     process.env[flag] = '1';
@@ -1797,6 +1860,7 @@ describe('native Codex fork', () => {
   test('a server returning the source session id is rejected without archiving source', async () => {
     const client = await startCore(); const threadId = await codexThread(client);
     const reply = await completed(client, threadId, 'First');
+    await sourceIdle(threadId);
     const source = harness!.core.threads.require(threadId);
     process.env['CODEX_FAKE_FORK_SAME'] = '1';
     try { await expect(harness!.core.threads.fork(threadId, reply.id, false)).rejects.toThrow('distinct from the source'); }

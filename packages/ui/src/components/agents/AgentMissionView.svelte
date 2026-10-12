@@ -35,7 +35,7 @@
         {:else}
           {#if ['open', 'active'].includes(mission.status)}<button type="button" class="ghost small" onclick={() => void setStatus('paused')}><span class="ui-label">{labels.pause}</span></button>
           {:else if ['paused', 'waiting', 'review'].includes(mission.status)}<button type="button" class="ghost small" onclick={() => void setStatus('active')}><span class="ui-label">{labels.resume}</span></button>{/if}
-          <button type="button" class="ghost small" onclick={() => void setStatus('cancelled')}><span class="ui-label">{labels.cancel}</span></button>
+          <button type="button" class="ghost small" onclick={() => void setStatus('cancelled')}><span class="ui-label">{strings.common.cancel}</span></button>
           <button type="button" class="primary small" disabled={view.pending || unfinished} onclick={() => void setStatus('done')} data-testid="agent-mission-finish"><span class="ui-label">{labels.finishMission}</span></button>
         {/if}
       </div>
@@ -72,7 +72,7 @@
       <label class="agent-field">{labels.task}<input required bind:value={title} data-testid="agent-task-title" /></label>
       <label class="agent-field">{labels.instructions}<textarea bind:value={instructions} rows="3"></textarea></label>
       {#if tasks.length}<fieldset class="agent-field"><legend>{labels.dependencies}</legend><div class="agent-checks">{#each tasks as task (task.id)}<label class="agent-chip-check"><input type="checkbox" checked={dependencies.includes(task.id)} onchange={() => { dependencies = dependencies.includes(task.id) ? dependencies.filter(id => id !== task.id) : [...dependencies, task.id]; }} /><span class="ui-label">{task.title}</span></label>{/each}</div></fieldset>{/if}
-      <div class="agent-form-actions"><button class="primary" disabled={view.pending}><span class="ui-label">{labels.save}</span></button><button type="button" class="ghost" onclick={() => { adding = false; }}><span class="ui-label">{labels.cancel}</span></button></div>
+      <div class="agent-form-actions"><button class="primary" disabled={view.pending}><span class="ui-label">{strings.common.save}</span></button><button type="button" class="ghost" onclick={() => { adding = false; }}><span class="ui-label">{strings.common.cancel}</span></button></div>
     </form>
   {/if}
 </section>

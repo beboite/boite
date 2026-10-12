@@ -40,6 +40,7 @@ export function listen(ctx: StoreContext, client: Client): void {
           resetPullRequestSupport(client);
           models.probeEpoch++;
           models.probeAttempts.clear();
+          models.forgetConfirmed();
           models.probeTimes.clear();
           models.effortAttempts.clear();
           s.error = null;
@@ -81,6 +82,9 @@ export function listen(ctx: StoreContext, client: Client): void {
   on('thread.commands', ({ threadId, commands }) => {
     const open = s.openThread;
     if (open && open.id === threadId) open.commands = commands;
+    // A page a press loaded is the open thread a moment later (press-preload.ts).
+    const preloaded = threads.preloads.thread(threadId);
+    if (preloaded) preloaded.commands = commands;
   });
   // What the agent still runs in the background, whole each time, like the commands.
   on('thread.background', ({ threadId, tasks, history }) => {
@@ -89,9 +93,16 @@ export function listen(ctx: StoreContext, client: Client): void {
       open.background = tasks;
       if (history) open.backgroundHistory = history;
     }
+    const preloaded = threads.preloads.thread(threadId);
+    if (preloaded) {
+      preloaded.background = tasks;
+      if (history) preloaded.backgroundHistory = history;
+    }
   });
   on('thread.activity', ({ threadId, activity }) => {
     if (s.openThread?.id === threadId) s.openThread.activity = activity;
+    const preloaded = threads.preloads.thread(threadId);
+    if (preloaded) preloaded.activity = activity;
   });
   on('collaboration.changed', ({ threadId }) => {
     if (s.openThread?.id === threadId) void s.loadCoordination(threadId, false);
@@ -313,6 +324,7 @@ export function listen(ctx: StoreContext, client: Client): void {
     s.probedModels = {};
     models.probeEpoch++;
     models.probeAttempts.clear();
+    models.forgetConfirmed();
     models.probeTimes.clear();
     models.effortAttempts.clear();
     models.saveModels();
@@ -320,6 +332,7 @@ export function listen(ctx: StoreContext, client: Client): void {
   on('providers.probed', ({ providerId, accountId, models: probed }) => {
     s.probedModels = { ...s.probedModels, [probeKey(providerId, accountId)]: probed };
     models.probeAttempts.add(probeKey(providerId, accountId));
+    models.confirmed.add(probeKey(providerId, accountId));
     models.probeTimes.set(probeKey(providerId, accountId), Date.now());
     models.saveModels();
   });

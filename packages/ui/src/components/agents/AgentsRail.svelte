@@ -8,8 +8,10 @@
   import Menu from '../Menu.svelte';
   import RailFrame from '../RailFrame.svelte';
   import RailHead from '../RailHead.svelte';
+  import MachineStatus from '../MachineStatus.svelte';
   import AgentAvatar from './AgentAvatar.svelte';
   import AgentRow from './AgentRow.svelte';
+  import { minuteClock } from '../../lib/clock.svelte';
 
   /**
    * The conversations with agents, listed the way a messenger lists its chats
@@ -32,11 +34,7 @@
   const labels = $derived(strings.agents);
   let query = $state('');
   let searching = $state(false);
-  let now = $state(Date.now());
-  $effect(() => {
-    const timer = setInterval(() => (now = Date.now()), 30_000);
-    return () => clearInterval(timer);
-  });
+  const now = $derived(minuteClock.now);
 
   const snapshot = $derived(view.snapshot);
   const profiles = $derived(new Map(snapshot?.profiles.map(a => [a.id, a]) ?? []));
@@ -47,8 +45,6 @@
     ...snapshot.profiles.filter(a => a.status === 'archived' && a.name.toLowerCase().includes(needle)).map(a => ({ kind: 'profile' as const, id: a.id, name: a.name, avatar: a.avatar, state: labels.archived })),
     ...snapshot.missions.filter(m => m.title.toLowerCase().includes(needle)).map(m => ({ kind: 'mission' as const, id: m.id, name: m.title, avatar: '', state: labels[m.status] }))
   ] : []);
-  const multi = $derived(workspace.machines.length > 1);
-  const machines = $derived<MenuItem[]>(workspace.machines.map(m => ({ id: m.id, label: m.label, active: m.store === view.store })));
   const machine = $derived(workspace.machines.find(m => m.store === view.store));
   const createItems = $derived<MenuItem[]>([{ id: 'profile', label: labels.newTitle.profile, glyph: UserRoundPlus }, { id: 'group', label: labels.newTitle.group, glyph: Users }]);
 
@@ -78,11 +74,6 @@
 <RailFrame store={view.store} kind="agents-rail" label={labels.heading}>
   {#snippet head()}
     <RailHead store={view.store} current="agents">
-      {#snippet lead()}
-        {#if multi}
-          <Menu items={machines} onpick={pickMachine} label={strings.machines.heading} placement="bottom" variant="text" testid="agents-machine"><span class="ui-label">{machine?.label ?? strings.machines.local}</span></Menu>
-        {/if}
-      {/snippet}
       {#snippet actions()}
         <button type="button" class="ghost icon small" bind:this={searchToggle} class:active={searching} aria-pressed={searching} title={labels.search} aria-label={labels.search} onclick={() => (searching ? closeSearch() : (searching = true))} data-testid="agents-search-toggle"><Search size={16} /></button>
         {#if view.store.owner}
@@ -97,7 +88,7 @@
       <label class="agents-search"><Search size={14} strokeWidth={1.75} />
         <!-- svelte-ignore a11y_autofocus -->
         <input type="search" bind:value={query} aria-label={labels.search} placeholder={labels.search} autofocus onkeydown={e => { if (e.key === 'Escape') closeSearch(); }} />
-        <button type="button" class="ghost icon small" aria-label={labels.close} onclick={closeSearch}><X size={13} /></button>
+        <button type="button" class="ghost icon small" aria-label={strings.common.close} onclick={closeSearch}><X size={13} /></button>
       </label>
     {/if}
   {/snippet}
@@ -125,6 +116,11 @@
     </section>
   {/if}
   {#if needle && !shown.length && !found.length}<p class="agent-empty">{labels.noMatch}</p>{/if}
+
+  {#snippet lead()}
+    <!-- Which machine's agents the list shows: chosen at the foot's left, where the thread list keeps its machine button. -->
+    <MachineStatus store={view.store} pick filter={machine?.id ?? null} onfilter={id => { if (id) pickMachine(id); }} />
+  {/snippet}
 
   {#snippet foot()}
     {#if view.store.owner}<button type="button" class="ghost icon" class:active={active === 'engine'} title={labels.engineSettings} aria-label={labels.engineSettings} onclick={() => onfocus({ kind: 'engine' })} data-testid="agents-engine"><Settings2 size={16} /></button>{/if}

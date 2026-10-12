@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../../lib/errors';
   import type { AgentsView } from '../../lib/agents.svelte';
   import { confirm } from '../../lib/confirm.svelte';
   import { strings } from '../../lib/strings';
@@ -9,9 +10,9 @@
   const limits = $derived(view.snapshot!.limits);
 
   async function stopEngine() {
-    if (!await confirm.ask({ title: labels.stopEngine, body: labels.stopEngineBody, confirmLabel: labels.stopEngine, cancelLabel: labels.cancel, danger: true })) return;
+    if (!await confirm.ask({ title: labels.stopEngine, body: labels.stopEngineBody, confirmLabel: labels.stopEngine, cancelLabel: strings.common.cancel, danger: true })) return;
     try { await view.store.client?.call('core.shutdown', {}); view.store.client?.close(); }
-    catch (error) { view.error = error instanceof Error ? error.message : String(error); }
+    catch (error) { view.error = errorText(error); }
   }
 </script>
 

@@ -20,7 +20,7 @@ import { activityMethods, pauseActivity } from './fake-client/activity';
 import { brainMethods } from './fake-client/brain';
 import { FakeContext, type FakeClientOptions, type FakeMethods } from './fake-client/context';
 import { hookMethods, recordHookRun } from './fake-client/hooks';
-import { logMethods } from './fake-client/logs';
+import { logMethods, seedDiagnostics } from './fake-client/logs';
 import { coordinationMethods, registerCore, unregisterCore } from './fake-client/coordination';
 import { seedStewardDemo, stewardMethods } from './fake-client/stewards';
 import { delegationMethods, seedDelegationDemo } from './fake-client/delegation';
@@ -108,6 +108,8 @@ export class FakeClient implements ObservableClient {
       ctx.usageSeeded = false;
       ctx.scheduler = { ...ctx.scheduler, running: [], queued: [] };
     }
+    // After a first launch has cleared the threads, so no record names one that is gone.
+    seedDiagnostics(ctx);
   }
 
   // -------------------------------------------------------------------------
@@ -243,6 +245,7 @@ export class FakeClient implements ObservableClient {
       throw new RpcFailure({ code: RpcErrorCode.Internal, message: 'not connected' });
     }
     await this.#ctx.tick();
+    if (this.#ctx.rttMs > 0) await this.#ctx.leg();
     if (generation !== this.#transportGeneration || (bus.state !== 'ready' && method !== 'hello')) {
       throw new RpcFailure({ code: RpcErrorCode.Internal, message: 'connection changed before RPC dispatch' });
     }
@@ -256,6 +259,13 @@ export class FakeClient implements ObservableClient {
     if (bus.principal === 'session' && method === 'agents.message.send' && (params as RpcParams<'agents.message.send'>).threadId !== undefined) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'agents.message.send: paired devices must omit threadId and speak as the user' });
     if (bus.principal === 'session' && method === 'git.diff' && ![undefined, '', 'HEAD'].includes((params as RpcParams<'git.diff'>).ref)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'git.diff: paired devices compare the working tree with HEAD only' });
     const result = await bus.hold(this.#dispatch(method, params)) as RpcResult<M>;
+    if (this.#ctx.rttMs > 0) {
+      // An answer still on its way back when the socket changed never arrives.
+      await this.#ctx.leg();
+      if (generation !== this.#transportGeneration || (bus.state !== 'ready' && method !== 'hello')) {
+        throw new RpcFailure({ code: RpcErrorCode.Internal, message: 'connection changed before RPC answer' });
+      }
+    }
     if (options.onProgress) reportSlices(result, options.onProgress);
     // The real client writes its set from the answer, never from the request.
     if (method === 'threads.subscribe') {

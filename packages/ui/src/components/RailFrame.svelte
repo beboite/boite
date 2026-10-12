@@ -122,6 +122,7 @@
   </div>
   <div class="foot">
     {@render lead?.()}
+    <span class="grow"></span>
     {@render foot?.()}
     {#if work.shows('sidebar.limits')}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -133,6 +134,7 @@
       title={`${strings.sidebar.settings}${store.keyHint('settings')}`}
       aria-label={strings.sidebar.settings}
       data-testid="nav-settings"
+      data-preload-view="settings"
       onclick={() => store.showSettings()}><Settings size={16} /></button
     >
   </div>
@@ -183,37 +185,30 @@
   .scroll > :global(*) { flex-shrink: 0; }
   .foot {
     display: flex;
-    align-items: center;
-    /* One row of equal buttons across the whole width, a dock rather than two
-       clumps around a gap: each takes its share, so the targets grow with the
-       column instead of leaving its middle empty. */
+    /* The machine button alone on the left, the others together on the
+       right, at the bottom: square targets as tall as the composer's, whose
+       lower edge meets the chat card's instead of floating above it. */
+    align-items: flex-end;
     gap: 4px;
-    min-height: 44px;
     box-sizing: border-box;
     margin: 0 10px;
-    padding: 6px 0;
+    padding-top: 8px;
   }
+  .grow { flex: 1; }
   .control {
     display: contents;
   }
-  .foot :global(button.icon),
-  .foot :global(.machines:has(.trigger)) {
-    /* A basis, not 0: a button's border counts in its base size and a bare
-       wrapper has none, so a 0 basis left the machine button 2 px short. */
-    flex: 1 1 var(--control-sm);
-    min-width: var(--control-sm);
+  .foot :global(button.icon) {
+    flex: none;
+    width: var(--control-lg);
     height: var(--control-lg);
   }
-  .foot :global(button.icon) { width: auto; }
+  .foot :global(.machines) { min-width: var(--control-lg); }
   .foot :global(.machines .menu),
-  .foot :global(.machines .trigger) { width: 100%; height: 100%; }
-  /* With one machine the wrapper stays, empty, for its connection state: out
-     of the row, or it would still take a gap. */
+  .foot :global(.machines .trigger) { height: var(--control-lg); max-width: 100%; }
+  .foot :global(.machines .trigger:not(:has(.name))) { width: var(--control-lg); }
+  /* With one machine the wrapper stays, empty, for its connection state. */
   .foot :global(.machines:not(:has(.trigger))) { display: none; }
-  /* A machine filter names the machine: that button keeps its text's width,
-     up to MachineStatus's own cap. */
-  .foot :global(.machines.filtered) { flex: 0 1 auto; max-width: 160px; }
-  .foot :global(.machines.filtered .trigger) { width: auto; max-width: 100%; }
   .foot :global(button.icon.active) { background: var(--color-active); color: var(--color-foreground); }
 
   /* Centred in the frame's gap between the list and the card beside it. */

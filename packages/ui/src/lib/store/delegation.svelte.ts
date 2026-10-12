@@ -1,3 +1,4 @@
+import { errorText } from '../errors';
 import { secureId } from '../secure-id';
 import type {
   AgentContact,
@@ -121,7 +122,7 @@ export class Delegation {
           if (current()) this.coordinationDirectory = agents;
         }
       } catch (error) {
-        if (current()) this.coordinationError = error instanceof Error ? error.message : String(error);
+        if (current()) this.coordinationError = errorText(error);
       } finally {
         if (current()) this.coordinationLoading = false;
       }
@@ -145,7 +146,7 @@ export class Delegation {
         void s.loadCoordination(threadId);
       }
     } catch (error) {
-      if (this.ctx.client === client && s.openThread?.id === threadId) this.coordinationError = error instanceof Error ? error.message : String(error);
+      if (this.ctx.client === client && s.openThread?.id === threadId) this.coordinationError = errorText(error);
     } finally {
       if (this.ctx.client === client && this.coordinationEpoch === epoch) this.coordinationSaving = false;
     }
@@ -161,7 +162,7 @@ export class Delegation {
       const grants = await client.call('stewards.list', {});
       if (this.ctx.client === client && this.stewardsEpoch === epoch) { this.stewards = grants; this.stewardsError = null; }
     } catch (error) {
-      if (this.ctx.client === client && this.stewardsEpoch === epoch) this.stewardsError = error instanceof Error ? error.message : String(error);
+      if (this.ctx.client === client && this.stewardsEpoch === epoch) this.stewardsError = errorText(error);
     }
   }
 
@@ -190,7 +191,7 @@ export class Delegation {
       const grants = await write(client);
       if (this.ctx.client === client && this.stewardsEpoch === epoch) this.stewards = grants;
     } catch (error) {
-      if (this.ctx.client === client) this.stewardsError = error instanceof Error ? error.message : String(error);
+      if (this.ctx.client === client) this.stewardsError = errorText(error);
     } finally {
       if (this.ctx.client === client && this.stewardsEpoch === epoch) this.stewardsSaving = false;
     }
@@ -276,8 +277,15 @@ export class Delegation {
     }
   }
 
-  /** One child transcript in the panel, while the parent conversation keeps streaming. */
-  async selectDelegatedAgent(threadId: ThreadId | null): Promise<void> {
+  /**
+   * One child transcript in the panel, while the parent conversation keeps
+   * streaming. The selection changes before the first await, so a caller that
+   * clears it does not wait on the network. The previous child's unsubscribe
+   * leaves without being awaited, and the new child's subscribe and read leave
+   * together: one round trip, not three. `keep` is a thread about to be
+   * opened, whose subscription the open takes over and must not lose.
+   */
+  async selectDelegatedAgent(threadId: ThreadId | null, keep: ThreadId | null = null): Promise<void> {
     const threads = this.ctx.threads;
     const client = this.ctx.client;
     if (!client) return;
@@ -286,27 +294,33 @@ export class Delegation {
     this.delegationSelectedAgentId = threadId;
     this.delegationThread = null;
     this.delegationSubscribedThreadId = null;
-    if (previous && previous !== threads.subscribedThreadId && previous !== threadId) {
-      await client.call('threads.unsubscribe', { threadId: previous }).catch(() => undefined);
+    if (previous && !threads.preloads.holds(previous) && previous !== threadId && previous !== keep) {
+      void client.call('threads.unsubscribe', { threadId: previous }).catch(() => undefined);
     }
     if (threadId === null) return;
+    const current = (): boolean => epoch === this.delegationSelectionEpoch && client === this.ctx.client;
+    const subscribed = threadId !== threads.subscribedThreadId ? client.call('threads.subscribe', { threadId }) : null;
+    const fetched = client.call('threads.get', { threadId });
+    // A run that a newer selection overtakes returns early and never awaits the read.
+    fetched.catch(() => undefined);
     try {
-      if (threadId !== threads.subscribedThreadId) {
-        await client.call('threads.subscribe', { threadId });
-        if (epoch !== this.delegationSelectionEpoch || client !== this.ctx.client) {
-          if (this.delegationSelectedAgentId !== threadId && threads.subscribedThreadId !== threadId) {
+      if (subscribed) {
+        await subscribed;
+        if (!current()) {
+          // An open that took this thread over keeps its subscription.
+          if (this.delegationSelectedAgentId !== threadId && !threads.preloads.holds(threadId) && threads.openThread?.id !== threadId) {
             await client.call('threads.unsubscribe', { threadId }).catch(() => undefined);
           }
           return;
         }
       }
-      if (epoch === this.delegationSelectionEpoch && client === this.ctx.client) this.delegationSubscribedThreadId = threadId;
-      const thread = await client.call('threads.get', { threadId });
-      if (epoch === this.delegationSelectionEpoch && client === this.ctx.client && this.delegationSelectedAgentId === threadId) {
+      if (current()) this.delegationSubscribedThreadId = threadId;
+      const thread = await fetched;
+      if (current() && this.delegationSelectedAgentId === threadId) {
         this.delegationThread = thread;
       }
     } catch (error) {
-      if (epoch === this.delegationSelectionEpoch && client === this.ctx.client) this.delegationError = this.ctx.reason(error);
+      if (current()) this.delegationError = this.ctx.reason(error);
     }
   }
 

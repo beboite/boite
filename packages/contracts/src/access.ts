@@ -25,6 +25,8 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'workflows.list', 'workflows.get', 'workflows.control', 'workflows.templates.list',
   // Coordination is visible with the conversation; only the owner enables it.
   'collaboration.get',
+  // A phone's own rendering errors and failed calls land in the owner's diagnostics, bounded per connection.
+  'diagnostics.report',
   'collaboration.directory',
   // Which conversations act as stewards and over what: shown beside Communication settings. Only the owner grants or revokes.
   'stewards.list',
@@ -43,6 +45,8 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   // The machines of the group and a ticket to each: a phone paired with one member reaches the others at its own role, never more.
   'group.get',
   'group.ticket',
+  // A device paired the older way hands over its own device key: it gains no role, only one key for every member.
+  'group.enrollDevice',
   // Each authenticated pairing manages only its own push destination.
   'push.status',
   'push.subscribe',

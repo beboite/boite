@@ -82,7 +82,7 @@
         </button>
       {:else if update.phase === 'error'}
         <button type="button" onclick={() => updater.check(update.channel)} data-testid="app-update-retry">
-          <span class="ui-label">{strings.appUpdate.retry}</span>
+          <span class="ui-label">{strings.common.retry}</span>
         </button>
       {:else if update.phase !== 'downloading' && update.phase !== 'installing'}
         <!-- Keep the running check visible and disabled. -->
@@ -140,7 +140,6 @@
   .track span { display: block; height: 100%; border-radius: inherit; background: var(--color-foreground); transition: width var(--dur-2) var(--ease-out-quint); }
   .track.indeterminate span { opacity: 0.4; }
   .actions :global(.spinning) { animation: spin 1s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .actions :global(.spinning) { animation: none; } }
   :global(html[data-motion='reduced']) .actions :global(.spinning) { animation: none; }
 </style>

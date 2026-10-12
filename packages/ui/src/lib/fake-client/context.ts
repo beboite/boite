@@ -10,6 +10,7 @@ import {
   SPEECH_DEFAULT_MODEL,
   normalizeCoreLogText,
   normalizeCoreLogOutput,
+  normalizeLogData,
   RpcErrorCode,
   processAgentCommand,
   type Attachment,
@@ -100,10 +101,22 @@ export interface FakeClientOptions {
   stewardDemo?: boolean;
   /** Who this client is. `'session'` makes it a paired phone, refused like one. */
   principal?: Principal;
+  /**
+   * A round trip, in milliseconds, each call waits half of on the way out and
+   * half on the way back, like a remote machine; `?fake=1&rtt=150` sets it.
+   * Pushed events are not delayed.
+   */
+  rttMs?: number;
   /** Stable public identity for multi-machine coordination tests. */
   coreId?: string;
   coreName?: string;
   publicUrl?: string;
+}
+
+function roundTrip(): number {
+  if (typeof location === 'undefined') return 0;
+  const rtt = Number(new URLSearchParams(location.search).get('rtt'));
+  return Number.isFinite(rtt) && rtt > 0 ? rtt : 0;
 }
 
 function tokenStream(): number | undefined {
@@ -232,6 +245,7 @@ export class FakeContext {
   seq = 0;
   readonly turnRequests = new Map<string, { content: string; turn: Turn; messageId: string }>();
   readonly delayMs: number;
+  readonly rttMs: number;
   readonly chunkSize: number | undefined;
   readonly long: boolean;
   readonly heavy: boolean;
@@ -278,6 +292,7 @@ export class FakeContext {
       principal: () => this.bus.principal,
     });
     this.delayMs = options.delayMs ?? 18;
+    this.rttMs = options.rttMs ?? roundTrip();
     this.chunkSize = options.chunkSize ?? tokenStream();
     this.long = options.long ?? false;
     this.heavy = options.heavy ?? false;
@@ -350,6 +365,11 @@ export class FakeContext {
     return Promise.resolve();
   }
 
+  /** One way of a call's trip: half the simulated round trip. */
+  leg(): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, this.rttMs / 2));
+  }
+
   pause(): Promise<void> {
     if (this.delayMs <= 0) return Promise.resolve();
     return new Promise((resolve) => setTimeout(resolve, this.delayMs));
@@ -361,6 +381,8 @@ export class FakeContext {
       const bounded = (value: string): string => normalizeCoreLogText(value).replace(/[\r\n\t]/g, ' ').slice(0, 200);
       payload = { level: log.level, at: log.at, message: log.kind === 'provider-output' ? normalizeCoreLogOutput(log.message) : normalizeCoreLogText(log.message), source: bounded(log.source ?? 'core'), event: bounded(log.event ?? 'core.log'),
         ...(log.threadId === undefined ? {} : { threadId: bounded(log.threadId) }), ...(log.turnId === undefined ? {} : { turnId: bounded(log.turnId) }), ...(log.requestId === undefined ? {} : { requestId: bounded(log.requestId) }),
+        ...(typeof log.durationMs === 'number' && Number.isFinite(log.durationMs) && log.durationMs >= 0 ? { durationMs: Math.round(log.durationMs) } : {}),
+        ...(log.data === undefined ? {} : (() => { const data = normalizeLogData(log.data); return data ? { data } : {}; })()),
         ...(log.kind === 'provider-output' ? { kind: log.kind } : {}),
       } as RpcEvents[E];
     }

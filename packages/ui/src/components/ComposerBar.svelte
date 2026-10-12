@@ -3,7 +3,7 @@
   import { tick } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import type { PermissionMode, ProviderSummary } from '@boite/contracts';
-  import { tokens as formatTokens } from '../lib/format';
+  import { formatTokens, providerName } from '../lib/format';
   import { confirm } from '../lib/confirm.svelte';
   import { switchDropsHistory, switchResetsCache, type CacheKey } from '../lib/switch-warning';
   import { modeHint, modeIcon, modeLabel, modesFor, shownMode } from '../lib/permission-modes';
@@ -146,8 +146,8 @@
       picking = true;
       try {
         if (switchDropsHistory(thread, target.accountId)) {
-          const from = store.providers.find((entry) => entry.id === thread.providerId)?.name ?? thread.providerId;
-          const to = store.providers.find((entry) => entry.id === target.providerId)?.name ?? target.providerId;
+          const from = providerName(store, thread.providerId);
+          const to = providerName(store, target.providerId);
           const go = await confirm.ask({
             title: fill(strings.composer.switchTitle, { tokens: formatTokens(thread.context?.tokens ?? 0), provider: to }),
             body: fill(strings.composer.switchBody, { provider: to }),
@@ -291,7 +291,7 @@
         aria-label={strings.composer.attach}
         onclick={() => picker?.click()}
       >
-        <Paperclip size={14} strokeWidth={1.75} />
+        <Paperclip size={16} strokeWidth={1.75} />
       </button>
       <input
         bind:this={picker}
@@ -334,9 +334,6 @@
     display: none;
   }
 
-  .attach {
-    padding: 0 7px;
-  }
   .context-control { flex: none; }
 
   .mode-icon { display: inline-flex; }
@@ -416,6 +413,9 @@
   }
 
   .send:not(:disabled):active { transform: scale(.92); }
+  /* No chips to fill the row: the tools sit beside the send button on the right. */
+  .answering { justify-content: flex-end; }
+  .answering .stop, .answering .send { margin-left: 0; }
   .answering .send { width: auto; padding-inline: 12px; border-radius: var(--radius-md); }
   .answering .attach { display: inline-flex; }
 
@@ -432,7 +432,6 @@
     .chips :global(.picker > .trigger > .label) { min-width: 0; max-width: none; }
     .chips :global(.picker > .trigger.connect) { padding: 0 12px; border-radius: var(--radius-md); background: var(--color-accent-soft); color: var(--color-accent); }
     .send, .stop { margin-left: 2px; }
-    .answering .send { margin-left: auto; }
     /* The composer carries `dictating` while a dictation runs. */
     :global(.dictating) .send { display: none; }
   }

@@ -12,7 +12,7 @@
 //! see-through over the desktop. Here solid is the backdrop attribute set to
 //! none, one write like every other material, and no accent policy is ever set.
 
-use tauri::{AppHandle, Manager, Webview};
+use tauri::{AppHandle, Webview};
 
 use crate::browser::{self, MAIN_LABEL};
 
@@ -107,13 +107,19 @@ pub(crate) async fn window_material(app: AppHandle, webview: Webview, kind: Stri
     browser::only_main(&webview)?;
     let build = windows_build();
     backdrop_for(&kind, build)?;
-    let window = app
-        .get_webview_window(MAIN_LABEL)
+    let window = crate::window::main_window(&app)
         .ok_or_else(|| format!("the {MAIN_LABEL:?} window is gone: no material was applied"))?;
     #[cfg(windows)]
     {
         let hwnd = window.hwnd().map_err(|error| format!("the {MAIN_LABEL:?} window has no handle: {error}"))?;
-        apply_material(hwnd.0, &kind, build)
+        let applied = apply_material(hwnd.0, &kind, build);
+        match &applied {
+            Ok(()) => crate::shell_log::info("window", "shell.window.material", format!("the window material changed to {kind}"),
+                serde_json::json!({ "material": kind, "build": build })),
+            Err(error) => crate::shell_log::warn("window", "shell.window.material", format!("the window material {kind} could not be applied: {error}"),
+                serde_json::json!({ "material": kind, "build": build })),
+        }
+        applied
     }
     #[cfg(not(windows))]
     {

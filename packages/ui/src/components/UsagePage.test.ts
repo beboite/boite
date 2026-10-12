@@ -32,7 +32,7 @@ test('a failed initial read stops loading, can be retried and distinguishes miss
   expect(document.querySelector('[data-provider=removed-provider]')?.textContent).toContain('Not reported');
   click('[data-testid=usage-metric-cost]');
   await settle();
-  expect(document.querySelector('[data-testid=usage-total]')?.textContent).toBe('No cost reported');
+  expect(document.querySelector('[data-testid=usage-total]')?.textContent).toBe('No price');
 });
 
 test('changing the range invalidates an older read before it can overwrite the latest history', async () => {

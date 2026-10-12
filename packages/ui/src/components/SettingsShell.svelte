@@ -3,7 +3,7 @@
   import { tick } from 'svelte';
   import MobileSettings from './MobileSettings.svelte';
   import BrainPage from './BrainPage.svelte';
-  import { Activity, ArrowLeft, Brain, ChevronRight, Coins, FlaskConical, Gauge, House, Keyboard, Mic, Monitor, Palette, Puzzle, Settings2, ShieldCheck, SlidersHorizontal, Users } from '@lucide/svelte';
+  import { Activity, ArrowLeft, Brain, ChevronRight, Coins, FlaskConical, Gauge, House, Keyboard, Mic, Monitor, Palette, Puzzle, Settings2, ShieldCheck, SlidersHorizontal, Stethoscope, Users } from '@lucide/svelte';
   import KeyboardPage from './KeyboardPage.svelte';
   import LimitsPage from './LimitsPage.svelte';
   import PluginsPage from './PluginsPage.svelte';
@@ -16,6 +16,7 @@
   import AdvancedSettings from './AdvancedSettings.svelte';
   import AppearancePage from './AppearancePage.svelte';
   import ExperimentsPage from './ExperimentsPage.svelte';
+  import DiagnosticsPage from './DiagnosticsPage.svelte';
   import GeneralSettings from './GeneralSettings.svelte';
   import MachinesPage from './MachinesPage.svelte';
   import ResourcesPage from './ResourcesPage.svelte';
@@ -26,13 +27,14 @@
   import { providerGroups } from '../lib/provider-family';
 import { workspace } from '../lib/workspace.svelte';
   import { browserBridge } from '../lib/browser-bridge';
+  import { revealSettingsCard } from '../lib/settings-flash';
 
   let { store, onopenthread }: { store: Store; onopenthread?: () => void } = $props();
   const narrow = new MediaQuery('(max-width: 720px)');
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
 
-  /** Providers, Plugins, Resources and Brain call nothing a paired device may call. */
-  const OWNER_TABS: SettingsTab[] = ['accounts', 'plugins', 'resources', 'brain'];
+  /** Providers, Plugins, Resources, Brain and Diagnostics call nothing a paired device may call. */
+  const OWNER_TABS: SettingsTab[] = ['accounts', 'plugins', 'resources', 'brain', 'diagnostics'];
 
   type Tab = SettingsTile;
 
@@ -54,6 +56,7 @@ import { workspace } from '../lib/workspace.svelte';
     { id: 'resources', label: strings.settings.tabs.resources, icon: ShieldCheck, group: 2 },
     { id: 'machines', label: strings.settings.tabs.machines, icon: Monitor, group: 3 },
     { id: 'advanced', label: strings.settings.tabs.advanced, icon: SlidersHorizontal, group: 3 },
+    { id: 'diagnostics', label: strings.settings.tabs.diagnostics, icon: Stethoscope, group: 3 },
     { id: 'experiments', label: strings.settings.tabs.experiments, icon: FlaskConical, group: 3 }
   ]);
 
@@ -89,14 +92,19 @@ import { workspace } from '../lib/workspace.svelte';
     ],
     machines: [
       { id: 'machines', label: strings.machines.heading },
-      { id: 'devices', label: strings.settings.pairing.heading },
       { id: 'phone', label: strings.phone.heading }
     ],
     advanced: [
       ...(store.owner ? [{ id: 'execution', label: strings.settings.execution }, { id: 'origins', label: strings.machines.browserOrigins }] : []),
       { id: 'core', label: strings.settings.core }
     ],
-    experiments: EXPERIMENT_IDS.map((id) => ({ id, label: experimentCopy()[id].title }))
+    experiments: EXPERIMENT_IDS.map((id) => ({ id, label: experimentCopy()[id].title })),
+    diagnostics: [
+      { id: 'diagnostics-status', label: strings.diagnostics.status },
+      { id: 'diagnostics-problems', label: strings.diagnostics.problems },
+      { id: 'diagnostics-log', label: strings.diagnostics.log },
+      { id: 'diagnostics-agents', label: strings.diagnostics.agentAccess }
+    ]
   });
 
   /**
@@ -153,11 +161,14 @@ import { workspace } from '../lib/workspace.svelte';
     ['resources', 'quiet', strings.settings.muteAgents],
     ['resources', 'limits', strings.settings.memoryProtection],
     ['resources', 'tasks', strings.settings.reapOrphans],
-    ['machines', 'devices', strings.settings.listenOnLan],
-    ['machines', 'devices', strings.settings.pairing.mint],
+    ['machines', 'phone', strings.settings.listenOnLan],
+    ['machines', 'machines', strings.group.addDevice],
     ['machines', 'phone', strings.phone.publicUrl],
     ['machines', 'machines', strings.machines.main],
-    ['advanced', 'execution', strings.settings.warmProcessMinutes]
+    ['advanced', 'execution', strings.settings.warmProcessMinutes],
+    ['diagnostics', 'diagnostics-status', strings.diagnostics.export],
+    ['diagnostics', 'diagnostics-status', strings.diagnostics.report],
+    ['diagnostics', 'diagnostics-log', strings.diagnostics.search]
   ]);
 
   /** Every page, every section the nav names and the settings above: what the home page's search looks through. */
@@ -236,10 +247,7 @@ import { workspace } from '../lib/workspace.svelte';
     if (!section || tab !== store.settingsTab) return;
     void section.request;
     void tick().then(() => {
-      const target = document.getElementById(`settings-${section.id}`);
-      if (!target) return;
-      jumping = Date.now();
-      target.scrollIntoView({ behavior: motion(), block: 'start' });
+      if (revealSettingsCard(section.id, section.flash === true, motion())) jumping = Date.now();
     });
   });
 </script>
@@ -268,10 +276,10 @@ import { workspace } from '../lib/workspace.svelte';
       >
         <Icon size={15} strokeWidth={1.75} />
         <span class="ui-label">{entry.label}</span>
-        {#if toc[entry.id]}<ChevronRight size={14} class={tab === entry.id ? 'expanded' : ''} />{/if}
+        {#if toc[entry.id]}<ChevronRight size={14} class={tab === entry.id ? 'fold-caret open' : 'fold-caret'} />{/if}
       </button>
       {#if toc[entry.id]}
-        <div class="subcategories" class:open={tab === entry.id} inert={tab !== entry.id}>
+        <div class="subcategories disclosure-fold" class:open={tab === entry.id} inert={tab !== entry.id}>
           <div>
             {#each toc[entry.id] ?? [] as child (child.id)}
               <button class="ghost subsection" class:chosen={chosenSection === child.id} data-settings-section={child.id} title={child.label} onclick={() => jump(child.id)}><span class="ui-label">{child.label}</span></button>
@@ -323,6 +331,8 @@ import { workspace } from '../lib/workspace.svelte';
         <PluginsPage {store} />
       {:else if tab === 'experiments'}
         <ExperimentsPage />
+      {:else if tab === 'diagnostics'}
+        <DiagnosticsPage {store} {onopenthread} />
       {:else}
         <ResourcesPage {store} />
       {/if}
@@ -336,17 +346,12 @@ import { workspace } from '../lib/workspace.svelte';
   .category { flex: none; }
   .rule { flex: none; height: 1px; margin: 8px 10px; background: var(--color-border); }
   .tab span { flex: 1; text-align: left; }
-  .tab :global(svg:last-child) { transition: transform var(--dur-3) var(--ease-out-quint); }
-  .tab :global(.expanded) { transform: rotate(90deg); }
-  .subcategories { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows var(--dur-3) var(--ease-out-quint), opacity var(--dur-2); }
-  .subcategories.open { grid-template-rows: 1fr; opacity: 1; }
-  .subcategories > div { overflow: hidden; min-height: 0; }
+  .tab :global(.fold-caret) { color: inherit; }
   /* Block rather than flex, and a label longer than the rail wraps onto a second
      line: French says most of these in more letters, and a cut label hides the word
      that tells two sections apart. */
   .subsection { display: block; text-align: left; white-space: normal; text-wrap: pretty; height: auto; min-height: var(--control); padding-block: 5px; line-height: 1.3; width: calc(100% - 24px); margin-left: 24px; padding-left: 15px; border-left: 1px solid var(--color-edge); border-radius: 0; color: var(--color-muted-foreground); font-size: var(--text-sm); transition: color var(--dur-2), border-color var(--dur-2), background var(--dur-2); }
   .subsection.chosen { color: var(--color-foreground); border-left-color: var(--color-foreground); background: var(--color-hover); }
-  @media (prefers-reduced-motion: reduce) { .subcategories, .tab :global(svg:last-child) { transition: none; } }
 
   .settings {
     display: flex;

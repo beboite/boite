@@ -32,6 +32,12 @@ export class Models {
    */
   probedModels = $state<Record<string, ModelInfo[]>>({});
   probeAttempts = new Set<string>();
+  /**
+   * The keys whose list came from the connected core itself, by a probe answer
+   * or its `providers.probed` event. The core accepts a model from such a list
+   * without being asked again; a list restored from storage is not one of them.
+   */
+  confirmed = new Set<string>();
   probeTimes = new Map<string, number>();
   /** One per-model effort read per provider, account and model, see `probeModelEffort`. */
   effortAttempts = new Set<string>();
@@ -109,6 +115,7 @@ export class Models {
       const { models } = await client.call('providers.probe', { providerId, accountId, model });
       if (client !== this.ctx.client || epoch !== this.probeEpoch) return;
       this.probedModels = { ...this.probedModels, [probeKey(providerId, accountId)]: models };
+      this.confirmed.add(probeKey(providerId, accountId));
       this.saveModels();
     } catch (error) {
       // An older core refuses nothing here, it just answers the plain list; a
@@ -116,6 +123,20 @@ export class Models {
       if (client === this.ctx.client) this.effortAttempts.delete(key);
       console.warn('reading the model efforts failed', error);
     }
+  }
+
+  /**
+   * The core already listed this model for this account: a pick can land at
+   * once, and a refresh running behind it keeps that list until it answers.
+   */
+  catalogHas(providerId: ProviderId, accountId: string, model: string): boolean {
+    const key = probeKey(providerId, accountId);
+    return this.confirmed.has(key) && (this.probedModels[key]?.some((entry) => entry.id === model) ?? false);
+  }
+
+  /** Every list the client holds came from another connection or a reloaded core. */
+  forgetConfirmed(): void {
+    this.confirmed.clear();
   }
 
   isProbing(providerId: ProviderId, accountId: string | null): boolean {
@@ -160,6 +181,7 @@ export class Models {
         const { models } = await client.call('providers.probe', { providerId, accountId, ...(force ? { refresh: true } : {}) });
         if (client !== this.ctx.client || epoch !== this.probeEpoch) return;
         this.probedModels = { ...this.probedModels, [key]: models };
+        this.confirmed.add(key);
         this.saveModels();
       } catch (error) {
         if (client !== this.ctx.client) return;
@@ -319,7 +341,11 @@ export class Models {
     const s = this.ctx.store;
     const provider = s.providerOf(choice.providerId);
     if (!choice.model || !provider) return choice;
-    if (['claude-sdk', 'acp', 'codex-appserver', 'muse', 'pi', 'agy'].includes(provider.protocol)) {
+    // The core listed this model on this connection: it accepts it without a
+    // second read, which would wait behind a refresh still running.
+    const known = this.catalogHas(choice.providerId, choice.accountId, choice.model) &&
+      (provider.protocol !== 'acp' || choice.effort === null || s.modelsOf(provider.id, choice.accountId).find((m) => m.id === choice.model)?.effort !== undefined);
+    if (!known && ['claude-sdk', 'acp', 'codex-appserver', 'muse', 'pi', 'agy'].includes(provider.protocol)) {
       const client = this.ctx.client;
       if (!client) return null;
       const epoch = this.probeEpoch;
@@ -334,6 +360,7 @@ export class Models {
         });
         if (client !== this.ctx.client || epoch !== this.probeEpoch) return null;
         this.probedModels = { ...this.probedModels, [probeKey(choice.providerId, choice.accountId)]: result.models };
+        this.confirmed.add(probeKey(choice.providerId, choice.accountId));
         this.saveModels();
       } catch (error) {
         const current = client === this.ctx.client && epoch === this.probeEpoch;
@@ -361,6 +388,7 @@ export class Models {
   dropProbes(accountId: string): void {
     this.probeEpoch++;
     for (const key of this.probeAttempts) if (key.endsWith(`::${accountId}`)) this.probeAttempts.delete(key);
+    for (const key of this.confirmed) if (key.endsWith(`::${accountId}`)) this.confirmed.delete(key);
     for (const key of this.probeTimes.keys()) if (key.endsWith(`::${accountId}`)) this.probeTimes.delete(key);
     const suffix = `::${accountId}`;
     const kept = Object.entries(this.probedModels).filter(([key]) => !key.endsWith(suffix));

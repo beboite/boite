@@ -1,16 +1,17 @@
 # Groups
 
-A group is the set of machines one person owns. Put a machine in a group and
-it connects to every other machine of it, in both directions, with no pairing
-link each. A phone paired with one machine reaches all of them. Agents on one
-machine find the agents of the others.
+A group is one person's machines and devices. Put a machine in a group and it
+connects to every other machine of it, in both directions. A phone or a browser
+added on any machine is a device of the group: one key of its own opens every
+machine, with nothing to pair machine by machine. Agents on one machine find the
+agents of the others.
 
-Settings shows one group card containing the machine connections, one row
-each, with their updates and settings folded under the row
-([machines](machines.md#the-machines-page)). Opening Machines converts existing full-control connections into one
-group automatically, reusing an existing group when there is one. Offline
-machines join when they reconnect while the page is open. Device-only
-connections retain their role and are never made group members.
+Settings, Machines shows one group card: the machines, one row each with their
+updates and settings folded under the row
+([machines](machines.md#the-machines-page)), then the devices. One button adds
+anything, **Add a device**. Opening Machines converts existing full-control
+connections into one group automatically, reusing an existing group when there
+is one. Offline machines join when they reconnect while the page is open.
 
 A machine already in another group stays there and shows the group to leave
 before moving it; each existing group keeps its own name and controls.
@@ -22,10 +23,11 @@ Settings again does not join it back automatically.
 ## Trust
 
 **Every machine of a group has full control of the others.** A member may
-invite a machine, remove one, and vouch for a client at the owner role. Group
-only machines that are yours. A machine that is partly trusted, a friend's or
-a shared server, should not be added to your group. Device pairing gives one
-direction and one role.
+invite a machine, remove one, admit or remove a device, and vouch for a client
+at the owner role. Group only machines that are yours. A machine that is partly
+trusted, a friend's or a shared server, should not be added to your group. A
+device is admitted at the device role: it reads and drives conversations and
+configures nothing ([phone](phone.md#what-a-paired-device-may-call)).
 
 A removal takes effect on each member when it hears of it. Until then that
 member still treats the removed machine as one of the group, with full control
@@ -42,28 +44,29 @@ a machine is not: it is as private as its transport ([the network](#the-network)
 
 ## Using it
 
-In Settings, Machines:
+On any machine, in Settings, Machines, **Add a device**. A machine in no group
+starts one named after itself first. The card shows a QR code, a short code
+under it and **Copy link**:
 
-1. On one machine, **Create a group** and name it.
-2. On that machine, **Invite a machine**. The invitation works once, for ten
-   minutes, and whoever holds it joins: treat it as a credential.
-3. On the machine that joins, paste it under **Join a group**.
+- a phone scans the QR code from its Boite app, or types the code there
+  ([phone](phone.md#adding-a-phone));
+- a computer pastes the copied link under **Join** in its own Settings,
+  Machines: its core joins the group. A computer alone in a group of its own,
+  the one its phone brought, joins all the same and brings that phone along.
+
+The QR code and the code work once, for ten and five minutes. Whoever holds
+them gets in: treat them as credentials. The QR code carries the phone's part
+alone, so it stays sparse enough for a camera across a room; the copied link
+carries the machine invitation after `#join=` as well.
 
 Click or tap the group name to rename it. Enter or leaving the field saves;
 Escape cancels. Updated members synchronize the name, including after a restart.
 
-The two machines list each other and connect. A third machine joins with an
-invitation from either. A phone needs nothing more than its usual pairing
-link, from any member ([phone](phone.md)): once paired, it connects to the
-others at the same role, and keeps reaching them when the machine it paired
-with is off. The app then opens on one of the others by itself, and the
-phone can name any machine it reaches as the one it opens on
-([machines](machines.md#connecting-a-machine)).
-
-**Leave the group** takes this machine out and tells the others first.
-**Remove from the group** takes another machine out; that machine is told and
-leaves on its own, or learns it the next time it reaches a member. Revoking a
-paired device on any member revokes it on all of them.
+**Remove from the group**, on a device's row, takes that phone or browser out:
+every member refuses it from then on. On a machine's row it takes that machine
+out; that machine is told and leaves on its own, or learns it the next time it
+reaches a member. **Leave the group** takes this machine out and tells the
+others first.
 
 The group card also offers one switch to keep the settings of every connected
 machine like the selected one. It uses the settings synchronization
@@ -76,7 +79,7 @@ the running core:
 
 ```sh
 boite-core group create Home
-boite-core group invite          # prints the invitation, and nothing else, on stdout
+boite-core group invite          # prints a machine invitation, and nothing else, on stdout
 boite-core group join            # reads the invitation on its standard input
 boite-core group status
 boite-core group leave
@@ -112,8 +115,10 @@ as it does for two machines linked by hand ([coordination](coordination.md)).
 A client is sent to fewer of them, because its link is not sealed: to the
 HTTPS address alone when the machine has one, and otherwise only to an address
 written as numbers. A name over plain HTTP is whatever the client's resolver
-says it is, so a client never sends a ticket or a key to one. A pairing link
-follows the same rule.
+says it is, so a client never sends a ticket or a key to one. A device sends no
+secret at all, only a signature made for the machine it means, but what follows
+its hello is not sealed either, so it keeps to the same addresses. A link that
+adds a device follows the same rule.
 
 The core reads its tailnet address off Tailscale's own network interface
 (`tailscale0`, `Tailscale`, or on macOS a `utun` that also carries a Tailscale
@@ -152,11 +157,69 @@ Clocks of two members may differ by one minute; past that, signed requests and
 tickets are refused for their date.
 
 A phone whose page is served over HTTPS can only open secure sockets. It
-connects directly to the members that give an HTTPS address, and reaches the
-others through a member it was paired with by hand ([relay](#relay)). The Tailscale
+connects directly to the members that give an HTTPS address or are served at
+one, and reaches the others through a member it reaches ([relay](#relay)). The Tailscale
 switch of Settings, or `boite-core tailscale on` ([server](server.md)), serves
 a member on `https://<machine>.<tailnet>.ts.net` and sets it as its public
 address; a tailnet without HTTPS certificates needs a reverse proxy for that.
+
+## Devices
+
+A phone or a browser holds one Ed25519 key, made the first time it is added and
+kept in its storage (`lib/device-key.ts`, `@noble/ed25519`, since a page served
+over plain HTTP has no WebCrypto). Its id is the SHA-256 of the public key. The
+desktop app is no device: it is its machine's own.
+
+**Admission.** "Add a device" mints a one-time grant, drawn as a QR code and as a
+code `XXXX-XXXX` ([phone](phone.md#adding-a-phone)). The device says `hello`
+with that grant and `device: { publicKey, name, sig }`, where `sig` signs the
+grant itself with the key, so whoever reads the grant on the way cannot have
+another key admitted with it. The member spends the grant, writes the device in
+the roster under its own signature over the group, the device id and its role,
+and the socket is the device's from then on. The same key asking again with the
+same grant, after an answer lost on a weak link, gets the same answer; any other
+is refused as for a used link. A well-formed code typed on the page of a member
+that did not draw it is sent, sealed, to the other members (`group.redeem`),
+twenty a minute at most; the one that drew it admits the device and answers with
+the roster. A wrong code counts toward dropping the live codes only on the
+member it was typed at, so guesses typed there drop no other member's codes.
+
+**Hello.** From then on the device says `hello` with `device: { id, at, nonce,
+sig }` on any member, `sig` signing `boite-device-hello`, the id of that member,
+`at` and `nonce`. The member checks that its roster lists the device, not
+removed, admitted by a machine that is still a member; that the signature names
+it; that `at` is within two minutes of its clock; and that it never saw the
+nonce. Nothing the device sends opens another member or opens this one twice.
+The member keeps a session row of its own for the device, made on its first
+visit, whose token it throws away: it carries the device's last visit, its push
+subscription and its sockets. The device's `group.get` lists its own entry only.
+
+**Removal.** `group.revokeDevice`, on any member, writes the device's removal in
+the roster. Every member, as it hears of it, drops the device's session and
+closes its sockets; a member that is off does it when it is back. A removal is
+final: the same key is never admitted again, and the app makes a new one when it
+is added again. A device admitted by a machine that is then removed with **Remove
+from the group** stays: the member that removes it signs those devices in again.
+A machine that leaves on its own takes the devices it admitted with it.
+
+**Devices paired before device keys.** A phone that holds a key of the older
+kind, one per machine, keeps it. The next time it connects to an updated member
+it sends its device key with `group.enrollDevice`, signed for that member; the
+member admits the key and lists the session it called with as one the key took
+over (`legacy`), so revoking the key revokes that session too, on every member
+that issued one. The page then signs, and drops the old key. A machine in no
+group starts one of its own for it. Nothing is asked of the user.
+
+**Origins.** A member accepts the origin of a page served by any member: the
+addresses each gives, and the origins each says its page is served at. A machine
+learns where it is served from the socket a page opens: an origin it already
+accepts of its own accord (its public address or an origin listed under
+Advanced) whose host is the one the socket asked for, outside loopback. It
+learns it before any hello, so the first page of a phone that holds no key yet
+already opens the way, and publishes up to four in the roster (`origins`). A
+machine behind a reverse proxy is thus accepted by the others without anything
+set on them. The origin check keeps arbitrary websites out; it grants nothing,
+since every socket still needs a credential at `hello`.
 
 ## Relay
 
@@ -167,11 +230,12 @@ not on but another member is.
 
 The client tries the member's own addresses first, those it may send a key
 to. When none is usable or none answers, it tries
-`<member>/group/relay/<core id>/rpc` at once on every machine it was paired
-with by hand that lists that member, and the first that answers carries it.
-Its `hello` names its key for the relaying machine in `relay`, beside the
-ticket or key for the member at the end. The relaying machine checks that key
-(a key it issued, or its owner's token; never an agent's), takes it out, opens
+`<member>/group/relay/<core id>/rpc` at once on every machine its own key opens
+or it was paired with by hand that lists that member, and the first that answers carries it. Its `hello` names, in
+`relay`, its credential for the relaying machine: a device's signature for that
+machine, or the key that machine issued, beside its credential for the member at
+the end. The relaying machine checks it (a device of its roster, a key it issued,
+or its owner's token; never an agent's), takes it out, opens
 a socket on the other member at one of its addresses and passes the rest of
 the hello on. A client that holds no key for the relaying machine any more
 sends nothing on that route: the hello would hand that machine its key for the
@@ -225,10 +289,12 @@ as private as the network between the two machines.
 ### Notifications through the group
 
 A phone installs one machine's page and subscribes to Web Push there, with
-that machine's key. A member whose thread needs the user, or finished, also
-sends the news to the home machine of every device that holds a key it issued
-through the group and has no subscription of its own there; such a key cannot
-subscribe there, the refusal naming its home. That machine pushes it to the
+that machine's key. That machine writes itself in the roster as the device's
+push home (`push`). A member whose thread needs the user, or finished, also
+sends the news to the push home of every device of the group that has no
+subscription of its own there. (A key of the older kind, issued through a ticket,
+has the member it was paired with for its home and cannot subscribe elsewhere,
+the refusal naming its home.) That machine pushes it to the
 device with its own key, once per device, as a sealed `group.push` request
 between members. The request carries an id the home remembers for two
 minutes: tried on two addresses that both reach it, it pushes once. Title,
@@ -333,14 +399,18 @@ name up to three times the allowance a minute, and past that by date, nothing
 as old as what was turned away being taken again. A request is dated against
 the clock once its body is in.
 
-**Tickets.** A client connected to a member asks it for a ticket to another
+**Tickets.** A device of the group needs none: its key opens every member. A
+ticket is what the desktop app of a member, and a client paired the older way
+until it sends its device key, use to reach the others. A client connected to a
+member asks it for a ticket to another
 (`group.ticket`): the member's signed statement of who vouches, for whom, at
 which role, for which machine, for one minute. The client says `hello` with
 the ticket on the other member, which checks the signature against the roster,
 that the ticket names it, its date and that it was never used, then issues a
 session key of its own, exactly as it does for a pairing grant. A ticket also
-names the one address it is good at, and the member refuses one made for an
-address it does not give, or no longer: a ticket a client was led to send where
+names the one address it is good at, one of the addresses the member gives or
+an origin it is served at, and the member refuses one made for an address it
+does not give, or no longer: a ticket a client was led to send where
 the member used to be opens nothing when carried to the member. The key the
 ticket becomes lives while the member still gives that address. When it
 publishes an HTTPS address, or its address changes, the keys issued for what it
@@ -359,9 +429,10 @@ listed in the roster as a device.
 
 **What follows from the roster.**
 
-- Browser origins: a page served by one member may open its socket on another.
-  The list in [machines](machines.md#browser-and-phone-connections) is only
-  needed outside a group.
+- Browser origins: a page served by one member may open its socket on another,
+  at any address that member gives or origin it is served at
+  ([devices](#devices)). The list under Advanced is only needed for a page
+  served outside the group.
 - Agent coordination: every member is a trusted peer for messages, with the
   app closed, while it is a member. The app writes no standing agent link for
   a machine the group brought, or between two machines one of which lists the
@@ -369,18 +440,23 @@ listed in the roster as a device.
   thread's own restrictions and pause still apply. Letting the agents of
   another machine read this machine's conversations stays the per-machine
   switch of Agent links, on a link made by hand: membership does not grant it.
-- Pairing links: a member's link names its HTTPS address, else its tailnet
-  address in numbers.
-- Revocation: `sessions.revoke` on a device of the group writes its removal in
-  the roster first, then drops the session, and every member drops the key it
-  issued. A removed machine loses the keys the others issued to it and to the
-  devices paired with it. A core checks at every start that no key outlived
-  what it stood for.
+- Links to add a device: a member's link names its HTTPS address, else its
+  tailnet address in numbers.
+- Revocation: `group.revokeDevice`, or `sessions.revoke` on a device's session,
+  writes its removal in the roster first, then drops the session, and every
+  member drops its own session for that device and any key it issued for it. A
+  removed machine loses the keys the others issued to it. A core checks at every
+  start that no key outlived what it stood for.
 
 The UI does the client's part by itself (`lib/group-links.svelte.ts`). Each
 connected machine says which group it is in; for every member this client
-holds no key for, it finds an address that answers, asks a connected member
-for a ticket and connects. Who is in a group is read off the machines this
+holds no key for, it finds an address that answers and connects. A device signs
+its own way in there and is done: what a member lists is all it needs, and a
+machine its key opens that another one of the group no longer lists leaves its
+list. Its page's own machine, waiting for the device to be added, is taken over
+the same way. The rest of this section is about clients that use tickets, the
+desktop app and a client paired the older way: they ask a connected member
+for a ticket and connect. Who is in a group is read off the machines this
 client was paired with by hand, the one it opened on included. A machine the
 group brought vouches for nothing: it is dropped once one of those hand-paired
 machines, in the same group, no longer lists it, whatever it and other
@@ -453,13 +529,16 @@ address, where it is worth nothing once the member has given that address up.
 - The client link is not sealed. On a tailnet or over HTTPS it is private. A
   machine that listens on the local network serves its clients in the clear
   there: a ticket, a session key and what follows are readable, and can be
-  taken over, by someone on that network. Sealing it needs a secure channel
+  taken over, by someone on that network. A device's signed hello is good for
+  that machine once, but the socket it opens can be taken over the same way. Sealing it needs a secure channel
   inside the WebSocket, which a page served over plain HTTP cannot build.
 - A core remembers the requests it has seen in memory. For a minute after it
   restarts, a request recorded on a plain HTTP path before the restart can be
   sent to it again. Nothing is done twice by it, a letter is delivered once
   and a roster merged again is the same roster, but it counts against the
-  allowance of the member that signed it.
+  allowance of the member that signed it. Device hello nonces are kept in
+  memory too: for two minutes after a restart, a device hello recorded on a
+  plain HTTP path can open a socket again.
 - A window trusts the machine that serves its page. A machine removed from
   the group that still serves the page a client opens decides what that page
   does, with every key saved under its address.
@@ -467,16 +546,21 @@ address, where it is worth nothing once the member has given that address up.
   installed app opens from the copy its service worker kept, which needs an
   HTTPS address ([phone](phone.md#https-and-installation)); a page opened over
   plain HTTP does not load at all, and another member's address is another
-  origin, which holds none of this device's keys.
-- While the only machine a phone was paired with by hand is off, the keys it
-  already holds keep working, but a machine that joined the group since cannot
-  be reached: only a machine paired by hand vouches for a ticket.
+  origin, which holds none of this device's storage, its key included.
+- A page served by a machine outside the device's group reaches nothing of that
+  group: its origin is none of theirs. The Android app that opened one fixed
+  machine's page was this case for anybody else's phone.
+- A typed code reaches the machine that drew it through the machine serving the
+  page. A page served elsewhere has nobody to send the code to: scan the QR
+  code there.
+- A machine that runs a version from before device keys drops them from the
+  roster it keeps and lets no device key in. Update every member.
 - A member that has not heard a removal stays exposed to the removed machine,
   which may use it to act on the group. The only answer is to have every
   member on when a compromised machine is removed.
 - The group gives keys, and a route through a member, not reachability. A
   machine that is off or asleep stays listed and unreachable. One that neither
-  the client nor any machine it was paired with by hand can reach stays so too.
+  the client nor any machine it reaches can reach stays so too.
 - A member reached through another goes with it: that machine off, it is
   unreachable until its own address answers. An agent's browser surface,
   opened on a port of the member, is not carried.
@@ -487,10 +571,11 @@ address, where it is worth nothing once the member has given that address up.
 - Notifications of another member reach a device through the machine it
   installed only once that device has connected to the member. A member that
   runs a version without `group.push` sends none.
-- Verified on loopback cores and in the in-memory client, the relay also from
-  an HTTPS page in Chrome. Not exercised here: two physical machines over a
-  real tailnet, the Windows firewall prompt, a phone on a tailnet, a push
-  delivered by a real push service through another member.
+- Verified on loopback cores and in the in-memory client, the relay and the
+  addition of a phone from an HTTPS page in Chrome behind two reverse proxies.
+  Not exercised here: two physical machines over a real tailnet, the Windows
+  firewall prompt, a physical phone, a push delivered by a real push service
+  through another member.
 
 ## Tests
 
@@ -521,3 +606,16 @@ desktop and phone captures. `tests/e2e/group-relay.test.ts` serves the page
 over HTTPS to a phone-sized Chrome paired with one core, and shows it reaching
 a second core that gives only a plain-HTTP address: through the first, chatting
 there, named in Settings, and again after a reload with the key it kept.
+
+`packages/core/test/group-devices.test.ts` runs real cores for device keys: a
+phone added on one member says hello on another with its signature and none
+made for a third machine, twice, or two minutes off; one revocation shuts it out
+of both; a code drawn on one member typed on another; a phone paired the older
+way handing over its key, kept when the machine that admitted it is removed; a
+machine alone with its phone joining a group and bringing it; a member learning
+where another is served from the first page socket, before any hello.
+`tests/e2e/group-devices.test.ts` puts two real cores behind two HTTPS reverse
+proxies, installs the phone app from the first one's address at phone width,
+scans the code the second one drew through Chromium's fake camera, lists and
+answers conversations on both with no origin set by hand, then removes the phone
+on one machine and shows every machine refusing it.

@@ -85,10 +85,13 @@ test('the parent timeline retains one team row, updates completion counts and op
   expect(row.textContent).toContain('Started 2 subagents');
   expect(row.textContent).toContain('1/2 completed');
   await owner.selectDelegatedAgent('t-team-running');
+  // A workflow graph left open in the agents tab gives way to the team, the way the dock opens it.
+  const graph = owner.panel.openWorkflow('run-left-open');
   row.click();
   flushSync();
   expect(owner.panel.isOpen).toBe(true);
   expect(owner.delegationSelectedAgentId).toBeNull();
+  expect(owner.panel.state.surfaces.find(surface => surface.id === graph.id)?.runId).toBeUndefined();
   const agent = owner.delegation!.agents.find(agent => agent.thread.id === 't-team-running')!;
   agent.thread.status = 'idle';
   agent.lastTurn!.status = 'done';
@@ -558,7 +561,7 @@ test('a long thread renders a window of messages and carries the rest in the spa
   expect(below?.style.height).toBe(`${(500 - 262) * ESTIMATE}px`);
 });
 
-test('a prompt not measured yet counts its pictures at their thumbnail height, from the size a light page sent', async () => {
+test('a prompt not measured yet counts its one row of thumbnails', async () => {
   const messages = thread(500);
   messages[10] = {
     ...messages[10]!,
@@ -577,10 +580,10 @@ test('a prompt not measured yet counts its pictures at their thumbnail height, f
   timeline.dispatchEvent(new Event('scroll'));
   await settle();
 
-  // A 240 px thumbnail for the tall one, its own 100 px for the short one, and
-  // a row's frame each: 360 px more above, so 20000 px is message 245, not 250.
-  expect(articles()[0]?.dataset['mid']).toBe('m-241');
-  expect(spacer('timeline-above')?.style.height).toBe(`${241 * ESTIMATE + 250 + 110}px`);
+  // One 88 px row and its frame for both pictures: 98 px more above, so
+  // 20000 px is message 248, not 250, and the window starts 4 rows earlier.
+  expect(articles()[0]?.dataset['mid']).toBe('m-244');
+  expect(spacer('timeline-above')?.style.height).toBe(`${244 * ESTIMATE + 98}px`);
 });
 
 test('a viewer opened from a row stays open, its files readable, once the rows leave the window', async () => {

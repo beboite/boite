@@ -55,12 +55,13 @@ stills it.
 
 ### Threads an agent runs or carries
 
-An agent works in threads of its own (`agentSessionId`). The thread list shows
-it: an Agents in charge card above the projects lists the [stewards](stewards.md)
-of that machine, every entrusted thread with its agent, and every agent whose
-own thread runs, is queued or waits on the user, with the same state words as a
-thread row. A row opens the thread, or the agent's conversation when it waits
-on an answer given there. A project thread an agent runs, a mission task in a
+An agent works in threads of its own (`agentSessionId`). The Threads and
+Agents switch over the thread list counts the agents at work on every machine
+beside Agents: every agent whose own thread runs, is queued or waits on the
+user, and every [steward](stewards.md) or entrusted thread mid-turn, each
+thread once. The count turns to the waiting colour while one of them needs the
+user, and Threads carries the same count for the conversations at work
+(`lib/work-counts.ts`). A project thread an agent runs, a mission task in a
 worktree for example, wears the agent's picture in place of the provider logo,
 and so does a delegated child of such a thread. Opening an agent's thread
 shows, where the composer would be, whose thread it is and the way to the
@@ -289,8 +290,9 @@ the brain and policy, converse and handle decisions on the selected host.
 ## Interface and storage
 
 The page opens conversations, activity, scoped memory, routines, the
-individual brain and model limits. With several machines, the menu at the top
-of the list selects the owning core; closing this client does not stop that
+individual brain and model limits. With several machines, the machine button
+at the bottom left of the list, where the thread list keeps its own, selects the
+owning core and names it; closing this client does not stop that
 core. Disconnection marks the last state as stale. Retained scene sources have
 no navigation entry.
 
@@ -340,9 +342,9 @@ same-millisecond cursors, session paging, the query plan of each targeted read
 and the migration from schema 15.
 The UI journey creates and converses with an agent, leaves the page, edits
 memory and brain files, plans a routine on chosen weekdays and reads its
-sentence, inspects model limits, accepts a task, finds the agent waiting in the
-thread list's Agents in charge card, opens its thread and its conversation from
-there, answers a decision in the conversation, then entrusts a thread from its
+sentence, inspects model limits, accepts a task, finds the Agents count in the
+waiting colour over the thread list, opens the agent's thread and its conversation
+from there, answers a decision in the conversation, then entrusts a thread from its
 title menu and finds the take-over marker and the Done label in the agent's
 conversation. `robots.test.ts`, `schedule.test.ts`, `thread-entrust.test.ts` and
 `agents.test.ts` cover robot codes, schedule sentences, the entrust menu rows,

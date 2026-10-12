@@ -20,20 +20,22 @@
   async function startScanning() {
     workspace.error = null;
     try { QrScanner ??= (await import('./QrScanner.svelte')).default; scanning = true; }
-    catch { workspace.error = strings.phone.dialogOffline; adding = true; }
+    // The camera's code did not load: the letters are the other way in, opened in its place on a phone.
+    catch { workspace.error = strings.phone.dialogOffline; if (mobile && codeOrigin) codeOpen = true; else adding = true; }
   }
-  /** A code that reads as a pairing link connects at once; the machine names itself and the card renames it. */
+  /** A code that reads as a link to add a device connects at once; the machine names itself and the card renames it. */
   async function scanned(text: string) {
     scanning = false;
     link = text;
-    adding = true;
+    if (!mobile) adding = true;
     await add();
   }
 
   /**
-   * A code typed in the installed app pairs it with the core that serves this
-   * page. The camera app would hand a link to Safari, whose storage the
-   * home-screen app does not share; a code typed here stays here.
+   * A code typed in the installed app goes to the machine that serves this
+   * page, which asks the other machines of its group when it did not draw
+   * that code itself. The camera app would hand a link to Safari, whose
+   * storage the home-screen app does not share; a code typed here stays here.
    */
   const codeOrigin = window.__TAURI_INTERNALS__ === undefined && /^https?:$/.test(location.protocol) ? location.origin : null;
   let codeOpen = $state(false);
@@ -69,6 +71,8 @@
   let target = $derived(workspace.linkTarget(link));
   export function startAdding() {
     workspace.error = null;
+    // A phone adds itself with its camera: the code, not a link to paste.
+    if (mobile) { void startScanning(); return; }
     adding = true;
     requestAnimationFrame(() => linkInput?.focus());
   }
@@ -100,9 +104,10 @@
         <!-- A phone has a camera and the other machine draws a code: no link to copy across. -->
         {#if mobile}<button class="primary add-open" data-testid="machine-scan" disabled={busy} onclick={() => void startScanning()}><ScanLine size={15} /><span class="ui-label">{strings.machines.scan}</span></button>{/if}
         {#if mobile && codeOrigin}<button class="add-open" data-testid="machine-code-open" aria-expanded={codeOpen} onclick={toggleCode}><KeyRound size={15} /><span class="ui-label">{strings.machines.typeCode}</span></button>{/if}
-        {#if !open}<button class:primary={!mobile} class="add-open" data-testid="machine-add-open" onclick={startAdding}><Plus size={15} /><span class="ui-label">{mobile ? strings.machines.pasteLink : strings.machines.add}</span></button>{/if}
+        {#if !open && !mobile}<button class="primary add-open" data-testid="machine-add-open" onclick={startAdding}><Plus size={15} /><span class="ui-label">{strings.machines.add}</span></button>{/if}
       </div>
     {/if}
+  {#if mobile && !codeOpen && workspace.error}<p class="error" role="alert">{workspace.error}</p>{/if}
   {#if codeOpen && codeOrigin}
     <form class="card code-form" data-testid="machine-code-form" onsubmit={(e) => { e.preventDefault(); void pairCode(); }}>
       <label>{strings.machines.codeLabel}<input
@@ -122,7 +127,9 @@
       {#if codeError || workspace.error}<p class="error" role="alert">{codeError || workspace.error}</p>{/if}
     </form>
   {/if}
-  <div class="reveal" class:open inert={!open}>
+  <!-- A computer's browser pastes the link; a phone has its camera and the code, and nothing else. -->
+  {#if !mobile}
+  <div class="disclosure-fold" class:open inert={!open}>
     <div>
       <section class="card add" data-testid="machine-add-card" aria-label={strings.machines.add}>
         <div class="add-head">
@@ -174,6 +181,8 @@
     </div>
   </div>
 
+  {/if}
+
   {#if scanning && QrScanner}
     <QrScanner accept={(text) => parsePairingLink(text) !== null} onresult={(text) => void scanned(text)} onclose={() => (scanning = false)} />
   {/if}
@@ -182,9 +191,6 @@
 <style>
   .pair-machine { margin-bottom: 20px; }
   .head-actions { display: flex; gap: 8px; justify-content: flex-end; margin-bottom: 12px; }
-  .reveal { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows var(--dur-3) var(--ease-out-quint), opacity var(--dur-2); }
-  .reveal.open { grid-template-rows: 1fr; opacity: 1; }
-  .reveal > div { overflow: hidden; min-height: 0; }
   .add { padding: 20px; display: flex; flex-direction: column; gap: 10px; }
   .add-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   h2 { font-size: var(--text-base); margin: 0; }
@@ -203,5 +209,4 @@
   .code-form { padding: 16px; margin: 0 0 12px; }
   .code-form input { font-family: var(--font-mono); font-size: var(--text-base); letter-spacing: 1.5px; text-transform: uppercase; }
   .code-hint { margin: 0; font-size: var(--text-xs); color: var(--color-muted-foreground); }
-  @media (prefers-reduced-motion: reduce) { .reveal { transition: none; } }
 </style>

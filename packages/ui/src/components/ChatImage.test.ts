@@ -8,6 +8,8 @@ import type { Store } from '../lib/store.svelte';
 type ImagePart = Extract<Message['parts'][number], { type: 'image' }>;
 
 const PIXEL = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+/** 3 by 2 pixels: a header whose proportions a square box would not match. */
+const WIDE = 'iVBORw0KGgoAAAANSUhEUgAAAAMAAAACCAIAAAASFvFNAAAAC0lEQVR4nGNgwAQAABQAAX3+Hu4AAAAASUVORK5CYII=';
 
 let running: Record<string, unknown> | null = null;
 const observer = globalThis.IntersectionObserver;
@@ -41,14 +43,14 @@ test('a deferred picture has its size and its blur before a byte arrives, asks f
   const loadDisplayImage = vi.fn(async () => COPY);
   const loadMessageAttachment = vi.fn();
   const store = { loadDisplayImage, loadMessageAttachment, reportError: vi.fn() } as unknown as Store;
-  running = mount(ChatImage, { target: document.body, props: { store, threadId: 't', messageId: 'm', partIndex: 1, image, maxHeight: 240 } });
+  running = mount(ChatImage, { target: document.body, props: { store, threadId: 't', messageId: 'm', partIndex: 1, image, tile: 88 } });
   flushSync();
 
   const box = document.querySelector<HTMLElement>('[data-testid=image-box]')!;
-  // 240 px high keeping 16:9 is 427 px wide, and the column may still shrink it.
-  const width = `${(240 * 1280) / 720}px`;
+  // 88 px high keeping 16:9 is 156 px wide.
+  const width = '156px';
   expect(box.style.width).toBe(width);
-  expect(box.style.aspectRatio).toBe('1280 / 720');
+  expect(box.style.height).toBe('88px');
   expect(document.querySelector('[data-testid=image-preview]')?.getAttribute('src')).toBe('data:image/png;base64,PREVIEW');
   expect(document.querySelector('[data-testid=image-part]')).toBeNull();
   // Far from the screen, nothing is fetched.
@@ -86,7 +88,7 @@ test('a picture whose fetch failed asks again when it comes back near the screen
     return COPY;
   });
   const store = { loadDisplayImage, reportError: vi.fn() } as unknown as Store;
-  running = mount(ChatImage, { target: document.body, props: { store, threadId: 't', messageId: 'm', partIndex: 1, image } });
+  running = mount(ChatImage, { target: document.body, props: { store, threadId: 't', messageId: 'm', partIndex: 1, image, tile: 88 } });
   flushSync();
   const box = document.querySelector<HTMLElement>('[data-testid=image-box]')!;
 
@@ -105,12 +107,11 @@ test('a picture that came with its bytes reads its size from their header and as
   observeBy();
   const loadMessageAttachment = vi.fn();
   const store = { loadMessageAttachment, reportError: vi.fn() } as unknown as Store;
-  const image = reactive<ImagePart>({ type: 'image', mimeType: 'image/png', data: PIXEL, alt: null });
-  running = mount(ChatImage, { target: document.body, props: { store, threadId: 't', messageId: 'm', partIndex: 0, image, maxHeight: null } });
+  const image = reactive<ImagePart>({ type: 'image', mimeType: 'image/png', data: WIDE, alt: null });
+  running = mount(ChatImage, { target: document.body, props: { store, threadId: 't', messageId: 'm', partIndex: 0, image, tile: 88 } });
   flushSync();
   const box = document.querySelector<HTMLElement>('[data-testid=image-box]')!;
-  expect(box.style.aspectRatio).toBe('1 / 1');
-  expect(box.style.width).toBe('1px');
-  expect(document.querySelector('[data-testid=image-part]')?.getAttribute('src')).toBe(`data:image/png;base64,${PIXEL}`);
+  expect(box.style.width).toBe('132px');
+  expect(document.querySelector('[data-testid=image-part]')?.getAttribute('src')).toBe(`data:image/png;base64,${WIDE}`);
   expect(loadMessageAttachment).not.toHaveBeenCalled();
 });

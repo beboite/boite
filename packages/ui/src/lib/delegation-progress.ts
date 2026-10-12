@@ -1,8 +1,8 @@
-import type { DelegatedAgent } from '@boite/contracts';
+import { threadActive, type DelegatedAgent } from '@boite/contracts';
 
 /** An idle thread alone is not evidence that its task completed. */
 export function agentProgress(agent: DelegatedAgent) {
-  const active = ['queued', 'running', 'waiting'].includes(agent.thread.status);
+  const active = threadActive(agent.thread.status);
   const status = active ? agent.thread.status : agent.lastTurn?.status ?? agent.thread.status;
   return {
     active,

@@ -1,5 +1,7 @@
+import { errorText } from './errors';
 import type { AgentEntityKind, AgentsSnapshot, RpcParams, RpcResult, AgentsRpcMethods, AgentHistoryCursor, AgentHistoryKind, AgentRecord, AgentsHistoryPage, AgentConversationMessage, AgentMission, AgentScope, AgentTeam, ThreadSummary } from '@boite/contracts';
 import type { Store } from './store.svelte';
+import { agentThreadLive } from './agent-directory.svelte';
 
 export type AgentEntryKind = Extract<AgentEntityKind, 'profile' | 'group' | 'team' | 'mission'>;
 export type AgentSelection = { kind: AgentEntryKind; id: string };
@@ -121,8 +123,6 @@ export function agentChats(snapshot: AgentsSnapshot, messages: AgentConversation
   return [...chats.values()].sort((a, b) => b.at - a.at || a.name.localeCompare(b.name));
 }
 
-const LIVE: ReadonlySet<ThreadSummary['status']> = new Set(['running', 'queued', 'waiting']);
-
 /**
  * The thread each conversation's agents work in right now, keyed like the
  * chat list: what a row's state and a conversation's live line read, so an
@@ -139,7 +139,7 @@ export function liveThreads(snapshot: AgentsSnapshot, threads: readonly ThreadSu
     if (!held || rank(thread) < rank(held)) live.set(key, thread);
   };
   for (const thread of threads) {
-    if (!thread.agentSessionId || !LIVE.has(thread.status) || thread.archived) continue;
+    if (!agentThreadLive(thread)) continue;
     const session = snapshot.sessions.find(s => s.id === thread.agentSessionId);
     if (!session) continue;
     put(chatKey('profile', session.agentId), thread);
@@ -211,6 +211,8 @@ export function attentionOf(snapshot: AgentsSnapshot, threads: Store['threads'])
   };
 }
 
+const VIEWS = new WeakMap<Store, AgentsView>();
+
 /** One view controller per owning Store. No renderer owns an execution. */
 export class AgentsView {
   snapshot = $state.raw<AgentsSnapshot | null>(null);
@@ -243,18 +245,53 @@ export class AgentsView {
   private loading: Promise<void> | null = null;
   private client: Store['client'] = null;
   private off: (() => void) | null = null;
+  /** The page is on screen: changes refresh the snapshot. Off screen the last one is kept for the next visit. */
+  private shown = false;
   constructor(readonly store: Store) {}
+  /**
+   * The view of this store, kept between visits: the page draws the last
+   * snapshot at once and refreshes it, instead of starting from "loading".
+   */
+  static of(store: Store): AgentsView {
+    let view = VIEWS.get(store);
+    // A closed view never loads again: the next visit gets a fresh one.
+    if (view?.disposed) view = undefined;
+    if (!view) { view = new AgentsView(store); VIEWS.set(store, view); }
+    return view;
+  }
   start(): void {
+    this.shown = true;
+    // A failure of an earlier visit is not news on this one.
+    this.error = ''; this.loadError = '';
+    // A visit starts from one bounded snapshot, drawn at once, not from every
+    // record an earlier visit paged in or saw created.
+    this.forgetHistory();
+    if (this.snapshot) this.seen = absorb(EMPTY, this.snapshot);
+    this.listen();
     void this.refresh();
+  }
+  private forgetHistory(): void {
+    this.seen = EMPTY; this.older = {}; this.tried.clear(); this.kinds.clear();
+    for (const kind of Object.keys(this.generation) as AgentHistoryKind[]) this.generation[kind]++;
+  }
+  /** Off screen: no snapshot is fetched for changes nobody sees. */
+  pause(): void {
+    this.shown = false;
+    this.off?.(); this.off = null;
+  }
+  private listen(): void {
+    if (this.off || !this.shown) return;
+    this.off = this.client?.on('agents.changed', () => { void this.refresh(); }) ?? null;
   }
   refresh(): Promise<void> {
     if (this.disposed) return Promise.resolve();
     if (this.client !== this.store.client) {
-      this.off?.();
+      this.off?.(); this.off = null;
       this.client = this.store.client;
-      this.seen = EMPTY; this.older = {}; this.tried.clear(); this.kinds.clear();
-      for (const kind of Object.keys(this.generation) as AgentHistoryKind[]) this.generation[kind]++;
-      this.off = this.client?.on('agents.changed', () => { void this.refresh(); }) ?? null;
+      this.forgetHistory();
+      // What this view last drew stays on screen until the new snapshot lands.
+      if (this.snapshot) this.seen = absorb(EMPTY, this.snapshot);
+      this.listen();
     }
     this.dirty = true;
     if (!this.loading) this.loading = this.load().finally(() => { this.loading = null; });
@@ -268,7 +305,7 @@ export class AgentsView {
         const snapshot = await client?.call('agents.snapshot', {});
         if (snapshot && !this.disposed && client === this.store.client) { this.accept(snapshot); this.loadError = ''; }
       }
-    } catch (error) { if (!this.disposed) this.loadError = String(error instanceof Error ? error.message : error); }
+    } catch (error) { if (!this.disposed) this.loadError = errorText(error); }
   }
   /**
    * More records than a window holds can arrive between two snapshots. The new
@@ -323,7 +360,7 @@ export class AgentsView {
       if (this.disposed || client !== this.store.client || generation !== this.generation[params.kind]) return;
       this.seen = absorb(this.seen, page);
       this.older = { ...this.older, [key]: page.more };
-    } catch (error) { if (!this.disposed) this.error = error instanceof Error ? error.message : String(error); }
+    } catch (error) { if (!this.disposed) this.error = errorText(error); }
     finally { this.loadingOlder = null; }
   }
   /** Fills a view that shows fewer than `enough` records once, when older ones exist. A failure is not retried. */
@@ -341,7 +378,7 @@ export class AgentsView {
       const result = await this.store.client.call(method, $state.snapshot(params) as RpcParams<M>);
       await this.refresh();
       return result;
-    } catch (error) { this.error = error instanceof Error ? error.message : String(error); return null; }
+    } catch (error) { this.error = errorText(error); return null; }
     finally { this.pending = false; }
   }
   close(): void { this.disposed = true; this.off?.(); }

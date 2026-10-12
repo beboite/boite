@@ -1,5 +1,8 @@
 <script lang="ts">
+  import FirewallNotice from './FirewallNotice.svelte';
+  import { errorText } from '../lib/errors';
   import InfoTip from './InfoTip.svelte';
+  import LanReach from './LanReach.svelte';
   import TailscaleAccess from './TailscaleAccess.svelte';
   import { untrack } from 'svelte';
   import type { Store } from '../lib/store.svelte';
@@ -66,7 +69,7 @@
       subscribed = true;
       localStorage.setItem(PUSH_ENABLED_KEY, 'on');
       message = strings.phone.enabled;
-    } catch (reason) { error = reason instanceof Error ? reason.message : String(reason); }
+    } catch (reason) { error = errorText(reason); }
     finally { busy = false; }
   }
   async function disable() {
@@ -78,13 +81,31 @@
       localStorage.removeItem(PUSH_ENABLED_KEY);
       const registration = await navigator.serviceWorker.getRegistration('/');
       await (await registration?.pushManager.getSubscription())?.unsubscribe();
-    } catch (reason) { error = reason instanceof Error ? reason.message : String(reason); }
+    } catch (reason) { error = errorText(reason); }
     finally { busy = false; }
   }
+  let firewall: FirewallNotice | undefined = $state();
+  let reach: LanReach | undefined = $state();
+  let restarting = $state(false);
+  /**
+   * The core reads this when it starts: turning it on asks Windows for its
+   * firewall rule while the owner is looking, then the desktop app restarts
+   * its core either way. A refusal puts the switch back.
+   */
+  async function toggleLan(input: HTMLInputElement) {
+    const ok = await store.saveSettings({ listenOnLan: input.checked });
+    if (!ok) {
+      input.checked = store.settings?.listenOnLan ?? !input.checked;
+      return;
+    }
+    if (input.checked) await firewall?.allow();
+    await reach?.restart(store.deviceInvite !== null);
+  }
+
   async function testPush() {
     busy = true; error = ''; message = '';
     try { await store.client?.call('push.test', {}); message = strings.phone.testSent; }
-    catch (reason) { error = reason instanceof Error ? reason.message : String(reason); }
+    catch (reason) { error = errorText(reason); }
     finally { busy = false; }
   }
 </script>
@@ -93,13 +114,25 @@
   <h2>{strings.phone.heading}</h2>
   {#if store.owner && showServerSettings}
     <div class="block"><TailscaleAccess {store} /></div>
+    <div class="block">
+      <label for="{uid}-listen-on-lan" class="switch-row">
+        <span class="text ui-label-box">
+          <span class="ui-label" id="{uid}-listen-on-lan-name">{strings.settings.listenOnLan}</span><InfoTip topic={strings.settings.listenOnLan} text={strings.settings.listenOnLanHint} />
+        </span>
+        <input id="{uid}-listen-on-lan" aria-labelledby="{uid}-listen-on-lan-name" type="checkbox" role="switch" data-testid="setting-listen-on-lan"
+          checked={store.settings?.listenOnLan ?? false} disabled={!store.settings || restarting}
+          onchange={(event) => void toggleLan(event.currentTarget)} />
+      </label>
+      <LanReach {store} loopback={false} {firewall} bind:this={reach} bind:restarting />
+      <FirewallNotice {store} bind:this={firewall} />
+    </div>
     <!-- A reverse proxy of one's own: what the Tailscale switch above does without typing anything. -->
     <div class="block"><details class="disclosure" data-testid="phone-own-address">
       <summary>{strings.phone.ownAddress}</summary>
       <div class="fields">
       <label for="{uid}-public-url"><span class="ui-label-box"><span class="ui-label" id="{uid}-public-url-name">{strings.phone.publicUrl}</span><InfoTip topic={strings.phone.publicUrl} text={strings.phone.publicUrlHint} /></span><input id="{uid}-public-url" aria-labelledby="{uid}-public-url-name" type="url" bind:value={publicUrl} placeholder={strings.phone.urlPlaceholder} data-testid="phone-public-url" /></label>
       <div class="actions">
-        <button disabled={store.connection !== 'ready'} onclick={() => void store.saveSettings({ publicUrl: publicUrl.trim() || null })}><span class="ui-label">{strings.settings.save}</span></button>
+        <button disabled={store.connection !== 'ready'} onclick={() => void store.saveSettings({ publicUrl: publicUrl.trim() || null })}><span class="ui-label">{strings.common.save}</span></button>
       </div>
       </div>
     </details></div>

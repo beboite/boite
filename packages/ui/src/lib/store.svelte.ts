@@ -1,3 +1,4 @@
+import { startDiagnosticsReport } from './diagnostics-report';
 import type { Message, PermissionMode, ProjectId, ProviderId, ThreadId } from '@boite/contracts';
 import type { Client } from './client';
 import { readModelDefaults } from './model-defaults';
@@ -25,7 +26,7 @@ import type { Workbench } from './store/workbench.svelte';
 import type { Workflows } from './store/workflows.svelte';
 
 export type Page = 'chat' | 'settings' | 'agents';
-export type SettingsTab = 'home' | 'advanced' | 'brain' | 'voice' | 'general' | 'machines' | 'appearance' | 'keyboard' | 'accounts' | 'plugins' | 'usage' | 'limits' | 'resources' | 'task-manager' | 'experiments';
+export type { SettingsTab } from './settings-tabs';
 
 /** A login process the core runs for one account, as `account.login` reports it. */
 export interface LoginState {
@@ -39,6 +40,13 @@ export interface LoginState {
 
 /** A thread that exists only in the UI until its first message is sent. */
 export interface Draft {
+  /**
+   * Which draft this is: a project can hold several. Absent only on drafts
+   * made before ids existed, which are keyed by their project instead.
+   */
+  id?: string;
+  /** When the draft was opened, which orders the list of drafts, newest first. */
+  createdAt?: number;
   /**
    * Null is the drafts project before the core made it: the first send asks
    * for it with `projects.drafts`, so opening the app writes nothing to disk.
@@ -137,6 +145,7 @@ export class Store {
     this.probedModels = {};
     ctx.models.probeEpoch++;
     ctx.models.probeAttempts.clear();
+    ctx.models.forgetConfirmed();
     ctx.models.probeTimes.clear();
     ctx.models.effortAttempts.clear();
     ctx.models.probeRequests.clear();
@@ -151,6 +160,9 @@ export class Store {
     listen(ctx, client);
     ctx.off.push(ctx.composer.watchQueues());
     ctx.off.push(watchIncognito(ctx));
+    // Each machine hears about this window's own failures. Unit tests drive
+    // fake timers through stores by the hundred, so the reporter stays out of them.
+    if (import.meta.env.MODE !== 'test') ctx.off.push(startDiagnosticsReport(client));
   }
 
   detach(): void {
@@ -234,28 +246,26 @@ export class Store {
   // Pairing: store/pairing.svelte.ts
   // -------------------------------------------------------------------------
 
-  get pairing() { return this.#ctx.pairing.pairing; }
-  set pairing(value) { this.#ctx.pairing.pairing = value; }
+  get deviceInvite() { return this.#ctx.pairing.deviceInvite; }
+  set deviceInvite(value) { this.#ctx.pairing.deviceInvite = value; }
   get sessions() { return this.#ctx.pairing.sessions; }
   set sessions(value) { this.#ctx.pairing.sessions = value; }
 
-  mintPairing(...args: Parameters<Pairing['mintPairing']>) { return this.#ctx.pairing.mintPairing(...args); }
-  closePairing() { return this.#ctx.pairing.closePairing(); }
+  addDevice() { return this.#ctx.pairing.addDevice(); }
+  closeDeviceInvite() { return this.#ctx.pairing.closeDeviceInvite(); }
+  revokeDevice(id: string) { return this.#ctx.pairing.revokeDevice(id); }
   loadSessions(...args: Parameters<Pairing['loadSessions']>) { return this.#ctx.pairing.loadSessions(...args); }
   revokeSession(...args: Parameters<Pairing['revokeSession']>) { return this.#ctx.pairing.revokeSession(...args); }
   get group() { return this.#ctx.pairing.group; }
   set group(value) { this.#ctx.pairing.group = value; }
   get groupKnown() { return this.#ctx.pairing.groupKnown; }
   set groupKnown(value) { this.#ctx.pairing.groupKnown = value; }
-  get groupInvite() { return this.#ctx.pairing.groupInvite; }
-  set groupInvite(value) { this.#ctx.pairing.groupInvite = value; }
   loadGroup(...args: Parameters<Pairing['loadGroup']>) { return this.#ctx.pairing.loadGroup(...args); }
   createGroup(...args: Parameters<Pairing['createGroup']>) { return this.#ctx.pairing.createGroup(...args); }
   renameGroup(...args: Parameters<Pairing['renameGroup']>) { return this.#ctx.pairing.renameGroup(...args); }
   joinGroup(...args: Parameters<Pairing['joinGroup']>) { return this.#ctx.pairing.joinGroup(...args); }
   leaveGroup(...args: Parameters<Pairing['leaveGroup']>) { return this.#ctx.pairing.leaveGroup(...args); }
   removeFromGroup(...args: Parameters<Pairing['removeFromGroup']>) { return this.#ctx.pairing.removeFromGroup(...args); }
-  inviteToGroup(...args: Parameters<Pairing['inviteToGroup']>) { return this.#ctx.pairing.inviteToGroup(...args); }
 
   // -------------------------------------------------------------------------
   // Layout, navigation and notifications: store/layout.svelte.ts
@@ -381,6 +391,7 @@ export class Store {
   modelOf(...args: Parameters<Models['modelOf']>) { return this.#ctx.models.modelOf(...args); }
   probeModelEffort(...args: Parameters<Models['probeModelEffort']>) { return this.#ctx.models.probeModelEffort(...args); }
   isProbing(...args: Parameters<Models['isProbing']>) { return this.#ctx.models.isProbing(...args); }
+  catalogHas(...args: Parameters<Models['catalogHas']>) { return this.#ctx.models.catalogHas(...args); }
   modelsPending(...args: Parameters<Models['modelsPending']>) { return this.#ctx.models.modelsPending(...args); }
   probeModels(...args: Parameters<Models['probeModels']>) { return this.#ctx.models.probeModels(...args); }
   defaultModelOf(...args: Parameters<Models['defaultModelOf']>) { return this.#ctx.models.defaultModelOf(...args); }
@@ -508,6 +519,7 @@ export class Store {
   mergeBack(...args: Parameters<Threads['mergeBack']>) { return this.#ctx.threads.mergeBack(...args); }
   fork(...args: Parameters<Threads['fork']>) { return this.#ctx.threads.fork(...args); }
   open(...args: Parameters<Threads['open']>) { return this.#ctx.threads.open(...args); }
+  preload(threadId: ThreadId) { return this.#ctx.threads.preloads.preload(threadId); }
   loadToolOutput(...args: Parameters<Threads['loadToolOutput']>) { return this.#ctx.threads.loadToolOutput(...args); }
   loadMessageAttachment(...args: Parameters<Threads['loadMessageAttachment']>) { return this.#ctx.threads.loadMessageAttachment(...args); }
   /** The light copy of a deferred picture the timeline draws (`store/display-images.ts`); the original stays with `loadMessageAttachment`. */
@@ -545,6 +557,7 @@ export class Store {
 
   get composerStates() { return this.#ctx.composer.composerStates; }
   get draftEntries() { return this.#ctx.drafts.entries; }
+  discardDraft(id: string) { return this.#ctx.drafts.discard(id); }
   get draftsReadable() { return this.#ctx.drafts.readable; }
   flushDrafts() { return this.#ctx.drafts.flush(); }
   set composerStates(value) { this.#ctx.composer.composerStates = value; }
@@ -633,6 +646,12 @@ export class Store {
   loadDelegation(...args: Parameters<Delegation['loadDelegation']>) { return this.#ctx.delegation.loadDelegation(...args); }
   configureDelegation(...args: Parameters<Delegation['configureDelegation']>) { return this.#ctx.delegation.configureDelegation(...args); }
   selectDelegatedAgent(...args: Parameters<Delegation['selectDelegatedAgent']>) { return this.#ctx.delegation.selectDelegatedAgent(...args); }
+  /** The agents tab on the whole team: no agent picked, and no workflow graph left open over it. */
+  showTeam(): void {
+    const surface = this.panel.open('agents');
+    this.panel.update(surface.id, { runId: undefined });
+    void this.selectDelegatedAgent(null);
+  }
   spawnDelegatedAgent(...args: Parameters<Delegation['spawnDelegatedAgent']>) { return this.#ctx.delegation.spawnDelegatedAgent(...args); }
   messageDelegatedAgent(...args: Parameters<Delegation['messageDelegatedAgent']>) { return this.#ctx.delegation.messageDelegatedAgent(...args); }
   stopDelegatedAgent(...args: Parameters<Delegation['stopDelegatedAgent']>) { return this.#ctx.delegation.stopDelegatedAgent(...args); }

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { page } from '../lib/page-hidden.svelte';
+  import { secondClock } from '../lib/clock.svelte';
   import { Bot, Brain, ChevronRight, FilePen, FileText, Globe, Search, SquareTerminal, TriangleAlert, Wrench } from '@lucide/svelte';
   import { fill, strings } from '../lib/strings';
   import { elapsed } from '../lib/format';
@@ -46,18 +46,11 @@
   let busy = $derived(tools.some((part) => isBackground(part.toolId)));
 
   // The run's clock: it ticks while a step runs and stops on the last finish.
-  let now = $state(Date.now());
-  const hidden = $derived(page.hidden);
-  $effect(() => {
-    if (!live || hidden || steps.length < 2) return;
-    now = Date.now();
-    const timer = setInterval(() => { now = Date.now(); }, 1000);
-    return () => clearInterval(timer);
-  });
+  // Only a group of two steps or more shows it.
   let took = $derived.by(() => {
     const span = runSpan(parts);
     if (!span) return '';
-    const ms = (live ? now : span.end) - span.start;
+    const ms = (live ? secondClock.now : span.end) - span.start;
     return live || ms >= 1000 ? elapsed(ms) : '';
   });
 
@@ -120,8 +113,8 @@
       {/if}
       <span class="fold-caret" class:open aria-hidden="true"><ChevronRight size={12} /></span>
     </button>
-    <div class="fold" class:open inert={!open}>
-      <div class="clip">
+    <div class="disclosure-fold" class:open inert={!open}>
+      <div>
         {#if built}
           <div class="calls">
             {#each steps as { part, index } (part.type === 'tool' ? part.toolId : `thinking-${index}`)}
@@ -221,11 +214,6 @@
     animation: pulse 1.6s var(--ease-out-quint) infinite;
   }
 
-  @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: .3; }
-  }
-
   .spinner {
     flex: none;
     width: 11px;
@@ -234,29 +222,6 @@
     border: 1.5px solid var(--color-edge);
     border-top-color: var(--color-live);
     animation: spin 0.9s linear infinite;
-  }
-
-  @keyframes spin {
-    to { transform: rotate(360deg); }
-  }
-
-  .fold {
-    display: grid;
-    grid-template-rows: 0fr;
-    opacity: 0;
-    transition:
-      grid-template-rows var(--dur-3) var(--ease-out-quint),
-      opacity var(--dur-3) var(--ease-out-quint);
-  }
-
-  .fold.open {
-    grid-template-rows: 1fr;
-    opacity: 1;
-  }
-
-  .clip {
-    min-height: 0;
-    overflow: hidden;
   }
 
   /* The calls hang off a hairline under the summary's glyph. */

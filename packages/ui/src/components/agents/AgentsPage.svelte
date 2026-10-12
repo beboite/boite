@@ -7,6 +7,7 @@
   import { mobileOverlay } from '../../lib/mobile-history';
   import type { Store } from '../../lib/store.svelte';
   import { fill, strings } from '../../lib/strings';
+  import { avatarStatus } from '../../lib/thread-state';
   import Menu from '../Menu.svelte';
   import InfoTip from '../InfoTip.svelte';
   import AgentsRail from './AgentsRail.svelte';
@@ -28,7 +29,7 @@
   type Creating = { kind: AgentEntryKind; preset?: { memberIds: string[]; teamId: string | null }; from?: AgentSelection | null };
 
   let { store }: { store: Store } = $props();
-  const view = new AgentsView(untrack(() => store));
+  const view = AgentsView.of(untrack(() => store));
   const narrow = new MediaQuery('(max-width: 720px)');
   let chosen = $state<AgentFocus | null>(null);
   let creating = $state<Creating | null>(null);
@@ -138,7 +139,7 @@
   const level = $derived(narrow.current && (chosen || creating) ? `${creating ? 'new' : ''}|${focus?.kind}:${focus && 'id' in focus ? focus.id : ''}|${current}` : '');
   $effect(() => { if (level) return mobileOverlay(back); });
 
-  onMount(() => { view.start(); return () => view.close(); });
+  onMount(() => { view.start(); return () => view.pause(); });
   // On a phone an open conversation hides the tab bar. The root carries it as a
   // class: `.app:has(.agents-page.detail-open)` made the whole app a `:has()`
   // subject, rechecked on every node mounted anywhere.
@@ -147,7 +148,13 @@
     root.classList.toggle('agents-detail-open', !!chosen || !!creating);
     return () => root.classList.remove('agents-detail-open');
   });
-  $effect(() => { if (store.connection === 'ready') void view.refresh(); });
+  // A reconnect reads the snapshot again; the first visit already asked in `start`.
+  let wasReady = untrack(() => store.connection === 'ready');
+  $effect(() => {
+    const ready = store.connection === 'ready';
+    if (ready && !wasReady) void view.refresh();
+    wasReady = ready;
+  });
   $effect(() => { if (current === 'activity' && workHistory) view.fill(workKey, workHistory, work); });
   // A link from elsewhere (a thread an agent runs) names the agent to open.
   $effect(() => {
@@ -217,7 +224,7 @@
       <header class="agents-detail-head">
         {#if narrow.current || parent}{@render backButton(backLabel)}{/if}
         <button type="button" class="ghost agents-identity" onclick={() => { pane = null; }} aria-label={title}>
-          <AgentAvatar kind={selected.kind} id={selected.id} name={title} avatar={profile?.avatar} {members} status={liveHere?.status === 'waiting' ? 'waiting' : liveHere ? 'running' : 'idle'} size={32} />
+          <AgentAvatar kind={selected.kind} id={selected.id} name={title} avatar={profile?.avatar} {members} status={avatarStatus(liveHere?.status)} size={32} />
           <span class="agents-identity-text">
             <strong>{title}</strong>
             <small data-status={status.tone}>{status.text}</small>

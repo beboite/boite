@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import InfoTip from './InfoTip.svelte';
   import { Minus, Plus } from '@lucide/svelte';
   import { onMount, untrack } from 'svelte';
@@ -61,7 +62,7 @@
   function zoomTo(factor: number) {
     zoomError = '';
     setZoom(factor).catch((error: unknown) => {
-      zoomError = fill(strings.settings.zoomFailed, { error: error instanceof Error ? error.message : String(error) });
+      zoomError = fill(strings.settings.zoomFailed, { error: errorText(error) });
     });
   }
   const smallest = ZOOM_STEPS[0] ?? ZOOM_DEFAULT;

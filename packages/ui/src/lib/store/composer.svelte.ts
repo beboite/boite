@@ -1,4 +1,4 @@
-import { RpcErrorCode, PREVIEW_REFERENCES_PER_TURN, previewReferencesError, type PreviewReference } from '@boite/contracts';
+import { RpcErrorCode, PREVIEW_REFERENCES_PER_TURN, previewReferencesError, threadActive, type PreviewReference } from '@boite/contracts';
 import { untrack } from 'svelte';
 import type { Attachment, Message, MessageId, MessagePart, ThreadId, ThreadSummary, Turn, TurnInFlightData } from '@boite/contracts';
 import { drainQueue, SENDING_PREFIX, sentPrompt } from '../composer-queue';
@@ -14,6 +14,7 @@ import { unresolvedAssetId } from '../draft-attachments';
 import { secureId } from '../secure-id';
 import type { Choice } from '../store.svelte';
 import type { StoreContext } from './context';
+import { draftKey } from './drafts.svelte';
 
 /**
  * A prompt written while its machine could not be reached: the outbox. It goes
@@ -390,7 +391,8 @@ export class Composer {
     }, { navigate: false });
     if (!created || !owner()) return null;
     const originalDraft = current() && s.draft === draft && !s.openThread;
-    if (!s.draft || s.draft.projectId !== draft.projectId || originalDraft) this.ctx.drafts.forget(draft.projectId);
+    // Only this draft is forgotten: the project's other drafts stay.
+    if (!s.draft || draftKey(s.draft) !== draftKey(draft) || originalDraft) this.ctx.drafts.forget(draftKey(draft));
     if (composer) {
       this.composerStates[created.id] = composer;
       if (this.composerStates[DRAFT_STASH_KEY] === composer && (!s.draft || originalDraft)) delete this.composerStates[DRAFT_STASH_KEY];
@@ -428,7 +430,7 @@ export class Composer {
     if (!sent) return false;
     if (projectId !== undefined && client === this.ctx.client && clientGeneration === this.ctx.clientGeneration && sent.navigation === s.navigationGeneration) {
       // Null names the drafts, which the send has made by now.
-      s.startDraft(projectId);
+      s.startDraft(projectId, { fresh: true });
       s.draftChoice = { ...choice };
     }
     return true;
@@ -626,7 +628,7 @@ export class Composer {
     const s = this.ctx.store;
     // The core refused because a turn is in flight, even when its row has not
     // moved off idle yet: waiting is what the composer must do.
-    const row: ThreadSummary = ['queued', 'running', 'waiting'].includes(thread.status) ? thread : { ...thread, status: 'running' };
+    const row: ThreadSummary = threadActive(thread.status) ? thread : { ...thread, status: 'running' };
     this.ctx.threads.upsertThread(row);
     if (s.openThread?.id === row.id) Object.assign(s.openThread, row);
     this.composerStates[row.id] ??= { text: '', attachments: [], queued: [], sending: false, paused: false };

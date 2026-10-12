@@ -320,12 +320,12 @@
   {@const install = store.installOf(provider.id)}
   {#if step === 'install'}
     <button class="small" class:primary={main} data-testid="install-start" disabled={busy !== null} onclick={() => void startInstall(provider, true)}>
-      <span class="ui-label">{install?.state === 'failed' ? strings.install.retry : strings.install.action}</span>
+      <span class="ui-label">{install?.state === 'failed' ? strings.common.retry : strings.install.action}</span>
     </button>
   {:else if step === 'repair'}
     <button class="small" class:primary={main} data-testid="install-repair" onclick={() => void repair(provider)}><span class="ui-label">{strings.install.repair}</span></button>
   {:else if step === 'installing'}
-    <button class="quiet small" data-testid="install-cancel" onclick={() => void cancelInstall(provider)}><span class="ui-label">{strings.install.cancel}</span></button>
+    <button class="quiet small" data-testid="install-cancel" onclick={() => void cancelInstall(provider)}><span class="ui-label">{strings.common.cancel}</span></button>
     {#if chained[provider.id]}<InfoTip topic={strings.providerSettings.step.installing} text={strings.providerSettings.thenSignIn} />{/if}
   {:else if step === 'manual'}
     {#if setupUrls[provider.id]}
@@ -415,7 +415,7 @@
           {/if}
           {#if provider.login && provider.login.kind === 'device'}<span class="hint"><span class="ui-label">{strings.providerSettings.deviceHint}</span></span>{/if}
           <button type="button" class="quiet small" data-testid="account-login-cancel" data-account-id={loginAccount.id} onclick={() => void store.cancelLogin(loginAccount.id)}>
-            <span class="ui-label">{strings.accounts.loginCancel}</span>
+            <span class="ui-label">{strings.common.cancel}</span>
           </button>
         </form>
       {:else}
@@ -458,7 +458,7 @@
           {#if editing === entry.id}
             <form class="code rename" onsubmit={event => void rename(event, entry.id)}>
               <input aria-label={strings.providerSettings.accountName} data-testid="account-name" maxlength="100" bind:value={label} />
-              <button class="small" type="submit" disabled={saving || !label.trim()}><span class="ui-label">{strings.providerSettings.save}</span></button>
+              <button class="small" type="submit" disabled={saving || !label.trim()}><span class="ui-label">{strings.common.save}</span></button>
               <button class="quiet small" type="button" disabled={saving} onclick={() => editing = null}><span class="ui-label">{strings.install.removeCancel}</span></button>
             </form>
           {:else}<h3>{entry.label}</h3>{/if}
@@ -476,7 +476,7 @@
               <span class="ui-label">{entry.status === 'ok' ? strings.providerSettings.reconnect : strings.accounts.login}</span>
             </button>
           {/if}
-          <button class="quiet small" data-testid="account-rename" onclick={() => { editing = entry.id; label = entry.label; }}><span class="ui-label">{strings.providerSettings.rename}</span></button>
+          <button class="quiet small" data-testid="account-rename" onclick={() => { editing = entry.id; label = entry.label; }}><span class="ui-label">{strings.common.rename}</span></button>
           <button class="quiet small" disabled={!on || checking !== null || loggingIn(entry.id)} data-testid="account-verify" onclick={() => void verify(entry)}><span class="ui-label">{checking === entry.id ? strings.providerSettings.checking : strings.providerSettings.check}</span></button>
           <button class="quiet small" data-testid="account-remove" data-account-id={entry.id} onclick={() => void remove(entry)}><span class="ui-label">{strings.accounts.remove}</span></button>
         </div>
@@ -577,7 +577,7 @@
           data-testid="provider-details-toggle"
           onclick={() => (open = { ...open, [row.id]: !open[row.id] })}
         >
-          <span class="chevron"><ChevronRight size={16} strokeWidth={2.25} /></span>
+          <span class="knob"><ChevronRight size={16} strokeWidth={2.25} class={open[row.id] ? 'fold-caret open' : 'fold-caret'} /></span>
           <ProviderIcon providerId={row.id} size={secondary ? 18 : 22} />
           <span class="who">
             <span class="name">{row.name}{#if alone}{@render experimentalBadge(lead)}{/if}</span>
@@ -589,7 +589,7 @@
         </button>
       {:else}
         <div class="summary still">
-          <span class="chevron blank"></span>
+          <span class="knob blank"></span>
           <ProviderIcon providerId={row.id} size={secondary ? 18 : 22} />
           <span class="who">
             <span class="name">{row.name}{#if alone}{@render experimentalBadge(lead)}{/if}</span>
@@ -730,7 +730,7 @@
   }
   button.summary:hover { background: var(--color-hover); }
   .summary:active:not(:disabled) { transform: none; }
-  .chevron {
+  .knob {
     display: grid;
     place-items: center;
     width: 22px;
@@ -741,10 +741,9 @@
     background: var(--color-surface-3);
   }
   /* A row with nothing to open keeps the column, not the control. */
-  .chevron.blank { background: transparent; }
-  .chevron :global(svg) { transition: transform var(--dur-2) var(--ease-out-quint); }
-  .summary:hover .chevron, .summary.open .chevron { color: var(--color-foreground); }
-  .summary.open .chevron :global(svg) { transform: rotate(90deg); }
+  .knob.blank { background: transparent; }
+  .knob :global(.fold-caret) { color: inherit; }
+  .summary:hover .knob, .summary.open .knob { color: var(--color-foreground); }
 
   .state { margin: 0; display: flex; align-items: center; gap: 6px; font-size: var(--text-sm); color: var(--color-muted-foreground); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
   .bad { color: var(--color-danger); }

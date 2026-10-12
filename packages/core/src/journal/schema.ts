@@ -5,7 +5,7 @@ import { nativeAgentPartSql } from './native-agent-parts.ts';
 import { createPartBlobs } from './part-blobs.ts';
 import { parseJson } from './rows.ts';
 
-export const SCHEMA_VERSION = 32;
+export const SCHEMA_VERSION = 33;
 
 /** Raised when the journal was written by a newer core than this one. */
 export class JournalTooNewError extends Error {
@@ -152,7 +152,8 @@ const SCHEMA_V8 = `
 ALTER TABLE sessions ADD COLUMN role TEXT NOT NULL DEFAULT 'device';
 `;
 
-export function migrate(db: Database, file: string): void {
+/** Brings the journal to the current schema; returns the version found on disk and the one now stamped. */
+export function migrate(db: Database, file: string): { from: number; to: number } {
   const row = db.query('PRAGMA user_version').get() as { user_version: number } | null;
   let version = row?.user_version ?? 0;
   // An older core must not write a schema it does not know: it would stamp its
@@ -409,8 +410,14 @@ export function migrate(db: Database, file: string): void {
       CREATE INDEX IF NOT EXISTS media_displays_thread ON media_displays (thread_id);`);
     version = 32;
   }
+  // When a thread was archived: the last one put away is the one brought back.
+  if (!hasColumn('threads', 'archived_at')) {
+    db.exec('ALTER TABLE threads ADD COLUMN archived_at INTEGER');
+    version = 33;
+  }
   version = Math.max(version, SCHEMA_VERSION);
   if (row?.user_version !== version) db.exec(`PRAGMA user_version = ${version}`);
+  return { from: row?.user_version ?? 0, to: version };
 }
 
 /** Old receipts lacked input identity. A hash match must name exactly one stored input. */

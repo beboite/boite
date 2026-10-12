@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import type { Project, ProjectId, WorktreeEntry } from '@boite/contracts';
   import InfoTip from './InfoTip.svelte';
   import WorktreeStorageSetting from './WorktreeStorageSetting.svelte';
@@ -33,7 +34,7 @@
     try {
       return (await store.client?.call('worktrees.list', { projectId: project.id })) ?? [];
     } catch (error) {
-      return error instanceof Error ? error.message : String(error);
+      return errorText(error);
     }
   }
 
@@ -54,7 +55,7 @@
       await store.client?.call('worktrees.remove', { projectId: project.id, path: entry.path, ...(force ? { force: true } : {}) });
       return true;
     } catch (error) {
-      store.error = error instanceof Error ? error.message : String(error);
+      store.error = errorText(error);
       return false;
     }
   }

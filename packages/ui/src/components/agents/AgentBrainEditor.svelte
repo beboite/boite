@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../../lib/errors';
   import { secureId } from '../../lib/secure-id';
   import { onMount } from 'svelte';
   import type { AgentBrain } from '@boite/contracts';
@@ -12,7 +13,7 @@
   async function save() { if (brain) { const saved = await view.call('agents.brain.save', { agentId, expectedRevision: brain.revision, instructions: brain.instructions, memory: brain.memory }); if (saved) brain = saved; } }
   async function compact(sessionId: string) {
     try { await view.call('agents.context.compact', { sessionId, requestId: secureId() }); }
-    catch (error) { view.error = error instanceof Error ? error.message : String(error); }
+    catch (error) { view.error = errorText(error); }
   }
   function scopeName(kind: string, id: string): string {
     const s = view.snapshot;
@@ -27,7 +28,7 @@
     <p class="hint">{labels.brainHint} <code>{brain.path}</code></p>
     <label class="agent-field"><span>{labels.notes}<small class="hint">{labels.notesHint}</small></span><textarea rows="6" maxlength="64000" bind:value={brain.memory} readonly={!view.store.owner} data-testid="agent-brain-memory"></textarea></label>
     <label class="agent-field"><span>{labels.procedures}<small class="hint">{labels.proceduresHint}</small></span><textarea rows="4" maxlength="32000" bind:value={brain.instructions} readonly={!view.store.owner}></textarea></label>
-    {#if view.store.owner}<div class="agent-form-actions"><button class="primary" disabled={view.pending}><span class="ui-label">{labels.save}</span></button></div>{/if}
+    {#if view.store.owner}<div class="agent-form-actions"><button class="primary" disabled={view.pending}><span class="ui-label">{strings.common.save}</span></button></div>{/if}
   </form>
   {#if sessions.length}
     <section class="card">

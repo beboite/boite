@@ -745,7 +745,8 @@ test('a later navigation wins while the previous agent subscription is being rel
   const real = client.call.bind(client);
   vi.spyOn(client, 'call').mockImplementation(((method: string, params: { threadId?: string }) => {
     if (method === 'threads.unsubscribe' && params.threadId === 't-team-running') {
-      return new Promise(resolve => { release = () => { void real(method as never, params as never).then(resolve); }; });
+      // Nothing waits on this unsubscribe now: a close may drop it, and the store's catch must see that.
+      return new Promise((resolve, reject) => { release = () => { real(method as never, params as never).then(resolve, reject); }; });
     }
     return real(method as never, params as never);
   }) as typeof client.call);
@@ -972,7 +973,7 @@ test('uninstalled setup starts without account-dependent demo state', async ({ c
   expect(await client.call('scheduler.get', {})).toMatchObject({ running: [], queued: [] });
   // No folder yet: the app lands on a draft in the drafts, which nothing has made.
   expect(store.projects).toEqual([]);
-  expect(store.draft).toEqual({ projectId: null, worktree: false });
+  expect(store.draft).toEqual({ projectId: null, worktree: false, id: expect.any(String), createdAt: expect.any(Number) });
   expect((await client.call('sessions.list', {})).length).toBeGreaterThan(0);
 });
 
@@ -2000,38 +2001,38 @@ test('account lifecycle newer cancellation beats a stale reload snapshot', async
   }
 });
 
-test('closing a pairing link discards a pending replacement from the same core', async ({ store, client }) => {
-  await store.mintPairing();
+test('closing Add a device discards a pending replacement from the same core', async ({ store, client }) => {
+  await store.addDevice();
   const call = client.call.bind(client);
   let release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
   const spy = vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
     const result = await call(method, params);
-    if (method === 'pairing.grant') await gate;
+    if (method === 'group.addDevice') await gate;
     return result;
   });
   try {
-    const pending = store.mintPairing();
-    store.closePairing();
+    const pending = store.addDevice();
+    store.closeDeviceInvite();
     release();
     await pending;
-    expect(store.pairing).toBeNull();
+    expect(store.deviceInvite).toBeNull();
   } finally { release(); spy.mockRestore(); }
 });
 
-test('replacing a machine endpoint clears its previous pairing link before connecting', async ({ store, client }) => {
-  await store.mintPairing();
-  expect(store.pairing).not.toBeNull();
+test('replacing a machine endpoint clears its previous Add a device link before connecting', async ({ store, client }) => {
+  await store.addDevice();
+  expect(store.deviceInvite).not.toBeNull();
   let release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
   const connect = vi.spyOn(store, 'connect').mockReturnValue(gate);
   let connecting: Promise<void> | undefined;
   try {
     connecting = store.connectEndpoint({ url: 'https://replacement.test', token: 'fixture-token', paired: true });
-    expect(store.pairing).toBeNull();
+    expect(store.deviceInvite).toBeNull();
     release();
     await connecting;
-    expect(store.pairing).toBeNull();
+    expect(store.deviceInvite).toBeNull();
   } finally {
     release();
     await connecting;

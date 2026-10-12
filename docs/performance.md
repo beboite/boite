@@ -155,6 +155,18 @@ preserves the Windows Bun 1.4.2 runs, tables and failed 1,000-start attempts fro
 2026-09-29 and 2026-09-30. These fixtures do not establish a supported real-agent
 count, provider quota, native shell performance or physical-phone behavior.
 
+## Load on press
+
+`bun test tests/e2e/press-preload.test.ts` opens sidebar threads in a hidden
+browser on the fake core with a simulated 200 ms round trip
+(`?fake=1&rtt=200`), the mouse button held 120 ms, and times the release to
+the thread's messages in hand, each sample on a fresh page with nothing cached.
+On 2026-10-12 in the Linux container, three runs of four samples each: a plain
+click had medians of 222, 230 and 232 ms, and the Load on press experiment 95,
+96 and 100 ms. The Windows CI job measured medians of 225 and 92 ms the same
+day. The press saved about the 120 ms it was held, up to one round trip. The fake does not delay pushed events or model payload size, and a real
+core adds its own handling time to both paths.
+
 ## Naming a long conversation
 
 `bun run bench/retitle.ts` creates 5,000 messages containing about 40 MB of text
@@ -429,12 +441,39 @@ them in its cache. A link that asks to save data, or reads as 3G or slower,
 skips that prefetch and fetches each one when it opens (`lib/prefetch.ts`). The
 tour is prefetched only for a device that has not seen it.
 
+Settings, the Agents page with its first snapshot (behind its experiment) and,
+for the owner, the terminal's xterm modules are fetched in the same idle pass.
+The Agents view lives as long as its machine's store: a return visit draws the
+last snapshot at once and refreshes it, and nothing follows `agents.changed`
+while the page is away. `bun run bench/agents-page.ts` measures a click on
+Agents until its first conversation row, behind an emulated 40 ms, 4 Mbit/s
+link, on a temporary core with twelve agents. On 2026-10-11 in this Linux
+container, medians of five against `origin/main` at `4762402b`: first visit
+164 ms before and 110 ms after, return visit 55 ms and 32 ms. The rest of a
+first visit is rendering.
+
+Day labels and clock times in an agent conversation reuse one
+`Intl.DateTimeFormat` per language (`lib/format.ts`), as hover titles already
+did: `toLocaleString` with a locale builds a new formatter per call.
+
 The French catalogue and the quota window are chunks of their own too, so an
 English page does not download or parse either (`docs/language.md`).
 
 The service worker still asks the core for the app shell first, but waits
 2.5 s at most before serving the cached one; the late answer is stored for the
 next open.
+
+## Picking a model
+
+Claude and Codex list their models from a process of their own. Measured on
+2026-10-11 in this Linux container with the real CLIs, no prompt sent: Claude
+answered in 1.6 to 2.9 s and took another 0.8 to 1 s to exit, Codex 0.9 to
+2.3 s and 0.1 to 0.3 s; a cached list answered in 3 to 15 ms. The picker used
+to wait for that read whenever the list was more than five minutes old, so a
+click on a model could hang for 2.6 to 3.7 s before it closed. A row from a
+list the core already gave is now picked at once, the core keeps that list for
+its checks while the fresh read runs, and the answer leaves before the process
+exit ([providers](providers.md#the-models-probe)).
 
 ## Core startup
 
