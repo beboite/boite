@@ -10,7 +10,7 @@
  */
 import { randomUUID, verify } from 'node:crypto';
 import { hostname } from 'node:os';
-import { deviceAdmitInput, deviceHelloInput, DEVICE_LINK_JOIN, GRANT_TTL_MS, GROUP_TICKET_TTL_MS, PAIRING_ROLES } from '@boite/contracts';
+import { deviceAdmitInput, deviceHelloInput, DEVICE_LINK_JOIN, GRANT_TTL_MS, GROUP_TICKET_TTL_MS, normalizePairingCode, PAIRING_ROLES, RpcErrorCode } from '@boite/contracts';
 import type { CoordinationPeer, DeviceHello, DeviceInvite, Group, GroupTicket, PairingRole } from '@boite/contracts';
 import { invalidParams, messageOf, refused, RpcFailure, unauthorized, unavailable } from '../errors.ts';
 import type { GroupStore } from '../group.ts';
@@ -21,6 +21,8 @@ import { deviceAdmissionInput, deviceId, deviceKey, deviceSigned, LEGACY_MAX, ty
 import { checkRoster, clockOf, DEVICE_ENTRIES_MAX, homeOf, liveCores, liveDeviceKeys, liveDevices, peerOf, reachOf, type DeviceEntry, type Roster } from './roster.ts';
 import { encodeTicket, parseTicket, ticketSigningInput } from './ticket.ts';
 
+/** Typed codes a machine passes on to the others a minute, whoever types them. */
+const FORWARDS_PER_MINUTE = 20;
 /** Clocks of two machines may differ by this much before a ticket is refused for its date. */
 const CLOCK_SKEW_MS = 60_000;
 /** Live devices a group holds at a time. */
@@ -108,8 +110,11 @@ export class GroupClients {
     try {
       role = this.group.core.sessions.redeem(grant, id, nonce);
     } catch (error) {
-      // A code another member drew: that member knows it, and says yes or no.
-      if (!(error instanceof RpcFailure) || !this.isCode(grant) || this.group.roster === null || liveCores(this.group.roster).length < 2) throw error;
+      // A code another member drew: that member knows it, and says yes or no. Only a well-formed code this
+      // machine does not know is passed on, a few a minute: a stranger's guesses must not spend the
+      // members' allowance for each other's requests, nor drop their codes.
+      if (!(error instanceof RpcFailure) || error.code !== RpcErrorCode.Unauthorized || normalizePairingCode(grant) === null
+        || this.group.roster === null || liveCores(this.group.roster).length < 2 || !this.forwardAllowed()) throw error;
       const entry = await this.redeemElsewhere(grant, { publicKey, name, sig: offer.sig as string });
       if (entry === null) throw error;
       return { deviceId: entry.id, sessionId: this.deviceSession(entry, client), role: entry.role };
@@ -117,6 +122,14 @@ export class GroupClients {
     await this.ensureGroup();
     const entry = this.admitKey(publicKey, name, role);
     return { deviceId: entry.id, sessionId: this.deviceSession(entry, client), role: entry.role };
+  }
+
+  /** Codes passed on to the other members in the current minute. */
+  private forwarded = { since: 0, count: 0 };
+
+  private forwardAllowed(now = Date.now()): boolean {
+    if (now - this.forwarded.since > 60_000) this.forwarded = { since: now, count: 0 };
+    return ++this.forwarded.count <= FORWARDS_PER_MINUTE;
   }
 
   private isCode(grant: string): boolean {
@@ -158,7 +171,8 @@ export class GroupClients {
     if (roster.deviceKeys?.some((device) => device.id === id && device.removed)) {
       throw unauthorized('this device was removed from the group: it needs a new key, which the app makes when it is added again');
     }
-    const role = this.group.core.sessions.redeem(code, id, null);
+    // The member that passed it on counted a wrong one already: it does not drop this machine's codes too.
+    const role = this.group.core.sessions.redeem(code, id, null, Date.now(), false);
     this.admitKey(publicKey, typeof raw.name === 'string' ? raw.name : 'device', role);
     return { roster: this.group.require() };
   }

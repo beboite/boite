@@ -227,3 +227,17 @@ test('a key handed over on two members keeps both older pairings, a removed key 
   expect(a.core.group.view('owner')).not.toBeNull();
   expect(a.core.group.allowsOrigin('null')).toBe(false);
 });
+
+test('wrong codes typed on one member drop none of the codes another member drew', async () => {
+  const [a, b] = await pair();
+  const { code } = await b.core.group.clients.addDevice();
+  const guesser = phoneKey();
+  // Twelve wrong codes typed on a's page: a counts them, b, which only hears them passed on, does not.
+  for (let i = 0; i < 12; i++) {
+    const wrong = `ZZZZ-ZZ${String(i).padStart(2, '0')}`;
+    await refused(a, open(a.url, { grant: wrong, device: { publicKey: guesser.publicKey, sig: guesser.sign(deviceAdmitInput(wrong, guesser.publicKey)) } }));
+  }
+  const phone = phoneKey();
+  const admitted = await open(b.url, { grant: code, device: { publicKey: phone.publicKey, sig: phone.sign(deviceAdmitInput(code, phone.publicKey)) } });
+  expect(admitted.device).toMatch(/^[0-9a-f]{64}$/);
+});

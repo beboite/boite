@@ -135,9 +135,10 @@ code** reads the QR code through the camera, **Type the code** takes the eight
 letters, in any case, with or without the dash, `O` and `I`/`L` read as `0` and
 `1`. Either way the app makes its device key if it has none and is admitted to
 the group with it ([groups](groups.md#devices)): it then lists every machine of
-the group and opens on the one that served its page. The code goes to the
-machine that serves the page, which passes it, sealed, to the machine that drew
-it. The installed iPhone app needs the scanner or the code because the Camera app
+the group and opens on the one that served its page. A scanned QR code goes to
+the machine that drew it. A typed code goes to the machine that serves the page,
+which passes it, sealed, to the machine that drew it, twenty codes a minute at
+most, a wrong one counted on the machine it was typed at. The installed iPhone app needs the scanner or the code because the Camera app
 hands a link to Safari, whose storage the home-screen app does not share.
 
 The owner must ask for a code, and startup logs contain neither grant nor key.
@@ -382,8 +383,8 @@ the browser instead, which the installed app's screen says.
 A missing or revoked key opens that recovery screen, narrow or wide (an iPhone
 on its side), instead of a stale page. A network outage offers
 reconnection without discarding the saved key. The scan and code buttons stay
-while a replacement key is being exchanged, and a rejected link can be replaced
-without leaving the screen. After pairing, the saved session is reused on
+while a replacement key is being exchanged, and a rejected code can be replaced
+without leaving the screen. After pairing, the saved device key is reused on
 subsequent opens. Installing a PWA and using Web Push require no Apple Developer
 account.
 

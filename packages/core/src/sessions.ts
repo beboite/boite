@@ -150,7 +150,8 @@ export class SessionStore {
   }
 
   /** The grant a typed code names; anything that is not code-shaped passes through. */
-  private resolveCode(grant: string): string {
+  /** `counted`: a miss counts toward dropping every live code. A code another member passes on was counted there. */
+  private resolveCode(grant: string, counted = true): string {
     if (grant.length > 16) return grant;
     const code = normalizePairingCode(grant);
     if (code === null) return grant;
@@ -159,7 +160,7 @@ export class SessionStore {
       this.codeFailures = 0;
       return entry.grant;
     }
-    if (++this.codeFailures >= CODE_FAILURES_MAX) {
+    if (counted && ++this.codeFailures >= CODE_FAILURES_MAX) {
       this.codes.clear();
       this.codeFailures = 0;
       this.core.log('warn', `pairing codes dropped after ${CODE_FAILURES_MAX} wrong codes in a row`);
@@ -209,14 +210,14 @@ export class SessionStore {
    * gets the same answer, so a lost answer costs no new link; anybody else is
    * refused as for a used link. The device's key is its own retry nonce.
    */
-  redeem(grant: string, deviceId: string, nonce: string | null = null, now = Date.now()): PairingRole {
+  redeem(grant: string, deviceId: string, nonce: string | null = null, now = Date.now(), counted = true): PairingRole {
     const problem = nonce === null ? null : nonceProblem(nonce);
     if (problem !== null) throw invalidParams(problem, { field: 'nonce', min: NONCE_MIN, max: NONCE_MAX });
     this.sweep(now);
     const typed = grant;
     const canonical = typed.length <= 16 ? normalizePairingCode(typed) : null;
     const again = canonical === null ? undefined : this.redeemedCodes.get(canonical);
-    grant = again?.grant ?? this.resolveCode(grant);
+    grant = again?.grant ?? this.resolveCode(grant, counted);
     const known = this.grants.get(grant);
     if (known === undefined) {
       const done = this.redeemed.get(grant);
