@@ -2,8 +2,9 @@
   import type { NativeAgent } from '@boite/contracts';
   import { ChevronRight } from '@lucide/svelte';
   import { fill, strings } from '../lib/strings';
-  import AgentElapsed from './AgentElapsed.svelte';
+  import Elapsed from './Elapsed.svelte';
   import StatusMark from './StatusMark.svelte';
+  import { threadTone } from '../lib/thread-state';
   let { agents, source = 'provider' }: { agents: NativeAgent[]; source?: 'provider' | 'process' } = $props();
 </script>
 
@@ -12,12 +13,12 @@
   {#each agents as agent, index (agent.id)}
     <details class="agent" data-testid={source === 'process' ? 'process-agent' : 'native-agent'}>
       <summary>
-        <ChevronRight size={12} class="chevron" />
+        <ChevronRight size={12} class="fold-caret" />
         <span class="identity"><strong>{agent.name ?? agent.task ?? fill(strings.delegation.profileName, { count: String(index + 1) })}</strong>{#if agent.model || agent.effort}<small>{agent.model ?? ''}{#if agent.model && agent.effort} · {/if}{agent.effort ?? ''}</small>{/if}</span>
         <span class="status" data-status={agent.status}>
-          {#if agent.status === 'running'}<StatusMark status="running" />{/if}
+          {#if agent.status === 'running'}<StatusMark {...threadTone('running')} />{/if}
           <span class="ui-label">{strings.delegation.nativeStatus[agent.status]}</span>
-          {#if source === 'process'}<AgentElapsed startedAt={agent.startedAt} finishedAt={agent.finishedAt ?? null} active={agent.status === 'running'} />{/if}
+          {#if source === 'process'}<Elapsed startedAt={agent.startedAt} finishedAt={agent.finishedAt ?? null} active={agent.status === 'running'} />{/if}
         </span>
       </summary>
       <div class="body">
@@ -36,8 +37,7 @@
   .agent + .agent { border-top: 1px solid var(--color-border); }
   summary { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 10px 0; cursor: pointer; min-height: var(--row); }
   .identity { min-width: 0; flex: 1; display: grid; gap: 3px; }
-  summary :global(.chevron) { flex: none; color: var(--color-muted-foreground); }
-  details[open] summary :global(.chevron) { transform: rotate(90deg); }
+  summary :global(.fold-caret) { color: var(--color-muted-foreground); }
   strong { font-size: var(--text-sm); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   small { overflow-wrap: anywhere; }
   .status { flex: none; display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }

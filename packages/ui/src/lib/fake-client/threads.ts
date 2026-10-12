@@ -1,6 +1,6 @@
 import { dismissMergedPr } from './merged-pr-archive';
 import { assertIdleFamily } from './completion';
-import { isThreadTerminal, protectedThreadIdsError } from '@boite/contracts';
+import { isThreadTerminal, protectedThreadIdsError, threadActive } from '@boite/contracts';
 /** Threads and their messages: create, read, select, archive, and the turn entry points. */
 import { DEFAULT_THREAD_DONE_RETENTION_DAYS, DEFAULT_THREAD_DELETION_RETENTION_DAYS, attachmentError, previewReferencesError, MESSAGE_PAGE, MESSAGE_PAGE_MAX, MESSAGE_PAGE_MAX_BYTES, RPC_MAX_FRAME_BYTES, RpcErrorCode, type AgentProfile, type AgentWork, type AgentWhere, type Attachment, type Message, type MessageId, type MoveEnd, type PreviewReference, type RpcParams, type Thread, type Turn } from '@boite/contracts';
 import { steerUser } from './user-steering';
@@ -495,6 +495,7 @@ export function threadMethods(ctx: FakeContext) {
       const was = thread.archived;
       thread.archived = params.archived ?? true;
       thread.doneAt = thread.archived && params.onlyIfIdle === true ? thread.doneAt ?? Date.now() : null;
+      thread.archivedAt = thread.archived ? (was ? thread.archivedAt ?? null : Date.now()) : null;
       if (thread.archived) {
         delete thread.archiveReason;
         cancelFamilySideQuestions(ctx, thread.id);
@@ -504,7 +505,7 @@ export function threadMethods(ctx: FakeContext) {
         if (ctx.threads.get(thread.id) === thread && thread.archived && !removing.has(thread.id)) {
           for (const member of family) {
             if (ctx.threads.get(member.id) !== member || ctx.inFlight.has(member.id)
-              || ['queued', 'running', 'waiting'].includes(member.status)) continue;
+              || threadActive(member.status)) continue;
             let ended = false;
             for (const record of ctx.processes) {
               if (record.threadId !== member.id || record.exitedAt !== null) continue;
@@ -651,7 +652,7 @@ export function threadMethods(ctx: FakeContext) {
       const provider = ctx.providers.find(p => p.id === providerId);
       if (!provider) throw ctx.notFound('provider', providerId);
       // As the core, in its order: an archived or busy thread first, then whether the agent can run at all.
-      if (!thread.archived && !['queued', 'running', 'waiting'].includes(thread.status) && !ctx.inFlight.has(thread.id)) {
+      if (!thread.archived && !threadActive(thread.status) && !ctx.inFlight.has(thread.id)) {
         // A signed-out or removed account hands the thread to another of its agent first.
         const usable = thread.agentSessionId ? null : usableAccount(ctx, providerId, thread.accountId);
         if (usable && usable.id !== thread.accountId) moveToAccount(ctx, thread, usable);
@@ -687,7 +688,7 @@ export function threadMethods(ctx: FakeContext) {
       const thread = ctx.thread(params.threadId);
       if (thread.agentSessionId) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'a persistent agent session takes its work through Agents and cannot be rewound', data: { threadId: thread.id, field: 'threadId', expected: 'a conversation thread' } });
       if (thread.archived) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'cannot rewind an archived thread', data: { threadId: thread.id, field: 'threadId', expected: 'a thread that is not archived' } });
-      if (['queued', 'running', 'waiting'].includes(thread.status) || ctx.inFlight.has(thread.id)) {
+      if (threadActive(thread.status) || ctx.inFlight.has(thread.id)) {
         throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'this thread has a turn running or queued; stop it before editing a message', data: { threadId: thread.id, reason: 'turn-in-flight', status: thread.status, expected: 'an idle thread' } });
       }
       const at = thread.messages.findIndex((message) => message.id === params.messageId);

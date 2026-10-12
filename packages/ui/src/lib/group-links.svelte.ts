@@ -1,5 +1,5 @@
 import { untrack } from 'svelte';
-import { groupRelayUrl, parseGroupRelayUrl, RPC_PATH, type Group, type GroupCore } from '@boite/contracts';
+import { groupRelayUrl, parseGroupRelayUrl, RPC_PATH, withoutTrailingSlashes, type Group, type GroupCore } from '@boite/contracts';
 import { WsClient } from './client';
 import { deviceKey } from './device-key';
 import { DROPPED_STORAGE_KEY, isDropped, isMemberDropped, keepDropped, readEnvironments, rememberGroupAddresses, removeBrought, signsFor, type Endpoint, type StoredEnvironment } from './endpoint';
@@ -413,7 +413,7 @@ export class GroupLinks {
         moved = true;
         return;
       }
-      const sitting = this.workspace.machines.find((machine) => machine.id === url.replace(/\/+$/, ''));
+      const sitting = this.workspace.machines.find((machine) => machine.id === withoutTrailingSlashes(url));
       // A device of the group signs its own way in: no ticket, nothing a member hands over. The machine
       // already at that address is taken over when it holds no key of its own there, the page's own core
       // waiting to be paired included; one this device holds a key for stays as it is.

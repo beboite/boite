@@ -19,7 +19,7 @@
    */
   let { store, filter = null, onfilter, pick = false }: { store: Store; filter?: string | null; onfilter?: (id: string | null) => void; pick?: boolean } = $props();
 
-  const machines = $derived([...(workspace.machines.length ? workspace.machines : [{ id: 'current', label: strings.machines.local, store }])]
+  const machines = $derived([...workspace.machinesOr(store)]
     .sort((a, b) => Number(isThisPC(b)) - Number(isThisPC(a))));
   const health = $derived(new Map(machines.map(m => [m, machineHealth(m, store)])));
   const issues = $derived(machines.filter(m => health.get(m) === 'lost').length);

@@ -994,6 +994,12 @@ export interface ForkOrigin {
 export interface ThreadSummary {
   /** Date marked done, or automatically archived after a PR merge. Cleared on restore or manual archive. */
   doneAt?: Timestamp | null;
+  /**
+   * When the core last archived it, the order Ctrl+Shift+T and the archived
+   * list follow on every client. Null once restored; missing on threads
+   * archived by an older core, which fall back to `updatedAt`.
+   */
+  archivedAt?: Timestamp | null;
   forkOrigin?: ForkOrigin;
 
   /** Durable explanation for an automatic archive; absent for manual archives and restored conversations. */
@@ -1120,6 +1126,21 @@ export interface Usage {
   costUsdEquivalent: number | null;
 }
 
+/** Public API prices in US dollars per million tokens. */
+export interface TokenRates {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
+
+/** The public model a usage row was priced as, with the rates its tokens were charged. */
+export interface UsagePrice {
+  /** The id in the core's price list, such as `claude-opus-5-5`. */
+  model: string;
+  rates: TokenRates;
+}
+
 /**
  * The finished turns of one provider and model whose `finishedAt` falls in
  * `[edges[bucket], edges[bucket + 1])` of a `usage.history` call.
@@ -1133,14 +1154,21 @@ export interface UsageHistoryRow {
   turns: number;
   /** Turns among them that carried a usage report. */
   reported: number;
-  /** Turns among them that carried an API-equivalent price. */
+  /**
+   * Turns among them with an API-equivalent cost: every reported turn when the
+   * row has a `price`, else the turns whose agent reported a cost.
+   */
   priced: number;
   /**
    * Sums over the reported turns. `inputTokens` never includes the cache reads,
    * whatever the provider counts, so the four token fields add up to the tokens
-   * processed. `costUsdEquivalent` is null when no turn of the row was priced.
+   * processed. `costUsdEquivalent` is the tokens at `price`'s rates, or the sum
+   * of the costs the agent reported when no rate matched the model; null when
+   * neither gave one.
    */
   usage: Usage;
+  /** The public rates the row was priced at. Null when none matched its model; absent from an older core. */
+  price?: UsagePrice | null;
 }
 
 export interface UsageHistoryThread {

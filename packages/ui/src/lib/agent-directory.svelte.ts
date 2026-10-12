@@ -1,9 +1,12 @@
-import type { AgentEntrustment, AgentProfile, AgentsSnapshot, ThreadSummary } from '@boite/contracts';
+import { threadActive, type AgentEntrustment, type AgentProfile, type AgentsSnapshot, type ThreadSummary } from '@boite/contracts';
 import { experimentOn } from './experiments.svelte';
 import type { Store } from './store.svelte';
 
-/** Threads an agent is busy in: a turn running, queued, or waiting on the user. */
-const LIVE: ReadonlySet<ThreadSummary['status']> = new Set(['running', 'queued', 'waiting']);
+/** A thread an agent is busy in right now: a turn running, queued, or waiting on the user. */
+export function agentThreadLive(thread: ThreadSummary): boolean {
+  return !!thread.agentSessionId && !thread.archived && threadActive(thread.status);
+}
+
 /** The least time between two snapshots the thread list asks for: agents change many records per turn. */
 const SETTLE_MS = 1500;
 
@@ -143,7 +146,7 @@ export class AgentDirectory {
     if (!snapshot) return [];
     const byThread = new Map<string, AgentAtWork>();
     for (const thread of this.store.threads) {
-      if (!thread.agentSessionId || !LIVE.has(thread.status) || thread.archived) continue;
+      if (!agentThreadLive(thread)) continue;
       const agent = this.ownerOf(thread);
       if (agent) byThread.set(thread.id, { agent, thread, waiting: thread.status === 'waiting' });
     }

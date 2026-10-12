@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import { untrack } from 'svelte';
   import type { TailscaleStatus } from '@boite/contracts';
   import InfoTip from './InfoTip.svelte';
@@ -28,7 +29,7 @@
     try {
       status = method === 'tailscale.enable' ? await client.call(method, { replace }) : await client.call(method, {});
     } catch (reason) {
-      failure = reason instanceof Error ? reason.message : String(reason);
+      failure = errorText(reason);
     } finally {
       busy = false;
     }

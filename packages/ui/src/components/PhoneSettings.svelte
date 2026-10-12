@@ -1,5 +1,6 @@
 <script lang="ts">
   import FirewallNotice from './FirewallNotice.svelte';
+  import { errorText } from '../lib/errors';
   import InfoTip from './InfoTip.svelte';
   import LanReach from './LanReach.svelte';
   import TailscaleAccess from './TailscaleAccess.svelte';
@@ -70,7 +71,7 @@
       subscribed = true;
       localStorage.setItem(PUSH_ENABLED_KEY, 'on');
       message = strings.phone.enabled;
-    } catch (reason) { error = reason instanceof Error ? reason.message : String(reason); }
+    } catch (reason) { error = errorText(reason); }
     finally { busy = false; }
   }
   async function disable() {
@@ -82,7 +83,7 @@
       localStorage.removeItem(PUSH_ENABLED_KEY);
       const registration = await navigator.serviceWorker.getRegistration('/');
       await (await registration?.pushManager.getSubscription())?.unsubscribe();
-    } catch (reason) { error = reason instanceof Error ? reason.message : String(reason); }
+    } catch (reason) { error = errorText(reason); }
     finally { busy = false; }
   }
   let firewall: FirewallNotice | undefined = $state();
@@ -106,7 +107,7 @@
   async function testPush() {
     busy = true; error = ''; message = '';
     try { await store.client?.call('push.test', {}); message = strings.phone.testSent; }
-    catch (reason) { error = reason instanceof Error ? reason.message : String(reason); }
+    catch (reason) { error = errorText(reason); }
     finally { busy = false; }
   }
 </script>
@@ -133,7 +134,7 @@
       <div class="fields">
       <label for="{uid}-public-url"><span class="ui-label-box"><span class="ui-label" id="{uid}-public-url-name">{strings.phone.publicUrl}</span><InfoTip topic={strings.phone.publicUrl} text={strings.phone.publicUrlHint} /></span><input id="{uid}-public-url" aria-labelledby="{uid}-public-url-name" type="url" bind:value={publicUrl} placeholder={strings.phone.urlPlaceholder} data-testid="phone-public-url" /></label>
       <div class="actions">
-        <button disabled={store.connection !== 'ready'} onclick={() => void store.saveSettings({ publicUrl: publicUrl.trim() || null })}><span class="ui-label">{strings.settings.save}</span></button>
+        <button disabled={store.connection !== 'ready'} onclick={() => void store.saveSettings({ publicUrl: publicUrl.trim() || null })}><span class="ui-label">{strings.common.save}</span></button>
       </div>
       </div>
     </details></div>

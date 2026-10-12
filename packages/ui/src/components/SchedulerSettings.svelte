@@ -84,7 +84,7 @@
       {/each}
     </div>
     <div class="actions">
-      <button type="button" class="primary" data-testid="scheduler-save" disabled={!allValid || saving || !store.settings} onclick={() => void save()}><span class="ui-label">{strings.settings.save}</span></button>
+      <button type="button" class="primary" data-testid="scheduler-save" disabled={!allValid || saving || !store.settings} onclick={() => void save()}><span class="ui-label">{strings.common.save}</span></button>
       {#if savedAt !== null}
         <span class="muted ui-label" data-testid="scheduler-saved">{strings.settings.saved} {time(savedAt)}</span>
       {/if}

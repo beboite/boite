@@ -283,7 +283,6 @@
   @keyframes word { 0%, 28% { opacity: 0; } 32%, 100% { opacity: 1; } }
   @keyframes mic-active { 0%, 12% { box-shadow: 0 0 0 0 transparent; } 20%, 45% { box-shadow: 0 0 0 5px var(--color-accent-soft); } 60%, 100% { box-shadow: 0 0 0 0 transparent; } }
   @keyframes meter { 0%, 13% { transform: scaleX(0); transform-origin: left; } 35%, 100% { transform: scaleX(1); transform-origin: left; } }
-  @keyframes spin { to { transform: rotate(1turn); } }
   @keyframes sync { 0%, 32% { opacity: 0; transform: none; } 36% { opacity: 1; } 50% { opacity: 1; transform: translateX(36px); } 54%, 100% { opacity: 0; transform: translateX(36px); } }
   @keyframes rise { 0% { opacity: 0; transform: translateY(4px); } 8%, 100% { opacity: 1; transform: none; } }
   @keyframes rise-2 { 0%, 12% { opacity: 0; transform: translateY(4px); } 20%, 100% { opacity: 1; transform: none; } }

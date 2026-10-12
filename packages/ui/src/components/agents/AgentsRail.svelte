@@ -11,6 +11,7 @@
   import MachineStatus from '../MachineStatus.svelte';
   import AgentAvatar from './AgentAvatar.svelte';
   import AgentRow from './AgentRow.svelte';
+  import { minuteClock } from '../../lib/clock.svelte';
 
   /**
    * The conversations with agents, listed the way a messenger lists its chats
@@ -33,11 +34,7 @@
   const labels = $derived(strings.agents);
   let query = $state('');
   let searching = $state(false);
-  let now = $state(Date.now());
-  $effect(() => {
-    const timer = setInterval(() => (now = Date.now()), 30_000);
-    return () => clearInterval(timer);
-  });
+  const now = $derived(minuteClock.now);
 
   const snapshot = $derived(view.snapshot);
   const profiles = $derived(new Map(snapshot?.profiles.map(a => [a.id, a]) ?? []));
@@ -91,7 +88,7 @@
       <label class="agents-search"><Search size={14} strokeWidth={1.75} />
         <!-- svelte-ignore a11y_autofocus -->
         <input type="search" bind:value={query} aria-label={labels.search} placeholder={labels.search} autofocus onkeydown={e => { if (e.key === 'Escape') closeSearch(); }} />
-        <button type="button" class="ghost icon small" aria-label={labels.close} onclick={closeSearch}><X size={13} /></button>
+        <button type="button" class="ghost icon small" aria-label={strings.common.close} onclick={closeSearch}><X size={13} /></button>
       </label>
     {/if}
   {/snippet}

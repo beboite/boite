@@ -1,3 +1,4 @@
+import { errorText } from './errors';
 import { Bot, Handshake } from '@lucide/svelte';
 import type { ThreadSummary } from '@boite/contracts';
 import { agentDirectory } from './agent-directory.svelte';
@@ -5,6 +6,7 @@ import { contextMenu } from './context-menu.svelte';
 import { experimentOn } from './experiments.svelte';
 import type { MenuItem } from './menu';
 import type { Store } from './store.svelte';
+import { canMove, type Movable } from './thread-move.svelte';
 import { fill, strings } from './strings';
 
 /*
@@ -14,11 +16,11 @@ import { fill, strings } from './strings';
  * `agents.entrust` does the rest in the core (docs/agents.md).
  */
 
-type Entrustable = Pick<ThreadSummary, 'id' | 'projectId' | 'parentThreadId' | 'agentSessionId' | 'archived' | 'incognito'>;
+type Entrustable = Pick<ThreadSummary, 'id'> & Movable;
 
-/** A thread the owner can hand over: an ordinary, kept conversation in a project. */
+/** A thread the owner can hand over: the same ordinary, kept conversation in a project a move takes. */
 export function canEntrust(store: Store, thread: Entrustable): boolean {
-  return experimentOn('resident-agents') && store.owner && !thread.parentThreadId && !thread.agentSessionId && thread.projectId !== null && !thread.archived && !thread.incognito;
+  return experimentOn('resident-agents') && store.owner && canMove(thread);
 }
 
 export function entrustItems(store: Store, thread: Entrustable): MenuItem[] {
@@ -50,6 +52,6 @@ export async function entrust(store: Store, threadId: string, agentId: string | 
     await client.call('agents.entrust', { threadId, agentId });
     agentDirectory(store).reload();
   } catch (error) {
-    store.error = error instanceof Error ? error.message : String(error);
+    store.error = errorText(error);
   }
 }

@@ -44,7 +44,7 @@ function askToFollowLink(url: string): Promise<boolean> {
     title: strings.machines.linkTitle.replace('{host}', host),
     body: strings.machines.linkBody,
     confirmLabel: strings.machines.linkConfirm,
-    cancelLabel: strings.machines.linkCancel,
+    cancelLabel: strings.common.cancel,
     danger: true
   });
 }

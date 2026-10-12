@@ -1,5 +1,5 @@
 /** Accounts, their quotas and the fake sign-in a login runs. */
-import { RpcErrorCode, subscriptionProxyOf, type Account, type AccountQuota, type GatewayQuotaEntry, type QuotaWindow, type RpcEvents, type SubscriptionProxyQuotas } from '@boite/contracts';
+import { RpcErrorCode, subscriptionProxyOf, threadActive, type Account, type AccountQuota, type GatewayQuotaEntry, type QuotaWindow, type RpcEvents, type SubscriptionProxyQuotas } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { sessionStatus } from './checks';
 import { DATA_DIR } from './shared';
@@ -219,7 +219,7 @@ export function accountMethods(ctx: FakeContext) {
       const account = ctx.accounts.find(a => a.id === params.accountId);
       if (!account) throw ctx.notFound('account', params.accountId);
       // As the core: only a turn in flight keeps the account, a conversation that names it does not.
-      const busy = [...ctx.threads.values()].some((t) => t.accountId === params.accountId && (['queued', 'running', 'waiting'].includes(t.status) || ctx.inFlight.has(t.id)));
+      const busy = [...ctx.threads.values()].some((t) => t.accountId === params.accountId && (threadActive(t.status) || ctx.inFlight.has(t.id)));
       if (busy) {
         throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'this account is running a turn; stop it or wait for it before removing the account', data: { accountId: params.accountId } });
       }

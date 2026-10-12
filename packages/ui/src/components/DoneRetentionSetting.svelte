@@ -37,7 +37,7 @@
         oninput={() => { dirty = true; }} aria-invalid={!valid} aria-describedby={valid ? undefined : `${uid}-error`}
         data-testid="done-retention-days" />
       <button type="submit" disabled={!valid || !dirty || saving || !store.settings || store.connection !== 'ready'}
-        data-testid="done-retention-save"><span class="ui-label">{strings.settings.save}</span></button>
+        data-testid="done-retention-save"><span class="ui-label">{strings.common.save}</span></button>
     </div>
     {#if !valid}<p id="{uid}-error" class="field-error" role="alert">{strings.settings.deleted.retentionError}</p>{/if}
   </form>

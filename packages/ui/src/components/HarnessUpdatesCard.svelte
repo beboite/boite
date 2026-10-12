@@ -54,9 +54,9 @@
             oninstall={() => void store.installProvider(provider.id)} />
           {#if installing}
             <span class="progress ui-label" role="status">{strings.providerSettings.updating}</span>
-            <button class="ghost small" data-testid="install-cancel" disabled={!connected} onclick={() => void store.cancelInstall(provider.id)}><span class="ui-label">{strings.install.cancel}</span></button>
+            <button class="ghost small" data-testid="install-cancel" disabled={!connected} onclick={() => void store.cancelInstall(provider.id)}><span class="ui-label">{strings.common.cancel}</span></button>
           {:else if install?.state === 'failed' && update?.state !== 'failed'}
-            <button class="small" disabled={!connected || busy} data-testid="install-update" onclick={() => void store.installProvider(provider.id)}><span class="ui-label">{strings.install.retry}</span></button>
+            <button class="small" disabled={!connected || busy} data-testid="install-update" onclick={() => void store.installProvider(provider.id)}><span class="ui-label">{strings.common.retry}</span></button>
           {/if}
         </div>
         {#if installing}

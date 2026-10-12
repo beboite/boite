@@ -202,7 +202,7 @@ test('an answered card folds to one line and asks nothing more', () => {
   toggle.click();
   flushSync();
   expect(toggle.getAttribute('aria-expanded')).toBe('false');
-  expect(query('[data-testid=question-text]').closest<HTMLElement>('.fold')?.inert).toBe(true);
+  expect(query('[data-testid=question-text]').closest<HTMLElement>('.disclosure-fold')?.inert).toBe(true);
 });
 
 test('a question whose turn ended says so instead of offering a button', () => {

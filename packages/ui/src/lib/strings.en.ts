@@ -99,14 +99,14 @@ export const strings = {
     show: 'Show', hide: 'Hide', hideHint: 'Stop watching and cover the view again',
     none: 'The agent has no browser open', noneHint: 'It appears here when the agent opens a page.',
     unavailable: 'No agent browser on {machine}', tabs: 'The agent’s tabs', untitled: 'Untitled page',
-    newTab: 'New tab', closeTab: 'Close {name}', newTabHint: 'Open a page in this conversation’s browser on {machine}. The agent sees it and can use it.', open: 'Open'
+    newTab: 'New tab', closeTab: 'Close {name}', newTabHint: 'Open a page in this conversation’s browser on {machine}. The agent sees it and can use it.'
   },
   /** The Device panel: simulators and emulators an agent opened with `boite device`. */
   devicePanel: {
     cover: 'This agent controls a device on {machine}', coverHint: 'Nothing streams to this device until you show it.',
     show: 'Show', hide: 'Hide', hideHint: 'Stop watching and cover the view again',
     empty: 'No device is open in this conversation. An agent opens one with boite device open, or open one here.',
-    onMachine: 'On this machine', open: 'Open', refresh: 'Refresh', add: 'Open a device',
+    onMachine: 'On this machine', add: 'Open a device',
     none: 'No simulators or emulators were found on this machine.',
     starting: 'Starting {name}. This can take a minute.', failed: '{name} did not start',
     stopped: 'Off', running: 'Running', booting: 'Starting',
@@ -129,7 +129,6 @@ export const strings = {
     removeRoute: "Remove this model",
     compactEvery: "Compact after this many turns",
     runMinutes: "Maximum minutes per execution",
-    maxSubagents: "Maximum subagents",
     runtimeHint: 'The default model must be allowed. Removing access stops the work that uses it and pauses it for review.',
     brainHint: 'Instructions and skills persist across models. Shared contexts keep their own memory.',
     compactNow: "Compact this context",
@@ -140,15 +139,13 @@ export const strings = {
     interval: "At an interval",
     daily: "Daily",
     everyMinutes: "Every N minutes",
-    localTime: "Local date or time",
     timezone: "Time zone",
-    addRoutine: "Add routine",
     accountAccess: "Account access",
     accountAccessHint: 'Which agents may use each account, subagents included. Removing access stops the executions that use it.',
     allAgents: "All agents, including future agents",
     heading: 'Agents', intro: 'Agents with their own roles, memory and missions. Conversation subagents appear in Subagents.', back: 'Back to chat',
     profiles: 'Agents', groups: 'Groups', teams: 'Teams', missions: 'Missions', attention: 'Needs attention',
-    list: 'All agents', create: 'New', edit: 'Edit', save: 'Save', cancel: 'Cancel', close: 'Close',
+    list: 'All agents', create: 'New', edit: 'Edit',
     search: 'Search', empty: 'Nothing here yet. Create your first entry.', select: 'Choose an entry to see its activity.',
     name: 'Name', domain: 'Role', instructions: 'Instructions', identityHint: 'The identity and memory stay when you change its model.',
     model: 'Model and account', noAccount: 'Add a provider account in Settings before creating an agent.', permissions: 'Permissions',
@@ -163,22 +160,22 @@ export const strings = {
     archiveTitle: 'Archive "{name}"?', archiveBody: 'Archiving stops this agent’s work and removes it from the active list. Its profile and history remain available through search. Type its current name exactly to confirm.', archiveName: 'Agent name',
     objective: 'Objective', expectedResult: 'Expected result', minutes: 'Total execution minutes', tokens: 'Token limit, blank for none',
     finishMission: 'Finish mission', reopenMission: 'Reopen mission',
-    conversation: 'Chat', activity: 'Activity', send: 'Send', message: 'Write a message', recipients: 'Recipients', everyone: 'Let the group rule choose',
+    conversation: 'Chat', activity: 'Activity', send: 'Send', message: 'Write a message', recipients: 'Recipients',
     user: 'You', noWork: 'No execution yet.', loadEarlier: 'Load earlier',
     openRun: 'Open execution', requested: 'Requested', executed: 'Executed', noUsage: 'Usage not reported',
     pending: 'Queued', running: 'Working', waiting: 'Waiting for a decision', done: 'Done', cancelled: 'Cancelled', interrupted: 'Interrupted', error: 'Failed', review: 'Ready for review', open: 'Open', assigned: 'Assigned', accepted: 'Accepted',
     included: 'Included in execution', processed: 'Processed', failed: 'Failed', limited: 'Exchange limit reached',
     reconcile: 'Review and resume', reconcileHint: 'Inspect the execution and files first. Describe what is already done and what can continue.', reconcileNote: 'What did you verify?',
-    answer: 'Answer', answerPlaceholder: 'Your decision and instructions', noAttention: 'No decisions or interruptions need your attention.',
+    answer: 'Answer', answerPlaceholder: 'Your decision and instructions',
     task: 'Task', tasks: 'Tasks', addTask: 'Add task', acquire: 'Assign', dependencies: 'Wait for tasks', approve: 'Accept result', revise: 'Request changes', reject: 'Reject', feedback: 'Feedback for the next attempt',
-    result: 'Result', verification: 'Verification reported by the agent', workspace: 'Workspace', copyPath: 'Copy path', noResults: 'Submitted results will appear here.',
+    result: 'Result', verification: 'Verification reported by the agent', workspace: 'Workspace', copyPath: 'Copy path',
     resources: 'Resources', addResource: 'Add resource', directory: 'Directory', url: 'URL', value: 'Value', read: 'Read', write: 'Write',
     resourceHint: 'Access declarations guide the agent. The provider’s permissions still control filesystem actions.',
     addMemory: 'Add memory', text: 'Text', scope: 'Scope', sources: 'Sources', ownerMemory: 'Added by you',
     searchKnowledge: 'Search memory and resources', expiresAt: 'Expires at, optional', expired: 'Expired', expireMemory: 'Expire now',
     engine: 'Background work', concurrency: 'Concurrent agents', engineHint: 'Closing this page leaves work running on the connected core.',
     kebacc: 'External kebacc experiment', kebaccHint: 'Use the external kebacc-switcher plugin for Antigravity CLI. Boite does not switch or rotate these accounts.',
-    experimentOff: 'Enable the experiment in background settings first.', backgroundSettings: 'Background settings',
+    experimentOff: 'Enable the experiment in background settings first.',
     idle: 'Available', offline: 'Agents could not be loaded from this machine. Reconnect or update its core.', retry: 'Retry',
     stale: 'Connection lost. This is the last received state. Work may still be running on the host.',
     history: 'History',
@@ -228,7 +225,6 @@ export const strings = {
   annotate: 'Reference an element',
   picking: 'Select an element in the page. Escape cancels.',
   add: 'Add to message',
-  cancel: 'Cancel',
   added: 'Element added to your message.',
   unavailable: 'Element selection is unavailable on this page. Use the desktop app for cross-origin pages.',
   failed: 'Element selection failed. Reload the page and try again.',
@@ -240,14 +236,14 @@ export const strings = {
   activityUnsupported: 'Element references cannot be used with /goal or /loop. Send a regular message or remove the references.',
   stashUnsupported: 'This draft contains element references and cannot be stashed. Send it or remove the references first.'
 },
-  artifacts: { viewReplay: 'Play again', viewExpand: 'View full size', viewCollapse: 'Close full size', loadImage: 'Load image', retry: 'Try again', mediaFailed: 'This media could not be previewed. Try again or download the file to open it.', videoFailed: 'This device cannot play this video. Download it to watch it in another app.', saving: 'Saving', zoomIn: 'Zoom in', zoomOut: 'Zoom out', fitImage: 'Fit image', open: 'Open', openLocal: 'Open this file in its default application.', preview: 'Preview', download: 'Download', close: 'Close preview', closeImage: 'Close image', enlarge: 'View full size', saved: 'Saved in Downloads', loading: 'Loading file', unavailable: 'No inline preview for this file. Download it to open it.', failed: 'Could not open this file', ownerOnly: 'Local file links need an owner connection. Ask the agent to attach the file to share it with this device.' },
+  artifacts: { viewReplay: 'Play again', viewExpand: 'View full size', viewCollapse: 'Close full size', loadImage: 'Load image', mediaFailed: 'This media could not be previewed. Try again or download the file to open it.', videoFailed: 'This device cannot play this video. Download it to watch it in another app.', saving: 'Saving', zoomIn: 'Zoom in', zoomOut: 'Zoom out', fitImage: 'Fit image', openLocal: 'Open this file in its default application.', preview: 'Preview', download: 'Download', close: 'Close preview', closeImage: 'Close image', enlarge: 'View full size', saved: 'Saved in Downloads', loading: 'Loading file', unavailable: 'No inline preview for this file. Download it to open it.', failed: 'Could not open this file', ownerOnly: 'Local file links need an owner connection. Ask the agent to attach the file to share it with this device.' },
 
   brain: {
     heading: 'Brain', description: 'Your agents share the same instructions and skills.',
     folder: 'Brain folder', pathHint: 'Folder path', save: 'Connect folder', browse: 'Browse', useFolder: 'Choose this folder',
-    enabled: 'Use with agents', disconnect: 'Disconnect', refresh: 'Refresh', sync: 'Synchronize', working: 'Working',
+    enabled: 'Use with agents', disconnect: 'Disconnect', sync: 'Synchronize', working: 'Working',
     empty: 'Connect your brain', emptyHint: 'Choose the folder with your instructions and skills.',
-    change: 'Change folder', cancel: 'Cancel', saveChanges: 'Save',
+    change: 'Change folder',
     autoPull: 'Pull automatically', onStartup: 'At startup', periodic: 'Periodically', minutes: 'min',
     globalInstructions: 'Global AGENTS.md', globalDetails: 'Connected harnesses',
     globalHint: 'Uses this brain in every project, including outside Boite. Existing files are backed up and restored when disabled.',
@@ -398,7 +394,7 @@ export const strings = {
     notSetUp: 'Dictation is not set up', needsCli: 'This machine also needs whisper-cli on PATH, or its path under Advanced.',
     statusKey: 'Add a {provider} key', downloadingModel: 'Downloading {model}',
     statusFailed: 'The download did not finish', statusBroken: 'Voice settings could not be read', repair: 'Save to repair',
-    setUp: 'Set up dictation', tryAgain: 'Try again',
+    setUp: 'Set up dictation',
     update: 'Update engine', updateHint: 'A faster engine is available, 8 MB.',
     https: 'Microphone access needs HTTPS or localhost. Open this machine through its HTTPS address.',
     linux: 'Dictation is not available in the Linux app yet: its webview does not grant the microphone. Open Boite in a browser to dictate.',
@@ -502,7 +498,6 @@ export const strings = {
   },
   machines: {
     heading: 'Machines', local: 'This PC', projects: 'Projects', recent: 'Recent',
-    dynamic: 'All machines',
     intro: 'Each machine runs its own agents on its own files.',
     details: 'Details', address: 'Address', updateFailed: 'Update failed',
     label: 'Machine name', icon: 'Machine icon', icons: { desktop: 'Desktop', laptop: 'Laptop', server: 'Server', rack: 'Server rack', cloud: 'Cloud', cpu: 'Processor' }, link: 'Link from another machine', add: 'Add machine', adding: 'Connecting', connect: 'Connect',
@@ -525,8 +520,8 @@ export const strings = {
     remove: 'Remove machine', removeTitle: 'Remove {machine}?',
     removeBody: 'Boite forgets this machine on this device.',
     open: 'Open machine', invalidUrl: 'Machine URL must be an HTTP or HTTPS URL without credentials, query or fragment.',
-    duplicate: 'This machine is already connected.', noPr: 'No PR', refreshPr: 'Refresh pull request',
-    prUnavailable: 'Pull request unavailable', manual: 'Connect with URL and token',
+    duplicate: 'This machine is already connected.', refreshPr: 'Refresh pull request',
+    manual: 'Connect with URL and token',
     filter: 'Filter machines', all: 'All machines',
     main: 'Main machine', mainLast: 'Last one used',
     mainHint: 'Boite opens on this machine. When it is off, Boite opens on another one.',
@@ -534,21 +529,10 @@ export const strings = {
     timeout: 'Machine did not answer within 12 seconds. Check its address and browser origins, then reconnect.',
     linkTitle: 'Connect to {host}?',
     linkBody: 'The link you opened points this page at a machine this device has never connected to. That machine will see everything you type here. Connect only if you made this link or trust who sent it. Cancel keeps your current machine.',
-    linkConfirm: 'Connect', linkCancel: 'Cancel',
+    linkConfirm: 'Connect',
     browserOrigins: 'Allowed browser origins',
     browserOriginsHint: 'Machines of the group, and the addresses they are served at, are allowed on their own. Add here only a page served by something outside the group. One exact http(s) origin per line.',
-    agentLinks: 'Agent links', agentLinksHint: 'Linked agents can find and message each other. Choose below which machines may read conversations. Removed links stay removed.',
-    agentReadThreads: 'Allow agents on {source} to read conversations on {target}',
-    agentReadUpgrade: 'Update this machine to control conversation access.',
-    agentLinkViaApp: 'Through this app while both owner connections are open',
-    agentLinksRefresh: 'Refresh agent links', linkAgents: 'Link agents', linkedAgents: 'Linked agent cores', availableAgentLinks: 'Available connections',
-    noAgentLinks: 'No other connected owner machine is available.', unlinkAgent: 'Revoke on this machine',
     settings: 'Settings for this machine', settingsHint: 'Resource limits, process retention, agent updates and worktree storage apply only to this machine.',
-    syncFrom: 'Synchronize common preferences with {source}', syncing: 'Copying preferences',
-    syncTitle: 'Copy the common preferences of {source} to {target}?',
-    syncBody: 'Process guards, question mode, keybindings and brain switches on {target} take the values of {source}. Resource limits, process retention, agent updates, storage, network access and sign-ins stay on their machine.',
-    syncConfirm: 'Automatic synchronization',
-    syncHint: 'Copies common preferences, keybindings and brain switches now and after each change. Resource limits and execution settings stay on this machine.',
     synced: 'Common preferences synchronized with {source}.',
     syncBrainAbsent: 'Connect a brain folder on this machine to copy its switches too.',
     syncKeysAbsent: 'One of the two machines runs a Boite without keybindings, so they stayed as they were.',
@@ -556,9 +540,7 @@ export const strings = {
     syncStages: { settings: 'the settings', keybindings: 'the keybindings', brain: 'the brain switches' },
     syncProviders: 'Still to sign in on this machine: {providers}. Sign-ins never leave the machine they were made on.',
     syncOpenProviders: 'Open its providers',
-    autoLinkFailed: 'Not linked automatically: {reason}',
     agentLinkAddressRequired: 'Update both machines to relay through the app, or set a reachable HTTPS address for {machine} in General settings.',
-    reciprocalLink: 'Configured on both machines', oneSidedLink: 'Configured on one machine only', agentLinkReachable: 'Signed connection verified', publicIdentityHint: 'The app relays signed messages between owner connections. A public HTTPS address also lets agents communicate while this app is closed.',
   },
   group: {
     rename: 'Rename group', merging: 'Grouping connected machines',
@@ -629,7 +611,6 @@ export const strings = {
     minimize: 'Minimize',
     maximize: 'Maximize',
     restore: 'Restore',
-    close: 'Close',
     quitHold: 'Hold Ctrl+Q to quit',
     quitHoldHint: 'or press it twice',
     quitTitle: 'Close Boite?',
@@ -665,7 +646,6 @@ export const strings = {
   appUpdate: {
     released: 'Released {time}',
     changelog: 'Changelog on GitHub',
-    hideReminder: 'Hide reminder',
     heading: 'App updates',
     intro: 'Choose the releases this desktop app follows. Stable and nightly share this installation, conversations and settings.',
     unsupported: 'Automatic app updates are available in installed builds: the Windows x64 installer, the macOS app, and the Linux .deb or AppImage.',
@@ -690,7 +670,6 @@ export const strings = {
     retained: 'Changing channels keeps your conversations and settings.',
     check: 'Check for updates',
     checkingAction: 'Checking',
-    retry: 'Try again',
     download: 'Download',
     install: 'Install and restart',
     readyAction: 'Update',
@@ -741,7 +720,6 @@ export const strings = {
     heading: 'Open a project',
     deviceBody: 'Projects are opened from the app the core runs in. The ones it holds show up here.',
     pathPlaceholder: 'Absolute path of the folder',
-    add: 'Open'
   },
 
   /** The guided connection: from "nothing works yet" to a composer on a signed-in agent. */
@@ -766,7 +744,6 @@ export const strings = {
     ready: '{provider} is connected.',
     use: 'Use {provider}',
     back: 'Back',
-    close: 'Close',
     device: 'No AI is connected on the computer running Boite yet. Connect one from that computer.',
     reconnect: 'Sign in again',
     signedOut: '{provider} is signed out'
@@ -813,7 +790,6 @@ export const strings = {
     markDone: 'Mark done',
     doneToast: 'Marked "{title}" done',
     doneLoadFailed: 'Some completed threads could not be loaded.',
-    doneRetry: 'Try again',
     /** The pull request under a done or archived conversation, which opens it on the forge. */
     prMerged: '#{number} merged',
     prClosed: '#{number} closed',
@@ -854,9 +830,6 @@ export const strings = {
     archivedProjects: 'Archived projects',
     restoreProject: 'Restore',
     restoreAndStart: 'Restore {project} and start a thread',
-    /** The drawer under a project's rows: its archived threads, opened for this session only. */
-    archivedThreads: 'Archived conversations',
-    restoreThread: 'Restore',
     removeProject: 'Remove from Boite',
     /** On a project whose folder was deleted, moved or renamed outside Boite. */
     projectMissing: 'Folder not found',
@@ -868,8 +841,6 @@ export const strings = {
     threadMenu: 'Thread actions',
     /** A pencil on a thread's row: something typed in its box and not sent. */
     unsentDraft: 'Unsent draft',
-    open: 'Open',
-    rename: 'Rename',
     retitle: 'Regenerate title',
     retitling: 'Writing a title',
     /** What a row shows in place of its time while the agent works or has news. */
@@ -900,7 +871,6 @@ export const strings = {
     pin: 'Pin',
     unpin: 'Unpin',
     archive: 'Archive',
-    delete: 'Delete',
     deleteUnavailable: 'Update Boite on the machine hosting this conversation to delete it. The conversation has been kept.',
     deletedToast: 'Deleted "{title}". You can restore it from Settings.',
     /** The toast after an archive, with its way back: the button and Ctrl+Z. */
@@ -983,7 +953,6 @@ export const strings = {
     empty: 'No Claude Code session for this folder.',
     imported: 'Imported',
     importing: 'Importing',
-    close: 'Close'
   },
 
   /** Images on their way to an agent, files given with an answer, and the full-screen viewer. */
@@ -1033,7 +1002,6 @@ export const strings = {
     loop: 'Loop',
     tasks: 'Tasks',
     taskCount: '{done}/{total} tasks',
-    showTasks: 'Show tasks',
     goalDescription: 'Keep working toward an objective',
     loopDescription: 'Repeat a task a set number of times or on a schedule',
     goalUsage: 'Use /goal followed by an objective.',
@@ -1371,7 +1339,6 @@ export const strings = {
     outlineEarlier: 'Show earlier messages in the rail',
     outlineLater: 'Show later messages in the rail',
     goToMessage: 'Go to message {number}: {text}',
-    copy: 'Copy',
     copied: 'Copied',
     /** The card an agent's proposed plan is read in, before it starts editing. */
     plan: 'Plan',
@@ -1423,7 +1390,7 @@ export const strings = {
     pause: 'Pause coordination', resume: 'Resume coordination', paused: 'Paused',
     sends: '{used} of {limit} sends this hour', wakes: '{used} of {limit} wake turns this hour', receives: 'Recipients accept up to {limit} letters each hour.',
     sent: '{used} sent this hour', woken: '{used} wake turns this hour',
-    directory: 'Authorized contacts', refresh: 'Refresh', directoryEmpty: 'No opted-in thread in this project is available.', unavailable: 'Unavailable contacts',
+    directory: 'Authorized contacts', directoryEmpty: 'No opted-in thread in this project is available.', unavailable: 'Unavailable contacts',
     details: 'Show exchange',
     machineNotConnected: 'Connect to this machine in Settings to open its thread.',
     status: {
@@ -1500,7 +1467,6 @@ export const strings = {
     stopped: '{count} stopped',
     elapsed: 'Elapsed time',
     showTeam: 'View subagents',
-    doneStatus: 'Completed',
     stoppedStatus: 'Stopped',
     failedStatus: 'Failed',
     activeSection: 'Active',
@@ -1533,7 +1499,6 @@ export const strings = {
     close: 'Close details',
     notStarted: 'Not started yet.',
     skipped: 'Skipped: its condition did not hold.',
-    cancel: 'Cancel',
     card: 'Workflow',
     show: 'Show the workflow',
     tokens: '{tokens} tokens'
@@ -1629,6 +1594,9 @@ export const strings = {
     imagePreview: 'Preview {image}',
     imagePreviewClose: 'Close image preview',
     attachPending: 'Reload to recover',
+    /** The last tile of a full strip: how many more it hides, and folding them back. */
+    attachMore: 'Show {count} more',
+    attachLess: 'Show fewer',
     attachUnnamed: 'the attachment',
     attachFormat: '{name} is {type}, and an image must be one of {formats}.',
     attachTooLarge: '{name} is too big: a file may weigh {max} at most.',
@@ -1645,7 +1613,6 @@ export const strings = {
     newSurface: 'Open a surface',
     scrollLeft: 'Scroll the tabs left',
     scrollRight: 'Scroll the tabs right',
-    close: 'Close',
     closeTab: 'Close {title}',
     closeOthers: 'Close others',
     closeToRight: 'Close to the right',
@@ -1728,9 +1695,6 @@ export const strings = {
     noMatch: 'No loaded row matches',
     failed: 'This directory could not be read. {reason}',
     capped: 'Only the first {count} entries of this directory are listed.',
-    expandRow: 'Unfold this directory',
-    collapseRow: 'Fold this directory',
-    openRow: 'Open this file',
     // The viewer and the editor, one file per tab.
     readFailed: 'This file could not be read. {reason}',
     writeFailed: 'This file could not be saved. {reason}',
@@ -1738,7 +1702,6 @@ export const strings = {
     noFile: 'This tab carries no path',
     truncated: 'This file was cut short at its size limit, so what is below is not the whole file and cannot be saved.',
     readOnly: "Saving a file is the owner's, so this one opens read only.",
-    save: 'Save',
     saving: 'Saving',
     unsaved: 'Unsaved changes',
     discardOne: 'Close {name} without saving?',
@@ -1746,7 +1709,6 @@ export const strings = {
     discardBody: 'What was typed since the last save is lost.',
     discardConfirm: 'Close without saving',
     editorLabel: 'File contents',
-    lineOf: 'Line {line}',
     zoomIn: 'Zoom in',
     zoomOut: 'Zoom out',
     fit: 'Fit',
@@ -1761,7 +1723,7 @@ export const strings = {
     title: 'Browser testing tools', desktop: 'Desktop', laptop: 'Laptop', portrait: 'Portrait', landscape: 'Landscape',
     system: 'Follow system appearance', light: 'Light page', dark: 'Dark page', diagnostics: 'Page diagnostics and actions',
     startRecording: 'Record this browser tab', stopRecording: 'Stop recording', reviewRecording: 'Recorded video',
-    refresh: 'Refresh', clear: 'Clear', pageEvents: 'Page events', actions: 'Actions', noEvents: 'No page events captured.', noActions: 'No actions recorded yet.',
+    clear: 'Clear', pageEvents: 'Page events', actions: 'Actions', noEvents: 'No page events captured.', noActions: 'No actions recorded yet.',
     omitted: '{count} older or oversized events omitted.', recorded: '{seconds} seconds · {fps} fps · {mb} MB · silent {format}',
     recordingError: 'Recording stopped after an error.', recordingLimit: 'Recording stopped by itself at the {mb} MB size limit. The video plays up to that point.',
     frameRate: 'Record at {rate} frames per second', codec: 'Encode as {codec}', codecUnavailable: 'This computer cannot encode it',
@@ -1801,9 +1763,7 @@ export const strings = {
     manage: 'Manage browser profiles',
     isDefault: 'Opens new tabs',
     makeDefault: 'Open new tabs here',
-    rename: 'Rename',
     renameLabel: 'New name for {name}',
-    delete: 'Delete',
     addLabel: 'New profile name',
     addPlaceholder: 'Work, Personal…',
     add: 'Add profile',
@@ -1883,9 +1843,6 @@ export const strings = {
     unknown: 'Not available',
     state: 'Protection status',
     states: { ok: 'Enough memory', critical: 'Memory limit crossed' },
-    critical: 'A memory limit was crossed. Boite stops large processes to free memory.',
-    stopped: 'Boite stopped a process to free memory.',
-    onMachine: (name: string) => `On ${name}`,
     killTitle: 'Process stopped to free memory',
     killCount: (count: number) => `${count} processes stopped to free memory`,
     stoppedProcesses: (count: number) => `Show ${count} stopped processes`,
@@ -1904,16 +1861,13 @@ export const strings = {
     killTree: 'Kill tree',
     killConfirm: 'Kill every process of this thread?',
     killConfirmYes: 'Kill',
-    killConfirmNo: 'Cancel'
   },
 
   /** A provider whose files Boite downloads itself. */
   install: {
     action: 'Install',
     update: 'Update',
-    retry: 'Try again',
     repair: 'Reinstall',
-    cancel: 'Cancel',
     remove: 'Uninstall',
     removeTitle: 'Uninstall {provider}?',
     removeBody: 'The files Boite downloaded go with it. Your accounts stay, and it can be installed again later.',
@@ -1937,7 +1891,6 @@ export const strings = {
     loginInputPlaceholder: 'Paste the code the page gives you, if it gives one',
     loginRedirectPlaceholder: 'On another device? Paste the localhost address the page ends on',
     loginSend: 'Send',
-    loginCancel: 'Cancel',
     terminalHint: 'Answer its questions in the terminal, then close it once you are signed in.',
     terminalDone: 'Close the terminal',
     remove: 'Remove',
@@ -1958,12 +1911,10 @@ export const strings = {
 
   usage: {
     heading: 'Usage',
-    note: 'Costs are estimated at API rates. On a subscription this is not an invoice.',
+    note: 'Costs are the tokens at each model\'s public API rates, from models.dev. A model with no listed rate uses the cost its agent reported. On a subscription this is not an invoice.',
     thread: 'Thread',
     input: 'Input',
     output: 'Output',
-    cacheRead: 'Cache read',
-    cacheWrite: 'Cache write',
     cost: 'API-rate estimate',
     total: 'Total',
     empty: 'No token spent yet.',
@@ -1982,7 +1933,12 @@ export const strings = {
     noActivity: 'No turns',
     noUsage: 'Not reported',
     coverage: 'Tokens {reported}/{turns} turns · Cost {priced}/{turns}',
-    partialCost: '{count} turns have no reported cost. The estimate includes only priced turns.',
+    partialCost: '{count} turns have no price and are left out of the estimate.',
+    rates: 'Public API rates of {model}, per million tokens: input {input}, output {output}, cache read {cacheRead}, cache write {cacheWrite}.',
+    reportedCost: 'No public rate matches this model, so the cost is the one its agent reported.',
+    noRates: 'No public rate matches this model and its agent reported no cost.',
+    noTokens: 'The agent reported no tokens for these turns, so they have no cost.',
+    priceOf: 'the price of {model}',
     metrics: { tokens: 'Tokens', cost: 'API estimate', turns: 'Turns' },
     totalOf: {
       tokens: 'Tokens, last {days} days',
@@ -1990,7 +1946,7 @@ export const strings = {
       turns: 'Turns, last {days} days'
     },
     summary: '{turns} turns · {tokens} tokens · {cost} at API rates',
-    summaryNoPrice: '{turns} turns · {tokens} tokens · No cost reported',
+    summaryNoPrice: '{turns} turns · {tokens} tokens · No price',
     summaryMissing: '{turns} turns · Usage not reported',
     overview: 'Overview',
     chart: 'Per day',
@@ -2004,7 +1960,7 @@ export const strings = {
     turns: 'Turns',
     tokens: 'Tokens',
     cache: 'Cache',
-    noPrice: 'No cost reported',
+    noPrice: 'No price',
     defaultModel: 'Default model',
     other: 'Other',
     threads: 'Top threads',
@@ -2013,7 +1969,7 @@ export const strings = {
     untitled: 'Untitled thread',
     archived: 'Archived',
     emptyRange: 'No turn finished in the last {days} days.',
-    unpriced: 'No API cost is reported for {providers}. These turns are excluded from the estimate.',
+    unpriced: 'No price for {providers}: no public rate and no reported cost.',
     unreported: '{count} turns reported no usage. They count as turns only.',
     limits: 'Limits',
     limitsOwner: 'Subscription limits are read on the computer that runs Boite. Open this page there to see them.',
@@ -2102,8 +2058,6 @@ export const strings = {
     theme: 'Theme',
     display: 'Display',
     accent: 'Accent colour',
-    accentHint: 'Reasoning, buttons, links and focus indicators',
-    accentCustom: 'Custom accent colour',
     accentNames: ['Blue', 'Violet', 'Rose', 'Orange', 'Amber', 'Green', 'Teal'],
     colors: {
       title: 'Colours',
@@ -2169,19 +2123,7 @@ export const strings = {
     terminalCursorUnderline: 'Underline',
     connection: 'Connection',
     localCore: 'This app runs on the core it started on this computer.',
-    coreAt: 'Connected to the core at {url}.',
-    pairingLink: 'Pairing link',
-    pairingLinkPlaceholder: 'http://host:port/?grant=',
     pair: 'Pair',
-    pairHint:
-      'Paste a link minted by the other core, from its own Settings or with boite-core pair --owner on the machine it runs on. The key it becomes stays on this computer.',
-    useLocal: "Use this computer's core",
-    useLocalHint: 'The remembered cores below stay remembered.',
-    environments: 'Remembered cores',
-    environmentsHint: 'Paired or connected cores stay here. Switching back needs no new link: the key stays until revoked there or forgotten here.',
-    envCurrent: 'current',
-    envSwitch: 'Switch',
-    envForget: 'Forget',
     manual: 'Core URL and token',
     coreUrl: 'Core URL',
     token: 'Token',
@@ -2219,7 +2161,6 @@ export const strings = {
     titleModelAutoHint: "The thread's agent, small model",
     titleModelSmall: 'small',
     numberRange: 'A whole number from {min} to {max}.',
-    save: 'Save',
     saved: 'Saved',
     core: 'Core',
     version: 'Version',
@@ -2239,7 +2180,6 @@ export const strings = {
       show: 'Show archived threads',
       empty: 'No archived thread on this machine.',
       restore: 'Restore',
-      open: 'Open'
     },
     deleted: {
       heading: 'Deleted conversations',
@@ -2391,7 +2331,6 @@ export const strings = {
     creditRemaining: 'Credits remaining',
     creditBalance: '{count} credits',
 
-    trayHeading: 'Usage',
     /** The tray icon's right-click menu. */
     trayShow: 'Show',
     trayQuit: 'Quit',
@@ -2427,7 +2366,6 @@ export const strings = {
     allLimits: 'Limits page',
     /** A read of the limits failed; the core's reason follows. */
     readFailed: "Couldn't read the limits: {error}",
-    retry: 'Try again',
     quit: 'Quit Boite',
   },
   harnessUpdates: {
@@ -2440,7 +2378,7 @@ export const strings = {
     availableShort: 'Update available',
     installed: (version: string) => `Installed: ${version}`,
     on: (machine: string) => `On ${machine}`,
-    update: 'Update', skip: 'Skip', retry: 'Try again',
+    update: 'Update', skip: 'Skip',
     updating: (name: string) => `Updating ${name}`,
     waiting: (count: number) => count === 1 ? 'Waits for a thread to pause' : `Waits for ${count} threads to pause`,
     failed: (name: string) => `${name} did not update`,
@@ -2475,9 +2413,7 @@ export const strings = {
     check: 'Check connection',
     connectionOk: 'Connected',
     checking: 'Checking connection',
-    rename: 'Rename',
     accountName: 'Account name',
-    save: 'Save',
     revealEmail: 'Reveal email',
     deviceHint: 'Enter this code on the sign-in page. Boite waits for you to finish.',
     addAccount: 'Add another account',
@@ -2510,7 +2446,6 @@ export const strings = {
     recommendedBy: 'Recommended by Boite',
     install: 'Install',
     update: 'Update to {version}',
-    retry: 'Try again',
     reinstall: 'Reinstall',
     remove: 'Uninstall',
     stateInstalled: 'Installed',
@@ -2527,7 +2462,6 @@ export const strings = {
     switch: 'Use this account',
     forget: 'Forget account',
     active: 'Active',
-    refresh: 'Refresh',
     removeTitle: 'Uninstall {name}?',
     removeBody: 'Deletes the plugin\'s folder in Boite\'s data directory. What the program saved elsewhere, such as its saved logins, stays where it is.',
     switchTitle: 'Change the CLI login?',
@@ -2568,7 +2502,6 @@ export const strings = {
     refusedFile: 'File',
     refusedField: 'Field',
     refusedExpected: 'Expected',
-    dismiss: 'Dismiss',
     /** Recommended plugins whose entry names an update source: the check, and what it last found. */
     checkUpdates: 'Check for updates',
     checkingUpdates: 'Checking for updates',
@@ -2639,6 +2572,13 @@ export const strings = {
     refresh: 'Refresh',
     dismiss: 'Dismiss',
     cancel: 'Cancel',
+    /** Verbs every view shares. A status word stays with its subject: French agrees it in gender. */
+    retry: 'Try again',
+    save: 'Save',
+    rename: 'Rename',
+    delete: 'Delete',
+    copy: 'Copy',
+    open: 'Open',
   },
 
   /**
@@ -2677,7 +2617,7 @@ export const strings = {
       usageLabel: 'Claude', window: '5-hour limit', used: '24% used', reset: 'Resets in 2 h 10 min', trayHint: 'Hover the Boite icon to see your limits without opening the app.',
       desktop: 'Your computer', phone: 'Your phone', synced: 'The same conversation', reachHint: 'After pairing by QR code, follow your agents from your phone. Your computer keeps running them.',
       notification: 'Contact form finished', quietBody: 'Let your agents work without taking over your screen or your speakers.',
-      installVoice: 'Install local dictation', downloadVoice: 'About 200 MB. Audio stays on this computer.', installingVoice: 'Downloading voice engine', cancelVoice: 'Cancel download', readyVoice: 'Dictation is ready. Use the microphone in the composer.', retryVoice: 'Retry voice setup',
+      installVoice: 'Install local dictation', downloadVoice: 'About 200 MB. Audio stays on this computer.', installingVoice: 'Downloading voice engine', cancelVoice: 'Cancel download', readyVoice: 'Dictation is ready. Use the microphone in the composer.',
     },
     label: 'Getting started',
     skip: 'Skip',
@@ -2708,9 +2648,6 @@ export const strings = {
     agents: {
       title: 'A conversation that follows your work',
       body: 'Switch agents, dictate a message, inspect the result. Stay in the same thread.',
-      demoModel: 'Sonnet 5',
-      demoEffort: 'High',
-      demoMode: 'Ask'
     },
 
     /** Dictation: what it does, and where this core stands on setting it up. */
@@ -2726,7 +2663,6 @@ export const strings = {
       title: 'The panel beside the conversation',
       body: 'Changes, files, tasks and a browser, one key away.',
       open: 'Keyboard shortcuts',
-      noKey: 'no key'
     },
 
     /** The quota bars, and the switch that fills them. */
@@ -2763,9 +2699,6 @@ export const strings = {
     project: {
       title: 'Open your first project',
       body: 'The folder an agent works in.',
-      opened: '{count} project open.',
-      openedMany: '{count} projects open.',
-      deviceBody: 'Projects are opened from the app the core runs in.'
     }
   }
 } as const;

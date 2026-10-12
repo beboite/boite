@@ -1,7 +1,8 @@
-import type { ProviderId, ThreadId, Usage, UsageHistory, UsageHistoryThread } from '@boite/contracts';
+import type { ProviderId, ThreadId, Usage, UsageHistory, UsageHistoryThread, UsagePrice } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams } from './errors.ts';
 import type { UsageSums } from './journal/usage-sums.ts';
+import { costAt, priceOf } from './pricing/index.ts';
 
 /** A year of days plus the closing edge. */
 export const MAX_USAGE_EDGES = 367;
@@ -72,22 +73,47 @@ function sumsToUsage(sums: UsageSums, cachedInInput: boolean): Usage {
   };
 }
 
+interface Priced {
+  usage: Usage;
+  priced: number;
+  price: UsagePrice | null;
+}
+
+/**
+ * The API-equivalent cost of a group of turns: their tokens at the model's
+ * public rates when the price list knows the model, else the costs the agents
+ * reported. Rates come first because a reported cost is only as good as the
+ * agent's own sum: Claude's is a running total the driver has to take apart,
+ * Codex and Grok report none, and a rate prices every provider the same way.
+ */
+function priced(sums: UsageSums, model: string | null, protocol: string | null): Priced {
+  const usage = sumsToUsage(sums, protocol === 'codex-appserver');
+  const price = priceOf(model, protocol === 'claude-sdk');
+  if (price === null || sums.reported === 0) return { usage, priced: sums.priced, price };
+  return { usage: { ...usage, costUsdEquivalent: costAt(price.rates, usage) }, priced: sums.reported, price };
+}
+
 export function usageHistory(core: Core, edges: number[], providerId?: ProviderId): UsageHistory {
-  const cachedInInput = (providerId: ProviderId): boolean => core.providers.get(providerId)?.protocol === 'codex-appserver';
-  const rows = core.journal.usageByBucket(edges).filter((row) => providerId === undefined || row.provider_id === providerId).map((row) => ({
-    bucket: row.bucket,
-    providerId: row.provider_id,
-    model: row.model,
-    turns: row.turns,
-    reported: row.reported,
-    priced: row.priced,
-    usage: sumsToUsage(row, cachedInInput(row.provider_id)),
-  }));
+  // A provider removed since keeps its protocol through its shipped id.
+  const protocolOf = (id: ProviderId): string | null => core.providers.get(id)?.protocol ?? (id === 'claude' ? 'claude-sdk' : id === 'codex' ? 'codex-appserver' : null);
+  const rows = core.journal.usageByBucket(edges).filter((row) => providerId === undefined || row.provider_id === providerId).map((row) => {
+    const cost = priced(row, row.model, protocolOf(row.provider_id));
+    return {
+      bucket: row.bucket,
+      providerId: row.provider_id,
+      model: row.model,
+      turns: row.turns,
+      reported: row.reported,
+      priced: cost.priced,
+      usage: cost.usage,
+      price: cost.price,
+    };
+  });
 
   const byThread = new Map<ThreadId, UsageHistoryThread>();
   for (const row of core.journal.usageByThread(edges[0]!, edges[edges.length - 1]!)) {
     if (providerId !== undefined && row.provider_id !== providerId) continue;
-    const usage = sumsToUsage(row, cachedInInput(row.provider_id));
+    const { usage } = priced(row, row.model, protocolOf(row.provider_id));
     const entry = byThread.get(row.thread_id);
     if (entry !== undefined) {
       entry.turns += row.turns;

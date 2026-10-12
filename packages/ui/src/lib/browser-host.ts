@@ -15,6 +15,7 @@
  *
  * No port is opened: WebView2 hands each webview's protocol to the app itself.
  */
+import { errorText } from './errors';
 import { BROWSER_HOST_BATCH_BYTES, BROWSER_HOST_BATCH_MAX, DEFAULT_BROWSER_PROFILE, PRIVATE_BROWSER_PROFILE } from '@boite/contracts';
 import type { BrowserEvent } from './browser-bridge';
 
@@ -52,8 +53,6 @@ export const AGENT_VIEW_PREFIX = 'agent-';
 interface Target { id: string; relay: string; profile: string; context: string | null; url: string; title: string; off: (() => void) | null }
 interface Message { id?: number; method?: string; params?: Record<string, unknown>; sessionId?: string }
 
-const message = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
-
 export class BrowserHostRelay {
   #targets = new Map<string, Target>();
   #contexts = new Set<string>();
@@ -90,7 +89,7 @@ export class BrowserHostRelay {
     const { id, method = '', params = {}, sessionId } = parsed;
     if (typeof id !== 'number') return;
     const answer = (result: unknown) => this.#send(profile, { id, result: result ?? {}, ...(sessionId ? { sessionId } : {}) });
-    const fail = (cause: unknown) => this.#send(profile, { id, error: { message: message(cause) }, ...(sessionId ? { sessionId } : {}) });
+    const fail = (cause: unknown) => this.#send(profile, { id, error: { message: errorText(cause) }, ...(sessionId ? { sessionId } : {}) });
     if (sessionId !== undefined) {
       if (!this.#targets.has(sessionId)) { fail(`no webview ${sessionId}: it was closed`); return; }
       this.bridge.relay(sessionId, method, params).then(answer, fail);

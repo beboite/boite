@@ -55,7 +55,7 @@
 
   /** Every machine's drafts first, whether the core has made them yet or not, then its live projects. */
   let groups = $derived.by<Group[]>(() => {
-    const machines = workspace.machines.length ? workspace.machines : [{ id: '', label: '', store }];
+    const machines = workspace.machinesOr(store);
     const several = workspace.machines.length > 1;
     return machines.map((machine) => {
       const here = machine.store === store;

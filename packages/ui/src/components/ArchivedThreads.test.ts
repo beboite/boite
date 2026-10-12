@@ -1,7 +1,6 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, tick, unmount } from 'svelte';
-import type { Project, ThreadSummary } from '@boite/contracts';
-import ArchivedDrawer from './ArchivedDrawer.svelte';
+import type { ThreadSummary } from '@boite/contracts';
 import ArchivedThreads from './ArchivedThreads.svelte';
 import ContextMenu from './ContextMenu.svelte';
 import { FakeClient } from '../lib/fake-client';
@@ -33,31 +32,23 @@ function deferred<T = void>() {
   return { promise, resolve };
 }
 
-test.each(['drawer', 'settings'] as const)('the mounted %s shows merged PR identity/time, reloads reason and restores the retained conversation', async surface => {
+test('the mounted settings archive shows merged PR identity/time, reloads reason and restores the retained conversation', async () => {
   const { store, client } = await ready();
   const account = (await client.call('accounts.list', {})).find(account => account.providerId === 'echo')!;
   const thread = await client.call('threads.create', { projectId: 'p-boite', providerId: 'echo', accountId: account.id, title: 'Merged conversation', worktree: { branch: 'merged-ui-fixture' } });
   client.setMergedPrFixture(thread.id, { repository: 'github.com/example/repo', branch: thread.branch!, tip: 'a'.repeat(40), clean: true, candidates: [{ repository: 'github.com/example/repo', branch: thread.branch!, sha: 'a'.repeat(40), number: 7, url: 'https://github.com/example/repo/pull/7', mergedAt: '2026-10-01T12:00:00Z' }] });
   const draw = async () => {
-    running = surface === 'drawer'
-      ? mount(ArchivedDrawer, { target: document.body, props: { store, project: store.projects.find(project => project.id === 'p-boite')! } })
-      : mount(ArchivedThreads, { target: document.body, props: { store, eager: true } });
+    running = mount(ArchivedThreads, { target: document.body, props: { store, eager: true } });
     await settle();
-    if (surface === 'drawer') { document.querySelector<HTMLButtonElement>('[data-testid=archived-drawer-toggle]')!.click(); await settle(); }
   };
-  if (surface === 'settings') {
-    await client.call('threads.archive', { threadId: 't-parser', archived: false });
-    const calls = vi.spyOn(client, 'call');
-    await draw();
-    expect(document.querySelector('[data-testid=archived-empty]')).not.toBeNull();
-    const loaded = calls.mock.calls.length;
-    expect(await client.sweepMergedPrArchives()).toBe(1);
-    await settle();
-    expect(calls.mock.calls.slice(loaded).some(([method]) => method === 'threads.list')).toBe(false);
-  } else {
-    expect(await client.sweepMergedPrArchives()).toBe(1);
-    await draw();
-  }
+  await client.call('threads.archive', { threadId: 't-parser', archived: false });
+  const calls = vi.spyOn(client, 'call');
+  await draw();
+  expect(document.querySelector('[data-testid=archived-empty]')).not.toBeNull();
+  const loaded = calls.mock.calls.length;
+  expect(await client.sweepMergedPrArchives()).toBe(1);
+  await settle();
+  expect(calls.mock.calls.slice(loaded).some(([method]) => method === 'threads.list')).toBe(false);
   const row = () => document.querySelector<HTMLElement>(`[data-thread-id="${thread.id}"]`)!;
   expect(row()).not.toBeNull();
   const reason = row().querySelector<HTMLElement>('[data-testid=archive-merged-reason]')!;
@@ -68,22 +59,19 @@ test.each(['drawer', 'settings'] as const)('the mounted %s shows merged PR ident
   await unmount(running!, { outro: false }); running = null; document.body.innerHTML = '';
   await draw();
   expect(row().querySelector('[data-testid=archive-merged-reason]')).not.toBeNull();
-  row().querySelector<HTMLButtonElement>(surface === 'drawer' ? '[data-testid=archived-drawer-restore]' : '[data-testid=archived-restore]')!.click();
+  row().querySelector<HTMLButtonElement>('[data-testid=archived-restore]')!.click();
   await settle();
   const restored = await client.call('threads.get', { threadId: thread.id });
   expect(restored.archived).toBe(false); expect(restored.archiveReason).toBeUndefined(); expect(restored.cwd).toBe(thread.cwd);
   expect(await client.sweepMergedPrArchives()).toBe(0);
-  if (surface === 'drawer') expect(row()).toBeNull();
-  else {
-    expect(row().querySelector('[data-testid=archive-merged-reason]')).toBeNull();
-    row().querySelector<HTMLButtonElement>('[data-testid=archived-open]')!.click(); await settle();
-    expect(store.openThread?.id).toBe(thread.id);
-    expect(store.openThread?.cwd).toBe(thread.cwd);
-    await client.call('threads.archive', { threadId: thread.id, archived: true }); await settle();
-    expect(row().querySelector('[data-testid=archived-restore]')).not.toBeNull();
-    await client.call('threads.archive', { threadId: thread.id, archived: false }); await settle();
-    expect(row()).toBeNull();
-  }
+  expect(row().querySelector('[data-testid=archive-merged-reason]')).toBeNull();
+  row().querySelector<HTMLButtonElement>('[data-testid=archived-open]')!.click(); await settle();
+  expect(store.openThread?.id).toBe(thread.id);
+  expect(store.openThread?.cwd).toBe(thread.cwd);
+  await client.call('threads.archive', { threadId: thread.id, archived: true }); await settle();
+  expect(row().querySelector('[data-testid=archived-restore]')).not.toBeNull();
+  await client.call('threads.archive', { threadId: thread.id, archived: false }); await settle();
+  expect(row()).toBeNull();
 });
 
 test('a mounted settings archive reconciles a late sweep and removal ahead of its initial list response', async () => {
@@ -145,32 +133,27 @@ test('mounted policy menu keeps its owner during an awaited write and ignores a 
   expect(store.error).toBeNull();
 });
 
-test.each(['drawer', 'settings'] as const)('an awaited mounted %s Restore never inserts its old conversation into a replacement machine', async surface => {
+test('an awaited mounted settings Restore never inserts its old conversation into a replacement machine', async () => {
   const { store, client } = await ready();
-  running = surface === 'drawer'
-    ? mount(ArchivedDrawer, { target: document.body, props: { store, project: store.projects.find(project => project.id === 'p-boite')! } })
-    : mount(ArchivedThreads, { target: document.body, props: { store, eager: true } });
+  running = mount(ArchivedThreads, { target: document.body, props: { store, eager: true } });
   await settle();
-  if (surface === 'drawer') { document.querySelector<HTMLButtonElement>('[data-testid=archived-drawer-toggle]')!.click(); await settle(); }
   const started = deferred(), released = deferred(), call = client.call.bind(client);
   vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
     const answer = await call(method, params);
     if (method === 'threads.archive') { started.resolve(); await released.promise; }
     return answer;
   });
-  document.querySelector<HTMLButtonElement>(`[data-thread-id=t-parser] [data-testid=${surface === 'drawer' ? 'archived-drawer-restore' : 'archived-restore'}]`)!.click(); await started.promise;
+  document.querySelector<HTMLButtonElement>(`[data-thread-id=t-parser] [data-testid=archived-restore]`)!.click(); await started.promise;
   const replacement = new FakeClient({ delayMs: 0, coreId: 'replacement' }); cleanups.push(() => replacement.close());
   store.attach(replacement); await store.connect();
   released.resolve(); await settle();
   expect(store.threads.some(thread => thread.id === 't-parser')).toBe(false);
   expect((await replacement.call('threads.get', { threadId: 't-parser' })).archived).toBe(true);
-  if (surface === 'settings') {
-    const title = document.querySelector('[data-testid=archived-list] [data-thread-id=t-parser] .title')!.textContent;
-    await client.call('threads.archive', { threadId: 't-parser', archived: true });
-    await client.call('threads.update', { threadId: 't-parser', title: 'Old machine archive' });
-    await settle();
-    expect(document.querySelector('[data-testid=archived-list] [data-thread-id=t-parser] .title')!.textContent).toBe(title);
-  }
+  const title = document.querySelector('[data-testid=archived-list] [data-thread-id=t-parser] .title')!.textContent;
+  await client.call('threads.archive', { threadId: 't-parser', archived: true });
+  await client.call('threads.update', { threadId: 't-parser', title: 'Old machine archive' });
+  await settle();
+  expect(document.querySelector('[data-testid=archived-list] [data-thread-id=t-parser] .title')!.textContent).toBe(title);
   expect(store.error).toBeNull();
 });
 
@@ -179,38 +162,27 @@ async function settle() {
   flushSync();
 }
 
-const project = (extra: Partial<Project> = {}): Project => ({ id: 'p-1', name: 'boite', path: '/w/boite', createdAt: 0, ...extra });
-const archived = (id: string, title: string) => ({ id, title, projectId: 'p-1', archived: true, updatedAt: 0 }) as ThreadSummary;
-
-test('a project with no archived thread has no drawer', () => {
-  running = mount(ArchivedDrawer, { target: document.body, props: { store: { connection: 'ready' } as never, project: project() } });
-  flushSync();
-  expect(document.querySelector('[data-testid=archived-drawer]')).toBeNull();
-});
-
-test('the drawer reads the project\'s archived threads on opening, and a restore takes the row out', async () => {
-  const call = vi.fn(async (method: string, params: Record<string, unknown>) => {
-    if (method === 'threads.list') return [archived('t-1', 'Parser'), archived('t-2', 'Old spike'), { ...archived('t-3', 'Child'), parentThreadId: 't-1' }];
-    return { ...archived(String(params.threadId), 'Parser'), archived: false };
-  });
-  const store = { connection: 'ready', error: null, client: { call }, threads: [] as ThreadSummary[] };
-  running = mount(ArchivedDrawer, { target: document.body, props: { store: store as never, project: project({ archivedThreads: 2 }) } });
-  flushSync();
-  const toggle = document.querySelector<HTMLButtonElement>('[data-testid=archived-drawer-toggle]')!;
-  // The count sits after the label, as on every fold, never inside it.
-  expect(toggle.querySelector('.label')?.textContent).toBe('Archived conversations');
-  expect(toggle.querySelector('.fold-count')?.textContent).toBe('2');
-  // Folded, nothing is read.
-  expect(call).not.toHaveBeenCalled();
-
-  toggle.click();
+test('a thread archived live takes its place by archive time, not the top', async () => {
+  const { store, client } = await ready();
+  await store.archive('t-trace');
+  let push: ((summary: ThreadSummary) => void) | undefined;
+  const on = client.on.bind(client);
+  vi.spyOn(client, 'on').mockImplementation(((event: string, handler: (summary: ThreadSummary) => void) => {
+    if (event === 'thread.updated') push = handler;
+    return on(event as never, handler as never);
+  }) as never);
+  running = mount(ArchivedThreads, { target: document.body, props: { store, eager: true } });
   await settle();
-  expect(call).toHaveBeenCalledWith('threads.list', { projectId: 'p-1', includeArchived: true });
-  expect([...document.querySelectorAll('[data-testid=archived-drawer] li')].map((li) => li.getAttribute('data-thread-id'))).toEqual(['t-1', 't-2']);
-
-  document.querySelector<HTMLButtonElement>('[data-thread-id=t-1] button')!.click();
+  const rows = () => [...document.querySelectorAll('[data-testid=archived-list] li')].map(row => row.getAttribute('data-thread-id'));
+  expect(rows()).toEqual(['t-trace', 't-parser']);
+  // Put away long ago on another computer, announced only now.
+  const bench = store.threads.find(thread => thread.id === 't-bench')!;
+  push!({ ...bench, archived: true, archivedAt: 1, updatedAt: Date.now() });
   await settle();
-  expect(call).toHaveBeenCalledWith('threads.archive', { threadId: 't-1', archived: false });
-  expect(store.threads.map((t) => t.id)).toEqual(['t-1']);
-  expect(document.querySelector('[data-thread-id=t-1]')).toBeNull();
+  expect(rows()).toEqual(['t-trace', 't-parser', 't-bench']);
+  // A row archived again elsewhere moves up with its new time.
+  const parser = (await client.call('threads.list', { includeArchived: true })).find(thread => thread.id === 't-parser')!;
+  push!({ ...parser, archivedAt: Date.now() + 60_000 });
+  await settle();
+  expect(rows()).toEqual(['t-parser', 't-trace', 't-bench']);
 });

@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Options } from '@anthropic-ai/claude-agent-sdk';
+import type { Turn } from '@boite/contracts';
 import { connect } from '../src/client.ts';
 import { waitFor } from './harness.ts';
 import {
@@ -288,6 +289,34 @@ describe('claude driver', () => {
     expect(costs[0]).toBeCloseTo(0.25, 10);
     expect(costs[1]).toBeCloseTo(0.05, 10);
     expect(costs[2]).toBeCloseTo(0.07, 10);
+  });
+
+  test('a resumed CLI that restored less than the journal holds leaves the turn unpriced instead of charging the session again', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+
+    // The second process restored the session's tokens (52 held for a 26-token turn) but a total of 0.1, under the 0.25
+    // the journal already charged. Charging 0.1 would count the first turn twice, and every later resume more.
+    const held = (tokens: number) => ({ 'claude-test': { inputTokens: tokens, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, webSearchRequests: 0, costUSD: 0, contextWindow: 0, maxOutputTokens: 0 } });
+    const results = [{ total_cost_usd: 0.25, modelUsage: held(26) }, { total_cost_usd: 0.1, modelUsage: held(52) }];
+    let turn = 0;
+    scripted(() => undefined, (fake) => {
+      fake.emit(init('sess-short'));
+      fake.emit(sdk({ ...(success('sess-short') as object), ...results[turn++] }));
+    });
+
+    const finished: Turn[] = [];
+    for (const prompt of ['first', 'second']) {
+      const done = client.next('turn.finished', (finishedTurn) => finishedTurn.threadId === threadId, 10000);
+      await client.call('turns.start', { threadId, prompt });
+      finished.push(await done);
+    }
+
+    expect(queries).toHaveLength(2);
+    expect(finished[0]?.usage?.costUsdEquivalent).toBeCloseTo(0.25, 10);
+    // The tokens stay, so the usage page still prices the turn at the model's rates.
+    expect(finished[1]?.usage).toMatchObject({ costUsdEquivalent: null });
+    expect(finished[1]?.usage?.inputTokens).toBeGreaterThan(0);
   });
 
   test('warmProcessMinutes at zero keeps one query per turn', async () => {

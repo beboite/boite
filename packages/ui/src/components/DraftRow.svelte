@@ -22,7 +22,7 @@
   }
   function menu(event: MouseEvent) {
     contextMenu.open(event, [
-      { id: 'open', label: strings.sidebar.open },
+      { id: 'open', label: strings.common.open },
       separator(),
       { id: 'delete', label: strings.sidebar.deleteDraft, danger: true }
     ], action => {

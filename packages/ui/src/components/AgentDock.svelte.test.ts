@@ -30,7 +30,7 @@ test('a workflow without active children shows a timer and opens the team overvi
   await tick();
   const button = document.querySelector<HTMLButtonElement>('[data-testid=agent-dock] button');
   expect(button?.textContent).toContain('1 workflow');
-  expect(button?.querySelector('[data-testid=agent-elapsed]')?.textContent).toContain('1 m');
+  expect(button?.querySelector('[data-testid=agent-elapsed]')?.textContent).toContain('1m');
   const surface = store.panel.openWorkflow(run!.id);
   store.panel.close(surface.id);
   button!.click();

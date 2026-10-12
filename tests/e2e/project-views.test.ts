@@ -89,6 +89,8 @@ test('copy path stays readable with a long working directory in conversation men
     expect(await page.evaluate(`document.querySelector('${copy}').textContent.trim()`)).toBe('Copier le chemin');
     await page.click(copy);
     await page.waitFor(`!document.querySelector('${menu}')`);
+    // The menu closes before the asynchronous clipboard write lands.
+    await page.waitFor(`navigator.clipboard.readText().then(text => text === ${JSON.stringify(cwd)})`).catch(() => {});
     expect(await page.evaluate(`navigator.clipboard.readText()`)).toBe(cwd);
   }
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1300, height: 850, deviceScaleFactor: 1, mobile: false });

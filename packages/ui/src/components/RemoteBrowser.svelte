@@ -1,10 +1,12 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import { onMount, untrack } from 'svelte';
-  import { Pause, Play, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Copy, Globe, Lock, MonitorSmartphone, RotateCw, Send } from '@lucide/svelte';
+  import { Pause, Play, ArrowUp, ArrowDown, Copy, MonitorSmartphone, Send } from '@lucide/svelte';
   import { REMOTE_PRESS_MAX, REMOTE_TEXT_MAX, type RemoteBrowserFrame, type RemoteBrowserInput } from '@boite/contracts';
   import { browserKey, hasKeyboard, liveInput, writeClipboardLater } from '../lib/live-input';
   import type { Store } from '../lib/store.svelte';
   import { strings } from '../lib/strings';
+  import BrowserNav from './BrowserNav.svelte';
   import { normalizeUrl } from '../lib/browser-bridge';
   import { dragScroll, FRAME_INTERVAL, frameMaxWidth, framePoint, frameQuality, nextPollDelay } from '../lib/remote-browser-view';
   /**
@@ -41,7 +43,6 @@
   const previewScale = $derived(frame ? (zoom || Math.min(areaWidth / frame.width, areaHeight / frame.height)) : 1);
   const validSize = $derived([viewportWidth, viewportHeight].every(n => typeof n === 'number' && Number.isInteger(n) && n >= 240 && n <= 3840));
   const usable = $derived(!!frame && frameClient === store.client && !paused && !busy && !error && store.connection === 'ready');
-  const message = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
   function stop() { generation++; clearTimeout(timer); }
   async function decoded(base64: string): Promise<void> {
     const image = new Image();
@@ -70,7 +71,7 @@
       else { frame = null; frameClient = null; error = strings.remoteBrowser.reconnecting; }
     } catch (cause) {
       if (alive && run === generation) {
-        const reason = message(cause);
+        const reason = errorText(cause);
         // The core spaces frame requests; a refusal for asking early is not a failure.
         if (/wait before requesting/.test(reason)) retry = true;
         else { failures++; error = reason; }
@@ -124,7 +125,7 @@
       if (moving) fresh = false;
       return true;
     }
-    catch (cause) { if (alive && run === generation && client === store.client) error = message(cause); return false; }
+    catch (cause) { if (alive && run === generation && client === store.client) error = errorText(cause); return false; }
     finally {
       busy = false;
       if (resizing && alive && run === generation) { frame = null; frameClient = null; resume(); }
@@ -145,7 +146,7 @@
       // What cannot land on the page the user saw is dropped, never replayed on another.
       if (!alive || !client || frameClient !== client || !target || paused || store.connection !== 'ready' || old(target)) { queue = []; return; }
       try { await client.call('browser.remoteInput', { threadId, frameId: target.id, input: value }); }
-      catch (cause) { queue = []; if (alive && client === store.client) error = message(cause); return; }
+      catch (cause) { queue = []; if (alive && client === store.client) error = errorText(cause); return; }
       finally { if (alive) kick(); }
     }
   }
@@ -162,7 +163,7 @@
   /** The Copy button, for a screen with no Control+C. */
   async function copySelection() {
     try { say(await writeClipboardLater(selection()) ? strings.remoteBrowser.copied : strings.remoteBrowser.nothingSelected); }
-    catch (cause) { say(message(cause)); }
+    catch (cause) { say(errorText(cause)); }
   }
   onMount(() => {
     const live = liveInput(() => area, {
@@ -309,19 +310,19 @@
 </script>
 
 <section class="remote" data-testid="remote-browser" aria-label={strings.remoteBrowser.title}>
-  <form class="nav" data-testid="remote-browser-nav" onsubmit={go}>
-    <button type="button" class="ghost small icon" disabled={!usable} title={strings.remoteBrowser.back} aria-label={strings.remoteBrowser.back} onclick={() => void input({ kind: 'history', direction: 'back' })}><ArrowLeft size={15} strokeWidth={1.75} /></button>
-    <button type="button" class="ghost small icon" disabled={!usable} title={strings.remoteBrowser.forward} aria-label={strings.remoteBrowser.forward} onclick={() => void input({ kind: 'history', direction: 'forward' })}><ArrowRight size={15} strokeWidth={1.75} /></button>
-    <button type="button" class="ghost small icon" disabled={!usable} title={strings.remoteBrowser.reload} aria-label={strings.remoteBrowser.reload} onclick={() => void input({ kind: 'reload' })}><RotateCw size={14} strokeWidth={1.75} class={frame && !fresh ? 'spin' : ''} /></button>
-    <div class="omnibox" class:secure={secure}>
-      <label class="site" for={addressId}><span aria-hidden="true">{#if secure}<Lock size={12} strokeWidth={2} />{:else}<Globe size={12} strokeWidth={2} />{/if}</span></label>
+  <BrowserNav {addressId} {secure} loading={!!frame && !fresh && !paused} spinning={!!frame && !fresh} disabled={!usable} onsubmit={go}
+    onback={() => void input({ kind: 'history', direction: 'back' })} onforward={() => void input({ kind: 'history', direction: 'forward' })} onreload={() => void input({ kind: 'reload' })}>
+    {#snippet field()}
       <input id={addressId} bind:value={address} data-testid="remote-browser-address" type="text" inputmode="url" enterkeyhint="go" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="4096" aria-label={strings.remoteBrowser.address} placeholder={strings.remoteBrowser.addressPlaceholder} onfocus={e => { editingAddress = true; e.currentTarget.select(); }} onblur={() => { editingAddress = false; }} />
+    {/snippet}
+    {#snippet status()}
       {#if paused || error || !frame}<span class="state ui-label" data-testid="remote-browser-state">{paused ? strings.remoteBrowser.paused : error ? strings.remoteBrowser.reconnecting : strings.remoteBrowser.waiting}</span>{/if}
-    </div>
-    <button type="button" class="ghost small icon" data-testid="remote-browser-display" aria-expanded={displaySettings} title={strings.remoteBrowser.display} aria-label={strings.remoteBrowser.display} onclick={() => { displaySettings = !displaySettings; if (frame) { viewportWidth = frame.width; viewportHeight = frame.height; } }}><MonitorSmartphone size={15} strokeWidth={1.75} /></button>
-    <button type="button" class="ghost small icon" data-testid="remote-browser-pause" aria-pressed={paused} title={paused ? strings.remoteBrowser.resume : strings.remoteBrowser.pause} aria-label={paused ? strings.remoteBrowser.resume : strings.remoteBrowser.pause} onclick={() => { paused = !paused; }}>{#if paused}<Play size={14} strokeWidth={1.75} />{:else}<Pause size={14} strokeWidth={1.75} />{/if}</button>
-  </form>
-  {#if frame && !fresh && !paused}<span class="loading" aria-hidden="true"></span>{/if}
+    {/snippet}
+    {#snippet actions()}
+      <button type="button" class="ghost small icon" data-testid="remote-browser-display" aria-expanded={displaySettings} title={strings.remoteBrowser.display} aria-label={strings.remoteBrowser.display} onclick={() => { displaySettings = !displaySettings; if (frame) { viewportWidth = frame.width; viewportHeight = frame.height; } }}><MonitorSmartphone size={15} strokeWidth={1.75} /></button>
+      <button type="button" class="ghost small icon toggle" data-testid="remote-browser-pause" aria-pressed={paused} title={paused ? strings.remoteBrowser.resume : strings.remoteBrowser.pause} aria-label={paused ? strings.remoteBrowser.resume : strings.remoteBrowser.pause} onclick={() => { paused = !paused; }}>{#if paused}<Play size={14} strokeWidth={1.75} />{:else}<Pause size={14} strokeWidth={1.75} />{/if}</button>
+    {/snippet}
+  </BrowserNav>
   {#if error}<div class="error" role="status" data-testid="remote-browser-error"><p>{error}</p></div>{/if}
   <div class="viewer">
   {#if displaySettings}
@@ -374,23 +375,9 @@
 <style>
   .remote { flex: 1; min-height: 0; height: 100%; display: flex; flex-direction: column; position: relative; overflow-x: clip; }
   small, .empty { color: var(--color-muted-foreground); font-size: var(--text-sm); }
-  .nav { display: flex; align-items: center; gap: 2px; height: 40px; padding: 0 6px; margin: 0; flex: none; border-bottom: 1px solid var(--color-border); background: var(--color-surface); }
-  .nav > button { flex: none; }
-  .omnibox { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; height: var(--control-sm); margin: 0 4px; padding: 0 10px 0 0; border: 1px solid transparent; border-radius: var(--radius-full); background: var(--color-surface-2); color: var(--color-muted-foreground); cursor: text; transition: border-color var(--dur-2) var(--ease-out-quint); }
-  .omnibox:hover { border-color: var(--color-border); }
-  .omnibox:focus-within { border-color: color-mix(in srgb, var(--color-accent) 60%, var(--color-edge)); box-shadow: 0 0 0 3px var(--color-accent-soft); }
-  .omnibox input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; color: var(--color-foreground); font-size: var(--text-sm); text-overflow: ellipsis; outline: none; }
-  /* The icon is the field's label: a click beside the text still lands in it. */
-  .site { display: flex; align-items: center; flex: none; align-self: stretch; padding: 0 6px 0 10px; line-height: 0; cursor: text; }
   .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  .omnibox.secure .site { color: var(--color-foreground); opacity: .7; }
-  .state { flex: none; font-size: var(--text-xs); color: var(--color-muted-foreground); }
-  .nav button[aria-pressed=true] { color: var(--color-accent); background: var(--color-accent-soft); }
-  .nav :global(.spin) { animation: reload-spin 1s linear infinite; }
-  @keyframes reload-spin { to { transform: rotate(360deg); } }
-  .loading { position: absolute; top: 39px; left: 0; height: 2px; width: 40%; z-index: 2; background: var(--color-accent); animation: loading-slide 1.1s var(--ease-out-quint) infinite; }
-  @keyframes loading-slide { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
-  @media (prefers-reduced-motion: reduce) { .nav :global(.spin), .loading { animation: none; } }
+  .state { flex: none; margin-left: 6px; font-size: var(--text-xs); color: var(--color-muted-foreground); }
+  .toggle[aria-pressed=true] { color: var(--color-accent); background: var(--color-accent-soft); }
   .viewer { position: relative; flex: 1; min-height: 80px; overflow: hidden; }
   .screen-area { width: 100%; height: 100%; display: flex; background: var(--color-background); overflow: auto; }
   .zoomed .screen { touch-action: pan-x pan-y; }
@@ -416,6 +403,6 @@
   footer input { min-width: 0; flex: 1; height: var(--control); border-radius: var(--radius-full); padding: 0 12px; font-size: var(--text-md); }
   .error { padding: 6px 12px; border-bottom: 1px solid var(--color-border); } .error p { margin: 0; font-size: var(--text-sm); color: var(--color-danger); max-height: 90px; overflow: auto; overflow-wrap: anywhere; }
   .empty { margin: auto; padding: 24px; }
-  @media (max-width: 720px), (pointer: coarse) { .omnibox input, .display-settings input { font-size: var(--text-md); } }
-  @media (max-width: 720px) { .nav { height: auto; min-height: 48px; padding-block: 2px; } .loading { top: auto; } footer .hint { display: none; } }
+  @media (max-width: 720px), (pointer: coarse) { .display-settings input { font-size: var(--text-md); } }
+  @media (max-width: 720px) { footer .hint { display: none; } }
 </style>

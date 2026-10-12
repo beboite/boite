@@ -3,7 +3,7 @@
   import type { ProjectEntry } from '../lib/project-view.svelte';
   import type { ThreadId, ThreadSummary } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
-  import { archivedThreads } from '../lib/archive';
+  import { archivedThreads, archivedTime } from '../lib/archive';
   import { projectName } from '../lib/format';
   import { strings } from '../lib/strings';
   import { archiveCount, archiveKindOf, type ArchiveKind } from '../lib/project-threads.svelte';
@@ -75,7 +75,7 @@
     }));
     const drawn = await row;
     if (revision !== current) return;
-    loaded = results.flatMap(result => result.status === 'fulfilled' ? result.value : []).sort((a, b) => b.thread.updatedAt - a.thread.updatedAt);
+    loaded = results.flatMap(result => result.status === 'fulfilled' ? result.value : []).sort((a, b) => archivedTime(b.thread) - archivedTime(a.thread));
     failed = !drawn || results.some(result => result.status === 'rejected');
     loading = false;
   }
@@ -83,7 +83,7 @@
 
 {#snippet completedRows()}
     {#if loading}<p class="hint" role="status"><span class="ui-label">{strings.app.loading}</span></p>{/if}
-    {#if failed}<div class="hint" role="status"><span class="ui-label">{strings.sidebar.doneLoadFailed}</span><button type="button" class="ghost small" data-testid="recent-done-retry" onclick={() => retry++}><span class="ui-label">{strings.sidebar.doneRetry}</span></button></div>{/if}
+    {#if failed}<div class="hint" role="status"><span class="ui-label">{strings.sidebar.doneLoadFailed}</span><button type="button" class="ghost small" data-testid="recent-done-retry" onclick={() => retry++}><span class="ui-label">{strings.common.retry}</span></button></div>{/if}
     <WindowList items={rows} keyOf={entry => JSON.stringify([entry.machine.id, entry.thread.id])} {scrollRoot} estimate={44} {measurements}>
       {#snippet row(entry)}{#if DoneThread}<DoneThread {entry} {now} showMachine={multi} showProject={spans} {onopen} />{/if}{/snippet}
     </WindowList>

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { strings } from '../lib/strings';
   import { formatLocale } from '../lib/i18n.svelte';
+  import { longDay } from '../lib/format';
   import { formatTick, niceScale, reportedValue, type UsageBucket, type UsageMetric } from '../lib/usage';
 
   type Serie = { key: string; color: string; label: string };
@@ -30,7 +31,6 @@
   // In the language the app speaks, not the system's.
   const weekday = $derived(new Intl.DateTimeFormat(formatLocale(), { weekday: 'short' }));
   const dayMonth = $derived(new Intl.DateTimeFormat(formatLocale(), { day: 'numeric', month: 'short' }));
-  const fullDay = $derived(new Intl.DateTimeFormat(formatLocale(), { weekday: 'long', day: 'numeric', month: 'long' }));
 
   /** An estimate of a label's width at the tick size, wide enough to keep two labels apart. */
   const CHAR = 6.5;
@@ -107,7 +107,7 @@
     const bucket = buckets[active ?? buckets.length - 1];
     if (bucket === undefined) return '';
     const lines = [...series].reverse().map((serie) => `${serie.label} ${reportedValue(metric, bucket.values[serie.key] ?? 0, bucket.coverage[serie.key]!)}`);
-    return `${fullDay.format(bucket.start)}: ${strings.usage.total} ${reportedValue(metric, bucket.total, bucket)}, ${lines.join(', ')}`;
+    return `${longDay(bucket.start)}: ${strings.usage.total} ${reportedValue(metric, bucket.total, bucket)}, ${lines.join(', ')}`;
   });
   let tipWidth = $state(0);
   /** Beside the column, on whichever side has room, never past the chart's edges. */
@@ -165,7 +165,7 @@
   {/if}
   {#if tip}
     <div class="tooltip" style:left="{tipX}px" bind:clientWidth={tipWidth} aria-hidden="true" data-testid="usage-tooltip">
-      <strong>{fullDay.format(tip.start)}</strong>
+      <strong>{longDay(tip.start)}</strong>
       <ul>
         {#each [...series].reverse() as serie (serie.key)}
           <li class:zero={(tip.values[serie.key] ?? 0) === 0}>

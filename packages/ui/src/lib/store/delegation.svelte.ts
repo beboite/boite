@@ -1,3 +1,4 @@
+import { errorText } from '../errors';
 import { secureId } from '../secure-id';
 import type {
   AgentContact,
@@ -121,7 +122,7 @@ export class Delegation {
           if (current()) this.coordinationDirectory = agents;
         }
       } catch (error) {
-        if (current()) this.coordinationError = error instanceof Error ? error.message : String(error);
+        if (current()) this.coordinationError = errorText(error);
       } finally {
         if (current()) this.coordinationLoading = false;
       }
@@ -145,7 +146,7 @@ export class Delegation {
         void s.loadCoordination(threadId);
       }
     } catch (error) {
-      if (this.ctx.client === client && s.openThread?.id === threadId) this.coordinationError = error instanceof Error ? error.message : String(error);
+      if (this.ctx.client === client && s.openThread?.id === threadId) this.coordinationError = errorText(error);
     } finally {
       if (this.ctx.client === client && this.coordinationEpoch === epoch) this.coordinationSaving = false;
     }
@@ -161,7 +162,7 @@ export class Delegation {
       const grants = await client.call('stewards.list', {});
       if (this.ctx.client === client && this.stewardsEpoch === epoch) { this.stewards = grants; this.stewardsError = null; }
     } catch (error) {
-      if (this.ctx.client === client && this.stewardsEpoch === epoch) this.stewardsError = error instanceof Error ? error.message : String(error);
+      if (this.ctx.client === client && this.stewardsEpoch === epoch) this.stewardsError = errorText(error);
     }
   }
 
@@ -190,7 +191,7 @@ export class Delegation {
       const grants = await write(client);
       if (this.ctx.client === client && this.stewardsEpoch === epoch) this.stewards = grants;
     } catch (error) {
-      if (this.ctx.client === client) this.stewardsError = error instanceof Error ? error.message : String(error);
+      if (this.ctx.client === client) this.stewardsError = errorText(error);
     } finally {
       if (this.ctx.client === client && this.stewardsEpoch === epoch) this.stewardsSaving = false;
     }
