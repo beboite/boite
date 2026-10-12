@@ -8,6 +8,8 @@
  * recent commands list. Nothing is written into the user's own files: bash
  * reads ours through `--rcfile` after `~/.bashrc`, PowerShell gets it in
  * `-EncodedCommand` after its profile, which no execution policy blocks.
+ * `BOITE_TERMINAL_HISTORY` gives PowerShell another history file, which bash
+ * takes from `HISTFILE`: tests use them to keep away from the user's.
  */
 
 import { existsSync, mkdirSync, openSync, readSync, closeSync, fstatSync, writeFileSync } from 'node:fs';
@@ -86,6 +88,8 @@ if (Get-Command PSConsoleHostReadLine -ErrorAction SilentlyContinue) {
     $line
   }
 }
+# PSReadLine takes its path from the profile folder, never from $env:APPDATA: a test names another file here.
+if ($env:BOITE_TERMINAL_HISTORY) { try { Set-PSReadLineOption -HistorySavePath $env:BOITE_TERMINAL_HISTORY } catch {} }
 try { $path = (Get-PSReadLineOption).HistorySavePath } catch { $path = $null }
 if ($path) { [Console]::Write("$($Global:__BoiteE)]633;P;HistoryFile=$path$($Global:__BoiteB)") }
 `;

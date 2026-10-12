@@ -232,10 +232,11 @@ describe('terminals', () => {
     const pwsh = process.platform === 'win32' ? Bun.which('pwsh.exe') : null;
     if (process.platform === 'win32' && pwsh === null) return;
     const home = mkdtempSync(join(tmpdir(), 'boite-shell-home-'));
-    const saved = { shell: process.env['BOITE_TERMINAL_SHELL'], home: process.env['HOME'], appData: process.env['APPDATA'], histfile: process.env['HISTFILE'] };
+    const saved = { shell: process.env['BOITE_TERMINAL_SHELL'], home: process.env['HOME'], history: process.env['BOITE_TERMINAL_HISTORY'], histfile: process.env['HISTFILE'] };
     process.env['BOITE_TERMINAL_SHELL'] = pwsh ?? '/bin/bash';
     process.env['HOME'] = home;
-    process.env['APPDATA'] = home;
+    // PSReadLine ignores APPDATA: without this it would save to the user's own history.
+    process.env['BOITE_TERMINAL_HISTORY'] = join(home, 'ConsoleHost_history.txt');
     delete process.env['HISTFILE'];
     try {
       const client = await harness.connect();
@@ -264,11 +265,12 @@ describe('terminals', () => {
       await waitFor(() => seen.text().slice(echoedAt).includes('\x1b]133;D;0'), SHELL_MS);
       // Written as each command ran, not when the shell exits.
       await waitFor(async () => (await client.call('terminals.history', { id })).commands[0] === 'echo boite-history-marker', SHELL_MS);
-      expect((await client.call('terminals.history', { id })).commands.slice(0, 2)).toEqual(['echo boite-history-marker', failing]);
+      // Exactly the two commands: the shell read and wrote the test's own file, nothing of the user's.
+      expect((await client.call('terminals.history', { id })).commands).toEqual(['echo boite-history-marker', failing]);
       await client.call('terminals.close', { id });
       await waitFor(() => seen.exited() !== null, SHELL_MS);
     } finally {
-      for (const [name, value] of [['BOITE_TERMINAL_SHELL', saved.shell], ['HOME', saved.home], ['APPDATA', saved.appData], ['HISTFILE', saved.histfile]] as const) {
+      for (const [name, value] of [['BOITE_TERMINAL_SHELL', saved.shell], ['HOME', saved.home], ['BOITE_TERMINAL_HISTORY', saved.history], ['HISTFILE', saved.histfile]] as const) {
         if (value === undefined) delete process.env[name];
         else process.env[name] = value;
       }
