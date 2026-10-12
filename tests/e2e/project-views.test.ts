@@ -87,11 +87,13 @@ test('copy path stays readable with a long working directory in conversation men
     await capture(`copy-path-${opener}.png`);
     expect(await page.evaluate(`(() => { const e = document.querySelector('${copy}'); return e.scrollWidth <= e.clientWidth; })()`)).toBe(true);
     expect(await page.evaluate(`document.querySelector('${copy}').textContent.trim()`)).toBe('Copier le chemin');
+    // Each opener writes its own copy: the previous one must not answer for it.
+    await page.evaluate(`navigator.clipboard.writeText('')`);
     await page.click(copy);
     await page.waitFor(`!document.querySelector('${menu}')`);
-    // The menu closes before the asynchronous clipboard write lands.
-    await page.waitFor(`navigator.clipboard.readText().then(text => text === ${JSON.stringify(cwd)})`).catch(() => {});
-    expect(await page.evaluate(`navigator.clipboard.readText()`)).toBe(cwd);
+    // The menu closes at once and the copy it fired lands afterwards: the
+    // clipboard write is asynchronous and nothing awaits it.
+    await page.waitFor(`navigator.clipboard.readText().then(text => text === ${JSON.stringify(cwd)})`);
   }
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1300, height: 850, deviceScaleFactor: 1, mobile: false });
   await page.send('Emulation.setFocusEmulationEnabled', { enabled: false });
