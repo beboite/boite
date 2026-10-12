@@ -151,11 +151,16 @@ describe('automatic compaction', () => {
     await client.call('settings.set', { autoCompact: { tokens: null, moments: ['cache-expiry'] } });
     // Echo's cache lives 300 s: the margin puts the moment 200 ms after the turn.
     AUTO_COMPACT.cacheMarginMs = 300_000 - 200;
-    await turn(client, threadId, 'hello');
-    await pause(80);
-    expect(await compactions(client, threadId)).toEqual([]);
     const compacted = client.next('turn.finished', t => t.threadId === threadId && t.execution?.operation === 'compact');
-    expect((await compacted).execution?.automatic).toBe(true);
+    const finished = client.next('turn.finished', t => t.threadId === threadId);
+    await client.call('turns.start', { threadId, prompt: 'hello' });
+    const hello = await finished;
+    const compaction = await compacted;
+    expect(compaction.execution?.automatic).toBe(true);
+    // The cache's clock starts when the turn ends: the compaction opens at the
+    // cache moment, not before. Polling for "nothing yet" a little after the
+    // turn raced the 200 ms on a slow runner.
+    expect(compaction.queuedAt).toBeGreaterThanOrEqual(hello.finishedAt! + 300_000 - AUTO_COMPACT.cacheMarginMs);
     client.close();
   });
 
