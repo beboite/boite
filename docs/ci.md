@@ -133,7 +133,7 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 593,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,584,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,620,000 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 3,912,000 |
 
@@ -163,6 +163,25 @@ limits were 4,466,000 and 3,744,000, the branch measured 4,469,022 and
 3,749,375 on Linux, about 3,755,400 core bytes on Windows. The limits rise to
 4,475,000 and 3,760,000.
 
+On 2026-10-11 on Linux with Bun 1.4.2, `main` at `4762402b` measured 4,471,508
+UI bytes with a 581,473-byte entry chunk. Several drafts per project, the
+composer's own undo history and image-carrying copy, the work counts on the
+Threads/Agents switch, the merged project fold, thread-like done rows with long
+press and their English/French sentences measured 4,493,255 and 590,779: 21,747
+bytes in all, 9,306 of them in the entry chunk. The display options panel loads
+on its own (6,646 bytes of JavaScript, 3,613 of CSS) to keep the entry chunk
+under its unchanged 591,000. The Windows job measured the same UI total. The UI
+limit rises to 4,500,000. Merged with `5dd77e39` and its review fixes, the
+Windows job measured a 591,007-byte entry chunk at `b294a3da`, and the next
+fixes 591,270 on Linux. A done row now loads with the first done rows (5,167
+bytes of JavaScript, 3,113 of CSS): the entry chunk measured 587,071 and the UI
+4,496,036. Merged with `daff9a53`, whose agent discussions had raised the UI
+limit to 4,500,000 on their own, the Windows job measured 591,322 and
+4,508,531 at `a1bd2cc4`. The project fold's rows now load at its first opening
+or after the list has drawn (7,250 bytes of JavaScript, 3,406 of CSS): on Linux
+the entry chunk measured 585,204, under its unchanged 591,000, and the UI
+4,511,041. The UI limit rises to 4,525,000.
+
 Later on 2026-10-11 on Linux with Bun 1.4.2, `main` at `5dd77e39` measured
 4,472,003 UI bytes and 3,749,519 core bytes, and settings cards (`boite
 settings`) on top of it 4,495,656 and 3,760,802; the Windows job measured
@@ -181,6 +200,14 @@ On 2026-10-12 on Linux with Bun 1.4.2, the latency pass (idle warm-up of the
 pages, kept Agents view, optimistic pin and archive, single permission answer)
 merged with `main` measured 4,513,690 UI bytes and a 591,872-byte entry chunk,
 within the limits above.
+
+Several drafts per project, merged with settings cards at `87fca361`, measured
+4,536,091 UI bytes and a 590,215-byte entry chunk on Linux: the done rows and
+the project fold's rows load outside the entry chunk, which stays under 593,000.
+Merged with `bafe8898`, whose diagnostic logs had raised the UI limit to
+4,581,000, the branch measured 4,606,394 UI bytes, a 591,099-byte entry chunk
+and 3,901,792 core bytes on Linux the same day. The UI limit rises to
+4,620,000.
 
 On 2026-10-10, `bun run build:ui` with Bun 1.4.2 measured 4,420,649 UI bytes at
 `feeb393b` and 4,425,557 with close confirmation and typed agent archival.
@@ -227,9 +254,10 @@ limits take the same increases: 4,581,000, 593,000 and 3,912,000.
 
 On 2026-10-12 on Linux, `main` at `bafe8898` measured 4,579,818 UI bytes. Priced
 usage rows measured 4,581,495: the UI gains 1,677 bytes for the rate notes and
-their English and French sentences, so the UI limit rises to 4,584,000. The
-core, with its table of public API rates, measured 3,908,480 bytes, under the
-unchanged 3,912,000.
+their English and French sentences. Merged with `5ee76431`, the branch measured
+4,608,071 UI bytes, under the 4,620,000 that `main` had set by then, and
+3,908,480 core bytes with its table of public API rates, under the unchanged
+3,912,000. No limit changes.
 
 On 2026-10-03, fresh builds of `e1f00a3` measured 2,695,204 core bytes and 3,932,309
 UI bytes. The orchestration additions measured 3,228,444 and 3,943,301 bytes:

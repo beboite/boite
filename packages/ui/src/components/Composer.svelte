@@ -3,16 +3,19 @@
   import { supportsSideQuestions, type Attachment, type PreviewReference } from '@boite/contracts';
   import { restorePreviewMentions } from '../lib/preview-mentions';
   import { AGENT_PREFIX, isAgentCommand, runCommand } from '../lib/commands.svelte';
-  import { agentSlashItems, boiteSlashItems, listKey, mentionQueryOf, mentionRows, slashQueryOf, type ChipCommand } from '../lib/composer-menus';
+  import { agentSlashItems, boiteSlashItems, listKey, mentionQueryOf, slashQueryOf, type ChipCommand } from '../lib/composer-menus';
   import { attachFiles } from '../lib/composer-attachments';
   import { rewindComposerEdit } from '../lib/composer-edit';
   import { fitHeight, selfSizing } from '../lib/composer-size';
-  import { editComposerInput, insertImageReference, removeImageReferences, trackImageSend } from '../lib/composer-images';
+  import { editComposerInput, insertImageReference, removeImageReferences, touchesImageReference, trackImageSend } from '../lib/composer-images';
+  import { checkpoint, editKind, recordEdit, resetHistory, settled } from '../lib/composer-history';
+  import { boxSelection, copySelection, pasteImages, travel, type EditingHost } from '../lib/composer-editing';
+  import { ComposerMentions } from '../lib/composer-mentions.svelte';
   import { unresolvedAssetId } from '../lib/draft-attachments';
   import { focusWithin } from '../lib/focus';
   import { touchScreen } from '../lib/device';
   import { ignoreQuestions, repliesOf, replyTarget, sendAnswer } from '../lib/question-reply.svelte';
-  import { emptyBox, returnPrompt, sentPrompts, textEntries, type SentPrompt } from '../lib/composer-queue';
+  import { emptyBox, returnPrompt, sentPrompts, textEntries, type ComposerState, type SentPrompt } from '../lib/composer-queue';
   import { rankItems, type PaletteItem } from '../lib/palette';
   import { clearStash, DRAFT_STASH_KEY, readStash, writeStash } from '../lib/prefs';
   import { claudeKeywords, promptSegments } from '../lib/message-display';
@@ -67,20 +70,7 @@
   /** Where the caret stands in the text, kept for the mention menu. */
   let caret = $state(0);
   let pendingEdit: { start: number; end: number } | undefined;
-  /** Escape shuts the mention menu on text it keeps, until that text changes again. */
-  let mentionDismissed = $state(false);
-  /** The row the keyboard is on in the mention menu. */
-  let mentionAt = $state(0);
-  /** The core's last page of files for the mention query. */
-  let mentionItems = $state<PaletteItem[]>([]);
-  /** How many matches the core held beyond that page. */
-  let mentionMore = $state(0);
-  /** The number of the last `projects.files` asked, so an older answer is dropped. */
-  let mentionAsk = 0;
-  /** The project `mentionItems` was ranked in: another one's paths are never shown. */
-  let mentionFrom: string | null = null;
-  const MENTION_PAGE = 30;
-  const MENTION_DEBOUNCE_MS = 60;
+  const mentions = new ComposerMentions();
 
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
   /** The three commands the composer runs itself: each one opens a chip's menu. */
@@ -196,49 +186,15 @@
   $effect(() => {
     void text;
     slashDismissed = false;
-    mentionDismissed = false;
+    mentions.dismissed = false;
   });
 
-  let mentionOpen = $derived(mentionQuery !== null && focused && !mentionDismissed);
+  let mentionOpen = $derived(mentionQuery !== null && focused && !mentions.dismissed);
 
   /** The project whose files are named: the open thread's, or the draft's. */
   let mentionProject = $derived(store.openThread?.projectId ?? store.draft?.projectId ?? null);
 
-  /** The core's page for the query, asked a beat after the last keystroke, the stale answer dropped. */
-  $effect(() => {
-    const query = mentionQuery;
-    const projectId = mentionProject;
-    const client = store.client;
-    // Every run drops the page in flight, the one that shuts the menu included.
-    const ask = ++mentionAsk;
-    // The menu opens on the frame `@` is typed, a whole round trip before the
-    // answer: a list ranked in another project, or for a word the user has
-    // left, would be pickable until then. Narrowing inside one project keeps
-    // its rows, which is what makes the list stand still while he types.
-    if (query === null || projectId !== mentionFrom) {
-      mentionFrom = projectId;
-      mentionItems = [];
-      mentionMore = 0;
-    }
-    if (query === null || projectId === null || !client) return;
-    const timer = setTimeout(() => {
-      void client
-        .call('projects.files', { projectId, query, limit: MENTION_PAGE })
-        .then((page) => {
-          if (ask !== mentionAsk) return;
-          mentionItems = mentionRows(page.files);
-          mentionMore = Math.max(0, page.total - page.files.length);
-          mentionAt = 0;
-        })
-        .catch(() => {
-          // A project gone or a core away: the menu says nothing matches, the text stands.
-          if (ask !== mentionAsk) return;
-          mentionItems = [];
-          mentionMore = 0;
-        });
-    }, MENTION_DEBOUNCE_MS);
-    return () => clearTimeout(timer);
-  });
+  $effect(() => mentions.follow(mentionQuery, mentionProject, store.client));
 
   let agentItems = $derived.by((): PaletteItem[] => agentSlashItems(store.openThread?.commands ?? []));
 
@@ -324,11 +280,21 @@
   function oninput(event: Event) {
     const input = event as InputEvent;
     const element = event.currentTarget as HTMLTextAreaElement;
+    const before = pendingEdit && { ...pendingEdit };
     if (pendingEdit && pendingEdit.start === pendingEdit.end && input.inputType?.startsWith('delete')) {
       if (input.inputType.endsWith('Backward')) pendingEdit.start = element.selectionStart;
       else pendingEdit.end += Math.max(0, text.length - element.value.length);
     }
-    const whole = editComposerInput(store, key, element, input.inputType === 'historyUndo' || input.inputType === 'historyRedo', pendingEdit);
+    // A host whose undo could not be cancelled already rewrote the box: the old path keeps its references.
+    const nativeUndo = input.inputType === 'historyUndo' || input.inputType === 'historyRedo';
+    const state = stateForInput();
+    // The state still holds the text before this edit: that is the step undo returns to.
+    if (!nativeUndo) {
+      const kind = touchesImageReference(state.text, state.attachments, pendingEdit) ? 'big' : editKind(input.inputType, pendingEdit);
+      recordEdit(state, kind, before, input.data ?? null);
+    }
+    const whole = editComposerInput(store, key, element, nativeUndo, pendingEdit);
+    settled(state);
     pendingEdit = undefined;
     recall = null;
     // Typing is proof the box has the keyboard, whatever the focus event did.
@@ -344,8 +310,9 @@
     if (state && (state.selection?.start !== start || state.selection?.end !== end)) state.selection = { start, end };
   }
 
-  /** Writes a recalled or restored prompt in, caret at its end. */
+  /** Writes a recalled or restored prompt in, caret at its end. One undo step, with whatever else the caller changes. */
   function put(value: string, at = value.length) {
+    checkpoint(stateForInput());
     setText(value);
     const el = box;
     if (el) {
@@ -354,6 +321,12 @@
     }
     caret = at;
     requestAnimationFrame(grow);
+  }
+
+  /** What the composer's own edits write to (`lib/composer-editing.ts`). An answer's files reach the agent as paths, so it takes images whatever the provider reads. */
+  function editing(): EditingHost {
+    return { store, key, box, state: stateForInput(), provider: reply ? null : provider,
+      moved: (at) => { caret = at; recall = null; if (!sizesItself) grow(); else syncInput(); } };
   }
 
   /**
@@ -383,7 +356,12 @@
     const images = attachments;
     const references = previewReferences;
     if (reply) {
-      if (canSend && await sendAnswer(store, reply)) { recall = null; requestAnimationFrame(grow); }
+      const answeredKey = key;
+      if (canSend && await sendAnswer(store, reply)) {
+        const answered = store.composerStates[answeredKey];
+        if (answered) resetHistory(answered);
+        recall = null; requestAnimationFrame(grow);
+      }
       return;
     }
     if (!canSend || !choice) return;
@@ -401,6 +379,7 @@
         offline ? { choice: $state.snapshot(sendChoice) } : undefined);
       state.editing = null;
       emptyBox(state);
+      resetHistory(state);
       recall = null;
       requestAnimationFrame(grow);
       return;
@@ -409,7 +388,8 @@
     const finishImageSend = trackImageSend(state, prompt, images);
     // The box empties and the prompt joins the timeline now; the core's answer only ticks its receipts. A `/goal` writes no message.
     const local = edited ? edited.local : inputStore.stageSend(inputKey, prompt, images, references);
-    if (local) { emptyBox(state); recall = null; requestAnimationFrame(grow); }
+    // Undo never brings back a prompt that left.
+    if (local) { emptyBox(state); resetHistory(state); recall = null; requestAnimationFrame(grow); }
     // A rewind can finish after navigation: the replacement belongs to the
     // captured thread and machine, whichever conversation is on screen now.
     const accepted = await (editedThread
@@ -418,7 +398,7 @@
         ? inputStore.submitAndDraft(prompt, sendChoice, images, references)
         : inputStore.submit(prompt, sendChoice, images, references));
     if (accepted && editedThread && nextDraft && inputStore.openThread?.id === inputKey) {
-      inputStore.startDraft(editedThread.projectId);
+      inputStore.startDraft(editedThread.projectId, { fresh: true });
       inputStore.draftChoice = { ...sendChoice };
     }
     finishImageSend(accepted);
@@ -426,6 +406,7 @@
     if (accepted && !local) {
       if (state.text === prompt) state.text = '';
       if (state.attachments === images) state.attachments = [];
+      if (state.text === '') resetHistory(state);
       state.paused = false;
     } else if (!accepted && local) { inputStore.unstageSend(local); returnPrompt(state, prompt, images, references); }
     if (accepted) recall = null;
@@ -447,7 +428,12 @@
     const inputStore = store;
     readingFiles += 1;
     try {
-      await attachFiles(inputStore, files, state, attachmentProvider, () => {
+      // Each picture that arrives is one undo step, its reference in the text included.
+      const holder = {
+        get attachments() { return state.attachments; },
+        set attachments(value: Attachment[]) { checkpoint(state); state.attachments = value; }
+      };
+      await attachFiles(inputStore, files, holder, attachmentProvider, () => {
         if (inputStore.composerStates[inputKey] === state) insertImageReference(inputStore, inputKey);
       });
     } finally { readingFiles -= 1; }
@@ -458,7 +444,7 @@
       .filter((item) => item.kind === 'file')
       .map((item) => item.getAsFile())
       .filter((file): file is File => file !== null);
-    if (files.length === 0) return;
+    if (files.length === 0) { pasteImages(editing(), event); return; }
     // The text of a clipboard that also carries an image stays out of the box.
     event.preventDefault();
     void take(files);
@@ -481,6 +467,7 @@
 
   function removeAttachment(at: number) {
     const state = stateForInput();
+    checkpoint(state);
     // The keyboard's remove button goes with its chip, so the focus comes back to
     // the box. A tap leaves it where it was: focusing the box would open a phone's keyboard.
     const refocus = focusWithin(box?.closest('[data-testid="composer"]'));
@@ -556,6 +543,7 @@
   /** Leaves edit mode: the box empties, nothing was rewound. */
   function cancelEdit() {
     const state = stateForInput();
+    checkpoint(state);
     state.editing = null;
     state.attachments = [];
     state.previewReferences = [];
@@ -569,6 +557,7 @@
     if (!state || state.sending || text.length > 0 || attachments.length > 0 || previewReferences.length > 0) return;
     const entry = store.restoreQueued(key, at);
     if (!entry) return;
+    checkpoint(state);
     state.attachments = entry.attachments;
     recall = null;
     restorePrompt(entry.text, entry.previewReferences ?? []);
@@ -582,6 +571,7 @@
     if (next < 0) {
       recall = null;
       const state = stateForInput();
+      checkpoint(state);
       state.previewReferences = [];
       if (state.editing) { state.editing = null; state.attachments = []; }
       put('');
@@ -609,6 +599,7 @@
       recall = null;
       // The text set aside is plain text: the next prompt typed is not an edit of a sent one.
       const state = stateForInput();
+      checkpoint(state);
       if (state.editing) { state.editing = null; state.attachments = []; }
       put('');
       return;
@@ -661,7 +652,7 @@
    */
   function menuKey(event: KeyboardEvent): boolean {
     if (mentionOpen) {
-      return listKey(event, mentionItems, mentionAt, (index) => (mentionAt = index), () => (mentionDismissed = true), pickMention);
+      return listKey(event, mentions.items, mentions.at, (index) => (mentions.at = index), () => (mentions.dismissed = true), pickMention);
     }
     if (slashOpen) {
       return listKey(event, slashItems, slashAt, (index) => (slashAt = index), () => (slashDismissed = true), pickSlash);
@@ -672,6 +663,13 @@
   function onkeydown(event: KeyboardEvent) {
     if (event.isComposing) return;
     const meta = event.ctrlKey || event.metaKey;
+    // Ahead of the modifier return below: the box's undo is the composer's, never the textarea's.
+    const letter = event.key?.toLowerCase();
+    if (meta && !event.altKey && (letter === 'z' || letter === 'y') && !store.isKey(event, 'send-and-draft') && !store.isKey(event, 'stash')) {
+      event.preventDefault();
+      travel(editing(), letter === 'z' && !event.shiftKey);
+      return;
+    }
     // The two composer chords come from the keyboard table, like the app's.
     if (store.isKey(event, 'send-and-draft')) {
       event.preventDefault();
@@ -751,7 +749,12 @@
       class:highlighted
       bind:this={box}
       value={text}
-      onbeforeinput={() => { pendingEdit = box ? { start: box.selectionStart, end: box.selectionEnd } : undefined; }}
+      onbeforeinput={(event) => {
+        if (event.inputType === 'historyUndo' || event.inputType === 'historyRedo') { event.preventDefault(); travel(editing(), event.inputType === 'historyUndo'); return; }
+        pendingEdit = boxSelection(box);
+      }}
+      oncopy={(event) => copySelection(editing(), event, false)}
+      oncut={(event) => copySelection(editing(), event, true)}
       {oninput}
       {onkeydown}
       {onpaste}
@@ -782,11 +785,11 @@
 
     <MentionMenu
       open={mentionOpen}
-      items={mentionItems}
-      selected={mentionAt}
-      more={mentionMore}
+      items={mentions.items}
+      selected={mentions.at}
+      more={mentions.more}
       onpick={pickMention}
-      onhover={(index) => (mentionAt = index)}
+      onhover={(index) => (mentions.at = index)}
     />
 
     {#if speechStatus}
@@ -824,7 +827,7 @@
     padding: 0 20px;
   }
 
-  /* A translucent surface with a top reflection. */
+  /* A translucent surface with a top reflection. Focus lights its edge and lays a bloom under it: app.css, beside its themes. */
   .composer {
     position: relative;
     display: flex;
@@ -839,12 +842,9 @@
     border-top-color: var(--color-edge);
     border-radius: var(--radius-xl);
     --composer-rest: var(--shadow-composer);
-    box-shadow: var(--composer-rest), 0 0 0 3px transparent;
+    box-shadow: var(--composer-rest);
     transition: border-color var(--dur-3) var(--ease-out-quint), box-shadow var(--dur-3) var(--ease-out-quint);
   }
-
-  /* Focus tints the hairline with the accent and lays a faint halo of it around the box. */
-  .composer:focus-within { border-color: var(--color-composer-focus); box-shadow: var(--composer-rest), 0 0 0 3px var(--color-composer-halo); }
 
   .input-wrap { position: relative; }
 

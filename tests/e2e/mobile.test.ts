@@ -108,8 +108,15 @@ test('phone navigates conversations, activity and settings without a sidebar', a
 test('draft survives navigation and the light phone layout fits landscape', async () => {
   await page.evaluate(`(() => { const t = document.querySelector('[data-testid=composer-input]'); t.value = 'Keep this draft'; t.dispatchEvent(new Event('input', {bubbles:true})); })()`);
   await navigateMobile('mobile-conversations');
+  // A new thread opens a draft of its own; the written one waits in the list and comes back from its row.
+  const draftRow = `[...document.querySelectorAll('[data-testid=draft-row]')].find(row => row.title === 'Keep this draft')`;
+  await page.waitFor(`!!${draftRow}`);
   await page.click('[data-testid=mobile-header] [data-testid=mobile-new]');
-  expect(await page.evaluate(`document.querySelector('[data-testid=composer-input]').value`)).toBe('Keep this draft');
+  expect(await page.evaluate(`document.querySelector('[data-testid=composer-input]').value`)).toBe('');
+  await navigateMobile('mobile-conversations');
+  await page.waitFor(`!!${draftRow}`);
+  await page.evaluate(`${draftRow}.click()`);
+  await page.waitFor(`document.querySelector('[data-testid=composer-input]')?.value === 'Keep this draft'`);
   await page.evaluate(`document.documentElement.dataset.theme = 'light'`);
   await page.send('Emulation.setDeviceMetricsOverride', { width: 700, height: 390, deviceScaleFactor: 1, mobile: true });
   await capture('mobile-landscape.png');
