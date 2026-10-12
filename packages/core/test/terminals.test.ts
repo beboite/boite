@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
@@ -231,6 +231,9 @@ describe('terminals', () => {
     // A home of the test's own, so neither the user's profile nor their history is read or written.
     const pwsh = process.platform === 'win32' ? Bun.which('pwsh.exe') : null;
     if (process.platform === 'win32' && pwsh === null) return;
+    // macOS ships bash 3.2, which has no PS0 and so never marks a command running;
+    // its users get zsh or a login bash, which start without the integration.
+    if (process.platform === 'darwin') return;
     const home = mkdtempSync(join(tmpdir(), 'boite-shell-home-'));
     const saved = { shell: process.env['BOITE_TERMINAL_SHELL'], home: process.env['HOME'], history: process.env['BOITE_TERMINAL_HISTORY'], histfile: process.env['HISTFILE'] };
     process.env['BOITE_TERMINAL_SHELL'] = pwsh ?? '/bin/bash';
@@ -247,7 +250,8 @@ describe('terminals', () => {
       expect(opened.shell).toEqual({ name: pwsh === null ? 'bash' : 'pwsh', kind: pwsh === null ? 'posix' : 'powershell', integrated: true });
       await waitFor(() => seen.text().includes('\x1b]133;B'), SHELL_MS);
       expect(seen.text()).toContain('\x1b]133;A');
-      expect(seen.text()).toContain(`\x1b]633;P;Cwd=${opened.cwd}`);
+      // The shell reports the directory it resolved: a temporary folder behind a symlink reads as its target.
+      expect(seen.text()).toContain(`\x1b]633;P;Cwd=${realpathSync(opened.cwd)}`);
 
       // A failing command: C as it runs, then D with its status before the next prompt.
       const failing = pwsh === null ? 'ls /boite-missing-path' : 'cmd /c exit 3';
