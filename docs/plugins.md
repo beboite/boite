@@ -287,14 +287,71 @@ fails keeps the version that worked.
 
 Updating:
 
-- A recommended plugin shows Update when Boite ships a newer version of its
-  manifest.
+- A recommended plugin shows Update to X.Y.Z when a newer version is
+  available: either Boite ships a newer entry, or the plugin's update source
+  publishes a newer release (see [Updates from the source](#updates-from-the-source)).
+  The newest of the two wins, and the version installed is never replaced by
+  an older one. The row shows the download's progress, Cancel and any error.
 - A URL plugin updates when the owner reads the same URL again at a newer ref;
   the preview names the version it replaces.
 - An id already installed from another URL is refused, so one repository cannot
   take over another's install.
 - Reinstall downloads again from the manifest recorded in `installed.json`,
   without fetching the repository.
+
+### Updates from the source
+
+A recommended entry may name an update source, so a plugin release reaches
+installed copies without a Boite release:
+
+```json
+"updates": { "repository": "https://github.com/beboite/bots", "ref": "main" }
+```
+
+The field sits in Boite's reviewed list only. A plugin's own
+`boite-plugin.json` refuses it like any unknown field, so a plugin cannot point
+Boite anywhere else.
+
+When the core checks:
+
+- a minute after it starts, then every six hours, for the recommended plugins
+  that are installed. A core whose owner never installed one sends nothing.
+- when the owner clicks Check for updates on the plugin's row
+  (`plugins.checkUpdates {id?}`), whether it is installed or not. A check
+  finished less than ten seconds before answers instead of a new read.
+- A read that fails waits 15 minutes, then twice as long each time, up to six
+  hours. The row shows the failure as a quiet note, never as an install error.
+
+The core reads `boite-plugin.json` at the ref through the same git path,
+limits and rules as `plugins.inspect`. It offers the manifest found only when:
+
+- it passes every manifest rule: every artifact https, with a SHA-256;
+- its `id`, `name`, `homepage`, `executable` and `provides` are those of the
+  reviewed entry;
+- its version is strictly newer, by semver, than both the entry and the
+  version installed;
+- it has an artifact for the core's platform.
+
+Otherwise it is not offered, and the row says why under the plugin. A release
+taken back at the source stops being offered at the next check. Installing
+what was found is the owner's click. It takes the usual path: download, SHA-256
+check, and a desktop app stopped before the binary is replaced and started
+after. `installed.json` records the manifest that was installed, as for any
+install, with no new field, so an older core still reads it.
+
+`PluginState.updates` carries the source, whether a check is running, when the
+last one finished and the next is due, the release on offer (version, commit,
+time), and the reason a release was ignored or the check failed. Every change is
+announced by `plugins.updated`. An older core sends no `updates` field, and the
+UI then shows no check.
+
+When a check finds a release, the owner's conversation view shows a notice in
+its top right corner: « B.O.T.S 0.1.10 est disponible », with Plus tard and
+Mettre à jour. It waits while Settings are open, where the Plugins page shows
+the same update. It
+shows once per version and machine: either answer holds until a newer version.
+The answers are kept in the window's local storage. A paired device sees no
+notice and cannot call `plugins.checkUpdates`.
 
 Uninstall deletes `<dataDir>/plugins/<id>/`, which is everything an install
 wrote. Whatever the program itself saved elsewhere, such as the logins in its
@@ -355,6 +412,21 @@ token or thread, so an agent cannot borrow the app's access, and an app is no
 more trusted than any other executable you install: install one only from a
 publisher you trust.
 
+An update source moves part of that trust from the Boite review to the
+plugin's repository. Whoever can push to its ref can offer new binaries, and
+the SHA-256 then only proves the download is the one the manifest names. They
+cannot:
+
+- offer anything until the owner clicks Update;
+- change the id, name, homepage, executable or features: a plugin that wants
+  the owner token or an account pool it did not have needs a Boite pull
+  request;
+- send an older version, an http download or a download without a digest;
+- point Boite at another repository, since the source sits in Boite's list.
+
+A recommended entry should name a source only when its publisher guards that
+ref like a release.
+
 ## Test a plugin locally
 
 1. Build the release binaries and take their digests:
@@ -384,8 +456,12 @@ The core tests show a whole install without the network:
 Run them from `packages/core`:
 
 ```sh
-bun test test/plugins.test.ts test/plugin-manifest.test.ts
+bun test test/plugins.test.ts test/plugin-manifest.test.ts test/plugin-updates.test.ts
 ```
+
+`plugin-updates.test.ts` swaps the source read for a published manifest, and
+its clock for one the test moves, to cover the checks, the backoff and every
+refusal without waiting hours.
 
 ## Getting recommended
 
@@ -395,13 +471,21 @@ entry:
 
 - the artifact URLs pinned to a tagged release, not a moving `latest`;
 - the SHA-256 of each artifact, which the reviewer checks against the download;
-- a `homepage` where the source is public.
+- a `homepage` where the source is public;
+- optionally `updates`, the repository and ref where the plugin's
+  `boite-plugin.json` describes its latest release. Name a branch only you can
+  push to, and keep that manifest's id, name, homepage, executable and
+  features as reviewed.
 
 The core parses the list when it loads, and `plugin-manifest.test.ts` fails on
 an entry the reader refuses. Once recommended, the id is reserved: nobody can
 add a plugin with that id from a URL.
 
-Updating a recommended plugin is the same pull request with a new `version`,
-URLs and digests. Installed copies then show Update.
+With an update source, a release is a push of the new `boite-plugin.json` to
+that ref, after its artifacts are published. Installed copies find it within
+six hours or at the owner's Check for updates. Without one, updating is the
+same pull request with a new `version`, URLs and digests. A pinned entry newer
+than what the source offers wins. Bump the entry now and then anyway: a fresh
+install never reads the source by itself until the plugin is installed.
 `BOITE_E2E_KEBACC_INSTALL=1` runs the real download of kebacc-switcher and its
 uninstall in a temporary data directory ([development](development.md)).

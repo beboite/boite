@@ -2468,6 +2468,17 @@ export const fr: Translation = {
     refusedField: 'Champ',
     refusedExpected: 'Attendu',
     dismiss: 'Ignorer',
+    checkUpdates: 'Rechercher des mises à jour',
+    checkingUpdates: 'Recherche de mises à jour',
+    upToDate: 'À jour · vérifiée {time}',
+    updateFound: 'Trouvée sur {source}, {ref} au commit {commit} · vérifiée {time}',
+    updateIgnored: 'Pas proposée : {reason}',
+    updateFailed: 'Impossible de rechercher les mises à jour : {error}. Boite réessaiera plus tard.',
+    noticeTitle: '{name} {version} est disponible',
+    noticeBody: 'Son téléchargement est vérifié contre le SHA-256 publié par sa version.',
+    noticeUpdate: 'Mettre à jour',
+    noticeLater: 'Plus tard',
+    noticeLabel: "Mise à jour d'extension",
   },
 
   time: {

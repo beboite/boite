@@ -90,7 +90,8 @@
     ConnectFlow: () => import('./components/ConnectFlow.svelte'),
     Onboarding: () => import('./components/Onboarding.svelte'),
     // xterm.js and its stylesheet: only once a terminal is asked for.
-    TerminalView: () => import('./components/TerminalView.svelte')
+    TerminalView: () => import('./components/TerminalView.svelte'),
+    PluginUpdateNotice: () => import('./components/PluginUpdateNotice.svelte')
   };
   type Deferred = { [K in keyof typeof deferredLoaders]?: Awaited<ReturnType<(typeof deferredLoaders)[K]>>['default'] };
   let deferred = $state.raw<Deferred>({});
@@ -118,11 +119,11 @@
     const names = Object.keys(deferredLoaders) as (keyof Deferred)[];
     for (const name of prefetchNames(names, { tourSeen: tourSeen(), owner: store.owner })) need(name);
   }
-  // Once the first load has landed rather than against it, and only on a link
-  // that can spare the bytes (lib/prefetch.ts).
+  // Once the first load has landed rather than against it, and the rest only on a
+  // link that can spare the bytes (lib/prefetch.ts). The plugin update notice reads its own list, so it loads on any link.
   $effect(() => {
-    if (!store.booted || !prefetchAllowed()) return;
-    return whenIdle(() => { needAll(); warmPages(store, experimentOn('resident-agents')); });
+    if (!store.booted) return;
+    return whenIdle(() => { if (!prefetchAllowed()) return need('PluginUpdateNotice'); needAll(); warmPages(store, experimentOn('resident-agents')); });
   });
   let WhipOverlay = $state<typeof import('./components/WhipOverlay.svelte').default>();
   $effect(() => {
@@ -678,7 +679,6 @@
     </div>
   {/if}
 
-
   {#if toast.shown}
     <div
       class="toast"
@@ -704,7 +704,7 @@
 
 <ContextMenu />
 <DragGhost />
-{#if tour && deferred.Onboarding}{@const Onboarding = deferred.Onboarding}<Onboarding {store} />{/if}
+{#if tour && deferred.Onboarding}{@const Onboarding = deferred.Onboarding}<Onboarding {store} />{:else if deferred.PluginUpdateNotice}{@const PluginUpdateNotice = deferred.PluginUpdateNotice}<PluginUpdateNotice />{/if}
 {#if deferred.ProjectPicker}{@const ProjectPicker = deferred.ProjectPicker}<ProjectPicker {store} />{/if}
 <ConfirmDialog />
 {#if deferred.ImportDialog}{@const ImportDialog = deferred.ImportDialog}<ImportDialog {store} />{/if}

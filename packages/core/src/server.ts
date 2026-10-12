@@ -626,6 +626,8 @@ export function startServer(options: ServerOptions): RunningServer {
     });
     // Desktop-app plugins the owner left enabled, now that they have an address to reach.
     core.plugins.startApps();
+    // Newer releases of installed recommended plugins, read a minute from now and every six hours.
+    core.plugins.startUpdateChecks();
   }, 0);
   core.subscribers = {
     hasSubscribers(threadId: ThreadId): boolean {

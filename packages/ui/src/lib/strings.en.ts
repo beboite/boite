@@ -2579,6 +2579,18 @@ export const strings = {
     refusedField: 'Field',
     refusedExpected: 'Expected',
     dismiss: 'Dismiss',
+    /** Recommended plugins whose entry names an update source: the check, and what it last found. */
+    checkUpdates: 'Check for updates',
+    checkingUpdates: 'Checking for updates',
+    upToDate: 'Up to date · checked {time}',
+    updateFound: 'Found at {source}, {ref} at {commit} · checked {time}',
+    updateIgnored: 'Not offered: {reason}',
+    updateFailed: 'Could not check for updates: {error}. Boite tries again later.',
+    noticeTitle: '{name} {version} is available',
+    noticeBody: 'Its download is checked against the SHA-256 its release publishes.',
+    noticeUpdate: 'Update',
+    noticeLater: 'Later',
+    noticeLabel: 'Plugin update',
   },
 
   time: {
