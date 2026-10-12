@@ -6,10 +6,12 @@
   import type { Store } from '../lib/store.svelte';
 
   type ImagePart = Extract<Message['parts'][number], { type: 'image' }>;
+  /** The proportions a tile keeps, width over height: a long screenshot is cropped rather than drawn as a sliver. */
+  const TILE_NARROWEST = 0.6, TILE_WIDEST = 1.8;
 
   /**
-   * A picture of the timeline in a box of its own proportions from the first
-   * frame. A picture a light page left on the core comes with its size and its
+   * A prompt's picture as a thumbnail, in a box of its final size from the
+   * first frame. A picture a light page left on the core comes with its size and its
    * blur: the box shows the blur, asks for the bytes once it nears the screen,
    * and the picture fades in over it. One that came with its bytes reads its
    * size from their header. Nothing around the box moves when the bytes land.
@@ -20,15 +22,15 @@
     messageId,
     partIndex,
     image,
-    maxHeight = null
+    tile
   }: {
     store: Store;
     threadId: string;
     messageId: string;
     partIndex: number;
     image: ImagePart;
-    /** The tallest the box is drawn; null draws the picture at its own size, the column permitting. */
-    maxHeight?: number | null;
+    /** The thumbnail's height. Its width keeps the picture's proportions, held between narrow and wide, and the picture is cropped to fill it. */
+    tile: number;
   } = $props();
 
   let shown = $state(false);
@@ -40,8 +42,8 @@
   const original = $derived(image.dataDeferred || image.data.length === 0 ? null : `data:${image.mimeType};base64,${image.data}`);
   const src = $derived(original ?? copy);
   const size = $derived(image.width && image.height ? { width: image.width, height: image.height } : image.data.length > 0 ? imageSize(image.data) : null);
-  /** The box's width: the picture's own, shrunk to `maxHeight` keeping its proportions. The column still caps it. */
-  const width = $derived(size === null ? null : maxHeight === null ? size.width : Math.min(size.width, (maxHeight * size.width) / size.height));
+  /** The box's width from the first frame: square until the picture's size is known. */
+  const width = $derived(Math.round(size === null ? tile : Math.min(TILE_WIDEST, Math.max(TILE_NARROWEST, size.width / size.height)) * tile));
 
   // Near the screen a deferred picture asks for its light copy, once while a
   // request runs or after one succeeded; a failed one asks again the next
@@ -63,11 +65,9 @@
 
 <span
   class="media"
-  class:sized={size !== null}
   class:shown
-  style:width={width === null ? undefined : `${width}px`}
-  style:aspect-ratio={size === null ? undefined : `${size.width} / ${size.height}`}
-  style:--media-max-height={maxHeight === null ? undefined : `${maxHeight}px`}
+  style:width="{width}px"
+  style:height="{tile}px"
   title={failed ? strings.chat.imageUnavailable : undefined}
   data-testid="image-box"
   data-state={shown ? 'shown' : failed ? 'failed' : src ? 'loading' : 'waiting'}
@@ -90,26 +90,6 @@
     max-width: 100%;
     overflow: hidden;
     background: var(--color-surface-2);
-  }
-
-  /* Without a size, the picture lays itself out as it always did. */
-  .media:not(.sized) {
-    min-width: 120px;
-    min-height: 80px;
-  }
-
-  .media:not(.sized) .picture {
-    position: static;
-    width: auto;
-    height: auto;
-    max-width: 100%;
-    max-height: var(--media-max-height, none);
-  }
-
-  .media:not(.sized).shown {
-    min-width: 0;
-    min-height: 0;
-    background: none;
   }
 
   .blur,

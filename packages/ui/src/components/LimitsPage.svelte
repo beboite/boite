@@ -101,13 +101,13 @@
   {#if store.owner && reader.error}
     <div class="card failed" role="alert" data-testid="limits-error">
       <p>{fill(strings.quotas.readFailed, { error: reader.error })}</p>
-      <button type="button" class="ghost small" disabled={reader.loading} data-testid="limits-retry" onclick={refresh}><span class="ui-label">{strings.quotas.retry}</span></button>
+      <button type="button" class="ghost small" disabled={reader.loading} data-testid="limits-retry" onclick={refresh}><span class="ui-label">{strings.common.retry}</span></button>
     </div>
   {/if}
   {#if gatewayError}
     <div class="card failed" role="alert" data-testid="gateway-quotas-error">
       <p>{fill(strings.subscriptionProxy.quotasFailed, { name: proxyName, error: gatewayError })}</p>
-      <button type="button" class="ghost small" disabled={reader.loading} onclick={refresh}><span class="ui-label">{strings.quotas.retry}</span></button>
+      <button type="button" class="ghost small" disabled={reader.loading} onclick={refresh}><span class="ui-label">{strings.common.retry}</span></button>
     </div>
   {/if}
   {#if gatewayNative}
@@ -166,7 +166,6 @@
   .gateway-empty { max-width: var(--settings-width); margin-bottom: 12px; }
   .refresh { flex: none; margin-left: auto; width: var(--control); height: var(--control); padding: 0; }
   .refresh :global(.spinning) { animation: spin 900ms linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
   .muted { margin: 0; color: var(--color-muted-foreground); font-size: var(--text-sm); }
   .tracked { display: grid; gap: 2px; max-width: var(--settings-width); margin-top: 12px; padding: var(--settings-padding); }
   .tracked h2 { display: flex; align-items: center; margin: 0 0 8px; font-size: var(--text-base); font-weight: 600; }
@@ -182,8 +181,8 @@
   .empty { display: flex; align-items: center; justify-content: space-between; gap: 16px; max-width: var(--settings-width); padding: var(--settings-padding); }
   .empty p { margin: 0; color: var(--color-muted-foreground); font-size: var(--text-sm); }
   .skeleton { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; max-width: var(--settings-width); }
-  .ghost-card { height: 150px; margin: 0; animation: breathe 1.4s var(--ease-out-quint) infinite alternate; }
-  @keyframes breathe { from { opacity: 0.45; } to { opacity: 0.9; } }
+  .ghost-card { height: 150px; margin: 0; animation: ghost-breathe 1.4s var(--ease-out-quint) infinite alternate; }
+  @keyframes ghost-breathe { from { opacity: 0.45; } to { opacity: 0.9; } }
   @media (prefers-reduced-motion: reduce) {
     .refresh :global(.spinning), .ghost-card { animation: none; }
   }

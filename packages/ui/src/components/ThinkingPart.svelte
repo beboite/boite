@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { page } from '../lib/page-hidden.svelte';
+  import { secondClock } from '../lib/clock.svelte';
   import { Brain, ChevronRight } from '@lucide/svelte';
   import { renderMarkdown } from '../lib/markdown';
   import { ParagraphScan } from '../lib/message-display';
@@ -8,15 +8,7 @@
 
   let { text, live = false, startedAt = null, finishedAt = null }: { text: string; live?: boolean; startedAt?: number | null; finishedAt?: number | null } = $props();
 
-  let now = $state(Date.now());
-  const hidden = $derived(page.hidden);
-  $effect(() => {
-    if (!live || startedAt === null || hidden) return;
-    now = Date.now();
-    const timer = setInterval(() => { now = Date.now(); }, 1000);
-    return () => clearInterval(timer);
-  });
-  const took = $derived(startedAt === null || (!live && finishedAt === null) ? '' : elapsed((live ? now : finishedAt!) - startedAt));
+  const took = $derived(startedAt === null || (!live && finishedAt === null) ? '' : elapsed((live ? secondClock.now : finishedAt!) - startedAt));
 
   // Folded by default, and the fold belongs to this part alone.
   let open = $state(false);
@@ -58,8 +50,8 @@
     {#if !empty}<span class="fold-caret" class:open={shown} aria-hidden="true"><ChevronRight size={12} /></span>{/if}
   </button>
 
-  <div class="fold" class:open={shown} inert={!shown}>
-    <div class="clip">
+  <div class="disclosure-fold" class:open={shown} inert={!shown}>
+    <div>
       {#if built}
         <div class="body" data-testid="thinking-text">
           {#each content.blocks as block, index (index)}<div class="paragraph">{@html renderMarkdown(block)}</div>{/each}
@@ -108,26 +100,6 @@
     border-radius: 50%;
     background: var(--color-live);
     animation: pulse 1.6s ease-in-out infinite;
-  }
-
-  /* The rows track carries the open and the close, the same trick as the tool card. */
-  .fold {
-    display: grid;
-    grid-template-rows: 0fr;
-    opacity: 0;
-    transition:
-      grid-template-rows var(--dur-3) var(--ease-out-quint),
-      opacity var(--dur-3) var(--ease-out-quint);
-  }
-
-  .fold.open {
-    grid-template-rows: 1fr;
-    opacity: 1;
-  }
-
-  .clip {
-    min-height: 0;
-    overflow: hidden;
   }
 
   .body {

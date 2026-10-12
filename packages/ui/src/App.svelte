@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from './lib/errors';
   import { onMount, untrack } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import { takeNotificationTarget } from './lib/endpoint';
@@ -9,7 +10,6 @@
   import UndoToast from './components/UndoToast.svelte';
   import NotificationCard from './components/NotificationCard.svelte';
   import ChatView from './components/ChatView.svelte';
-
   import ConfirmDialog from './components/ConfirmDialog.svelte';
   import ContextMenu from './components/ContextMenu.svelte';
   import DragGhost from './components/DragGhost.svelte';
@@ -362,7 +362,7 @@
   // every connected machine that wait on an answer or finished unread. The
   // installed app's icon badge carries the same count.
   $effect(() => {
-    const stores = workspace.machines.length ? workspace.machines.map((machine) => machine.store) : [store];
+    const stores = workspace.machinesOr(store).map((machine) => machine.store);
     const count = attentionCount(stores);
     const name = appName();
     document.title = count > 0 ? `(${count}) ${name}` : name;
@@ -501,7 +501,7 @@
     if (zoom !== null && !(event.target instanceof Element && event.target.closest('[data-testid=browser-surface]'))) {
       event.preventDefault();
       void setZoom(zoom === 0 ? ZOOM_DEFAULT : stepZoom(wantedZoom(), zoom)).catch((error: unknown) => {
-        store.error = error instanceof Error ? error.message : String(error);
+        store.error = errorText(error);
       });
       return;
     }
@@ -696,9 +696,9 @@
       />
     </div>
   {/if}
-  <UndoToast onerror={(error) => (store.error = error instanceof Error ? error.message : String(error))} />
+  <UndoToast onerror={(error) => (store.error = errorText(error))} />
   {#if store.booted && experimentOn('whip') && WhipOverlay}
-    <WhipOverlay onerror={(error) => (store.error = error instanceof Error ? error.message : String(error))} />
+    <WhipOverlay onerror={(error) => (store.error = errorText(error))} />
   {/if}
 </div>
 

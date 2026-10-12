@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ChevronDown, Circle, CircleCheck, CircleDot, Plus, Repeat, Target, X } from '@lucide/svelte';
+  import { ChevronRight, Circle, CircleCheck, CircleDot, Plus, Repeat, Target, X } from '@lucide/svelte';
   import type { Todo } from '@boite/contracts';
   import { time } from '../lib/format';
   import { fill, strings } from '../lib/strings';
@@ -49,11 +49,11 @@
       title={open.activity ? strings.tasks.collapse : strings.tasks.expand}
       onclick={() => (open.activity = !open.activity)}
     >
-      <ChevronDown size={13} strokeWidth={1.75} class={open.activity ? 'turned' : ''} />
+      <ChevronRight size={13} strokeWidth={1.75} class={open.activity ? 'fold-caret open' : 'fold-caret'} />
       <span class="section-label ui-label">{strings.tasks.goalSection}</span>
     </button>
     <div class="disclosure-fold" id="{sectionId}-activity" class:open={open.activity} inert={!open.activity}>
-      <div class="disclosure-clip"><div class="body">
+      <div><div class="body">
         {#if activity?.goal}
           <div class="line" data-testid="tasks-goal">
             <Target size={13} strokeWidth={1.75} />
@@ -95,7 +95,7 @@
       title={open.tasks ? strings.tasks.collapse : strings.tasks.expand}
       onclick={() => (open.tasks = !open.tasks)}
     >
-      <ChevronDown size={13} strokeWidth={1.75} class={open.tasks ? 'turned' : ''} />
+      <ChevronRight size={13} strokeWidth={1.75} class={open.tasks ? 'fold-caret open' : 'fold-caret'} />
       <span class="section-label ui-label">{strings.tasks.agentSection}</span>
       {#if tasks.length > 0}
         <span class="meta ui-label">
@@ -107,7 +107,7 @@
       {/if}
     </button>
     <div class="disclosure-fold" id="{sectionId}-tasks" class:open={open.tasks} inert={!open.tasks}>
-      <div class="disclosure-clip"><div class="body">
+      <div><div class="body">
         {#each tasks as task (task.id)}
           <div class="line" class:muted={task.status === 'completed'} data-testid="agent-task" data-status={task.status}>
             <span class="mark" data-status={task.status} title={strings.activity[task.status]}>
@@ -138,11 +138,11 @@
       title={open.todos ? strings.tasks.collapse : strings.tasks.expand}
       onclick={() => (open.todos = !open.todos)}
     >
-      <ChevronDown size={13} strokeWidth={1.75} class={open.todos ? 'turned' : ''} />
+      <ChevronRight size={13} strokeWidth={1.75} class={open.todos ? 'fold-caret open' : 'fold-caret'} />
       <span class="section-label ui-label">{strings.tasks.todoSection}</span>
     </button>
     <div class="disclosure-fold" id="{sectionId}-todos" class:open={open.todos} inert={!open.todos}>
-      <div class="disclosure-clip"><div class="body">
+      <div><div class="body">
         <form
           class="composer"
           onsubmit={(event) => {
@@ -264,14 +264,8 @@
     justify-content: flex-start;
   }
 
-  .head :global(svg) {
-    flex: none;
-    transition: transform var(--dur-2) var(--ease-out-quint);
-    transform: rotate(-90deg);
-  }
-
-  .head :global(.turned) {
-    transform: none;
+  .head :global(.fold-caret) {
+    color: inherit;
   }
 
   .body {

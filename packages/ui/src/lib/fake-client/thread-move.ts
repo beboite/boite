@@ -1,5 +1,5 @@
 /** `threads.move` and `agent.move`, as the core's `threads/move.ts` answers them: the same refusals by field, the same placement. */
-import { RpcErrorCode, type AgentMove, type Message, type MoveEnd, type MoveNotice, type Project, type Thread, type ThreadId, type ThreadSummary } from '@boite/contracts';
+import { RpcErrorCode, threadActive, type AgentMove, type Message, type MoveEnd, type MoveNotice, type Project, type Thread, type ThreadId, type ThreadSummary } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { missingFolder } from './checks';
 import { archiveProject } from './project-archive';
@@ -28,7 +28,6 @@ function refuse(message: string, data: Record<string, unknown>): RpcFailure {
 /** As the core's `Phase`: `now` wants the whole family idle, `request` lets the thread's own turn run, `apply` runs once it ended. */
 type Phase = 'now' | 'request' | 'apply';
 type By = 'user' | 'agent';
-const IN_FLIGHT = ['queued', 'running', 'waiting'];
 
 function familyOf(ctx: FakeContext, thread: Thread): Thread[] {
   return [thread, ...[...ctx.threads.values()].filter((one) => one.parentThreadId === thread.id)];
@@ -52,7 +51,7 @@ function check(ctx: FakeContext, thread: Thread, projectId: string, stopBackgrou
   const busyNow = (one: Thread): boolean => {
     if (one.id === threadId && phase === 'request') return false;
     if (one.id === threadId && phase === 'apply') return ctx.inFlight.has(one.id) || one.status === 'running' || one.status === 'waiting';
-    return IN_FLIGHT.includes(one.status) || ctx.inFlight.has(one.id);
+    return threadActive(one.status) || ctx.inFlight.has(one.id);
   };
   const busy = familyOf(ctx, thread).find(busyNow);
   if (busy) {
@@ -152,7 +151,7 @@ export function resolveProject(ctx: FakeContext, threadId: ThreadId, query: stri
 }
 
 function inFlight(ctx: FakeContext, thread: Thread): boolean {
-  return IN_FLIGHT.includes(thread.status) || ctx.inFlight.has(thread.id);
+  return threadActive(thread.status) || ctx.inFlight.has(thread.id);
 }
 
 /** The row hears its pending move without a new `updatedAt`, as the core's `announce`. */

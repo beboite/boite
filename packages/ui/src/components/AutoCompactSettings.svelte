@@ -3,7 +3,7 @@
   import { CircleCheck, Hourglass, Ruler, Timer } from '@lucide/svelte';
   import { AUTO_COMPACT_MOMENTS, AUTO_COMPACT_TOKENS, type AutoCompact, type AutoCompactMoment } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
-  import { formatTokens } from '../lib/tokens';
+  import { formatTokens } from '../lib/format';
   import type { Store } from '../lib/store.svelte';
   import InfoTip from './InfoTip.svelte';
 

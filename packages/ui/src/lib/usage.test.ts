@@ -147,7 +147,8 @@ describe('summarize', () => {
 
 describe('formatMetric', () => {
   test('reads tokens like the context meter, money in dollars, turns whole', () => {
-    expect(formatMetric('tokens', 84_400)).toBe('84k');
+    expect(formatMetric('tokens', 512)).toBe('512');
+    expect(formatMetric('tokens', 84_400)).toBe('84.4K');
     expect(formatMetric('tokens', 1_240_000)).toBe('1.2M');
     expect(formatMetric('tokens', 3_400_000_000)).toBe('3.4B');
     expect(formatMetric('turns', 1234)).toBe('1,234');
@@ -157,6 +158,7 @@ describe('formatMetric', () => {
     expect(formatMetric('cost', 12_400)).toBe('$12.4k');
     expect(formatTick('cost', 2.5)).toBe('$2.5');
     expect(formatTick('cost', 1500)).toBe('$1.5k');
+    expect(formatTick('tokens', 2_000_000)).toBe('2M');
   });
 
   test('writes counts and money the way the language the app speaks does', async () => {
@@ -164,6 +166,8 @@ describe('formatMetric', () => {
     try {
       const plain = (text: string) => text.replace(/\s/g, ' ');
       expect(plain(formatMetric('turns', 1594))).toBe('1 594');
+      expect(plain(formatMetric('tokens', 84_400))).toBe('84,4 k');
+      expect(plain(formatMetric('tokens', 3_400_000_000))).toBe('3,4 Md');
       expect(plain(formatMetric('cost', 113.23))).toBe('113,23 $US');
       expect(plain(formatMetric('cost', 12_400))).toBe('12,4k $US');
       expect(plain(formatTick('cost', 2.5))).toBe('2,5 $US');

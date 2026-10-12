@@ -2,7 +2,7 @@
   import { untrack } from 'svelte';
   import { ChevronDown, FolderOpen, VenetianMask } from '@lucide/svelte';
   import { fill, strings } from '../lib/strings';
-  import { levelName, projectName } from '../lib/format';
+  import { effortName, projectName } from '../lib/format';
   import type { Store } from '../lib/store.svelte';
   import { DRAFT_STASH_KEY } from '../lib/prefs';
   import { lastIndexById } from '../lib/thread-rows';
@@ -54,7 +54,7 @@
   let draftModel = $derived(store.modelOf(draftChoice));
   let draftProvider = $derived(draftChoice ? store.providerOf(draftChoice.providerId) : null);
   let draftEffort = $derived(draftChoice?.effort ?? draftModel?.effort?.default ?? null);
-  let effortLabel = $derived.by(() => { const level = draftModel?.effort?.levels.find((level) => level.id === draftEffort); return level ? levelName(level) : draftEffort; });
+  let effortLabel = $derived(draftEffort ? effortName(draftModel, draftEffort) : null);
   let modelLabel = $derived(draftModel?.name ?? draftChoice?.model ?? draftProvider?.name ?? '');
 </script>
 

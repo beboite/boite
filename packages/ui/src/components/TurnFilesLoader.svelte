@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import type { ComponentProps } from 'svelte';
   import type TurnFiles from './TurnFiles.svelte';
   import { strings } from '../lib/strings';
@@ -10,6 +11,6 @@
 {#await loading then module}
   <module.default {...props} />
 {:catch reason}
-  <p role="alert">{reason instanceof Error ? reason.message : String(reason)}</p>
+  <p role="alert">{errorText(reason)}</p>
   <button class="ghost small" onclick={() => loading = import('./TurnFiles.svelte')}>{strings.common.refresh}</button>
 {/await}

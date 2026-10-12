@@ -1,4 +1,4 @@
-import type { ProjectId, ThreadId, ThreadSummary } from '@boite/contracts';
+import { threadActive, type ProjectId, type ThreadId, type ThreadSummary } from '@boite/contracts';
 import { confirm } from './confirm.svelte';
 import { contextMenu } from './context-menu.svelte';
 import { projectName } from './format';
@@ -6,7 +6,6 @@ import type { MenuItem } from './menu';
 import { startPointerDrag, type DragGrip } from './pointer-drag';
 import { fill, strings } from './strings';
 import type { Store } from './store.svelte';
-import { workingThread } from './thread-rows';
 
 /** What a thread row carries while it is dragged: the machine it lives on, so a drop elsewhere is ignored. */
 export interface ThreadDrag {
@@ -95,6 +94,18 @@ function find(store: Store, threadId: ThreadId): ThreadSummary | null {
   return store.threads.find((t) => t.id === threadId) ?? (store.openThread?.id === threadId ? store.openThread : null);
 }
 
+/** The threads a move takes, the core's rule: an ordinary, kept conversation inside a project, not a sub-thread. */
+export type Movable = Pick<ThreadSummary, 'projectId' | 'parentThreadId' | 'agentSessionId' | 'archived' | 'incognito'>;
+
+/**
+ * Whether the thread can change project at all: a persistent agent's session
+ * and a thread outside any project have no project to leave, a sub-thread
+ * moves with its parent. Every menu and the drag read this one rule.
+ */
+export function canMove(thread: Movable): boolean {
+  return !thread.parentThreadId && !thread.agentSessionId && thread.projectId !== null && !thread.archived && !thread.incognito;
+}
+
 /**
  * Whether a sub-thread of this thread works. The core refuses the move then:
  * the parent's turn end is no moment to move a thread whose child still runs.
@@ -131,7 +142,7 @@ export async function moveThread(store: Store, threadId: ThreadId, projectId: Pr
   }
   const target = store.projects.find((p) => p.id === projectId);
   const names = { folder: thread.cwd, project: target ? projectName(target) : projectId };
-  const running = workingThread(thread.status);
+  const running = threadActive(thread.status);
   const kinds = [thread, ...store.threads.filter((t) => t.parentThreadId === threadId)].flatMap((t) => t.backgroundWork?.kinds ?? []);
   let stopBackground: boolean | undefined;
   if (kinds.length > 0) {

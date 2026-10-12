@@ -19,7 +19,7 @@ import { forgetArchivedThread } from '../archive-history';
 import { rightPanel } from '../right-panel.svelte';
 import { workingChildren, type WorkingChildren, lastIndexById, mergeResumed, patchRow, reconcileThread, threadsByProject } from '../thread-rows';
 import type { StoreContext } from './context';
-import { RpcErrorCode } from '@boite/contracts';
+import { RpcErrorCode, threadActive } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { strings } from '../strings';
 import { archiveWhile, keepArchived, pinWhile } from './optimistic';
@@ -131,7 +131,7 @@ export class Threads {
 
   get busy(): boolean {
     const status = this.openThread?.status;
-    return status === 'running' || status === 'queued' || status === 'waiting';
+    return status !== undefined && threadActive(status);
   }
 
   /** One pass over the rows per change of a project, flag or the list itself; a load tick is none of those. */

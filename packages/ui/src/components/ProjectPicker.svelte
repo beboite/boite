@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import { tick, untrack } from 'svelte';
   import { ArrowUp, ChevronDown, ChevronRight, Folder, FolderOpen, Monitor, X } from '@lucide/svelte';
   import { Closing } from '../lib/closing.svelte';
@@ -20,7 +21,7 @@
   let previous: HTMLElement | null = null;
   let target = $state<Store>();
   const selected = $derived(target ?? store);
-  const available = $derived(workspace.machines.length ? workspace.machines : [{ id: 'current', label: strings.connection.local, store }]);
+  const available = $derived(workspace.machinesOr(store));
   const machineName = $derived(available.find(m => m.store === selected)?.label ?? strings.connection.local);
   const machines = $derived([
     ...available.map(m => ({ id: m.id, label: m.label, active: m.store === selected })),
@@ -49,7 +50,7 @@
       if (!current()) return;
       path = result.path; parent = result.parent; directories = result.directories;
     } catch (failure) {
-      if (current()) error = failure instanceof Error ? failure.message : String(failure);
+      if (current()) error = errorText(failure);
     } finally { if (current()) busy = false; }
   }
   $effect(() => { if (overlay.open) return mobileOverlay(close); });
@@ -88,7 +89,7 @@
       if (project) { close(); await workspace.select(owner, undefined, project.id); }
       else if (!native) error = owner.error ?? strings.connection.unavailable;
     } catch (failure) {
-      if (current()) error = failure instanceof Error ? failure.message : String(failure);
+      if (current()) error = errorText(failure);
     } finally { if (current()) busy = false; }
   }
   function keydown(event: KeyboardEvent) {
@@ -127,7 +128,7 @@
         </div>
         {#if error}<p class="error" role="alert">{error}</p>{/if}
       </div>
-      <footer><button type="button" class="ghost" data-testid="project-cancel" onclick={close}><span class="ui-label">{strings.common.cancel}</span></button><button type="button" class="primary" data-testid="project-add" disabled={busy || !path.trim() || !selected.owner || selected.connection !== 'ready'} onclick={() => void open()}><FolderOpen size={15} /><span class="ui-label">{strings.firstRun.add}</span></button></footer>
+      <footer><button type="button" class="ghost" data-testid="project-cancel" onclick={close}><span class="ui-label">{strings.common.cancel}</span></button><button type="button" class="primary" data-testid="project-add" disabled={busy || !path.trim() || !selected.owner || selected.connection !== 'ready'} onclick={() => void open()}><FolderOpen size={15} /><span class="ui-label">{strings.common.open}</span></button></footer>
     </div>
   </div>
 {/if}

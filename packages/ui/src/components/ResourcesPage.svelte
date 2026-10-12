@@ -6,6 +6,7 @@
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import StatusMark from './StatusMark.svelte';
+  import { threadTone } from '../lib/thread-state';
 
   let { store, limitsOnly = false }: { store: Store; limitsOnly?: boolean } = $props();
   const uid = $props.id();
@@ -85,7 +86,7 @@
       <label><span class="name"><span class="ui-label">{strings.settings.memoryReserveMb}</span><InfoTip topic={strings.settings.memoryReserveMb} text={strings.settings.memoryReserveHint} /></span><input disabled={!memoryEnabled} aria-label={strings.settings.memoryReserveMb} data-testid="memory-reserve" type="number" min="0" required bind:value={memoryReserve} />
         {#if memoryEnabled && memoryReserve === 0 && store.memory}<span class="hint" data-testid="memory-reserve-auto">{strings.resources.auto(store.memory.limits.memoryReserveMb)}</span>{/if}
       </label>
-      <button type="submit" class="primary"><span class="ui-label">{strings.settings.save}</span></button>
+      <button type="submit" class="primary"><span class="ui-label">{strings.common.save}</span></button>
     </form>
   </section>
   <section class="card" data-testid="memory-status">
@@ -110,7 +111,7 @@
   {#each resources as entry (entry.threadId)}
     <section class="card flush" data-testid="resource-row" data-thread-id={entry.threadId}>
       <div class="head">
-        <StatusMark status={entry.status} />
+        <StatusMark {...threadTone(entry.status)} />
         <button class="quiet title" data-preload-thread={entry.threadId} onclick={() => void store.open(entry.threadId)}><span class="ui-label">{entry.title}</span></button>
         <span class="load" data-testid="resource-load">
           <span>{entry.load.processes} {strings.resources.processes}</span>
@@ -120,7 +121,7 @@
         {#if confirming === entry.threadId}
           <span class="confirm ui-label">{strings.resources.killConfirm}</span>
           <button class="danger" onclick={() => void kill(entry.threadId)}><span class="ui-label">{strings.resources.killConfirmYes}</span></button>
-          <button class="quiet" onclick={() => (confirming = null)}><span class="ui-label">{strings.resources.killConfirmNo}</span></button>
+          <button class="quiet" onclick={() => (confirming = null)}><span class="ui-label">{strings.common.cancel}</span></button>
         {:else}
           <button class="danger" onclick={() => (confirming = entry.threadId)}><span class="ui-label">{strings.resources.killTree}</span></button>
         {/if}
@@ -212,7 +213,6 @@
     animation: pulse 2s var(--ease-out-quint) infinite;
   }
 
-  @keyframes pulse { 50% { opacity: 0.35; } }
   @media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
 
   .confirm {

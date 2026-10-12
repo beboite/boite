@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import { Check, ChevronDown, ChevronLeft, ChevronRight, Circle, CircleCheck, CircleDot, Hand, ListTodo, MessageCircleQuestionMark, Pause, Play, Repeat, Reply, Settings2, Target, X } from '@lucide/svelte';
   import { focusComposer } from '../lib/focus';
   import type { Store } from '../lib/store.svelte';
@@ -106,7 +107,7 @@
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
         height = node.offsetHeight;
-        const details = node.querySelector<HTMLElement>(':scope > .task-disclosure');
+        const details = node.querySelector<HTMLElement>(':scope > .disclosure-fold');
         readingHeight = height - (details?.offsetHeight ?? 0);
       });
     });
@@ -140,7 +141,7 @@
       const value = await store.client.call('threads.activity.control', { threadId: thread.id, kind, action });
       if (store.openThread?.id === thread.id) store.openThread.activity = value;
     } catch (error) {
-      store.error = error instanceof Error ? error.message : String(error);
+      store.error = errorText(error);
     } finally { saving = false; }
   }
 </script>
@@ -170,8 +171,8 @@
             </span>
           {/if}
         </div>
-        <div class="task-disclosure" class:open={questionOpen} inert={!questionOpen}>
-          <div class="task-clip">
+        <div class="disclosure-fold" class:open={questionOpen} inert={!questionOpen}>
+          <div>
             {#each asked as question (question.id)}
               {@const reply = replyOf(store, question.id)}
               <div hidden={question.id !== shown.id} data-testid="activity-question" data-question={question.id}>
@@ -275,8 +276,8 @@
              already says it in words, the bar only draws it. -->
         {#if tasks.length}<progress max={tasks.length} value={done} aria-hidden="true"></progress>{/if}
       </button>
-      <div class="task-disclosure" class:open={expanded} inert={!expanded}>
-        <div class="task-clip" id={detailsId}>
+      <div class="disclosure-fold" class:open={expanded} inert={!expanded}>
+        <div id={detailsId}>
           {#if tasks.length}
             <ul data-testid="activity-tasks">
               {#each tasks as task (task.id)}
@@ -351,8 +352,7 @@
   .entry.blocked { border-radius: var(--radius-md); background: color-mix(in srgb, var(--color-live) 6%, transparent); }
   .entry.blocked .activity-row > :global(svg:first-child) { color: var(--color-live); }
   .blocker { display: flex; align-items: center; gap: 8px; min-height: var(--control); padding: 0 4px 4px 13px; }
-  .waiting-dot { flex: none; width: 6px; height: 6px; margin-inline: 5px; border-radius: var(--radius-full); background: var(--color-live); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-live) 22%, transparent); animation: waiting 1.8s ease-in-out infinite; }
-  @keyframes waiting { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+  .waiting-dot { flex: none; width: 6px; height: 6px; margin-inline: 5px; border-radius: var(--radius-full); background: var(--color-live); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-live) 22%, transparent); animation: pulse 1.8s ease-in-out infinite; }
   .blocker p { flex: 1; min-width: 0; margin: 0; line-height: 1.45; overflow-wrap: anywhere; }
   .ask { font-weight: 600; color: var(--color-foreground); }
   .hint { color: var(--color-muted-foreground); }
@@ -369,9 +369,6 @@
   progress::-webkit-progress-bar { background: var(--color-surface-3); }
   progress::-webkit-progress-value { background: var(--color-accent); transition: width var(--dur-3); }
   progress::-moz-progress-bar { background: var(--color-accent); }
-  .task-disclosure { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--dur-3) var(--ease-out-quint); }
-  .task-disclosure.open { grid-template-rows: 1fr; }
-  .task-clip { overflow: hidden; min-height: 0; }
   ul, ol { list-style: none; margin: 0; padding: 2px 8px 6px; }
   li { display: flex; align-items: flex-start; gap: 8px; padding: 4px 0; line-height: 1.5; overflow-wrap: anywhere; }
   /* The same box as the toggle's icon, so the task text starts under its line. */
@@ -394,7 +391,7 @@
   [data-verdict='partial'] { --verdict: var(--color-live); }
   [data-verdict='fail'], [data-verdict='missing'] { --verdict: var(--color-danger); }
   [data-verdict='running'] { --verdict: var(--color-accent); }
-  .verdict[data-verdict='running']::before { animation: waiting 1.8s ease-in-out infinite; }
+  .verdict[data-verdict='running']::before { animation: pulse 1.8s ease-in-out infinite; }
   .verdict-name { color: var(--verdict); font-weight: 600; }
   .open-review { margin-top: 4px; padding-inline: 6px; color: var(--color-accent); }
   .error { color: var(--color-danger); margin: 2px 8px 6px; overflow-wrap: anywhere; }
@@ -406,5 +403,5 @@
     .waiting-dot { margin-top: 7px; }
   }
   :global(html[data-motion='reduced']) .waiting-dot, :global(html[data-motion='reduced']) .verdict::before { animation: none; }
-  @media (prefers-reduced-motion: reduce) { .waiting-dot, .verdict::before { animation: none; } .activity, .task-disclosure, progress::-webkit-progress-value, .toggle-line > :global(svg:last-child) { transition: none; } }
+  @media (prefers-reduced-motion: reduce) { .waiting-dot, .verdict::before { animation: none; } .activity, progress::-webkit-progress-value, .toggle-line > :global(svg:last-child) { transition: none; } }
 </style>

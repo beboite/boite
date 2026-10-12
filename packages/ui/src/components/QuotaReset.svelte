@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import { onDestroy } from 'svelte';
   import type { AccountQuota, QuotaResetOutcome } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
@@ -60,7 +61,7 @@
     } catch (error) {
       if (disposed || store.client !== client) return;
       failed = true;
-      status = fill(strings.quotas.resetFailed, { error: error instanceof Error ? error.message : String(error) });
+      status = fill(strings.quotas.resetFailed, { error: errorText(error) });
     } finally { busy = false; sending = false; }
   }
 </script>

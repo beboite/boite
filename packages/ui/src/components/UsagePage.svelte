@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import { untrack } from 'svelte';
   import { ChevronDown, RefreshCw } from '@lucide/svelte';
   import type { UsageHistory, UsageHistoryThread } from '@boite/contracts';
@@ -99,7 +100,7 @@
       const answered = results.flatMap((result) => result.status === 'fulfilled' ? [result.value] : []);
       failures = results.flatMap((result, index) => {
         if (result.status === 'fulfilled') return [];
-        const message = result.reason instanceof Error ? result.reason.message : String(result.reason);
+        const message = errorText(result.reason);
         return [named ? `${from[index]!.label}: ${message}` : message];
       });
       if (answered.length === 0) {
@@ -427,7 +428,6 @@
   .refresh { margin-left: auto; width: var(--control); height: var(--control); padding: 0; }
   .filter-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 190px; }
   .refresh :global(.spinning) { animation: spin 900ms linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
   .failure { max-width: var(--settings-width); margin: 0 0 12px; color: var(--color-danger); font-size: var(--text-sm); }
   .body { max-width: var(--settings-width); transition: opacity var(--dur-2) var(--ease-out-quint); }
   .body.stale { opacity: 0.6; }

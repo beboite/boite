@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../../lib/errors';
   import { secureId } from '../../lib/secure-id';
   import { untrack } from 'svelte';
   import { Dices, Palette } from '@lucide/svelte';
@@ -116,7 +117,7 @@
       if (!target.client || target.connection !== 'ready') throw new Error(fill(strings.agents.machineUnreachable, { name: workspace.machines.find(m => m.store === target)?.label ?? strings.machines.local }));
       created = await target.client.call('agents.profile.save', { value: $state.snapshot(value) as typeof value });
     } catch (error) {
-      view.error = error instanceof Error ? error.message : String(error);
+      view.error = errorText(error);
       moving = false;
       return;
     }
@@ -143,7 +144,7 @@
         title: fill(labels.archiveTitle, { name: existing.name }),
         body: labels.archiveBody,
         confirmLabel: labels.archive,
-        cancelLabel: labels.cancel,
+        cancelLabel: strings.common.cancel,
         danger: true,
         requiredText: existing.name,
         inputLabel: labels.archiveName,
@@ -172,8 +173,8 @@
 
 {#snippet actions()}
   <div class="agent-form-actions">
-    <button class="primary" type="submit" disabled={busy || !name.trim() || kind === 'profile' && creating && (!selection.accountId || !selection.model)} data-testid="agent-save"><span class="ui-label">{creating ? labels.createAction : labels.save}</span></button>
-    {#if creating}<button type="button" class="ghost" onclick={oncancel}><span class="ui-label">{labels.cancel}</span></button>{/if}
+    <button class="primary" type="submit" disabled={busy || !name.trim() || kind === 'profile' && creating && (!selection.accountId || !selection.model)} data-testid="agent-save"><span class="ui-label">{creating ? labels.createAction : strings.common.save}</span></button>
+    {#if creating}<button type="button" class="ghost" onclick={oncancel}><span class="ui-label">{strings.common.cancel}</span></button>{/if}
   </div>
 {/snippet}
 

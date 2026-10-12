@@ -13,6 +13,7 @@ interface Formatters {
   clock: Intl.DateTimeFormat;
   dayClock: Intl.DateTimeFormat;
   calendar: Intl.DateTimeFormat;
+  longDay: Intl.DateTimeFormat;
   /** `22 min` in both languages: French's narrow relative form reads `-22 min`. */
   minutes: Intl.NumberFormat;
   counter: Intl.NumberFormat;
@@ -27,8 +28,6 @@ interface Formatters {
   exact: Intl.DateTimeFormat;
   /** The day spelled out and the time to the second: a message's hover title. */
   full: Intl.DateTimeFormat;
-  /** `Tuesday 14 October`: a day separator. */
-  longDay: Intl.DateTimeFormat;
 }
 
 const sets = new Map<string, Formatters>();
@@ -42,6 +41,7 @@ function formatters(): Formatters {
     clock: new Intl.DateTimeFormat(tag, { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
     dayClock: new Intl.DateTimeFormat(tag, { hour: '2-digit', minute: '2-digit' }),
     calendar: new Intl.DateTimeFormat(tag, { day: 'numeric', month: 'short' }),
+    longDay: new Intl.DateTimeFormat(tag, { weekday: 'long', day: 'numeric', month: 'long' }),
     minutes: new Intl.NumberFormat(tag, { style: 'unit', unit: 'minute', unitDisplay: 'short' }),
     counter: new Intl.NumberFormat(tag, { notation: 'compact', maximumFractionDigits: 1 }),
     plain: new Intl.NumberFormat(tag),
@@ -51,8 +51,7 @@ function formatters(): Formatters {
     weekday: new Intl.DateTimeFormat(tag, { weekday: 'short', hour: '2-digit', minute: '2-digit' }),
     quotaDay: new Intl.DateTimeFormat(tag, { weekday: 'long' }),
     exact: new Intl.DateTimeFormat(tag, { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' }),
-    full: new Intl.DateTimeFormat(tag, { dateStyle: 'full', timeStyle: 'medium' }),
-    longDay: new Intl.DateTimeFormat(tag, { weekday: 'long', day: 'numeric', month: 'long' })
+    full: new Intl.DateTimeFormat(tag, { dateStyle: 'full', timeStyle: 'medium' })
   };
   sets.set(tag, made);
   return made;
@@ -96,6 +95,12 @@ export function levelName(level: { id: string; label: string }): string {
   return typeof name === 'string' ? name : level.label;
 }
 
+/** A model's effort level `id` in the app's language; an id the model does not list stays as it is. */
+export function effortName(model: { effort?: { levels: readonly { id: string; label: string }[] } | null } | null | undefined, id: string): string {
+  const level = model?.effort?.levels.find((entry) => entry.id === id);
+  return level ? levelName(level) : id;
+}
+
 /**
  * A quota window the core named in English (`5 hours`, `Weekly`, `Monthly`,
  * `Credits`) in the app's language; any other name as sent. The core joins a
@@ -137,18 +142,18 @@ export function fullTime(value: number): string {
   return formatters().full.format(value);
 }
 
-/** The weekday, day and month in words. */
-export function longDay(value: number): string {
-  return formatters().longDay.format(new Date(value));
-}
-
-/** Hours and minutes, two digits each. */
-export function hourMinute(value: number): string {
-  return formatters().dayClock.format(new Date(value));
-}
-
 export function time(value: number): string {
   return formatters().clock.format(new Date(value));
+}
+
+/** `10:31`: the hour and minute alone. */
+export function dayClock(value: number): string {
+  return formatters().dayClock.format(value);
+}
+
+/** `Tuesday 15 September`: the heading over a day's messages or a chart's day. */
+export function longDay(value: number): string {
+  return formatters().longDay.format(value);
 }
 
 /** `10:31` today, `Tue 10:31` within the week, `12 Sep 10:31` before that: when a turn finished. */
@@ -181,7 +186,8 @@ export function quotaResetTime(value: number): string {
   return `${set.quotaDay.format(value)} ${set.dayClock.format(value)}`;
 }
 
-export function tokens(value: number): string {
+/** `512`, `84.4K`, `1.2M`, `3.4B` in English, `84,4 k` in French: a token count in a chip or a title. */
+export function formatTokens(value: number): string {
   return formatters().counter.format(value);
 }
 
@@ -254,6 +260,11 @@ export function projectName(project: { name: string; kind?: 'drafts' } | null | 
   return project.kind === 'drafts' ? strings.drafts.name : project.name;
 }
 
+/** A provider's name as the owning machine lists it; its id once the machine no longer lists it. */
+export function providerName(owner: { providers: readonly { id: string; name: string }[] }, providerId: string): string {
+  return owner.providers.find((entry) => entry.id === providerId)?.name ?? providerId;
+}
+
 /**
  * `Claude · Opus 5.5`: the provider's name, then the model's, as the owning
  * machine lists them. A provider or model the machine no longer lists keeps
@@ -263,7 +274,7 @@ export function agentLabel(
   owner: { providers: { id: string; name: string }[]; modelsOf(providerId: string, accountId: string | null): { id: string; name: string }[] },
   thread: { providerId: string; accountId: string; model: string | null }
 ): string {
-  const provider = owner.providers.find((entry) => entry.id === thread.providerId)?.name ?? thread.providerId;
+  const provider = providerName(owner, thread.providerId);
   if (!thread.model) return provider;
   const model = owner.modelsOf(thread.providerId, thread.accountId).find((entry) => entry.id === thread.model)?.name ?? thread.model;
   return `${provider} · ${model}`;

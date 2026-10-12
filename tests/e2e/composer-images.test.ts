@@ -167,3 +167,76 @@ test('the paint layer breaks lines where the box does at a fractional width', as
     expect(lines.paintWidth).toBe(lines.boxWidth);
   } finally { await page?.close(); await server.close(); }
 }, 60_000);
+
+test('a full attachment strip stays one row and folds the rest behind a +N tile', async () => {
+  const port = await freePort();
+  const server = await startDevUi(port);
+  let page: BrowserPage | undefined;
+  try {
+    page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&open=recent`, windowSize: { width: 1280, height: 900 } });
+    await page.waitFor('document.querySelector("[data-testid=composer-input]")');
+    await page.evaluate(`(async () => {
+      const transfer = new DataTransfer();
+      for (let at = 0; at < 8; at++) {
+        const canvas = document.createElement('canvas'); canvas.width = 320; canvas.height = 200;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = 'hsl(' + at * 40 + ' 55% 45%)'; ctx.fillRect(0, 0, 320, 200);
+        ctx.fillStyle = '#ffffff'; ctx.font = '96px sans-serif'; ctx.fillText(String(at + 1), 130, 135);
+        const blob = await new Promise(resolve => canvas.toBlob(resolve));
+        transfer.items.add(new File([blob], 'shot-' + (at + 1) + '.png', { type: 'image/png' }));
+      }
+      document.querySelector('[data-testid=composer-input]').dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: transfer }));
+    })()`);
+    const tiles = '[data-testid=composer-attachment], [data-testid=composer-attachments-more], [data-testid=composer-attachments-less]';
+    const rows = `new Set(Array.from(document.querySelectorAll('${tiles}'), el => el.offsetTop)).size`;
+    const capture = async (name: string) => {
+      await page!.evaluate('Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])');
+      await page!.screenshot(join(import.meta.dir, '.artifacts', name));
+    };
+    await page.waitFor('document.querySelectorAll("[data-testid=composer-attachment]").length === 8');
+    expect(await page.evaluate(rows)).toBe(1);
+    expect(await page.evaluate('document.querySelector("[data-testid=composer-attachments-more]")')).toBeNull();
+    await capture('composer-strip-desktop.png');
+
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+    await page.waitFor('document.querySelector("[data-testid=composer-attachments-more]")');
+    const shown = await page.evaluate<number>('document.querySelectorAll("[data-testid=composer-attachment]").length');
+    expect(shown).toBeLessThan(8);
+    expect(await page.evaluate('document.querySelector("[data-testid=composer-attachments-more]").textContent.trim()')).toBe(`+${8 - shown}`);
+    expect(await page.evaluate(rows)).toBe(1);
+    await capture('composer-strip-phone.png');
+    expect(await page.evaluate('(() => { const strip = document.querySelector("[data-testid=composer-attachments]").getBoundingClientRect(); const more = document.querySelector("[data-testid=composer-attachments-more]").getBoundingClientRect(); return more.right <= strip.right; })()')).toBe(true);
+
+    await page.click('[data-testid=composer-attachments-more]');
+    await page.waitFor('document.querySelectorAll("[data-testid=composer-attachment]").length === 8');
+    expect(await page.evaluate(rows)).toBeGreaterThan(1);
+    await capture('composer-strip-phone-open.png');
+    await page.click('[data-testid=composer-attachments-less]');
+    await page.waitFor(`document.querySelectorAll("[data-testid=composer-attachment]").length === ${shown}`);
+
+    // Sent, the eight keep to one row of thumbnails in the bubble, the rest behind a +N over the last one.
+    await page.type('[data-testid=composer-input]', 'Eight screens');
+    await page.click('[data-testid=composer-send]');
+    const bubble = 'Array.from(document.querySelectorAll("[data-testid=message-images]")).at(-1)';
+    const sentRows = `new Set(Array.from(${bubble}.querySelectorAll('.shot:not([inert])'), el => el.offsetTop)).size`;
+    await page.waitFor(`${bubble}?.querySelectorAll('[data-testid=image-open]').length === 8 && ${bubble}.querySelector('[data-testid=message-images-more]')`);
+    await page.evaluate(`${bubble}.scrollIntoView({ block: 'center' })`);
+    const sent = await page.evaluate<{ fits: number; more: string; height: number }>(`(() => {
+      const row = ${bubble};
+      return { fits: row.querySelectorAll('.shot:not([inert])').length, more: row.querySelector('[data-testid=message-images-more]').textContent.trim(), height: row.getBoundingClientRect().height };
+    })()`);
+    expect(sent.fits).toBeLessThan(8);
+    expect(sent.more).toBe(`+${8 - sent.fits}`);
+    expect(sent.height).toBeLessThan(100);
+    expect(await page.evaluate(sentRows)).toBe(1);
+    await capture('message-images-phone.png');
+    await page.click('[data-testid=message-images-more]');
+    await page.waitFor(`${bubble}.querySelectorAll('.shot:not([inert])').length === 8 && !${bubble}.querySelector('[data-testid=message-images-more]')`);
+    expect(await page.evaluate(sentRows)).toBeGreaterThan(1);
+    await capture('message-images-phone-open.png');
+    expect(page.errors()).toEqual([]);
+  } finally {
+    await page?.close();
+    await server.close();
+  }
+}, 90_000);
