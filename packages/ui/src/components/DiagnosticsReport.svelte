@@ -5,6 +5,7 @@
   import { mobileOverlay } from '../lib/mobile-history';
   import { focusedElement, restoreFocus } from '../lib/focus';
   import { openExternal } from '../lib/links';
+  import { errorText } from '../lib/errors';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
 
@@ -69,14 +70,14 @@
         else error = result.error ?? '';
       }
     } catch (cause) {
-      if (store.client === client) error = cause instanceof Error ? cause.message : String(cause);
+      if (store.client === client) error = errorText(cause);
     } finally { busy = false; }
   }
 
   async function openForm() {
     if (!draft) return;
     try { await openExternal(draft.prefillUrl); opened = true; }
-    catch (cause) { error = cause instanceof Error ? cause.message : String(cause); }
+    catch (cause) { error = errorText(cause); }
   }
 
   function onkeydown(event: KeyboardEvent) {

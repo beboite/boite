@@ -142,7 +142,7 @@
     aria-label={phase === 'recording' ? strings.speech.stop : strings.speech.start} aria-pressed={phase === 'recording'}
     disabled={store.connection !== 'ready' || phase === 'opening' || phase === 'transcribing'}
     onclick={() => { if (phase === 'recording') void stop(); else { cancel(); void start(); } }}>
-    {#if phase === 'recording'}<Check size={18} strokeWidth={2} />{:else}<Mic size={18} strokeWidth={1.75} />{/if}
+    {#if phase === 'recording'}<Check size={16} strokeWidth={2} />{:else}<Mic size={16} strokeWidth={1.75} />{/if}
     {#if phase === 'recording'}<i class="level" style:opacity={0.4 + level * 0.6}></i>{/if}
     {#if phase === 'opening' || phase === 'transcribing'}<LoaderCircle size={10} class="spinner" />{/if}
   </button>
@@ -154,7 +154,8 @@
 
 <style>
   .dictation { display: flex; align-items: center; gap: 2px; flex: none; }
-  .microphone { position: relative; color: var(--color-foreground); background: var(--color-surface); border: 1px solid var(--color-edge); border-radius: var(--radius-md); }
+  /* Same face as the attach button beside it: the global icon button. */
+  .microphone { position: relative; }
   .microphone.listening { color: var(--color-accent); background: var(--color-accent-soft); border-color: var(--color-accent); }
   .level { position: absolute; bottom: 3px; width: 3px; height: 3px; border-radius: var(--radius-sm); background: currentColor; }
   .dictation button { flex: none; width: var(--control); height: var(--control); }

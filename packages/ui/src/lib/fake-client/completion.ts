@@ -1,4 +1,4 @@
-import type { ThreadId } from '@boite/contracts';
+import { threadActive, type ThreadId } from '@boite/contracts';
 import type { FakeContext } from './context';
 import { refusal } from './shared';
 import { hasActiveSideQuestion, retainedFamilyIds } from './side-questions';
@@ -9,7 +9,7 @@ export function assertIdleFamily(ctx: FakeContext, threadId: ThreadId): void {
   for (const id of retainedFamilyIds(ctx, threadId)) {
     const thread = ctx.threads.get(id);
     if (!thread) continue;
-    if (['running', 'waiting', 'queued'].includes(thread.status) || scheduled.has(id) || ctx.inFlight.has(id)
+    if (threadActive(thread.status) || scheduled.has(id) || ctx.inFlight.has(id)
       || thread.background?.length || thread.pendingMove || ctx.hasProtectedInput(id) || hasActiveSideQuestion(ctx, id)
       || ctx.heldAnswers.get(id)?.length || ctx.workflows.active(id)
       || [...ctx.pendingPermissions.values(), ...ctx.pendingQuestions.values()].some(card => card.request.threadId === id)) {

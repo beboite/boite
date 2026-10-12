@@ -137,8 +137,11 @@ export function mapUsage(result: SDKResultMessage, costBefore: number): Usage {
     outputTokens: usage?.output_tokens ?? 0,
     cacheReadTokens: usage?.cache_read_input_tokens ?? 0,
     cacheWriteTokens: usage?.cache_creation_input_tokens ?? 0,
-    // A total under what was already charged is a process that started over.
-    costUsdEquivalent: total === null ? null : total >= costBefore ? total - costBefore : total,
+    // A total under what was already charged leaves this turn's share unknown:
+    // the CLI restored less than the journal holds. Charging the whole total
+    // would count the restored turns again, and the journal's sum, read back
+    // as `costBefore` on the next resume, would grow with every cold start.
+    costUsdEquivalent: total === null || total < costBefore ? null : total - costBefore,
   };
 }
 

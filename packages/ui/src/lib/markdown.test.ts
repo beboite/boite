@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { renderBlock, renderMarkdown, withCaret } from './markdown';
+import { renderBlock, renderMarkdown } from './markdown';
 
 describe('renderMarkdown', () => {
   test('inline code keeps emphasis and links literal', () => {
@@ -56,20 +56,6 @@ describe('renderMarkdown', () => {
       '<table><thead><tr><th>a</th><th>b</th></tr></thead><tbody><tr><td>1</td><td>2</td></tr></tbody></table>'
     );
     expect(renderMarkdown('either | or')).toBe('<p>either | or</p>');
-  });
-});
-
-describe('withCaret', () => {
-  test('lands inside the last block whatever it is', () => {
-    expect(withCaret('', 'C')).toBe('<p>C</p>');
-    expect(withCaret('<p>a</p>', 'C')).toBe('<p>aC</p>');
-    expect(withCaret('<ul><li>a</li></ul>', 'C')).toBe('<ul><li>aC</li></ul>');
-    expect(withCaret('<pre><code>a</code></pre>', 'C')).toBe('<pre><code>aC</code></pre>');
-    expect(withCaret('<table><thead><tr><th>a</th></tr></thead><tbody><tr><td>1</td></tr></tbody></table>', 'C')).toBe(
-      '<table><thead><tr><th>a</th></tr></thead><tbody><tr><td>1C</td></tr></tbody></table>'
-    );
-    expect(withCaret('<blockquote><p>q</p></blockquote>', 'C')).toBe('<blockquote><p>qC</p></blockquote>');
-    expect(withCaret('<p>a</p><hr>', 'C')).toBe('<p>a</p><hr><p>C</p>');
   });
 });
 

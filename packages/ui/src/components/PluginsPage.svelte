@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import InfoTip from './InfoTip.svelte';
   import { onMount } from 'svelte';
   import { Download, Play, Puzzle, RefreshCw, RotateCw, ShieldAlert, Square, TriangleAlert } from '@lucide/svelte';
@@ -31,7 +32,7 @@
   let installed = $derived(plugins.filter((plugin) => plugin.origin === 'url' || plugin.version !== null));
   let recommended = $derived(plugins.filter((plugin) => plugin.origin === 'recommended' && plugin.version === null));
 
-  const messageOf = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
+  const messageOf = (cause: unknown) => (errorText(cause));
   const short = (commit: string) => commit.slice(0, 7);
   const bare = (address: string) => address.replace(/^https:\/\//, '');
   const providerName = (id: string) => store.providers.find((provider) => provider.id === id)?.name ?? id;
@@ -253,7 +254,7 @@
             <button class="small" data-testid="plugin-update" data-plugin={plugin.id} disabled={working} onclick={() => void change(plugin, 'plugins.install')}><span class="ui-label">{fill(t.update, { version: `v${plugin.availableVersion}` })}</span></button>
           {/if}
           {#if plugin.status === 'error' || (plugin.status === 'rejected' && plugin.origin === 'recommended')}
-            <button class="small" data-testid="plugin-retry" data-plugin={plugin.id} disabled={working} onclick={() => void change(plugin, 'plugins.install')}><RefreshCw size={14} /><span class="ui-label">{plugin.status === 'error' ? t.retry : t.reinstall}</span></button>
+            <button class="small" data-testid="plugin-retry" data-plugin={plugin.id} disabled={working} onclick={() => void change(plugin, 'plugins.install')}><RefreshCw size={14} /><span class="ui-label">{plugin.status === 'error' ? strings.common.retry : t.reinstall}</span></button>
           {/if}
           <button class="ghost small" data-testid="plugin-uninstall" data-plugin={plugin.id} disabled={working} onclick={() => void change(plugin, 'plugins.uninstall')}><span class="ui-label">{t.remove}</span></button>
         {/if}
@@ -315,7 +316,7 @@
       <div class="pools">
         <div class="pools-head">
           <h4 class="section-label"><span class="ui-label">{t.pools}</span><InfoTip topic={t.pools} text={t.cliScope} /></h4>
-          <button class="quiet small" data-testid="plugin-refresh" data-plugin={plugin.id} disabled={working} onclick={() => void loadPools(plugin.id, true)}><RefreshCw size={14} /><span class="ui-label">{t.refresh}</span></button>
+          <button class="quiet small" data-testid="plugin-refresh" data-plugin={plugin.id} disabled={working} onclick={() => void loadPools(plugin.id, true)}><RefreshCw size={14} /><span class="ui-label">{strings.common.refresh}</span></button>
         </div>
         {#each pools[plugin.id] ?? [] as pool (pool.provider)}
           <div class="pool" data-testid="plugin-pool" data-plugin={plugin.id} data-provider={pool.provider}>
@@ -336,7 +337,7 @@
                     <button class="ghost small" disabled={working} onclick={() => void accountAction(plugin, pool.provider, 'remove', account.email)}><span class="ui-label">{t.forget}</span></button>
                   </span>
                 </div>
-                <QuotaList bare rows={[{ accountId: account.email, providerId: pool.provider, providerName: account.email, label: '', enabled: true,
+                <QuotaList rows={[{ accountId: account.email, providerId: pool.provider, providerName: account.email, label: '', enabled: true,
                   status: account.checkedSecondsAgo === null ? 'unavailable' : 'ready', windows: account.windows,
                   checkedAt: account.checkedSecondsAgo === null ? null : Date.now() - account.checkedSecondsAgo * 1000, error: null }]} />
               </div>
@@ -427,7 +428,7 @@
             <p class="trust"><TriangleAlert size={15} strokeWidth={1.75} />{t.trust}</p>
           {/if}
           <div class="act end">
-            <button class="quiet small" data-testid="plugin-dismiss" onclick={() => { preview = null; }}><span class="ui-label">{preview.rejected ? t.dismiss : strings.common.cancel}</span></button>
+            <button class="quiet small" data-testid="plugin-dismiss" onclick={() => { preview = null; }}><span class="ui-label">{preview.rejected ? strings.common.dismiss : strings.common.cancel}</span></button>
             {#if preview.previewId && preview.manifest}
               <button class="primary small" data-testid="plugin-add" disabled={adding} onclick={() => void add()}><Download size={14} /><span class="ui-label">{fill(t.confirmAdd, { name: preview.manifest.name })}</span></button>
             {/if}

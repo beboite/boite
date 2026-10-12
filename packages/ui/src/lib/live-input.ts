@@ -1,3 +1,4 @@
+import { errorText } from './errors';
 /**
  * A live view (the agent's browser, a device) driven from a computer: once its
  * picture has been clicked, the keyboard and the clipboard belong to it until
@@ -75,7 +76,7 @@ export function liveInput(screen: () => Element | null | undefined, handlers: Li
     event.preventDefault();
     writeClipboardLater(handlers.copy()).then(
       written => { if (written && event.type === 'cut') handlers.cut?.(); },
-      cause => handlers.failed?.(cause instanceof Error ? cause.message : String(cause)));
+      cause => handlers.failed?.(errorText(cause)));
   };
   document.addEventListener('pointerdown', pointer, true);
   document.addEventListener('focusin', focus, true);

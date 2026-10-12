@@ -6,6 +6,7 @@
   import { agentDirectory } from '../lib/agent-directory.svelte';
   import { experimentOn } from '../lib/experiments.svelte';
   import { fill, strings } from '../lib/strings';
+  import { avatarStatus } from '../lib/thread-state';
   import AgentAvatar from './agents/AgentAvatar.svelte';
 
   /**
@@ -20,12 +21,11 @@
     return untrack(() => target.watch());
   });
   const agent = $derived(directory.ownerOf(thread));
-  const working = $derived(thread.status === 'running' || thread.status === 'queued');
 </script>
 
 <div class="owner-bar" data-testid="agent-owner-bar">
   {#if agent}
-    <AgentAvatar kind="profile" id={agent.id} name={agent.name} avatar={agent.avatar} status={thread.status === 'waiting' ? 'waiting' : working ? 'running' : 'idle'} size={32} />
+    <AgentAvatar kind="profile" id={agent.id} name={agent.name} avatar={agent.avatar} status={avatarStatus(thread.status)} size={32} />
     <span class="text"><strong>{fill(strings.agents.ownedBy, { name: agent.name })}</strong><small>{fill(strings.agents.ownedHint, { name: agent.name })}</small></span>
     {#if experimentOn('resident-agents')}<button type="button" class="small" onclick={() => store.showAgents(agent.id)} data-testid="agent-owner-open">{fill(strings.agents.openAgent, { name: agent.name })}</button>{/if}
   {:else}

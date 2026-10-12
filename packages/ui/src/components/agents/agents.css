@@ -254,7 +254,6 @@ html[data-motion='reduced'] .typing-bubble .dots i { animation: none; opacity: 0
 .routine-card { display: flex; flex-direction: column; gap: 10px; }
 .routine-card > header { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .routine-icon { width: 32px; height: 32px; flex: none; display: grid; place-items: center; border-radius: 50%; background: var(--color-accent-soft); color: var(--color-accent); }
-.routine-agent { width: auto; height: auto; padding: 0; border-radius: 50%; }
 .routine-text { flex: 1; min-width: 0; display: grid; gap: 2px; }
 .routine-text strong { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .routine-when { font-size: var(--text-sm); color: var(--color-muted-foreground); }
@@ -274,7 +273,6 @@ html[data-motion='reduced'] .typing-bubble .dots i { animation: none; opacity: 0
 /* A phone: the list is the screen, a page opens over it with a back arrow and no tab bar. */
 @media (max-width: 720px) {
   .agents-page { flex-direction: column; padding-bottom: env(safe-area-inset-bottom); }
-  html.agents-detail-open .mobile-tabs { display: none; }
   .agents-page .agents-rail { --ring: var(--color-background); background: var(--color-background); }
   .agents-main { display: none; }
   .agents-page.detail-open .agents-rail { display: none; }

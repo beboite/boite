@@ -97,10 +97,10 @@ test('a reasoning with no text offers nothing to unfold', () => {
   flushSync();
   expect(toggle.querySelector('.fold-caret')).toBeNull();
   expect(toggle.hasAttribute('aria-expanded')).toBe(false);
-  expect(document.querySelector('.fold')!.classList.contains('open')).toBe(false);
+  expect(document.querySelector('.disclosure-fold')!.classList.contains('open')).toBe(false);
 
   props.text = 'Reading the file.';
   flushSync();
   expect(toggle.getAttribute('aria-expanded')).toBe('true');
-  expect(document.querySelector('.fold')!.classList.contains('open')).toBe(true);
+  expect(document.querySelector('.disclosure-fold')!.classList.contains('open')).toBe(true);
 });

@@ -1,11 +1,12 @@
 <script lang="ts">
   import { ArrowLeft, Pause, Play, Plus, Settings, Square, Trash2, UsersRound, Workflow } from '@lucide/svelte';
   import { onDestroy } from 'svelte';
-  import { DEFAULT_DELEGATION_CONFIG, type DelegationConfig, type DelegationProfile } from '@boite/contracts';
+  import { DEFAULT_DELEGATION_CONFIG, threadActive, type DelegationConfig, type DelegationProfile } from '@boite/contracts';
   import type { BoundPanel, Surface } from '../lib/right-panel.svelte';
   import { fill, strings } from '../lib/strings';
   import type { Choice, PickPatch, Store } from '../lib/store.svelte';
-  import { formatTokens } from '../lib/tokens';
+  import { effortName, formatTokens, providerName } from '../lib/format';
+  import { totalTokens } from '../lib/usage';
   import { modelLogoId, modelMakerName } from '../lib/provider-logos';
   import { isLive, runProgress } from '../lib/workflow-view';
   import EffortSlider from './EffortSlider.svelte';
@@ -13,9 +14,9 @@
   import ModelPicker from './ModelPicker.svelte';
   import ProviderLogo from './ProviderLogo.svelte';
   import StatusMark from './StatusMark.svelte';
-  import AgentElapsed from './AgentElapsed.svelte';
+  import { threadTone, workflowTone } from '../lib/thread-state';
+  import Elapsed from './Elapsed.svelte';
   import NativeAgents from './NativeAgents.svelte';
-  import WorkflowMark from './WorkflowMark.svelte';
   import WorkflowRunPane from './WorkflowRunPane.svelte';
   import { agentProgress } from '../lib/delegation-progress';
 
@@ -41,7 +42,7 @@
   let doneAgents = $derived(agents.filter(agent => !agentProgress(agent).active).sort((a, b) => endOf(b) - endOf(a)));
   let liveRuns = $derived(runs.filter(isLive));
   let doneRuns = $derived(runs.filter(entry => !isLive(entry)));
-  let busy = $derived(agents.some(agent => ['queued', 'running', 'waiting'].includes(agent.thread.status)) || runs.some(isLive));
+  let busy = $derived(agents.some(agent => threadActive(agent.thread.status)) || runs.some(isLive));
 
   $effect(() => {
     const threadId = openThreadId;
@@ -107,16 +108,16 @@
   function routeOf(agent: Agent) {
     const thread = agent.thread;
     const model = store.modelOf({ providerId: thread.providerId, accountId: thread.accountId, model: thread.model, effort: thread.effort, permissionMode: 'default', speed: null });
-    const provider = store.providerOf(thread.providerId)?.name ?? thread.providerId;
+    const provider = providerName(store, thread.providerId);
     const name = model?.name ?? thread.model ?? strings.thread.defaultModel;
-    const effort = thread.effort ? model?.effort?.levels.find(level => level.id === thread.effort)?.label ?? thread.effort : null;
+    const effort = thread.effort ? effortName(model, thread.effort) : null;
     const logo = modelLogoId(thread.providerId, thread.model ?? model?.id);
     return { provider, maker: modelMakerName(logo, thread.providerId) ?? provider, name, effort, logo, label: [provider, name, effort].filter(Boolean).join(' · ') };
   }
 
   function tokensOf(agent: Agent): number | null {
     const usage = agent.lastTurn?.usage;
-    return usage ? usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheWriteTokens : null;
+    return usage ? totalTokens(usage) : null;
   }
 
   /** Completed goes without saying under Finished; a stop or a failure does not. */
@@ -136,14 +137,14 @@
 {#snippet runRow(entry: (typeof runs)[number])}
   {@const progress = runProgress(entry)}
   <button type="button" class="member" data-testid="delegation-run" data-run-id={entry.id} onclick={() => showRun(entry.id)}>
-    <span class="avatar run"><Workflow size={16} strokeWidth={1.75} /><span class="dot"><WorkflowMark status={entry.status} run /></span></span>
+    <span class="avatar run"><Workflow size={16} strokeWidth={1.75} /><StatusMark {...workflowTone(entry.status, true)} corner /></span>
     <span class="member-main">
       <strong class="title"><span class="ui-label">{entry.name}</span></strong>
       <span class="route"><span class="ui-label">{fill(strings.workflow.steps, { done: String(progress.done), total: String(progress.total) })}</span></span>
     </span>
     <span class="meta">
       {#if !isLive(entry)}<span class="outcome ui-label" data-status={entry.status}>{strings.workflow.status[entry.status]}</span>{/if}
-      <AgentElapsed startedAt={entry.createdAt} finishedAt={entry.finishedAt} active={entry.status === 'running'} />
+      <Elapsed startedAt={entry.createdAt} finishedAt={entry.finishedAt} active={entry.status === 'running'} />
     </span>
   </button>
 {/snippet}
@@ -156,7 +157,7 @@
   <button type="button" class="member" class:selected={selected?.thread.id === agent.thread.id} data-testid="delegation-member" data-agent-id={agent.thread.id} onclick={() => void store.selectDelegatedAgent(agent.thread.id)}>
     <span class="avatar" role="img" aria-label={route.maker} title={route.maker}>
       <ProviderLogo providerId={route.logo} size={20} />
-      {#if progress.active}<span class="dot"><StatusMark status={agent.thread.status} /></span>{/if}
+      {#if progress.active}<StatusMark {...threadTone(agent.thread.status)} corner />{/if}
     </span>
     <span class="member-main">
       <strong class="title"><span class="ui-label">{agent.thread.title}</span></strong>
@@ -166,7 +167,7 @@
     </span>
     <span class="meta">
       {#if outcome}<span class="outcome ui-label" data-status={progress.status}>{outcome}</span>{/if}
-      <AgentElapsed startedAt={progress.startedAt} finishedAt={progress.finishedAt} active={progress.active} />
+      <Elapsed startedAt={progress.startedAt} finishedAt={progress.finishedAt} active={progress.active} />
       {#if tokens !== null}<span class="tokens ui-label">{formatTokens(tokens)} {strings.units.tokens}</span>{/if}
     </span>
     {#if agent.result}<span class="result"><span>{agent.result}</span></span>{/if}
@@ -252,7 +253,7 @@
               <button type="button" class="ghost small icon back" aria-label={strings.delegation.backToTeam} onclick={() => void store.selectDelegatedAgent(null)}><ArrowLeft size={15} /></button>
               <div><strong>{selected.thread.title}</strong><small>{routeOf(selected).label}</small></div>
               <button type="button" class="quiet small" data-testid="delegation-open-thread" onclick={() => void openChild()}><span class="ui-label">{strings.delegation.openThread}</span></button>
-              {#if ['queued', 'running', 'waiting'].includes(selected.thread.status)}<button type="button" class="danger small" onclick={() => void store.stopDelegatedAgent(selected.thread.id)}><Square size={11} fill="currentColor" /><span class="ui-label">{strings.delegation.stop}</span></button>{/if}
+              {#if threadActive(selected.thread.status)}<button type="button" class="danger small" onclick={() => void store.stopDelegatedAgent(selected.thread.id)}><Square size={11} fill="currentColor" /><span class="ui-label">{strings.delegation.stop}</span></button>{/if}
             </header>
             {#if store.delegationThread}
               <div class="transcript"><DelegationTranscript messages={store.delegationThread.messages} /></div>
@@ -285,10 +286,6 @@
   .switch-row > span, .profiles-head > span { flex: 1; min-width: 0; }
   .switch-row small, .profiles-head small { display: block; margin-top: 2px; color: var(--color-muted-foreground); font-size: var(--text-xs); line-height: 1.4; font-weight: normal; }
   .empty { margin: 16px; color: var(--color-muted-foreground); font-size: var(--text-sm); line-height: 1.5; }
-  input[role='switch'] { appearance: none; position: relative; width: 40px; height: 24px; min-height: 24px; padding: 0; border-radius: 999px; background: var(--color-surface-3); }
-  input[role='switch']::after { content: ''; position: absolute; width: 16px; height: 16px; top: 3px; left: 3px; border-radius: 50%; background: var(--color-muted-foreground); transition: transform var(--dur-2) var(--ease-out-quint); }
-  input[role='switch']:checked { background: var(--color-foreground); }
-  input[role='switch']:checked::after { transform: translateX(16px); background: var(--color-background); }
   .profiles { margin-top: 7px; display: grid; gap: 5px; }
   .profile { display: grid; grid-template-columns: minmax(90px, .8fr) minmax(140px, 1fr) auto var(--control-sm); gap: 6px; align-items: center; }
   .profile > input { min-width: 0; }
@@ -303,9 +300,8 @@
   .member { width: 100%; height: auto; padding: 10px 9px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 0 10px; border: 1px solid transparent; border-radius: var(--radius-md); background: transparent; text-align: left; }
   .member + .member { margin-top: 2px; }
   .member:hover, .member.selected { background: var(--color-hover); border-color: var(--color-border); }
-  .avatar { position: relative; width: 30px; height: 30px; display: grid; place-items: center; border-radius: var(--radius-md); background: var(--color-surface-2); border: 1px solid var(--color-border); }
+  .avatar { --ring: var(--color-background); position: relative; width: 30px; height: 30px; display: grid; place-items: center; border-radius: var(--radius-md); background: var(--color-surface-2); border: 1px solid var(--color-border); }
   .avatar.run { color: var(--color-muted-foreground); }
-  .avatar .dot { position: absolute; right: -3px; bottom: -3px; display: grid; place-items: center; padding: 2px; border-radius: 50%; background: var(--color-background); }
   .member-main { min-width: 0; display: grid; gap: 6px; padding-top: 1px; }
   .title { min-width: 0; font-size: var(--text-sm); font-weight: 600; }
   .title .ui-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -337,5 +333,4 @@
     .detail-pane > header > .quiet:not(.back) { grid-column: 2; justify-self: start; }
     .detail-pane > header > .danger { grid-column: 3; }
   }
-  @media (prefers-reduced-motion: reduce) { input[role='switch']::after { transition: none; } }
 </style>

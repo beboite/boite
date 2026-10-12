@@ -3,14 +3,8 @@
   import type { ProcessRecord, TraceCapability } from '@boite/contracts';
   import { bytes, millis } from '../lib/format';
   import { strings } from '../lib/strings';
+  import { secondClock } from '../lib/clock.svelte';
   let { records, capability }: { records: ProcessRecord[]; capability: TraceCapability | null } = $props();
-  let now = $state(Date.now());
-  let live = $derived(records.some(record => record.exitedAt === null));
-  $effect(() => {
-    if (!live) return;
-    const timer = setInterval(() => { now = Date.now(); }, 1000);
-    return () => clearInterval(timer);
-  });
   let ordered = $derived([...records].sort((a, b) => Number(b.exitedAt === null) - Number(a.exitedAt === null) || b.startedAt - a.startedAt));
   function name(exe: string) { return exe.split(/[\\/]/).pop() ?? exe; }
 </script>
@@ -30,14 +24,14 @@
         <details class="process" class:live={record.exitedAt === null} data-testid="trace-row" data-pid={record.pid}>
           <summary>
             <div class="headline">
-              <ChevronRight size={14} />
+              <ChevronRight size={14} class="fold-caret" />
               <span class="exe ui-label" data-exe={record.exe} title={`${record.exe}\npid ${record.pid}`}>{name(record.exe)}</span>
               <span class="status ui-label" class:failed={record.exitedAt !== null && record.exitCode !== null && record.exitCode !== 0}>
                 {record.exitedAt === null ? strings.trace.live : record.exitCode === 0 ? strings.trace.finished : record.exitCode === null ? strings.common.unknown : `${strings.trace.exit} ${record.exitCode}`}
               </span>
             </div>
             <div class="metrics">
-              <span>{strings.trace.duration} <b>{millis((record.exitedAt ?? now) - record.startedAt)}</b></span>
+              <span>{strings.trace.duration} <b>{millis((record.exitedAt ?? secondClock.now) - record.startedAt)}</b></span>
               <span>{strings.trace.memory} <b>{bytes(record.peakMemoryBytes)}</b></span>
             </div>
           </summary>
@@ -65,8 +59,6 @@
   .process > summary { list-style: none; cursor: pointer; padding: 12px 0; }
   .process > summary::-webkit-details-marker { display: none; }
   .headline { display: flex; align-items: center; gap: 7px; }
-  .headline :global(svg) { flex: none; color: var(--color-subtle); transition: transform var(--dur-2); }
-  .process[open] .headline :global(svg) { transform: rotate(90deg); }
   .exe { flex: 1; min-width: 0; overflow-wrap: anywhere; font-weight: 500; font-size: var(--text-sm); }
   .status { flex: none; color: var(--color-muted-foreground); font-size: var(--text-xs); }
   .live .status { color: var(--color-live); }

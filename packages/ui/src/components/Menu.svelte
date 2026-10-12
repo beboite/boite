@@ -191,11 +191,8 @@
   .switches .label { gap: 9px; }
   .switches .glyph { margin-right: 0; }
   .switches .hint { padding-left: 23px; font-size: var(--text-xs); }
-  .switch { position: relative; grid-column: 2; grid-row: 1 / span 2; align-self: center; width: 36px; height: 22px; border: 1px solid var(--color-edge); border-radius: 999px; background: var(--color-surface-3); transition: background var(--dur-2), border-color var(--dur-2); }
-  .switch::after { content: ''; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--color-muted-foreground); transition: transform var(--dur-2) var(--ease-out-quint); }
-  .switch.on { background: var(--color-foreground); border-color: var(--color-foreground); }
-  .switch.on::after { transform: translateX(14px); background: var(--color-background); }
-  @media (prefers-reduced-motion: reduce) { .switch, .switch::after { transition: none; } }
+  /* The shared switch (app.css), a little smaller in a menu row. */
+  .switch { --switch-width: 36px; --switch-height: 22px; grid-column: 2; grid-row: 1 / span 2; align-self: center; }
   .item.hide-mark.active { background: var(--color-active); }
   .status-dot { display: inline-block; width: 6px; height: 6px; flex: none; border-radius: 50%; margin-right: 8px; vertical-align: middle; background: var(--color-live); }
   .status-dot[data-tone='success'] { background: var(--color-success); }

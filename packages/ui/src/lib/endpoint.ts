@@ -1,3 +1,4 @@
+import { errorText } from './errors';
 import { GRANT_QUERY_PARAM, PAIR_QUERY_PARAM, parseGroupRelayUrl, withoutTrailingSlashes, type DeviceHello } from '@boite/contracts';
 import { heldDeviceKey } from './device-key';
 
@@ -41,10 +42,6 @@ export interface Endpoint {
 
 export const ENDPOINT_STORAGE_KEY = 'boite.core';
 export const CORE_QUERY_PARAM = 'core';
-
-function normalise(url: string): string {
-  return url.replace(/\/+$/, '');
-}
 
 function isEndpoint(value: unknown): value is Endpoint {
   if (typeof value !== 'object' || value === null) return false;
@@ -119,7 +116,7 @@ export function keepDropped(): void {
  * admitted the machine again.
  */
 function setDropped(url: string, epoch: number | null): void {
-  setMark(normalise(url), epoch);
+  setMark(withoutTrailingSlashes(url), epoch);
 }
 
 /** The same machine under every address it gives: a drop heard for one of them holds for the others. */
@@ -146,7 +143,7 @@ function setMark(target: string, epoch: number | null): void {
  * than the one dropped means the machine was admitted again, and is not dropped.
  */
 export function isDropped(url: string, epoch?: number): boolean {
-  const mark = droppedAddresses()[normalise(url)];
+  const mark = droppedAddresses()[withoutTrailingSlashes(url)];
   return mark !== undefined && (epoch === undefined || epoch <= mark.epoch);
 }
 
@@ -158,7 +155,7 @@ export function isDropped(url: string, epoch?: number): boolean {
 export function droppedSince(url: string, began: number, member?: { coreId?: string; groupId?: string }): boolean {
   const marks = droppedAddresses();
   const of = member?.coreId !== undefined && member.groupId !== undefined ? marks[memberKey(member.groupId, member.coreId)] : undefined;
-  return [marks[normalise(url)], of].some((mark) => mark !== undefined && mark.at >= began);
+  return [marks[withoutTrailingSlashes(url)], of].some((mark) => mark !== undefined && mark.at >= began);
 }
 
 /**
@@ -181,7 +178,7 @@ export function readStoredEndpoint(): Endpoint | null {
     if (!raw) return null;
     const parsed: unknown = JSON.parse(raw);
     if (!isEndpoint(parsed) || isDropped(parsed.url)) return null;
-    return { url: normalise(parsed.url), token: parsed.token, ...(parsed.paired === true ? { paired: true } : {}), ...brought(parsed), ...signsOf(parsed) };
+    return { url: withoutTrailingSlashes(parsed.url), token: parsed.token, ...(parsed.paired === true ? { paired: true } : {}), ...brought(parsed), ...signsOf(parsed) };
   } catch {
     return null;
   }
@@ -210,7 +207,7 @@ export function storeEndpoint(endpoint: Endpoint): void {
   try {
     window.localStorage.setItem(
       ENDPOINT_STORAGE_KEY,
-      JSON.stringify({ url: normalise(endpoint.url), token: endpoint.token, ...(endpoint.paired ? { paired: true } : {}), ...brought(endpoint), ...signsOf(endpoint) })
+      JSON.stringify({ url: withoutTrailingSlashes(endpoint.url), token: endpoint.token, ...(endpoint.paired ? { paired: true } : {}), ...brought(endpoint), ...signsOf(endpoint) })
     );
   } catch {
     /* a browser that refuses storage still runs for this session */
@@ -314,7 +311,7 @@ export function storeEnvironments(envs: StoredEnvironment[]): void {
 /** The shell discovers its local endpoint on every start; its random port is not a machine identity. */
 export function refreshLocalEnvironment(local: Endpoint): StoredEnvironment[] {
   const list = readEnvironments().filter(entry => {
-    if (entry.url === normalise(local.url)) return false;
+    if (entry.url === withoutTrailingSlashes(local.url)) return false;
     let host: string;
     try { host = new URL(entry.url).hostname; } catch { return true; }
     const generated = !entry.paired && entry.label === 'This computer';
@@ -335,7 +332,7 @@ export function upsertEnvironment(entry: {
   epoch?: number;
   signs?: string;
 }): StoredEnvironment[] {
-  const url = normalise(entry.url);
+  const url = withoutTrailingSlashes(entry.url);
   const list = readEnvironments();
   const at = list.findIndex((env) => env.url === url);
   const label = entry.label ?? list[at]?.label ?? defaultEnvironmentLabel(url);
@@ -357,7 +354,7 @@ export function upsertEnvironment(entry: {
 /** The machine was paired by hand since: it is no longer the group's to drop. */
 export function forgetGroupOf(url: string): StoredEnvironment[] {
   setDropped(url, null);
-  const list = readEnvironments().map((env) => (env.url === normalise(url) ? { url: env.url, label: env.label, token: env.token, paired: env.paired } : env));
+  const list = readEnvironments().map((env) => (env.url === withoutTrailingSlashes(url) ? { url: env.url, label: env.label, token: env.token, paired: env.paired } : env));
   storeEnvironments(list);
   return list;
 }
@@ -382,11 +379,11 @@ export function rememberSession(endpoint: Endpoint, token: string): StoredEnviro
  */
 export function rememberDevice(url: string, coreId: string): StoredEnvironment[] {
   setDropped(url, null);
-  const list = readEnvironments().map((env) => (env.url === normalise(url) ? { url: env.url, label: env.label, token: '', paired: true, signs: coreId } : env));
+  const list = readEnvironments().map((env) => (env.url === withoutTrailingSlashes(url) ? { url: env.url, label: env.label, token: '', paired: true, signs: coreId } : env));
   storeEnvironments(list);
   const updated = upsertEnvironment({ url, token: '', paired: true, signs: coreId });
   const stored = readStoredEndpoint();
-  if (stored?.url === normalise(url)) storeEndpoint({ url: stored.url, token: '', paired: true, signs: coreId });
+  if (stored?.url === withoutTrailingSlashes(url)) storeEndpoint({ url: stored.url, token: '', paired: true, signs: coreId });
   return updated;
 }
 
@@ -397,12 +394,12 @@ export function rememberDevice(url: string, coreId: string): StoredEnvironment[]
  */
 export function removeEnvironment(url: string, token?: string): StoredEnvironment[] {
   const all = readEnvironments();
-  const list = all.filter((env) => env.url !== normalise(url) || (token !== undefined && env.token !== token));
+  const list = all.filter((env) => env.url !== withoutTrailingSlashes(url) || (token !== undefined && env.token !== token));
   storeEnvironments(list);
   // The same key may be the one the window opens on next time: it goes too, or the
   // next start would send it to the address it was just forgotten at.
   const stored = readStoredEndpoint();
-  if (stored?.url === normalise(url) && all.some((env) => !list.includes(env) && env.token === stored.token)) clearStoredEndpoint();
+  if (stored?.url === withoutTrailingSlashes(url) && all.some((env) => !list.includes(env) && env.token === stored.token)) clearStoredEndpoint();
   return list;
 }
 
@@ -417,17 +414,17 @@ export function removeBrought(url: string, machine: { coreId: string; groupId?: 
   const { coreId, groupId } = machine;
   // The machine is marked whatever is saved for this address: another window may hold it under another one.
   if (dropped !== undefined && groupId !== undefined) setMark(memberKey(groupId, coreId), dropped);
-  const saved = readEnvironments().find((env) => env.url === normalise(url));
+  const saved = readEnvironments().find((env) => env.url === withoutTrailingSlashes(url));
   const stored = readStoredEndpoint();
   // Something saved must say the group brought that machine there. An address a member merely gave, and
   // that was only tried, is not one to touch: a key the owner holds for whoever really sits there stays.
-  const mine = saved?.coreId === coreId || (stored?.url === normalise(url) && stored.coreId === coreId);
+  const mine = saved?.coreId === coreId || (stored?.url === withoutTrailingSlashes(url) && stored.coreId === coreId);
   if (!mine || (saved !== undefined && saved.coreId !== coreId)) return readEnvironments();
   if (dropped === undefined) return removeEnvironment(url, saved?.token);
   // The address is marked first: a key another window left for that machine, in the list or as the core
   // it opens on, is not read again either.
   setDropped(url, dropped);
-  if (rawStoredUrl() === normalise(url)) clearStoredEndpoint();
+  if (rawStoredUrl() === withoutTrailingSlashes(url)) clearStoredEndpoint();
   return readEnvironments();
 }
 
@@ -457,7 +454,7 @@ export function readMainMachine(): MainMachine | null {
     if (shape['local'] === true) return { local: true };
     if (typeof shape['url'] !== 'string') return null;
     const member = typeof shape['coreId'] === 'string' && typeof shape['groupId'] === 'string' ? { coreId: shape['coreId'], groupId: shape['groupId'] } : {};
-    return { url: normalise(shape['url']), ...member };
+    return { url: withoutTrailingSlashes(shape['url']), ...member };
   } catch {
     return null;
   }
@@ -501,7 +498,7 @@ export function openOnMainMachine(): void {
 function rawStoredUrl(): string | null {
   try {
     const parsed: unknown = JSON.parse(window.localStorage.getItem(ENDPOINT_STORAGE_KEY) ?? 'null');
-    return isEndpoint(parsed) ? normalise(parsed.url) : null;
+    return isEndpoint(parsed) ? withoutTrailingSlashes(parsed.url) : null;
   } catch {
     return null;
   }
@@ -523,7 +520,7 @@ export function parsePairingLink(text: string): { url: string; grant: string } |
   const grant = link.searchParams.get(GRANT_QUERY_PARAM);
   if (!grant) return null;
   const core = link.searchParams.get(CORE_QUERY_PARAM);
-  return { url: normalise(core ?? `${link.origin}${link.pathname}`), grant };
+  return { url: withoutTrailingSlashes(core ?? `${link.origin}${link.pathname}`), grant };
 }
 
 /**
@@ -540,7 +537,7 @@ function takeFromQuery(): Endpoint | null {
   const grant = params.get(GRANT_QUERY_PARAM);
   if (!core && !token && !grant) return null;
 
-  const url = normalise(core ?? window.location.origin);
+  const url = withoutTrailingSlashes(core ?? window.location.origin);
   // A token this device already holds for that core says nothing new: the core is reopened as it is known.
   const held = heldFor(url);
   const known = grant ? null : !token ? knownEndpoint(url) : held.keys.includes(token) ? { url, token, paired: true } : null;
@@ -568,7 +565,7 @@ export function opensFromLink(): boolean {
 /** The core a `?core=` link names, with or without a key of its own, read before the link is taken. */
 export function linkedCore(): string | null {
   const core = new URLSearchParams(window.location.search).get(CORE_QUERY_PARAM);
-  return core ? normalise(core) : null;
+  return core ? withoutTrailingSlashes(core) : null;
 }
 
 export function insideTauri(): boolean {
@@ -646,9 +643,9 @@ export async function fromTauri(): Promise<Endpoint | null> {
     const { invoke } = await import('@tauri-apps/api/core');
     const result: unknown = await invoke('core_endpoint');
     shellRefusal = isEndpoint(result) ? null : 'the shell answered with no core address';
-    return isEndpoint(result) ? { url: normalise(result.url), token: result.token, local: true } : null;
+    return isEndpoint(result) ? { url: withoutTrailingSlashes(result.url), token: result.token, local: true } : null;
   } catch (error) {
-    shellRefusal = error instanceof Error ? error.message : String(error);
+    shellRefusal = errorText(error);
     return null;
   }
 }
@@ -656,7 +653,7 @@ export async function fromTauri(): Promise<Endpoint | null> {
 function fromOrigin(): Endpoint | null {
   const protocol = window.location.protocol;
   if (protocol !== 'http:' && protocol !== 'https:') return null;
-  return { url: normalise(window.location.origin), token: '' };
+  return { url: withoutTrailingSlashes(window.location.origin), token: '' };
 }
 
 /** The stored core or a remembered one at this address, with the key this device holds for it. */
@@ -688,15 +685,15 @@ function knownEndpoint(url: string): Endpoint | null {
 /** The machine this device's key signs for at `url`, when its key is what opens it there. */
 export function signsFor(url: string): string | undefined {
   const stored = readStoredEndpoint();
-  if (stored?.url === normalise(url) && stored.signs !== undefined) return stored.signs;
-  return readEnvironments().find((env) => env.url === normalise(url))?.signs;
+  if (stored?.url === withoutTrailingSlashes(url) && stored.signs !== undefined) return stored.signs;
+  return readEnvironments().find((env) => env.url === withoutTrailingSlashes(url))?.signs;
 }
 
 /** Addresses of the machines of this device's group, as its members last listed them: a link to one asks nothing. */
 export const GROUP_ADDRESSES_STORAGE_KEY = 'boite.group.addresses';
 
 export function rememberGroupAddresses(addresses: readonly string[]): void {
-  try { window.localStorage.setItem(GROUP_ADDRESSES_STORAGE_KEY, JSON.stringify([...new Set(addresses.map(normalise))].slice(0, 256))); } catch { /* storage refused */ }
+  try { window.localStorage.setItem(GROUP_ADDRESSES_STORAGE_KEY, JSON.stringify([...new Set(addresses.map(withoutTrailingSlashes))].slice(0, 256))); } catch { /* storage refused */ }
 }
 
 function isGroupAddress(url: string): boolean {
@@ -710,7 +707,7 @@ function isGroupAddress(url: string): boolean {
 
 async function followLink(endpoint: Endpoint, approve?: (url: string) => Promise<boolean>): Promise<boolean> {
   // A machine of this device's own group is no stranger: its key already opens it.
-  const known = endpoint.url === normalise(window.location.origin) || knownEndpoint(endpoint.url) !== null || isGroupAddress(endpoint.url);
+  const known = endpoint.url === withoutTrailingSlashes(window.location.origin) || knownEndpoint(endpoint.url) !== null || isGroupAddress(endpoint.url);
   // A link that carries a key of its own, a grant or a token, turns a machine the group brought into
   // the owner's, out of the group's hands. A machine the group removed can make such a link itself: the owner is asked.
   const held = heldFor(endpoint.url);

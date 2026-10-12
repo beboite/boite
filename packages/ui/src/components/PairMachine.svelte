@@ -129,7 +129,7 @@
   {/if}
   <!-- A computer's browser pastes the link; a phone has its camera and the code, and nothing else. -->
   {#if !mobile}
-  <div class="reveal" class:open inert={!open}>
+  <div class="disclosure-fold" class:open inert={!open}>
     <div>
       <section class="card add" data-testid="machine-add-card" aria-label={strings.machines.add}>
         <div class="add-head">
@@ -191,9 +191,6 @@
 <style>
   .pair-machine { margin-bottom: 20px; }
   .head-actions { display: flex; gap: 8px; justify-content: flex-end; margin-bottom: 12px; }
-  .reveal { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows var(--dur-3) var(--ease-out-quint), opacity var(--dur-2); }
-  .reveal.open { grid-template-rows: 1fr; opacity: 1; }
-  .reveal > div { overflow: hidden; min-height: 0; }
   .add { padding: 20px; display: flex; flex-direction: column; gap: 10px; }
   .add-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   h2 { font-size: var(--text-base); margin: 0; }
@@ -212,5 +209,4 @@
   .code-form { padding: 16px; margin: 0 0 12px; }
   .code-form input { font-family: var(--font-mono); font-size: var(--text-base); letter-spacing: 1.5px; text-transform: uppercase; }
   .code-hint { margin: 0; font-size: var(--text-xs); color: var(--color-muted-foreground); }
-  @media (prefers-reduced-motion: reduce) { .reveal { transition: none; } }
 </style>

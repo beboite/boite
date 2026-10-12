@@ -65,8 +65,8 @@
         </label>
       {/each}
       <div class="agent-form-actions">
-        <button type="submit" class="primary" disabled={view.pending} data-testid="agent-roles-save"><span class="ui-label">{labels.save}</span></button>
-        <button type="button" class="ghost" onclick={() => { editing = false; }}><span class="ui-label">{labels.cancel}</span></button>
+        <button type="submit" class="primary" disabled={view.pending} data-testid="agent-roles-save"><span class="ui-label">{strings.common.save}</span></button>
+        <button type="button" class="ghost" onclick={() => { editing = false; }}><span class="ui-label">{strings.common.cancel}</span></button>
       </div>
     </form>
   {:else}

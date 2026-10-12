@@ -371,7 +371,7 @@
         onclick={() => void save()}
       >
         <Save size={13} strokeWidth={1.75} />
-        <span class="ui-label">{saving ? strings.files.saving : strings.files.save}</span>
+        <span class="ui-label">{saving ? strings.files.saving : strings.common.save}</span>
       </button>
     {/if}
   </div>

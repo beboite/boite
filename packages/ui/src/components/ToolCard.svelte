@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { page } from '../lib/page-hidden.svelte';
+  import { errorText } from '../lib/errors';
+  import { secondClock } from '../lib/clock.svelte';
   import { Bot, ChevronRight, FilePen, FileText, Globe, Search, SquareTerminal, Wrench, X } from '@lucide/svelte';
   import type { ToolDocument, ToolStatus } from '@boite/contracts';
   import { elapsed, json } from '../lib/format';
@@ -59,19 +60,11 @@
     nested?: boolean;
   } = $props();
 
-  let now = $state(Date.now());
-  const hidden = $derived(page.hidden);
-  // A running call ticks once a second while the page is on screen.
-  $effect(() => {
-    if (status !== 'running' || startedAt === null || hidden) return;
-    now = Date.now();
-    const timer = setInterval(() => { now = Date.now(); }, 1000);
-    return () => clearInterval(timer);
-  });
   /** Shown from one second on: a quick call needs no clock. */
   let took = $derived.by(() => {
     if (startedAt === null) return '';
-    const end = status === 'running' ? now : finishedAt;
+    // A running call reads the second clock, paused while the page is hidden.
+    const end = status === 'running' ? secondClock.now : finishedAt;
     if (end === null || end === undefined) return '';
     const spent = end - startedAt;
     return spent >= 1000 ? elapsed(spent) : '';
@@ -161,7 +154,7 @@
     if (!shown || !deferred || !loadOutput || attempted) return;
     attempted = true;
     loading = true;
-    void loadOutput().catch(reason => { loadError = reason instanceof Error ? reason.message : String(reason); }).finally(() => { loading = false; });
+    void loadOutput().catch(reason => { loadError = errorText(reason); }).finally(() => { loading = false; });
   });
 </script>
 
@@ -202,8 +195,8 @@
     <span class="fold-caret" class:open={shown} aria-hidden="true"><ChevronRight size={12} /></span>
   </button>
 
-  <div class="fold" class:open={shown} inert={!shown}>
-    <div class="clip">
+  <div class="disclosure-fold" class:open={shown} inert={!shown}>
+    <div>
       {#if built}
         <div class="body">
           {#if loading}<p data-testid="tool-output-loading">{strings.app.loading}</p>{/if}
@@ -353,11 +346,6 @@
     animation: pulse 1.6s var(--ease-out-quint) infinite;
   }
 
-  @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: .3; }
-  }
-
   .took {
     flex: none;
     color: var(--color-subtle);
@@ -378,33 +366,6 @@
     border: 1.5px solid var(--color-edge);
     border-top-color: var(--color-live);
     animation: spin 0.9s linear infinite;
-  }
-
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
-  }
-
-  /* The open and the close are the same move: the rows track goes 0fr to 1fr,
-     so the card grows to whatever the body measures without a pixel written. */
-  .fold {
-    display: grid;
-    grid-template-rows: 0fr;
-    opacity: 0;
-    transition:
-      grid-template-rows var(--dur-3) var(--ease-out-quint),
-      opacity var(--dur-3) var(--ease-out-quint);
-  }
-
-  .fold.open {
-    grid-template-rows: 1fr;
-    opacity: 1;
-  }
-
-  .clip {
-    min-height: 0;
-    overflow: hidden;
   }
 
   /* The body sits under the line's words, past the glyph. */

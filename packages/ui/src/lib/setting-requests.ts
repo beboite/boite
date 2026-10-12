@@ -8,7 +8,7 @@
 import type { AutoCompactMoment, ProviderSummary, RequestableSetting, SettingAsk, SettingsPage } from '@boite/contracts';
 import { formatLocale } from './i18n.svelte';
 import { fill, strings } from './strings';
-import { formatTokens } from './tokens';
+import { formatTokens } from './format';
 
 const UNITS: Partial<Record<RequestableSetting, { unit: string; display: 'short' | 'long' }>> = {
   agentCpuCapPercent: { unit: 'percent', display: 'short' },

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import { exactTime } from '../lib/format';
   import { ArrowUp, Brain, Check, ChevronRight, FileText, Folder, GitBranch, Puzzle, RefreshCw, Sparkles } from '@lucide/svelte';
   import { RpcErrorCode, type BrainConfig, type BrainStatus, type RpcResult } from '@boite/contracts';
@@ -23,7 +24,7 @@
   let entries = $derived(status?.entries.filter(entry => entry.kind === selected) ?? []);
   let folderName = $derived(status?.config.path?.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? '');
   let autoPull = $derived(status?.config.autoPull ?? { onStartup: false, intervalMinutes: 0 });
-  const failure = (cause: unknown) => cause instanceof RpcFailure && cause.code === RpcErrorCode.MethodNotFound ? t.missing : cause instanceof Error ? cause.message : String(cause);
+  const failure = (cause: unknown) => cause instanceof RpcFailure && cause.code === RpcErrorCode.MethodNotFound ? t.missing : errorText(cause);
 
   $effect(() => {
     const client = store.client;
@@ -120,7 +121,7 @@
       </div>
       <div class="connection-bottom">
         <label class="sharing"><input type="checkbox" role="switch" checked={status.config.enabled} onchange={event => { event.currentTarget.checked = status!.config.enabled; void run('toggle'); }} disabled={busy} data-testid="brain-enabled" /><span class="ui-label">{t.enabled}</span></label>
-        <button class="ghost small" disabled={busy} onclick={() => { editing = !editing; path = status!.config.path!; folders = null; }} data-testid="brain-change"><span class="ui-label">{editing ? t.cancel : t.change}</span></button>
+        <button class="ghost small" disabled={busy} onclick={() => { editing = !editing; path = status!.config.path!; folders = null; }} data-testid="brain-change"><span class="ui-label">{editing ? strings.common.cancel : t.change}</span></button>
       </div>
       <div class="global-instructions">
         <label class="sharing"><input type="checkbox" role="switch" checked={status.config.globalInstructions ?? false} disabled={busy || !status.config.enabled} data-testid="brain-global" onchange={event => { event.currentTarget.checked = status!.config.globalInstructions ?? false; void run('global'); }} /><span class="ui-label">{t.globalInstructions}</span></label>
@@ -165,7 +166,7 @@
           <button type="button" disabled={busy} onclick={() => { path = folders!.path; folders = null; }}><span class="ui-label">{t.useFolder}</span></button>
         </div>
       {/if}
-      <div class="form-actions"><button class="primary" type="submit" disabled={busy || !path.trim()} data-testid="brain-save"><span class="ui-label">{status.config.path ? t.saveChanges : t.save}</span></button>{#if status.config.path}<button type="button" class="ghost" disabled={busy} onclick={() => void run('disconnect')} data-testid="brain-disconnect"><span class="ui-label">{t.disconnect}</span></button>{/if}</div>
+      <div class="form-actions"><button class="primary" type="submit" disabled={busy || !path.trim()} data-testid="brain-save"><span class="ui-label">{status.config.path ? strings.common.save : t.save}</span></button>{#if status.config.path}<button type="button" class="ghost" disabled={busy} onclick={() => void run('disconnect')} data-testid="brain-disconnect"><span class="ui-label">{t.disconnect}</span></button>{/if}</div>
     </form>
   {/if}
   {#if status?.config.path}
@@ -176,13 +177,13 @@
             <button class="ghost category" class:active={selected === kind} aria-pressed={selected === kind} onclick={() => selected = kind} data-testid="brain-category-{kind}"><span class="ui-label">{t[kind]}</span><span class="ui-label">{status.entries.filter(entry => entry.kind === kind).length}</span></button>
           {/each}
         </div>
-        <button class="ghost icon" disabled={busy} onclick={() => void run('refresh')} aria-label={t.refresh} data-testid="brain-refresh"><RefreshCw size={15} /></button>
+        <button class="ghost icon" disabled={busy} onclick={() => void run('refresh')} aria-label={strings.common.refresh} data-testid="brain-refresh"><RefreshCw size={15} /></button>
       </div>
       {#each status.problems as problem, index (`${index}:${problem}`)}<p class="error">{problem}</p>{/each}
       {#each entries as entry (entry.path)}
         {@const Icon = icons[entry.kind]}
         <details class="entry" data-testid="brain-entry">
-          <summary><Icon size={17} strokeWidth={1.5} /><span class="ui-label">{entry.name}</span>{#if entry.error}<span class="error-indicator" aria-label={entry.error}>!</span>{/if}<ChevronRight size={14} class="chevron" /></summary>
+          <summary><Icon size={17} strokeWidth={1.5} /><span class="ui-label">{entry.name}</span>{#if entry.error}<span class="error-indicator" aria-label={entry.error}>!</span>{/if}<ChevronRight size={14} class="fold-caret" /></summary>
           <div class="entry-details">{#if entry.description}<p>{entry.description}</p>{/if}<code>{entry.path}</code>{#if entry.error}<p class="error">{entry.error}</p>{/if}</div>
         </details>
       {/each}
@@ -247,7 +248,6 @@
   .entry summary:hover { background: var(--color-hover); }
   .entry summary > span:first-of-type { flex: 1; min-width: 0; overflow-wrap: anywhere; }
   .entry summary :global(svg) { color: var(--color-muted-foreground); flex: none; }
-  .entry[open] :global(.chevron) { transform: rotate(90deg); }
   .entry-details { padding: 0 40px 16px; }
   .entry-details p { margin: 0 0 8px; }
   .empty-category { padding: 24px 12px; }

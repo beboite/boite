@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import { parseChord, type KeybindingCommand } from '@boite/contracts';
   import { RotateCcw, Search, X } from '@lucide/svelte';
   import InfoTip from './InfoTip.svelte';
@@ -155,7 +156,7 @@
     try {
       await openOwnFile(path);
     } catch (error) {
-      store.reportError(fill(strings.keyboard.openFailed, { reason: error instanceof Error ? error.message : String(error) }), 'minor');
+      store.reportError(fill(strings.keyboard.openFailed, { reason: errorText(error) }), 'minor');
     }
   }
 </script>

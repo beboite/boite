@@ -161,7 +161,7 @@
     contextMenu.open(
       event,
       [
-        { id: 'close', label: strings.rightPanel.close },
+        { id: 'close', label: strings.common.close },
         { id: 'others', label: strings.rightPanel.closeOthers, disabled: surfaces.length < 2 },
         {
           id: 'right',

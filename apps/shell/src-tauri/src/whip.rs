@@ -2,13 +2,13 @@
 
 use std::sync::{atomic::{AtomicBool, Ordering}, Arc};
 use std::time::Duration;
-use tauri::{Manager, PhysicalPosition, State, Webview, WebviewWindow};
+use tauri::{Manager, PhysicalPosition, State, Webview, Window};
 
 #[derive(Default)]
 pub(crate) struct WhipState(Arc<AtomicBool>);
 
 struct Restore {
-    window: WebviewWindow,
+    window: Window,
     origin: PhysicalPosition<i32>,
     running: Arc<AtomicBool>,
 }
@@ -44,7 +44,7 @@ fn shake(origin: PhysicalPosition<i32>, scale: f64,
 #[tauri::command]
 pub(crate) async fn whip_window(webview: Webview, state: State<'_, WhipState>) -> Result<bool, String> {
     crate::browser::only_main(&webview)?;
-    let window = webview.app_handle().get_webview_window(crate::browser::MAIN_LABEL)
+    let window = crate::window::main_window(webview.app_handle())
         .ok_or("main window is missing")?;
     if window.is_maximized().map_err(|error| error.to_string())?
         || window.is_fullscreen().map_err(|error| error.to_string())? {

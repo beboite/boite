@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import { untrack } from 'svelte';
   import { DEFAULT_THREAD_DELETION_RETENTION_DAYS, type DeletedThreadSummary, type ThreadId, type ThreadSummary } from '@boite/contracts';
   import { exactTime, projectName } from '../lib/format';
@@ -51,7 +52,7 @@
       const rows = await client.call('threads.deleted', {});
       if (current === generation && client === store.client) threads = rows;
     } catch (error) {
-      if (current === generation) store.error = error instanceof Error ? error.message : String(error);
+      if (current === generation) store.error = errorText(error);
     } finally { if (current === generation) loading = false; }
   }
 
@@ -74,7 +75,7 @@
       <label class="ui-label-box" for="{uid}-days"><span class="ui-label">{strings.settings.deleted.retentionLabel}</span><InfoTip topic={strings.settings.deleted.retentionLabel} text={strings.settings.deleted.retentionHint} /></label>
       <div class="retention-actions">
         <input id="{uid}-days" type="number" min="0" max="3650" step="1" bind:value={days} oninput={() => { dirty = true; }} aria-invalid={!valid} aria-describedby={valid ? undefined : `${uid}-error`} data-testid="deleted-retention-days" />
-        <button type="submit" disabled={!valid || !dirty || saving || !store.settings || store.connection !== 'ready'} data-testid="deleted-retention-save"><span class="ui-label">{strings.settings.save}</span></button>
+        <button type="submit" disabled={!valid || !dirty || saving || !store.settings || store.connection !== 'ready'} data-testid="deleted-retention-save"><span class="ui-label">{strings.common.save}</span></button>
       </div>
       {#if !valid}<p id="{uid}-error" class="field-error" role="alert">{strings.settings.deleted.retentionError}</p>{/if}
     </form>
