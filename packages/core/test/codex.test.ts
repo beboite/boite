@@ -1249,9 +1249,20 @@ describe('codex driver', () => {
     const turn = await client.call('turns.start', { threadId: thread.id, prompt: '[slow] Deploy' });
     await waitFor(() => fakeLog().includes('waiting for interrupt'));
 
+    // The core sends the difference between the turn and the latest selection, so
+    // changes made while one is still on its way to the app-server merge: a fast
+    // tier and its removal cancel out. Each one has to reach the server before the
+    // next is made, or a slow runner's round trip sends two requests instead of four.
+    const settingsSent = (): number => fakeLog().split('\n').filter(line => line.startsWith('turn/settings/update')).length;
+    const reached = async (count: number): Promise<void> => {
+      if (!old) await waitFor(() => settingsSent() === count);
+    };
     await client.call('threads.update', { threadId: thread.id, effort: 'high' });
+    await reached(1);
     await client.call('threads.update', { threadId: thread.id, speed: 'fast' });
+    await reached(2);
     await client.call('threads.update', { threadId: thread.id, speed: null });
+    await reached(3);
     await client.call('threads.update', { threadId: thread.id, effort: 'medium' });
     if (old) {
       // One refusal tells this app-server has no such request; nothing else is sent to it.
