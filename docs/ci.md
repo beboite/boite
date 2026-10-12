@@ -252,6 +252,13 @@ UI bytes, 2,000 entry bytes and 12,000 core bytes, the branch measured
 4,567,439 UI bytes and 3,891,447 core bytes on Linux on 2026-10-12, and its
 limits take the same increases: 4,581,000, 593,000 and 3,912,000.
 
+On 2026-10-12 on Linux, `main` at `bafe8898` measured 4,579,818 UI bytes. Priced
+usage rows measured 4,581,495: the UI gains 1,677 bytes for the rate notes and
+their English and French sentences. Merged with `5ee76431`, the branch measured
+4,608,071 UI bytes, under the 4,620,000 that `main` had set by then, and
+3,908,480 core bytes with its table of public API rates, under the unchanged
+3,912,000. No limit changes.
+
 On 2026-10-03, fresh builds of `e1f00a3` measured 2,695,204 core bytes and 3,932,309
 UI bytes. The orchestration additions measured 3,228,444 and 3,943,301 bytes:
 the core gains 533,240 bytes, mostly the official MCP SDK and its validation

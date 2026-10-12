@@ -11,6 +11,7 @@
     formatMetric,
     mergeHistories,
     modelName,
+    priceNote,
     reportedValue,
     seriesFor,
     summarize,
@@ -360,7 +361,10 @@
                     <tr>
                       <td class="who">
                         <span class="swatch" style:background={colorOf(row.providerId)}></span>
-                        <span><span class="model">{modelName(row.model, modelNames, row.providerId)}</span><small>{providerName(row.providerId)}</small></span>
+                        <span>
+                          <span class="model-line"><span class="model">{modelName(row.model, modelNames, row.providerId)}</span><InfoTip topic={fill(strings.usage.priceOf, { model: modelName(row.model, modelNames, row.providerId) })} text={priceNote(row)} testid="usage-price" /></span>
+                          <small>{providerName(row.providerId)}</small>
+                        </span>
                       </td>
                       {@render numbers(row)}
                     </tr>
@@ -468,7 +472,8 @@
   td.muted { font-size: var(--text-sm); }
   .who { display: flex; align-items: center; gap: 10px; white-space: normal; }
   .who > span:last-child { display: grid; min-width: 0; }
-  .model { overflow: hidden; text-overflow: ellipsis; }
+  /* The "i" flows after the name's last word, so a narrow column keeps the name's width. */
+  .model-line { min-width: 0; overflow-wrap: anywhere; }
   .who small { color: var(--color-muted-foreground); font-size: var(--text-xs); }
   tbody tr:hover td { background: var(--color-hover); }
   @container (max-width: 560px) { .wide { display: none; } }
