@@ -14,6 +14,7 @@ import type {
   ProviderId,
   QuestionAnswer,
   QuestionOption,
+  SettingAsk,
   RequestId,
   ThreadId,
   ThreadSummary,
@@ -54,7 +55,8 @@ export interface QuestionAsk {
    * card outlives its turn, and the answer reaches the agent as a steer or as
    * the next prompt. The ticket still resolves, for a driver that cares.
    */
-  async?: boolean;
+  async?: boolean;  /** A settings card (`settings.request`), always asynchronous. */
+  setting?: SettingAsk;
 }
 
 /**

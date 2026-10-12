@@ -11,7 +11,7 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
-import { AGENT_ENV, VIEW_HELP } from '@boite/contracts';
+import { AGENT_ENV, SETTINGS_PAGES, VIEW_HELP } from '@boite/contracts';
 import { VIEW_EXAMPLE } from './view-example.ts';
 import type { AgentTask, GitChange, PanelSurface, Todo } from '@boite/contracts';
 import { connect } from './client.ts';
@@ -79,6 +79,15 @@ ${CONTROL_HELP}
                                  show the user the draft before submit
   ask <question> [option ...]    ask the user without stopping; the answer
                                  arrives later as a message (--multiple)
+  settings [key]                 Boite settings you may ask about: value, page
+  settings request <key> <value> --why <text>
+                                 a card asking the user to change one; value
+                                 is JSON or a bare word; the outcome arrives as
+                                 a message (applied, changed or refused)
+  settings open <page>[#<card>] --why <text>
+                                 a card with a button to that Settings page,
+                                 for what is not one value: a provider login,
+                                 a pairing (pages: ${SETTINGS_PAGES.join(', ')})
   task list                      the agent's task list
   task add <text>                add a task (id t1, t2, ...)
   task start|done|remove <id>    move or drop one task
@@ -233,6 +242,23 @@ export function splitLine(spec: string): { path: string; line: number | undefine
 
 function absolute(cwd: string, path: string): string {
   return isAbsolute(path) ? path : resolve(cwd, path);
+}
+
+/** A value as typed: JSON when it parses (60, true, null, ["a"]), the bare word otherwise. */
+export function settingValue(raw: string): unknown {
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    return raw;
+  }
+}
+
+/** `resources#limits` into a page and a card. */
+function settingsPlace(raw: string): { page: string; section?: string } {
+  const parts = raw.split('#');
+  if (parts.length > 2) throw new Usage('settings open takes one page, with an optional #card');
+  const [page = '', section] = parts;
+  return section === undefined || section.length === 0 ? { page } : { page, section };
 }
 
 function nextTaskId(tasks: AgentTask[]): string {
@@ -475,6 +501,31 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
         const dir = rest[1];
         await opened(dir === undefined ? { kind: 'files' } : { kind: 'files', path: absolute(io.cwd, dir) });
       } else throw new Usage(`open: unknown surface ${kind}`);
+    },
+    settings: async () => {
+      const action = rest[0];
+      if (action === 'request' || action === 'open') {
+        if (parsed.why === undefined || parsed.why.trim().length === 0) throw new Usage(`settings ${action} needs --why <text>, the reason the user reads on the card`);
+        const params = action === 'request'
+          ? { threadId, reason: parsed.why, key: want(1, 'a setting key (boite settings lists them)'), value: settingValue(requiredText(rest, 2, 'settings request needs a value after the key', false)) }
+          : { threadId, reason: parsed.why, ...settingsPlace(want(1, `a page: ${SETTINGS_PAGES.join(', ')}`)) };
+        if (action === 'open' && rest.length > 2) throw new Usage('settings open takes one page, with an optional #card');
+        const asked = await client.call('settings.request', params);
+        const setting = asked.setting;
+        print([
+          `requested: ${asked.questionId}`,
+          ...(setting.kind === 'change'
+            ? [`change: ${setting.key} ${JSON.stringify(setting.previous)} -> ${JSON.stringify(setting.value)}`, setting.sensitive ? 'card: opens Settings at the setting; the user changes it there' : 'card: Apply, or open Settings at the setting']
+            : [`card: opens Settings at ${setting.section === null ? setting.page : `${setting.page}#${setting.section}`}`]),
+          'Keep working. The outcome arrives as a message quoting your reason; without one, nothing changed.',
+        ], asked);
+        return;
+      }
+      if (rest.length > 1) throw new Usage('settings expects a key, request <key> <value> or open <page>');
+      const readings = await client.call('agent.settings', { threadId });
+      const shown = action === undefined ? readings : readings.filter(reading => reading.key === action);
+      if (shown.length === 0) throw new Usage(`settings: unknown key ${action}; boite settings lists them`);
+      print(shown.map(reading => `${reading.key} ${JSON.stringify(reading.value)} ${reading.page}#${reading.section}${reading.sensitive ? ' (changed from Settings only)' : ''}`), action === undefined ? readings : shown[0]);
     },
     ask: async () => {
       const text = want(0, 'a question');

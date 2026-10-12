@@ -35,6 +35,8 @@ export interface Parsed {
   can?: string;
   /** `stewards set --quiet`: no notices. */
   quiet: boolean;
+  /** `settings request|open --why <text>`: the reason the card shows the user. */
+  why?: string;
   /** Another core's address; its token comes from BOITE_TOKEN, never the command line. */
   core?: string;
 }
@@ -74,6 +76,7 @@ export function parse(argv: string[]): Parsed {
     else if (arg === '--name') parsed.name = next();
     else if (arg === '--project') parsed.project = next();
     else if (arg === '--can') parsed.can = next();
+    else if (arg === '--why') parsed.why = next();
     else if (arg === '--core') parsed.core = next();
     else if (arg === '--limit') {
       const value = number(arg, next());
