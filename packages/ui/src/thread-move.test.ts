@@ -29,7 +29,7 @@ afterEach(() => {
   window.localStorage.clear();
   work.load();
   workspace.view = 'projects';
-  projectThreadView.shelf = { idle: false, archived: false };
+  projectThreadView.shelfOpen = false;
 });
 
 async function waitFor(check: () => boolean, attempts = 2000): Promise<void> {
@@ -149,8 +149,8 @@ test('a row dropped on an idle project in its fold moves there', async () => {
   await mountOnFake();
   await waitFor(() => inProject('t-descriptors', 'p-notes'));
   const quiet = await store.client!.call('projects.add', { path: 'C:\\src\\quiet', name: 'quiet' });
-  await waitFor(() => document.querySelector('[data-testid=idle-projects-toggle]') !== null);
-  query<HTMLButtonElement>('[data-testid=idle-projects-toggle]').click();
+  await waitFor(() => document.querySelector('[data-testid=project-shelf-toggle]') !== null);
+  query<HTMLButtonElement>('[data-testid=project-shelf-toggle]').click();
   await waitFor(() => document.querySelector(`[data-testid=idle-project][data-project-id="${quiet.id}"]`) !== null);
   const row = query(`[data-testid=idle-project][data-project-id="${quiet.id}"]`);
   const move = vi.spyOn(store, 'move');

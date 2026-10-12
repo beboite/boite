@@ -29,7 +29,7 @@
   type Creating = { kind: AgentEntryKind; preset?: { memberIds: string[]; teamId: string | null }; from?: AgentSelection | null };
 
   let { store }: { store: Store } = $props();
-  const view = new AgentsView(untrack(() => store));
+  const view = AgentsView.of(untrack(() => store));
   const narrow = new MediaQuery('(max-width: 720px)');
   let chosen = $state<AgentFocus | null>(null);
   let creating = $state<Creating | null>(null);
@@ -139,8 +139,22 @@
   const level = $derived(narrow.current && (chosen || creating) ? `${creating ? 'new' : ''}|${focus?.kind}:${focus && 'id' in focus ? focus.id : ''}|${current}` : '');
   $effect(() => { if (level) return mobileOverlay(back); });
 
-  onMount(() => { view.start(); return () => view.close(); });
-  $effect(() => { if (store.connection === 'ready') void view.refresh(); });
+  onMount(() => { view.start(); return () => view.pause(); });
+  // On a phone an open conversation hides the tab bar. The root carries it as a
+  // class: `.app:has(.agents-page.detail-open)` made the whole app a `:has()`
+  // subject, rechecked on every node mounted anywhere.
+  $effect(() => {
+    const root = document.documentElement;
+    root.classList.toggle('agents-detail-open', !!chosen || !!creating);
+    return () => root.classList.remove('agents-detail-open');
+  });
+  // A reconnect reads the snapshot again; the first visit already asked in `start`.
+  let wasReady = untrack(() => store.connection === 'ready');
+  $effect(() => {
+    const ready = store.connection === 'ready';
+    if (ready && !wasReady) void view.refresh();
+    wasReady = ready;
+  });
   $effect(() => { if (current === 'activity' && workHistory) view.fill(workKey, workHistory, work); });
   // A link from elsewhere (a thread an agent runs) names the agent to open.
   $effect(() => {

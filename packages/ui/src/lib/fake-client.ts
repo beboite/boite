@@ -20,7 +20,7 @@ import { activityMethods, pauseActivity } from './fake-client/activity';
 import { brainMethods } from './fake-client/brain';
 import { FakeContext, type FakeClientOptions, type FakeMethods } from './fake-client/context';
 import { hookMethods, recordHookRun } from './fake-client/hooks';
-import { logMethods } from './fake-client/logs';
+import { logMethods, seedDiagnostics } from './fake-client/logs';
 import { coordinationMethods, registerCore, unregisterCore } from './fake-client/coordination';
 import { seedStewardDemo, stewardMethods } from './fake-client/stewards';
 import { delegationMethods, seedDelegationDemo } from './fake-client/delegation';
@@ -108,6 +108,8 @@ export class FakeClient implements ObservableClient {
       ctx.usageSeeded = false;
       ctx.scheduler = { ...ctx.scheduler, running: [], queued: [] };
     }
+    // After a first launch has cleared the threads, so no record names one that is gone.
+    seedDiagnostics(ctx);
   }
 
   // -------------------------------------------------------------------------

@@ -25,14 +25,26 @@ export function relationOf(core: Core, localCore: string, threadId: string, othe
 
 /** Each letter with the relation of its other end to `threadId`, worked out once per correspondent. */
 export function withRelations(core: Core, localCore: string, threadId: string, letters: AgentLetter[]): AgentLetter[] {
-  const known = new Map<string, AgentRelation>();
+  const known = new Map<string, AgentRelation | undefined>();
   return letters.map(letter => {
     const other = letter.from.coreId === localCore && letter.from.threadId === threadId ? letter.to : letter.from;
     const key = `${other.coreId}/${other.threadId}`;
-    const relation = known.get(key) ?? relationOf(core, localCore, threadId, other);
+    const relation = known.has(key) ? known.get(key) : enriched(core, threadId, () => relationOf(core, localCore, threadId, other), undefined);
     known.set(key, relation);
-    return { ...letter, relation };
+    return relation === undefined ? letter : { ...letter, relation };
   });
+}
+
+/**
+ * Enrichment reads journal rows a corrupt or older entry can break. It must not
+ * stop delivery: claimed letters are already marked delivered, and a throw in
+ * `deliver` would pause the thread. The failure goes to the diagnostic log.
+ */
+function enriched<T>(core: Core, threadId: string, read: () => T, fallback: T): T {
+  try { return read(); } catch (error) {
+    try { core.logs.warn(`letter context unreadable: ${error instanceof Error ? error.message : String(error)}`, { source: 'coordination', event: 'coordination.context-failed', threadId }); } catch { /* A failed log write is dropped too. */ }
+    return fallback;
+  }
 }
 
 /**
@@ -42,7 +54,7 @@ export function withRelations(core: Core, localCore: string, threadId: string, l
  * resources only, never its chat.
  */
 export function senderContext(core: Core, localCore: string, threadId: string): (letter: AgentLetter) => LetterContext {
-  return letter => {
+  return letter => enriched<LetterContext>(core, threadId, () => {
     const relation = relationOf(core, localCore, threadId, letter.from);
     const local = relation !== 'machine';
     // A row older than its field, or a peer that left it out, must not stop delivery.
@@ -53,7 +65,7 @@ export function senderContext(core: Core, localCore: string, threadId: string): 
       : null;
     const yours = answered ? excerpt((JSON.parse(answered.data) as AgentLetter).text) : undefined;
     return { relation, ...(about ? { about } : {}), ...(yours ? { yours } : {}) };
-  };
+  }, {});
 }
 
 /** The first thing asked in a local thread, as its user or starter wrote it. */

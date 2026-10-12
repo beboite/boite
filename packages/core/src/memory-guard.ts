@@ -52,6 +52,7 @@ export class MemoryGuard {
     if (changed) this.bus.emit('resources.memory', { threadId: null, kind: 'pressure', state: this.state, at });
     for (const threadId of result.nothingKillable) this.bus.emit('core.log', {
       level: 'warn', at, message: `Memory guard: thread ${threadId} has no killable process; root agent processes are protected.`,
+      source: 'memory-guard', event: 'memory.nothing-killable', threadId, data: { agentMb: Math.round(agentBytes / 1048576) },
     });
     for (const { process: victim, reason, limitBytes } of result.kills) {
       if (kill(victim)) this.bus.emit('resources.memory', {

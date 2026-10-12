@@ -21,6 +21,7 @@ import type { StoreContext } from './context';
 import { RpcErrorCode, threadActive } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { strings } from '../strings';
+import { archiveWhile, keepArchived, pinWhile } from './optimistic';
 
 /** What a rewind hands back to the composer: the removed message's content, and how the agent forgets it. */
 export type RewoundMessage = Omit<ThreadRewind, 'thread'>;
@@ -666,7 +667,8 @@ export class Threads {
     const clientGeneration = this.ctx.clientGeneration;
     if (!client) return;
     try {
-      const summary = await client.call('threads.pin', { threadId, pinned });
+      const shown = [this.threads.find((t) => t.id === threadId), this.openThread?.id === threadId ? this.openThread : null];
+      const summary = await pinWhile(shown, pinned, () => client.call('threads.pin', { threadId, pinned }));
       if (!this.ctx.currentClient(client, clientGeneration)) return;
       this.upsertThread(summary);
       const open = this.openThread;
@@ -714,7 +716,7 @@ export class Threads {
     if (!client) return;
     const navigationGeneration = this.openGeneration;
     try {
-      await client.call('threads.archive', { threadId, archived: true, ...(onlyIfIdle ? { onlyIfIdle: true } : {}) });
+      await archiveWhile(() => this.threads, threadId, client.call('threads.archive', { threadId, archived: true, ...(onlyIfIdle ? { onlyIfIdle: true } : {}) }));
       if (!this.ctx.currentClient(client, clientGeneration)) return;
       this.ctx.threadReads.change(threadId, null);
       this.threads = this.threads.filter((t) => t.id !== threadId);
@@ -794,7 +796,7 @@ export class Threads {
   upsertThread(summary: ThreadSummary): void {
     this.ctx.threadReads.change(summary.id, summary);
     const row = this.threads.find((t) => t.id === summary.id);
-    if (row) patchRow(row, summary);
+    if (row) patchRow(row, keepArchived(row, summary));
     else this.threads.push(summary);
   }
 

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { errorText } from '../lib/errors';
+  import { exactTime } from '../lib/format';
   import { ArrowUp, Brain, Check, ChevronRight, FileText, Folder, GitBranch, Puzzle, RefreshCw, Sparkles } from '@lucide/svelte';
   import { RpcErrorCode, type BrainConfig, type BrainStatus, type RpcResult } from '@boite/contracts';
   import { RpcFailure } from '../lib/client';
@@ -7,7 +8,6 @@
   import InfoTip from './InfoTip.svelte';
   import type { Store } from '../lib/store.svelte';
   import { strings } from '../lib/strings';
-  import { exactTime } from '../lib/format';
 
   let { store }: { store: Store } = $props();
   let status = $state.raw<BrainStatus | null>(null);

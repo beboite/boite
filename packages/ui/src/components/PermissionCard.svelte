@@ -15,8 +15,21 @@
     toolName: string;
     decision: 'allow' | 'deny' | null;
     request: PermissionRequest | null;
-    answer: (decision: 'allow' | 'deny') => void;
+    /** False, or a promise of false, gives the buttons back: the answer did not reach the core. */
+    answer: (decision: 'allow' | 'deny') => unknown;
   } = $props();
+
+  /**
+   * The decision out to the core: both buttons stay down until it lands, so a
+   * second tap sends nothing and the card shows its answer was taken.
+   */
+  let sending = $state<'allow' | 'deny' | null>(null);
+
+  async function choose(choice: 'allow' | 'deny'): Promise<void> {
+    if (sending !== null || decision !== null) return;
+    sending = choice;
+    if ((await answer(choice)) === false) sending = null;
+  }
 
   /**
    * One sentence says what the agent wants to do; under it, the thing itself
@@ -72,11 +85,11 @@
   {/if}
 
   {#if decision === null}
-    <div class="actions">
-      <button type="button" class="primary" data-testid="permission-allow" onclick={() => answer('allow')}>
+    <div class="actions" aria-busy={sending !== null}>
+      <button type="button" class="primary" data-testid="permission-allow" disabled={sending !== null} onclick={() => void choose('allow')}>
         <span class="ui-label">{strings.chat.allow}</span>
       </button>
-      <button type="button" class="danger" data-testid="permission-deny" onclick={() => answer('deny')}>
+      <button type="button" class="danger" data-testid="permission-deny" disabled={sending !== null} onclick={() => void choose('deny')}>
         <span class="ui-label">{strings.chat.deny}</span>
       </button>
     </div>

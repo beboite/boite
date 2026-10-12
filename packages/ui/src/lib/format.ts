@@ -128,7 +128,11 @@ export function duration(startedAt: number, endedAt: number | null): string {
   return millis((endedAt ?? Date.now()) - startedAt);
 }
 
-/** The whole date and time, for the hover title of a relative or shortened stamp. */
+/**
+ * The whole date and time, for the hover title of a relative or shortened stamp.
+ * Every sidebar row and agent row draws one: `toLocaleString` with a locale
+ * builds a new formatter per call, about half a millisecond each.
+ */
 export function exactTime(value: number): string {
   return formatters().exact.format(value);
 }

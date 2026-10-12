@@ -8,7 +8,6 @@
   import { strings } from '../lib/strings';
   import { archiveCount, archiveKindOf, type ArchiveKind } from '../lib/project-threads.svelte';
   import RecentGroup from './RecentGroup.svelte';
-  import DoneThread from './DoneThread.svelte';
   import WindowList from './WindowList.svelte';
 
   let { entries, kind = 'done', scrollRoot, now, query = '', open = $bindable(false), header = true, onopen, onrows }: {
@@ -24,6 +23,8 @@
     onrows?: (rows: { store: Store; threadId: ThreadId }[]) => void;
   } = $props();
   type Entry = ProjectEntry & { thread: ThreadSummary };
+  /** The row loads with the first rows, out of the entry chunk: most screens never unfold Done. */
+  let DoneThread = $state.raw<typeof import('./DoneThread.svelte').default>();
   let loaded = $state.raw<Entry[]>([]);
   let loading = $state(false);
   let failed = $state(false);
@@ -33,6 +34,8 @@
   const count = $derived(entries.reduce((total, { project }) => total + archiveCount(project, kind), 0));
   const rows = $derived(loaded.filter(({ thread, project, machine }) => !query || [thread.title, projectName(project), thread.branch, machine.label].some(value => value?.toLocaleLowerCase().includes(query))));
   const multi = $derived(new Set(entries.map(entry => entry.machine.id)).size > 1);
+  /** Under one project's header its name would only repeat it; the Recent list of every project names it. */
+  const spans = $derived(entries.length > 1);
   $effect(() => {
     const notify = onrows;
     const visible = open ? rows.map(entry => ({ store: entry.machine.store, threadId: entry.thread.id })) : [];
@@ -58,6 +61,7 @@
     failed = false;
     loaded = [];
     const machines = [...new Map(sources.map(entry => [entry.machine.store, entry])).values()];
+    const row = DoneThread ? Promise.resolve(true) : import('./DoneThread.svelte').then(module => { DoneThread = module.default; return true; }, () => false);
     const results = await Promise.allSettled(machines.map(async source => {
       if (!source.client || source.connection !== 'ready') throw new Error('machine unavailable');
       const ownProjects = sources.filter(entry => entry.machine.store === source.machine.store);
@@ -69,9 +73,10 @@
         return project ? [{ machine: source.machine, project, thread }] : [];
       });
     }));
+    const drawn = await row;
     if (revision !== current) return;
     loaded = results.flatMap(result => result.status === 'fulfilled' ? result.value : []).sort((a, b) => b.thread.updatedAt - a.thread.updatedAt);
-    failed = results.some(result => result.status === 'rejected');
+    failed = !drawn || results.some(result => result.status === 'rejected');
     loading = false;
   }
 </script>
@@ -79,8 +84,8 @@
 {#snippet completedRows()}
     {#if loading}<p class="hint" role="status"><span class="ui-label">{strings.app.loading}</span></p>{/if}
     {#if failed}<div class="hint" role="status"><span class="ui-label">{strings.sidebar.doneLoadFailed}</span><button type="button" class="ghost small" data-testid="recent-done-retry" onclick={() => retry++}><span class="ui-label">{strings.common.retry}</span></button></div>{/if}
-    <WindowList items={rows} keyOf={entry => JSON.stringify([entry.machine.id, entry.thread.id])} {scrollRoot} estimate={60} {measurements}>
-      {#snippet row(entry)}<DoneThread {entry} {now} showMachine={multi} {onopen} />{/snippet}
+    <WindowList items={rows} keyOf={entry => JSON.stringify([entry.machine.id, entry.thread.id])} {scrollRoot} estimate={44} {measurements}>
+      {#snippet row(entry)}{#if DoneThread}<DoneThread {entry} {now} showMachine={multi} showProject={spans} {onopen} />{/if}{/snippet}
     </WindowList>
     {#if !loading && !failed && !rows.length}<p class="hint"><span class="ui-label">{strings.sidebar.noMatch}</span></p>{/if}
 {/snippet}

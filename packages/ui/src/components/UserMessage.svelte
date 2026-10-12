@@ -297,15 +297,14 @@
     padding: 0;
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
-    background: color-mix(in oklab, var(--color-background) 62%, transparent);
-    backdrop-filter: blur(2px);
+    background: color-mix(in oklab, var(--color-background) 72%, transparent);
     color: var(--color-foreground);
     font-size: var(--text-lg);
     font-weight: 600;
   }
 
   .more:hover {
-    background: color-mix(in oklab, var(--color-background) 48%, transparent);
+    background: color-mix(in oklab, var(--color-background) 58%, transparent);
   }
 
   .shot[aria-busy='true'] {

@@ -188,16 +188,17 @@
     background: var(--color-scrim);
     color: var(--color-foreground);
     box-shadow: none;
+    transition: opacity var(--dur-2) var(--ease-out-quint), transform var(--dur-2) var(--ease-out-quint), background var(--dur-1) var(--ease-out-quint);
+  }
+
+  /* A pointer sees the cross on the picture it is over, or the keyboard on its chip; the rest of the strip stays clean. A touch screen has no hover and keeps it. */
+  @media (hover: hover) and (pointer: fine) {
+    .attachment .remove { opacity: 0; transform: scale(0.85); }
+    .attachment:hover .remove, .attachment:focus-within .remove { opacity: 1; transform: none; }
   }
   .attachment.document .remove { background: transparent; }
   .attachment .remove:hover:not(:disabled) { background: var(--color-danger); color: var(--color-on-danger); }
 
-  /* A mouse sees the cross only on the tile it points at; a finger always has it. */
-  .attachment .remove { opacity: 0; transition: opacity var(--dur-1) var(--ease-out-quint), background var(--dur-2) var(--ease-out-quint); }
-  .attachment:hover .remove, .attachment:focus-within .remove { opacity: 1; }
-  @media (hover: none) {
-    .attachment .remove { opacity: 1; }
-  }
   @media (max-width: 720px) {
     .image-preview > img { height: min(28dvh, 260px); }
   }

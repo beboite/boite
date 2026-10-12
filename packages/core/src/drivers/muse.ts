@@ -5,6 +5,7 @@ import { readModels } from './muse/models.ts';
 import { MuseSession } from './muse/session.ts';
 import { MuseTurn } from './muse/turn.ts';
 import type { Driver, TurnContext, TurnHandle } from './types.ts';
+import { noteWarmSession } from './driver-log.ts';
 export { choiceFor, museExecutable } from './muse/mapping.ts';
 export { modelsFrom, readCatalogEfforts } from './muse/models.ts';
 export { mintUuidV7, MspError } from './muse/rpc.ts';
@@ -30,7 +31,9 @@ export function createMuseDriver(): Driver {
       const turn = new MuseTurn(ctx);
 
       let session = sessions.get(threadId) ?? null;
-      if (session !== null && !session.usable(key, warmMs)) {
+      const usable = session?.usable(key, warmMs) === true;
+      noteWarmSession(ctx, 'Muse', { kept: session !== null, usable, sameSetup: session?.key === key, setupChange: 'the thread changed mode, account or folder' });
+      if (session !== null && !usable) {
         sessions.delete(threadId);
         session.close(session.key === key ? null : 'the thread changed mode, account or folder', ctx);
         session = null;
