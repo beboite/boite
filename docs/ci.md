@@ -104,6 +104,11 @@ fault (actions/runner-images#7522) failed the Apple Silicon DMG of nightly
 attempt left attached and removes its partial DMGs. Any other failure ends
 the step.
 
+On 2026-10-12 the Windows job measured 4,623,852 UI bytes for device keys in
+the group merged with `main` at `5ee76431`: the signing chunk
+(`@noble/ed25519`, loaded at the first signature), Add a device and the group's
+device rows. The UI limit rises to 4,640,000.
+
 ## Build cost
 
 Cargo, Vitest and BuildKit save caches only from `main`. Cargo namespaces
@@ -133,7 +138,7 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 593,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,620,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,640,000 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 3,912,000 |
 
