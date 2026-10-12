@@ -3,6 +3,7 @@ import { deviceAdmitInput, deviceHelloInput } from '@boite/contracts';
 import { generateKeyPairSync, randomBytes, sign, type KeyObject } from 'node:crypto';
 import { connect, type CoreClient } from '../src/client.ts';
 import { isAllowedOrigin } from '../src/server.ts';
+import { FORWARDS_PER_MINUTE } from '../src/group/clients.ts';
 import { mergeDeviceKeys } from '../src/group/device-keys.ts';
 import { startTestCore, waitFor, type TestCore } from './harness.ts';
 
@@ -109,8 +110,10 @@ test('a phone added on one member says hello on every member with one key, and o
 test('a code drawn on one member is typed on another and still admits the phone', async () => {
   const [a, b] = await pair();
   const phone = phoneKey();
-  const { code } = await b.core.group.clients.addDevice();
+  const drawn = (await b.core.group.clients.addDevice()).code;
   // The installed app sends the code to the machine that serves its page: a, which never drew it.
+  // Typed as people type it, lower case and spaced: b reads it as a would have.
+  const code = drawn.toLowerCase().replace('-', ' ');
   const admitted = await open(a.url, { grant: code, device: { publicKey: phone.publicKey, sig: phone.sign(deviceAdmitInput(code, phone.publicKey)) } });
   expect(admitted.device).toMatch(/^[0-9a-f]{64}$/);
   expect(b.core.group.view('owner')?.devices.map((device) => device.by)).toEqual([id(b)]);
@@ -228,16 +231,19 @@ test('a key handed over on two members keeps both older pairings, a removed key 
   expect(a.core.group.allowsOrigin('null')).toBe(false);
 });
 
-test('wrong codes typed on one member drop none of the codes another member drew', async () => {
+test('wrong codes typed on one member drop none of the codes another member drew, and only a few a minute are passed on', async () => {
   const [a, b] = await pair();
   const { code } = await b.core.group.clients.addDevice();
   const guesser = phoneKey();
-  // Twelve wrong codes typed on a's page: a counts them, b, which only hears them passed on, does not.
-  for (let i = 0; i < 12; i++) {
+  // A minute's worth of wrong codes typed on a's page: a counts them, b, which only hears them passed on, does not.
+  for (let i = 0; i < FORWARDS_PER_MINUTE; i++) {
     const wrong = `ZZZZ-ZZ${String(i).padStart(2, '0')}`;
     await refused(a, open(a.url, { grant: wrong, device: { publicKey: guesser.publicKey, sig: guesser.sign(deviceAdmitInput(wrong, guesser.publicKey)) } }));
   }
+  // The next one is not passed on, good as it is: a refuses it alone, and b's code is not spent.
   const phone = phoneKey();
-  const admitted = await open(b.url, { grant: code, device: { publicKey: phone.publicKey, sig: phone.sign(deviceAdmitInput(code, phone.publicKey)) } });
+  const offer = { publicKey: phone.publicKey, sig: phone.sign(deviceAdmitInput(code, phone.publicKey)) };
+  await refused(a, open(a.url, { grant: code, device: offer }), 'wrong, expired, or was already used');
+  const admitted = await open(b.url, { grant: code, device: offer });
   expect(admitted.device).toMatch(/^[0-9a-f]{64}$/);
 });

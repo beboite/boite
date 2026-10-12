@@ -22,7 +22,7 @@ import { checkRoster, clockOf, DEVICE_ENTRIES_MAX, homeOf, liveCores, liveDevice
 import { encodeTicket, parseTicket, ticketSigningInput } from './ticket.ts';
 
 /** Typed codes a machine passes on to the others a minute, whoever types them. */
-const FORWARDS_PER_MINUTE = 20;
+export const FORWARDS_PER_MINUTE = 20;
 /** Clocks of two machines may differ by this much before a ticket is refused for its date. */
 const CLOCK_SKEW_MS = 60_000;
 /** Live devices a group holds at a time. */
@@ -32,6 +32,11 @@ export const DEVICES_MAX = 200;
 const DEVICE_HELLO_SKEW_MS = 2 * 60_000;
 /** Device hello nonces remembered at once; past it, hellos are refused until the oldest expire. */
 const DEVICE_NONCES_MAX = 20_000;
+
+/** A typed code as the member that drew it reads one: the test both ends of a forwarded code share. */
+function isCode(text: string): boolean {
+  return text.length <= 16 && normalizePairingCode(text) !== null;
+}
 
 export class GroupClients {
   /** Device hello nonces seen, until their hello would be refused for its date anyway. In memory: see docs/groups.md, limits. */
@@ -113,7 +118,7 @@ export class GroupClients {
       // A code another member drew: that member knows it, and says yes or no. Only a well-formed code this
       // machine does not know is passed on, a few a minute: a stranger's guesses must not spend the
       // members' allowance for each other's requests, nor drop their codes.
-      if (!(error instanceof RpcFailure) || error.code !== RpcErrorCode.Unauthorized || normalizePairingCode(grant) === null
+      if (!(error instanceof RpcFailure) || error.code !== RpcErrorCode.Unauthorized || !isCode(grant)
         || this.group.roster === null || liveCores(this.group.roster).length < 2 || !this.forwardAllowed()) throw error;
       const entry = await this.redeemElsewhere(grant, { publicKey, name, sig: offer.sig as string });
       if (entry === null) throw error;
@@ -130,10 +135,6 @@ export class GroupClients {
   private forwardAllowed(now = Date.now()): boolean {
     if (now - this.forwarded.since > 60_000) this.forwarded = { since: now, count: 0 };
     return ++this.forwarded.count <= FORWARDS_PER_MINUTE;
-  }
-
-  private isCode(grant: string): boolean {
-    return grant.length <= 16 && /^[0-9A-Za-z-]+$/.test(grant);
   }
 
   /** Asks every other member whether it drew this code, sealed; the one that did admits the device and answers with the roster. */
@@ -163,7 +164,7 @@ export class GroupClients {
     const raw = (typeof payload === 'object' && payload !== null ? payload : {}) as { code?: unknown; publicKey?: unknown; name?: unknown; sig?: unknown };
     const code = typeof raw.code === 'string' ? raw.code : '';
     const publicKey = typeof raw.publicKey === 'string' ? raw.publicKey : '';
-    if (!this.isCode(code) || deviceKey(publicKey) === null || !deviceSigned(publicKey, deviceAdmitInput(code, publicKey), raw.sig)) {
+    if (!isCode(code) || deviceKey(publicKey) === null || !deviceSigned(publicKey, deviceAdmitInput(code, publicKey), raw.sig)) {
       throw invalidParams('group.redeem: expected a code, a device key and its signature over the code');
     }
     const id = deviceId(publicKey);
