@@ -505,7 +505,10 @@ describe('harness updates', () => {
   });
 
   test('an update asked for during a check waits for it, and a second one is refused while the first runs', async () => {
-    const { client } = await start('npm');
+    // The updater holds until the test opens its gate: "while the first runs" must not
+    // depend on a real updater outlasting a turn start and a round trip, which a fast
+    // runner's does not.
+    const { client, state } = await start('npm', 'update-gated');
     await client.call('providers.updates', { refresh: true });
 
     const project = await client.call('projects.add', { path: harness!.dataDir, name: 'updates' });
@@ -533,6 +536,7 @@ describe('harness updates', () => {
     const turn = await client.call('turns.start', { threadId: thread.id, prompt: 'hello' });
     await checked;
     await expect(client.call('providers.update', { providerId: 'update-fake' })).rejects.toThrow(/already updating/);
+    writeFileSync(`${state}.go`, '');
     const updated = only(await changed);
     await waitFor(() => harness?.core.journal.getTurn(turn.id)?.status === 'done', 20000);
     expect(harness!.core.journal.getTurn(turn.id)!.startedAt!).toBeGreaterThanOrEqual(updated.checkedAt!);
