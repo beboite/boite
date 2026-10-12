@@ -503,3 +503,12 @@ describe('group links', () => {
     expect(await dropped.vet([relayed], [anchor])).toEqual([]);
   });
 });
+
+describe('a machine the device key opens', () => {
+  it('is known as its member before it answers, so the group does not reach it a second time through another', () => {
+    localStorage.setItem(ENVIRONMENTS_STORAGE_KEY, JSON.stringify([{ url: 'http://a.test', label: 'A', token: '', paired: true, signs: 'a'.repeat(64) }]));
+    const asleep = { id: 'http://a.test', label: 'A', store: { group: null } } as unknown as Machine;
+    expect(GroupLinks.coreOf(asleep)).toBe('a'.repeat(64));
+    localStorage.clear();
+  });
+});
