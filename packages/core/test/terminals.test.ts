@@ -250,15 +250,18 @@ describe('terminals', () => {
 
       // A failing command: C as it runs, then D with its status before the next prompt.
       const failing = pwsh === null ? 'ls /boite-missing-path' : 'cmd /c exit 3';
+      // PSReadLine colours the typed line, so the output is cut where the typing began.
+      const typedAt = seen.text().length;
       await client.call('terminals.write', { id, data: `${failing}\r` });
-      await waitFor(() => /\x1b\]133;D;[1-9]/.test(seen.text()), SHELL_MS);
-      const after = seen.text().slice(seen.text().lastIndexOf(failing));
+      await waitFor(() => /\x1b\]133;D;[1-9]/.test(seen.text().slice(typedAt)), SHELL_MS);
+      const after = seen.text().slice(typedAt);
       expect(after.indexOf('\x1b]133;C')).toBeGreaterThan(-1);
       expect(after.indexOf('\x1b]133;C')).toBeLessThan(after.indexOf('\x1b]133;D;'));
       if (pwsh !== null) expect(after).toContain('\x1b]133;D;3');
 
       await client.call('terminals.write', { id, data: 'echo boite-history-marker\r' });
-      await waitFor(() => seen.text().split('\x1b]133;D;0').length > 1, SHELL_MS);
+      const echoedAt = seen.text().length;
+      await waitFor(() => seen.text().slice(echoedAt).includes('\x1b]133;D;0'), SHELL_MS);
       // Written as each command ran, not when the shell exits.
       await waitFor(async () => (await client.call('terminals.history', { id })).commands[0] === 'echo boite-history-marker', SHELL_MS);
       expect((await client.call('terminals.history', { id })).commands.slice(0, 2)).toEqual(['echo boite-history-marker', failing]);
