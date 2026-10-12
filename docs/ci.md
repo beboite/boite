@@ -104,11 +104,6 @@ fault (actions/runner-images#7522) failed the Apple Silicon DMG of nightly
 attempt left attached and removes its partial DMGs. Any other failure ends
 the step.
 
-On 2026-10-12 the Windows job measured 4,623,852 UI bytes for device keys in
-the group merged with `main` at `5ee76431`: the signing chunk
-(`@noble/ed25519`, loaded at the first signature), Add a device and the group's
-device rows. The UI limit rises to 4,640,000.
-
 ## Build cost
 
 Cargo, Vitest and BuildKit save caches only from `main`. Cargo namespaces
@@ -205,6 +200,11 @@ On 2026-10-12 on Linux with Bun 1.4.2, the latency pass (idle warm-up of the
 pages, kept Agents view, optimistic pin and archive, single permission answer)
 merged with `main` measured 4,513,690 UI bytes and a 591,872-byte entry chunk,
 within the limits above.
+
+On 2026-10-12 the Windows job measured 4,623,852 UI bytes for device keys in
+the group merged with `main` at `5ee76431`: the signing chunk
+(`@noble/ed25519`, loaded at the first signature), Add a device and the group's
+device rows. The UI limit rises to 4,640,000.
 
 Several drafts per project, merged with settings cards at `87fca361`, measured
 4,536,091 UI bytes and a 590,215-byte entry chunk on Linux: the done rows and
