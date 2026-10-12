@@ -213,6 +213,27 @@ test('a full attachment strip stays one row and folds the rest behind a +N tile'
     await capture('composer-strip-phone-open.png');
     await page.click('[data-testid=composer-attachments-less]');
     await page.waitFor(`document.querySelectorAll("[data-testid=composer-attachment]").length === ${shown}`);
+
+    // Sent, the eight keep to one row of thumbnails in the bubble, the rest behind a +N over the last one.
+    await page.type('[data-testid=composer-input]', 'Eight screens');
+    await page.click('[data-testid=composer-send]');
+    const bubble = 'Array.from(document.querySelectorAll("[data-testid=message-images]")).at(-1)';
+    const sentRows = `new Set(Array.from(${bubble}.querySelectorAll('.shot:not([inert])'), el => el.offsetTop)).size`;
+    await page.waitFor(`${bubble}?.querySelectorAll('[data-testid=image-open]').length === 8 && ${bubble}.querySelector('[data-testid=message-images-more]')`);
+    await page.evaluate(`${bubble}.scrollIntoView({ block: 'center' })`);
+    const sent = await page.evaluate<{ fits: number; more: string; height: number }>(`(() => {
+      const row = ${bubble};
+      return { fits: row.querySelectorAll('.shot:not([inert])').length, more: row.querySelector('[data-testid=message-images-more]').textContent.trim(), height: row.getBoundingClientRect().height };
+    })()`);
+    expect(sent.fits).toBeLessThan(8);
+    expect(sent.more).toBe(`+${8 - sent.fits}`);
+    expect(sent.height).toBeLessThan(100);
+    expect(await page.evaluate(sentRows)).toBe(1);
+    await capture('message-images-phone.png');
+    await page.click('[data-testid=message-images-more]');
+    await page.waitFor(`${bubble}.querySelectorAll('.shot:not([inert])').length === 8 && !${bubble}.querySelector('[data-testid=message-images-more]')`);
+    expect(await page.evaluate(sentRows)).toBeGreaterThan(1);
+    await capture('message-images-phone-open.png');
     expect(page.errors()).toEqual([]);
   } finally {
     await page?.close();
