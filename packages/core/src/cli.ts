@@ -11,7 +11,7 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
-import { AGENT_ENV, VIEW_HELP } from '@boite/contracts';
+import { AGENT_ENV, SETTINGS_PAGES, VIEW_HELP } from '@boite/contracts';
 import { VIEW_EXAMPLE } from './view-example.ts';
 import type { AgentTask, GitChange, PanelSurface, Todo } from '@boite/contracts';
 import { connect } from './client.ts';
@@ -25,6 +25,7 @@ import { browserCommand, BROWSER_HELP } from './browser-cli.ts';
 import { deviceCommand } from './device-cli.ts';
 import { agentsCommand, AgentsUsage, WAIT_MAX_S } from './agents-cli.ts';
 import { parse, requiredText, Usage, type Parsed } from './cli-args.ts';
+import { issueCommand, logsCommand } from './logs-cli.ts';
 import { CONTROL_HELP, controlCommand, isControlCommand, ownerThreadNew, ownerWithoutThread, type Caller } from './control-cli.ts';
 
 export interface CliIo {
@@ -68,11 +69,25 @@ ${CONTROL_HELP}
   server check|update|cancel      check or update this server, or cancel the
                                  pending update; no thread needed as owner
   journal-check [table rowid]     bounded read-only journal diagnostics, owner only
-  logs [--limit <n>] [--level info|warn|error]
-                                 recent private diagnostics, owner only;
-                                 --thread filters one conversation
+  logs [--min-level warn] [--since 2h]
+                                 Boite's own diagnostics: did the app, its shell
+                                 or a client fail? logs help has the filters,
+                                 logs problems groups them, logs export writes
+                                 the anonymized file a developer reads
+  issue draft|submit --title <t> --description <text>
+                                 report a Boite bug on GitHub with that export;
+                                 show the user the draft before submit
   ask <question> [option ...]    ask the user without stopping; the answer
                                  arrives later as a message (--multiple)
+  settings [key]                 Boite settings you may ask about: value, page
+  settings request <key> <value> --why <text>
+                                 a card asking the user to change one; value
+                                 is JSON or a bare word; the outcome arrives as
+                                 a message (applied, changed or refused)
+  settings open <page>[#<card>] --why <text>
+                                 a card with a button to that Settings page,
+                                 for what is not one value: a provider login,
+                                 a pairing (pages: ${SETTINGS_PAGES.join(', ')})
   task list                      the agent's task list
   task add <text>                add a task (id t1, t2, ...)
   task start|done|remove <id>    move or drop one task
@@ -183,7 +198,7 @@ function targetOf(parsed: Parsed, env: CliIo['env']): Target {
     if (parsed.core !== undefined) throw new Error(`this CLI speaks for thread ${own} on its own core; --core is for a terminal`);
     return { url, token, threadId: own };
   }
-  const threadId = parsed.thread ?? own ?? (['server', 'logs', 'journal-check'].includes(parsed.positional[0] ?? '') || ownerWithoutThread(parsed) ? '' : undefined);
+  const threadId = parsed.thread ?? own ?? (['server', 'logs', 'issue', 'journal-check'].includes(parsed.positional[0] ?? '') || ownerWithoutThread(parsed) ? '' : undefined);
   if (parsed.core !== undefined) {
     // The token stays out of the command line, where any process listing would show it.
     const remoteToken = env.BOITE_TOKEN || undefined;
@@ -227,6 +242,23 @@ export function splitLine(spec: string): { path: string; line: number | undefine
 
 function absolute(cwd: string, path: string): string {
   return isAbsolute(path) ? path : resolve(cwd, path);
+}
+
+/** A value as typed: JSON when it parses (60, true, null, ["a"]), the bare word otherwise. */
+export function settingValue(raw: string): unknown {
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    return raw;
+  }
+}
+
+/** `resources#limits` into a page and a card. */
+function settingsPlace(raw: string): { page: string; section?: string } {
+  const parts = raw.split('#');
+  if (parts.length > 2) throw new Usage('settings open takes one page, with an optional #card');
+  const [page = '', section] = parts;
+  return section === undefined || section.length === 0 ? { page } : { page, section };
 }
 
 function nextTaskId(tasks: AgentTask[]): string {
@@ -275,10 +307,13 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
     print([`shown: ${shown ? 'yes' : 'no, nobody is watching this thread; it is queued on its panel'}`], { shown });
   };
 
+  // An agent's token reads the anonymized view; the owner's terminal reads its own records.
+  const agentCaller = Boolean(io.env[AGENT_ENV.coreUrl] && io.env[AGENT_ENV.token] && io.env[AGENT_ENV.threadId]);
   const commands: Record<string, () => Promise<void>> = {
     'journal-check': async () => {
       if (rest.length !== 0 && rest.length !== 2) throw new Usage('journal-check expects no arguments or a cursor table and rowid');
       const cursor = rest.length ? { table: rest[0] as import('@boite/contracts').JournalInspectionTable, afterRowid: Number(rest[1]) } : null;
+      if (parsed.limit !== undefined && parsed.limit > 200) throw new Usage('journal-check takes --limit up to 200');
       const result = await client.call('journal.inspect', { cursor, limit: parsed.limit ?? 100 });
       print([`checked: ${result.checked}; issues: ${result.issues.length}; more: ${result.truncated ? 'yes' : 'no'}`,
         ...result.issues.map(issue => `${issue.table} row ${issue.rowId}: ${issue.code} (${issue.field}: ${issue.expected})`),
@@ -301,15 +336,10 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
       const result = await deviceCommand(rest, io, client, threadId, parsed.timeout);
       print(result.lines, result.value);
     },
-    logs: async () => {
-      if (rest.length > 0) throw new Usage('logs takes --limit, --level and --thread filters');
-      const records = await client.call('core.logs', {
-        ...(parsed.limit === undefined ? {} : { limit: parsed.limit }),
-        ...(parsed.level === undefined ? {} : { level: parsed.level }),
-        ...(parsed.thread === undefined ? {} : { threadId: parsed.thread }),
-      });
-      print(records.map(record => `${new Date(record.at).toISOString()} ${record.level.toUpperCase()} ${record.source}/${record.event}${record.threadId ? ` thread=${record.threadId}` : ''}${record.turnId ? ` turn=${record.turnId}` : ''}${record.requestId ? ` request=${record.requestId}` : ''} ${record.message.replace(/[\r\n]+/g, ' ')}`), records);
-    },
+    // `boite --limit 5 logs` parsed them as globals: they come first, so the command's own flags still win.
+    // A global `--level` yields to the command's own `--min-level`, which it would otherwise override.
+    logs: () => logsCommand([...(parsed.limit === undefined ? [] : ['--limit', String(parsed.limit)]), ...(parsed.level === undefined || rest.some(entry => entry === '--min-level' || entry.startsWith('--min-level=')) ? [] : ['--level', parsed.level]), ...rest], client, threadId, agentCaller, io.cwd, print),
+    issue: () => issueCommand(rest, client, threadId, agentCaller, io.cwd, print),
     server: async () => {
       const action = rest[0] ?? 'check';
       if (!['check', 'update', 'cancel'].includes(action)) throw new Usage('server expects check, update or cancel');
@@ -471,6 +501,31 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
         const dir = rest[1];
         await opened(dir === undefined ? { kind: 'files' } : { kind: 'files', path: absolute(io.cwd, dir) });
       } else throw new Usage(`open: unknown surface ${kind}`);
+    },
+    settings: async () => {
+      const action = rest[0];
+      if (action === 'request' || action === 'open') {
+        if (parsed.why === undefined || parsed.why.trim().length === 0) throw new Usage(`settings ${action} needs --why <text>, the reason the user reads on the card`);
+        const params = action === 'request'
+          ? { threadId, reason: parsed.why, key: want(1, 'a setting key (boite settings lists them)'), value: settingValue(requiredText(rest, 2, 'settings request needs a value after the key', false)) }
+          : { threadId, reason: parsed.why, ...settingsPlace(want(1, `a page: ${SETTINGS_PAGES.join(', ')}`)) };
+        if (action === 'open' && rest.length > 2) throw new Usage('settings open takes one page, with an optional #card');
+        const asked = await client.call('settings.request', params);
+        const setting = asked.setting;
+        print([
+          `requested: ${asked.questionId}`,
+          ...(setting.kind === 'change'
+            ? [`change: ${setting.key} ${JSON.stringify(setting.previous)} -> ${JSON.stringify(setting.value)}`, setting.sensitive ? 'card: opens Settings at the setting; the user changes it there' : 'card: Apply, or open Settings at the setting']
+            : [`card: opens Settings at ${setting.section === null ? setting.page : `${setting.page}#${setting.section}`}`]),
+          'Keep working. The outcome arrives as a message quoting your reason; without one, nothing changed.',
+        ], asked);
+        return;
+      }
+      if (rest.length > 1) throw new Usage('settings expects a key, request <key> <value> or open <page>');
+      const readings = await client.call('agent.settings', { threadId });
+      const shown = action === undefined ? readings : readings.filter(reading => reading.key === action);
+      if (shown.length === 0) throw new Usage(`settings: unknown key ${action}; boite settings lists them`);
+      print(shown.map(reading => `${reading.key} ${JSON.stringify(reading.value)} ${reading.page}#${reading.section}${reading.sensitive ? ' (changed from Settings only)' : ''}`), action === undefined ? readings : shown[0]);
     },
     ask: async () => {
       const text = want(0, 'a question');

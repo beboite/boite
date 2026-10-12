@@ -33,7 +33,7 @@ explicit stop tool when that is intended.
 
 The fixed tools expose this thread's location, projects, runtime capabilities,
 authorized contact directory/search/read/send, delegation get/spawn/send/stop/wait/result,
-fork summary merge-back, plan get/set and asynchronous questions. Every call injects the authenticated
+fork summary merge-back, plan get/set, asynchronous questions and settings cards. Every call injects the authenticated
 source thread and reaches the existing RPC access and relationship checks.
 Arguments cannot select an arbitrary RPC method or another source thread.
 There are no command execution, file access or diagnostic log tools. Mutation
@@ -193,7 +193,8 @@ The CLI says hello with that token and becomes the `agent` principal of that
 one thread. `AGENT_METHODS` in `packages/core/src/access.ts` lists its allowed
 calls and reasons. Each call is bound to that authenticated thread; delegation
 and coordination additionally check relationships and authorized contacts.
-An owner-only method such as `files.write`, `trace.get` or `core.logs` is refused. The
+An owner-only method such as `files.write`, `trace.get` or `core.logs` is refused;
+the anonymized `diagnostics.*` view is the agent's ([diagnostics](#diagnostics)). The
 token is forgotten when the thread is
 archived or removed, a socket an agent already opened with it is closed at the
 same moment, and the token is never written to disk.
@@ -427,6 +428,44 @@ unless the "Asynchronous
 questions" setting is off. Codex asks natively (`delivery: "async"`), and
 Boite draws those cards the same way.
 
+`settings` helps a lost user set Boite up. Bare, it lists the settings an agent
+may ask about, one row each: key, value as JSON, the page and card it sits on
+(`agentCpuCapPercent 75 resources#limits`). The list is `REQUESTABLE_SETTINGS`
+in `packages/contracts/src/setting-requests.ts`; credentials, account ids and
+browser profiles are not in it. `settings request <key> <value> --why <text>`
+draws a settings card the same way `ask` draws a question: the agent keeps
+working and the card outlives the turn and a restart. The value is JSON when it
+parses (`60`, `false`, `null`, `["https://a.example"]`) and the bare word
+otherwise. It is refused when the key is not in the list (the refusal lists
+them), when `settings.set` would refuse the value, when the setting already
+holds it, or when a card on that key is already open in the thread.
+
+The card shows the reason, the setting's name, the current value struck
+through, the proposed one and where it sits in Settings. Apply calls
+`settings.set`, the call the Settings page makes, so only the owner can use it.
+A change card's button to Settings (Show in Settings beside Apply, Open
+Settings without it) also needs the owner, so a paired device answers a change
+card with Refuse only. An open card's Open Settings is offered to any client
+whose Settings draws that card. No button to Settings appears where the card is
+missing: a paired device's Settings lacks the owner pages (Providers,
+Plugins, Protection, Brain) and the owner's cards on shared pages (worktrees,
+privacy, execution, browser origins, auto-compact), and a phone browser's
+Settings lacks some cards of the computer's. The card never answers "applied"
+itself: the core closes every open card whose setting left the value it was
+asked from, whoever moved it, from the card or from the page. The agent then
+reads `applied: <key> is now <value>` or `changed: the user set <key> to
+<value>, not <proposed>`. Refuse sends `refused: <key> stays <value>`. A
+sensitive setting has no Apply: the network ones, the guards that keep agents
+quiet and their memory protection, history retention and where worktrees go.
+Its card opens Settings on the setting's card, which rings once in the accent
+colour, and closes when the user changes it there.
+
+`settings open <page>[#<card>] --why <text>` points at a page for what is not
+one value, a provider login (`accounts#provider-claude`) or a pairing
+(`machines#devices`). Open Settings goes there with the same ring and sends
+`opened: the user opened Settings at <page>`; Dismiss sends `dismissed`. The
+MCP tools `boite_settings` and `boite_settings_request` do the same.
+
 Exit codes: 0, 1 on a refusal or a failure (`error: ...` on stderr), 2 on a
 usage error (the usage text on stderr).
 
@@ -460,23 +499,52 @@ only the owner can change profiles or resume a paused team.
 prints the whole format, `workflow run` starts it and opens it in the panel,
 and the results come back as one message when the run ends.
 
-## Owner diagnostics
+## Diagnostics
 
-Outside a thread, an owner can read recent structured diagnostics without
-selecting a conversation:
+`boite logs` reads Boite's own diagnostics: the core, the desktop shell and the
+clients. Lines are oldest first, one record each:
 
-```sh
-boite logs --limit 50 --level error
-boite logs --thread <thread-id> --limit 100 --json
-boite logs --data-dir <data-directory> --level warn
+```text
+2026-10-10 14:03:22.120Z ERROR shell main-thread/shell.main-thread.blocked main thread blocked for 6.2 s, command notify started 6.2 s ago and has not returned {blockedMs=6200, command=notify, commandRunningMs=6200}
+2026-10-10 14:03:25.002Z INFO  core  turns/turn.finished [thr_x claude/claude-opus-5-5 <thr_parent turn=trn_y] (41.3 s) Turn finished: done {status=done, outputTokens=812}
 ```
 
-The CLI reads the owner credential from that core's `core.json`. `--thread`
-filters the history; it is optional. Each text row carries timestamp, level,
-source/event and available thread, turn and request correlation. `--json` keeps
-the record fields. [Trace](trace.md#structured-diagnostics) owns rotation,
-redaction, output exclusions and query bounds. Inside a thread the CLI remains
-an agent and cannot gain this access by changing a data-directory flag.
+```sh
+boite logs --min-level warn --since 2h        # warnings and errors of the last two hours
+boite logs --origin shell --min-level debug   # the desktop window's detail
+boite logs --search memory-guard --since 1d
+boite logs problems --since 24h               # grouped, with the threads they touched
+boite logs export --out report.txt            # the anonymized file a developer reads
+boite issue draft --title "Window froze" --description-file what-happened.md
+boite issue submit --title "Window froze" --description-file what-happened.md
+boite logs help
+```
+
+Filters: `--limit` (default 100), `--min-level` (default `info`), `--since`
+(`30m`, `2h`, `1d` or a date), `--origin core|shell|ui`, `--search`. A value
+that starts with `--` goes after an equals sign: `--search=--verbose`. Owner
+only: `--level` (exact), `--turn` and `--anonymize`, plus the global `--thread`
+to read one conversation. Agent only:
+`--mine`, the thread and the threads it started without the records about no
+thread; by default an agent reads those records plus its own family, never
+another conversation's. `--json` keeps the records.
+
+From a terminal outside a thread, the CLI reads the owner credential from that
+core's `core.json` (`--data-dir` picks another) and prints the stored records,
+credentials already removed. Inside a thread the CLI is that thread's agent:
+it reads the anonymized `diagnostics.*` view, and only while the owner leaves
+agent access on. Changing a data-directory flag does not change that.
+
+`logs export` prints where the core saved the file (`<dataDir>/logs/exports/`)
+and, with `--out`, also writes it relative to the working directory.
+`issue draft` prints the issue body and a prefilled GitHub link without
+sending anything. From the owner's terminal, `issue submit` creates it on
+`beboite/boite` with `gh` when `gh` is signed in, or prints that link and the
+export to attach. Inside a thread, `issue submit` publishes nothing: the
+issue would be public and signed by the owner's GitHub login, so the agent
+gives the user the link and the user submits it, or submits it from
+Settings > Diagnostics. [Trace](trace.md#structured-diagnostics)
+owns the record format, rotation, anonymization and query bounds.
 
 ## Where the command lives
 

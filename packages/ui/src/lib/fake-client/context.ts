@@ -10,6 +10,7 @@ import {
   SPEECH_DEFAULT_MODEL,
   normalizeCoreLogText,
   normalizeCoreLogOutput,
+  normalizeLogData,
   RpcErrorCode,
   processAgentCommand,
   type Attachment,
@@ -361,6 +362,8 @@ export class FakeContext {
       const bounded = (value: string): string => normalizeCoreLogText(value).replace(/[\r\n\t]/g, ' ').slice(0, 200);
       payload = { level: log.level, at: log.at, message: log.kind === 'provider-output' ? normalizeCoreLogOutput(log.message) : normalizeCoreLogText(log.message), source: bounded(log.source ?? 'core'), event: bounded(log.event ?? 'core.log'),
         ...(log.threadId === undefined ? {} : { threadId: bounded(log.threadId) }), ...(log.turnId === undefined ? {} : { turnId: bounded(log.turnId) }), ...(log.requestId === undefined ? {} : { requestId: bounded(log.requestId) }),
+        ...(typeof log.durationMs === 'number' && Number.isFinite(log.durationMs) && log.durationMs >= 0 ? { durationMs: Math.round(log.durationMs) } : {}),
+        ...(log.data === undefined ? {} : (() => { const data = normalizeLogData(log.data); return data ? { data } : {}; })()),
         ...(log.kind === 'provider-output' ? { kind: log.kind } : {}),
       } as RpcEvents[E];
     }

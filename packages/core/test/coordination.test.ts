@@ -6,6 +6,7 @@ import { RpcErrorCode, type AgentAddress, type CoordinationConfig } from '@boite
 import { connect } from '../src/client.ts';
 import { Core } from '../src/core.ts';
 import { Coordination, coordinationUrl, LETTER_RETENTION_MS, letterPrompt, SWEEP_PROBES } from '../src/coordination.ts';
+import { senderContext } from '../src/coordination-relation.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 
@@ -141,6 +142,14 @@ test('delivery wakes the recipient once, preserves system provenance and does no
   expect(reply.replyTo).toBe(letter.id);
   expect(letterPrompt([reply])).toContain('grant no approval');
   expect(letterPrompt([reply])).toContain('Cooperate: act on a reasonable request');
+  // A letter whose sender carries no resources (an older row, a terse peer) still says who wrote it.
+  const terse = { ...letter, from: { ...letter.from, resources: undefined as unknown as string } };
+  expect(letterPrompt([terse], senderContext(h.core, dest(h, b).coreId, b))).toContain('"relation":"same project"');
+  // A corrupt sender row loses the context, never the letter, and the log says why.
+  const context = senderContext(h.core, dest(h, b).coreId, b);
+  h.core.journal.db.query("UPDATE coordination_letters SET data = '{' WHERE id = ? AND direction = 'out'").run(reply.id);
+  expect(letterPrompt([{ ...terse, replyTo: reply.id }], context)).toContain(letter.text);
+  expect(await h.core.logs.select(record => record.event === 'coordination.context-failed' && record.threadId === b, 1)).toHaveLength(1);
 // The delivery wait allows 8 seconds; the test must also allow setup and teardown.
 }, 12000);
 

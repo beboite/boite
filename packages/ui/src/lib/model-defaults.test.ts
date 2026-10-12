@@ -172,9 +172,12 @@ test('a cached remote model waits for the restarted core catalog before creating
 });
 
 test('a failed catalog read preserves the draft and its cached selection', async ({ ready }) => {
+  // The catalog comes from browser storage, so the core is asked before the thread is made.
+  const { store: first } = await ready({ delayMs: 0 });
+  const accountId = first.accountsOf('codex')[0]!.id;
+  await first.probeModels('codex', accountId);
+  first.detach();
   const { store, client } = await ready({ delayMs: 0 });
-  const accountId = store.accountsOf('codex')[0]!.id;
-  await store.probeModels('codex', accountId);
   const choice = { providerId: 'codex', accountId, model: 'codex-demo', effort: 'high', permissionMode: 'default' as const };
   store.startDraft(store.projects[0]!.id);
   store.remember(choice);
@@ -231,4 +234,15 @@ test('a built-in default the account no longer lists moves to its later revision
   expect(await store.prepareDraftChoice(stale)).toBeNull();
   expect(store.error).toContain('claude-opus-5-5');
   call.mockRestore();
+});
+
+test('a draft on a model the core already listed is created without reading the catalog again', async ({ ready }) => {
+  const { store, client } = await ready({ delayMs: 0 });
+  const accountId = store.accountsOf('codex')[0]!.id;
+  await store.probeModels('codex', accountId);
+  const choice = { providerId: 'codex', accountId, model: 'codex-demo', effort: 'high', speed: null, permissionMode: 'default' as const };
+  const calls = vi.spyOn(client, 'call');
+  // A refresh still reading behind the send must not hold it.
+  expect(await store.prepareDraftChoice(choice)).toEqual(choice);
+  expect(calls.mock.calls.some(([method]) => method === 'providers.probe')).toBe(false);
 });

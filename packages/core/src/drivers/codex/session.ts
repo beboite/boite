@@ -39,6 +39,7 @@ import { CodexRpc } from './rpc.ts';
 import { updateTurnSettings } from './live-settings.ts';
 import { CodexTurn } from './turn.ts';
 import { SessionRetention } from '../session-retention.ts';
+import { errorCodeOf, httpStatusOf, noteReady } from '../driver-log.ts';
 
 /**
  * What `thread/resume` answers when the thread's rollout file is gone. Both
@@ -47,7 +48,8 @@ import { SessionRetention } from '../session-retention.ts';
 const MISSING_THREAD = /no rollout found for (?:thread|conversation) id|thread not found: /i;
 
 /** `thread/resume` refused a thread the agent no longer has. */
-class ThreadLostError extends Error {}
+/** `sessionLost` tells `noteReady` this is a resume miss the turn recovers from, not a failed open. */
+class ThreadLostError extends Error { readonly sessionLost = true; }
 
 /** `hook/completed` statuses as the ledger counts them; `running` is not an end. */
 const HOOK_OUTCOMES: Record<string, HookOutcome> = {
@@ -312,7 +314,7 @@ export class CodexSession {
   // -- the process ----------------------------------------------------------
 
   private start(ctx: SessionContext): Promise<void> {
-    if (this.starting === null) this.starting = this.open(ctx);
+    if (this.starting === null) this.starting = noteReady(ctx, 'Codex app-server', () => this.open(ctx), () => ({ text: this.served.model ? `, on ${this.served.model}` : '', data: { model: this.served.model } }), () => this.active?.isStopped === true || this.closing || this.ended);
     return this.starting;
   }
 
@@ -580,6 +582,12 @@ export class CodexSession {
         const error = params['error'] as CodexTurnError | undefined;
         const willRetry = params['willRetry'] === true;
         const text = error?.message ?? 'the codex agent reported an error';
+        const info = (error as { codexErrorInfo?: unknown } | undefined)?.codexErrorInfo;
+        const code = errorCodeOf(info);
+        const status = httpStatusOf(info);
+        turn.ctx.diagnostic?.('warn', `Codex reported ${code ?? 'an error'}${status === null ? '' : ` (HTTP ${status})`}${willRetry ? ', it retries' : ', no retry'}: ${text}`, {
+          event: willRetry ? 'driver.api.retry' : 'driver.api.error', data: { code, status, willRetry },
+        });
         // `turn/completed` says whether the turn survived it, so this is a line
         // in the log and never the turn's own outcome.
         turn.ctx.log('warn', `codex agent: ${text}${willRetry ? ' (retrying)' : ''}`);

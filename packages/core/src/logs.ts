@@ -1,19 +1,35 @@
 import { chmod, mkdir, open, rename, stat, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
-import { normalizeCoreLogOutput, normalizeCoreLogText as redactLogText, validateCoreLogsQuery, type CoreLogLevel, type CoreLogRecord, type CoreLogsQuery, type RpcEventName, type RpcEvents } from '@boite/contracts';
+import {
+  LOG_CONTEXT_CHARS, logMatches, normalizeCoreLogOutput, normalizeCoreLogText as redactLogText, normalizeLogData, parseLogRecord, validateCoreLogsQuery, validateDiagnosticReport,
+  type CoreLogLevel, type CoreLogRecord, type CoreLogsQuery, type DiagnosticReportRecord, type LogData, type LogOrigin, type RpcEventName, type RpcEvents,
+} from '@boite/contracts';
 import type { Bus, EventPayload } from './bus.ts';
 import { invalidParams } from './errors.ts';
 
-export const LOG_FILE_BYTES = 1024 * 1024;
-export const LOG_FILE_COUNT = 4;
-export const LOG_MESSAGE_CHARS = 4096;
-const CONTEXT_CHARS = 200;
-const PENDING_RECORDS = 256;
+export const LOG_FILE_BYTES = 2 * 1024 * 1024;
+export const LOG_FILE_COUNT = 8;
+/** The shell writes `shell.0..3.ndjson` beside the core's files, in the same format. */
+export const SHELL_LOG_FILE_COUNT = 4;
+export { LOG_MESSAGE_CHARS } from '@boite/contracts';
+const PENDING_RECORDS = 1024;
 const RECENT_RECORDS = 4096;
 const FLUSH_MS = 250;
+/** How far ahead of the core a record's time may be: clients' times are kept within 10 minutes. */
+const CLOCK_SKEW_MS = 10 * 60_000;
 
 /** Only explicit diagnostic metadata can cross this boundary. Never pass a payload. */
-export type LogContext = Pick<CoreLogRecord, 'source' | 'event' | 'threadId' | 'turnId' | 'requestId'>;
+export type LogContext = Pick<CoreLogRecord, 'source' | 'event' | 'threadId' | 'turnId' | 'requestId'> & {
+  durationMs?: number;
+  data?: LogData;
+  origin?: LogOrigin;
+  /** Set by a caller that knows better than the thread lookup, such as a turn that switched model. */
+  providerId?: string;
+  model?: string;
+};
+
+/** Who a thread is, so every record about it names its agent. */
+export type ThreadIdentity = { providerId: string; model: string | null; parentThreadId: string | null };
 
 export { normalizeCoreLogText as redactLogText } from '@boite/contracts';
 
@@ -21,6 +37,8 @@ export { normalizeCoreLogText as redactLogText } from '@boite/contracts';
 export class DiagnosticLogs {
   readonly runId = crypto.randomUUID();
   readonly directory: string;
+  /** Resolves a thread id to its agent; set by the core once the journal is open. */
+  describeThread: (threadId: string) => ThreadIdentity | null = () => null;
   private readonly recent = new Map<string, CoreLogRecord>();
   private pending: CoreLogRecord[] = [];
   private writing: Promise<void> = Promise.resolve();
@@ -36,7 +54,7 @@ export class DiagnosticLogs {
   private dropped = 0;
   private unsubscribe: (() => void) | undefined;
   private queued = new Set<string>();
-  private readonly activeTurns = new Map<string, string>();
+  private readonly activeTurns = new Map<string, { turnId: string; startedAt: number }>();
   private readonly processTurns = new Map<string, string>();
 
   constructor(dataDir: string, private readonly secrets: readonly string[] = [], private readonly report: (message: string) => void = message => console.error(message), private readonly fileBytes = LOG_FILE_BYTES) {
@@ -46,6 +64,18 @@ export class DiagnosticLogs {
   }
 
   private path(index: number): string { return join(this.directory, `core.${index}.ndjson`); }
+  private shellPath(index: number): string { return join(this.directory, `shell.${index}.ndjson`); }
+
+  /** Every file a query or an export reads, with its size: what Settings lists. */
+  async files(): Promise<{ name: string; bytes: number }[]> {
+    const names = [...Array.from({ length: LOG_FILE_COUNT }, (_, index) => `core.${index}.ndjson`), ...Array.from({ length: SHELL_LOG_FILE_COUNT }, (_, index) => `shell.${index}.ndjson`)];
+    const files: { name: string; bytes: number }[] = [];
+    for (const name of names) {
+      try { files.push({ name, bytes: (await stat(join(this.directory, name))).size }); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    }
+    return files;
+  }
 
   private async initialize(): Promise<void> {
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
@@ -72,25 +102,58 @@ export class DiagnosticLogs {
 
   normalize(payload: RpcEvents['core.log']): RpcEvents['core.log'] {
     const context = this.context(payload);
-    return { level: payload.level, at: payload.at, message: payload.kind === 'provider-output' ? normalizeCoreLogOutput(payload.message, this.secrets) : redactLogText(payload.message, this.secrets), ...context,
+    const data = normalizeLogData(payload.data, this.secrets);
+    return { level: payload.level, at: payload.at, message: payload.kind === 'provider-output' ? normalizeCoreLogOutput(payload.message, this.secrets) : redactLogText(payload.message, this.secrets),
+      source: context.source, event: context.event,
+      ...(context.threadId === undefined ? {} : { threadId: context.threadId }),
+      ...(context.turnId === undefined ? {} : { turnId: context.turnId }),
+      ...(context.requestId === undefined ? {} : { requestId: context.requestId }),
+      ...(validDuration(payload.durationMs) ? { durationMs: Math.round(payload.durationMs!) } : {}),
+      ...(data ? { data } : {}),
       ...(payload.kind === 'provider-output' ? { kind: payload.kind } : {}) };
   }
 
-  private context(raw: Partial<LogContext>): LogContext {
-    const bounded = (value: string): string => redactLogText(value, this.secrets).replace(/[\r\n\t]/g, ' ').slice(0, CONTEXT_CHARS);
+  /** Credentials and sensitive fields removed, as every stored record is. */
+  redact(text: string): string { return redactLogText(text, this.secrets); }
+  /** A client's report, redacted with the secrets this store knows; they never leave it. */
+  validateReport(raw: unknown): DiagnosticReportRecord[] { return validateDiagnosticReport(raw, this.secrets); }
+
+  private bounded(value: string): string { return redactLogText(value, this.secrets).replace(/[\r\n\t]/g, ' ').slice(0, LOG_CONTEXT_CHARS); }
+
+  private context(raw: Partial<LogContext>): Required<Pick<CoreLogRecord, 'source' | 'event'>> & Pick<CoreLogRecord, 'threadId' | 'turnId' | 'requestId'> {
     return {
-      source: bounded(raw.source ?? 'core'), event: bounded(raw.event ?? 'core.log'),
-      ...(typeof raw.threadId === 'string' ? { threadId: bounded(raw.threadId) } : {}),
-      ...(typeof raw.turnId === 'string' ? { turnId: bounded(raw.turnId) } : {}),
-      ...(typeof raw.requestId === 'string' ? { requestId: bounded(raw.requestId) } : {}),
+      source: this.bounded(raw.source ?? 'core'), event: this.bounded(raw.event ?? 'core.log'),
+      ...(typeof raw.threadId === 'string' ? { threadId: this.bounded(raw.threadId) } : {}),
+      ...(typeof raw.turnId === 'string' ? { turnId: this.bounded(raw.turnId) } : {}),
+      ...(typeof raw.requestId === 'string' ? { requestId: this.bounded(raw.requestId) } : {}),
+    };
+  }
+
+  /** The agent a thread runs, looked up once per record. A lookup that throws names nobody. */
+  private identity(threadId: string | undefined, context: Partial<LogContext>): Pick<CoreLogRecord, 'providerId' | 'model' | 'parentThreadId'> {
+    let known: ThreadIdentity | null = null;
+    if (threadId !== undefined) { try { known = this.describeThread(threadId); } catch { known = null; } }
+    const providerId = context.providerId ?? known?.providerId;
+    const model = context.model ?? known?.model ?? undefined;
+    const parent = known?.parentThreadId ?? undefined;
+    return {
+      ...(providerId ? { providerId: this.bounded(providerId) } : {}),
+      ...(model ? { model: this.bounded(model) } : {}),
+      ...(parent ? { parentThreadId: this.bounded(parent) } : {}),
     };
   }
 
   record(level: CoreLogLevel, message: string, context: Partial<LogContext> = {}, at = Date.now()): void {
     if (this.closed) return;
+    const base = this.context(context);
+    const data = normalizeLogData(context.data, this.secrets);
     const record: CoreLogRecord = {
       id: `${this.runId}:${++this.sequence}`, runId: this.runId, at, level,
-      ...this.context(context), message: redactLogText(message, this.secrets),
+      ...(context.origin && context.origin !== 'core' ? { origin: context.origin } : {}),
+      ...base, ...this.identity(base.threadId, context),
+      ...(validDuration(context.durationMs) ? { durationMs: Math.round(context.durationMs!) } : {}),
+      ...(data ? { data } : {}),
+      message: redactLogText(message, this.secrets),
     };
     this.recent.set(record.id, record);
     if (this.recent.size > RECENT_RECORDS) this.recent.delete(this.recent.keys().next().value!);
@@ -108,6 +171,11 @@ export class DiagnosticLogs {
     }
   }
 
+  debug(message: string, context: Partial<LogContext> = {}): void { this.record('debug', message, context); }
+  info(message: string, context: Partial<LogContext> = {}): void { this.record('info', message, context); }
+  warn(message: string, context: Partial<LogContext> = {}): void { this.record('warn', message, context); }
+  error(message: string, context: Partial<LogContext> = {}): void { this.record('error', message, context); }
+
   attach(bus: Bus): void {
     bus.normalizeLog = payload => this.normalize(payload);
     this.unsubscribe = bus.onCommitted((name, payload) => this.observe(name, payload));
@@ -123,18 +191,55 @@ export class DiagnosticLogs {
       for (const entry of state.queued) if (!this.queued.has(entry.turnId)) this.record('info', 'Turn queued', { source: 'scheduler', event: 'turn.queued', threadId: entry.threadId, turnId: entry.turnId }, entry.queuedAt);
       this.queued = queued;
     } else if (name === 'turn.started' || name === 'turn.finished') {
-      const turn = payload as RpcEvents['turn.started'];
-      if (name === 'turn.started') this.activeTurns.set(turn.threadId, turn.id);
-      else if (this.activeTurns.get(turn.threadId) === turn.id) this.activeTurns.delete(turn.threadId);
-      this.record(turn.status === 'error' ? 'error' : 'info', name === 'turn.started' ? 'Turn started' : `Turn finished: ${turn.status}`, { source: 'turns', event: name, threadId: turn.threadId, turnId: turn.id }, (name === 'turn.started' ? turn.startedAt : turn.finishedAt) ?? Date.now());
+      this.observeTurn(name, payload as RpcEvents['turn.started']);
     } else if (name === 'process.started' || name === 'process.exited') {
       const proc = payload as RpcEvents['process.started'];
       const key = `${proc.threadId}:${proc.pid}`;
-      const turnId = this.processTurns.get(key) ?? this.activeTurns.get(proc.threadId);
+      const turnId = this.processTurns.get(key) ?? this.activeTurns.get(proc.threadId)?.turnId;
       if (name === 'process.started' && turnId !== undefined) this.processTurns.set(key, turnId);
       if (name === 'process.exited') this.processTurns.delete(key);
-      this.record(name === 'process.exited' && proc.exitCode !== null && proc.exitCode !== 0 ? 'warn' : 'info', name === 'process.started' ? `Process started: pid ${proc.pid}` : `Process exited: pid ${proc.pid}, code ${proc.exitCode ?? 'unknown'}`, { source: 'processes', event: name, threadId: proc.threadId, turnId }, (name === 'process.started' ? proc.startedAt : proc.exitedAt) ?? Date.now());
+      const exe = executableName(proc.exe);
+      const lifetime = proc.exitedAt !== null && proc.exitedAt !== undefined ? proc.exitedAt - proc.startedAt : undefined;
+      const data: LogData = { pid: proc.pid, ...(proc.parentPid === null ? {} : { parentPid: proc.parentPid }), ...(exe ? { exe } : {}) };
+      if (name === 'process.exited') {
+        if (proc.cpuMs !== null && proc.cpuMs !== undefined) data.cpuMs = proc.cpuMs;
+        if (proc.peakMemoryBytes !== null && proc.peakMemoryBytes !== undefined) data.peakMemoryMb = Math.round(proc.peakMemoryBytes / 1048576);
+        data.exitCode = proc.exitCode;
+      }
+      // An agent's own commands exit 1 all the time (grep with no match, a failing test): that is work,
+      // not a fault. A signal or a Windows status code (above 255, such as 0xC0000005) is a crash.
+      const failed = name === 'process.exited' && proc.exitCode !== null && (proc.exitCode < 0 || proc.exitCode > 255);
+      this.record(failed ? 'warn' : 'debug', name === 'process.started' ? `Process ${exe ?? 'unknown'} started, pid ${proc.pid}` : `Process ${exe ?? 'unknown'} exited, pid ${proc.pid}, code ${proc.exitCode ?? 'unknown'}`,
+        { source: 'processes', event: name, threadId: proc.threadId, turnId, data, ...(name === 'process.exited' && lifetime !== undefined ? { durationMs: lifetime } : {}) },
+        (name === 'process.started' ? proc.startedAt : proc.exitedAt) ?? Date.now());
     }
+  }
+
+  private observeTurn(name: 'turn.started' | 'turn.finished', turn: RpcEvents['turn.started']): void {
+    if (name === 'turn.started') {
+      this.activeTurns.set(turn.threadId, { turnId: turn.id, startedAt: turn.startedAt ?? Date.now() });
+      const waited = typeof turn.startedAt === 'number' && typeof turn.queuedAt === 'number' ? turn.startedAt - turn.queuedAt : null;
+      this.record('info', waited !== null && waited >= 1000 ? `Turn started after ${Math.round(waited / 100) / 10} s in the queue` : 'Turn started',
+        { source: 'turns', event: name, threadId: turn.threadId, turnId: turn.id, ...turnAgent(turn), data: { ...(waited !== null ? { queuedMs: waited } : {}), ...(turn.execution?.effort ? { effort: turn.execution.effort } : {}), ...(turn.execution?.accountId ? { accountId: turn.execution.accountId } : {}) } }, turn.startedAt ?? Date.now());
+      return;
+    }
+    const active = this.activeTurns.get(turn.threadId);
+    if (active?.turnId === turn.id) this.activeTurns.delete(turn.threadId);
+    // Only this turn's own start: the thread may be running another turn while this one ends.
+    const started = turn.startedAt ?? (active?.turnId === turn.id ? active.startedAt : undefined);
+    const finished = turn.finishedAt ?? Date.now();
+    const data: LogData = { status: turn.status };
+    if (turn.usage) {
+      data.inputTokens = turn.usage.inputTokens; data.outputTokens = turn.usage.outputTokens;
+      data.cacheReadTokens = turn.usage.cacheReadTokens; data.cacheWriteTokens = turn.usage.cacheWriteTokens;
+      if (turn.usage.costUsdEquivalent !== null) data.costUsdEquivalent = turn.usage.costUsdEquivalent;
+    }
+    if (turn.execution?.effort) data.effort = turn.execution.effort;
+    if (turn.execution?.permissionMode) data.permissionMode = turn.execution.permissionMode;
+    const level: CoreLogLevel = turn.status === 'error' ? 'error' : turn.status === 'stopped' ? 'warn' : 'info';
+    // turn.error can carry the provider's own output; the cause goes in turn.failed from its diagnostic text.
+    this.record(level, `Turn finished: ${turn.status}`,
+      { source: 'turns', event: name, threadId: turn.threadId, turnId: turn.id, data, ...turnAgent(turn), ...(started !== undefined && started !== null ? { durationMs: finished - started } : {}) }, finished);
   }
 
   flush(): Promise<void> {
@@ -153,7 +258,7 @@ export class DiagnosticLogs {
         if (this.dropped > 0) {
           const count = this.dropped;
           this.dropped = 0;
-          this.record('warn', `${count} diagnostics were not persisted because the pending buffer was full`, { source: 'logs', event: 'logs.dropped' });
+          this.record('warn', `${count} diagnostics were not persisted because the pending buffer was full`, { source: 'logs', event: 'logs.dropped', data: { count } });
         }
       }
     }).catch(error => { this.failed = true; this.pending = []; this.failure(error); }).finally(() => { this.flushing = false; });
@@ -190,36 +295,72 @@ export class DiagnosticLogs {
   async query(raw: CoreLogsQuery): Promise<CoreLogRecord[]> {
     let query: ReturnType<typeof validateCoreLogsQuery>;
     try { query = validateCoreLogsQuery(raw); } catch (error) { throw invalidParams((error as Error).message); }
+    return this.select(record => logMatches(record, query), query.limit);
+  }
+
+  /**
+   * The newest `limit` records a predicate keeps, from every core and shell
+   * file and recent memory, newest first. Core files are read newest first and
+   * the read stops once an older file cannot change the answer.
+   */
+  async select(keep: (record: CoreLogRecord) => boolean, limit: number): Promise<CoreLogRecord[]> {
     await this.ready;
     await this.flush();
-    // Serialize the bounded history read with rotation, so a query cannot miss a renamed file.
     let result: CoreLogRecord[] = [];
+    const fromMemory = (): CoreLogRecord[] => [...this.recent.values()].filter(keep);
+    // Serialize the bounded history read with rotation, so a query cannot miss a renamed file.
     this.writing = this.writing.then(async () => {
       const records = new Map<string, CoreLogRecord>();
-      for (let index = LOG_FILE_COUNT - 1; index >= 0; index -= 1) {
-        for (const record of await this.read(index)) records.set(record.id, record);
+      // Larger is newer everywhere, for records of the same millisecond: a later line of a file,
+      // a newer file, memory last. Insertion order alone is newest file first, oldest line first.
+      const rank = new Map<string, number>();
+      const place = (record: CoreLogRecord, value: number): void => { records.set(record.id, record); rank.set(record.id, value); };
+      fromMemory().forEach((record, line) => place(record, (LOG_FILE_COUNT + 1) * LINES_PER_FILE + line));
+      for (let index = 0; index < LOG_FILE_COUNT; index += 1) {
+        // A record's time can be earlier than its write (a turn logs when it was queued), so file
+        // order says nothing about `at`. A file's modification time does bound what it holds:
+        // nothing in it is newer than its last write, give or take a client's allowed clock skew.
+        // Once `limit` kept records are all newer than that, this file and older ones cannot enter.
+        if (index > 0 && records.size >= limit) {
+          const modified = await this.modified(this.path(index));
+          // A missing file (deleted, or a crash mid-rotation) holds nothing; older ones still can.
+          if (modified === null) continue;
+          const limitTh = [...records.values()].map(record => record.at).sort((a, b) => b - a)[limit - 1]!;
+          if (limitTh > modified + CLOCK_SKEW_MS) break;
+        }
+        (await this.read(this.path(index), 'core', keep)).forEach((record, line) => { if (!records.has(record.id)) place(record, (LOG_FILE_COUNT - index) * LINES_PER_FILE + line); });
       }
-      for (const record of this.recent.values()) { records.delete(record.id); records.set(record.id, record); }
-      result = [...records.values()].reverse().filter(record => (query.threadId === undefined || record.threadId === query.threadId) && (query.level === undefined || record.level === query.level)).slice(0, query.limit);
-    }).catch(error => { this.failure(error); result = [...this.recent.values()].reverse().filter(record => (query.threadId === undefined || record.threadId === query.threadId) && (query.level === undefined || record.level === query.level)).slice(0, query.limit); });
+      // Bands below the core's, so a shell and a core record of the same millisecond always sort the same way.
+      for (let index = 0; index < SHELL_LOG_FILE_COUNT; index += 1) (await this.read(this.shellPath(index), 'shell', keep)).forEach((record, line) => place(record, -(index + 1) * LINES_PER_FILE + line));
+      // What was recorded while the files were read is in memory only, and newest of all.
+      fromMemory().forEach((record, line) => { if (!records.has(record.id)) place(record, (LOG_FILE_COUNT + 2) * LINES_PER_FILE + line); });
+      result = sortNewest([...records.values()], record => rank.get(record.id) ?? 0).slice(0, limit);
+    }).catch(error => { this.failure(error); result = sortNewest(fromMemory()).slice(0, limit); });
     await this.writing;
     return result;
   }
 
-  private async read(index: number): Promise<CoreLogRecord[]> {
+  private async modified(path: string): Promise<number | null> {
+    try { return (await stat(path)).mtimeMs; }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
+  }
+
+  private async read(path: string, origin: LogOrigin, keep: (record: CoreLogRecord) => boolean): Promise<CoreLogRecord[]> {
     let handle;
-    try { handle = await open(this.path(index), 'r'); }
+    try { handle = await open(path, 'r'); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error; }
     try {
-      const buffer = Buffer.alloc(Math.min((await handle.stat()).size, this.fileBytes));
-      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+      // Past the cap, the tail: a file is appended to, so its newest records are last.
+      // A line cut at the start of the window fails to parse and is skipped.
+      const size = (await handle.stat()).size;
+      const buffer = Buffer.alloc(Math.min(size, Math.max(this.fileBytes, LOG_FILE_BYTES)));
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, size - buffer.length);
       const records: CoreLogRecord[] = [];
       for (const line of buffer.subarray(0, bytesRead).toString('utf8').split('\n')) {
-        try {
-          const raw = JSON.parse(line) as CoreLogRecord;
-          if (!raw || typeof raw.id !== 'string' || typeof raw.runId !== 'string' || typeof raw.at !== 'number' || !Number.isFinite(raw.at) || !['info', 'warn', 'error'].includes(raw.level) || typeof raw.message !== 'string' || typeof raw.source !== 'string' || typeof raw.event !== 'string') continue;
-          records.push({ id: raw.id.slice(0, CONTEXT_CHARS), runId: raw.runId.slice(0, CONTEXT_CHARS), at: raw.at, level: raw.level, message: redactLogText(raw.message, this.secrets), ...this.context(raw) });
-        } catch { /* A crash can leave an incomplete final line; other records still answer. */ }
+        // A crash can leave an incomplete final line; other records still answer.
+        // Re-redacted with today's secrets: a credential configured after the write is still removed.
+        const record = parseLogRecord(line, origin, this.secrets);
+        if (record !== null && keep(record)) records.push(record);
       }
       return records;
     } finally { await handle.close(); }
@@ -234,4 +375,26 @@ export class DiagnosticLogs {
     await this.ready;
     this.closed = true;
   }
+}
+
+/** The agent frozen for this turn, which a later model switch does not rewrite. */
+function turnAgent(turn: RpcEvents['turn.started']): Pick<LogContext, 'providerId' | 'model'> {
+  return { ...(turn.execution?.providerId ? { providerId: turn.execution.providerId } : {}), ...(turn.execution?.model ? { model: turn.execution.model } : {}) };
+}
+
+function validDuration(value: unknown): value is number { return typeof value === 'number' && Number.isFinite(value) && value >= 0; }
+
+/** Above the lines any file can hold, so a file's rank never reaches the next one's. */
+const LINES_PER_FILE = 10_000_000;
+
+/** Newest first; `order` breaks a tie of the same millisecond, larger being newer (by default, the later in the list). */
+function sortNewest(records: CoreLogRecord[], order: (record: CoreLogRecord, index: number) => number = (_record, index) => index): CoreLogRecord[] {
+  return records.map((record, index) => ({ record, rank: order(record, index) })).sort((a, b) => b.record.at - a.record.at || b.rank - a.rank).map(entry => entry.record);
+}
+
+/** The program's file name, without its folder: which tool ran, never where the user keeps it. */
+export function executableName(exe: string | null | undefined): string | null {
+  if (!exe) return null;
+  const name = exe.split(/[\\/]/).pop() ?? '';
+  return name.length > 0 ? name.slice(0, 80) : null;
 }

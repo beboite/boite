@@ -304,6 +304,9 @@ export class BrainStore {
     if (this.closed) throw refused('Brain is shutting down');
     if (this.busy) throw refused('Brain synchronization is already running');
     this.busy = true;
+    const at = performance.now();
+    // Unknown until the post-fetch status: a failure before it must not read as up to date.
+    let counts: { ahead: number; behind: number } | null = null;
     try {
       const path = this.config().path;
       if (!path || !exists(join(path, '.git'))) throw refused('brain.path must point to the root of a Git checkout to synchronize');
@@ -319,6 +322,7 @@ export class BrainStore {
       if (state.branch !== started.branch || state.upstream !== started.upstream || state.head !== started.head) {
         throw refused('Brain branch, upstream or HEAD changed during synchronization. Retry from the intended branch.');
       }
+      counts = { ahead: state.ahead, behind: state.behind };
       if (state.dirty || (state.ahead > 0 && state.behind > 0)) throw refused('Brain has local changes or diverging commits. Resolve them before synchronizing; Boite does not merge conflicts.');
       if (state.behind > 0) await this.git(path, ['merge', '--ff-only', '@{upstream}']);
       // An external checkout after the check must never change what gets published.
@@ -327,7 +331,13 @@ export class BrainStore {
       this.core.journal.setSetting('brain.lastSync', Date.now());
       this.core.journal.setSetting('brain.pullError', null);
       this.links.apply(this.globalRoot());
+      this.core.logs.info(`Brain ${push ? 'synchronized' : 'pulled'}: ${state.behind} commits pulled${push ? `, ${state.ahead} pushed` : ''}`, { source: 'brain', event: 'brain.synced', durationMs: performance.now() - at, data: { ...counts, push } });
       return await this.status();
+    } catch (cause) {
+      // Stopped by the core shutting down: no failure to report.
+      if (this.closed) throw cause;
+      this.core.logs.warn(`Brain ${push ? 'synchronization' : 'automatic pull'} failed: ${messageOf(cause)}`, { source: 'brain', event: 'brain.sync-failed', durationMs: performance.now() - at, data: { ...counts, push } });
+      throw cause;
     } finally { this.busy = false; }
   }
 
