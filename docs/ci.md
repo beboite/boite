@@ -132,10 +132,10 @@ The tested installer becomes the release artifact.
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 593,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,620,000 |
+| UI entry chunk | 594,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,810,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 3,912,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 3,925,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
@@ -200,6 +200,15 @@ On 2026-10-12 on Linux with Bun 1.4.2, the latency pass (idle warm-up of the
 pages, kept Agents view, optimistic pin and archive, single permission answer)
 merged with `main` measured 4,513,690 UI bytes and a 591,872-byte entry chunk,
 within the limits above.
+
+On 2026-10-12 on Linux with Bun 1.4.2, the terminal rewrite (#453) measured
+4,802,359 UI bytes, 593,425 for the entry chunk and 3,915,408 core bytes; the
+Windows job measured 3,915,831 core bytes. The xterm WebGL, search and Unicode
+11 addons are lazy chunks of 113,385, 31,879 and 24,853 bytes, loaded with the
+first terminal, never at startup. The find bar, the recent commands list and
+their English/French sentences make up the rest of the UI growth, and the bash
+and PowerShell integration scripts the core's. The limits rise to 594,000,
+4,810,000 and 3,925,000.
 
 Several drafts per project, merged with settings cards at `87fca361`, measured
 4,536,091 UI bytes and a 590,215-byte entry chunk on Linux: the done rows and
