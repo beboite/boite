@@ -260,10 +260,14 @@ export class Stewards {
         this.line(target.id, `Deleted by ${by}.`);
         await this.core.threads.remove(target.id);
         return { thread: null };
-      case 'stop':
+      case 'stop': {
         this.core.activity.pauseAll(target.id);
-        if (this.core.threads.stopTurn(target.id)) this.line(target.id, `Stopped by ${by}.`);
+        const stopped = this.core.threads.stopTurn(target.id);
+        // The same fields as an owner's or an agent's stop in threads/rpc.ts: a steward is an agent principal.
+        this.core.logs.info(`Stop requested by the steward ${params.threadId}: ${stopped ? 'a turn was stopped' : 'nothing was running'}`, { source: 'turns', event: 'turn.stop-asked', threadId: target.id, data: { principal: 'agent', client: null, stopped, stewardThreadId: params.threadId } });
+        if (stopped) this.line(target.id, `Stopped by ${by}.`);
         break;
+      }
       case 'rename': {
         const title = typeof params.title === 'string' ? params.title.trim() : '';
         if (title.length === 0 || title.length > 120) throw invalidParams(`${method}.title: expected 1 to 120 characters`);
@@ -288,10 +292,10 @@ export class Stewards {
     const question = this.core.threads.listQuestions(target.id).find(request => request.id === params.questionId);
     if (question === undefined) throw refused(`steward.answer.questionId: ${String(params.questionId)} is not a pending question of ${target.id}`, { threadId: params.threadId, field: 'questionId', expected: 'a pending question id of the target' });
     const steward = this.core.threads.require(params.threadId);
-    if (params.skip === true) this.core.threads.skipQuestion({ threadId: target.id, questionId: question.id });
+    if (params.skip === true) this.core.threads.skipQuestion({ threadId: target.id, questionId: question.id }, 'steward');
     else {
       if (!Array.isArray(params.optionIds)) throw invalidParams('steward.answer.optionIds: expected an array of option ids');
-      this.core.threads.answerQuestion({ threadId: target.id, questionId: question.id, optionIds: params.optionIds, ...(params.text === undefined ? {} : { text: params.text }) });
+      this.core.threads.answerQuestion({ threadId: target.id, questionId: question.id, optionIds: params.optionIds, ...(params.text === undefined ? {} : { text: params.text }) }, 'steward');
     }
     this.line(target.id, `${params.skip === true ? 'Question skipped' : 'Question answered'} by the steward "${steward.title}" (${steward.id}), not by the user.`);
     return { ok: true };
@@ -303,7 +307,7 @@ export class Stewards {
     const request = this.core.threads.listPermissions(target.id).find(pending => pending.id === params.requestId);
     if (request === undefined) throw refused(`steward.permission.requestId: ${String(params.requestId)} is not a pending permission of ${target.id}`, { threadId: params.threadId, field: 'requestId', expected: 'a pending permission request id of the target' });
     const steward = this.core.threads.require(params.threadId);
-    this.core.threads.answerPermission({ requestId: request.id, decision: params.decision });
+    this.core.threads.answerPermission({ requestId: request.id, decision: params.decision }, 'steward');
     this.line(target.id, `${request.toolName} ${params.decision === 'allow' ? 'allowed' : 'denied'} by the steward "${steward.title}" (${steward.id}), not by the user.`);
     return { ok: true };
   }

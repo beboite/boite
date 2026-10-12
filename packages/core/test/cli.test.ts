@@ -509,7 +509,9 @@ describe('settings', () => {
     expect(card?.setting).toEqual({ kind: 'change', key: 'agentCpuCapPercent', value: 60, previous: 75, page: 'resources', section: 'limits', sensitive: false });
     expect((await boite(['settings', 'request', 'agentCpuCapPercent', '50', '--why', 'again'])).err).toContain('already open');
     // Applied is the core's to say: an answer cannot claim it.
-    await expect(client.call('questions.answer', { threadId, questionId, optionIds: ['applied'] })).rejects.toThrow('does not offer');
+    // Caught by hand: with `expect(...).rejects`, the next call crashed Bun 1.4.2 on Windows every time.
+    const claimed = await client.call('questions.answer', { threadId, questionId, optionIds: ['applied'] }).then(() => null, (error: unknown) => error);
+    expect(claimed instanceof Error ? claimed.message : String(claimed)).toContain('does not offer');
 
     const next = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
     await client.call('settings.set', { agentCpuCapPercent: 60 });

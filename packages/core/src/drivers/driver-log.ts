@@ -1,0 +1,90 @@
+import type { SessionContext } from './types.ts';
+
+type Diagnosable = Pick<SessionContext, 'diagnostic' | 'warmProcessMinutes'>;
+
+/**
+ * Whether a turn reused the thread's warm agent process or replaced the kept
+ * one, and why. A setup change is worth `info`; the routine cases (warm
+ * processes off, the warm process ended) are `debug`. The first turn keeps
+ * nothing, so it logs nothing.
+ */
+export function noteWarmSession(ctx: Diagnosable, agent: string, choice: { kept: boolean; usable: boolean; sameSetup: boolean; setupChange?: string }): void {
+  const note = ctx.diagnostic;
+  if (note === undefined || !choice.kept) return;
+  if (choice.usable) {
+    note('debug', `Warm ${agent} process reused for this turn`, { event: 'driver.session.reused', data: { warmMinutes: ctx.warmProcessMinutes } });
+    return;
+  }
+  const why = !choice.sameSetup ? (choice.setupChange ?? 'its setup changed') : ctx.warmProcessMinutes <= 0 ? 'warm processes are off' : 'the warm process ended or is closing';
+  note(choice.sameSetup ? 'debug' : 'info', `Warm ${agent} process replaced: ${why}`, { event: 'driver.session.replaced', data: { reason: why, warmMinutes: ctx.warmProcessMinutes } });
+}
+
+/** A protocol error's code, from the shapes agents use: a string, a number or a one-key object. */
+export function errorCodeOf(info: unknown): string | null {
+  if (typeof info === 'string') return info.slice(0, 80);
+  if (typeof info === 'number' && Number.isFinite(info)) return String(info);
+  if (info !== null && typeof info === 'object' && !Array.isArray(info)) {
+    const keys = Object.keys(info);
+    return keys.length === 1 ? keys[0]!.slice(0, 80) : null;
+  }
+  return null;
+}
+
+/** An HTTP status anywhere one level down in a protocol error's details. */
+export function httpStatusOf(info: unknown): number | null {
+  if (info === null || typeof info !== 'object') return null;
+  for (const value of [info, ...Object.values(info as Record<string, unknown>)]) {
+    if (value === null || typeof value !== 'object') continue;
+    const status = (value as Record<string, unknown>).httpStatusCode ?? (value as Record<string, unknown>).status;
+    if (typeof status === 'number' && status >= 100 && status < 600) return status;
+  }
+  return null;
+}
+
+/**
+ * How long an agent process took to open its session, or why it could not.
+ * `opening` runs here, after the clock starts, so synchronous setup counts and
+ * a synchronous throw is logged like a rejection. `details` adds what only
+ * the session knows once open, such as the model it was served. `stopped`
+ * says whether the user stopped the turn that opens it: closing the process
+ * is the only way to stop an open in flight, and the rejection that follows
+ * is routine, not a failure.
+ */
+export function noteReady<T>(
+  ctx: Pick<SessionContext, 'diagnostic' | 'sessionId'>,
+  agent: string,
+  opening: () => Promise<T>,
+  details: () => { text?: string; data?: Record<string, string | number | boolean | null>; resumed?: boolean; abandoned?: boolean } = () => ({}),
+  stopped: () => boolean = () => false,
+): Promise<T> {
+  const at = Date.now();
+  const resume = ctx.sessionId !== null;
+  const abandoned = (): void => {
+    const elapsed = Date.now() - at;
+    ctx.diagnostic?.('debug', `${agent} session open was abandoned after ${elapsed} ms: the turn was stopped, or the session closed, before it opened`, { event: 'driver.session.open-abandoned', durationMs: elapsed, data: { resume } });
+  };
+  const failed = (error: unknown): never => {
+    // A driver that must throw on a stop marks the error, so a normal stop is no warning.
+    if ((error as { abandoned?: unknown } | null)?.abandoned === true || stopped()) { abandoned(); throw error; }
+    const elapsed = Date.now() - at;
+    // A stored session the agent no longer has: the turn starts a new one, so this is lifecycle.
+    if ((error as { sessionLost?: unknown } | null)?.sessionLost === true) {
+      ctx.diagnostic?.('info', `${agent} no longer has the stored session (${error instanceof Error ? error.message : String(error)}); the turn starts a new one`, { event: 'driver.session.lost', durationMs: elapsed, data: { resume } });
+      throw error;
+    }
+    ctx.diagnostic?.('warn', `${agent} session failed to open after ${elapsed} ms: ${error instanceof Error ? error.message : String(error)}`, { event: 'driver.session.open-failed', durationMs: elapsed, data: { resume, code: errorCodeOf((error as { code?: unknown } | null)?.code) } });
+    throw error;
+  };
+  let started: Promise<T>;
+  try { started = opening(); } catch (error) { return Promise.reject(error).catch(failed); }
+  return started.then((value) => {
+    const extra = details();
+    // Stopped before a process ever started: nothing became ready.
+    if (extra.abandoned) { abandoned(); return value; }
+    // A session asked to resume can still come back new, when the agent could not load it.
+    const resumed = extra.resumed ?? resume;
+    const elapsed = Date.now() - at;
+    ctx.diagnostic?.('info', `${agent} session ready in ${elapsed} ms, ${resumed ? 'resumed' : 'new'}${extra.text ?? ''}`, { event: 'driver.session.ready', durationMs: elapsed, data: { ...extra.data, resume, resumed } });
+    return value;
+  }, failed);
+}

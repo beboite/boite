@@ -6,7 +6,7 @@ import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import type { MessagePart, PermissionMode, RpcEvents, Settings } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
 import { Core } from '../src/core.ts';
-import { getDriver } from '../src/drivers/index.ts';
+import { getDriver, probedModelsOf } from '../src/drivers/index.ts';
 import { readCodexQuota } from '../src/drivers/codex.ts';
 import { codexQuotaDetails } from '../src/quota-details.ts';
 import { consumeCodexReset } from '../src/drivers/codex/models.ts';
@@ -18,7 +18,7 @@ import { countLogLines, countProcesses, readScriptedLog, writeScriptedProvider }
 /** The fake Codex app-server: a real ndjson JSON-RPC process over stdio, run by bun. */
 const FAKE_SERVER = fileURLToPath(new URL('./fixtures/codex-server.ts', import.meta.url));
 /** The fixture's environment switches a test may set; every one is cleared after it. */
-const FAKE_SWITCHES = ['CODEX_FAKE_NO_LIVE_SETTINGS', 'CODEX_FAKE_FORK_ERROR', 'CODEX_FAKE_FORK_SAME', 'CODEX_FAKE_LOST', 'CODEX_FAKE_DEAF', 'CODEX_FAKE_SLOW_START', 'CODEX_FAKE_HOOKS', 'CODEX_FAKE_INIT_FAILURES', 'CODEX_FAKE_INIT_ERROR', 'CODEX_FAKE_CRASH_ERROR', 'CODEX_FAKE_INIT_RPC_ERROR', 'CODEX_FAKE_LOGIN_WAIT', 'CODEX_FAKE_RESET_CREDITS', 'CODEX_FAKE_RESET_ERROR'];
+const FAKE_SWITCHES = ['CODEX_FAKE_NO_LIVE_SETTINGS', 'CODEX_FAKE_FORK_ERROR', 'CODEX_FAKE_FORK_SAME', 'CODEX_FAKE_LOST', 'CODEX_FAKE_DEAF', 'CODEX_FAKE_SLOW_START', 'CODEX_FAKE_HOOKS', 'CODEX_FAKE_INIT_FAILURES', 'CODEX_FAKE_INIT_ERROR', 'CODEX_FAKE_CRASH_ERROR', 'CODEX_FAKE_INIT_RPC_ERROR', 'CODEX_FAKE_LOGIN_WAIT', 'CODEX_FAKE_RESET_CREDITS', 'CODEX_FAKE_RESET_ERROR', 'CODEX_FAKE_SLOW_MODELS'];
 
 test('native collaboration is journalled and appears in Team without using Boite delegation', async () => {
   const client = await startCore();
@@ -1449,6 +1449,49 @@ describe('codex driver', () => {
     const trace = await client.call('trace.get', { threadId: `probe:codex-fake:${accountId}` });
     expect(trace.every((row) => row.exitedAt !== null)).toBe(true);
     expect(countLines('model/list')).toBe(1);
+  });
+
+  test('a list already read is answered without a process, and a refresh reads it again', async () => {
+    const client = await startCore();
+    const { accountId } = await codexAccount(client);
+    const first = await client.call('providers.probe', { providerId: 'codex-fake', accountId });
+    expect(first.models.map((model) => model.id)).toContain('fake-smart');
+    expect((await client.call('providers.probe', { providerId: 'codex-fake', accountId })).probedAt).toBe(first.probedAt);
+    expect(countLines('model/list')).toBe(1);
+    await client.call('providers.probe', { providerId: 'codex-fake', accountId, refresh: true });
+    expect(countLines('model/list')).toBe(2);
+  });
+
+  test('a refresh keeps the last catalog for model checks until the agent answers', async () => {
+    const client = await startCore();
+    const { projectId, accountId } = await codexAccount(client);
+    await client.call('providers.probe', { providerId: 'codex-fake', accountId });
+
+    process.env['CODEX_FAKE_SLOW_MODELS'] = '1500';
+    let refreshed = false;
+    const refresh = client.call('providers.probe', { providerId: 'codex-fake', accountId, refresh: true }).then(() => { refreshed = true; });
+    await waitFor(() => countLines('model/list') === 2);
+    // Picked from the list on screen while the agent reads it again: no wait for that read.
+    const thread = await client.call('threads.create', {
+      projectId,
+      providerId: 'codex-fake',
+      accountId,
+      title: 'during the refresh',
+      model: 'fake-smart',
+    });
+    expect(thread.model).toBe('fake-smart');
+    expect(refreshed).toBe(false);
+    // So is a plain read of the list.
+    expect((await client.call('providers.probe', { providerId: 'codex-fake', accountId })).models.map((model) => model.id)).toContain('fake-smart');
+    expect(refreshed).toBe(false);
+    await refresh;
+
+    // A changed account still drops the list a refresh keeps.
+    const again = client.call('providers.probe', { providerId: 'codex-fake', accountId, refresh: true });
+    await waitFor(() => countLines('model/list') === 3);
+    await client.call('accounts.rename', { accountId, label: 'renamed' });
+    expect(probedModelsOf('codex-appserver', 'codex-fake', accountId)).toBeNull();
+    await again.catch(() => undefined);
   });
 
   test('creating a thread discovers its model without opening the picker and sends its effort', async () => {

@@ -154,6 +154,9 @@ test('a steward is told when its threads finish or ask, wakes, and answers the q
     expect(answered.err).toBe('');
     expect(h.core.threads.listQuestions(worker)).toHaveLength(0);
     expect(lines(worker, h).some(text => text.startsWith('Question answered by the steward "Steward"'))).toBe(true);
+    // The diagnostic log says who decided, too.
+    const [logged] = await h.core.logs.select(record => record.event === 'question.answered' && record.threadId === worker, 1);
+    expect(logged?.data).toMatchObject({ by: 'steward' });
   } finally { agent.close(); }
 
   // Quiet grants send no notices.

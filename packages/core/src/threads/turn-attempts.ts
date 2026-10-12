@@ -66,8 +66,8 @@ export class TurnAttempts {
   open(state: TurnAttemptState): LivePermissions {
     const { threadId } = state;
     const permissions = new LivePermissions(state.thread.permissionMode, handle => {
-      this.threads.cards.clearPermissionsOf(threadId);
-      this.threads.cards.clearQuestionsOf(threadId);
+      this.threads.cards.clearPermissionsOf(threadId, 'mode change');
+      this.threads.cards.clearQuestionsOf(threadId, false, 'mode change');
       handle.stop();
       this.armStopDeadline(threadId, handle);
     }, mode => {
@@ -120,7 +120,11 @@ export class TurnAttempts {
     let result: TurnResult;
     /** What the agent is told when its turn goes on after an agent update. */
     let afterUpdate: Resume | null = null;
+    let attempt = 0;
+    /** What started the next attempt, set where the loop goes round again. */
+    let because = 'first attempt';
     for (;;) {
+      attempt += 1;
       state.thread.permissionMode = permissions.mode;
       const note = afterUpdate;
       afterUpdate = null;
@@ -142,6 +146,12 @@ export class TurnAttempts {
       }
       if (state.running.execution) state.running.execution = { ...state.running.execution, permissionMode: permissions.mode };
       this.core.journal.putTurn(state.running);
+      const attemptAt = performance.now();
+      const why = because;
+      quiet(() => this.core.logs.info(`Attempt ${attempt} (${why}) on ${provider.id} ${state.thread.model ?? 'default model'}, ${state.thread.sessionId === null ? 'new session' : 'resuming session'}, permission mode ${permissions.mode}`, {
+        source: 'turns', event: 'turn.attempt.started', threadId, turnId, providerId: provider.id, ...(state.thread.model ? { model: state.thread.model } : {}),
+        data: { attempt, why, protocol: provider.protocol, accountId: account.id, resume: state.thread.sessionId !== null, permissionMode: permissions.mode, effort: state.thread.effort ?? null, speed: state.thread.speed ?? null },
+      }));
       const handle = driver.startTurn(context);
       this.handles.set(threadId, handle);
       permissions.attach(handle);
@@ -153,6 +163,7 @@ export class TurnAttempts {
       if (this.core.updates.wantsPause(provider.id)) this.pauseWanted.set(threadId, provider.id);
       if (!resumed && !retriedLostSession && !queued.execution?.operation) this.threads.titles.autoTitle(threadId, turnId);
       result = await Promise.race([handle.done, forced.promise]);
+      logAttemptEnd(this.core, threadId, turnId, attempt, result, performance.now() - attemptAt);
       permissions.detach();
       settings?.detach();
       await permissions.settled();
@@ -168,6 +179,7 @@ export class TurnAttempts {
         state.thread = fresh;
         retriedLostSession = true;
         state.running = { ...state.running, ...(state.running.execution ? { execution: { ...state.running.execution, sessionId: null, sessionGeneration: fresh.sessionGeneration ?? 0 } } : {}) };
+        because = 'retry on a fresh session';
         continue;
       }
       // Stopped between two tool calls for an agent update: the same turn
@@ -182,15 +194,17 @@ export class TurnAttempts {
         }
         afterUpdate = resume;
         resumed = true;
+        because = 'after an agent update';
         continue;
       }
       if (!permissions.restarting || result.status === 'done') break;
       usage = sumUsage(usage, result.usage);
       this.keepSession(state, result);
-      this.threads.cards.clearPermissionsOf(threadId);
-      this.threads.cards.clearQuestionsOf(threadId);
+      this.threads.cards.clearPermissionsOf(threadId, 'mode change');
+      this.threads.cards.clearQuestionsOf(threadId, false, 'mode change');
       setThreadStatus(this.core, threadId, 'running');
       resumed = true;
+      because = 'after a permission mode change';
     }
     result = { ...result, usage: sumUsage(usage, result.usage) };
     if (state.running.execution) state.running.execution = { ...state.running.execution, permissionMode: state.thread.permissionMode };
@@ -278,12 +292,17 @@ export class TurnAttempts {
     this.threads.handoff.forgetTools(threadId);
     const left = Promise.withResolvers<null>();
     this.paused.set(threadId, { providerId: provider.id, leave: () => left.resolve(null) });
+    const pausedAt = performance.now();
+    quiet(() => this.core.logs.info(`Turn paused between two tool calls while ${provider.id} updates`, { source: 'turns', event: 'turn.paused-for-update', threadId, turnId }));
     this.threads.noteSystem(threadId, turnId, `Paused between two tool calls while ${provider.name} updates.`, `Paused while ${provider.name} updates`, 'turn.pausedForUpdate');
     try {
       // Taken before the update can learn of this pause: it may settle in the same tick.
       const settled = this.core.updates.resumeOf(provider.id);
       this.core.updates.turnPaused(provider.id);
       const resume = await Promise.race([settled, left.promise]);
+      quiet(() => this.core.logs.info(resume === null ? 'Turn paused for an update was stopped before the update ended' : `Turn resumes after ${provider.id} updated`, {
+        source: 'turns', event: 'turn.resumed-after-update', threadId, turnId, durationMs: performance.now() - pausedAt, data: { resumed: resume !== null },
+      }));
       return resume === null || this.stopRequested.has(threadId) || this.core.stopping || this.core.journal.isClosed() ? null : resume;
     } finally {
       this.paused.delete(threadId);
@@ -305,7 +324,7 @@ export class TurnAttempts {
     if (current === null || current.archived) return null;
     if ((current.sessionGeneration ?? 0) !== (thread.sessionGeneration ?? 0) || current.sessionId !== thread.sessionId) return null;
     const generation = (current.sessionGeneration ?? 0) + 1;
-    this.core.log('info', `thread ${thread.id}: the agent has no session ${thread.sessionId} any more (${result.diagnosticError ?? result.error ?? 'no reason given'}); starting a fresh one with the thread's history`);
+    this.core.log('info', `thread ${thread.id}: the agent has no session ${thread.sessionId} any more (${result.diagnosticError ?? result.error ?? 'no reason given'}); starting a fresh one with the thread's history`, { source: 'turns', event: 'turn.session-lost', threadId: thread.id, data: { sessionGeneration: generation } });
     saveThread(this.core, { ...current, sessionId: null, sessionResumeAt: null, sessionGeneration: generation, context: null, promptCache: null }, 'thread.updated');
     return { ...thread, sessionId: null, sessionResumeAt: null, sessionGeneration: generation, context: null, promptCache: null };
   }
@@ -327,8 +346,8 @@ export class TurnAttempts {
     // An open card is what the driver is parked on. Aborting without answering
     // it leaves that await pending for good: the turn never finishes, the
     // thread stays `waiting`, and Stop does nothing the user can see.
-    this.threads.cards.clearPermissionsOf(threadId);
-    this.threads.cards.clearQuestionsOf(threadId);
+    this.threads.cards.clearPermissionsOf(threadId, 'stop');
+    this.threads.cards.clearQuestionsOf(threadId, false, 'stop');
     this.stopRequested.add(threadId);
     handle.stop();
     this.armStopDeadline(threadId, handle);
@@ -346,7 +365,7 @@ export class TurnAttempts {
     if (deadline === undefined || deadline.handle !== handle || deadline.timer !== null) return;
     deadline.timer = setTimeout(() => {
       if (this.handles.get(threadId) !== handle) return;
-      this.core.log('warn', `thread ${threadId} did not stop within ${STOP_DEADLINE.ms} ms: ending its processes`);
+      this.core.log('warn', `thread ${threadId} did not stop within ${STOP_DEADLINE.ms} ms: ending its processes`, { source: 'turns', event: 'turn.stop-deadline', threadId, data: { deadlineMs: STOP_DEADLINE.ms } });
       this.core.procs.killTree(threadId);
       releaseThread(threadId);
       deadline.timer = setTimeout(() => {
@@ -358,6 +377,20 @@ export class TurnAttempts {
     }, STOP_DEADLINE.ms);
     deadline.timer.unref?.();
   }
+}
+
+/** One line per driver attempt: how it ended and, for a failure, the cause the driver gave. */
+function logAttemptEnd(core: Core, threadId: ThreadId, turnId: TurnId, attempt: number, result: TurnResult, ms: number): void {
+  const cause = result.status === 'error' ? `: ${result.diagnosticError ?? result.error ?? 'no reason given'}` : '';
+  quiet(() => core.logs.record(result.status === 'error' ? 'warn' : 'info', `Attempt ${attempt} ended ${result.status} after ${Math.round(ms / 100) / 10} s${result.sessionLost ? ', the agent lost its session' : ''}${cause}`, {
+    source: 'turns', event: 'turn.attempt.finished', threadId, turnId, durationMs: ms,
+    data: { attempt, status: result.status, sessionLost: result.sessionLost === true, ...(result.usage ? { outputTokens: result.usage.outputTokens } : {}) },
+  }));
+}
+
+/** A diagnostic storage failure must not break a turn: its result, its retries or its pause. */
+function quiet(write: () => void): void {
+  try { write(); } catch { /* the turn goes on without the record */ }
 }
 
 /** Native attempts belong to one visible turn, including their reported usage. */

@@ -120,7 +120,7 @@
           toolName={part.toolName}
           decision={part.decision}
           request={store.permissionRequests[part.requestId] ?? null}
-          answer={(decision) => void store.answer(part.requestId, decision)}
+          answer={(decision) => store.answer(part.requestId, decision)}
         />
       {:else if part.type === 'question' && part.async === true && (part.answer ?? null) === null && store.pendingQuestions.some((q) => q.id === part.questionId)}
         <!-- Waiting in the dock above the composer: here only a line that brings it up. -->

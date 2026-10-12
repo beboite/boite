@@ -134,7 +134,7 @@ export class ThreadBranching {
       // The process that holds the whole session goes first, whatever it still runs.
       this.threads.releaseAgent(threadId);
       this.threads.agentState.noteBackground(threadId, []);
-      this.threads.cards.clearQuestionsOf(threadId, true);
+      this.threads.cards.clearQuestionsOf(threadId, true, 'rewind');
       this.threads.deferred.deferredAnswers.delete(threadId);
       this.threads.deferred.consumed.delete(threadId);
       this.threads.deferred.pendingWakes.delete(threadId);

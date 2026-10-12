@@ -745,7 +745,8 @@ test('a later navigation wins while the previous agent subscription is being rel
   const real = client.call.bind(client);
   vi.spyOn(client, 'call').mockImplementation(((method: string, params: { threadId?: string }) => {
     if (method === 'threads.unsubscribe' && params.threadId === 't-team-running') {
-      return new Promise(resolve => { release = () => { void real(method as never, params as never).then(resolve); }; });
+      // Nothing waits on this unsubscribe now: a close may drop it, and the store's catch must see that.
+      return new Promise((resolve, reject) => { release = () => { real(method as never, params as never).then(resolve, reject); }; });
     }
     return real(method as never, params as never);
   }) as typeof client.call);
