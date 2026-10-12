@@ -33,6 +33,7 @@
   import MachineIcon from './MachineIcon.svelte';
   import ProjectTile from './ProjectTile.svelte';
   import RailFrame from './RailFrame.svelte';
+  import { minuteClock } from '../lib/clock.svelte';
   let { store }: { store: Store } = $props();
   const mobile = new MediaQuery('(max-width: 720px)');
   let scrollRoot = $state<HTMLDivElement>();
@@ -45,11 +46,10 @@
   const showRows = $derived(mobile.current ? store.sidebarOpen : !store.sidebarCollapsed);
   $effect(() => { if (showRows && scrollRoot) void tick().then(() => { if (scrollRoot && showRows) scrollRoot.scrollTop = savedScroll; }); });
   let projectButton = $state<HTMLButtonElement>();
-  let now = $state(Date.now());
+  /** The clock the rows' times read: a minute's precision is all they show. */
+  const now = $derived(minuteClock.now);
   let filter = $state<string | null>(null);
-  let machines = $derived(
-    workspace.machines.length ? workspace.machines : [{ id: 'local', label: strings.machines.local, store }]
-  );
+  let machines = $derived(workspace.machinesOr(store));
   /** One machine says nothing about where a thread runs: its icon only shows once there are two. */
   let multi = $derived(machines.length > 1);
   /** A filter on a machine that has since gone filters nothing, so the list never empties itself. */
@@ -120,10 +120,6 @@
   // The grants load once per connection, for the robots on the projects a steward covers; `stewards.changed` keeps them current.
   $effect(() => {
     for (const { store: owner } of visible) if (owner.connection === 'ready' && owner.stewards === null) untrack(() => void owner.loadStewards());
-  });
-  $effect(() => {
-    const timer = setInterval(() => (now = Date.now()), 30_000);
-    return () => clearInterval(timer);
   });
   function addProject() {
     store.projectPickerOpen = true;
@@ -248,8 +244,8 @@
               onclick={(e) => openProjectMenu(e, machine, project)}><Ellipsis size={15} /></button
             >
           </div>
-          <div class="fold" class:expanded={!collapsed} inert={collapsed}>
-            <div class="rows">
+          <div class="disclosure-fold" class:open={!collapsed} inert={collapsed}>
+            <div>
               {#each draftsHere as draft (draft.id)}<DraftRow {owner} entry={draft} />{/each}
               <WindowList items={lists.attention} keyOf={thread => JSON.stringify([machine.id, thread.id])} {scrollRoot} active={!collapsed} estimate={34} measurements={measurements(JSON.stringify([machine.id, project.id]))}>
                 {#snippet row(thread)}<ThreadCard {machine} {project} {thread} {now} showProject={false} showMachine={false} showDone />{/snippet}
@@ -404,10 +400,8 @@
   .rollup.error { color: var(--color-danger); }
   .rollup.done { color: var(--color-success); }
   .rollup.queued { color: var(--color-muted-foreground); }
-  .rollup.delegating .dot, .rollup.monitoring .dot, .rollup.background .dot { animation: rollup-pulse 1.6s var(--ease-out-quint) infinite; }
-  .rollup :global(.spinner) { animation: rollup-spin 1s linear infinite; }
-  @keyframes rollup-spin { to { transform: rotate(360deg); } }
-  @keyframes rollup-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+  .rollup.delegating .dot, .rollup.monitoring .dot, .rollup.background .dot { animation: pulse 1.6s var(--ease-out-quint) infinite; }
+  .rollup :global(.spinner) { animation: spin 1s linear infinite; }
   @media (prefers-reduced-motion: reduce) { .rollup .dot, .rollup :global(.spinner) { animation: none; } }
   :global(html[data-motion='reduced']) .rollup .dot,
   :global(html[data-motion='reduced']) .rollup :global(.spinner) { animation: none; }
@@ -426,18 +420,6 @@
   .head:hover .project-actions,
   .head:focus-within .project-actions {
     opacity: 1;
-  }
-  .fold {
-    display: grid;
-    grid-template-rows: 0fr;
-    transition: grid-template-rows var(--dur-3) var(--ease-out-quint);
-  }
-  .fold.expanded {
-    grid-template-rows: 1fr;
-  }
-  .rows {
-    min-height: 0;
-    overflow: hidden;
   }
   .none {
     padding: 4px 10px;

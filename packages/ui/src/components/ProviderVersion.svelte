@@ -73,7 +73,7 @@
       <button type="button" class="quiet small" {disabled} data-testid="harness-update-unskip" onclick={() => void store.skipHarnessUpdate(update.providerId, null)}><span class="ui-label">{strings.harnessUpdates.unskip}</span></button>
     {:else if controls && offered(update) && update.state !== 'updating'}
       <button type="button" class="small" class:primary={main} {disabled} data-testid="harness-update-row-run" onclick={() => void store.updateHarness(update.providerId)}>
-        <span class="ui-label">{update.state === 'failed' ? strings.harnessUpdates.retry : strings.harnessUpdates.update}</span>
+        <span class="ui-label">{update.state === 'failed' ? strings.common.retry : strings.harnessUpdates.update}</span>
       </button>
       <button type="button" class="quiet small" {disabled} data-testid="harness-update-skip" onclick={() => void store.skipHarnessUpdate(update.providerId, update.latest)}><span class="ui-label">{strings.harnessUpdates.skip}</span></button>
     {:else if controls && update.route === 'self' && update.latest === null && update.current !== null && update.state !== 'updating'}

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import { Check, Copy, Download, FolderDown, NotebookPen } from '@lucide/svelte';
   import { planFileName } from '../lib/plan';
   import type { Store } from '../lib/store.svelte';
@@ -49,7 +50,7 @@
       await client.call('files.write', { threadId, path: name, text: plan });
       saved = name;
     } catch (error) {
-      store.error = error instanceof Error ? error.message : String(error);
+      store.error = errorText(error);
     } finally {
       saving = false;
     }
@@ -64,7 +65,7 @@
   <div class="body"><Prose text={plan} {store} {threadId} /></div>
   <div class="actions">
     <button type="button" class="ghost small" data-testid="plan-copy" onclick={() => void copy()}>
-      {#if copied}<Check size={14} /><span class="ui-label">{strings.chat.copied}</span>{:else}<Copy size={14} /><span class="ui-label">{strings.chat.copy}</span>{/if}
+      {#if copied}<Check size={14} /><span class="ui-label">{strings.chat.copied}</span>{:else}<Copy size={14} /><span class="ui-label">{strings.common.copy}</span>{/if}
     </button>
     <button type="button" class="ghost small" data-testid="plan-download" onclick={download}>
       <Download size={14} /><span class="ui-label">{strings.chat.planDownload}</span>

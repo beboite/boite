@@ -90,10 +90,8 @@
   .choices label:focus-within { outline: 2px solid var(--color-accent); outline-offset: 2px; }
   input { position: absolute; opacity: 0; width: 1px; height: 1px; }
   .worktree span:first-of-type { flex: 1; }
-  .switch { width: 30px; height: 18px; padding: 3px; background: var(--color-edge); border-radius: var(--radius-xl); }
-  .switch::after { content: ''; display: block; width: 12px; height: 12px; border-radius: var(--radius-xl); background: var(--color-foreground); transition: transform var(--dur-2); }
-  .switch.on { background: var(--color-accent); }
-  .switch.on::after { transform: translateX(12px); }
+  /* The shared switch (app.css), at the size of the button's text. */
+  .switch { --switch-width: 32px; --switch-height: 20px; }
   .worktree { margin-top: 12px; }
 
   @media (max-width: 720px) {

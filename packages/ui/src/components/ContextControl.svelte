@@ -2,7 +2,7 @@
   import { onDestroy } from 'svelte';
   import { Clock, Minimize2 } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
-  import type { ThreadCapabilities } from '@boite/contracts';
+  import { threadActive, type ThreadCapabilities } from '@boite/contracts';
   import { strings } from '../lib/strings';
   import { contextPercent, contextLevel } from '../lib/tokens';
   import { count, time } from '../lib/format';
@@ -53,7 +53,7 @@
   ] : [{name: strings.thread.contextUsed, count: context?.tokens ?? 0, kind: 'input'}]);
   // A running turn may refresh the cache. Hide the old timer until it finishes.
   let now = $state(Date.now());
-  const activeTurn = $derived(thread?.status === 'queued' || thread?.status === 'running' || thread?.status === 'waiting');
+  const activeTurn = $derived(thread ? threadActive(thread.status) : false);
   const cache = $derived(experimentOn('prompt-cache') && !activeTurn ? thread?.promptCache ?? null : null);
   const cacheNow = $derived(cache && thread ? promptCacheState(cache, thread, now) : null);
   $effect(() => {

@@ -1,3 +1,4 @@
+import { errorText } from './errors';
 import { tick } from 'svelte';
 import { closed, forgetArchivedThread } from './archive-history';
 import type { ProjectId, ThreadId, ThreadSummary } from '@boite/contracts';
@@ -64,7 +65,7 @@ export async function reopenLastArchived(store: Store): Promise<boolean> {
   let target: Archived | undefined;
   for (const candidate of lists.flat()) if (!target || newer(candidate, target)) target = candidate;
   if (!target) {
-    if (failure !== undefined && owners[0]!.current()) store.error = failure instanceof Error ? failure.message : String(failure);
+    if (failure !== undefined && owners[0]!.current()) store.error = errorText(failure);
     return false;
   }
   const { store: owner, thread } = target;
@@ -77,7 +78,7 @@ export async function reopenLastArchived(store: Store): Promise<boolean> {
     await workspace.select(owner, thread.id);
     return true;
   } catch (error) {
-    if (current()) owner.error = error instanceof Error ? error.message : String(error);
+    if (current()) owner.error = errorText(error);
     return false;
   }
 }

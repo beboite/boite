@@ -1,3 +1,4 @@
+import { secureId } from './secure-id';
 import { RELEASE_VERSION } from './release';
 import {
   PROTOCOL_VERSION,
@@ -15,7 +16,8 @@ import {
   type RpcMethodName,
   type RpcParams,
   type RpcResult,
-  type ThreadId
+  type ThreadId,
+  withoutTrailingSlashes
 } from '@boite/contracts';
 
 export type ClientState = 'idle' | 'connecting' | 'ready' | 'closed';
@@ -151,7 +153,7 @@ export function openDeadline(attempt: number): number {
 export function rpcUrl(coreUrl: string): string {
   const url = new URL(coreUrl);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-  url.pathname = `${url.pathname.replace(/\/+$/, '')}${RPC_PATH}`;
+  url.pathname = `${withoutTrailingSlashes(url.pathname)}${RPC_PATH}`;
   url.search = '';
   url.hash = '';
   return url.toString();
@@ -271,15 +273,6 @@ function megabytes(bytes: number): string {
   return (bytes / 1048576).toFixed(1).replace(/\.0$/, '');
 }
 
-/**
- * 16 random bytes as hex. `getRandomValues` works on a plain-http page, where a
- * phone on the LAN opens the core; `randomUUID` needs a secure context.
- */
-function pairingNonce(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(16));
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
-}
-
 function browserSocket(url: string): SocketLike {
   return new WebSocket(url) as unknown as SocketLike;
 }
@@ -340,7 +333,7 @@ export class WsClient implements ObservableClient {
     };
     this.#grant = options.grant ?? null;
     this.#ticket = options.ticket ?? null;
-    this.#nonce = this.#grant === null ? '' : pairingNonce();
+    this.#nonce = this.#grant === null ? '' : secureId();
     this.#paired = options.paired ?? (options.grant !== undefined || options.ticket !== undefined);
     this.#relay = options.relay ?? null;
     this.#onSession = options.onSession ?? null;

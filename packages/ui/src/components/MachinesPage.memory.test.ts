@@ -3,6 +3,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import type { MemoryStatus } from '@boite/contracts';
 import { FakeClient } from '../lib/fake-client';
 import { Store } from '../lib/store.svelte';
+import { strings } from '../lib/strings';
 import { workspace } from '../lib/workspace.svelte';
 import MachinesPage from './MachinesPage.svelte';
 
@@ -10,6 +11,12 @@ let mounted: ReturnType<typeof mount> | undefined;
 const clients: FakeClient[] = [];
 const stores: Store[] = [];
 const settle = async () => { for (let i = 0; i < 20; i++) { await Promise.resolve(); flushSync(); } };
+/** No notice and no line on the page names the pressure or a stopped process. */
+const pressureShown = () => {
+  const page = document.body.textContent ?? '';
+  const words = [strings.resources.states.critical, strings.resources.killTitle, strings.resources.killReason.budget('\0').split('\0')[0]!];
+  return words.some(word => page.includes(word));
+};
 afterEach(async () => {
   if (mounted) await unmount(mounted);
   mounted = undefined; workspace.machines = [];
@@ -29,13 +36,12 @@ async function machine(id = 'one') {
 test('memory pressure and process stops never create a persistent global notice', async () => {
   const { client } = await machine();
   mounted = mount(MachinesPage, { target: document.body, props: { mobile: true } }); await settle();
-  expect(document.querySelector('[data-testid=memory-banner]')).toBeNull();
   client.emitMemory({ threadId: null, kind: 'pressure', state: 'critical', at: 1 }); await settle();
-  expect(document.querySelector('[data-testid=memory-banner]')).toBeNull();
+  expect(pressureShown()).toBe(false);
   client.emitMemory({ threadId: 't-trace', kind: 'killed', reason: 'budget', limitBytes: 19456 * 1048576, state: 'critical', exe: 'cargo', at: 2 }); await settle();
-  expect(document.querySelector('[data-testid=memory-banner]')).toBeNull();
+  expect(pressureShown()).toBe(false);
   client.emitMemory({ threadId: null, kind: 'pressure', state: 'ok', at: 3 }); await settle();
-  expect(document.querySelector('[data-testid=memory-banner]')).toBeNull();
+  expect(pressureShown()).toBe(false);
 });
 
 test('pressure belongs to its machine and disconnected machines show no stale warning', async () => {
@@ -45,9 +51,9 @@ test('pressure belongs to its machine and disconnected machines show no stale wa
   first.client.emitMemory({ threadId: null, kind: 'pressure', state: 'ok', at: 1 }); await settle();
   expect(second.store.memoryState).toBe('critical');
   expect(first.store.memoryState).toBe('ok');
-  expect(document.querySelector('[data-testid=memory-banner]')).toBeNull();
+  expect(pressureShown()).toBe(false);
   second.client.drop(); await settle();
-  expect(document.querySelector('[data-testid=memory-banner]')).toBeNull();
+  expect(pressureShown()).toBe(false);
 });
 
 test('a late snapshot cannot overwrite a newer pressure event, and detach clears the reading', async () => {

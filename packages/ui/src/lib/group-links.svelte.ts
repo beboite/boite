@@ -1,5 +1,5 @@
 import { untrack } from 'svelte';
-import { groupRelayUrl, parseGroupRelayUrl, RPC_PATH, type Group, type GroupCore } from '@boite/contracts';
+import { groupRelayUrl, parseGroupRelayUrl, RPC_PATH, withoutTrailingSlashes, type Group, type GroupCore } from '@boite/contracts';
 import { WsClient } from './client';
 import { DROPPED_STORAGE_KEY, isDropped, isMemberDropped, keepDropped, readEnvironments, removeBrought, type Endpoint, type StoredEnvironment } from './endpoint';
 import { usableAddresses } from './group-addresses';
@@ -375,7 +375,7 @@ export class GroupLinks {
         return;
       }
       // A machine paired by hand already sits at that address: it is that machine's to reach, with the key it has.
-      if (this.workspace.machines.some((machine) => machine.id === url.replace(/\/+$/, '') && machine.coreId !== coreId)) {
+      if (this.workspace.machines.some((machine) => machine.id === withoutTrailingSlashes(url) && machine.coreId !== coreId)) {
         state = null;
         return;
       }

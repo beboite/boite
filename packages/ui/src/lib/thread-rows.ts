@@ -1,10 +1,6 @@
-import type { MessageId, ProjectId, Thread, ThreadId, ThreadStatus, ThreadSummary } from '@boite/contracts';
-import { resumeAnchor } from '@boite/contracts';
+import type { MessageId, ProjectId, Thread, ThreadId, ThreadSummary } from '@boite/contracts';
+import { resumeAnchor, threadActive } from '@boite/contracts';
 export { resumeAnchor } from '@boite/contracts';
-
-export function workingThread(status: ThreadStatus): boolean {
-  return status === 'running' || status === 'queued' || status === 'waiting';
-}
 
 /** A parent's delegated agents with a turn under way, and when the first of them started; null before any has. */
 export type WorkingChildren = { count: number; since: number | null };
@@ -14,7 +10,7 @@ export function workingChildren(threads: readonly ThreadSummary[]): Map<ThreadId
   const parents = new Map<ThreadId, WorkingChildren>();
   for (const thread of threads) {
     const parent = thread.parentThreadId;
-    if (!parent || thread.archived || !workingThread(thread.status)) continue;
+    if (!parent || thread.archived || !threadActive(thread.status)) continue;
     const held = parents.get(parent) ?? { count: 0, since: null };
     const started = thread.runningSince ?? null;
     parents.set(parent, { count: held.count + 1, since: started === null ? held.since : held.since === null ? started : Math.min(held.since, started) });

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import { untrack } from 'svelte';
   import { Gauge } from '@lucide/svelte';
   import { Closing } from '../lib/closing.svelte';
@@ -32,7 +33,7 @@
     const client = store.client;
     if (!client) return;
     const current = reader;
-    void current.read(client, refresh).then(() => { if (current === reader) failed = ''; }, (error) => { if (current === reader) failed = String(error instanceof Error ? error.message : error); });
+    void current.read(client, refresh).then(() => { if (current === reader) failed = ''; }, (error) => { if (current === reader) failed = errorText(error); });
   }
 
   $effect(() => {

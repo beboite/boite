@@ -112,7 +112,7 @@
       </div>
       <div class="actions">
         <button type="button" class="ghost" data-testid="import-close" disabled={dialog.running !== null} onclick={() => store.closeImports()}>
-          <span class="ui-label">{strings.imports.close}</span>
+          <span class="ui-label">{strings.common.close}</span>
         </button>
       </div>
     </div>

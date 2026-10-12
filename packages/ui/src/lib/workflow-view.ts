@@ -81,10 +81,6 @@ export function nodeTiming(node: WorkflowNode): { startedAt: number | null; fini
   return { startedAt, finishedAt, active };
 }
 
-export function runTokens(run: WorkflowRun): number {
-  return run.usage.inputTokens + run.usage.outputTokens + run.usage.cacheReadTokens + run.usage.cacheWriteTokens;
-}
-
 export function isLive(run: WorkflowRun): boolean {
   return run.status === 'running' || run.status === 'paused';
 }

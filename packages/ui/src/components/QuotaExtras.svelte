@@ -6,7 +6,7 @@
   import { creditBalance, exactTime, tenth } from '../lib/format';
   import { quotaCredits } from '../lib/quota-reader.svelte';
 
-  let { row, accountLabel = false, compact = false, resetAction }: { row: AccountQuota; accountLabel?: boolean; compact?: boolean; resetAction?: Snippet } = $props();
+  let { row, compact = false, resetAction }: { row: AccountQuota; compact?: boolean; resetAction?: Snippet } = $props();
   let resets = $derived(row.resetCredits);
   let credits = $derived(quotaCredits(row));
   let showCredits = $derived(credits !== null);
@@ -20,7 +20,6 @@
 
 {#if showResets || showCredits}
   <div class="extras" class:compact data-testid="quota-extras" data-account-id={row.accountId}>
-    {#if accountLabel}<small class="account">{row.label}</small>{/if}
     {#if showResets && resets}
       <div class="resets" data-testid="quota-banked-resets">
         <div class="reset-line">

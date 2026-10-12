@@ -47,7 +47,7 @@
   <header>
     <h2 id="coordination-title">{strings.coordination.heading}</h2>
     {#if steward}<span class="steward-chip" data-testid="steward-chip">{stewardChip(steward)}</span>{/if}
-    <button type="button" class="ghost icon" aria-label={strings.imports.close} data-testid="coordination-close" onclick={onclose}><X size={16} /></button>
+    <button type="button" class="ghost icon" aria-label={strings.common.close} data-testid="coordination-close" onclick={onclose}><X size={16} /></button>
   </header>
   <div class="settings"><CoordinationPanel {store} {threadId} expanded /></div>
 </dialog>

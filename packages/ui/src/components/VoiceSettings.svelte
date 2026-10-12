@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import InfoTip from './InfoTip.svelte';
   import VoiceInputSettings from './VoiceInputSettings.svelte';
   import { AlertTriangle, Check, Download, LoaderCircle, Trash2 } from '@lucide/svelte';
@@ -18,7 +19,7 @@
   let unsupported = $state(false);
   let savedTimer: ReturnType<typeof setTimeout> | undefined;
 
-  const message = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause));
+  const message = (cause: unknown): string => (errorText(cause));
   const missing = (cause: unknown): boolean => cause instanceof RpcFailure && cause.code === RpcErrorCode.MethodNotFound;
   const machine = $derived(store.core?.hostname ?? strings.app.name);
 
@@ -200,7 +201,7 @@
           <button type="button" class="primary small" data-testid="voice-repair" disabled={busy} onclick={() => void apply()}><span class="ui-label">{strings.speech.repair}</span></button>
         {:else if stage === 'local' || stage === 'failed'}
           <button type="button" class="primary small" data-testid="voice-install" disabled={busy} onclick={() => void manage('speech.install')}>
-            <Download size={14} /><span class="ui-label">{stage === 'failed' ? strings.speech.tryAgain : strings.speech.setUp}</span>
+            <Download size={14} /><span class="ui-label">{stage === 'failed' ? strings.common.retry : strings.speech.setUp}</span>
           </button>
         {:else if stage === 'ready' && status.engine === 'local' && status.runtimeOutdated}
           <button type="button" class="small" data-testid="voice-update" disabled={busy} onclick={() => void manage('speech.install')}><span class="ui-label">{strings.speech.update}</span></button>
@@ -331,7 +332,6 @@
   .pick:hover:not(:disabled) .radio { border-color: var(--color-muted-foreground); }
   .pick[aria-checked='true'] .radio { border: 5px solid var(--color-accent); }
   .model :global(.spinner) { flex: none; margin: 0 8px; color: var(--color-muted-foreground); animation: spin 1s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
 
   .field { display: flex; align-items: center; gap: 8px; flex: 0 1 380px; min-width: 0; }
   .field input { flex: 1; min-width: 0; }

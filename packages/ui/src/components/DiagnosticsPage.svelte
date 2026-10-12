@@ -8,6 +8,7 @@
   import DiagnosticsReport from './DiagnosticsReport.svelte';
   import { browserDownload, saveAttachment } from '../lib/attachment-save';
   import { bytes, count, exactTime, millis, relativeTime, time } from '../lib/format';
+  import { errorText } from '../lib/errors';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
 
@@ -59,10 +60,6 @@
     ...(search ? { search: search.slice(0, 200) } : {})
   });
 
-  function reason(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
-  }
-
   // The status and the problems: once per connection.
   $effect(() => {
     const client = store.client;
@@ -71,7 +68,7 @@
     failure = '';
     client.call('diagnostics.summary', {})
       .then(value => { if (active) summary = value; })
-      .catch(error => { if (active) failure = fill(s.failed, { reason: reason(error) }); });
+      .catch(error => { if (active) failure = fill(s.failed, { reason: errorText(error) }); });
     return () => { active = false; };
   });
 
@@ -91,7 +88,7 @@
         older = page.length === PAGE;
         void tick().then(() => { if (list) list.scrollTop = list.scrollHeight; });
       })
-      .catch(error => { if (active) { records = []; failure = fill(s.failed, { reason: reason(error) }); } })
+      .catch(error => { if (active) { records = []; failure = fill(s.failed, { reason: errorText(error) }); } })
       .finally(() => { if (active) loading = false; });
     return () => { active = false; };
   });
@@ -157,7 +154,7 @@
       // The rows already read stay under the eye; the older ones grow above.
       void tick().then(() => { if (element) element.scrollTop = element.scrollHeight - before; });
     } catch (error) {
-      failure = fill(s.failed, { reason: reason(error) });
+      failure = fill(s.failed, { reason: errorText(error) });
     } finally { loading = false; }
   }
 
@@ -214,7 +211,7 @@
       setTimeout(() => URL.revokeObjectURL(url), 1000);
       exportNote = fill(s.exportDownloaded, { name: result.name, size });
     } catch (error) {
-      if (store.client === client) exportNote = reason(error);
+      if (store.client === client) exportNote = errorText(error);
     } finally { exporting = false; }
   }
 

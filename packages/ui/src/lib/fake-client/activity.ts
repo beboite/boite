@@ -1,5 +1,6 @@
 /** A thread's goal, loop and task list, and the timer that runs them. */
-import { attachmentError, RpcErrorCode, type AgentTask, type Thread, type ThreadActivity, type Turn } from '@boite/contracts';
+import { errorText } from '../errors';
+import { attachmentError, RpcErrorCode, threadActive, type AgentTask, type Thread, type ThreadActivity, type Turn } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { refusal } from './shared';
 import { workflowAnswer, workflowChild } from './delegation';
@@ -83,7 +84,7 @@ function scheduleActivity(ctx: FakeContext, threadId: string, delay = 0): void {
   if (!thread || thread.archived || !activity || (activity.goal?.status !== 'active' && activity.loop?.status !== 'active')) return;
   ctx.activityTimers.set(threadId, setTimeout(() => {
     ctx.activityTimers.delete(threadId);
-    if (ctx.inFlight.has(threadId) || ['running', 'queued', 'waiting'].includes(thread.status)) return;
+    if (ctx.inFlight.has(threadId) || threadActive(thread.status)) return;
     const kind = activity.loop?.status === 'active' && (activity.loop.nextRunAt ?? 0) <= Date.now() ? 'loop' : activity.goal?.status === 'active' ? 'goal' : null;
     if (!kind) {
       if (activity.loop?.status === 'active') scheduleActivity(ctx, threadId, Math.max(0, (activity.loop.nextRunAt ?? Date.now()) - Date.now()));
@@ -105,7 +106,7 @@ function scheduleActivity(ctx: FakeContext, threadId: string, delay = 0): void {
       ctx.publishActivity(thread);
     } catch (error) {
       pauseActivity(ctx, thread);
-      activity[kind]!.error = error instanceof Error ? error.message : String(error);
+      activity[kind]!.error = errorText(error);
       ctx.publishActivity(thread);
     }
   }, delay));

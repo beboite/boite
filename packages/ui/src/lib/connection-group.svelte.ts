@@ -1,3 +1,4 @@
+import { errorText } from './errors';
 import type { Group } from '@boite/contracts';
 import type { Client } from './client';
 import { fill, strings } from './strings';
@@ -117,11 +118,11 @@ export class ConnectionGroup {
               continue;
             }
           } catch { /* Unknown outcome: keep duplicate-join protection until an explicit retry. */ }
-          this.errors = [...this.errors, `${target.label}: ${error instanceof Error ? error.message : String(error)}`];
+          this.errors = [...this.errors, `${target.label}: ${errorText(error)}`];
         }
       }
     } catch (error) {
-      this.errors = [...this.errors, `${source.label}: ${error instanceof Error ? error.message : String(error)}`];
+      this.errors = [...this.errors, `${source.label}: ${errorText(error)}`];
     } finally {
       this.busy = false;
       if (this.#pending) { this.#pending = false; void this.merge(); }

@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { AgentsView } from '../../lib/agents.svelte';
+  import { providerName } from '../../lib/format';
   import { strings } from '../../lib/strings';
   let { view }: { view: AgentsView } = $props();
   async function save(accountId: string, agentIds: string[] | null) {
@@ -15,7 +16,7 @@
     {@const grant = view.snapshot?.accountGrants.find(g => g.accountId === account.id)}
     <div class="agent-grant">
       <label class="switch-row">
-        <span class="text">{account.label}<span class="hint">{view.store.providerOf(account.providerId)?.name} · {strings.agents.allAgents}</span></span>
+        <span class="text">{account.label}<span class="hint">{providerName(view.store, account.providerId)} · {strings.agents.allAgents}</span></span>
         <input type="checkbox" role="switch" disabled={view.pending} checked={!grant || grant.agentIds === null} onchange={e => void save(account.id, e.currentTarget.checked ? null : [])} />
       </label>
       {#if grant?.agentIds}

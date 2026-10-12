@@ -83,7 +83,7 @@
 
 {#snippet completedRows()}
     {#if loading}<p class="hint" role="status"><span class="ui-label">{strings.app.loading}</span></p>{/if}
-    {#if failed}<div class="hint" role="status"><span class="ui-label">{strings.sidebar.doneLoadFailed}</span><button type="button" class="ghost small" data-testid="recent-done-retry" onclick={() => retry++}><span class="ui-label">{strings.sidebar.doneRetry}</span></button></div>{/if}
+    {#if failed}<div class="hint" role="status"><span class="ui-label">{strings.sidebar.doneLoadFailed}</span><button type="button" class="ghost small" data-testid="recent-done-retry" onclick={() => retry++}><span class="ui-label">{strings.common.retry}</span></button></div>{/if}
     <WindowList items={rows} keyOf={entry => JSON.stringify([entry.machine.id, entry.thread.id])} {scrollRoot} estimate={44} {measurements}>
       {#snippet row(entry)}{#if DoneThread}<DoneThread {entry} {now} showMachine={multi} showProject={spans} {onopen} />{/if}{/snippet}
     </WindowList>

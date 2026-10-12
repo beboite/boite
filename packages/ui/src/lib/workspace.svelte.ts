@@ -1,5 +1,5 @@
 import { Store, store } from './store.svelte';
-import { threadActive, type AgentAddress, type GroupCore } from '@boite/contracts';
+import { threadActive, withoutTrailingSlashes, type AgentAddress, type GroupCore } from '@boite/contracts';
 import {
   clearStoredEndpoint,
   forgetGroupOf,
@@ -93,7 +93,7 @@ function endpointIdentity(endpoint: Endpoint): { id: string; host: string } | nu
   try {
     const url = new URL(endpoint.url);
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) return null;
-    return { id: url.toString().replace(/\/+$/, ''), host: url.host };
+    return { id: withoutTrailingSlashes(url.toString()), host: url.host };
   } catch {
     return null;
   }
@@ -134,6 +134,14 @@ export class Workspace {
   /** The latest notification tap waiting for the machine its thread is on. */
   #memberTap = 0;
   #lifecycle = 0;
+
+  /**
+   * The connected machines or, before the first connection, the one store the
+   * app runs on, under the id `local` that only the caller's own keys read.
+   */
+  machinesOr(store: Store): Machine[] {
+    return this.machines.length ? this.machines : [{ id: 'local', label: strings.machines.local, store }];
+  }
 
   #current(lifecycle: number): boolean {
     return lifecycle === this.#lifecycle;

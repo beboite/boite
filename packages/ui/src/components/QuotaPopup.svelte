@@ -39,7 +39,7 @@
       {#if error}
         <div class="failed" role="alert" data-testid={`${testPrefix}-error`}>
           <p>{fill(strings.quotas.readFailed, { error })}</p>
-          <button type="button" class="ghost small" disabled={loading} data-testid={`${testPrefix}-retry`} onclick={refresh}><span class="ui-label">{strings.quotas.retry}</span></button>
+          <button type="button" class="ghost small" disabled={loading} data-testid={`${testPrefix}-retry`} onclick={refresh}><span class="ui-label">{strings.common.retry}</span></button>
         </div>
       {/if}
       {#if rows === null}
@@ -68,6 +68,5 @@
   .failed p { margin: 0; overflow-wrap: anywhere; }
   .muted { margin: 0; padding: 14px 4px; color: var(--color-muted-foreground); font-size: var(--text-sm); }
   .actions :global(.spinning) { animation: spin 900ms linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .actions :global(.spinning) { animation: none; } }
 </style>

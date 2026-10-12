@@ -2,7 +2,7 @@ import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import type { ThreadId, ThreadSummary } from '@boite/contracts';
 import ThreadState from './ThreadState.svelte';
-import { projectRollup, threadState } from '../lib/thread-state';
+import { projectRollup, threadState, threadTone, workflowTone } from '../lib/thread-state';
 import { workingChildren, type WorkingChildren } from '../lib/thread-rows';
 
 type Shown = Pick<ThreadSummary, 'status' | 'unread' | 'runningSince' | 'requestSince' | 'backgroundWork' | 'lastUserMessageAt' | 'createdAt'>;
@@ -167,4 +167,13 @@ test('a folded project names its most urgent state and how many threads share it
   // Threads waiting for a slot are work to come: they show, after work under way and before news.
   expect(projectRollup([{ status: 'queued', unread: false }, { status: 'queued', unread: false }])).toEqual({ kind: 'queued', count: 2 });
   expect(projectRollup([{ status: 'queued', unread: false }, { status: 'idle', unread: true }])).toEqual({ kind: 'queued', count: 1 });
+});
+
+test('threads, workflow runs and steps share one status mark vocabulary', () => {
+  expect(threadTone('idle', true).tone).toBe('unread');
+  expect(threadTone('running', true).tone).toBe('running');
+  // A failed run or step draws a thread's error; a step not started yet, an idle ring.
+  expect(workflowTone('failed', true).tone).toBe('error');
+  expect(workflowTone('waiting').tone).toBe('idle');
+  expect(workflowTone('skipped').tone).toBe('skipped');
 });

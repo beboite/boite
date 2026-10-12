@@ -647,6 +647,12 @@ export class Store {
   loadDelegation(...args: Parameters<Delegation['loadDelegation']>) { return this.#ctx.delegation.loadDelegation(...args); }
   configureDelegation(...args: Parameters<Delegation['configureDelegation']>) { return this.#ctx.delegation.configureDelegation(...args); }
   selectDelegatedAgent(...args: Parameters<Delegation['selectDelegatedAgent']>) { return this.#ctx.delegation.selectDelegatedAgent(...args); }
+  /** The agents tab on the whole team: no agent picked, and no workflow graph left open over it. */
+  showTeam(): void {
+    const surface = this.panel.open('agents');
+    this.panel.update(surface.id, { runId: undefined });
+    void this.selectDelegatedAgent(null);
+  }
   spawnDelegatedAgent(...args: Parameters<Delegation['spawnDelegatedAgent']>) { return this.#ctx.delegation.spawnDelegatedAgent(...args); }
   messageDelegatedAgent(...args: Parameters<Delegation['messageDelegatedAgent']>) { return this.#ctx.delegation.messageDelegatedAgent(...args); }
   stopDelegatedAgent(...args: Parameters<Delegation['stopDelegatedAgent']>) { return this.#ctx.delegation.stopDelegatedAgent(...args); }

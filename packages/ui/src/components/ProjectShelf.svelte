@@ -49,7 +49,7 @@
 {#if total > 0}
   <section class="shelf" data-testid="project-shelf">
     <FoldHeader {label} count={total} {open} controls={uid} testid="project-shelf-toggle" onclick={() => (projectThreadView.shelfOpen = !open)} />
-    <div id={uid} class="motion-fold" class:expanded={open} inert={!open}><div>
+    <div id={uid} class="disclosure-fold" class:open inert={!open}><div>
       {#if visited && Rows}<Rows {idle} {archived} {open} {multi} {now} {scrollRoot} {onopen} {onrows} />{/if}
     </div></div>
   </section>

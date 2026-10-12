@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import { BROWSER_PROFILES_MAX, checkSettingsPatch, DEFAULT_BROWSER_PROFILE, type BrowserProfile } from '@boite/contracts';
   import { tick } from 'svelte';
   import InfoTip from './InfoTip.svelte';
@@ -43,7 +44,7 @@
       const count = await copySignIns({ id: profile.id, name: profile.name }, machine.store);
       notice = count ? fill(s.copied, { count: String(count), name: profile.name, machine: machine.label }) : fill(s.copiedNone, { name: profile.name });
     } catch (error) {
-      problem = fill(s.copyFailed, { reason: error instanceof Error ? error.message : String(error) });
+      problem = fill(s.copyFailed, { reason: errorText(error) });
     } finally { busy = false; }
   }
 
@@ -103,7 +104,7 @@
     const sure = await confirm.ask({
       title: fill(s.deleteTitle, { name: profile.name }),
       body: s.deleteBody,
-      confirmLabel: s.delete,
+      confirmLabel: strings.common.delete,
       cancelLabel: strings.common.cancel,
       danger: true
     });
@@ -112,7 +113,7 @@
     problem = '';
     rightPanel.closeProfile(profile.id);
     let failure = '';
-    try { await browserBridge.deleteProfile?.(profile.id); } catch (error) { failure = error instanceof Error ? error.message : String(error); }
+    try { await browserBridge.deleteProfile?.(profile.id); } catch (error) { failure = errorText(error); }
     const saved = await save(browserProfiles.list.filter((one) => one.id !== profile.id));
     if (saved && failure) problem = fill(s.deleteFailed, { reason: failure });
   }
@@ -129,7 +130,7 @@
         {#if renaming === profile.id}
           <form class="rename" onsubmit={rename}>
             <input bind:this={field} bind:value={renamed} aria-label={fill(s.renameLabel, { name: profile.name })} maxlength="40" data-testid="browser-profile-rename-input" onkeydown={renameKey} />
-            <button type="submit" class="small" disabled={busy}>{strings.settings.save}</button>
+            <button type="submit" class="small" disabled={busy}>{strings.common.save}</button>
           </form>
         {:else}
           <span class="what">
@@ -143,8 +144,8 @@
             <button type="button" class="small ghost" data-testid="browser-profile-make-default" disabled={busy || !ready} onclick={() => void save(browserProfiles.list, profile.id)}>{s.makeDefault}</button>
           {/if}
           {#if !builtIn}
-            <button type="button" class="small ghost" data-testid="browser-profile-rename" disabled={busy || !ready} onclick={() => void startRename(profile)}>{s.rename}</button>
-            <button type="button" class="small ghost danger" data-testid="browser-profile-delete" disabled={busy || !ready} onclick={() => void remove(profile)}>{s.delete}</button>
+            <button type="button" class="small ghost" data-testid="browser-profile-rename" disabled={busy || !ready} onclick={() => void startRename(profile)}>{strings.common.rename}</button>
+            <button type="button" class="small ghost danger" data-testid="browser-profile-delete" disabled={busy || !ready} onclick={() => void remove(profile)}>{strings.common.delete}</button>
           {/if}
         {/if}
       </li>

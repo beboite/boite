@@ -1,5 +1,6 @@
 /** Delegation: a parent thread's team of child threads, their usage and letters. */
-import { collectNativeAgents, collectProcessAgents, CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, matchSpeed, providerEnabled, RpcErrorCode, SPEED_NEEDS_MODEL, speedRefusal, type AgentLetter, type DelegatedAgent, type DelegationConfig, type DelegationModelChoice, type DelegationProfile, type DelegationView, type DelegationWaitResult, type RpcParams, type Message, type Thread, type ThreadId, type Turn } from '@boite/contracts';
+import { errorText } from '../errors';
+import { collectNativeAgents, collectProcessAgents, CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, matchSpeed, providerEnabled, RpcErrorCode, SPEED_NEEDS_MODEL, speedRefusal, threadActive, type AgentLetter, type DelegatedAgent, type DelegationConfig, type DelegationModelChoice, type DelegationProfile, type DelegationView, type DelegationWaitResult, type RpcParams, type Message, type Thread, type ThreadId, type Turn } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { addUsage, emptyUsage, toSummary } from './shared';
 import { modelsOf, PROBED_PROTOCOLS, probe } from './provider-catalog';
@@ -105,11 +106,11 @@ export async function stopDelegation(ctx: FakeContext, rootId: ThreadId, agentId
   const selected = agentId ? rows.filter(row => row.threadId === agentId) : rows;
   if (agentId && selected.length === 0) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'agentId must name a direct child' });
   // Nothing unfinished, nothing to stop: the team stays usable. Finished children are history.
-  if (!agentId && rows.some(row => ['queued', 'running', 'waiting'].includes(ctx.thread(row.threadId).status))) ctx.delegationConfigs.set(rootId, { ...delegationConfig(ctx, rootId), paused: true });
+  if (!agentId && rows.some(row => threadActive(ctx.thread(row.threadId).status))) ctx.delegationConfigs.set(rootId, { ...delegationConfig(ctx, rootId), paused: true });
   let stopped = 0;
   for (const row of selected) {
     const thread = ctx.thread(row.threadId);
-    if (['queued', 'running', 'waiting'].includes(thread.status)) stopped += 1;
+    if (threadActive(thread.status)) stopped += 1;
     const queued = thread.turns.at(-1);
     if (queued?.status === 'queued') {
       queued.status = 'stopped';
@@ -308,7 +309,7 @@ export function delegationMethods(ctx: FakeContext) {
       await Promise.all(ctx.providers.filter(provider => provider.available && providerEnabled(provider) && PROBED_PROTOCOLS.includes(provider.protocol)).map(async provider => {
         const account = accountFor(ctx, parent, provider.id);
         if (!account || ctx.modelCatalogs.has(provider.id + '::' + account.id)) return;
-        await probe(ctx, provider.id, account.id).catch((error: unknown) => { unavailable.push({ providerId: provider.id, reason: error instanceof Error ? error.message : String(error) }); });
+        await probe(ctx, provider.id, account.id).catch((error: unknown) => { unavailable.push({ providerId: provider.id, reason: errorText(error) }); });
       }));
       return { anyModel: delegationConfig(ctx, parent.id).anyModel !== false, choices: modelChoices(ctx, parent), unavailable };
     },

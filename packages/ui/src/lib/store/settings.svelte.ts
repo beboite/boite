@@ -1,3 +1,4 @@
+import { errorText } from '../errors';
 import type {
   KeybindingCommand,
   Keybindings,
@@ -69,7 +70,7 @@ export class CoreSettings {
         : await client.call('keybindings.set', { command: id, chord });
       return null;
     } catch (error) {
-      return error instanceof Error ? error.message : String(error);
+      return errorText(error);
     }
   }
 
@@ -81,7 +82,7 @@ export class CoreSettings {
       this.keybindings = await client.call('keybindings.reset', {});
       return null;
     } catch (error) {
-      return error instanceof Error ? error.message : String(error);
+      return errorText(error);
     }
   }
 
