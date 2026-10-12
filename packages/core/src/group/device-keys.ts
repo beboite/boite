@@ -49,7 +49,8 @@ export interface ServedOrigins {
 }
 
 export const SERVED_ORIGINS_MAX = 4;
-const LEGACY_MAX = 32;
+/** Older pairings one device key may take over. */
+export const LEGACY_MAX = 32;
 const SPKI_ED25519 = Buffer.from('302a300506032b6570032100', 'hex');
 
 /** The raw key as a key object, or null when it is not 32 bytes. */

@@ -3438,7 +3438,7 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'collaboration.bridge.forward': { params: { coreId: string; body: string; signature: string }; result: CoordinationBridgeResponse };
   /** Only the owner connection that received this request can complete it. */
   'collaboration.bridge.reply': { params: { requestId: string; response: CoordinationBridgeResponse }; result: { ok: true } };
-  /** The group this core belongs to, or null. A paired device reads the machines, never the devices. */
+  /** The group this core belongs to, or null. A paired device reads the machines and its own device entry. */
   'group.get': { params: Record<string, never>; result: Group | null };
   /** Starts a group with this core as its only member. Refused while it belongs to one. Owner only. */
   'group.create': { params: { name: string }; result: Group };
