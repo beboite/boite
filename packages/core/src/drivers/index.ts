@@ -97,19 +97,30 @@ export function probeModels(protocol: Protocol, ctx: ProbeContext): Promise<Prob
   return driver.probe(ctx);
 }
 
-/** The models a probe already read for this account, or null if none ever ran. */
+/**
+ * The catalog an account had when the user asked for a fresh one, kept until
+ * that read settles. A model picked from the list on screen while the agent is
+ * still answering is then accepted instead of refused for an empty catalog.
+ */
+const refreshing = new Map<string, { providerId: ProviderId; accountId: AccountId; models: ModelInfo[] }>();
+const refreshKey = (providerId: ProviderId, accountId: AccountId): string => JSON.stringify([providerId, accountId]);
+
 const externalModels = new Map<string, { providerId: ProviderId; accountId: AccountId; models: ModelInfo[] }>();
 
 export function rememberExternalModels(protocol: Protocol, providerId: ProviderId, accountId: AccountId, models: ModelInfo[]): void {
   externalModels.set(JSON.stringify([protocol, providerId, accountId]), { providerId, accountId, models });
 }
 
+/** The models a probe already read for this account, or null if none ever ran. */
 export function probedModelsOf(
   protocol: Protocol,
   providerId: ProviderId,
   accountId: AccountId,
 ): ModelInfo[] | null {
-  return externalModels.get(JSON.stringify([protocol, providerId, accountId]))?.models ?? DRIVERS.get(protocol)?.probedModels?.(providerId, accountId) ?? null;
+  return externalModels.get(JSON.stringify([protocol, providerId, accountId]))?.models
+    ?? DRIVERS.get(protocol)?.probedModels?.(providerId, accountId)
+    ?? refreshing.get(refreshKey(providerId, accountId))?.models
+    ?? null;
 }
 
 /** A reload, a changed account or a removed one: what a probe cached is stale. */
@@ -118,6 +129,31 @@ export function forgetProbes(filter: ProbeFilter = {}): void {
     if ((!filter.providerId || entry.providerId === filter.providerId) && (!filter.accountId || entry.accountId === filter.accountId)) externalModels.delete(key);
   }
   for (const driver of DRIVERS.values()) driver.forgetProbes?.(filter);
+  for (const [key, entry] of refreshing) {
+    if (filter.providerId !== undefined && filter.providerId !== entry.providerId) continue;
+    if (filter.accountId !== undefined && filter.accountId !== entry.accountId) continue;
+    refreshing.delete(key);
+  }
+}
+
+/**
+ * The user asked for a fresh catalog: the driver reads it again, and the one it
+ * had answers model checks until `settleRefresh`. Nothing changed about the
+ * account, so its last list is still the best one known.
+ */
+export function refreshProbes(protocol: Protocol, providerId: ProviderId, accountId: AccountId): void {
+  const current = probedModelsOf(protocol, providerId, accountId);
+  externalModels.delete(JSON.stringify([protocol, providerId, accountId]));
+  for (const driver of DRIVERS.values()) driver.forgetProbes?.({ providerId, accountId });
+  if (current !== null) refreshing.set(refreshKey(providerId, accountId), { providerId, accountId, models: current });
+}
+
+/**
+ * The fresh read answered: the driver's own cache is the catalog again. A read
+ * that failed leaves the held one, as the picker keeps showing it.
+ */
+export function settleRefresh(providerId: ProviderId, accountId: AccountId): void {
+  refreshing.delete(refreshKey(providerId, accountId));
 }
 
 /** A thread that is archived or gone keeps no warm process: every driver drops it. */

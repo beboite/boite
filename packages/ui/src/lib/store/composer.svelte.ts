@@ -14,6 +14,7 @@ import { unresolvedAssetId } from '../draft-attachments';
 import { secureId } from '../secure-id';
 import type { Choice } from '../store.svelte';
 import type { StoreContext } from './context';
+import { draftKey } from './drafts.svelte';
 
 /**
  * A prompt written while its machine could not be reached: the outbox. It goes
@@ -390,7 +391,8 @@ export class Composer {
     }, { navigate: false });
     if (!created || !owner()) return null;
     const originalDraft = current() && s.draft === draft && !s.openThread;
-    if (!s.draft || s.draft.projectId !== draft.projectId || originalDraft) this.ctx.drafts.forget(draft.projectId);
+    // Only this draft is forgotten: the project's other drafts stay.
+    if (!s.draft || draftKey(s.draft) !== draftKey(draft) || originalDraft) this.ctx.drafts.forget(draftKey(draft));
     if (composer) {
       this.composerStates[created.id] = composer;
       if (this.composerStates[DRAFT_STASH_KEY] === composer && (!s.draft || originalDraft)) delete this.composerStates[DRAFT_STASH_KEY];
@@ -428,7 +430,7 @@ export class Composer {
     if (!sent) return false;
     if (projectId !== undefined && client === this.ctx.client && clientGeneration === this.ctx.clientGeneration && sent.navigation === s.navigationGeneration) {
       // Null names the drafts, which the send has made by now.
-      s.startDraft(projectId);
+      s.startDraft(projectId, { fresh: true });
       s.draftChoice = { ...choice };
     }
     return true;

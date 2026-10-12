@@ -23,12 +23,11 @@
   $effect(() => {
     // The phone's part only: the invitation a computer joins with stays in the copied link, and out of a denser code.
     const url = invite?.url.split('#')[0];
-    if (!url) {
-      qr = '';
-      return;
-    }
+    // A new link never shows the last one's code meanwhile.
+    qr = '';
+    if (!url) return;
     let live = true;
-    void qrSvg(url).then((svg) => { if (live) qr = svg; });
+    void qrSvg(url).then((svg) => { if (live) qr = svg; }, () => undefined);
     return () => { live = false; };
   });
 

@@ -1,4 +1,4 @@
-import { checkSettingsPatch, DEFAULT_THREAD_DONE_RETENTION_DAYS, DEFAULT_THREAD_DELETION_RETENTION_DAYS, subscriptionProxyOf, type Settings } from '@boite/contracts';
+import { checkSettingsPatch, readSettings, DEFAULT_THREAD_DONE_RETENTION_DAYS, DEFAULT_THREAD_DELETION_RETENTION_DAYS, subscriptionProxyOf, type Settings } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { writesTitles } from './drivers/index.ts';
 import { invalidParams } from './errors.ts';
@@ -33,7 +33,11 @@ export class SettingsStore {
     return { ...DEFAULT_SETTINGS, ...patch };
   }
 
-  set(patch: Partial<Settings>, persistPrivate?: () => void): Settings {
+  /**
+   * The patch as `set` would store it, or the refusal `set` would throw. A
+   * settings card checks its proposed value here before it is drawn.
+   */
+  normalize(patch: Partial<Settings>): Partial<Settings> {
     // Shared with the in-memory client: a pasted address is stored as its bare origin.
     const checked = checkSettingsPatch(patch);
     if (!checked.ok) throw invalidParams(checked.message, { field: checked.field });
@@ -54,17 +58,24 @@ export class SettingsStore {
         });
       }
     }
+    return checked.patch;
+  }
+
+  set(patch: Partial<Settings>, persistPrivate?: () => void): Settings {
+    const checked = this.normalize(patch);
     const previous = this.get();
-    const next: Settings = { ...previous, ...checked.patch };
+    const next: Settings = { ...previous, ...checked };
     this.core.journal.append({ type: 'settings.changed', threadId: null, version: 1, payload: next }, () => {
       // Private credentials share the transaction, never its public event payload.
       persistPrivate?.();
       this.core.journal.setSetting('settings', next);
     });
+    logSettingsChange(this.core, previous, next);
     this.core.scheduler.onSettingsChanged();
     this.core.procs.applySettings(next);
     this.core.bus.emit('settings.updated', next);
-    if (checked.patch.subscriptionProxy !== undefined) {
+    this.core.threads.cards.settleSettings(next);
+    if (checked.subscriptionProxy !== undefined) {
       for (const account of this.core.accounts.list()) {
         const provider = this.core.providers.get(account.providerId);
         // Only an account the gateway answered for before or answers for now: a
@@ -84,4 +95,22 @@ export class SettingsStore {
 export function registerSettingsMethods(core: Core): void {
   core.router.register('settings.get', () => core.settings.get());
   core.router.register('settings.set', (params) => core.settings.set(params));
+  core.router.register('agent.settings', () => readSettings(core.settings.get()));
+  core.router.register('settings.request', (params) => core.threads.cards.requestSetting(params));
+}
+
+/**
+ * Which settings changed, by key. A boolean or a number keeps its new value,
+ * since it explains behavior and holds nothing personal; anything else (a
+ * path, an address, a model, a list) is named only.
+ */
+function logSettingsChange(core: Core, previous: Settings, next: Settings): void {
+  const changed = (Object.keys(next) as (keyof Settings)[]).filter(key => JSON.stringify(previous[key]) !== JSON.stringify(next[key]));
+  if (changed.length === 0) return;
+  const data: Record<string, string | number | boolean | null> = { keys: changed.join(',').slice(0, 300) };
+  for (const key of changed.slice(0, 15)) {
+    const value = next[key];
+    if (typeof value === 'boolean' || typeof value === 'number') data[String(key).slice(0, 40)] = value;
+  }
+  core.logs.info(`Settings changed: ${changed.join(', ')}`, { source: 'settings', event: 'settings.changed', data });
 }

@@ -164,9 +164,10 @@ export class PushStore {
     // A new pairing of the same browser replaces its old delivery destination.
     for (const [key, previous] of Object.entries(all)) if (previous.endpoint === subscription.endpoint) delete all[key];
     all[id] = subscription;
-    if (keyed !== undefined) this.core.group.clients.pushedHere(keyed);
     this.core.journal.append({ type: 'push.subscribed', threadId: null, version: 1, payload: { sessionId: id } }, () => {
       this.core.journal.setSetting(SUBSCRIPTIONS, all);
+      // With the subscription, never before it: the others send its notifications here from then on.
+      if (keyed !== undefined) this.core.group.clients.pushedHere(keyed);
     });
     return { ok: true } as const;
   }
@@ -251,7 +252,8 @@ export class PushStore {
       // A device of the group may run a page no machine serves: its push says which machine the thread is on.
       const self = this.core.group.clients.deviceOf(sessionId) === undefined ? undefined : this.core.coordination.card().coreId;
       this.track(this.deliver(sessionId, { title, ...text, threadId, tag, badge, ...(self === undefined ? {} : { core: self }) }).catch(() => {
-        this.core.log('warn', 'Web Push delivery failed; the conversation remains available in Boite');
+        // `deliver` already wrote the warning with its cause: this one is detail.
+        this.core.logs.debug('Web Push delivery failed; the conversation remains available in Boite', { source: 'push', event: 'push.delivery-failed' });
       }));
     }
     // A device paired with another member of the group installed that member's page, and its push
@@ -297,7 +299,7 @@ export class PushStore {
     // A tag of that machine's never replaces a notification of this one's.
     const tag = `${from.coreId.slice(0, 16)}:${push.tag}`;
     this.track(this.deliver(sessionId, { ...push, tag, badge, core: from.coreId }).catch(() => {
-      this.core.log('warn', `Web Push delivery of a notification from ${from.name} failed`);
+      this.core.logs.debug(`Web Push delivery of a notification from ${from.name} failed`, { source: 'push', event: 'push.delivery-failed' });
     }));
     return { delivered: true };
   }
@@ -318,7 +320,13 @@ export class PushStore {
   };
 
   private async deliver(sessionId: string, payload: PushPayload): Promise<void> {
-    const keys = await this.keys();
+    let keys: Awaited<ReturnType<typeof this.keys>>;
+    try { keys = await this.keys(); }
+    catch (error) {
+      // The callers log a delivery failure as detail: this cause is said here, once.
+      this.core.logs.warn(`Web Push keys could not be read or created: ${error instanceof Error ? error.message : String(error)}`, { source: 'push', event: 'push.failed', ...(payload.threadId && !payload.core ? { threadId: payload.threadId } : {}), data: { sessionId, stage: 'keys' } });
+      throw error;
+    }
     if (this.closed || !this.core.journal.getSession(sessionId)) return;
     const subscription = this.subscriptions()[sessionId];
     if (!subscription) return;
@@ -326,7 +334,15 @@ export class PushStore {
       await this.send(subscription, JSON.stringify(payload), keys, createHash('sha256').update(payload.tag).digest('base64url').slice(0, 32));
     } catch (error) {
       const status = (error as { statusCode?: number }).statusCode;
-      if ((status === 404 || status === 410) && this.subscriptions()[sessionId]?.endpoint === subscription.endpoint) this.remove(sessionId);
+      const gone = (status === 404 || status === 410) && this.subscriptions()[sessionId]?.endpoint === subscription.endpoint;
+      if (gone) this.remove(sessionId);
+      // Only the status and the push service's host: the endpoint path is the device's address.
+      let service = 'unknown';
+      try { service = new URL(subscription.endpoint).hostname; } catch { /* stays unknown */ }
+      this.core.logs.warn(`Web Push to session ${sessionId} via ${service} failed${status ? ` with HTTP ${status}` : ' before an answer'}${gone ? '; the subscription is gone and was removed' : ''}`, {
+        // A relayed push names a thread of another machine: no local thread is blamed for it.
+        source: 'push', event: 'push.failed', ...(payload.threadId && !payload.core ? { threadId: payload.threadId } : {}), data: { sessionId, status: status ?? null, service, removed: gone, code: (error as { code?: string }).code ?? null },
+      });
       // Provider errors often contain the endpoint and encryption material. Do not forward them.
       throw refused(`Web Push delivery failed${status ? ` (${status})` : ''}`);
     }

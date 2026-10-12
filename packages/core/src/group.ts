@@ -33,14 +33,14 @@ import { boundedBody, MAX_BODY, PeerGone } from './coordination-wire.ts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused, RpcFailure, unauthorized, unavailable } from './errors.ts';
 import { advertisedAddresses, probeTailnet, tailnetAddress, ticketAddresses, type Tailnet } from './group/addresses.ts';
-import { admissionInput, checkCard, checkRoster, clockOf, CORE_ENTRIES_MAX, DEVICE_ENTRIES_MAX, digestOf, fingerprint, homeOf, liveCores, liveDeviceKeys, liveDevices, memberOrigins, mergeRosters, groupName, peerOf, reachOf } from './group/roster.ts';
+import { admissionInput, checkAddress, checkCard, checkRoster, clockOf, CORE_ENTRIES_MAX, DEVICE_ENTRIES_MAX, digestOf, fingerprint, homeOf, liveCores, liveDeviceKeys, liveDevices, memberOrigins, mergeRosters, groupName, peerOf, reachOf } from './group/roster.ts';
 import { deviceAdmissionInput, deviceId, deviceKey, deviceSigned, SERVED_ORIGINS_MAX, type DeviceKeyEntry } from './group/device-keys.ts';
 import type { CoreCard, CoreEntry, DeviceEntry, Roster } from './group/roster.ts';
 import { boxPublic, boxSigningInput, newBoxKey, open, openResponse, pack, readBoxKey, seal, SEALED, sealedName, sealResponse, unpack } from './group/seal.ts';
 import type { Sealing } from './group/seal.ts';
 import { encodeInvite, encodeTicket, parseInvite, parseTicket, ticketSigningInput, inviteId, invitePsk } from './group/ticket.ts';
 import type { Invite } from './group/ticket.ts';
-import { GroupClients } from './group/clients.ts';
+import { DEVICES_MAX, GroupClients } from './group/clients.ts';
 import { newId, newToken } from './ids.ts';
 import { currentOs } from './paths.ts';
 import { principalOf as principalOfRole, type ClientIdentity, type Identity } from './sessions.ts';
@@ -120,7 +120,7 @@ export class GroupStore {
       try {
         this.roster = checkRoster(stored);
       } catch (error) {
-        core.log('error', `the stored group roster is unreadable and was ignored: ${messageOf(error)}`);
+        core.log('error', `the stored group roster is unreadable and was ignored: ${messageOf(error)}`, { source: 'group', event: 'group.roster-unreadable' });
       }
     }
     const sessions = core.journal.getSetting(SESSIONS_SETTING);
@@ -242,7 +242,10 @@ export class GroupStore {
    * that is where this machine is served, behind a proxy or a name its
    * addresses do not list. The other members accept it from then on.
    */
-  servedFrom(origin: string): void {
+  servedFrom(raw: string): void {
+    // Only an origin the roster itself would read back: one it refused would make the whole roster unreadable.
+    let origin: string;
+    try { origin = checkAddress(raw); } catch { return; }
     if (this.served.at(-1) === origin) return;
     const roster = this.roster;
     const self = this.selfId();
@@ -431,7 +434,7 @@ export class GroupStore {
         if (this.core.journal.getSession(sessionId) !== null) {
           // What a session stood for is forgotten only once the session is gone: a failure here leaves both, for the next start.
           try { this.core.sessions.revoke(sessionId); } catch (error) {
-            this.core.log('warn', `group: could not revoke session ${sessionId}: ${messageOf(error)}`);
+            this.core.log('warn', `group: could not revoke session ${sessionId}: ${messageOf(error)}`, { source: 'group', event: 'group.revoke-failed' });
             continue;
           }
         }
@@ -496,7 +499,7 @@ export class GroupStore {
       // What is kept must be a roster this core, and the others, can read back: bounds and admissions included.
       merged = checkRoster(mergeRosters(mine, theirs));
     } catch (error) {
-      this.core.log('error', `group: a roster from a member was not merged, the result would not be a valid roster: ${messageOf(error)}`);
+      this.core.log('error', `group: a roster from a member was not merged, the result would not be a valid roster: ${messageOf(error)}`, { source: 'group', event: 'group.merge-refused' });
       return;
     }
     const self = merged.cores.find((core) => core.coreId === this.selfId());
@@ -536,7 +539,7 @@ export class GroupStore {
     } catch (error) {
       // A member says, signed and sealed to this exchange, that this core was removed while it was away.
       if (error instanceof PeerGone && stillMember()) {
-        this.core.log('warn', `${entry.name} answered that this machine was removed from the group ${roster.name}`);
+        this.core.log('warn', `${entry.name} answered that this machine was removed from the group ${roster.name}`, { source: 'group', event: 'group.removed' });
         this.disband();
       }
       // Anything else is a machine that is off or unreachable: the next tick asks again.
@@ -574,7 +577,7 @@ export class GroupStore {
 
   private background(work: Promise<unknown>): void {
     const job = work.catch((error: unknown) => {
-      if (!this.closed) this.core.log('warn', `group: ${messageOf(error)}`);
+      if (!this.closed) this.core.log('warn', `group: ${messageOf(error)}`, { source: 'group', event: 'group.contact-failed' });
     });
     this.pending.add(job);
     void job.finally(() => this.pending.delete(job));
@@ -701,12 +704,16 @@ export class GroupStore {
       if (roster.id !== invite.g || !live.some((core) => core.coreId === this.selfId()) || !live.some((core) => core.coreId === invite.c)) {
         throw refused('the machine that answered sent a roster that is not this invitation\'s group', { field: 'invite' });
       }
-      if (this.roster !== previous) throw refusal();
+      // Still alone in the group it was in: a change of its own entry meanwhile, a served origin say, is no company.
+      const current = this.roster as Roster | null;
+      if (!alone() || (current?.id ?? null) !== (previous?.id ?? null)) throw refusal();
       // The devices of the group it was alone in come into this one under this machine's word, in the same
       // write: adopted first, their sessions here would be taken for keys of a group this machine left.
+      // Within the new group's bounds: past them its roster would be refused by every member.
       const rev = clockOf(roster) + 1;
       const known = new Set((roster.deviceKeys ?? []).map((device) => device.id));
-      const carried = (previous === null ? [] : liveDeviceKeys(previous)).filter((device) => !known.has(device.id)).map((device): DeviceKeyEntry => ({
+      const room = Math.max(0, Math.min(DEVICES_MAX - liveDeviceKeys(roster).length, DEVICE_ENTRIES_MAX - (roster.deviceKeys?.length ?? 0)));
+      const carried = (current === null ? [] : liveDeviceKeys(current)).filter((device) => !known.has(device.id)).slice(0, room).map((device): DeviceKeyEntry => ({
         ...device,
         admit: { by: this.selfId(), sig: this.core.coordination.signature(deviceAdmissionInput(roster.id, device.id, device.role)).toString('base64') },
         rev,
@@ -801,7 +808,7 @@ export class GroupStore {
         roster = this.admitCore(invite, parsed, body, signature, from);
       } catch (reason) {
         error = reason instanceof RpcFailure ? reason.message : 'the machine could not process the invitation';
-        if (!(reason instanceof RpcFailure)) this.core.log('warn', `group join failed: ${messageOf(reason)}`);
+        if (!(reason instanceof RpcFailure)) this.core.log('warn', `group join failed: ${messageOf(reason)}`, { source: 'group', event: 'group.join-failed' });
       }
       const answer = JSON.stringify({ nonce, publicKey: this.core.coordination.card().publicKey, roster, error } satisfies JoinReply);
       const signature = this.core.coordination.signature(Buffer.from(JOIN_SIGNING_PREFIX + answer)).toString('base64');

@@ -1,3 +1,4 @@
+import { startDiagnosticsReport } from './diagnostics-report';
 import type { Message, PermissionMode, ProjectId, ProviderId, ThreadId } from '@boite/contracts';
 import type { Client } from './client';
 import { readModelDefaults } from './model-defaults';
@@ -25,7 +26,7 @@ import type { Workbench } from './store/workbench.svelte';
 import type { Workflows } from './store/workflows.svelte';
 
 export type Page = 'chat' | 'settings' | 'agents';
-export type SettingsTab = 'home' | 'advanced' | 'brain' | 'voice' | 'general' | 'machines' | 'appearance' | 'keyboard' | 'accounts' | 'plugins' | 'usage' | 'limits' | 'resources' | 'task-manager' | 'experiments';
+export type { SettingsTab } from './settings-tabs';
 
 /** A login process the core runs for one account, as `account.login` reports it. */
 export interface LoginState {
@@ -39,6 +40,13 @@ export interface LoginState {
 
 /** A thread that exists only in the UI until its first message is sent. */
 export interface Draft {
+  /**
+   * Which draft this is: a project can hold several. Absent only on drafts
+   * made before ids existed, which are keyed by their project instead.
+   */
+  id?: string;
+  /** When the draft was opened, which orders the list of drafts, newest first. */
+  createdAt?: number;
   /**
    * Null is the drafts project before the core made it: the first send asks
    * for it with `projects.drafts`, so opening the app writes nothing to disk.
@@ -137,6 +145,7 @@ export class Store {
     this.probedModels = {};
     ctx.models.probeEpoch++;
     ctx.models.probeAttempts.clear();
+    ctx.models.forgetConfirmed();
     ctx.models.probeTimes.clear();
     ctx.models.effortAttempts.clear();
     ctx.models.probeRequests.clear();
@@ -151,6 +160,9 @@ export class Store {
     listen(ctx, client);
     ctx.off.push(ctx.composer.watchQueues());
     ctx.off.push(watchIncognito(ctx));
+    // Each machine hears about this window's own failures. Unit tests drive
+    // fake timers through stores by the hundred, so the reporter stays out of them.
+    if (import.meta.env.MODE !== 'test') ctx.off.push(startDiagnosticsReport(client));
   }
 
   detach(): void {
@@ -379,6 +391,7 @@ export class Store {
   modelOf(...args: Parameters<Models['modelOf']>) { return this.#ctx.models.modelOf(...args); }
   probeModelEffort(...args: Parameters<Models['probeModelEffort']>) { return this.#ctx.models.probeModelEffort(...args); }
   isProbing(...args: Parameters<Models['isProbing']>) { return this.#ctx.models.isProbing(...args); }
+  catalogHas(...args: Parameters<Models['catalogHas']>) { return this.#ctx.models.catalogHas(...args); }
   modelsPending(...args: Parameters<Models['modelsPending']>) { return this.#ctx.models.modelsPending(...args); }
   probeModels(...args: Parameters<Models['probeModels']>) { return this.#ctx.models.probeModels(...args); }
   defaultModelOf(...args: Parameters<Models['defaultModelOf']>) { return this.#ctx.models.defaultModelOf(...args); }
@@ -543,6 +556,7 @@ export class Store {
 
   get composerStates() { return this.#ctx.composer.composerStates; }
   get draftEntries() { return this.#ctx.drafts.entries; }
+  discardDraft(id: string) { return this.#ctx.drafts.discard(id); }
   get draftsReadable() { return this.#ctx.drafts.readable; }
   flushDrafts() { return this.#ctx.drafts.flush(); }
   set composerStates(value) { this.#ctx.composer.composerStates = value; }

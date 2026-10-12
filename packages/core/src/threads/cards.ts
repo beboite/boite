@@ -9,6 +9,12 @@ import {
   type QuestionAnswer,
   type QuestionRequest,
   type RequestId,
+  type Settings,
+  type SettingAsk,
+  type SettingRequestParams,
+  checkSettingRequest,
+  settingAnswerText,
+  settledSetting,
   type ThreadId,
   type ThreadSummary,
   type Turn,
@@ -16,11 +22,28 @@ import {
 import { answerText, attachToAnswer } from '../attachments.ts';
 import type { Core } from '../core.ts';
 import type { PermissionTicket, QuestionAsk, QuestionTicket } from '../drivers/types.ts';
-import { notFound, refused } from '../errors.ts';
+import { notFound, refused, RpcFailure } from '../errors.ts';
 import { newId } from '../ids.ts';
 import type { ThreadStore } from '../threads.ts';
 import { nativeCommandPrompt } from './operations.ts';
 import { setThreadStatus, withLoad } from './records.ts';
+
+/** Why open cards were cleared, as the log says it. */
+export type CardClearReason = 'turn end' | 'stop' | 'mode change' | 'archive' | 'rewind';
+const CLEARED_BECAUSE: Record<CardClearReason, string> = {
+  'turn end': 'the turn ended', stop: 'the turn was stopped', 'mode change': 'the permission mode changed',
+  archive: 'the thread was archived', rewind: 'the conversation was rewound',
+};
+
+/** Tool name, decision, who decided and how long it waited: never the tool input or the question text. */
+function logCard(core: Core, request: PermissionRequest | QuestionRequest, event: string, message: string, data: Record<string, string | number | boolean>): void {
+  // A clock stepped back would make the wait negative.
+  const waited = Math.max(0, Date.now() - request.createdAt);
+  core.logs.record(waited >= 60_000 ? 'info' : 'debug', `${message} after ${Math.round(waited / 1000)} s`, {
+    source: 'permissions', event, threadId: request.threadId, turnId: request.turnId, requestId: request.id, durationMs: waited,
+    data: { ...('toolName' in request ? { tool: request.toolName } : {}), ...data },
+  });
+}
 
 interface PendingPermission {
   request: PermissionRequest;
@@ -61,7 +84,7 @@ export class ThreadCards {
     const decision = mode === 'bypassPermissions' || mode === 'yolo' ? 'allow'
       : mode === 'plan' || mode === 'dontAsk' ? 'deny' : null;
     if (decision === null) return;
-    for (const request of this.listPermissions(threadId)) this.answerPermission({ requestId: request.id, decision });
+    for (const request of this.listPermissions(threadId)) this.answerPermission({ requestId: request.id, decision }, `permission mode ${mode}`);
   }
 
   /**
@@ -88,11 +111,12 @@ export class ThreadCards {
     if (thread !== null) this.core.bus.emit('thread.updated', withLoad(this.core, thread));
   }
 
-  answerPermission(params: { requestId: RequestId; decision: 'allow' | 'deny' }): void {
+  answerPermission(params: { requestId: RequestId; decision: 'allow' | 'deny' }, by = 'user'): void {
     const pending = this.permissions.get(params.requestId);
     if (pending === undefined) throw notFound(`unknown permission request ${params.requestId}`, params);
     this.permissions.delete(params.requestId);
     const threadId = pending.request.threadId;
+    logCard(this.core, pending.request, 'permission.decided', `Permission for ${pending.request.toolName} ${params.decision === 'allow' ? 'allowed' : 'denied'} by ${by}`, { decision: params.decision, by });
     this.core.journal.append(
       { type: 'permission.resolved', threadId, version: 1, payload: { ...params } },
       () => undefined,
@@ -113,7 +137,7 @@ export class ThreadCards {
     return scoped.sort((a, b) => a.createdAt - b.createdAt);
   }
 
-  skipQuestion(params: { threadId: ThreadId; questionId: RequestId }): void {
+  skipQuestion(params: { threadId: ThreadId; questionId: RequestId }, by = 'user'): void {
     const pending = this.questions.get(params.questionId);
     if (pending === undefined) throw notFound(`unknown question ${params.questionId}`, params);
     const request = pending.request;
@@ -121,6 +145,7 @@ export class ThreadCards {
       throw refused('the question belongs to another thread', { ...params, expected: request.threadId });
     }
     this.questions.delete(request.id);
+    logCard(this.core, request, 'question.skipped', `Question skipped by ${by}`, { async: request.async === true, by });
     this.core.journal.append(
       { type: 'question.answered', threadId: request.threadId, version: 1, payload: { questionId: request.id, answer: null } },
       () => undefined,
@@ -138,7 +163,7 @@ export class ThreadCards {
     optionIds: string[];
     text?: string;
     attachments?: Attachment[];
-  }): void {
+  }, by = 'user'): void {
     const pending = this.questions.get(params.questionId);
     if (pending === undefined) throw notFound(`unknown question ${params.questionId}`, params);
     const request = pending.request;
@@ -178,6 +203,16 @@ export class ThreadCards {
 
     const answer: QuestionAnswer = text.length > 0 ? { optionIds: params.optionIds, text } : { optionIds: params.optionIds };
     if (files.length > 0) answer.attachments = attachToAnswer(this.core.dataDir, answer, files);
+    if (request.async === true) {
+      this.settleAsync(pending, answer, by);
+      return;
+    }
+    this.recordAnswer(request, answer, by);
+    setThreadStatus(this.core, request.threadId, this.waitingOn(request.threadId) ? 'waiting' : 'running');
+    pending.resolve(answer);
+  }
+
+  private recordAnswer(request: QuestionRequest, answer: QuestionAnswer, by: string): void {
     this.questions.delete(request.id);
     this.core.journal.append(
       {
@@ -189,15 +224,54 @@ export class ThreadCards {
       () => undefined,
     );
     this.core.bus.emit('question.answered', { questionId: request.id, threadId: request.threadId, answer });
-    if (request.async === true) {
-      this.foldAsyncCard(request.id, answer);
-      this.asyncChanged(request.threadId);
-      pending.resolve(answer);
-      this.threads.deferred.deliverAnswer(request.threadId, `> ${request.text}\n\n${answerTextOf(request, answer)}`);
-      return;
-    }
-    setThreadStatus(this.core, request.threadId, this.waitingOn(request.threadId) ? 'waiting' : 'running');
+    logCard(this.core, request, 'question.answered', `Question answered by ${by} with ${answer.optionIds.length} options${answer.text ? ' and text' : ''}`, { options: answer.optionIds.length, text: Boolean(answer.text), async: request.async === true, by });
+  }
+
+  /** An asynchronous card answered: folded where it was drawn, and the answer goes to the agent as a message. */
+  private settleAsync(pending: PendingQuestion, answer: QuestionAnswer, by: string): void {
+    const request = pending.request;
+    this.recordAnswer(request, answer, by);
+    this.foldAsyncCard(request.id, answer);
+    this.asyncChanged(request.threadId);
     pending.resolve(answer);
+    this.threads.deferred.deliverAnswer(request.threadId, `> ${request.text}\n\n${answerTextOf(request, answer)}`);
+  }
+
+  /**
+   * `boite settings request|open`: a settings card, asked without stopping.
+   * The reason is the card's text. A change offers only Refuse as an answer:
+   * Apply is `settings.set`, the owner's, and `settleSettings` closes the card
+   * when the value moves, so a paired phone cannot answer "applied".
+   */
+  requestSetting(params: SettingRequestParams): { questionId: RequestId; setting: SettingAsk } {
+    const thread = this.threads.require(params.threadId);
+    if (thread.archived) throw refused('cannot ask on an archived thread', { threadId: thread.id });
+    const open = [...this.questions.values()].flatMap(entry => (entry.request.threadId === thread.id && entry.request.setting ? [entry.request.setting] : []));
+    const checked = checkSettingRequest(params, this.core.settings.get(), patch => {
+      try {
+        return { ok: true, patch: this.core.settings.normalize(patch) };
+      } catch (error) {
+        if (!(error instanceof RpcFailure)) throw error;
+        const field = (error.data as { field?: unknown } | undefined)?.field;
+        return { ok: false, message: error.message, field: typeof field === 'string' ? field : 'value' };
+      }
+    }, open);
+    if (!checked.ok) throw refused(checked.message, checked.data);
+    const { reason, setting, options } = checked;
+    const { questionId } = this.drawAsync(thread, { text: reason, options, allowText: false, multiple: false, async: true, setting });
+    return { questionId, setting };
+  }
+
+  /**
+   * The settings changed, from a card's Apply or from the page: every change
+   * card whose setting left the value it was asked from settles, as applied
+   * when it holds the proposed value and as changed when it holds another.
+   */
+  settleSettings(next: Settings): void {
+    for (const pending of [...this.questions.values()]) {
+      const answer = pending.request.setting === undefined ? null : settledSetting(pending.request.setting, next);
+      if (answer !== null) this.settleAsync(pending, answer, 'a settings change');
+    }
   }
 
   /**
@@ -215,16 +289,20 @@ export class ThreadCards {
       throw refused('options must be at most 12 labels of 1 to 200 characters', { field: 'options' });
     }
     if (params.multiple !== undefined && typeof params.multiple !== 'boolean') throw refused('multiple must be a boolean', { field: 'multiple' });
-    const turns = this.core.journal.listTurns(thread.id);
-    const turn = turns.find(t => t.status === 'running') ?? turns.at(-1);
-    if (turn === undefined) throw refused('the thread has no turn to ask in yet', { threadId: thread.id });
-    const ask: QuestionAsk = {
+    return this.drawAsync(thread, {
       text,
       options: labels.map((label, index) => ({ id: String(index + 1), label: label.trim() })),
       allowText: true,
       multiple: params.multiple === true && labels.length > 1,
       async: true,
-    };
+    });
+  }
+
+  /** An asynchronous card drawn in the running turn, or under the last one, in a message of its own. */
+  private drawAsync(thread: ThreadSummary, ask: QuestionAsk): { questionId: RequestId } {
+    const turns = this.core.journal.listTurns(thread.id);
+    const turn = turns.find(t => t.status === 'running') ?? turns.at(-1);
+    if (turn === undefined) throw refused('the thread has no turn to ask in yet', { threadId: thread.id });
     const ticket = this.askQuestion(thread, turn, ask);
     const part: Extract<MessagePart, { type: 'question' }> = { type: 'question', questionId: ticket.questionId, ...ask, answer: null };
     const message: Message = { id: newId('msg_'), threadId: thread.id, turnId: turn.id, role: 'assistant', parts: [part], state: 'complete', createdAt: Date.now() };
@@ -277,8 +355,9 @@ export class ThreadCards {
     );
     setThreadStatus(this.core, thread.id, 'waiting');
     this.core.bus.emit('permission.requested', request);
+    this.core.logs.debug(`Permission requested for ${toolName}`, { source: 'permissions', event: 'permission.requested', threadId: thread.id, turnId: turn.id, requestId: request.id, data: { tool: toolName, permissionMode: thread.permissionMode } });
     const withdraw = (): void => {
-      if (this.permissions.has(request.id)) this.answerPermission({ requestId: request.id, decision: 'deny' });
+      if (this.permissions.has(request.id)) this.answerPermission({ requestId: request.id, decision: 'deny' }, 'the agent, which withdrew it');
     };
     return Object.assign(promise, { requestId: request.id, withdraw });
   }
@@ -293,6 +372,7 @@ export class ThreadCards {
       allowText: ask.allowText,
       multiple: ask.multiple,
       ...(ask.async === true ? { async: true } : {}),
+      ...(ask.setting === undefined ? {} : { setting: ask.setting }),
       createdAt: Date.now(),
     };
     let resolve: (answer: QuestionAnswer | null) => void = () => undefined;
@@ -308,6 +388,7 @@ export class ThreadCards {
     if (ask.async !== true) setThreadStatus(this.core, thread.id, 'waiting');
     else this.asyncChanged(thread.id);
     this.core.bus.emit('question.asked', request);
+    this.core.logs.debug(`Question asked with ${ask.options.length} options${ask.async === true ? ', without stopping the turn' : ''}`, { source: 'permissions', event: 'question.asked', threadId: thread.id, turnId: turn.id, requestId: request.id, data: { options: ask.options.length, async: ask.async === true, allowText: ask.allowText, multiple: ask.multiple } });
     return Object.assign(promise, { questionId: request.id });
   }
 
@@ -349,7 +430,7 @@ export class ThreadCards {
    * settles. An asynchronous card outlives its turn and goes only with `all`,
    * when the thread is put away.
    */
-  clearQuestionsOf(threadId: ThreadId, all = false): void {
+  clearQuestionsOf(threadId: ThreadId, all = false, reason: CardClearReason = 'turn end'): void {
     let asyncGone = false;
     for (const [id, pending] of [...this.questions]) {
       if (pending.request.threadId !== threadId) continue;
@@ -358,6 +439,7 @@ export class ThreadCards {
       this.asyncCards.delete(id);
       this.closeUnanswered(pending.request);
       asyncGone ||= pending.request.async === true;
+      logCard(this.core, pending.request, 'question.cancelled', `Question cancelled because ${CLEARED_BECAUSE[reason]}`, { async: pending.request.async === true, by: 'the core', reason });
       this.core.bus.emit('question.answered', { questionId: id, threadId, answer: null });
       pending.resolve(null);
     }
@@ -368,6 +450,7 @@ export class ThreadCards {
   withdrawQuestion(threadId: ThreadId, questionId: QuestionTicket['questionId']): void {
     const pending = this.questions.get(questionId);
     if (pending === undefined || pending.request.threadId !== threadId) return;
+    logCard(this.core, pending.request, 'question.withdrawn', 'Question withdrawn by the agent before an answer', { async: pending.request.async === true });
     this.questions.delete(questionId);
     this.asyncCards.delete(questionId);
     this.closeUnanswered(pending.request);
@@ -378,10 +461,11 @@ export class ThreadCards {
   }
 
   /** The turn ended with a card still open: it is denied, and every client is told so. */
-  clearPermissionsOf(threadId: ThreadId): void {
+  clearPermissionsOf(threadId: ThreadId, reason: CardClearReason = 'turn end'): void {
     for (const [id, pending] of [...this.permissions]) {
       if (pending.request.threadId !== threadId) continue;
       this.permissions.delete(id);
+      logCard(this.core, pending.request, 'permission.decided', `Permission for ${pending.request.toolName} denied because ${CLEARED_BECAUSE[reason]}`, { decision: 'deny', by: 'the core', reason });
       // Without this the card stays on screen with live buttons, and pressing
       // one answers `unknown permission request`.
       this.core.bus.emit('permission.resolved', { requestId: id, threadId, decision: 'deny' });
@@ -408,6 +492,7 @@ export const ASK_INSTRUCTIONS = '\n\nBoite: to ask the user something without st
 
 /** What the agent reads for an answer: the labels picked, then what the user typed. */
 function answerTextOf(request: QuestionRequest, answer: QuestionAnswer): string {
+  if (request.setting !== undefined) return settingAnswerText(request.setting, answer);
   const labels = answer.optionIds.map(id => request.options.find(option => option.id === id)?.label ?? id);
   return [labels.join(', '), answerText(answer)].filter(line => line.length > 0).join('\n');
 }

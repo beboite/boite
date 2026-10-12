@@ -412,6 +412,8 @@ test('two checkouts exchange existing commits; dirty and diverged histories rema
   expect(readFileSync(join(second, 'AGENTS.md'), 'utf8')).toBe('Local convention');
   file(join(root, 'untracked.txt'), 'Keep this');
   await expect(h.core.brain.sync()).rejects.toThrow('local file changes');
+  // Refused before the fetch: the log carries no ahead/behind it never measured.
+  expect((await h.core.logs.select(record => record.event === 'brain.sync-failed', 1))[0]?.data).toEqual({ push: true });
   expect(readFileSync(join(root, 'untracked.txt'), 'utf8')).toBe('Keep this');
   await git(root, ['add', 'untracked.txt']);
   await git(root, ['commit', '-m', 'Keep local notes']);

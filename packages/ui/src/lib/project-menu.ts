@@ -77,7 +77,8 @@ export function projectMenu(event: MouseEvent, owner: Store, project: Project, r
       if (action === 'manage') return contextMenu.follow(management, pick);
       if (action === 'back') return contextMenu.follow(main, pick);
       if (action === 'move-up' || action === 'move-down') reorder?.move(action === 'move-up' ? -1 : 1);
-      if (action === 'new') await workspace.select(owner, undefined, project.id);
+      // A new thread is a new draft: one already written there stays in the list.
+      if (action === 'new') await workspace.select(owner, undefined, project.id, { fresh: true });
       if (action === 'copy') await owner.copy(project.path);
       if (action === 'archived') {
         if (workspace.active !== owner) await workspace.select(owner);

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, GitBranch, RefreshCw } from '@lucide/svelte';
-  import type { GitChange, GitDiff, GitStatus } from '@boite/contracts';
+  import type { GitChange, GitDiff, GitStatus, ThreadId } from '@boite/contracts';
   import type { BoundPanel, Surface } from '../lib/right-panel.svelte';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
@@ -38,17 +38,25 @@
     return cut < 0 ? path : path.slice(cut + 1);
   }
 
-  async function refresh(): Promise<void> {
-    const id = threadId;
-    if (id === null) return;
+  /** Bumped by the refresh button, so the status and the diff are both read again. */
+  let asked = $state(0);
+  /** The last status request; an older answer that lands after it is dropped. */
+  let latest = 0;
+  /** The thread the list on screen belongs to. */
+  let listed: ThreadId | null = null;
+  /** The thread and path the diff on screen belongs to. */
+  let shown: string | null = null;
+
+  async function refresh(id: ThreadId): Promise<void> {
+    const mine = ++latest;
     loading = true;
     try {
       const answer = await store.gitStatus(id);
-      // The thread may have changed while the call was out: an answer about
-      // another working tree must not land in this list.
-      if (threadId === id) status = answer;
+      // The thread may have changed, or a newer read gone out, while the call
+      // was out: an answer about another working tree must not land in this list.
+      if (mine === latest && threadId === id) status = answer;
     } finally {
-      loading = false;
+      if (mine === latest) loading = false;
     }
   }
 
@@ -77,21 +85,32 @@
   // On mount, and again on every turn that ends: the working tree is what the
   // agent is changing, so the list is stale the moment a turn finishes.
   $effect(() => {
-    void threadId;
+    const id = threadId;
     void finished;
-    void refresh();
+    void asked;
+    // Another thread's files never stay on screen while this one's are read.
+    if (id !== listed) {
+      listed = id;
+      status = null;
+    }
+    if (id !== null) void refresh(id);
   });
 
-  // The diff of the selected row, read again when the status did.
+  // The diff of the selected row, read on the same triggers as the status and
+  // at the same time, not after it: the two reads do not depend on each other.
+  // A refresh of the same row keeps the old diff on screen until the new one
+  // replaces it; only another thread or another row starts from blank.
   $effect(() => {
     const id = threadId;
     const path = selected;
-    void status;
-    diff = null;
-    if (id === null || path === null) {
+    void finished;
+    void asked;
+    const key = id === null || path === null ? null : `${id}\n${path}`;
+    if (key !== shown) {
+      shown = key;
       diff = null;
-      return;
     }
+    if (id === null || path === null) return;
     let cancelled = false;
     void store.gitDiff(id, path).then((answer) => {
       if (!cancelled) diff = answer;
@@ -131,7 +150,7 @@
       aria-label={strings.common.refresh}
       data-testid="changes-refresh"
       disabled={loading}
-      onclick={() => void refresh()}
+      onclick={() => asked++}
     >
       <RefreshCw size={13} strokeWidth={1.75} />
     </button>

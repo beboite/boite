@@ -1,3 +1,5 @@
+import type { Store } from './store.svelte';
+
 /**
  * The idle prefetch of the chunks the first screen does not draw (App.svelte).
  * Each chunk still loads the moment it is asked for; this only decides what is
@@ -32,4 +34,22 @@ export function whenIdle(task: () => void): () => void {
   }
   const id = setTimeout(task, 300);
   return () => clearTimeout(id);
+}
+
+/**
+ * The pages beside the chat and the terminal's code, fetched in the same idle
+ * pass: Settings, the Agents page with its first snapshot when its experiment
+ * is on, and xterm for the owner. A first visit then draws its content instead
+ * of "loading"; App's own `import()` of each finds the module already there.
+ */
+export function warmPages(store: Store, agents: boolean): void {
+  const quiet = () => undefined;
+  void import('../components/SettingsShell.svelte').catch(quiet);
+  if (agents) {
+    void Promise.all([import('../components/agents/AgentsPage.svelte'), import('./agents.svelte')]).then(async ([, { AgentsView }]) => {
+      const view = AgentsView.of(store);
+      if (!view.snapshot && store.connection === 'ready') await view.refresh();
+    }).catch(quiet);
+  }
+  if (store.owner) void Promise.all([import('@xterm/xterm'), import('@xterm/addon-fit'), import('@xterm/addon-web-links')]).catch(quiet);
 }

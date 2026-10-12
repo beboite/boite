@@ -5,6 +5,7 @@ import type { Core } from '../core.ts';
 import { messageOf, RpcFailure } from '../errors.ts';
 import { NONCE_MAX, NONCE_MIN, nonceProblem, principalOf, type Identity } from '../sessions.ts';
 import type { ServerConnection } from './connection.ts';
+import { clientField, logHelloAccepted, logHelloRefused } from './connection-log.ts';
 
 export async function hello(core: Core, connection: ServerConnection, id: number | string, method: string, rawParams: unknown): Promise<void> {
   // A device being admitted waits on another member when only that one knows its code: nothing else is read meanwhile.
@@ -22,6 +23,7 @@ export async function hello(core: Core, connection: ServerConnection, id: number
 
 async function greet(core: Core, connection: ServerConnection, id: number | string, method: string, rawParams: unknown): Promise<void> {
   if (method !== 'hello') {
+    logHelloRefused(core, connection, `the first frame was ${clientField(method, 60, 'not a method call')}, not hello`, 'unknown');
     connection.sendResponse({
       jsonrpc: '2.0',
       id,
@@ -33,7 +35,9 @@ async function greet(core: Core, connection: ServerConnection, id: number | stri
   const params = rawParams as
     | { token?: unknown; grant?: unknown; ticket?: unknown; nonce?: unknown; device?: unknown; protocolVersion?: unknown; client?: { name?: unknown; version?: unknown; device?: unknown } }
     | undefined;
+  const clientName = clientField(params?.client?.name);
   const refuse = (message: string, reason: string): void => {
+    logHelloRefused(core, connection, `${reason}: ${message}`, clientName);
     connection.sendResponse({ jsonrpc: '2.0', id, error: { code: RpcErrorCode.Unauthorized, message } });
     connection.close(RpcCloseCode.Unauthorized, reason);
   };
@@ -56,6 +60,7 @@ async function greet(core: Core, connection: ServerConnection, id: number | stri
       ? 'nonce goes with a grant; a hello with a token takes none'
       : nonceProblem(params.nonce);
     if (problem !== null) {
+      logHelloRefused(core, connection, `bad nonce: ${problem}`, clientName);
       connection.sendResponse({
         jsonrpc: '2.0', id, error: {
           code: RpcErrorCode.InvalidParams, message: problem, data: { field: 'nonce', min: NONCE_MIN, max: NONCE_MAX },
@@ -67,6 +72,7 @@ async function greet(core: Core, connection: ServerConnection, id: number | stri
   }
   const wrongProtocol = (): boolean => {
     if (params?.protocolVersion === PROTOCOL_VERSION) return false;
+    logHelloRefused(core, connection, `protocol version ${params?.protocolVersion === undefined ? 'missing' : typeof params.protocolVersion === 'number' ? params.protocolVersion : clientField(String(params.protocolVersion), 20)}, this core speaks ${PROTOCOL_VERSION}`, clientName);
     connection.sendResponse({
       jsonrpc: '2.0', id, error: {
         code: RpcErrorCode.InvalidParams, message: `protocolVersion must be ${PROTOCOL_VERSION}`,
@@ -128,8 +134,9 @@ async function greet(core: Core, connection: ServerConnection, id: number | stri
   if (wrongProtocol()) return;
   connection.identity = identity;
   connection.sentFrom = sentFromOf(identity, client.name, params?.client?.device, connection.remote);
-  connection.clientName = client.name;
   connection.authenticated = true;
+  connection.clientName = clientName;
+  logHelloAccepted(core, connection, clientField(client.version, 40, ''));
   connection.sendResponse({
     jsonrpc: '2.0',
     id,

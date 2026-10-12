@@ -27,6 +27,8 @@ interface Formatters {
   exact: Intl.DateTimeFormat;
   /** The day spelled out and the time to the second: a message's hover title. */
   full: Intl.DateTimeFormat;
+  /** `Tuesday 14 October`: a day separator. */
+  longDay: Intl.DateTimeFormat;
 }
 
 const sets = new Map<string, Formatters>();
@@ -49,7 +51,8 @@ function formatters(): Formatters {
     weekday: new Intl.DateTimeFormat(tag, { weekday: 'short', hour: '2-digit', minute: '2-digit' }),
     quotaDay: new Intl.DateTimeFormat(tag, { weekday: 'long' }),
     exact: new Intl.DateTimeFormat(tag, { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' }),
-    full: new Intl.DateTimeFormat(tag, { dateStyle: 'full', timeStyle: 'medium' })
+    full: new Intl.DateTimeFormat(tag, { dateStyle: 'full', timeStyle: 'medium' }),
+    longDay: new Intl.DateTimeFormat(tag, { weekday: 'long', day: 'numeric', month: 'long' })
   };
   sets.set(tag, made);
   return made;
@@ -120,7 +123,11 @@ export function duration(startedAt: number, endedAt: number | null): string {
   return millis((endedAt ?? Date.now()) - startedAt);
 }
 
-/** The whole date and time, for the hover title of a relative or shortened stamp. */
+/**
+ * The whole date and time, for the hover title of a relative or shortened stamp.
+ * Every sidebar row and agent row draws one: `toLocaleString` with a locale
+ * builds a new formatter per call, about half a millisecond each.
+ */
 export function exactTime(value: number): string {
   return formatters().exact.format(value);
 }
@@ -128,6 +135,16 @@ export function exactTime(value: number): string {
 /** `Tuesday 30 September 2026 at 10:31:05`: every message builds one, so the formatter is kept. */
 export function fullTime(value: number): string {
   return formatters().full.format(value);
+}
+
+/** The weekday, day and month in words. */
+export function longDay(value: number): string {
+  return formatters().longDay.format(new Date(value));
+}
+
+/** Hours and minutes, two digits each. */
+export function hourMinute(value: number): string {
+  return formatters().dayClock.format(new Date(value));
 }
 
 export function time(value: number): string {

@@ -4,6 +4,7 @@ import { generateKeyPairSync, randomBytes, sign, type KeyObject } from 'node:cry
 import { connect, type CoreClient } from '../src/client.ts';
 import { appOrigin, isAllowedOrigin } from '../src/server.ts';
 import { APP_ORIGIN } from '@boite/contracts';
+import { mergeDeviceKeys } from '../src/group/device-keys.ts';
 import { startTestCore, waitFor, type TestCore } from './harness.ts';
 
 const cores: TestCore[] = [];
@@ -203,4 +204,34 @@ test('every core accepts the phone app\'s address, the published one or the one 
   expect(appOrigin({ BOITE_APP_ORIGIN: 'https://app.example/' })).toBe('https://app.example');
   expect(() => appOrigin({ BOITE_APP_ORIGIN: 'http://app.example' })).toThrow('BOITE_APP_ORIGIN');
   expect(() => appOrigin({ BOITE_APP_ORIGIN: 'https://app.example/path' })).toThrow('BOITE_APP_ORIGIN');
+});
+
+test('a key handed over on two members keeps both older pairings, a removed key spends no code through another member, and a device key gets no ticket', async () => {
+  const merged = mergeDeviceKeys(
+    [{ id: 'k', publicKey: 'p', name: 'Phone', role: 'device', admit: { by: 'a', sig: 's' }, at: 1, rev: 3, legacy: [`${'a'.repeat(64)}:ses_1`] }],
+    [{ id: 'k', publicKey: 'p', name: 'Phone', role: 'device', admit: { by: 'b', sig: 's' }, at: 1, rev: 4, legacy: [`${'b'.repeat(64)}:ses_2`] }],
+  );
+  expect(merged[0]?.legacy).toEqual([`${'a'.repeat(64)}:ses_1`, `${'b'.repeat(64)}:ses_2`]);
+
+  const [a, b] = await pair();
+  const phone = phoneKey();
+  const first = await b.core.group.clients.addDevice();
+  const grant = new URL(first.url).searchParams.get('grant')!;
+  const admitted = await open(b.url, { grant, device: { publicKey: phone.publicKey, sig: phone.sign(deviceAdmitInput(grant, phone.publicKey)) } });
+  // A device key asks a ticket for nothing: it signs its own way into the other machine.
+  await expect(admitted.call('group.ticket', { coreId: id(a) })).rejects.toThrow('needs no ticket');
+  b.core.group.clients.revokeDevice(admitted.device!);
+  await settled(b, 0);
+  await waitFor(() => (a.core.group.view('owner')?.devices.length ?? 1) === 0);
+  // The removed key types a code b drew on a: refused, and the code still admits the next key.
+  const { code } = await b.core.group.clients.addDevice();
+  await refused(a, open(a.url, { grant: code, device: { publicKey: phone.publicKey, sig: phone.sign(deviceAdmitInput(code, phone.publicKey)) } }));
+  const next = phoneKey();
+  const again = await open(a.url, { grant: code, device: { publicKey: next.publicKey, sig: next.sign(deviceAdmitInput(code, next.publicKey)) } });
+  expect(again.device).toMatch(/^[0-9a-f]{64}$/);
+  // An origin the roster could not read back is never written into it.
+  a.core.group.servedFrom('null');
+  a.core.group.servedFrom('ftp://a.example');
+  expect(a.core.group.view('owner')).not.toBeNull();
+  expect(a.core.group.allowsOrigin('null')).toBe(false);
 });

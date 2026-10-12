@@ -73,7 +73,24 @@ test('an agent starts a real thread in another project, which answers it back as
   expect(letter.text).toBe('Release notes 2.4: done\nDone in notes');
   await waitFor(() => (prompts.get(threadId) ?? []).some(p => p.includes('Done in notes')));
 
-  const again = await cli(['thread', 'new', 'notes', 'Write the 2.4 release notes', '--title', 'Release notes 2.4', '--request-id', 'notes-1', '--json']);
+  // The starter reads who answered: the thread it started, in which project, on which brief.
+  expect(letter.relation).toBe('started');
+  const delivered = prompts.get(threadId)!.find(p => p.includes('Done in notes'))!;
+  expect(delivered).toContain('"thread":"Release notes 2.4"');
+  expect(delivered).toContain('"relation":"a thread you started; it reports to you"');
+  expect(delivered).toContain('"project":"Notes"');
+  expect(delivered).toContain('"about":"Write the 2.4 release notes"');
+  expect(delivered).toContain('one to three short lines');
+  expect(delivered).not.toContain(h.core.coordination.identity().coreId);
+  // The started thread reads its starter as the one whose request is its task, beside the message it answers.
+  await h.core.coordination.send({ threadId, to: spawned.address, text: 'Add the migration note.', replyTo: letter.id, requestId: 'follow-up' });
+  await waitFor(() => (prompts.get(spawned.thread.id) ?? []).some(p => p.includes('Add the migration note.')));
+  const followUp = prompts.get(spawned.thread.id)!.find(p => p.includes('Add the migration note.'))!;
+  expect(followUp).toContain('"relation":"started this thread; its request is your task"');
+  expect(followUp).toContain('"yours":"Release notes 2.4: done Done in notes"');
+  expect(h.core.coordination.get(spawned.thread.id).messages.find(m => m.text === 'Add the migration note.')?.relation).toBe('starter');
+
+  const again =await cli(['thread', 'new', 'notes', 'Write the 2.4 release notes', '--title', 'Release notes 2.4', '--request-id', 'notes-1', '--json']);
   expect((JSON.parse(again.out) as AgentSpawn).thread.id).toBe(spawned.thread.id);
   expect(h.core.journal.listThreads(notes.id)).toHaveLength(1);
 });

@@ -51,21 +51,23 @@ test('signed agent mail opens from a compact summary and survives reload in its 
       text: 'Please wait before restarting. The deployment is still running.',
       requestId: 'browser-forwarded-message',
     });
-    const selector = `[data-testid="forwarded-agent-message"][data-letter-id="${letter.id}"]`;
-    const summary = '[data-testid=agent-message-summary][data-direction=incoming]';
+    const selector = `[data-testid="agent-discussion-message"][data-letter-id="${letter.id}"]`;
+    const summary = '[data-testid=agent-discussion-row]';
+    const view = '[data-testid=agent-discussion-view]';
     await page.waitFor(`document.querySelector(${JSON.stringify(summary)})`, 15000);
-    expect(await page.text(summary)).toContain('Received 1 message');
+    expect(await page.text(summary)).toContain('Deployment agent');
+    expect(await page.text(summary)).toContain('Please wait before restarting.');
     expect(await page.evaluate(`document.querySelector(${JSON.stringify(selector)}) === null`)).toBe(true);
     await page.click(summary);
     await page.waitFor(`document.querySelector(${JSON.stringify(selector)})`, 15000);
     const checkBubble = async () => {
+      const header = await page!.evaluate<string>(`document.querySelector(${JSON.stringify(view + ' header')}).textContent`);
+      expect(header).toContain('Deployment agent');
+      expect(header).toContain('Build PC');
+      expect(header).toContain('Release tools');
       const text = await page!.evaluate<string>(`document.querySelector(${JSON.stringify(selector)}).textContent`);
-      expect(text).toContain('Deployment agent');
-      expect(text).toContain('Build PC');
-      expect(text).toContain('Release tools');
-      expect(await page!.evaluate(`!!document.querySelector(${JSON.stringify(selector + ' [data-testid=agent-letter-status] svg.lucide-check-check')})`)).toBe(true);
       expect(text).toContain('Please wait before restarting.');
-      expect(await page!.evaluate(`(() => { const header = document.querySelector(${JSON.stringify(selector + ' [data-testid=agent-letter-open]')}); const icon = header.querySelector('.forward-icon'); return Math.abs(header.getBoundingClientRect().left - icon.getBoundingClientRect().left) < 2; })()`)).toBe(true);
+      expect(await page!.evaluate(`document.querySelector(${JSON.stringify(selector)}).classList.contains('right')`)).toBe(true);
       expect(await page!.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
       expect(text).not.toContain('Boite agent coordination.');
       expect(await page!.evaluate(`document.querySelectorAll(${JSON.stringify(selector)}).length`)).toBe(1);
@@ -87,16 +89,17 @@ test('signed agent mail opens from a compact summary and survives reload in its 
     await checkBubble();
     await page.evaluate('document.fonts.ready.then(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))');
     await page.screenshot(join(import.meta.dir, '.artifacts', 'coordination-real-cores-phone.png'));
-    await page.click(`${selector} [data-testid=agent-letter-open]`);
-    await page.waitFor('document.querySelector("[data-testid=agent-message-summary][data-direction=outgoing]")');
+    await page.click(`${view} [data-testid=agent-letter-open]`);
     await page.waitFor('!document.querySelector("[data-testid=right-panel]")');
-    await page.click('[data-testid=agent-message-summary][data-direction=outgoing]');
+    await page.waitFor(`document.querySelector(${JSON.stringify(summary)})`);
+    await page.click(summary);
     await page.waitFor(`document.querySelector(${JSON.stringify(selector)})?.dataset.direction === 'outgoing'`);
-    expect(await page.text(`${selector} [data-testid=agent-letter-project]`)).toBe('Infrastructure');
-    expect(await page.text(selector)).toContain('Maintenance agent');
+    expect(await page.text(`${view} [data-testid=agent-discussion-where]`)).toContain('Infrastructure');
+    expect(await page.text(`${view} [data-testid=agent-discussion-heading]`)).toBe('Maintenance agent');
+    expect(await page.evaluate(`document.querySelector(${JSON.stringify(selector)}).classList.contains('right')`)).toBe(false);
     await page.evaluate('document.fonts.ready');
     await page.screenshot(join(import.meta.dir, '.artifacts', 'coordination-outgoing-phone.png'));
-    await page.click(`${selector} [data-testid=agent-letter-open]`);
+    await page.click(`${view} [data-testid=agent-letter-open]`);
     await page.waitFor(`document.querySelector(${JSON.stringify(summary)})`);
     await page.waitFor(`document.querySelector(${JSON.stringify(selector)})?.dataset.direction === 'incoming'`);
     await checkBubble();

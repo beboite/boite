@@ -64,6 +64,14 @@ function covers(ctx: FakeContext, grant: StewardGrant, projectId: ProjectId | nu
   return grant.allProjects ? project.kind !== 'drafts' : grant.projectIds.includes(project.id);
 }
 
+/** The grant under which `stewardId` looks after `targetId`, as the real core's `Stewards.over` answers it. */
+export function stewardOver(ctx: FakeContext, stewardId: ThreadId, targetId: ThreadId): StewardGrant | null {
+  if (stewardId === targetId) return null;
+  const grant = grantOf(ctx, stewardId);
+  const target = ctx.threads.get(targetId);
+  return grant && target && !target.agentSessionId && covers(ctx, grant, target.projectId) ? grant : null;
+}
+
 function requireGrant(ctx: FakeContext, threadId: ThreadId, method: string): StewardGrant {
   const grant = grantOf(ctx, threadId);
   if (!grant) throw refused(`${method}: this thread is not a steward; the owner assigns projects to it in Communication settings`, { threadId, field: 'threadId', expected: 'a thread the owner made a steward' });

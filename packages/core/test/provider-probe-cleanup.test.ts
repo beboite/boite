@@ -4,7 +4,7 @@ import { RpcErrorCode, type ModelInfo } from '@boite/contracts';
 import { getDriver, setDriver } from '../src/drivers/index.ts';
 import { unavailable } from '../src/errors.ts';
 import { probeThreadId } from '../src/providers/probe.ts';
-import { startTestCore } from './harness.ts';
+import { startTestCore, waitFor } from './harness.ts';
 
 const models: ModelInfo[] = [{ id: 'scripted', name: 'Scripted', default: true, effort: { levels: [{ id: 'low', label: 'Low' }, { id: 'high', label: 'High' }], default: 'high' } }];
 const result = { models, probedAt: 1700000000000 };
@@ -73,6 +73,9 @@ test.each(['success', 'failure', 'account change'] as const)('a probe preserves 
     // A different request key shares this account's lane, rather than the first promise.
     const next = client.call('providers.probe', { providerId: 'echo', accountId: account.id, model: 'retry' });
     requests.push(next);
+    // The answer does not wait for the cleanup: its close event is still held, so its directory is still there.
+    await within(first, 'the probe answer waited for its process cleanup');
+    expect(existsSync(directories[0]!)).toBe(true);
     const [settled, retried] = await within(Promise.all([first, next]), 'probe cleanup blocked its protocol result and the next request in its account lane');
     if (outcome === 'success') expect(settled).toEqual({ value: result });
     else expect(settled).toMatchObject({ error: { rpc: outcome === 'failure'
@@ -80,11 +83,12 @@ test.each(['success', 'failure', 'account change'] as const)('a probe preserves 
       : { code: RpcErrorCode.Refused, message: 'the provider or account changed during discovery; refresh models' } } });
     expect(retried).toEqual(result);
     expect(reads).toBe(2);
-    expect(harness.core.procs.liveCount(threadId)).toBe(0);
-    expect(harness.core.providers.installs.leaseCount('echo')).toBe(0);
     expect(closeListeners).toHaveLength(2);
     expect(directories).toHaveLength(2);
-    expect(directories.every(directory => !existsSync(directory))).toBe(true);
+    // The answer leaves before the cleanup; the cleanup still ends within its grace.
+    await within(waitFor(() => harness.core.procs.liveCount(threadId) === 0
+      && harness.core.providers.installs.leaseCount('echo') === 0
+      && directories.every(directory => !existsSync(directory))), 'the probe cleanup did not finish after its answer');
     await within(harness.stop(), 'a completed probe cleanup blocked core shutdown');
   } finally {
     // Release held notifications on failure so the old implementation can also tear down.

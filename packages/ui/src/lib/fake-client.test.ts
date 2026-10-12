@@ -804,7 +804,8 @@ test('coordination stays scoped to its core and paired devices can only inspect 
   expect(letter.from.project).toBe(project.name);
   expect(letter.toProject).toBe(project.name);
   expect(letter.toMachine).toBe('Second');
-  expect((await second.call('collaboration.get', { threadId: 't-trace' })).messages).toEqual([letter]);
+  // The view says how the other end relates to the thread reading it: here, another machine.
+  expect((await second.call('collaboration.get', { threadId: 't-trace' })).messages).toEqual([{ ...letter, relation: 'machine' }]);
   expect((await second.call('collaboration.get', { threadId: 't-trace' })).sent).toBe(0);
   await second.call('collaboration.configure', { threadId: 't-trace', config: { mode: 'brief', resources: '', remote: true, paused: true } });
   await second.call('projects.archive', { projectId: 'p-boite', archived: true });

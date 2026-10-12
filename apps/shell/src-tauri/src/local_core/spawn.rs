@@ -29,7 +29,7 @@ pub(super) enum Output {
 const TAIL_LINES: usize = 20;
 
 impl Output {
-    fn tail(&self) -> Vec<String> {
+    pub(super) fn tail(&self) -> Vec<String> {
         match self {
             Output::Ring(lines) => lines.lock().map(|lines| lines.iter().cloned().collect()).unwrap_or_default(),
             Output::Log { path, from } => {
