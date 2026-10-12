@@ -27,6 +27,27 @@ defaults:
     shell: bash
 
 jobs:
+  # Phones run what lands here: only a commit whose CI passed is published.
+  ci:
+    name: CI passed
+    runs-on: ubuntu-24.04
+    timeout-minutes: 110
+    permissions:
+      contents: read
+      # Reruns the failed jobs of that CI run once (scripts/ci/commit-ci.ts).
+      actions: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version-file: package.json
+      - name: Wait for this commit's CI to pass
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bun scripts/ci/commit-ci.ts
+
   build:
     runs-on: ubuntu-24.04
     steps:
@@ -52,7 +73,9 @@ jobs:
           if-no-files-found: error
 
   deploy:
-    needs: build
+    needs: [ci, build]
+    # Dispatched from another branch, it builds that branch and publishes nothing.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     permissions:
       pages: write

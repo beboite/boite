@@ -554,7 +554,8 @@ export class Workspace {
     // A machine paired by hand at this address stays what it is: the group neither replaces its key nor claims it.
     if (existing && endpoint.ticket !== undefined && existing.coreId !== endpoint.coreId) return false;
     // The phone app's window opened on no machine: the first one added becomes the one it shows.
-    const adopt = !existing && appPage() && store.endpointUrl === null && !store.localCore;
+    // A first add that failed left it detached and out of the list: the next one takes it again.
+    const adopt = !existing && appPage() && !store.localCore && (store.endpointUrl === null || !this.machines.some((m) => m.store === store));
     const target = existing?.store ?? (adopt ? store : new Store());
     target.client?.close();
     target.detach();

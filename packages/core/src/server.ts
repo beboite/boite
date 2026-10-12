@@ -72,8 +72,9 @@ export function appOrigin(env: Record<string, string | undefined> = process.env)
   const named = env['BOITE_APP_ORIGIN']?.trim();
   if (!named) return APP_ORIGIN;
   try {
+    // Written in any case, with or without `:443` or a trailing slash, it is the same origin.
     const url = new URL(named);
-    if (url.protocol === 'https:' && url.origin === named.replace(/\/$/, '')) return url.origin;
+    if (url.protocol === 'https:' && !url.username && !url.password && url.pathname === '/' && !url.search && !url.hash) return url.origin;
   } catch { /* falls through */ }
   throw new Error(`BOITE_APP_ORIGIN: expected an https origin such as ${APP_ORIGIN}, got ${named}`);
 }
@@ -382,6 +383,8 @@ export function startServerOnStickyPort(
   options: ServerOptions & { explicitPort: boolean; previousPort: number | null; preferredPorts?: readonly number[] },
 ): RunningServer {
   const { explicitPort, previousPort, preferredPorts = PREFERRED_PORTS[options.core.channel], ...server } = options;
+  // Before any port is tried: a misspelt app address is no port taken.
+  appOrigin();
   if (explicitPort) return startServer(server);
   const candidates = [...new Set([...(previousPort === null ? [] : [previousPort]), ...preferredPorts])];
   let last: unknown = null;
@@ -411,6 +414,8 @@ export function startServer(options: ServerOptions): RunningServer {
   const core = options.core;
   const host = options.host ?? '127.0.0.1';
   const helloTimeoutMs = options.helloTimeoutMs ?? envTimeout() ?? DEFAULT_HELLO_TIMEOUT_MS;
+  // Read once, before anything is set up: a misspelt override stops the start rather than letting a page nobody meant in.
+  const app = appOrigin();
   const connections = new Set<ServerConnection>();
   const helloTimers = new Map<ServerConnection, ReturnType<typeof setTimeout>>();
   /** The counted peer of each open socket from another machine, until it closes. */
@@ -434,8 +439,6 @@ export function startServer(options: ServerOptions): RunningServer {
     return identity === null || identity.principal === 'agent' ? null : { sessionId: identity.sessionId };
   }, { helloTimeoutMs, helloMaxBytes: PREAUTH_FRAME_MAX_BYTES });
   core.relays = relays;
-  // Read once: a misspelt override stops the start rather than letting a page nobody meant in.
-  const app = appOrigin();
   let stopping = false;
 
   // One set of handlers for every address the core answers on: the sockets,

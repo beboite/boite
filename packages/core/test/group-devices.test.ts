@@ -1,11 +1,11 @@
 import { afterEach, expect, test } from 'bun:test';
-import { deviceAdmitInput, deviceHelloInput } from '@boite/contracts';
-import { generateKeyPairSync, randomBytes, sign, type KeyObject } from 'node:crypto';
+import { deviceAdmitInput, deviceHelloInput, type PushPayload, type RpcEvents } from '@boite/contracts';
+import { createECDH, generateKeyPairSync, randomBytes, sign, type KeyObject } from 'node:crypto';
 import { connect, type CoreClient } from '../src/client.ts';
 import { appOrigin, isAllowedOrigin } from '../src/server.ts';
 import { APP_ORIGIN } from '@boite/contracts';
 import { mergeDeviceKeys } from '../src/group/device-keys.ts';
-import { startTestCore, waitFor, type TestCore } from './harness.ts';
+import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 
 const cores: TestCore[] = [];
 const clients: CoreClient[] = [];
@@ -202,6 +202,7 @@ test('a device redeeming its code again after a lost answer is answered until th
 test('every core accepts the phone app\'s address, the published one or the one its start names, and refuses a misspelt one', () => {
   expect(appOrigin({})).toBe(APP_ORIGIN);
   expect(appOrigin({ BOITE_APP_ORIGIN: 'https://app.example/' })).toBe('https://app.example');
+  expect(appOrigin({ BOITE_APP_ORIGIN: 'HTTPS://APP.example:443' })).toBe('https://app.example');
   expect(() => appOrigin({ BOITE_APP_ORIGIN: 'http://app.example' })).toThrow('BOITE_APP_ORIGIN');
   expect(() => appOrigin({ BOITE_APP_ORIGIN: 'https://app.example/path' })).toThrow('BOITE_APP_ORIGIN');
 });
@@ -234,4 +235,29 @@ test('a key handed over on two members keeps both older pairings, a removed key 
   a.core.group.servedFrom('ftp://a.example');
   expect(a.core.group.view('owner')).not.toBeNull();
   expect(a.core.group.allowsOrigin('null')).toBe(false);
+});
+
+test('a push to a device key names the machine its thread is on, sent by that machine or passed on by the device\'s push home', async () => {
+  const [a, b] = await pair();
+  const phone = phoneKey();
+  const added = await a.core.group.clients.addDevice();
+  const grant = new URL(added.url).searchParams.get('grant')!;
+  const admitted = await open(a.url, { grant, device: { publicKey: phone.publicKey, sig: phone.sign(deviceAdmitInput(grant, phone.publicKey)) } });
+  const ecdh = createECDH('prime256v1');
+  // Subscribed on a: a is its push home, and b passes its news there.
+  await admitted.call('push.subscribe', { endpoint: `https://fcm.googleapis.com/fcm/send/${randomBytes(8).toString('hex')}`, keys: { p256dh: ecdh.generateKeys().toString('base64url'), auth: randomBytes(16).toString('base64url') } });
+  await waitFor(() => b.core.group.clients.pushHome(admitted.device!) === id(a));
+  // The device has been on b: b has a session of its own for it, which it passes news on for.
+  clients.push(await connect(b.url, '', { device: helloFor(phone, admitted.device!, id(b)) }));
+  const sent: PushPayload[] = [];
+  a.core.push.send = async (_target, payload) => { sent.push(JSON.parse(payload) as PushPayload); };
+  for (const [h, title] of [[a, 'on a'], [b, 'on b']] as const) {
+    const owner = await connect(h.url, h.token);
+    clients.push(owner);
+    const { threadId } = await echoThread(h, owner, title);
+    // A page that is no machine's, the app's own, opens the thread where this says.
+    h.core.bus.emit('question.asked', { id: `q-${title}`, threadId, text: 'Which branch?' } as RpcEvents['question.asked']);
+    await waitFor(() => sent.some((payload) => payload.title === title));
+    expect(sent.find((payload) => payload.title === title)?.core).toBe(id(h));
+  }
 });

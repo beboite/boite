@@ -162,9 +162,10 @@ core joins the group ([groups](groups.md#using-it)).
 
 The phone app can also be a page no machine serves: `APP_ORIGIN` in the
 contracts, `https://boite.mtsu.dev`. Every core accepts sockets from it, as
-it does the desktop shell's, so nothing is set on any machine for it; a core's
-`BOITE_APP_ORIGIN` names another one, for a fork that serves its own, and must
-be an `https` origin or the core does not start. There the app opens on its way
+it does the desktop shell's, so nothing is set on any machine for it. A fork
+that serves its own names it in `BOITE_APP_ORIGIN` on its cores, an `https`
+origin or the core does not start, and in `VITE_BOITE_APP_ORIGIN` when it builds
+its UI, which otherwise takes its own page for a machine's. There the app opens on its way
 in alone. A scanned code names the machine that drew it. A typed code goes with
 the machine's address, typed beside it (`boite.example.com`, or a full
 `http://` address), since the page's own address is no machine's; that machine
@@ -418,8 +419,8 @@ account.
 JavaScript that Vite copies to `dist/sw.js` with one change, the build id in
 its cache name, and `lib/sw.ts` registers
 it after the first paint, never before: the registration must not delay what the
-user sees. It registers only where it helps, which is the core's own http(s)
-origin. The Tauri shell loads the identical build from `tauri://`, where the
+user sees. It registers only where it helps: an http(s) origin, the core's own
+or the app's ([its own address](#the-app-on-its-own-address)). The Tauri shell loads the identical build from `tauri://`, where the
 files are already on disk, and `?fake=1` runs on the in-memory client with no
 core behind it; both are skipped. A registration that fails is one
 `console.warn`, and the app runs on.

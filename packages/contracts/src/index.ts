@@ -1504,8 +1504,10 @@ export interface PushPayload {
   /** The app icon's count after this notification. */
   badge?: number;
   /**
-   * Set when another member of the group sent it through the device's own
-   * machine: the id of the machine the thread is on.
+   * The id of the machine the thread is on. Every push to a device of the
+   * group carries it, direct or passed on by another member through the
+   * device's push home: the app's own page belongs to no machine and opens the
+   * thread there. A key of the older kind gets it only when passed on.
    */
   core?: string;
 }
