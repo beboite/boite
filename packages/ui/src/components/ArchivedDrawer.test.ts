@@ -233,4 +233,9 @@ test('a thread archived live takes its place by archive time, not the top', asyn
   push!({ ...bench, archived: true, archivedAt: 1, updatedAt: Date.now() });
   await settle();
   expect(rows()).toEqual(['t-trace', 't-parser', 't-bench']);
+  // A row archived again elsewhere moves up with its new time.
+  const parser = (await client.call('threads.list', { includeArchived: true })).find(thread => thread.id === 't-parser')!;
+  push!({ ...parser, archivedAt: Date.now() + 60_000 });
+  await settle();
+  expect(rows()).toEqual(['t-parser', 't-trace', 't-bench']);
 });

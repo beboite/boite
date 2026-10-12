@@ -15,7 +15,7 @@
 
   /**
    * A done or archived conversation, drawn like a thread row: the provider,
-   * the title, when it was last used, and under it the pull request it ended
+   * the title, when it was put away, and under it the pull request it ended
    * with, which opens on the forge. No menu button: a right click, or a long
    * press on a phone, opens the row's menu. Restoring stays one hover away.
    */

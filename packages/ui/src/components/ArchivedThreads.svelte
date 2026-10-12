@@ -71,10 +71,16 @@
     }
     if (summary.archived) restored = restored.filter(id => id !== summary.id);
     rows.add(summary.id);
-    if (held) { threads = threads.map(row => row.id === summary.id ? summary : row); return; }
-    // A newcomer takes its place by archive time: one put away earlier elsewhere does not jump to the top.
-    const at = threads.findIndex(row => archivedTime(row) < archivedTime(summary));
-    threads = at < 0 ? [...threads, summary] : [...threads.slice(0, at), summary, ...threads.slice(at)];
+    const prior = threads.find(row => row.id === summary.id);
+    // A row keeps its place while its archive time stands: a load sample or a restore moves nothing.
+    if (prior && (!summary.archived || archivedTime(prior) === archivedTime(summary))) {
+      threads = threads.map(row => row.id === summary.id ? summary : row);
+      return;
+    }
+    // A newcomer, or a row archived again, takes its place by archive time: one put away earlier elsewhere does not jump to the top.
+    const rest = threads.filter(row => row.id !== summary.id);
+    const at = rest.findIndex(row => archivedTime(row) < archivedTime(summary));
+    threads = at < 0 ? [...rest, summary] : [...rest.slice(0, at), summary, ...rest.slice(at)];
   }
 
   $effect(() => {
