@@ -214,3 +214,23 @@ test('the drawer reads the project\'s archived threads on opening, and a restore
   expect(store.threads.map((t) => t.id)).toEqual(['t-1']);
   expect(document.querySelector('[data-thread-id=t-1]')).toBeNull();
 });
+
+test('a thread archived live takes its place by archive time, not the top', async () => {
+  const { store, client } = await ready();
+  await store.archive('t-trace');
+  let push: ((summary: ThreadSummary) => void) | undefined;
+  const on = client.on.bind(client);
+  vi.spyOn(client, 'on').mockImplementation(((event: string, handler: (summary: ThreadSummary) => void) => {
+    if (event === 'thread.updated') push = handler;
+    return on(event as never, handler as never);
+  }) as never);
+  running = mount(ArchivedThreads, { target: document.body, props: { store, eager: true } });
+  await settle();
+  const rows = () => [...document.querySelectorAll('[data-testid=archived-list] li')].map(row => row.getAttribute('data-thread-id'));
+  expect(rows()).toEqual(['t-trace', 't-parser']);
+  // Put away long ago on another computer, announced only now.
+  const bench = store.threads.find(thread => thread.id === 't-bench')!;
+  push!({ ...bench, archived: true, archivedAt: 1, updatedAt: Date.now() });
+  await settle();
+  expect(rows()).toEqual(['t-trace', 't-parser', 't-bench']);
+});

@@ -121,6 +121,7 @@ test('archived threads are listed by when they were put away, not by their last 
   mounted = mount(RecentDone, { target: document.body, props: { entries: entries(), now: Date.now(), kind: 'archived' } });
   click('[data-testid=recent-archived-toggle]'); await settle();
   expect([...document.querySelectorAll('[data-testid=done-thread]')].map(row => (row as HTMLElement).dataset.threadId)).toEqual(['t-bench', 't-parser']);
+  expect(document.querySelector('[data-thread-id=t-parser] time')?.getAttribute('datetime')).toBe(new Date(1).toISOString());
 });
 
 test('a done thread is deleted from its own menu, opened by right click or a long press', async () => {

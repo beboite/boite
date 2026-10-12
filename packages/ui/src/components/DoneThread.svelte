@@ -2,7 +2,7 @@
   import { ArchiveRestore, Folder, GitMerge, GitPullRequest, GitPullRequestClosed } from '@lucide/svelte';
   import type { ThreadSummary } from '@boite/contracts';
   import type { ProjectEntry } from '../lib/project-view.svelte';
-  import { restoreThread } from '../lib/archive';
+  import { archivedTime, restoreThread } from '../lib/archive';
   import { contextMenu } from '../lib/context-menu.svelte';
   import { separator } from '../lib/menu';
   import { canDeleteThread, deleteThread } from '../lib/thread-removal';
@@ -100,7 +100,7 @@
       <span class="title ui-label">{thread.title}</span>
       <!-- The project shows below, outside the button: named here too, so two same-titled threads read apart. -->
       {#if showProject}<span class="visually-hidden">{projectName(entry.project)}</span>{/if}
-      <time datetime={new Date(thread.updatedAt).toISOString()} title={exactTime(thread.updatedAt)}>{ago(thread.updatedAt, now)}</time>
+      <time datetime={new Date(archivedTime(thread)).toISOString()} title={exactTime(archivedTime(thread))}>{ago(archivedTime(thread), now)}</time>
     </span>
   </button>
   {#if meta}

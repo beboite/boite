@@ -71,7 +71,10 @@
     }
     if (summary.archived) restored = restored.filter(id => id !== summary.id);
     rows.add(summary.id);
-    threads = held ? threads.map(row => row.id === summary.id ? summary : row) : [summary, ...threads];
+    if (held) { threads = threads.map(row => row.id === summary.id ? summary : row); return; }
+    // A newcomer takes its place by archive time: one put away earlier elsewhere does not jump to the top.
+    const at = threads.findIndex(row => archivedTime(row) < archivedTime(summary));
+    threads = at < 0 ? [...threads, summary] : [...threads.slice(0, at), summary, ...threads.slice(at)];
   }
 
   $effect(() => {
