@@ -233,9 +233,11 @@ function activate(): () => void {
     }
     for (const thumbs of drawn.values()) {
       for (const thumb of Object.values(thumbs)) {
-        // A dragged thumb that has nothing left to scroll goes too: removal ends its capture, and the drag.
+        // A dragged thumb that has nothing left to scroll goes too, and its drag
+        // ends now: the spare thumb may be drawn for another bar this frame.
         if (!thumb) continue;
         owners.delete(thumb);
+        if (thumb === drag?.thumb) { drag = null; thumb.removeAttribute('data-active'); }
         thumb.remove();
         spare.push(thumb);
       }

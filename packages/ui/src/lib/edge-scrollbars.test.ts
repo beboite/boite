@@ -66,6 +66,8 @@ describe('startEdgeScrollbars', () => {
     const change = media(true);
     const added = vi.spyOn(window, 'addEventListener');
     const removed = vi.spyOn(window, 'removeEventListener');
+    const addedOnDocument = vi.spyOn(document, 'addEventListener');
+    const removedOnDocument = vi.spyOn(document, 'removeEventListener');
     const stop = startEdgeScrollbars();
     expect(on()).toBe(true);
     change('forced-colors', true);
@@ -80,12 +82,17 @@ describe('startEdgeScrollbars', () => {
     expect(document.querySelector('.edge-scrollbar-layer')).toBeNull();
     const count = (calls: unknown[][]) => calls.map(([type, listener]) => `${String(type)}:${String(listener)}`).sort();
     expect(count(removed.mock.calls)).toEqual(count(added.mock.calls));
+    // The popover watch lives on the document: it goes with the rest.
+    expect(addedOnDocument.mock.calls.length).toBeGreaterThan(0);
+    expect(count(removedOnDocument.mock.calls)).toEqual(count(addedOnDocument.mock.calls));
     // The display changing after stop starts nothing again.
     change('pointer: fine', false);
     change('pointer: fine', true);
     expect(on()).toBe(false);
     added.mockRestore();
     removed.mockRestore();
+    addedOnDocument.mockRestore();
+    removedOnDocument.mockRestore();
   });
 
   it('leaves a touch-only display alone', () => {

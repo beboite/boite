@@ -27,8 +27,10 @@ export function startInteractionExperiments(): () => void {
         void modules[id]()
           .then((stop) => { if (started.left) stop(); else started.stop = stop; })
           .catch((error: unknown) => {
-            // A chunk that failed to load is tried again the next time the switch turns on.
-            if (running.get(id) === started) running.delete(id);
+            // A chunk that failed to load is tried again the next time the switch
+            // turns on; a failure the switch already left behind says nothing.
+            if (running.get(id) !== started) return;
+            running.delete(id);
             workspace.active.error = error instanceof Error ? error.message : String(error);
           });
       } else if (!enabled.includes(id) && run) {

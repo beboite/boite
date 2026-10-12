@@ -23,6 +23,7 @@ test('a press preloads on the owning machine, a click inside the grace keeps it,
   document.body.innerHTML = `
     <button id="local" data-preload-thread="t-1"><span id="inner">row</span></button>
     <div data-machine-id="m-2"><button id="remote" data-machine-id="m-2" data-preload-thread="t-9">row</button></div>
+    <button id="gone" data-machine-id="m-left" data-preload-thread="t-1">row of a machine that left</button>
     <button id="plain">nothing</button>`;
   const released: string[] = [];
   const preloaded: string[] = [];
@@ -43,9 +44,10 @@ test('a press preloads on the owning machine, a click inside the grace keeps it,
     press(document.getElementById('remote')!, 'pointercancel', { pointerId: 2 });
     expect(released.at(-1)).toBe('m-2:t-9');
 
-    // A secondary button, an unmarked element and a driven browser ask for nothing.
+    // A secondary button, an unmarked element, a machine no longer connected and a driven browser ask for nothing.
     press(document.getElementById('local')!, 'pointerdown', { button: 2 });
     press(document.getElementById('plain')!, 'pointerdown');
+    press(document.getElementById('gone')!, 'pointerdown');
     Object.defineProperty(navigator, 'webdriver', { value: true, configurable: true });
     press(document.getElementById('local')!, 'pointerdown');
     expect(preloaded).toEqual(['m-1:t-1', 'm-2:t-9']);

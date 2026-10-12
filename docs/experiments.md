@@ -181,8 +181,10 @@ Elements opt in with `data-preload-thread="<thread id>"` or
 reads them, so a sidebar row costs nothing to mark. The owning machine is the
 nearest `data-machine-id`, else the active one. Thread rows, the spawn marker,
 the parent chip, the resources page, workflow steps and the agents panel's
-"Open thread" are marked. On a data saver or a 2G or 3G link, touch presses
-wait for their click; the mouse keeps preloading.
+"Open thread" are marked. On a data saver or a slow-2G, 2G or 3G
+link, touch presses wait for their click; the mouse keeps preloading. A row of
+a machine that is no longer connected preloads nothing, and a press whose
+page was refused leaves the click to ask again.
 
 It stays off whenever `navigator.webdriver` is true, so Playwright and other
 driven browsers measure the plain click even on a profile with the switch on.

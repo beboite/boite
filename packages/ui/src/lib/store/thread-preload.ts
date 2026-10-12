@@ -30,6 +30,8 @@ export interface Preload extends PageAsk {
   client: Client;
   held: Thread | undefined;
   thread: Thread | null;
+  /** Its subscribe or page was refused: the open asks again rather than inherit the failure. */
+  failed: boolean;
   summaryRead: ReturnType<StoreContext['threadReads']['begin']>;
 }
 
@@ -96,9 +98,10 @@ export class ThreadPreloads {
     const summaryRead = this.ctx.threadReads.begin(threadId);
     let preload: Preload | null = null;
     const ask = askPage(this.ctx, this.opener, client, threadId, held, { requests: false }, () => preload !== null && this.#claimed === preload);
-    ask.subscribed?.catch(() => undefined);
-    ask.fetched.catch(() => undefined);
-    const made: Preload = { ...ask, threadId, client, held, thread: null, summaryRead };
+    const made: Preload = { ...ask, threadId, client, held, thread: null, failed: false, summaryRead };
+    const failed = () => { made.failed = true; };
+    ask.subscribed?.catch(failed);
+    ask.fetched.catch(failed);
     preload = made;
     this.#waiting = made;
     void ask.fetched.then((thread) => { made.thread = thread; }, () => undefined);
@@ -110,7 +113,7 @@ export class ThreadPreloads {
     const waiting = this.#waiting;
     if (!waiting || waiting.threadId !== threadId) return null;
     this.#waiting = null;
-    if (waiting.client !== client || waiting.held !== held) {
+    if (waiting.client !== client || waiting.held !== held || waiting.failed) {
       this.giveBack(waiting);
       return null;
     }

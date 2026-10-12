@@ -43,10 +43,16 @@ export function preloadAllowed(nav: { webdriver?: boolean } = navigator): boolea
   return nav.webdriver !== true || window.__BOITE_PRESS_PRELOAD_TEST__ === true;
 }
 
-/** The store that owns a marked element: its machine's, else the one on screen. */
-function owningStore(workspace: PreloadWorkspace, element: Element): PreloadStore {
-  const machineId = element.closest('[data-machine-id]')?.getAttribute('data-machine-id');
-  return workspace.machines.find((machine) => machine.id === machineId)?.store ?? workspace.active;
+/**
+ * The store that owns a marked element: its machine's, the one on screen when
+ * it names none, and null for a machine no longer connected. Thread ids can
+ * collide between machines, so a stale row never preloads on another one.
+ */
+function owningStore(workspace: PreloadWorkspace, element: Element): PreloadStore | null {
+  const named = element.closest('[data-machine-id]');
+  if (!named) return workspace.active;
+  const machineId = named.getAttribute('data-machine-id');
+  return workspace.machines.find((machine) => machine.id === machineId)?.store ?? null;
 }
 
 export function startPressPreload(workspace: PreloadWorkspace): () => void {
@@ -81,9 +87,10 @@ export function startPressPreload(workspace: PreloadWorkspace): () => void {
       return;
     }
     const threadId = target.getAttribute('data-preload-thread');
-    if (!threadId) return;
+    const store = owningStore(workspace, target);
+    if (!threadId || !store) return;
     settle(0);
-    release = owningStore(workspace, target).preload(threadId);
+    release = store.preload(threadId);
     pointer = event.pointerId;
     timer = setTimeout(() => settle(0), PRESS_HOLD_MS);
   };
