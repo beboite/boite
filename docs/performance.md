@@ -163,8 +163,8 @@ browser on the fake core with a simulated 200 ms round trip
 the thread's messages in hand, each sample on a fresh page with nothing cached.
 On 2026-10-12 in the Linux container, three runs of four samples each: a plain
 click had medians of 222, 230 and 232 ms, and the Load on press experiment 95,
-96 and 100 ms. The press saved about the 120 ms it was held, up to one round
-trip. The fake does not delay pushed events or model payload size, and a real
+96 and 100 ms. The Windows CI job measured medians of 225 and 92 ms the same
+day. The press saved about the 120 ms it was held, up to one round trip. The fake does not delay pushed events or model payload size, and a real
 core adds its own handling time to both paths.
 
 ## Naming a long conversation

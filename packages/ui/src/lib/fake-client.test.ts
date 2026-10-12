@@ -1429,6 +1429,22 @@ test('fake close and reconnect fence calls waiting before dispatch even when the
   } finally { release(); held.mockRestore(); }
 });
 
+test('a simulated round trip loses the answer of a call whose socket changed on the way back', async ({ createClient }) => {
+  const client = await createClient({ delayMs: 0, rttMs: 40 });
+  vi.useFakeTimers();
+  try {
+    const answered = client.call('threads.subscribe', { threadId: 't-trace' });
+    const lost = expect(answered).rejects.toMatchObject({ code: RpcErrorCode.Internal, message: 'connection changed before RPC answer' });
+    await vi.advanceTimersByTimeAsync(20);
+    expect(client.coreSubscribers).toContain('t-trace');
+    client.close();
+    await client.connect();
+    await vi.advanceTimersByTimeAsync(20);
+    await lost;
+    expect(client.clientSubscriptions).not.toContain('t-trace');
+  } finally { vi.useRealTimers(); }
+});
+
 test('fake merged PR proof follows the checkout branch and linked PRs like the core', async ({ createClient }) => {
   const client = await createClient({ delayMs: 0 });
   const project = await client.call('projects.add', { path: '/workspace/renamed-branch-fixture' });

@@ -122,5 +122,6 @@ test('loading on press hides the round trip behind the held button, and a press 
   await page.waitFor(`!globalThis.__boiteTest.workspace.active.client.coreSubscribers.includes('${other}')`, 5_000);
   expect(await page.evaluate<string>('globalThis.__boiteTest.workspace.active.openThread.id')).toBe(open);
   expect(await page.evaluate<string>(`globalThis.__boiteTest.workspace.active.client.coreSubscribers.join(',')`)).toBe(open);
-  expect(await page.evaluate<string[]>(`window.__calls.filter(call => call.endsWith(' ${other}'))`)).toEqual([`threads.get ${other}`, `threads.unsubscribe ${other}`]);
+  // Background lookups such as the sidebar's pull requests may run meanwhile.
+  expect(await page.evaluate<string[]>(`window.__calls.filter(call => /^threads\\.(get|subscribe|unsubscribe) ${other}$/.test(call))`)).toEqual([`threads.get ${other}`, `threads.unsubscribe ${other}`]);
 }, 60_000);
