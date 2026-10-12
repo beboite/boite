@@ -135,9 +135,14 @@ The tested installer becomes the release artifact.
 | UI entry chunk | 593,000 |
 | UI files, excluding `.br` and `.gz` copies | 4,640,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 3,935,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 3,942,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-12 the Windows job measured 3,935,380 core bytes for `main` at
+`5feb7d82`, once phones joined the group with one key (#439), over the
+3,935,000 limit; a UI-only branch on top measured the same. The core limit
+rises to 3,942,000, the value the stacked #449 already carries.
 
 On 2026-10-10 on Linux with Bun 1.4.2, `main` at `27aa04a8` measured about
 4,438,500 UI bytes and 3,719,300 emitted core JavaScript bytes. The group relay
