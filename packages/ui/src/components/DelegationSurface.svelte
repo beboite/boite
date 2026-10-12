@@ -252,7 +252,7 @@
             <header>
               <button type="button" class="ghost small icon back" aria-label={strings.delegation.backToTeam} onclick={() => void store.selectDelegatedAgent(null)}><ArrowLeft size={15} /></button>
               <div><strong>{selected.thread.title}</strong><small>{routeOf(selected).label}</small></div>
-              <button type="button" class="quiet small" data-testid="delegation-open-thread" onclick={() => void openChild()}><span class="ui-label">{strings.delegation.openThread}</span></button>
+              <button type="button" class="quiet small" data-testid="delegation-open-thread" data-preload-thread={selected.thread.id} onclick={() => void openChild()}><span class="ui-label">{strings.delegation.openThread}</span></button>
               {#if threadActive(selected.thread.status)}<button type="button" class="danger small" onclick={() => void store.stopDelegatedAgent(selected.thread.id)}><Square size={11} fill="currentColor" /><span class="ui-label">{strings.delegation.stop}</span></button>{/if}
             </header>
             {#if store.delegationThread}

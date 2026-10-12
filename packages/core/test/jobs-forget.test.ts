@@ -142,6 +142,24 @@ describeWindows('thread jobs of forgotten threads', () => {
     } finally { Worker.prototype.terminate = terminate; }
   }, 30000);
 
+  test('a job forgotten before its console host exits closes once the host is gone', async () => {
+    // The registry never traces a console host, and the one a piped `cmd` gets
+    // exits after `cmd`. Forgetting at once puts the forget before that exit.
+    // One registry at a time: the jobs module reports to the last one created.
+    await procs.close();
+    procs = new ProcRegistry(journal, new Bus(), processPlatform, { forgetDelayMs: 0 });
+    // A cold drain Worker reports `cmd`'s exit late, and the registry's 1 s
+    // fallback forgets after the host is gone. Warm it first.
+    const quiet = async (id: string): Promise<void> => {
+      const child = procs.spawn(id, 'cmd', ['/c', 'exit 0']);
+      await Promise.all([new Response(child.proc.stdout).text(), new Response(child.proc.stderr).text(), child.exited]);
+      await waitFor(() => procs.liveCount(id) === 0, 5000);
+    };
+    await quiet('warm-up');
+    await quiet('host-late');
+    await waitFor(() => threadJobCount() === 0, 5000);
+  }, 30000);
+
   test('a thread spawning again after it was forgotten gets a job of its own', async () => {
     await procs.spawn('again', 'cmd', ['/c', 'exit 0']).exited;
     await waitFor(() => procs.liveCount('again') === 0, 5000);

@@ -31,6 +31,8 @@ const zoomed = quotas ? Promise.resolve() : startZoom();
 void startLocale()
   .then(async () => mount(quotas ? (await import('./QuotaApp.svelte')).default : App, { target }))
   .then(async () => {
+    // Edge scrollbars and load on press follow their switches for the page's life.
+    if (!quotas) void import('./lib/interaction-experiments').then(({ startInteractionExperiments }) => startInteractionExperiments());
     // The shell builds its window hidden and shows it once this page has painted,
     // so a slow core start shows the page's own "Starting" instead of nothing and
     // a fast one never flashes an empty frame. Two frames: the first is when the

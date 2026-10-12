@@ -171,8 +171,16 @@ for (const outcome of ['shutdown', 'late-resolution', 'late-rejection'] as const
     await waitFor(() => h.core.threads.require(to).status === 'idle');
     await h.server.stop();
     closing = h.core.close();
-    const settled = await Promise.race([closing.then(() => true), Bun.sleep(500).then(() => false)]);
-    expect(settled).toBe(true);
+    // The acknowledgement stays pending until close has settled, so settling at all is the proof.
+    // The deadline only turns a close that waits on it forever into a readable failure: close's own
+    // work is bounded but not fast. A WAL checkpoint in the journal's close blocks the loop for up to
+    // 335 ms on a loaded desktop and the native Workers each get a 1 s fallback, so a 500 ms race
+    // failed on Windows runners while nothing waited on the acknowledgement.
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      closing,
+      new Promise<never>((_, reject) => { deadline = setTimeout(() => reject(new Error('core close waited on the steering acknowledgement')), 5000); }),
+    ]).finally(() => clearTimeout(deadline));
     expect(shutdowns).toBe(1);
     expect(h.core.journal.isClosed()).toBe(true);
     if (outcome === 'late-resolution') acknowledge(true);

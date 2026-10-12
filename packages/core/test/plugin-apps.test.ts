@@ -51,21 +51,23 @@ function installBots(dataDir: string): string {
 /**
  * The app the core spawns: it records the variables it was given, then does
  * what `mode.txt` beside it says. Returns the fixture's directory, where its
- * mode and its record live, and the pids the core started.
+ * mode and its record live, and the pids the core started. In `exit0` it is
+ * the user who quits: the app exits 0 once `quit()` says so, never before.
  */
-function fakeApp(h: TestCore): { home: string; pids: number[]; mode(value: 'exit0' | 'crash' | 'stay'): void } {
+function fakeApp(h: TestCore): { home: string; pids: number[]; mode(value: 'exit0' | 'crash' | 'stay'): void; quit(): void } {
   const home = join(h.dataDir, 'app-fixture');
   mkdirSync(home, { recursive: true });
   const fixture = join(home, 'app.ts');
   writeFileSync(fixture, `
-    import { readFileSync, writeFileSync } from 'node:fs';
+    import { existsSync, readFileSync, writeFileSync } from 'node:fs';
     import { join } from 'node:path';
     const names = ['BOITE_CORE_URL', 'BOITE_TOKEN', 'BOITE_PLUGIN_ID', 'BOITE_THREAD_ID', 'BOITE_AGENT_TOKEN'];
     writeFileSync(join(import.meta.dir, 'seen.json'), JSON.stringify({ args: process.argv.slice(2), cwd: process.cwd(), env: Object.fromEntries(names.map((name) => [name, process.env[name] ?? null])) }));
     const mode = readFileSync(join(import.meta.dir, 'mode.txt'), 'utf8');
-    if (mode === 'exit0') process.exit(0);
     if (mode === 'crash') process.exit(3);
-    setInterval(() => undefined, 1000);
+    // 'exit0' quits once the test says so; 'stay' runs until it is killed.
+    const quit = join(import.meta.dir, 'quit');
+    setInterval(() => { if (mode === 'exit0' && existsSync(quit)) process.exit(0); }, mode === 'exit0' ? 10 : 1000);
   `);
   const pids: number[] = [];
   const spawn = h.core.procs.spawn.bind(h.core.procs);
@@ -78,7 +80,7 @@ function fakeApp(h: TestCore): { home: string; pids: number[]; mode(value: 'exit
   });
   restores.push(() => spy.mockRestore());
   h.core.plugins.apps.desktop = () => null;
-  return { home, pids, mode: (value) => writeFileSync(join(home, 'mode.txt'), value) };
+  return { home, pids, mode: (value) => writeFileSync(join(home, 'mode.txt'), value), quit: () => writeFileSync(join(home, 'quit'), '') };
 }
 
 /** Timers that fire when the test says so. */
@@ -126,8 +128,12 @@ describe('a desktop app', () => {
     expect(harness.core.plugins.state('bots').app).toMatchObject({ enabled: true, status: 'stopped', pid: null });
     expect(harness.core.plugins.state('bots').commands[0]).toBe('bots');
 
+    // An app that quits by itself can be gone before `start` answers, and the
+    // answer then rightly says stopped: a macOS runner saw its exit settled
+    // before the reply. The user quits only once the app is seen running.
     const started = await client.call('plugins.app', { id: 'bots', action: 'start' });
     expect(started.app?.status).toBe('running');
+    fake.quit();
     await waitFor(() => app().status === 'stopped');
     expect(app()).toMatchObject({ enabled: true, status: 'stopped', exitCode: 0, error: null, startedAt: null });
     const seen = JSON.parse(readFileSync(join(fake.home, 'seen.json'), 'utf8')) as { args: string[]; cwd: string; env: Record<string, string | null> };

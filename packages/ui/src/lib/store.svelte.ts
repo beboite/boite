@@ -519,6 +519,7 @@ export class Store {
   mergeBack(...args: Parameters<Threads['mergeBack']>) { return this.#ctx.threads.mergeBack(...args); }
   fork(...args: Parameters<Threads['fork']>) { return this.#ctx.threads.fork(...args); }
   open(...args: Parameters<Threads['open']>) { return this.#ctx.threads.open(...args); }
+  preload(threadId: ThreadId) { return this.#ctx.threads.preloads.preload(threadId); }
   loadToolOutput(...args: Parameters<Threads['loadToolOutput']>) { return this.#ctx.threads.loadToolOutput(...args); }
   loadMessageAttachment(...args: Parameters<Threads['loadMessageAttachment']>) { return this.#ctx.threads.loadMessageAttachment(...args); }
   /** The light copy of a deferred picture the timeline draws (`store/display-images.ts`); the original stays with `loadMessageAttachment`. */
