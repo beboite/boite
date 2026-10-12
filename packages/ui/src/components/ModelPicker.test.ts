@@ -172,6 +172,12 @@ test('a model probe that resolves after navigation cannot update the next thread
   await waitFor(() => store.threads.some((thread) => thread.id === first.id) && store.threads.some((thread) => thread.id === next.id));
   await store.open(first.id);
   await waitFor(() => store.openThread?.id === first.id);
+  // After a reconnect the rows on screen are the browser's: the core has not
+  // listed them on this connection, so a pick reads the catalog before it lands.
+  client.drop();
+  await client.restore();
+  await waitFor(() => store.connection === 'ready' && !store.isProbing('claude', 'a-claude-main'));
+  expect(store.catalogHas('claude', 'a-claude-main', 'claude-opus-5-5')).toBe(false);
 
   let now = Date.now();
   vi.spyOn(Date, 'now').mockImplementation(() => now);
@@ -190,8 +196,7 @@ test('a model probe that resolves after navigation cannot update the next thread
     const update = vi.spyOn(store, 'update');
     document.querySelector<HTMLButtonElement>('[data-testid=composer-picker]')!.click();
     await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null && document.querySelector('[data-model="claude-opus-5-5"]') !== null);
-    // Opening the picker reused the fresh catalog. Age it only after its rows
-    // appeared, so the model click itself starts the held refresh.
+    // Opening the picker started the held read; the click waits on it.
     now += 5 * 60_000 + 1;
     document.querySelector<HTMLButtonElement>('[data-model="claude-opus-5-5"]')!.click();
     await waitFor(() => heldProbes === 1);
@@ -307,4 +312,44 @@ test('a thread whose provider is turned off says so beside the picker, and the c
   store.showChat();
   expect(await store.setProviderEnabled(provider.id, true)).toBe(true);
   await waitFor(() => chip() === null);
+});
+
+test('a model the core already listed is picked at once, even while its list is read again', async () => {
+  // Claude probes hold while `hold` is set: the refresh below reads for as long as the test wants.
+  const original = FakeClient.prototype.call;
+  let hold = false;
+  vi.spyOn(FakeClient.prototype, 'call').mockImplementation(async function (this: FakeClient, method, params) {
+    if (method === 'providers.probe' && (params as { providerId: string }).providerId === 'claude') await waitFor(() => !hold);
+    return original.call(this, method, params) as never;
+  });
+  window.history.replaceState(null, '', '/?fake=1&open=recent');
+  const target = document.createElement('div');
+  document.body.appendChild(target);
+  store.booted = false;
+  store.openThread = null;
+  store.draft = null;
+  store.composerStates = {};
+  closeTour();
+  running = mount(App, { target });
+  await waitFor(() => store.booted && (store.openThread !== null || store.draft !== null));
+  document.querySelector<HTMLButtonElement>('[data-testid=new-thread]')!.click();
+  await waitFor(() => store.draft !== null);
+
+  const probing = () => document.querySelector('[data-testid=composer-picker-menu] [data-testid=picker-probing]');
+  document.querySelector<HTMLButtonElement>('[data-testid=composer-picker]')!.click();
+  await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
+  document.querySelector<HTMLButtonElement>('[data-testid=composer-picker-menu] [data-provider=claude]')!.click();
+  await waitFor(() => rows() > 0 && probing() === null);
+
+  hold = true;
+  document.querySelector<HTMLButtonElement>('[data-testid=picker-refresh]')!.click();
+  await waitFor(() => probing() !== null);
+  const row = document.querySelector<HTMLButtonElement>('[data-testid=composer-picker-menu] [data-model="claude-fable-5-1"]')!;
+  row.click();
+  flushSync();
+  // No wait for the agent: the choice moved and the picker is closing.
+  expect(store.draftChoice).toMatchObject({ providerId: 'claude', model: 'claude-fable-5-1' });
+  expect(document.querySelector('[data-testid=composer-picker]')!.getAttribute('aria-expanded')).toBe('false');
+  hold = false;
+  await waitFor(() => !store.isProbing('claude', store.draftChoice!.accountId));
 });

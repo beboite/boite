@@ -254,7 +254,9 @@
   --color-composer-surface: var(--color-surface-2);
   --color-activity-surface: var(--color-surface);
   --color-composer-focus: var(--color-edge);
-  --color-composer-halo: transparent;
+  /* The focused composer's light: a soft bloom under it, none where the browser cannot mix the accent. */
+  --composer-glow: 0 0 transparent;
+  --composer-edge: transparent;
   --composer-glaze: linear-gradient(145deg, rgb(255 255 255 / 0.055), rgb(255 255 255 / 0.012) 48%, transparent);
   --shadow-composer: 0 6px 20px rgb(0 0 0 / 0.24), inset 0 1px 0 rgb(255 255 255 / 0.06);
   --control-glaze: var(--composer-glaze);
@@ -380,6 +382,8 @@
      100 ms before it moved. */
   --dur-slide: 300ms;
   --dur-slide-out: 200ms;
+  /* How long a Settings card a conversation pointed at stays ringed. */
+  --dur-flash: 1800ms;
   --ease-slide: cubic-bezier(0.2, 0, 0, 1);
   --z-whip: 100;
   --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
@@ -669,6 +673,10 @@
 .typing > span { width: 5px; height: 5px; border-radius: var(--radius-full); background: currentColor; animation: typing var(--dur-typing) ease-in-out infinite; animation-play-state: var(--typing-state, running); }
 .typing > span:nth-child(2) { animation-delay: var(--dur-typing-step); }
 .typing > span:nth-child(3) { animation-delay: calc(var(--dur-typing-step) * 2); }
+/* A Settings card a settings card in a conversation pointed at: one accent ring
+   that fades. No movement, so reduced motion keeps it. */
+.settings-flash { animation: settings-flash var(--dur-flash) var(--ease-out-quint); }
+@keyframes settings-flash { 0%, 40% { outline: 2px solid var(--color-accent); outline-offset: 3px; } 100% { outline: 2px solid transparent; outline-offset: 3px; } }
 @keyframes typing { 0%, 60%, 100% { opacity: .4; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
 @media (prefers-reduced-motion: reduce) { .typing > span { animation: none; } }
 html[data-motion='reduced'] .typing > span { animation: none; }
@@ -759,10 +767,16 @@ html[data-chat-width='full'] {
     --color-composer-surface: color-mix(in oklab, var(--color-surface-2) 82%, transparent);
     --color-activity-surface: color-mix(in oklab, var(--color-surface) 94%, transparent);
     --color-composer-focus: color-mix(in oklch, var(--color-accent) 55%, transparent);
-    --color-composer-halo: color-mix(in oklch, var(--color-accent) 13%, transparent);
+    /* A diffuse bloom of the accent under the box and a faint wide halo, no hard ring; the edge itself is a gradient (Composer.svelte). */
+    --composer-glow: 0 12px 40px -14px color-mix(in oklch, var(--color-accent) 55%, transparent), 0 0 0 5px color-mix(in oklch, var(--color-accent) 5%, transparent);
+    --composer-edge: linear-gradient(to bottom, color-mix(in oklch, var(--color-accent) 85%, var(--color-foreground)), color-mix(in oklch, var(--color-accent) 50%, transparent) 45%, color-mix(in oklch, var(--color-accent) 24%, transparent));
     --color-control-surface: color-mix(in oklab, var(--color-surface-2) 82%, transparent);
     --color-control-hover: color-mix(in oklab, var(--color-surface-3) 90%, transparent);
     --color-control-primary-hover: color-mix(in oklch, var(--color-accent) 88%, var(--color-foreground));
+  }
+  /* On a light page the bloom reads stronger: half as much. */
+  [data-theme='light'] {
+    --composer-glow: 0 12px 36px -16px color-mix(in oklch, var(--color-accent) 40%, transparent), 0 0 0 4px color-mix(in oklch, var(--color-accent) 6%, transparent);
   }
 }
 
@@ -1727,6 +1741,30 @@ html[data-glass] #app {
     background: color-mix(in oklab, var(--color-background) 90%, transparent);
   }
 }
+
+/* The focused composer (Composer.svelte): the accent lights its edge, bright along the top and fading
+   down the sides, and lays a soft bloom under the box rather than a hard ring around it. Under
+   `.composer-wrap` so it outranks the component's own resting shadow whichever stylesheet loads last. */
+.composer-wrap .composer::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  z-index: 2;
+  padding: 1px;
+  border-radius: inherit;
+  background: var(--composer-edge);
+  -webkit-mask: linear-gradient(black, black) content-box, linear-gradient(black, black);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(black, black) content-box, linear-gradient(black, black);
+  mask-composite: exclude;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-3) var(--ease-out-quint);
+}
+.composer-wrap .composer:focus-within { border-color: var(--color-composer-focus); box-shadow: var(--composer-rest), var(--composer-glow); }
+.composer-wrap .composer:focus-within::before { opacity: 1; }
+/* The gradient draws the whole edge; without color-mix it is transparent and the accent hairline stays. */
+@supports (color: color-mix(in oklch, red 50%, blue)) { .composer-wrap .composer:focus-within { border-color: transparent; } }
 
 @supports (color: color-mix(in oklab, white 50%, black)) {
   html[data-theme='grain'] .composer {

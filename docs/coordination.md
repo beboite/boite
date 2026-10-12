@@ -34,24 +34,6 @@ require messages tied to work, without courtesy replies or polling. Pause or
 Off stops automatic delivery. Messages are limited to 4,000 characters, batched
 up to four and expire after 15 minutes while waiting.
 
-Consecutive agent exchanges appear in the conversation as compact counts:
-"Forwarded 13 messages" and "Received 20 messages". Ordinary messages and
-activity markers separate bursts. A count opens the Messages tab in the right
-panel, filtered to that direction and scrolled to the selected burst. The tab
-also opens from the panel launcher and offers All, Sent and Received filters.
-It updates with new mail and keeps its filter across reloads. Under its count,
-a summary names the threads on the other end, each once. A message that is
-unconfirmed, expired or rejected shows that status in the Messages tab.
-
-The tab retains each message's bubble, text, age and delivery status. The arrow,
-thread title, project and machine identify the other conversation. Received
-messages use the accent color on the right; agent-authored outgoing messages
-sit on the left. User-authored delegation prompts retain the accent color.
-Click or tap a bubble's header to open
-the source thread for incoming mail or the recipient thread for outgoing mail.
-Cross-machine links use the connected machine's core identity; an unconnected
-machine asks the user to connect it in Settings. Two checkmarks indicate receipt,
-with the delivery stage available to screen readers and on hover.
 Coordination settings hold contacts and permissions. Pause suspends
 automatic coordination; Resume enables it again. Stop
 and a failed turn pause coordination too. A core restart pauses conversations
@@ -61,6 +43,44 @@ message in that conversation, so the agent can be woken again; a pause you set
 in Communication settings stays until you resume it. Paired devices can read the panel;
 only an owner
 connection can change permissions.
+
+## Discussions
+
+Agent mail is grouped by discussion: everything a thread exchanged with one
+other conversation, whichever way it went and whether it is coordination or
+delegation mail. A subagent's results and its coordination letters land in the
+same discussion.
+
+In the chat, a burst of mail shows one row per discussion it touched, in the
+order they started: the other conversation's title, a tag for how it relates to
+this thread, its project and machine, the last thing said and how many letters
+went each way. Ordinary messages and activity markers separate bursts. A burst
+that touched more than four discussions lists four and a line that opens the
+rest. Notices to a steward stay one quiet line.
+
+A row opens the Discussions tab in the right panel on that discussion, scrolled
+to the first letter of the burst, which flashes once. The tab lists every
+discussion of the thread, the most recent first, with the same title, tag,
+place and last words. Opening one shows the back and forth: what reaches this
+thread's agent sits on the right in the accent color, like the user's prompts;
+its own letters sit on the left, like its answers. A delegation prompt the user
+typed sits on the right under "You", a subagent's result is labelled "Result",
+and the steward's letters keep the steward's color on the left. Letters of one
+side a few minutes apart share one time stamp, a silence of twenty minutes gets
+a line of its own, and a reply to an earlier letter quotes it. Two checkmarks
+mark an outgoing letter that was received or delivered; an unconfirmed, expired or
+rejected letter shows that state, and a tap shows the reason. The header names
+the other agent, its model and what it declared it works on, and opens its
+thread. Cross-machine links use the connected machine's core identity; an
+unconnected machine asks the user to connect it in Settings. A wide panel keeps
+the list beside the open discussion; a narrow one or a phone swaps them, with a
+back arrow.
+
+The tag says who started or delegated whom: Started this thread, Started from
+here, Parent, Subagent, Steward, or Looked after for a thread a steward looks
+after. The core works it out when it reads letters out
+(`AgentLetter.relation`), from the journal, so a delegation or a steward grant
+that began later still shows.
 
 ## Stewards and notices
 
@@ -138,10 +158,31 @@ lookup. Directional destination read grants remain required.
 
 ## What the agent receives
 
-An incoming message is recorded separately from user messages and displayed as
-a forwarded agent message in the timeline. Provider input labels the body as
-another agent's. It does not become a user request or grant permission to run a
-tool.
+An incoming message is recorded separately from user messages and shown in its
+discussion. Provider input labels the body as another agent's. It does not
+become a user request or grant permission to run a tool.
+
+Each letter names its sender in words the recipient can act on, so a short
+message is not mistaken for noise: `from.thread` is the sender's conversation
+title, `from.address` what `boite agents read` takes, `from.relation` how it
+relates to the recipient ("started this thread; its request is your task", "a
+thread you started; it reports to you", "your parent", "your subagent", the
+steward, same project, another project or machine), `from.project`,
+`from.machine` when it is elsewhere, `from.agent`, `from.branch`,
+`from.status` and `from.about`, what it works on. `about` is the sender's
+declared resources; a sender on the same core without any falls back to the
+first request of its conversation, cut to 200 characters. Another machine
+shares its resources only, never its chat. A reply carries `inReplyTo.yours`,
+the start of the recipient's own message it answers. The core id hash, the
+mode and the timestamps stay out. When the context is still unclear, the
+recipient is told to read the sender's conversation instead of dismissing the
+message.
+
+Agents are told to write compactly: one to three short lines, facts and asks,
+no greeting, recap or sign-off, since the recipient already sees who wrote.
+`boite agents send` and `reply` print a reminder past 600 characters.
+Delegation messages carry the same instruction and name the sender as the
+recipient's parent or subagent.
 
 The recipient is told to cooperate with a reasonable request that fits its
 permissions: free disk, memory or ports, remove what its own work generated and
@@ -155,8 +196,8 @@ what you no longer use, the disk is full" is acted on instead of refused.
 
 Sent and received exchanges stay where they occurred in the conversation.
 Continued text and new tools start after each exchange; a tool already running
-keeps its original card. Consecutive exchanges collapse into counters within
-one turn. The elapsed-time footer follows the last visible message or exchange,
+keeps its original card. Consecutive exchanges within one turn collapse into
+one row per discussion. The elapsed-time footer follows the last visible message or exchange,
 including turns that only receive and forward messages.
 
 Claude receives messages at its next PostToolUse hook. Codex uses `turn/steer`

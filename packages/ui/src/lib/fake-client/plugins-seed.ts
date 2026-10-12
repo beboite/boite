@@ -22,9 +22,18 @@ export function appCommands(executable: string, pluginId: string): string[] {
   return [executable, `environment: BOITE_CORE_URL=<this core> BOITE_TOKEN=<the owner token> BOITE_PLUGIN_ID=${pluginId}`];
 }
 
+/** What the fake update sources publish: a check finds these when they differ from what is installed. */
+export const FAKE_RELEASES: Record<string, { version: string; commit: string; artifact: { url: string; sha256: string } }> = {
+  bots: {
+    version: '0.1.10', commit: '6b2e4d8f0a1c3e5b7d9f2a4c6e8b0d1f3a5c7e9b',
+    artifact: { url: 'https://github.com/beboite/bots/releases/download/v0.1.10/bots-x86_64-pc-windows-msvc.exe', sha256: '2c4e6a8b0d1f3a5c7e9b2d4f6a8c0e1b3d5f7a9c2e4b6d8f0a1c3e5b7d9f2a4c' }
+  }
+};
+
 /**
  * Every state the Plugins page draws, in the order the core lists them: Bots,
- * recommended first, installed and running as a desktop app; kebacc-switcher,
+ * recommended first, installed and running as a desktop app, with an update
+ * source a check finds 0.1.10 at; kebacc-switcher,
  * recommended and not installed yet; then one added from a URL and installed,
  * one stuck mid-download, and one whose installed.json the core refuses.
  */
@@ -35,10 +44,15 @@ export function fakePlugins(): PluginState[] {
     {
       ...base, id: 'bots', name: 'B.O.T.S', origin: 'recommended',
       description: 'Little robots on your desktop that follow your Boite agents, answer your questions and keep you company while you work.',
-      homepage: 'https://github.com/beboite/bots', version: '0.1.4', availableVersion: '0.1.4', status: 'installed', source: null,
-      artifact: { url: 'https://github.com/beboite/bots/releases/download/v0.1.4/bots-x86_64-pc-windows-msvc.exe', sha256: 'd39d6aa1883f45d6a96d89e6032fd75e466001313a5da336b1764c6254cb0553' },
+      homepage: 'https://github.com/beboite/bots', version: '0.1.9', availableVersion: '0.1.9', status: 'installed', source: null,
+      artifact: { url: 'https://github.com/beboite/bots/releases/download/v0.1.9/bots-x86_64-pc-windows-msvc.exe', sha256: 'b21ad5a3d248f8653808944021e4b84293eb0653abb1b65a76a265aaa3de5820' },
       commands: appCommands('bots', 'bots'), pools: [],
-      app: { enabled: true, status: 'running', pid: 4242, exitCode: null, error: null, startedAt: Date.parse('2026-10-10T08:00:00Z') }
+      app: { enabled: true, status: 'running', pid: 4242, exitCode: null, error: null, startedAt: Date.parse('2026-10-10T08:00:00Z') },
+      updates: {
+        source: { url: 'https://github.com/beboite/bots', ref: 'main' }, checking: false,
+        checkedAt: Date.parse('2026-10-10T08:01:00Z'), nextCheckAt: Date.parse('2026-10-10T14:01:00Z'),
+        available: null, ignored: null, error: null
+      }
     },
     {
       ...base, id: 'kebacc-switcher', name: 'kebacc-switcher', origin: 'recommended',

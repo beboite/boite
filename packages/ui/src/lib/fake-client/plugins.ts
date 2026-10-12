@@ -11,7 +11,7 @@ import {
   type RpcResult,
 } from '@boite/contracts';
 import { RpcFailure } from '../client';
-import { appCommands, fakePluginPools, fakePlugins, PLUGIN_STEPS, poolCommands } from './plugins-seed';
+import { appCommands, FAKE_RELEASES, fakePluginPools, fakePlugins, PLUGIN_STEPS, poolCommands } from './plugins-seed';
 import { INSTALL_STEP_MS } from './providers';
 
 type PluginMethod = Extract<RpcMethodName, `plugins.${string}`>;
@@ -90,7 +90,36 @@ export class FakePlugins {
       this.host.emit('plugins.updated', structuredClone(plugin));
       return structuredClone(plugin);
     },
+    'plugins.checkUpdates': (params) => { return this.#checkUpdates(params?.id); },
   };
+
+  /**
+   * What the core's check answers, without git: each source "publishes" its
+   * FAKE_RELEASES entry, offered while it is not the version installed.
+   */
+  async #checkUpdates(id: string | undefined): Promise<PluginState[]> {
+    const sourced = this.#plugins.filter((plugin) => plugin.updates != null);
+    if (id !== undefined && !sourced.some((plugin) => plugin.id === id)) {
+      throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `plugin ${id} has no update source; expected a recommended plugin that names an update source: ${sourced.map((plugin) => plugin.id).join(', ')}` });
+    }
+    const checked = sourced.filter((plugin) => id === undefined || plugin.id === id);
+    for (const plugin of checked) {
+      plugin.updates = { ...plugin.updates!, checking: true };
+      this.host.emit('plugins.updated', structuredClone(plugin));
+    }
+    await new Promise((resolve) => setTimeout(resolve, this.host.delayMs() * 10));
+    // The page reads these against the wall clock, not the fake's.
+    const at = Date.now();
+    for (const plugin of checked) {
+      const release = FAKE_RELEASES[plugin.id];
+      const offered = release !== undefined && plugin.status !== 'installing' && release.version !== plugin.version;
+      plugin.updates = { ...plugin.updates!, checking: false, checkedAt: at, nextCheckAt: at + 6 * 3_600_000, error: null, ignored: null,
+        available: offered ? { version: release.version, commit: release.commit, checkedAt: at } : null };
+      if (offered) Object.assign(plugin, { availableVersion: release.version, artifact: release.artifact });
+      this.host.emit('plugins.updated', structuredClone(plugin));
+    }
+    return structuredClone(checked);
+  }
 
   /** A desktop app the fake has just started, as the core reports it. */
   #running(app: PluginAppState | null): PluginAppState {
@@ -135,6 +164,8 @@ export class FakePlugins {
       else {
         // An enabled desktop app starts once its install or update is in place.
         Object.assign(plugin, { status: 'installed', version: plugin.availableVersion, progress: 0, error: null, rejected: null });
+        // Installed, the release found is no longer an update.
+        if (plugin.updates?.available != null) plugin.updates = { ...plugin.updates, available: null };
         if (plugin.app?.enabled) plugin.app = this.#running(plugin.app);
       }
       this.host.emit('plugins.updated', structuredClone(plugin));

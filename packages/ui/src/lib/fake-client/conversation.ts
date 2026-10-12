@@ -18,6 +18,12 @@ export const QUESTION_OPTIONS = [
 export const ASYNC_QUESTION_TEXT = 'Which port should the dev server take?';
 
 export const ASYNC_QUESTION_OPTIONS = ['5173', '4173'];
+/** `boite settings request|open`: what the fake agent asks for on each marker. */
+export const SETTING_MARKERS: [string, { reason: string } & ({ key: string; value: unknown } | { page: string; section?: string })][] = [
+  ['[settings]', { reason: 'Your Rust builds stall at the CPU cap. 90% leaves room for the game you are running.', key: 'agentCpuCapPercent', value: 90 }],
+  ['[settings-lan]', { reason: 'To pair your phone over Wi-Fi, this computer has to be reachable on the local network.', key: 'listenOnLan', value: true }],
+  ['[settings-open]', { reason: 'Claude is not signed in yet. Sign in here, then send me a message.', page: 'accounts', section: 'provider-claude' }],
+];
 
 export const DIFF_PATH = 'src/app.ts';
 

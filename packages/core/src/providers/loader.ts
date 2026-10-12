@@ -17,7 +17,8 @@ import { InstallManager } from './install.ts';
 import { compareVersions, INSTALL_LATEST_MAX_AGE_MS, LATEST_MAX_AGE_MS, resolveLatestInstall } from './install-latest.ts';
 import { detectResolves, HOST_CANDIDATES, hostAgentsEnabled, launcherScriptOnly, profileFor, resolveCommand } from './resolve.ts';
 import { Rejection, validateDescriptor } from './validate.ts';
-import { attachVersions, loadVersions, versionsSettled } from './versions.ts';
+import { attachVersions, loadVersions, readVersion, versionsSettled } from './versions.ts';
+import { programName } from '../threads/provider-process-log.ts';
 import { invalidParams, notFound, refused } from '../errors.ts';
 import antigravityShipped from './shipped/antigravity.json';
 import antigravityCliShipped from './shipped/antigravity-cli.json';
@@ -29,6 +30,7 @@ import opencodeShipped from './shipped/opencode.json';
 import opencodeV2Shipped from './shipped/opencode-v2.json';
 import piShipped from './shipped/pi.json';
 import echoShipped from './shipped/echo.json';
+import { detectionLogger, installLogger } from './install-log.ts';
 
 /**
  * Echo is the fake agent the tests and the bench drive: no CLI, it repeats the
@@ -461,8 +463,23 @@ export class ProviderRegistry {
 }
 
 export function registerProviderMethods(core: Core): void {
+  const logInstall = installLogger(core);
+  // The loaded descriptors in full, what each resolves to and the rejections:
+  // a reload that changes none of it leaves every client and cached model list alone.
+  const fingerprint = (result: ProviderLoadResult): string =>
+    JSON.stringify([result, result.loaded.map((summary) => core.providers.get(summary.id))]);
+  let listed = fingerprint(core.providers.list());
+  /** True when the list differs from the last one announced. */
+  const noteListed = (result: ProviderLoadResult): boolean => {
+    const now = fingerprint(result);
+    if (now === listed) return false;
+    listed = now;
+    return true;
+  };
   core.providers.installs.attach({
     emit: (payload) => {
+      // The installer would take a throw here for a failed install.
+      try { logInstall(payload); } catch { /* Logging must not break installs. */ }
       core.bus.emit('providers.installProgress', payload);
     },
     updated: () => {
@@ -472,7 +489,10 @@ export function registerProviderMethods(core: Core): void {
       // installer, which would take it for a failed install and delete the release.
       try { core.accounts.ensureDefaults(); }
       catch (error) { core.log('error', `default accounts after an install: ${error instanceof Error ? error.message : String(error)}`); }
-      core.bus.emit('providers.updated', core.providers.list());
+      // The announce fingerprint follows, so the next version read does not announce this list again.
+      const list = core.providers.list();
+      noteListed(list);
+      core.bus.emit('providers.updated', list);
     },
     log: (level, message) => {
       core.log(level, message);
@@ -496,33 +516,67 @@ export function registerProviderMethods(core: Core): void {
     return core.providers.list();
   };
   core.router.register('providers.list', settledList);
-  // The loaded descriptors in full, what each resolves to and the rejections:
-  // a reload that changes none of it leaves every client and cached model list alone.
-  const fingerprint = (result: ProviderLoadResult): string =>
-    JSON.stringify([result, result.loaded.map((summary) => core.providers.get(summary.id))]);
   // A program that just reported its version may be what a provider was
   // waiting for: it is listed as installed from now on, and a login it already
   // has is adopted before the clients hear of it.
-  let listed = fingerprint(core.providers.list());
+  // Every list the clients hear of is logged where it changed, whichever path emitted it
+  // (a reload, an install, an agent update); the first one once the version reads settle,
+  // so a program not read yet is not logged missing before it is found.
+  const logDetection = detectionLogger(core);
+  // Lists announced while the first reads land are partial: the settled one below comes first.
+  let settledOnce = false;
+  core.bus.onAny((name, payload) => {
+    if (name !== 'providers.updated' || !settledOnce) return;
+    const result = payload as ProviderLoadResult;
+    // Runs inside every emit, the installer's `updated` callback included, where a throw reads as a failed install.
+    try { logDetection(result.loaded, result.rejected.length); } catch { /* Logging must not break installs or announces. */ }
+  });
   // One fingerprint for every change found behind a list, so the next one is not announced twice.
   const announce = (after: string): void => {
     if (core.stopping || core.journal.isClosed()) return;
-    const now = fingerprint(core.providers.list());
-    if (now === listed) return;
-    listed = now;
+    if (!noteListed(core.providers.list())) return;
     try { core.accounts.ensureDefaults(); }
     catch (error) { core.log('error', `default accounts after ${after}: ${error instanceof Error ? error.message : String(error)}`); }
     core.bus.emit('providers.updated', core.providers.list());
   };
   core.providers.attachVersions(
-    (program, args) => programOutput(core, program, args),
+    (program, args) => {
+      const at = performance.now();
+      const name = programName(program);
+      return programOutput(core, program, args).then((output) => {
+        // A log that throws must not turn a good read into a failed one.
+        try {
+          const version = readVersion(output);
+          core.logs.record(version === null ? 'warn' : 'debug', version === null ? `${name} answered its version question with no version in ${Math.round(performance.now() - at)} ms` : `${name} reports version ${version}`, {
+            source: 'providers', event: 'provider.version-read', durationMs: performance.now() - at, data: { program: name, version },
+          });
+        } catch { /* the read stands */ }
+        return output;
+      }, (error: unknown) => {
+        // The message names the program by its full path; the log names only the file.
+        try { core.logs.warn(`Reading the version of ${name} failed: ${(error instanceof Error ? error.message : String(error)).split(program).join(name)}`, { source: 'providers', event: 'provider.version-failed', durationMs: performance.now() - at, data: { program: name } }); }
+        catch { /* the original error is what the caller sees */ }
+        throw error;
+      });
+    },
     () => announce('a version read'),
   );
+  // After attachVersions, so the wait covers the reads it starts: a program not read yet is not logged missing.
+  void core.providers.settle().then(() => {
+    settledOnce = true;
+    if (core.stopping || core.journal.isClosed()) return;
+    // An unhandled rejection here would stop the core: logging must not break startup.
+    try {
+      const first = core.providers.list();
+      logDetection(first.loaded, first.rejected.length);
+    } catch { /* the next list is logged */ }
+  }, () => { settledOnce = true; });
   core.router.register('providers.reload', async () => {
     const before = fingerprint(core.providers.list());
     core.providers.load();
     const result = await settledList();
     core.accounts.ensureDefaults();
+    noteListed(result);
     if (fingerprint(result) !== before) core.bus.emit('providers.updated', result);
     return result;
   });
@@ -566,6 +620,7 @@ export function registerProviderMethods(core: Core): void {
       }
     }
     const result = core.providers.list();
+    noteListed(result);
     core.bus.emit('providers.updated', result);
     return result;
   });

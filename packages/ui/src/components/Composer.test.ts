@@ -1850,3 +1850,116 @@ test('a delayed side fork acknowledgement preserves navigation to another conver
   expect(store.openThread!.id).toBe('t-descriptors');
   expect(document.querySelector('[data-testid=btw-answer]')).toBeNull();
 });
+
+/** One keystroke's worth of editing: the browser's beforeinput, the new value, then input. */
+function edit(inputType: string, value: string, caret: number, data: string | null = null): void {
+  const field = input();
+  field.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType, data }));
+  field.value = value;
+  field.setSelectionRange(caret, caret);
+  field.dispatchEvent(new InputEvent('input', { bubbles: true, inputType, data }));
+}
+
+/** jsdom has no DataTransfer: the clipboard a copy writes and a paste reads, as a plain map. */
+function clipboard(): DataTransfer {
+  const data = new Map<string, string>();
+  return {
+    items: [],
+    getData: (type: string) => data.get(type) ?? '',
+    setData: (type: string, value: string) => { data.set(type, value); }
+  } as unknown as DataTransfer;
+}
+
+function clipboardEvent(type: 'copy' | 'cut' | 'paste', data: DataTransfer): Event {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'clipboardData', { value: data });
+  input().dispatchEvent(event);
+  return event;
+}
+
+test('Ctrl+Z after deleting everything and a stray key brings back the text and its images, and Ctrl+Y redoes', async ({ app: _app }) => {
+  await store.open('t-trace');
+  await waitFor(() => !store.busy);
+  await type('Look at ');
+  paste(pngFile('first.png'));
+  await waitFor(() => input().value === 'Look at [Image 1] ');
+  paste(pngFile('second.png'));
+  await waitFor(() => input().value === 'Look at [Image 1] [Image 2] ');
+  const full = input().value;
+  input().focus();
+  // Ctrl+A, Backspace: every reference goes, and every picture with it.
+  input().setSelectionRange(0, full.length);
+  edit('deleteContentBackward', '', 0);
+  await waitFor(() => chips().length === 0);
+  edit('insertText', 'x', 1, 'x');
+  expect(input().value).toBe('x');
+
+  expect(press('z', { ctrlKey: true })).toBe(false);
+  await waitFor(() => input().value === '');
+  press('z', { ctrlKey: true });
+  await waitFor(() => input().value === full && chips().length === 2);
+  expect(chips().map(chip => chip.getAttribute('title'))).toEqual(['[Image 1] · first.png', '[Image 2] · second.png']);
+  expect([input().selectionStart, input().selectionEnd]).toEqual([0, full.length]);
+
+  press('y', { ctrlKey: true });
+  await waitFor(() => input().value === '' && chips().length === 0);
+  press('z', { ctrlKey: true, shiftKey: true });
+  await waitFor(() => input().value === 'x');
+  // The context menu's Undo is ours too, and never reaches the textarea's own stack.
+  const undo = new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'historyUndo' });
+  input().dispatchEvent(undo);
+  expect(undo.defaultPrevented).toBe(true);
+  await waitFor(() => input().value === '');
+
+  // A sent prompt is gone for good: undo after Enter brings nothing back.
+  press('z', { ctrlKey: true });
+  await waitFor(() => input().value === full);
+  await type('sent prompt');
+  input().focus();
+  press('Enter');
+  await waitFor(() => input().value === '' && !store.busy);
+  press('z', { ctrlKey: true });
+  await new Promise(resolve => setTimeout(resolve, 10));
+  expect(input().value).toBe('');
+  expect(chips()).toEqual([]);
+});
+
+test('copying an image reference carries its picture to another composer, and stays text in its own', async ({ app: _app }) => {
+  await store.open('t-trace');
+  await waitFor(() => !store.busy);
+  await type('A ');
+  paste(pngFile('first.png'));
+  await waitFor(() => input().value === 'A [Image 1] ');
+  paste(pngFile('second.png'));
+  await waitFor(() => input().value === 'A [Image 1] [Image 2] ');
+  input().focus();
+  input().setSelectionRange(12, 21);
+  const copied = clipboard();
+  expect(clipboardEvent('copy', copied).defaultPrevented).toBe(true);
+  expect(copied.getData('text/plain')).toBe('[Image 2]');
+
+  // Back into the same prompt it is plain text: its reference already names that picture.
+  input().setSelectionRange(input().value.length, input().value.length);
+  expect(clipboardEvent('paste', copied).defaultPrevented).toBe(false);
+  expect(chips()).toHaveLength(2);
+
+  await store.open('t-descriptors');
+  await waitFor(() => store.openThread?.id === 't-descriptors' && !store.busy);
+  await type('see ');
+  input().focus();
+  input().setSelectionRange(4, 4);
+  expect(clipboardEvent('paste', copied).defaultPrevented).toBe(true);
+  await waitFor(() => input().value === 'see [Image 1]');
+  expect(chips().map(chip => chip.getAttribute('title'))).toEqual(['[Image 1] · second.png']);
+  // Twice is the same picture under the same number, and the text-only fallback finds the copy too.
+  const stripped = clipboard();
+  stripped.setData('text/plain', '[Image 2]');
+  expect(clipboardEvent('paste', stripped).defaultPrevented).toBe(true);
+  await waitFor(() => input().value === 'see [Image 1][Image 1]');
+  expect(chips()).toHaveLength(1);
+  // The paste is one step: undo takes its text and its picture together.
+  press('z', { ctrlKey: true });
+  press('z', { ctrlKey: true });
+  await waitFor(() => input().value === 'see ' && chips().length === 0);
+  expect(store.composerStates['t-trace']!.attachments).toHaveLength(2);
+});

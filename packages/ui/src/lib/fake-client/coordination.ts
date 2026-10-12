@@ -1,8 +1,9 @@
 /** Coordination between threads, on this core and on the other fake cores it trusts. */
-import { defaultCoordinationConfig, RpcErrorCode, type AgentContact, type AgentLetter, type AgentMatch, type CoordinationConfig, type CoordinationPeer, type CoordinationView, type Thread, type ThreadId } from '@boite/contracts';
+import { defaultCoordinationConfig, RpcErrorCode, type AgentAddress, type AgentContact, type AgentLetter, type AgentMatch, type AgentRelation, type CoordinationConfig, type CoordinationPeer, type CoordinationView, type Thread, type ThreadId } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { archiveProject } from './project-archive';
 import type { FakeContext, FakeMethods } from './context';
+import { stewardOver } from './stewards';
 
 /** Every fake core of this page by id, what a remote letter or directory reaches. */
 const cores = new Map<string, FakeContext>();
@@ -48,13 +49,35 @@ export function coordinationConfig(ctx: FakeContext, threadId: ThreadId): Coordi
   return ctx.coordination.get(threadId) ?? defaultCoordinationConfig();
 }
 
+/** The thread whose agent started this one, from the mark on its first prompt. */
+function starterOf(thread: Thread): ThreadId | undefined {
+  for (const part of thread.messages.find(message => message.role === 'user')?.parts ?? []) if (part.type === 'text' && part.startedBy) return part.startedBy.threadId;
+  return undefined;
+}
+
+/** How `other` relates to `threadId`, worked out the way the real core's `Coordination.relation` does. */
+function relationOf(ctx: FakeContext, threadId: ThreadId, other: AgentAddress): AgentRelation {
+  if (other.coreId !== 'local' && other.coreId !== ctx.identity.coreId) return 'machine';
+  const self = ctx.threads.get(threadId);
+  const peer = ctx.threads.get(other.threadId);
+  if (!self || !peer) return 'other-project';
+  if (starterOf(self) === peer.id) return 'starter';
+  if (starterOf(peer) === self.id) return 'started';
+  if (self.parentThreadId === peer.id) return 'parent';
+  if (peer.parentThreadId === self.id) return 'child';
+  if (stewardOver(ctx, peer.id, self.id)) return 'steward';
+  if (stewardOver(ctx, self.id, peer.id)) return 'stewarded';
+  return self.projectId === peer.projectId ? 'project' : 'other-project';
+}
+
 function coordinationView(ctx: FakeContext, threadId: ThreadId): CoordinationView {
   const config = coordinationConfig(ctx, threadId);
   const letters = ctx.letters.get(threadId) ?? [];
+  const mine = (letter: AgentLetter) => letter.from.coreId === ctx.identity.coreId && letter.from.threadId === threadId;
   return {
     self: { coreId: ctx.identity.coreId, threadId },
     config: structuredClone(config),
-    messages: structuredClone(letters),
+    messages: structuredClone(letters).map(letter => ({ ...letter, relation: relationOf(ctx, threadId, mine(letter) ? letter.to : letter.from) })),
     sent: letters.filter(letter => letter.from.coreId === ctx.identity.coreId && letter.from.threadId === threadId && letter.createdAt > ctx.now() - 3_600_000).length,
     sendLimit: null,
     wakes: 0,

@@ -32,7 +32,7 @@ afterEach(() => {
   workspace.view = 'projects';
   projectView.order = 'recent';
   projectView.keys = [];
-  projectThreadView.shelf = { idle: false, archived: false };
+  projectThreadView.shelfOpen = false;
 });
 
 async function waitFor(check: () => boolean, attempts = 2000): Promise<void> {
@@ -182,7 +182,7 @@ test('an idle project waits as a row in its fold, outside the headers that reord
   // A project without conversations goes to the Idle projects fold, as a row with no header to drag.
   const template = store.projects.find((project) => project.id === first)!;
   store.projects = [...store.projects, { ...template, id: 'quiet-project', name: 'Quiet', createdAt: 0 }];
-  projectThreadView.shelf.idle = true;
+  projectThreadView.shelfOpen = true;
   await waitFor(() => document.querySelector('[data-testid=idle-project][data-project-id="quiet-project"]') !== null);
   expect(order()).toEqual([first, second]);
   expect(document.querySelector('[data-testid=idle-project] [data-testid=project-row]')).toBeNull();

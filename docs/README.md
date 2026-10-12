@@ -23,6 +23,7 @@
 - [Workflows](workflows.md): JSON plans of delegated steps, fan-out, conditions, templates and the graph.
 - [Usage](usage.md): tokens, API cost and limits per day, provider and model.
 - [Analytics](analytics.md): optional telemetry, consent, collected fields and data controls.
+- [Diagnostics](diagnostics.md): Boite's own logs, the Settings page, anonymized exports, issue reports and what a client reports.
 - [Keyboard shortcuts](keybindings.md): defaults and customization.
 - [The right panel](panel.md): browser, changes, files, tasks, workflows and trace beside the chat.
 - [The agent's browser](browser.md): the headless browser an agent drives on its machine, watched from any device.

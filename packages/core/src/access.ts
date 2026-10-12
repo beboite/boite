@@ -18,7 +18,8 @@
  * method added tomorrow is refused to both until someone decides otherwise,
  * on purpose.
  * core.logs stays owner-only: diagnostic causes can describe other threads,
- * local paths and account failures even after credential redaction.
+ * local paths and account failures even after credential redaction. Agents
+ * read the anonymized diagnostics.* view instead, which the owner can turn off.
  * resources.usage permits paired reads of sanitized metrics; process traces,
  * resource settings and tree termination remain owner-only.
  * speech.streamStart/Chunk/Finish permit phone dictation only through the
@@ -122,6 +123,8 @@ export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMeth
   ['devices.input', 'taps, swipes, text and keys on a device open in its own conversation, as adb input would'],
   ['devices.close', 'removing a device from its own panel; powering it off closes it in every conversation, as the emulator\'s own window would'],
   ['questions.ask','a question card on its own thread that it does not wait on; the answer comes back as a message'],
+  ['agent.settings', 'the settings it may ask the user about, with their values and pages; credentials, accounts and browser profiles are not among them'],
+  ['settings.request', 'a settings card on its own thread proposing a change or pointing at a page; only the owner applies it, through settings.set'],
   ['artifacts.publish', 'explicitly sharing a bounded snapshot from its own working directory in its own conversation'],
   ['artifacts.read', 'reading back only a published snapshot belonging to its own conversation'],
   ['artifacts.view', 'showing one HTML page of its own working directory in its own conversation, embedded whole, on an opaque origin that loads and calls nothing'],
@@ -136,6 +139,11 @@ export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMeth
   ['git.diff', 'both sides of one file, for the same reason'],
   ['files.list', 'one directory of the working directory it already runs in'],
   ['files.read', 'one file of it, text inline and anything else through a ticket'],
+  // Diagnostics reach an agent anonymized, and only while the owner leaves agentLogAccess on (checked in diagnostics.ts).
+  ['diagnostics.logs', 'anonymized app records so it can tell whether Boite itself failed; paths, names and addresses are placeholders'],
+  ['diagnostics.summary', 'the anonymized environment and grouped recent problems'],
+  ['diagnostics.export', 'the anonymized export a developer reads, the same file the owner would send'],
+  ['diagnostics.issue', 'a GitHub issue draft about Boite and its prefilled link; only the owner publishes it, so an agent never posts publicly under their login'],
 ]);
 
 export function isAgentMethod(method: RpcMethodName): boolean {

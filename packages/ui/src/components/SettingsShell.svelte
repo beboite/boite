@@ -3,7 +3,7 @@
   import { tick } from 'svelte';
   import MobileSettings from './MobileSettings.svelte';
   import BrainPage from './BrainPage.svelte';
-  import { Activity, ArrowLeft, Brain, ChevronRight, Coins, FlaskConical, Gauge, House, Keyboard, Mic, Monitor, Palette, Puzzle, Settings2, ShieldCheck, SlidersHorizontal, Users } from '@lucide/svelte';
+  import { Activity, ArrowLeft, Brain, ChevronRight, Coins, FlaskConical, Gauge, House, Keyboard, Mic, Monitor, Palette, Puzzle, Settings2, ShieldCheck, SlidersHorizontal, Stethoscope, Users } from '@lucide/svelte';
   import KeyboardPage from './KeyboardPage.svelte';
   import LimitsPage from './LimitsPage.svelte';
   import PluginsPage from './PluginsPage.svelte';
@@ -16,6 +16,7 @@
   import AdvancedSettings from './AdvancedSettings.svelte';
   import AppearancePage from './AppearancePage.svelte';
   import ExperimentsPage from './ExperimentsPage.svelte';
+  import DiagnosticsPage from './DiagnosticsPage.svelte';
   import GeneralSettings from './GeneralSettings.svelte';
   import MachinesPage from './MachinesPage.svelte';
   import ResourcesPage from './ResourcesPage.svelte';
@@ -26,13 +27,14 @@
   import { providerGroups } from '../lib/provider-family';
 import { workspace } from '../lib/workspace.svelte';
   import { browserBridge } from '../lib/browser-bridge';
+  import { revealSettingsCard } from '../lib/settings-flash';
 
   let { store, onopenthread }: { store: Store; onopenthread?: () => void } = $props();
   const narrow = new MediaQuery('(max-width: 720px)');
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
 
-  /** Providers, Plugins, Resources and Brain call nothing a paired device may call. */
-  const OWNER_TABS: SettingsTab[] = ['accounts', 'plugins', 'resources', 'brain'];
+  /** Providers, Plugins, Resources, Brain and Diagnostics call nothing a paired device may call. */
+  const OWNER_TABS: SettingsTab[] = ['accounts', 'plugins', 'resources', 'brain', 'diagnostics'];
 
   type Tab = SettingsTile;
 
@@ -54,6 +56,7 @@ import { workspace } from '../lib/workspace.svelte';
     { id: 'resources', label: strings.settings.tabs.resources, icon: ShieldCheck, group: 2 },
     { id: 'machines', label: strings.settings.tabs.machines, icon: Monitor, group: 3 },
     { id: 'advanced', label: strings.settings.tabs.advanced, icon: SlidersHorizontal, group: 3 },
+    { id: 'diagnostics', label: strings.settings.tabs.diagnostics, icon: Stethoscope, group: 3 },
     { id: 'experiments', label: strings.settings.tabs.experiments, icon: FlaskConical, group: 3 }
   ]);
 
@@ -95,7 +98,13 @@ import { workspace } from '../lib/workspace.svelte';
       ...(store.owner ? [{ id: 'execution', label: strings.settings.execution }, { id: 'origins', label: strings.machines.browserOrigins }] : []),
       { id: 'core', label: strings.settings.core }
     ],
-    experiments: EXPERIMENT_IDS.map((id) => ({ id, label: experimentCopy()[id].title }))
+    experiments: EXPERIMENT_IDS.map((id) => ({ id, label: experimentCopy()[id].title })),
+    diagnostics: [
+      { id: 'diagnostics-status', label: strings.diagnostics.status },
+      { id: 'diagnostics-problems', label: strings.diagnostics.problems },
+      { id: 'diagnostics-log', label: strings.diagnostics.log },
+      { id: 'diagnostics-agents', label: strings.diagnostics.agentAccess }
+    ]
   });
 
   /**
@@ -156,7 +165,10 @@ import { workspace } from '../lib/workspace.svelte';
     ['machines', 'machines', strings.group.addDevice],
     ['machines', 'phone', strings.phone.publicUrl],
     ['machines', 'machines', strings.machines.main],
-    ['advanced', 'execution', strings.settings.warmProcessMinutes]
+    ['advanced', 'execution', strings.settings.warmProcessMinutes],
+    ['diagnostics', 'diagnostics-status', strings.diagnostics.export],
+    ['diagnostics', 'diagnostics-status', strings.diagnostics.report],
+    ['diagnostics', 'diagnostics-log', strings.diagnostics.search]
   ]);
 
   /** Every page, every section the nav names and the settings above: what the home page's search looks through. */
@@ -235,10 +247,7 @@ import { workspace } from '../lib/workspace.svelte';
     if (!section || tab !== store.settingsTab) return;
     void section.request;
     void tick().then(() => {
-      const target = document.getElementById(`settings-${section.id}`);
-      if (!target) return;
-      jumping = Date.now();
-      target.scrollIntoView({ behavior: motion(), block: 'start' });
+      if (revealSettingsCard(section.id, section.flash === true, motion())) jumping = Date.now();
     });
   });
 </script>
@@ -322,6 +331,8 @@ import { workspace } from '../lib/workspace.svelte';
         <PluginsPage {store} />
       {:else if tab === 'experiments'}
         <ExperimentsPage />
+      {:else if tab === 'diagnostics'}
+        <DiagnosticsPage {store} {onopenthread} />
       {:else}
         <ResourcesPage {store} />
       {/if}

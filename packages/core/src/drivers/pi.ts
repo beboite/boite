@@ -5,6 +5,7 @@ import { readModels } from './pi/models.ts';
 import { PiSession } from './pi/session.ts';
 import { PiTurn } from './pi/turn.ts';
 import type { Driver, ProbeContext, ProbeFilter, ProbeResult, TurnContext, TurnHandle } from './types.ts';
+import { noteWarmSession } from './driver-log.ts';
 
 const MINUTE_MS = 60_000;
 
@@ -35,7 +36,9 @@ export function createPiDriver(): Driver {
       const turn = new PiTurn(ctx);
 
       let session = sessions.get(threadId) ?? null;
-      if (session !== null && !session.usable(key, warmMs)) {
+      const usable = session?.usable(key, warmMs) === true;
+      noteWarmSession(ctx, 'pi', { kept: session !== null, usable, sameSetup: session?.key === key, setupChange: 'the thread changed model, effort, account or folder' });
+      if (session !== null && !usable) {
         sessions.delete(threadId);
         session.close(session.key === key ? null : 'the thread changed model, effort, account or folder', ctx);
         session = null;

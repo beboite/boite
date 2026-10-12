@@ -762,11 +762,20 @@ descriptor, what one resolves to or a rejection, or a change to that
 account, and reaches every client as `providers.probed`. A reload that changes
 none of that emits no `providers.updated`. Two callers at once share
 one process. `refresh: true` bypasses a completed cache entry, sharing any probe
-already in flight. The UI keeps a persistent display cache and reads asynchronously.
+already in flight. Until that read answers, the account's previous list still
+answers model checks, and a read that fails leaves it in place; a reload or a
+change to the account drops it as before. The caller is answered as soon as the
+models are read: the process exits, its trace closes and its directory goes
+afterwards, and the next probe of the same account that needs a fresh read waits
+for that; a read the cache answers does not. Claude takes up to a second to exit. The UI keeps a persistent display cache and reads asynchronously.
 Cleanup starts the registry's bounded stop before waiting for process pipes to
 close. A missing close event gets one additional second, then a
 `provider.probeCleanup` warning. The original models or discovery error still
 reach the caller, and the next request for that account can proceed.
+A model picked from a list the core gave on this connection lands at once, and
+a draft created on it is not read again, except an ACP effort that list carries
+no scale for. A list restored from browser storage, or one the core has not
+given yet, is read before the pick or the send.
 A probe that finds no executable, whose agent dies or that runs past
 twenty seconds, thirty for pi, throws with the reason and caches nothing. `threads.create` and
 `threads.update` accept what the last probe listed on top of the descriptor's; a
