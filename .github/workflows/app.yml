@@ -12,6 +12,9 @@ on:
     paths:
       - packages/ui/**
       - packages/contracts/**
+      # The build's own inputs: its script and its dependencies.
+      - package.json
+      - bun.lock
       - .github/workflows/app.yml
   workflow_dispatch:
 

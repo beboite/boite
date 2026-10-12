@@ -137,8 +137,13 @@ test('the app on an address no machine serves scans one machine\'s code and reac
   await typist.waitFor(`document.querySelector('${id('machine-code-open')}')`, 30_000);
   await typist.click(id('machine-code-open'));
   await typist.waitFor(`document.querySelector('${id('machine-code-host')}')`);
-  await typist.type(id('machine-code-host'), second.url);
+  // Plain http on another host is mixed content on this HTTPS page: turned down before any socket, not failed as one.
+  await typist.type(id('machine-code-host'), 'http://192.168.1.20:3773');
   await typist.type(id('machine-code'), code);
+  await typist.click(id('machine-code-submit'));
+  await typist.waitFor(`document.querySelector('${id('machine-code-form')} [role="alert"]')?.textContent.includes('HTTPS address')`);
+  expect((await a.call('group.get', {}))?.devices).toHaveLength(1);
+  await typist.type(id('machine-code-host'), second.url);
   await capture(typist, 'app-code-entry.png');
   await typist.click(id('machine-code-submit'));
   await typist.waitFor(`globalThis.__boiteTest.workspace.machines.length === 2 && globalThis.__boiteTest.workspace.machines.every(machine => machine.store.connection === 'ready')`, 45_000);

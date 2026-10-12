@@ -168,14 +168,17 @@ that serves its own names it in `BOITE_APP_ORIGIN` on its cores, an `https`
 origin or the core does not start, and in `VITE_BOITE_APP_ORIGIN` when it builds
 its UI, which otherwise takes its own page for a machine's. There the app opens on its way
 in alone. A scanned code names the machine that drew it. A typed code goes with
-the machine's address, typed beside it (`boite.example.com`, or a full
-`http://` address), since the page's own address is no machine's; that machine
-passes the code on when another one drew it. The first machine added becomes
+the machine's address, typed beside it (`boite.example.com`), since the page's
+own address is no machine's; that machine passes the code on when another one
+drew it. The page is HTTPS, so the machine's address has to be too: a browser
+blocks a plain `http://` socket from it, the device's own loopback excepted, and
+the app turns such an address, typed or scanned, down with a message instead of
+failing on the socket. The first machine added becomes
 the one the app shows and opens on next time; the group brings the others.
 
 That address serves files and nothing else: `.github/workflows/app.yml`
-publishes the UI build there with GitHub Pages on every change of the UI or the
-contracts on `main`, `/.well-known/assetlinks.json` included. A phone downloads
+publishes the UI build there with GitHub Pages on every change of the UI, the
+contracts or the build's dependencies on `main`, `/.well-known/assetlinks.json` included. A phone downloads
 the page once and its service worker keeps it; conversations, prompts and
 sockets go from the phone to the machines, never to that address. Whoever
 controls the address controls the code the phone runs, as whoever signs the APK

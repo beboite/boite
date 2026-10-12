@@ -5,7 +5,7 @@
   import { parsePairingLink } from '../lib/endpoint';
   import { fill, strings } from '../lib/strings';
   import InfoTip from './InfoTip.svelte';
-  import { appPage } from '../lib/app-origin';
+  import { appPage, reachableFromApp } from '../lib/app-origin';
   let { mobile = false, onpaired }: { mobile?: boolean; onpaired?: () => void } = $props();
   let link = $state(''),
     url = $state(''),
@@ -42,13 +42,13 @@
   const app = appPage();
   const pageOrigin = !app && window.__TAURI_INTERNALS__ === undefined && /^https?:$/.test(location.protocol) ? location.origin : null;
   let codeHost = $state('');
-  /** `boite.example.com`, with or without its scheme and port, as the machine's HTTPS address. */
+  /** `boite.example.com`, with or without its scheme and port, as the machine's HTTPS address; plain http only on this device. */
   function hostOrigin(text: string): string | null {
     const trimmed = text.trim();
     if (!trimmed) return null;
     try {
       const url = new URL(/^[a-z]+:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`);
-      return url.protocol === 'https:' || url.protocol === 'http:' ? url.origin : null;
+      return reachableFromApp(url.origin) ? url.origin : null;
     } catch {
       return null;
     }
@@ -106,6 +106,12 @@
   }
   async function add(manual = false) {
     if (busy) return;
+    // The app's page is HTTPS: a scanned code naming a plain http machine would only fail as a socket error.
+    const target = manual ? url.trim() : parsePairingLink(link)?.url;
+    if (app && target !== undefined && !reachableFromApp(target)) {
+      workspace.error = strings.machines.codeInsecure;
+      return;
+    }
     busy = true;
     try {
       const ok = manual

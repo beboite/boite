@@ -509,6 +509,7 @@ export const fr: Translation = {
     codeInvalid: 'Un code compte 8 lettres et chiffres, comme ABCD-EFGH.',
     hostLabel: 'Adresse de la machine', hostPlaceholder: 'boite.example.com',
     hostInvalid: "Tapez l'adresse HTTPS de la machine qui affiche le code, comme boite.example.com.",
+    codeInsecure: "Ce code mène à une adresse HTTP simple, que l'appli ne peut pas ouvrir. Affichez le code sur une machine qui a une adresse HTTPS.",
     scanHint: "Sur l'une de vos machines, ouvrez Réglages, Machines, Ajouter un appareil et visez son QR code avec la caméra.",
     scanStarting: 'Démarrage de la caméra', scanClose: 'Fermer la caméra',
     scanErrors: {
