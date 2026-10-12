@@ -385,8 +385,7 @@ the setting returns links to the core's local address. No wildcard origin or
 forwarded header is trusted.
 
 On iPhone, open the pairing link in Safari, choose Share, then Add to Home Screen.
-On Android, use Install Boite in Phone app or the browser's installation menu
-([android.md](android.md)).
+On Android, use Install Boite in Phone app or the browser's installation menu.
 Open the installed icon and pair from inside Boite. On iPhone, installation
 does not copy the browser's localStorage, where Boite keeps its session key.
 The installed app therefore needs its own pairing even if Chrome or Safari

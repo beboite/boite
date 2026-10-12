@@ -17,7 +17,7 @@ through a proxy as in [phone.md](phone.md).
 The nightly publishes no APK. One built for one core's host sent every phone
 that installed it to that core, whoever's phone it was. The app that replaces
 it opens a neutral address every core trusts, and reaches the machines of the
-group its phone was added to ([phone.md](phone.md#adding-a-phone)).
+group its phone was added to ([phone.md](phone.md)).
 
 Android opens the page full screen only after it has checked both halves of
 Digital Asset Links. The app half is inside the APK and names the host. The site
@@ -49,11 +49,12 @@ of these hold:
 
 Otherwise the job builds the APK, signs it with `apksigner` and checks the
 certificate before uploading. A reused APK keeps its original version, so its
-filename may name an older version than the release containing it. Only the
+filename may name an older version than the run that reused it. Only the
 Android wrapper goes into the APK; UI and core changes never rebuild it.
 
-The version name is the nightly version and the version code is the number of
-commits on `main`, which only grows. `ci` builds an unsigned APK when
+The version name is the `version` input, or the `package.json` version when it
+is empty, and the version code is the number of commits on `main`, which only
+grows. `ci` builds an unsigned APK when
 `apps/android/` or its pipeline changes and keeps it as the
 `android-apk-unsigned` artifact of that run.
 
