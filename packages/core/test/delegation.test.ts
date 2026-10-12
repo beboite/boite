@@ -300,7 +300,9 @@ test('the parent learns dynamic workflows and coordination within a compact prom
   // 2600 before the line that names `boite view`, about 220 bytes, then 80 for `[--speed <tier>]` and its default,
   // then about 100 for the `boite settings` line.
   expect(prompt).toContain('standard speed without --speed (tiers: boite delegate models)');
-  expect(Buffer.byteLength(prompt)).toBeLessThan(3006);
+  // Then about 130 for the line naming `boite logs problems` and the built-in skill's path. The
+  // path starts with the data directory, whose length is the runner's, so it counts as `<data>`.
+  expect(Buffer.byteLength(prompt.replaceAll(h.dataDir, '<data>'))).toBeLessThan(3136);
   runs.get(threadId)!.finish();
   await waitFor(() => h.core.threads.require(threadId).status === 'idle');
   await owner.call('turns.start', { threadId, prompt: 'Continue' });

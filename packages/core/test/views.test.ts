@@ -51,6 +51,9 @@ async function cli(...args: string[]): Promise<{ code: number; output: string; e
 
 test('the session guide names the command and what calls for it, and view help carries the rules', async () => {
   expect(agentGuide(true)).toContain(VIEW_GUIDE_LINE);
+  // The logs hint stands without a skill (one that could not be written), and only while agents may read logs.
+  expect(agentGuide(true, true, [])).toContain('`boite logs problems`');
+  expect(agentGuide(true, false, [])).not.toContain('boite logs');
   expect(VIEW_GUIDE_LINE).toMatch(/when asked for a visual or a schema/);
   // One line of the session prompt, which every turn of every thread pays for.
   expect(VIEW_GUIDE_LINE.length).toBeLessThan(240);

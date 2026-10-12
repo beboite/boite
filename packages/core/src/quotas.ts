@@ -132,6 +132,7 @@ async function withQuotaProbe<T>(core: Core, account: Account, name: string, rea
   const cwd = mkdtempSync(join(tmpdir(), 'boite-quota-'));
   const threadId = `${reset ? 'quota-reset' : 'quota'}:${account.id}`;
   const exits: Promise<void>[] = [];
+  const at = performance.now();
   try {
     return await read({
       provider, accountId: account.id, cwd,
@@ -142,15 +143,20 @@ async function withQuotaProbe<T>(core: Core, account: Account, name: string, rea
         return child;
       },
       killTree: () => core.procs.killTree(threadId),
-      log: (level, message) => core.log(level, `${name} quota: ${message}`),
+      log: (level, message) => core.log(level, `${name}${reset ? '' : ' quota'}: ${message}`, { source: 'quotas', event: 'quota.read' }),
     });
+  } catch (error) {
+    core.logs.warn(`${reset ? `The ${name}` : `Reading the ${name} quota`} of account ${account.id} failed after ${Math.round(performance.now() - at)} ms: ${error instanceof Error ? error.message : String(error)}`, {
+      source: 'quotas', event: 'quota.read-failed', durationMs: performance.now() - at, data: { accountId: account.id, providerId: account.providerId, reset },
+    });
+    throw error;
   } finally {
     core.procs.killTree(threadId);
     await Promise.all(exits);
     // A descendant can hold the directory after the direct child closed. Neither
     // waiting for it nor removing the directory may replace the windows just read.
-    await core.procs.stopAndWait(threadId).catch((error: unknown) => core.log('warn', `${name} quota: ${error instanceof Error ? error.message : String(error)}`));
-    await removeDir(cwd, (message) => core.log('warn', `${name} quota: ${message}`));
+    await core.procs.stopAndWait(threadId).catch((error: unknown) => core.log('warn', `${name}${reset ? '' : ' quota'}: ${error instanceof Error ? error.message : String(error)}`, { source: 'quotas', event: 'quota.read' }));
+    await removeDir(cwd, (message) => core.log('warn', `${name}${reset ? '' : ' quota'}: ${message}`, { source: 'quotas', event: 'quota.read' }));
   }
 }
 

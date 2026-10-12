@@ -138,6 +138,18 @@ function recheckWhenDue(program: string, args: string[]): void {
   else if (Date.now() >= at) start(program, args);
 }
 
+/** The version a program last reported, without asking it again; null when unknown. */
+export function knownVersion(program: string): string | null {
+  const reading = readings.get(program);
+  if (reading === undefined) return null;
+  // Only while the file is the one that was read, as `majorAt` checks: a replaced program is unknown.
+  try {
+    const stat = statSync(program);
+    if (stat.mtimeMs !== reading.mtimeMs || stat.size !== reading.size) return null;
+  } catch { return null; }
+  return reading.version;
+}
+
 /**
  * The major version of the program at this path: a number once it is known,
  * null when the program answered with no version, cannot be reached or could
