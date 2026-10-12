@@ -3302,6 +3302,20 @@ export interface TerminalState {
    * resize draws lines twice. Absent on Linux, macOS and older cores.
    */
   windowsPty?: { buildNumber: number };
+  /** The shell that runs, and whether it marks its prompts and commands (OSC 133). Absent on older cores. */
+  shell?: TerminalShell;
+}
+
+/**
+ * A terminal's shell. `integrated` is true when the core started it with its
+ * shell integration: each prompt and command is marked with OSC 133, and the
+ * working directory follows with OSC 633 P Cwd.
+ */
+export interface TerminalShell {
+  /** The executable's name without `.exe`: `pwsh`, `powershell`, `bash`, `cmd`, `zsh`. */
+  name: string;
+  kind: 'powershell' | 'cmd' | 'posix';
+  integrated: boolean;
 }
 
 /** The server on one machine, independently of the desktop application's updater. */
@@ -3865,6 +3879,12 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'terminals.resize': { params: { id: string; cols: number; rows: number }; result: { ok: true } };
   /** Kill the shell and its tree. `terminal.exited` follows. */
   'terminals.close': { params: { id: string }; result: { ok: true } };
+  /**
+   * The shell's recent commands from its own history file, newest first and
+   * each once: what the up arrow walks through, across past sessions too.
+   * Empty for a shell that keeps none (cmd, sh).
+   */
+  'terminals.history': { params: { id: string }; result: { commands: string[] } };
 
   'threads.list': { params: { projectId?: ProjectId; includeArchived?: boolean }; result: ThreadSummary[] };
   /** Read the thread's own branch PR using the execution machine's GitHub CLI. Null when the thread has no branch. */

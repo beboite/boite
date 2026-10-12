@@ -11,10 +11,11 @@ import { existsSync } from 'node:fs';
 import { release } from 'node:os';
 import { win32 } from 'node:path';
 import { MAX_THREAD_TERMINALS, THREAD_TERMINAL_KEY, isThreadTerminal, threadTerminalId } from '@boite/contracts';
-import type { TerminalState, ThreadId, ThreadTerminal } from '@boite/contracts';
+import type { TerminalShell, TerminalState, ThreadId, ThreadTerminal } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, notFound, refused } from './errors.ts';
 import type { Router } from './router.ts';
+import { HistoryAnnounce, defaultHistoryFile, describeShell, integrate, parseHistory, readHistoryTail } from './terminal-integration.ts';
 
 /** What a late client is sent to redraw the screen. A full-screen app redraws itself anyway. */
 export const HISTORY_CHARS = 256 * 1024;
@@ -146,6 +147,9 @@ interface Session {
   exited: Promise<number | null>;
   /** Killed, not gone yet: it takes no keys, and its id is not free for a new shell. */
   closing: boolean;
+  shell: TerminalShell;
+  /** The history file the shell's integration named, else its default. */
+  historyFile: () => string | null;
 }
 
 export interface StartOptions {
@@ -158,6 +162,8 @@ export interface StartOptions {
   onExit?: () => void;
   /** The thread a thread's shell belongs to, set on its log records. */
   threadId?: ThreadId;
+  /** Start bash or PowerShell with the shell integration: a thread's shell, never a login one. */
+  integrate?: boolean;
 }
 
 export class TerminalStore {
@@ -174,7 +180,7 @@ export class TerminalStore {
     if (thread.archived) throw refused(`the thread ${threadId} is archived`, { threadId, field: 'archived', expected: false });
     // The ids bound the count: the first shell and `term-2` to `term-16`.
     const id = threadTerminalId(threadId, terminalId);
-    return this.open(id, { cwd: thread.cwd, env: { ...process.env }, cols, rows, threadId });
+    return this.open(id, { cwd: thread.cwd, env: { ...process.env }, cols, rows, threadId, integrate: true });
   }
 
   /** The thread's running shells, in the order they started. A closing one is gone already. */
@@ -217,12 +223,15 @@ export class TerminalStore {
     if (running !== undefined) {
       if (running.closing) throw refused(`the shell ${id} is still closing, open it again in a moment`, { id });
       running.terminal.resize(options.cols, options.rows);
-      return { id, cwd: running.cwd, output: running.history.text(), sequence: running.sequence, ...windowsPty() };
+      return { id, cwd: running.cwd, output: running.history.text(), sequence: running.sequence, shell: running.shell, ...windowsPty() };
     }
     if (!existsSync(options.cwd)) {
       throw refused(`the working directory ${options.cwd} does not exist any more`, { id, cwd: options.cwd });
     }
-    const shell = pickShell();
+    const picked = pickShell();
+    const { shell, integrated } = options.integrate === true ? integrate(picked, this.core.dataDir) : { shell: picked, integrated: false };
+    const described = describeShell(shell, integrated);
+    const announce = integrated ? new HistoryAnnounce() : null;
     const decoder = new TextDecoder();
     let session: Session | null = null;
     let sequence = 0;
@@ -267,6 +276,7 @@ export class TerminalStore {
         onData: (bytes) => {
           const data = decoder.decode(bytes, { stream: true });
           if (data.length === 0) return;
+          announce?.feed(data);
           if (gate === null) {
             emit(data);
             gate = setTimeout(release, OUTPUT_WINDOW_MS);
@@ -307,9 +317,12 @@ export class TerminalStore {
       options.onExit?.();
       return code;
     });
-    session = { id, cwd: options.cwd, terminal: spawned.terminal, sequence, history, exited, closing: false };
+    session = {
+      id, cwd: options.cwd, terminal: spawned.terminal, sequence, history, exited, closing: false, shell: described,
+      historyFile: () => announce?.path ?? defaultHistoryFile(described, process.platform, options.env),
+    };
     this.sessions.set(id, session);
-    return { id, cwd: options.cwd, output: history.text(), sequence, ...windowsPty() };
+    return { id, cwd: options.cwd, output: history.text(), sequence, shell: described, ...windowsPty() };
   }
 
   has(id: string): boolean {
@@ -346,6 +359,15 @@ export class TerminalStore {
     ]);
     clearTimeout(timer);
     return { ok: true };
+  }
+
+  /** The shell's recent commands, newest first, from the file its integration named or its default one. */
+  history(id: string): { commands: string[] } {
+    const session = this.require(id);
+    const file = session.historyFile();
+    if (file === null) return { commands: [] };
+    const text = readHistoryTail(file);
+    return { commands: text === null ? [] : parseHistory(text, session.shell.kind) };
   }
 
   async closeAll(): Promise<void> {
@@ -391,4 +413,5 @@ export function registerTerminalMethods(core: Core): void {
   router.register('terminals.resize', (params) =>
     core.terminals.resize(requireString(params.id, 'id'), params.cols, params.rows));
   router.register('terminals.close', (params) => core.terminals.close(requireString(params.id, 'id')));
+  router.register('terminals.history', (params) => core.terminals.history(requireString(params.id, 'id')));
 }
