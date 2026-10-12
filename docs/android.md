@@ -52,9 +52,8 @@ certificate before uploading. A reused APK keeps its original version, so its
 filename may name an older version than the run that reused it. Only the
 Android wrapper goes into the APK; UI and core changes never rebuild it.
 
-The version name is the `version` input, or the `package.json` version when it
-is empty, and the version code is the number of commits on `main`, which only
-grows. `ci` builds an unsigned APK when
+The version name is the `package.json` version, and the version code is the
+number of commits on `main`, which only grows. `ci` builds an unsigned APK when
 `apps/android/` or its pipeline changes and keeps it as the
 `android-apk-unsigned` artifact of that run.
 
