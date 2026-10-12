@@ -218,7 +218,14 @@ test('a full attachment strip stays one row and folds the rest behind a +N tile'
     await page.type('[data-testid=composer-input]', 'Eight screens');
     await page.click('[data-testid=composer-send]');
     const bubble = 'Array.from(document.querySelectorAll("[data-testid=message-images]")).at(-1)';
-    const sentRows = `new Set(Array.from(${bubble}.querySelectorAll('.shot:not([inert])'), el => el.offsetTop)).size`;
+    // The rows a reader sees: the live thumbnails and the one dimmed under the +N.
+    const sentRows = `(() => {
+      const row = ${bubble};
+      const more = row.querySelector('[data-testid=message-images-more]');
+      const shots = [...row.querySelectorAll('.shot')];
+      const covered = (shot) => more && shot.offsetTop === shots[0].offsetTop && shot.offsetLeft === more.offsetLeft;
+      return new Set(shots.filter(shot => !shot.inert || covered(shot)).map(shot => shot.offsetTop)).size;
+    })()`;
     await page.waitFor(`${bubble}?.querySelectorAll('[data-testid=image-open]').length === 8 && ${bubble}.querySelector('[data-testid=message-images-more]')`);
     await page.evaluate(`${bubble}.scrollIntoView({ block: 'center' })`);
     const sent = await page.evaluate<{ fits: number; more: string; height: number }>(`(() => {
@@ -227,6 +234,14 @@ test('a full attachment strip stays one row and folds the rest behind a +N tile'
     })()`);
     expect(sent.fits).toBeLessThan(8);
     expect(sent.more).toBe(`+${8 - sent.fits}`);
+    // The tile under the +N is inert like the wrapped ones, so the keyboard never lands behind the cover.
+    expect(await page.evaluate<boolean>(`(() => {
+      const row = ${bubble};
+      const more = row.querySelector('[data-testid=message-images-more]');
+      const shots = [...row.querySelectorAll('.shot')];
+      const under = shots.find(shot => shot.offsetTop === shots[0].offsetTop && shot.offsetLeft === more.offsetLeft);
+      return !!under && under.inert;
+    })()`)).toBe(true);
     expect(sent.height).toBeLessThan(100);
     expect(await page.evaluate(sentRows)).toBe(1);
     await capture('message-images-phone.png');

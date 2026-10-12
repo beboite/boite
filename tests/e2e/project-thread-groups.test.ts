@@ -75,6 +75,8 @@ for (const width of [1280, 390]) {
       expect(await page.evaluate('globalThis.__boiteTest.workspace.machines.map(m => m.store.projects.find(p => p.id === "p-boite").autoArchiveMergedPr)')).toEqual([true, false]);
       await page.waitFor(`document.querySelector('${menu} [role=switch]')`);
       await shot('recent-options');
+      // Each switch draws one knob, the shared one from app.css, not a second of its own.
+      expect(await page.evaluate(`[...document.querySelectorAll('${menu} [role=switch]')].every(sw => sw.childElementCount === 0 && getComputedStyle(sw, '::after').content !== 'none')`)).toBe(true);
       expect(await page.evaluate(`(() => { const r=document.querySelector('${menu}').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth; })()`)).toBe(true);
       await page.reload();
       await page.waitFor('globalThis.__boiteTest?.workspace.machines.length === 2');

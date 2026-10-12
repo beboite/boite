@@ -82,6 +82,9 @@
     fits = count;
     cover = count < tiles.length && last ? { left: last.offsetLeft, width: last.offsetWidth } : null;
   });
+  // The tile under the +N is pointer-blocked and its focus ring would be hidden:
+  // it is inert like the wrapped ones, and counted with them.
+  let hidden = $derived(cover ? images.length - fits + 1 : 0);
   /** The timeline's viewer; outside one (a test, a preview) the message shows its own. */
   const host = viewerHost();
   let viewing = $state<Gallery | null>(null);
@@ -175,7 +178,7 @@
           class="shot"
           title={image.alt ?? strings.chat.imagePart}
           aria-busy={opening === index}
-          inert={at >= fits}
+          inert={at >= (cover ? fits - 1 : fits)}
           use:media={() => viewed(image, at)}
           onclick={(event) => void open(event.currentTarget, image, index, at)}
           data-testid="image-open"
@@ -189,11 +192,11 @@
           class="more"
           style:left="{cover.left}px"
           style:width="{cover.width}px"
-          aria-label={fill(strings.composer.attachMore, { count: String(images.length - fits) })}
-          title={fill(strings.composer.attachMore, { count: String(images.length - fits) })}
+          aria-label={fill(strings.composer.attachMore, { count: String(hidden) })}
+          title={fill(strings.composer.attachMore, { count: String(hidden) })}
           onclick={() => unfolded = true}
           data-testid="message-images-more"
-        >+{images.length - fits}</button>
+        >+{hidden}</button>
       {/if}
     </div>
   {/if}
