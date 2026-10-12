@@ -10,10 +10,14 @@ in the installed web app
 ## One host per APK
 
 A TWA trusts a single origin, fixed at build time. The repository has no
-hard-coded origin. The nightly requires `ANDROID_HOST`, a repository variable
-containing a bare hostname such as `boite.example.com`, before publishing. The
-page must be served over HTTPS at that host, through a proxy as in
-[phone.md](phone.md).
+hard-coded origin: `android.yml` takes it as its `host` input, a bare hostname
+such as `boite.example.com`. The page must be served over HTTPS at that host,
+through a proxy as in [phone.md](phone.md).
+
+The nightly publishes no APK. One built for one core's host sent every phone
+that installed it to that core, whoever's phone it was. The app that replaces
+it opens a neutral address every core trusts, and reaches the machines of the
+group its phone was added to ([phone.md](phone.md)).
 
 Android opens the page full screen only after it has checked both halves of
 Digital Asset Links. The app half is inside the APK and names the host. The site
@@ -26,31 +30,30 @@ The APK also claims `https://<host>/` links. Set the core's Public HTTPS address
 to that same host, and a pairing QR code scanned on the phone opens the app
 instead of the browser.
 
-## Installing it
+## Installing one built by hand
 
-Each nightly release lists `boite-<version>.apk`. Download it on the phone,
-allow the browser to install unknown apps when Android asks, and open Boite.
-The first launch shows the page without a session; pair it from the desktop
-the usual way. Android updates the app over an older one when the certificate
-matches and the version code is higher.
+Run `android.yml` by hand with `release` on and `host` set to your own core's
+HTTPS host, then install its artifact: allow the browser to install unknown
+apps when Android asks, and open Boite. Android updates the app over an older
+one when the certificate matches and the version code is higher.
 
-## What a nightly publishes
+## Building a signed APK
 
-The nightly calls `.github/workflows/android.yml` with `release: true`.
-`scripts/ci/android-apk.ts reuse` checks the newest published release with a
-signed APK. It reuses that file under its original name when all of these hold:
+With `release` on, `scripts/ci/android-apk.ts reuse` checks the newest published
+release with a signed APK. It reuses that file under its original name when all
+of these hold:
 
 - `apps/android/` has no change between that release's tag and this commit;
-- the APK opens the host `ANDROID_HOST` names now;
+- the APK opens the host given now;
 - its certificate is the one `assetlinks.json` publishes.
 
 Otherwise the job builds the APK, signs it with `apksigner` and checks the
 certificate before uploading. A reused APK keeps its original version, so its
-filename may name an older version than the release containing it. Only the
+filename may name an older version than the run that reused it. Only the
 Android wrapper goes into the APK; UI and core changes never rebuild it.
 
-The version name is the nightly version and the version code is the number of
-commits on `main`, which only grows. `ci` builds an unsigned APK when
+The version name is the `package.json` version, and the version code is the
+number of commits on `main`, which only grows. `ci` builds an unsigned APK when
 `apps/android/` or its pipeline changes and keeps it as the
 `android-apk-unsigned` artifact of that run.
 
