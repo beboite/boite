@@ -168,7 +168,7 @@ fn build_popup<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<WebviewWindow<R>
     let native_frame = crate::window::undecorated_shadow(crate::material::windows_build());
     #[cfg(not(windows))]
     let native_frame = false;
-    let dark = app.get_webview_window(crate::browser::MAIN_LABEL).and_then(|main| main.theme().ok())
+    let dark = crate::window::main_window(app).and_then(|main| main.theme().ok())
         .is_none_or(|theme| theme == tauri::Theme::Dark);
     let mut builder = tauri::WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App(page_url(native_frame).into()))
         .title("Boite quotas").inner_size(380.0, 460.0).resizable(false)
