@@ -507,9 +507,9 @@ volumes ([server](server.md)). The signed or reused APK is required too;
 ## The phone app's address
 
 `app.yml` builds the UI on `main` when `packages/ui/`, `packages/contracts/` or
-the workflow change, or by hand, waits for that commit's CI to pass
-(`scripts/ci/commit-ci.ts`, as the nightly does), and only from `main` deploys
-it with GitHub Pages to the
+the workflow change, or by hand; from `main` it waits for that commit's CI to
+pass (`scripts/ci/commit-ci.ts`, as the nightly does) and deploys it with
+GitHub Pages to the
 repository's custom domain, `APP_ORIGIN` in the contracts
 ([phone](phone.md#the-app-on-its-own-address)). It packs the site itself so
 `/.well-known/assetlinks.json` ships, which `upload-pages-artifact` would leave

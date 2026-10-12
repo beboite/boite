@@ -178,9 +178,11 @@ another key admitted with it. The member spends the grant, writes the device in
 the roster under its own signature over the group, the device id and its role,
 and the socket is the device's from then on. The same key asking again with the
 same grant, after an answer lost on a weak link, gets the same answer; any other
-is refused as for a used link. A code typed on the page of a member that did not
-draw it is sent, sealed, to the other members (`group.redeem`); the one that drew
-it admits the device and answers with the roster.
+is refused as for a used link. A well-formed code typed on the page of a member
+that did not draw it is sent, sealed, to the other members (`group.redeem`),
+twenty a minute at most; the one that drew it admits the device and answers with
+the roster. A wrong code counts toward dropping the live codes only on the
+member it was typed at, so guesses typed there drop no other member's codes.
 
 **Hello.** From then on the device says `hello` with `device: { id, at, nonce,
 sig }` on any member, `sig` signing `boite-device-hello`, the id of that member,
@@ -211,8 +213,8 @@ group starts one of its own for it. Nothing is asked of the user.
 **Origins.** A member accepts the origin of a page served by any member: the
 addresses each gives, and the origins each says its page is served at. A machine
 learns where it is served from the socket a page opens: an origin it already
-accepts of its own accord (its public address, the shell, an origin listed
-under Advanced) whose host is the one the socket asked for, outside loopback. It
+accepts of its own accord (its public address or an origin listed under
+Advanced) whose host is the one the socket asked for, outside loopback. It
 learns it before any hello, so the first page of a phone that holds no key yet
 already opens the way, and publishes up to four in the roster (`origins`). A
 machine behind a reverse proxy is thus accepted by the others without anything
@@ -230,8 +232,8 @@ not on but another member is.
 
 The client tries the member's own addresses first, those it may send a key
 to. When none is usable or none answers, it tries
-`<member>/group/relay/<core id>/rpc` at once on every machine it reaches that
-lists that member, and the first that answers carries it. Its `hello` names, in
+`<member>/group/relay/<core id>/rpc` at once on every machine its own key opens
+or it was paired with by hand that lists that member, and the first that answers carries it. Its `hello` names, in
 `relay`, its credential for the relaying machine: a device's signature for that
 machine, or the key that machine issued, beside its credential for the member at
 the end. The relaying machine checks it (a device of its roster, a key it issued,
@@ -553,8 +555,9 @@ address, where it is worth nothing once the member has given that address up.
   machine's page was this case for anybody else's phone.
 - A typed code reaches the machine that drew it through the machine serving the
   page, or, on the app's own address, through the machine whose address is
-  typed beside it. A page served by a machine outside the group has nobody to
-  send the code to: scan the QR code there.
+  typed beside it. A page served by a machine outside the group reaches neither
+  way in, its origin being none of theirs: open the app's own address, or the
+  drawing machine's, and scan there.
 - A machine that runs a version from before device keys drops them from the
   roster it keeps and lets no device key in. Update every member.
 - A member that has not heard a removal stays exposed to the removed machine,

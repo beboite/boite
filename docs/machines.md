@@ -223,7 +223,8 @@ Removing an origin blocks new connections from it; existing authenticated
 connections must be revoked separately if they should lose access immediately.
 
 The origin permission does not replace authentication. Every socket still needs
-its own credential: a device signature, a token or a one-time grant. HTTPS pages
+its own credential: a device signature, a token, a one-time grant or a group
+ticket. HTTPS pages
 need secure WebSocket endpoints. [Phone setup](phone.md#https-and-installation)
 owns HTTPS and adding a phone; [server deployment](server.md) owns host
 reachability.
