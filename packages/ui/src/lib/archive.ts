@@ -47,10 +47,12 @@ export async function reopenLastArchived(store: Store): Promise<boolean> {
     const generation = owner.clientGeneration;
     return { owner, current: () => owner.client === client && owner.clientGeneration === generation };
   });
+  // A machine that cannot answer has nothing to bring back; the active one's
+  // failure is shown only when no other machine had a thread either.
+  let failure: unknown;
   const lists = await Promise.all(owners.map(async ({ owner, current }) => {
-    // A machine that cannot answer, the active one included, has nothing to bring back.
     const threads = await archivedThreads(owner).catch((error: unknown) => {
-      if (owner === store && current()) store.error = error instanceof Error ? error.message : String(error);
+      if (owner === store && current()) failure = error;
       return [];
     });
     return current() ? threads.filter((thread) => !thread.archiveReason).map((thread) => ({ store: owner, thread })) : [];
@@ -61,7 +63,10 @@ export async function reopenLastArchived(store: Store): Promise<boolean> {
     archivedTime(a.thread) !== archivedTime(b.thread) ? archivedTime(a.thread) > archivedTime(b.thread) : order(a) > order(b);
   let target: Archived | undefined;
   for (const candidate of lists.flat()) if (!target || newer(candidate, target)) target = candidate;
-  if (!target) return false;
+  if (!target) {
+    if (failure !== undefined && owners[0]!.current()) store.error = failure instanceof Error ? failure.message : String(failure);
+    return false;
+  }
   const { store: owner, thread } = target;
   const current = owners.find((entry) => entry.owner === owner)!.current;
   try {
@@ -80,7 +85,7 @@ export async function reopenLastArchived(store: Store): Promise<boolean> {
 type Archived = { store: Store; thread: ThreadSummary };
 
 /** When a thread was put away; a thread archived by an older core only has its last change. */
-function archivedTime(thread: ThreadSummary): number {
+export function archivedTime(thread: ThreadSummary): number {
   return thread.archivedAt ?? thread.updatedAt;
 }
 

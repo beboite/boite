@@ -4,7 +4,7 @@
   import { DEFAULT_THREAD_DONE_RETENTION_DAYS, type ThreadId, type ThreadSummary } from '@boite/contracts';
   import InfoTip from './InfoTip.svelte';
   import DeletedThreads from './DeletedThreads.svelte';
-  import { archivedThreads, restoreThread } from '../lib/archive';
+  import { archivedThreads, archivedTime, restoreThread } from '../lib/archive';
   import { SnapshotReads } from '../lib/store/snapshot-reads';
   import { canDeleteThread, deleteThread } from '../lib/thread-removal';
   import { ago, exactTime, projectName } from '../lib/format';
@@ -92,7 +92,7 @@
     try {
       const answer = await archivedThreads(store);
       if (store.client === client && store.clientGeneration === generation && read.active) {
-        threads = read.apply(answer, threads ?? []).filter(t => !removed.has(t.id)).sort((a, b) => b.updatedAt - a.updatedAt);
+        threads = read.apply(answer, threads ?? []).filter(t => !removed.has(t.id)).sort((a, b) => archivedTime(b) - archivedTime(a));
         rows.clear();
         for (const thread of threads) rows.add(thread.id);
       }
@@ -161,7 +161,7 @@
           {#if thread.doneAt != null && (store.settings?.threadDoneRetentionDays ?? DEFAULT_THREAD_DONE_RETENTION_DAYS) > 0}
             <span class="subtle expiry" data-testid="done-expires">{fill(strings.settings.archived.deletesAt, { date: exactTime(thread.doneAt + (store.settings?.threadDoneRetentionDays ?? DEFAULT_THREAD_DONE_RETENTION_DAYS) * 86_400_000) })}</span>
           {/if}
-          <span class="subtle meta" title={exactTime(thread.updatedAt)}>{projectOf(thread)} · {ago(thread.updatedAt)}</span>
+          <span class="subtle meta" title={exactTime(archivedTime(thread))}>{projectOf(thread)} · {ago(archivedTime(thread))}</span>
           {#if restored.includes(thread.id)}
             <button type="button" class="small" data-testid="archived-open" onclick={() => void workspace.select(store, thread.id)}>
               <span class="ui-label">{strings.settings.archived.open}</span>

@@ -106,6 +106,18 @@ test('deleting a just-archived thread removes its undo offer and reopening skips
   expect(store.error).toBeNull();
 });
 
+test('the active machine failing to list stays silent when another machine reopens a thread', async () => {
+  const active = await ready();
+  const other = await ready();
+  expect(await archiveThread(other, 't-trace')).toBe(true);
+  const call = active.client!.call.bind(active.client!);
+  vi.spyOn(active.client!, 'call').mockImplementation((method, params) => method === 'threads.list'
+    ? Promise.reject(new Error('Archive list temporarily unavailable')) : call(method, params as never));
+  expect(await reopenLastArchived(active)).toBe(true);
+  expect(other.threads.some(t => t.id === 't-trace')).toBe(true);
+  expect(active.error).toBeNull();
+});
+
 test('deletion clears the owning machine composer and leaves colliding IDs on another machine intact', async () => {
   const first = await ready();
   const second = await ready();

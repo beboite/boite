@@ -103,6 +103,21 @@ test('done and archived threads are separate lists with their own counts', async
   expect([...document.querySelectorAll('[data-testid=done-thread]')].map(row => (row as HTMLElement).dataset.threadId)).toEqual(['t-trace']);
 });
 
+test('archived threads are listed by when they were put away, not by their last change', async () => {
+  const source = await ready('first');
+  await source.store.archive('t-bench');
+  const call = source.client.call.bind(source.client);
+  // t-parser was archived long ago but changed since: its last change must not lift it.
+  vi.spyOn(source.client, 'call').mockImplementation((async (method: string, params: unknown) => {
+    const result = await call(method as never, params as never);
+    if (method !== 'threads.list') return result;
+    return (result as ThreadSummary[]).map(t => t.id === 't-parser' ? { ...t, archivedAt: 1, updatedAt: Date.now() + 60_000 } : t);
+  }) as never);
+  mounted = mount(RecentDone, { target: document.body, props: { entries: entries(), now: Date.now(), kind: 'archived' } });
+  click('[data-testid=recent-archived-toggle]'); await settle();
+  expect([...document.querySelectorAll('[data-testid=done-thread]')].map(row => (row as HTMLElement).dataset.threadId)).toEqual(['t-bench', 't-parser']);
+});
+
 test('a done thread is deleted from its own menu, opened by right click or by its button', async () => {
   const source = await ready('first');
   const props = $state({ entries: entries(), now: Date.now(), header: false, open: true });
