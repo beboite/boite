@@ -77,6 +77,10 @@ A chord is modifiers, then one key, joined with `+`, case and spaces ignored.
 | `terminal-split` | `mod+d` | In a terminal: a shell beside the active one |
 | `terminal-split-vertical` | `mod+shift+d` | In a terminal: a shell under the active one |
 | `terminal-close` | `mod+w` | In a terminal: end the active shell |
+| `terminal-find` | `mod+shift+f` | In a terminal: find in its output |
+| `terminal-history` | `mod+shift+h` | In a terminal: the shell's recent commands |
+| `terminal-previous-command` | `mod+up` | In a terminal: scroll to the previous command |
+| `terminal-next-command` | `mod+down` | In a terminal: scroll to the next command |
 | `close-surface` | `mod+w` | The active surface of the panel, never the window |
 | `settings` | `mod+,` | Settings |
 | `stash` | `mod+shift+s` | Put the composer text aside, or take it back |
@@ -102,10 +106,12 @@ where the top row types another character without Shift. In a plain browser
 tab, the browser keeps `Ctrl+Shift+T` for itself; the shell and the palette
 always reach it.
 
-The four `terminal-` commands are T3 Code's and act only while a terminal
-screen has the keyboard. There they come before every other command, so
-`mod+n` opens a shell rather than a draft and `mod+w` closes the shell rather
-than the panel's surface; anywhere else those chords keep their app meaning.
+The eight `terminal-` commands act only while a terminal screen has the
+keyboard. There they come before every other command, so `mod+n` opens a shell
+rather than a draft, `mod+w` closes the shell rather than the panel's surface
+and `mod+shift+f` finds in the terminal rather than opening the file tree;
+anywhere else those chords keep their app meaning. `mod+up` and `mod+down`
+reach the shell when it does not mark its commands.
 On the Keyboard page they conflict only with each other and with `terminal`,
 which also works from a terminal. A
 full-screen program, in the terminal's alternate screen, still receives its

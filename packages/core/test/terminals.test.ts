@@ -260,12 +260,11 @@ describe('terminals', () => {
       expect(after.indexOf('\x1b]133;C')).toBeLessThan(after.indexOf('\x1b]133;D;'));
       if (pwsh !== null) expect(after).toContain('\x1b]133;D;3');
 
-      await client.call('terminals.write', { id, data: 'echo boite-history-marker\r' });
       const echoedAt = seen.text().length;
-      await waitFor(() => seen.text().slice(echoedAt).includes('\x1b]133;D;0'), SHELL_MS);
-      // Written as each command ran, not when the shell exits.
-      await waitFor(async () => (await client.call('terminals.history', { id })).commands[0] === 'echo boite-history-marker', SHELL_MS);
-      // Exactly the two commands: the shell read and wrote the test's own file, nothing of the user's.
+      await client.call('terminals.write', { id, data: 'echo boite-history-marker\r' });
+      // The next prompt's input mark comes after bash's `history -a`: the command is in the file by then.
+      await waitFor(() => /\x1b\]133;D;0[\s\S]*\x1b\]133;B/.test(seen.text().slice(echoedAt)), SHELL_MS);
+      // Written as each command ran, not when the shell exits. Exactly the two commands: the shell read and wrote the test's own file, nothing of the user's.
       expect((await client.call('terminals.history', { id })).commands).toEqual(['echo boite-history-marker', failing]);
       await client.call('terminals.close', { id });
       await waitFor(() => seen.exited() !== null, SHELL_MS);
