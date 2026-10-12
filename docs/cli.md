@@ -461,8 +461,8 @@ Its card opens Settings on the setting's card, which rings once in the accent
 colour, and closes when the user changes it there.
 
 `settings open <page>[#<card>] --why <text>` points at a page for what is not
-one value, a provider login (`accounts#provider-claude`) or a pairing
-(`machines#devices`). Open Settings goes there with the same ring and sends
+one value, a provider login (`accounts#provider-claude`) or a device to add
+(`machines#machines`). Open Settings goes there with the same ring and sends
 `opened: the user opened Settings at <page>`; Dismiss sends `dismissed`. The
 MCP tools `boite_settings` and `boite_settings_request` do the same.
 

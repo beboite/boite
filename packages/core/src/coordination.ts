@@ -841,8 +841,7 @@ export class Coordination {
           if (!letter || letter.from.coreId !== peer.coreId || letter.from.threadId !== payload.fromThreadId) throw refused('unknown receipt');
           result = letter;
         } else if (envelope.operation === 'group.sync') result = this.core.group.receive(peer, envelope.payload);
-        else if (envelope.operation === 'group.push') result = this.core.push.relayed(peer, envelope.payload);
-        else if (envelope.operation === 'group.redeem') result = this.core.group.clients.redeemFor(peer, envelope.payload);
+        else if (envelope.operation === 'group.push' || envelope.operation === 'group.redeem') result = envelope.operation === 'group.push' ? this.core.push.relayed(peer, envelope.payload) : this.core.group.clients.redeemFor(peer, envelope.payload);
         else throw invalidParams('operation: expected directory, deliver, receipt, search, read, group.sync, group.push or group.redeem');
       } catch (reason) {
         status = reason instanceof RpcFailure ? 400 : 500;
