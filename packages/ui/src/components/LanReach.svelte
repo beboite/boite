@@ -19,7 +19,7 @@
     /** True while a restart is under way, for the switch to wait for it. */
     restarting?: boolean;
   } = $props();
-  const text = strings.settings.pairing.reach;
+  const text = strings.group.reach;
 
   /** Only the desktop app brings a stopped core of its own back. */
   const canRestart = $derived(store.localCore && typeof window !== 'undefined' && window.__TAURI_INTERNALS__ !== undefined);
@@ -44,9 +44,6 @@
   export async function restart(mint = false): Promise<void> {
     if (!canRestart || phase === 'restarting') return;
     phase = 'restarting';
-    const shown = store.pairing;
-    const role = shown?.role ?? 'device';
-    const short = role === 'owner' && !!shown?.code;
     try {
       await store.client?.call('core.restart', {});
     } catch {
@@ -60,7 +57,7 @@
       if (store.connection !== 'ready' || !store.core) continue;
       settled = !isLoopbackHost(store.core.endpoint.host) === (store.settings?.listenOnLan === true);
     }
-    if (settled && mint) await store.mintPairing(role, short);
+    if (settled && mint) await store.addDevice();
     phase = settled ? 'idle' : 'failed';
   }
 </script>
@@ -89,7 +86,7 @@
       <p class="hint warn">{text.failed}</p>
     {:else}
       <p class="hint warn">{text.loopback}</p>
-      {#if !canRestart}<p class="hint">{strings.settings.pairing.lanHint}</p>{/if}
+      {#if !canRestart}<p class="hint">{strings.group.lanHint}</p>{/if}
     {/if}
     {#if canRestart && phase !== 'restarting' && loopback}
       <div class="actions">

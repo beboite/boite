@@ -1,7 +1,8 @@
 import { untrack } from 'svelte';
 import { groupRelayUrl, parseGroupRelayUrl, RPC_PATH, withoutTrailingSlashes, type Group, type GroupCore } from '@boite/contracts';
 import { WsClient } from './client';
-import { DROPPED_STORAGE_KEY, isDropped, isMemberDropped, keepDropped, readEnvironments, removeBrought, type Endpoint, type StoredEnvironment } from './endpoint';
+import { deviceKey } from './device-key';
+import { DROPPED_STORAGE_KEY, isDropped, isMemberDropped, keepDropped, readEnvironments, rememberGroupAddresses, removeBrought, signsFor, type Endpoint, type StoredEnvironment } from './endpoint';
 import { usableAddresses } from './group-addresses';
 import type { Machine, Workspace } from './workspace.svelte';
 
@@ -33,7 +34,11 @@ export interface GroupLinkOptions {
 
 /** One question to a machine paired by hand, on a socket made for it and closed with the answer. */
 function askGroup(endpoint: Endpoint, patience: number): Promise<Group | null | undefined> {
-  const client = new WsClient({ url: endpoint.url, token: endpoint.token, paired: endpoint.paired === true, reconnect: false });
+  const client = new WsClient({
+    url: endpoint.url, token: endpoint.token, paired: endpoint.paired === true || endpoint.signs !== undefined, reconnect: false,
+    // A machine this device's key opens answers a signed hello.
+    ...(endpoint.signs === undefined ? {} : { signer: { key: deviceKey, coreId: endpoint.signs } })
+  });
   return Promise.race([
     client.connect().then(() => client.call('group.get', {})).catch(() => undefined),
     new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), patience))
@@ -194,7 +199,8 @@ export class GroupLinks {
 
   /** The member of the group this machine is: what it says itself, or what the group said when it brought it. */
   static coreOf(machine: Machine): string | undefined {
-    return machine.store.group?.self ?? machine.coreId;
+    // A machine this device's key opens says which it is before it answered: the id its hellos are signed for.
+    return machine.store.group?.self ?? machine.coreId ?? signsFor(machine.id);
   }
 
   async reconcile(): Promise<void> {
@@ -211,8 +217,19 @@ export class GroupLinks {
     if (informed.length === 0) return;
 
     // What the group brought vouches for nothing: only what was paired by hand says who is in a group.
+    // A machine this device's key opens is one of those: every member of its group lets the same key in.
     const anchors = informed.filter((machine) => machine.coreId === undefined);
     await this.#prune(informed, anchors);
+    await this.#pruneSigned(anchors);
+    // A link to one of these later asks nothing: they are this device's own group.
+    // Only addresses a key could go to, and that every machine this device's key opens in that group lists:
+    // one of them holding an older or a forged roster vouches for nothing on its own.
+    const signedAnchors = anchors.filter((machine) => signsFor(machine.id) !== undefined && machine.store.group != null);
+    const listed = signedAnchors.flatMap((machine) => machine.store.group!.cores.flatMap((core) => usableAddresses(core.addresses, this.#secure())
+      .filter((address) => signedAnchors.every((other) => other.store.group!.id !== machine.store.group!.id
+        || other.store.group!.cores.some((listedCore) => listedCore.coreId === core.coreId && usableAddresses(listedCore.addresses, this.#secure()).includes(address))))));
+    // Written even empty: a device out of every group follows no link on the word of an old roster.
+    rememberGroupAddresses(listed);
 
     const wanted = new Map<string, Wanted>();
     for (const via of anchors) {
@@ -324,6 +341,28 @@ export class GroupLinks {
     }
   }
 
+  /**
+   * A machine this device's key opens that its group no longer lists: another
+   * machine the key opens, in that group, has the last word, as for a machine
+   * the group brought. Nothing is marked: the key itself opens nothing there
+   * once that machine heard of its own removal, and a machine let back in is
+   * listed again.
+   */
+  async #pruneSigned(anchors: readonly Machine[]): Promise<void> {
+    const signed = anchors.filter((other) => signsFor(other.id) !== undefined && other.store.group != null);
+    for (const machine of [...this.workspace.machines]) {
+      const signs = signsFor(machine.id);
+      if (signs === undefined) continue;
+      const groupId = machine.store.group?.id;
+      const listedBy = (other: Machine): boolean => other.store.group!.cores.some((core) => core.coreId === signs);
+      // Its own group, as another machine of it says; or, refused there with the group it was in unknown, none of the device's groups lists it.
+      const delisted = groupId !== undefined
+        ? signed.some((other) => other !== machine && other.store.group!.id === groupId && !listedBy(other))
+        : machine.store.pairingRequired && signed.length > 0 && !signed.some((other) => other !== machine && listedBy(other));
+      if (delisted) await this.#drop(machine, false);
+    }
+  }
+
   /** The machine this window opened on cannot leave the list: its key goes and the window falls back to its own core. */
   /** `gone`: the group dropped it, and its address is marked for every window. Otherwise it only moved, or its key died. */
   async #drop(machine: Machine, gone: boolean): Promise<void> {
@@ -333,7 +372,7 @@ export class GroupLinks {
 
   /** A remembered key reconnects by itself; a machine without one needs a ticket again. */
   #holdsKey(machine: Machine): boolean {
-    return readEnvironments().some((env) => env.url === machine.id && env.token !== '');
+    return readEnvironments().some((env) => env.url === machine.id && (env.token !== '' || env.signs !== undefined));
   }
 
   /** The hand-paired machines of a group that are connected and have said what their group lists. */
@@ -374,8 +413,23 @@ export class GroupLinks {
         moved = true;
         return;
       }
+      const sitting = this.workspace.machines.find((machine) => machine.id === withoutTrailingSlashes(url));
+      // A device of the group signs its own way in: no ticket, nothing a member hands over. The machine
+      // already at that address is taken over when it holds no key of its own there, the page's own core
+      // waiting to be paired included; one this device holds a key for stays as it is.
+      if (signsFor(via.id) !== undefined) {
+        if (sitting !== undefined && sitting.coreId !== coreId && this.#holdsKey(sitting) && signsFor(sitting.id) !== coreId) {
+          state = null;
+          return;
+        }
+        if (await this.workspace.add({ url, token: '', signs: coreId }, core.name, true)) {
+          state = null;
+          if (upgrade !== undefined && this.workspace.machines.includes(upgrade)) await this.#drop(upgrade, false);
+        }
+        return;
+      }
       // A machine paired by hand already sits at that address: it is that machine's to reach, with the key it has.
-      if (this.workspace.machines.some((machine) => machine.id === withoutTrailingSlashes(url) && machine.coreId !== coreId)) {
+      if (sitting !== undefined && sitting.coreId !== coreId) {
         state = null;
         return;
       }

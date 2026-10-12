@@ -31,16 +31,18 @@ and [release layout](releasing.md).
 ## One WebSocket, one contract
 
 The core serves JSON-RPC 2.0 at `/rpc`. The `Origin` must be absent for a native
-client, a permitted shell origin, the core's own origin or an exact browser
-origin the owner configured in Machines. The first frame must be `hello` with
-an accepted token within five seconds, or the socket closes with `4001`.
+client, a permitted shell origin, the core's own origin, an origin a machine of
+its [group](groups.md) gives or is served at, or an exact origin the owner added
+under Advanced. The origin check only keeps arbitrary websites out: the first
+frame must still be `hello` with an accepted credential within five seconds, or
+the socket closes with `4001`.
 The owner token is 32 random bytes generated on first start and stored in
 `<dataDir>/core.json` with the port and PID.
 
 | Principal | Credential and authority |
 | --- | --- |
-| Owner | Core token or owner pairing; may configure the core |
-| Session | Paired-device token; limited to `DEVICE_METHODS` and `DEVICE_EVENTS` |
+| Owner | Core token, a group ticket from a member, or an owner pairing; may configure the core |
+| Session | A device of the group, signing with its own key; limited to `DEVICE_METHODS` and `DEVICE_EVENTS` |
 | Agent | In-memory per-thread token supplied to a launched process; limited to `AGENT_METHODS` and its authenticated thread |
 
 `hello` also names the client and, optionally, its `device`: the shell sends
@@ -355,14 +357,15 @@ A restart continuation remains durable until it starts or is explicitly excluded
 
 ## Groups
 
-A group is one roster every member core holds: the machines of one owner,
-their public keys and addresses, and the devices paired with them. Members
+A group is one roster every member core holds: the machines of one owner, their
+public keys, addresses and the origins their pages are served at, and the
+devices of the group, each with one Ed25519 key a member signed in. Members
 exchange it through the signed coordination endpoint and merge it by revision.
-A client of one member gets a signed ticket for another, which that one
-exchanges at `hello` for a session of its own; browser origins and coordination
-peers are read off the same roster. A member listens on its tailnet address
-beside the one it started on. [Groups](groups.md) describes the trust this
-assumes and where it stops.
+A device says `hello` on any member with a signature made for that member; a
+member's desktop app gets a signed ticket from its own core for the others.
+Browser origins and coordination peers are read off the same roster. A member
+listens on its tailnet address beside the one it started on. [Groups](groups.md)
+describes the trust this assumes and where it stops.
 
 ## The phone keeps the app
 
@@ -370,4 +373,4 @@ The service worker registers after first paint on the core's HTTP(S) origin.
 Navigation is network-first with a cached shell fallback; hashed assets are
 cache-first. RPC, upgrades, the worker and the manifest are never cached.
 An offline phone can draw the shell and reconnect when the core returns.
-[Phone](phone.md) owns pairing, secure origins and device limits.
+[Phone](phone.md) owns adding a device, secure origins and device limits.

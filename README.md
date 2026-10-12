@@ -30,7 +30,7 @@ Codex or [another supported agent](docs/providers.md) with your existing account
 - Choose a provider, model and account for each conversation.
 - Read streamed responses and tool calls beside files, diffs and previews.
 - Isolate tasks in Git worktrees and follow delegated agents.
-- Pair a phone or connect to a headless server.
+- Add a phone to your machines with one code, or connect a headless server.
 
 ## Get started
 

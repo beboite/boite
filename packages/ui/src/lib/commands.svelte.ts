@@ -183,7 +183,7 @@ export function runCommand(store: Store, id: string, inShell: boolean): void {
     case 'task-manager': store.showSettings('task-manager'); break;
     case 'archived': store.showSettings('general', 'archived'); break;
     case 'providers': store.showSettings('accounts'); break;
-    case 'pair': store.showSettings('machines', 'devices'); break;
+    case 'pair': store.showSettings('machines', 'machines'); void store.addDevice(); break;
     case 'tour': store.showChat(); openTour(); break;
     case 'theme-dark': setTheme('dark'); break;
     case 'theme-light': setTheme('light'); break;

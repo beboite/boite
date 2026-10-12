@@ -37,6 +37,8 @@ export class ServerConnection implements Connection {
   readonly openedAt = Date.now();
   clientName = 'unknown';
   closedBy: { code: number; reason: string } | null = null;
+  /** A hello is being answered. */
+  greeting = false;
 
   private socket: ServerWebSocket<SocketData> | null = null;
   private congested = false;

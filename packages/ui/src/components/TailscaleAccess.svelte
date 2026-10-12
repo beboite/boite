@@ -66,10 +66,10 @@
     if (ok) await call('tailscale.disable');
   }
 
-  /** A phone's link through the new address, shown with its QR code in the pairing card above. */
+  /** A phone's link through the new address, shown with its QR code in the group card above. */
   function pair() {
-    void store.mintPairing('device');
-    requestAnimationFrame(() => document.getElementById('settings-devices')?.scrollIntoView?.({ block: 'start', behavior: 'smooth' }));
+    void store.addDevice();
+    requestAnimationFrame(() => document.getElementById('settings-group')?.scrollIntoView?.({ block: 'start', behavior: 'smooth' }));
   }
 
   let sentence = $derived.by(() => {

@@ -113,6 +113,19 @@ export function isAllowedOrigin(origin: string | null, port: number, host: strin
   }
 }
 
+/** The socket came from a page whose origin names the host it asked for, outside loopback: this machine is served there. */
+function servedOrigin(core: Core, origin: string | null, host: string | null): void {
+  if (origin === null || host === null || SHELL_ORIGINS.includes(origin)) return;
+  try {
+    const url = new URL(origin);
+    if ((url.protocol !== 'https:' && url.protocol !== 'http:') || url.origin !== origin || url.host !== host.trim().toLowerCase()) return;
+    if (isLoopbackHost(url.host)) return;
+    core.group.servedFrom(origin);
+  } catch {
+    // Not an origin: nothing learned.
+  }
+}
+
 /**
  * The name the client dialled, from its `Host` header. A tunnel or a reverse
  * proxy on this machine connects from 127.0.0.1 too, so the peer address says
@@ -401,8 +414,12 @@ export function startServer(options: ServerOptions): RunningServer {
   const peerRequests = new Set<Promise<Response>>();
   const refusals = new Refusals();
   // A client of this machine carried to another member of its group: its key here, never an agent's, opens the way.
-  const relays = new RelayHub(core, (token) => {
-    const identity = authenticateToken(core, token);
+  const relays = new RelayHub(core, (credential) => {
+    if (typeof credential !== 'string') {
+      // A device of the group carried to another member: its signature for this machine, never one made for another.
+      try { return { sessionId: core.group.clients.authenticateDevice(credential, { name: 'pwa', version: '' }).sessionId }; } catch { return null; }
+    }
+    const identity = authenticateToken(core, credential);
     return identity === null || identity.principal === 'agent' ? null : { sessionId: identity.sessionId };
   }, { helloTimeoutMs, helloMaxBytes: PREAUTH_FRAME_MAX_BYTES });
   core.relays = relays;
@@ -458,9 +475,11 @@ export function startServer(options: ServerOptions): RunningServer {
         return viewPage(core, url.pathname.slice(VIEW_ROUTE.length + 1));
       }
 
+      // What this machine trusts of its own accord: itself, the shell, and the addresses its owner gave it.
+      const ownOrigin = (origin: string | null): boolean => isAllowedOrigin(origin, self.port ?? 0, hostname)
+        || (origin !== null && (core.settings.get().browserOrigins?.includes(origin) === true || origin === core.settings.get().publicUrl));
       // A page served by one machine of the group opens its socket on the others.
-      const allowedOrigin = (origin: string | null): boolean => isAllowedOrigin(origin, self.port ?? 0, hostname)
-        || (origin !== null && (core.settings.get().browserOrigins?.includes(origin) === true || origin === core.settings.get().publicUrl || core.group.allowsOrigin(origin)));
+      const allowedOrigin = (origin: string | null): boolean => ownOrigin(origin) || (origin !== null && core.group.allowsOrigin(origin));
 
       const relayed = parseRelayPath(url.pathname);
       if (relayed !== null) {
@@ -497,8 +516,17 @@ export function startServer(options: ServerOptions): RunningServer {
           core.log('warn', `refused a websocket: ${refusal}`, { source: 'connections', event: 'connection.preauth-refused' });
           return new Response('too many connections waiting for hello', { status: 503 });
         }
+        // A page of this machine, at an origin it trusts itself and that names the host the socket asked for:
+        // this machine is served there, and the others of its group accept that origin from now on. Learned
+        // before any hello, so a phone's first page, which holds no key yet, already opens the way to the others.
         const connection = new ServerConnection(core, !isLoopbackHost(request.headers.get('host')));
-        if (self.upgrade(request, { data: { connection, peer } })) return undefined;
+        if (self.upgrade(request, { data: { connection, peer } })) {
+          // A page of this machine, at an origin it trusts itself and that names the host the socket asked for:
+          // this machine is served there, and the others of its group accept that origin from now on. Learned at
+          // the upgrade, before any hello, so a phone's first page, which holds no key yet, already opens the way.
+          if (ownOrigin(origin)) servedOrigin(core, origin, request.headers.get('host'));
+          return undefined;
+        }
         return new Response('expected a websocket upgrade', { status: 400 });
       }
 

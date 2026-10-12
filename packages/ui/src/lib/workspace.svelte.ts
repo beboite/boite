@@ -19,7 +19,8 @@ import {
   fromTauri,
   type Endpoint,
   type MainMachine,
-  type StoredEnvironment
+  type StoredEnvironment,
+  opens
 } from './endpoint';
 import { strings } from './strings';
 import { onReveal, reveal } from './reveal';
@@ -217,7 +218,8 @@ export class Workspace {
   async #vet(saved: StoredEnvironment[]): Promise<StoredEnvironment[]> {
     const held = saved.filter(holdsBack);
     if (held.length === 0) return [];
-    const anchors: Endpoint[] = saved.filter((e) => e.coreId === undefined && e.token !== '').map((e) => ({ url: e.url, token: e.token, paired: e.paired }));
+    const anchors: Endpoint[] = saved.filter((e) => e.coreId === undefined && opens(e))
+      .map((e) => ({ url: e.url, token: e.token, paired: e.paired, ...(e.signs === undefined ? {} : { signs: e.signs }) }));
     const local = window.__TAURI_INTERNALS__ ? await fromTauri().catch(() => null) : null;
     if (local && !anchors.some((e) => e.url === local.url)) anchors.push(local);
     return this.groups.vet(held, anchors);
@@ -225,7 +227,7 @@ export class Workspace {
 
   /** The machine paired by hand a window falls back on: the one serving this page first. None in the shell, which has its own core. */
   #byHand(): StoredEnvironment | undefined {
-    const byHand = readEnvironments().filter((e) => e.coreId === undefined && e.token !== '');
+    const byHand = readEnvironments().filter((e) => e.coreId === undefined && opens(e));
     return window.__TAURI_INTERNALS__ ? undefined : byHand.find((e) => servesThisPage(e.url)) ?? byHand[0];
   }
 
@@ -237,7 +239,7 @@ export class Workspace {
   #openElsewhere(): void {
     clearStoredEndpoint();
     const next = this.#byHand();
-    if (next) storeEndpoint({ url: next.url, token: next.token, ...(next.paired ? { paired: true } : {}) });
+    if (next) storeEndpoint({ url: next.url, token: next.token, ...(next.paired ? { paired: true } : {}), ...(next.signs === undefined ? {} : { signs: next.signs }) });
   }
 
   /**
@@ -268,7 +270,7 @@ export class Workspace {
    */
   #mayStandIn(): boolean {
     return store.endpointUrl !== null && !store.localCore && store.connection !== 'ready'
-      && (window.__TAURI_INTERNALS__ !== undefined || readEnvironments().some((e) => e.token !== '' && e.url !== store.endpointUrl));
+      && (window.__TAURI_INTERNALS__ !== undefined || readEnvironments().some((e) => opens(e) && e.url !== store.endpointUrl));
   }
 
   /** Whether the machine the window opens on has still not said hello after `PRIMARY_PATIENCE_MS`, with another machine to show instead. */
@@ -378,7 +380,7 @@ export class Workspace {
       if (connected) this.#standIn(lifecycle, generation);
       return connected;
     };
-    if (!store.localCore && primaryEndpoint?.url === store.endpointUrl && primaryEndpoint.token) {
+    if (!store.localCore && primaryEndpoint?.url === store.endpointUrl && opens(primaryEndpoint)) {
       // An entry that went during the boot comes back as what it was: a machine the group brought is not made
       // the owner's by being written again. One still there says what it is itself, a pairing by hand included.
       const was = readEnvironments().some((e) => e.url === primaryEndpoint.url) ? undefined : saved.find((e) => e.url === primaryEndpoint.url);
@@ -520,7 +522,8 @@ export class Workspace {
     // A machine the group brought is written back as one: another window may have dropped its entry meanwhile.
     if (!endpoint.grant && !endpoint.ticket && !endpoint.local)
       upsertEnvironment({
-        url: machine.id, token: endpoint.token, paired: endpoint.paired ?? false, label: machine.label,
+        url: machine.id, token: endpoint.token, paired: endpoint.paired ?? endpoint.signs !== undefined, label: machine.label,
+        ...(endpoint.signs === undefined ? {} : { signs: endpoint.signs }),
         ...(machine.coreId === undefined ? {} : { coreId: machine.coreId }),
         ...(machine.groupId === undefined ? {} : { groupId: machine.groupId }),
         ...(machine.epoch === undefined ? {} : { epoch: machine.epoch })

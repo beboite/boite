@@ -1,42 +1,50 @@
-import { RpcErrorCode, type Group, type GroupInvite, type PairedSession, type PairingGrant, type PairingRole } from '@boite/contracts';
+import { RpcErrorCode, type DeviceInvite, type Group, type PairedSession } from '@boite/contracts';
 import { RpcFailure, type Client } from '../client';
 import type { StoreContext } from './context';
 
 /** A read of the group that failed is tried again after these waits, on the same connection. */
 const GROUP_READ_DELAYS_MS = [1000, 4000];
 
-/** Pairing: the owner mints one-time links, sees every paired device, revokes, and groups its machines. */
+/** The group of this core: its machines and devices, "Add a device", removals. */
 export class Pairing {
-  /** The last one-time pairing link, until it is closed or the core changes. */
-  pairing = $state<PairingGrant | null>(null);
+  /** The last "Add a device" link and code, until closed, used or the core changes. */
+  deviceInvite = $state<DeviceInvite | null>(null);
   sessions = $state<PairedSession[]>([]);
   private revision = 0;
   /** The group this core belongs to, null for none or for a core from before groups. */
   group = $state<Group | null>(null);
   /** The core answered `group.get` at least once on this connection: null then means no group, not no answer yet. */
   groupKnown = $state(false);
-  /** The last invitation minted from Settings, until it is used or the page changes. */
-  groupInvite = $state<GroupInvite | null>(null);
-
   constructor(private readonly ctx: StoreContext) {}
 
-  /** `short`: an owner link a phone may scan, with a code, for five minutes. */
-  async mintPairing(role: PairingRole = 'device', short = false): Promise<void> {
+  /**
+   * "Add a device": one link and one code. A phone scans or types it, a
+   * computer pastes the link. A core in no group starts one of its own first.
+   */
+  async addDevice(): Promise<void> {
     const client = this.ctx.client;
     if (!client) return;
     const revision = ++this.revision;
     try {
-      const grant = await client.call('pairing.grant', short ? { role, short } : { role });
-      if (revision === this.revision && client === this.ctx.client) this.pairing = grant;
+      const invite = await client.call('group.addDevice', {});
+      if (revision !== this.revision || client !== this.ctx.client) return;
+      this.deviceInvite = invite;
+      // The core may have started a group for it.
+      if (this.group === null) void this.loadGroup();
     } catch (error) {
       if (revision === this.revision && client === this.ctx.client) this.ctx.fail(error);
     }
   }
 
-  /** Hide this grant and ignore pending mint responses; the grant itself keeps its expiry. */
-  closePairing(): void {
+  /** Hide the link and ignore pending answers; the link itself keeps its expiry. */
+  closeDeviceInvite(): void {
     this.revision++;
-    this.pairing = null;
+    this.deviceInvite = null;
+  }
+
+  /** Takes a phone or a browser out of the group, on every machine. */
+  revokeDevice(id: string): Promise<boolean> {
+    return this.#change((client) => client.call('group.revokeDevice', { id }));
   }
 
   async loadSessions(): Promise<void> {
@@ -73,8 +81,8 @@ export class Pairing {
     try {
       const group = await client.call('group.get', {});
       if (client !== this.ctx.client) return;
-      // An invitation is for one machine: once the roster gains one, it is spent.
-      if ((group?.cores.length ?? 0) !== (this.group?.cores.length ?? 0)) this.groupInvite = null;
+      // A link is for one device: once the roster gains one, it is spent.
+      if ((group?.cores.length ?? 0) + (group?.devices.length ?? 0) > (this.group?.cores.length ?? 0) + (this.group?.devices.length ?? 0) && this.group !== null) this.closeDeviceInvite();
       this.group = group;
       this.groupKnown = true;
     } catch (error) {
@@ -101,7 +109,6 @@ export class Pairing {
       // The store moved to another core meanwhile: this answer, or this refusal, is about the one it left.
       if (client !== this.ctx.client) return false;
       this.group = group;
-      this.groupInvite = null;
       return true;
     } catch (error) {
       if (client === this.ctx.client) this.ctx.fail(error);
@@ -132,14 +139,4 @@ export class Pairing {
     return this.#change((client) => client.call('group.remove', { coreId }));
   }
 
-  async inviteToGroup(): Promise<void> {
-    const client = this.ctx.client;
-    if (!client) return;
-    try {
-      const invite = await client.call('group.invite', {});
-      if (client === this.ctx.client) this.groupInvite = invite;
-    } catch (error) {
-      if (client === this.ctx.client) this.ctx.fail(error);
-    }
-  }
 }

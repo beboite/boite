@@ -1,5 +1,6 @@
 import { errorText } from './errors';
-import { GRANT_QUERY_PARAM, PAIR_QUERY_PARAM, parseGroupRelayUrl, withoutTrailingSlashes } from '@boite/contracts';
+import { GRANT_QUERY_PARAM, PAIR_QUERY_PARAM, parseGroupRelayUrl, withoutTrailingSlashes, type DeviceHello } from '@boite/contracts';
+import { heldDeviceKey } from './device-key';
 
 export interface Endpoint {
   url: string;
@@ -26,6 +27,11 @@ export interface Endpoint {
   paired?: boolean;
   /** The core the shell started on this computer, the one a native folder picker can name paths for. */
   local?: boolean;
+  /**
+   * This device's key opens that machine: the id of the machine its hellos
+   * are signed for. `token` is empty then. A machine of the device's group.
+   */
+  signs?: string;
   /**
    * Taken from the address this page was opened on. Nothing about it is
    * stored until the core has answered a hello, so a link that leads nowhere,
@@ -172,7 +178,7 @@ export function readStoredEndpoint(): Endpoint | null {
     if (!raw) return null;
     const parsed: unknown = JSON.parse(raw);
     if (!isEndpoint(parsed) || isDropped(parsed.url)) return null;
-    return { url: withoutTrailingSlashes(parsed.url), token: parsed.token, ...(parsed.paired === true ? { paired: true } : {}), ...brought(parsed) };
+    return { url: withoutTrailingSlashes(parsed.url), token: parsed.token, ...(parsed.paired === true ? { paired: true } : {}), ...brought(parsed), ...signsOf(parsed) };
   } catch {
     return null;
   }
@@ -187,11 +193,21 @@ function brought(from: { coreId?: unknown; groupId?: unknown; epoch?: unknown })
   };
 }
 
+/** Whether this device holds something that opens the machine saved here: a key of its own for it, or its device key. */
+export function opens(entry: { token: string; signs?: string }): boolean {
+  return entry.token !== '' || entry.signs !== undefined;
+}
+
+/** The machine a device key signs for, kept beside the address. */
+function signsOf(from: { signs?: unknown }): { signs?: string } {
+  return typeof from.signs === 'string' && /^[0-9a-f]{64}$/.test(from.signs) ? { signs: from.signs } : {};
+}
+
 export function storeEndpoint(endpoint: Endpoint): void {
   try {
     window.localStorage.setItem(
       ENDPOINT_STORAGE_KEY,
-      JSON.stringify({ url: withoutTrailingSlashes(endpoint.url), token: endpoint.token, ...(endpoint.paired ? { paired: true } : {}), ...brought(endpoint) })
+      JSON.stringify({ url: withoutTrailingSlashes(endpoint.url), token: endpoint.token, ...(endpoint.paired ? { paired: true } : {}), ...brought(endpoint), ...signsOf(endpoint) })
     );
   } catch {
     /* a browser that refuses storage still runs for this session */
@@ -223,6 +239,8 @@ export interface StoredEnvironment {
   groupId?: string;
   /** Which admission of that machine the group listed then. */
   epoch?: number;
+  /** This device's key opens it, signed for this machine id; `token` is empty. */
+  signs?: string;
 }
 
 export const ENVIRONMENTS_STORAGE_KEY = 'boite.envs';
@@ -275,7 +293,8 @@ export function readEnvironments(): StoredEnvironment[] {
     label: defaultEnvironmentLabel(stored.url),
     token: stored.token,
     paired: true,
-    ...brought(stored)
+    ...brought(stored),
+    ...signsOf(stored)
   };
   storeEnvironments([seeded]);
   return [seeded];
@@ -311,6 +330,7 @@ export function upsertEnvironment(entry: {
   coreId?: string;
   groupId?: string;
   epoch?: number;
+  signs?: string;
 }): StoredEnvironment[] {
   const url = withoutTrailingSlashes(entry.url);
   const list = readEnvironments();
@@ -318,7 +338,9 @@ export function upsertEnvironment(entry: {
   const label = entry.label ?? list[at]?.label ?? defaultEnvironmentLabel(url);
   const next: StoredEnvironment = {
     url, label, token: entry.token, paired: entry.paired,
-    ...brought({ coreId: entry.coreId ?? list[at]?.coreId, groupId: entry.groupId ?? list[at]?.groupId, epoch: entry.epoch ?? list[at]?.epoch })
+    ...brought({ coreId: entry.coreId ?? list[at]?.coreId, groupId: entry.groupId ?? list[at]?.groupId, epoch: entry.epoch ?? list[at]?.epoch }),
+    // A key written for that address replaces the device key's word; an empty one keeps it.
+    ...signsOf({ signs: entry.signs ?? (entry.token === '' ? list[at]?.signs : undefined) })
   };
   if (at === -1) {
     list.push(next);
@@ -348,6 +370,21 @@ export function rememberSession(endpoint: Endpoint, token: string): StoredEnviro
   if (endpoint.grant === undefined && endpoint.coreId !== undefined && endpoint.groupId !== undefined) setMark(memberKey(endpoint.groupId, endpoint.coreId), null);
   if (endpoint.grant !== undefined) forgetGroupOf(endpoint.url);
   return upsertEnvironment({ url: endpoint.url, token, paired: true, ...brought(endpoint) });
+}
+
+/**
+ * This device's key now opens the machine at `url`, signed for `coreId`: an
+ * admission by a grant, or a key handed over by a device paired the older
+ * way. Whatever the group's marks said of that address is past.
+ */
+export function rememberDevice(url: string, coreId: string): StoredEnvironment[] {
+  setDropped(url, null);
+  const list = readEnvironments().map((env) => (env.url === withoutTrailingSlashes(url) ? { url: env.url, label: env.label, token: '', paired: true, signs: coreId } : env));
+  storeEnvironments(list);
+  const updated = upsertEnvironment({ url, token: '', paired: true, signs: coreId });
+  const stored = readStoredEndpoint();
+  if (stored?.url === withoutTrailingSlashes(url)) storeEndpoint({ url: stored.url, token: '', paired: true, signs: coreId });
+  return updated;
 }
 
 /**
@@ -436,7 +473,7 @@ export function storeMainMachine(main: MainMachine | null): void {
 /** The key this device holds for the chosen machine: at its address, or wherever the group has brought that machine since. */
 function mainEnvironment(main: MainMachine): StoredEnvironment | undefined {
   if ('local' in main) return undefined;
-  const keyed = readEnvironments().filter((env) => env.token !== '');
+  const keyed = readEnvironments().filter(opens);
   return keyed.find((env) => env.url === main.url)
     ?? (main.coreId === undefined ? undefined : keyed.find((env) => env.coreId === main.coreId && env.groupId === main.groupId));
 }
@@ -453,7 +490,7 @@ export function openOnMainMachine(): void {
   if (main === null) return;
   // With no stored core, a start falls back on the app's own: the shell's, or the origin of the page.
   // In a browser that machine may need the key held for it, a phone's page being served by the machine it paired with.
-  const env = 'local' in main ? readEnvironments().find((entry) => entry.token !== '' && servesThisPage(entry.url)) : mainEnvironment(main);
+  const env = 'local' in main ? readEnvironments().find((entry) => opens(entry) && servesThisPage(entry.url)) : mainEnvironment(main);
   if (env) storeEndpoint(env);
   else if ('local' in main) clearStoredEndpoint();
 }
@@ -574,17 +611,20 @@ export function coreHref(endpointUrl: string, path: string): string {
 }
 
 /**
- * For a machine reached through another member's relay route, this device's
- * key for that member, where it keeps it: the core it opens on, or the
- * remembered ones. Null for an address that is no relay, or a member it holds
- * no key for.
+ * For a machine reached through another member's relay route, what opens the
+ * way on that member: this device's signature for it, or the key this device
+ * keeps for it, where it keeps it. Null for an address that is no relay, or a
+ * member it holds nothing for.
  */
-export function relayKeyFor(url: string): string | null {
+export function relayKeyFor(url: string): string | DeviceHello | null {
   const relay = parseGroupRelayUrl(url);
   if (relay === null) return null;
   const stored = readStoredEndpoint();
-  if (stored?.url === relay.member && stored.token !== '') return stored.token;
-  return readEnvironments().find((env) => env.url === relay.member && env.token !== '')?.token ?? null;
+  const held = [stored?.url === relay.member ? stored : undefined, readEnvironments().find((env) => env.url === relay.member)].filter((place) => place !== undefined);
+  const signs = held.find((place) => place.signs !== undefined)?.signs;
+  const hello = signs === undefined ? undefined : heldDeviceKey()?.hello(signs);
+  if (hello !== undefined) return hello;
+  return held.find((place) => place.token !== '')?.token ?? null;
 }
 
 let shellRefusal: string | null = null;
@@ -633,7 +673,7 @@ function knownEndpoint(url: string): Endpoint | null {
   const stored = readStoredEndpoint();
   if (stored?.url === url) return stored;
   const remembered = readEnvironments().find((env) => env.url === url);
-  return remembered ? { url, token: remembered.token, ...(remembered.paired ? { paired: true } : {}), ...brought(remembered) } : null;
+  return remembered ? { url, token: remembered.token, ...(remembered.paired ? { paired: true } : {}), ...brought(remembered), ...signsOf(remembered) } : null;
 }
 
 /**
@@ -642,8 +682,32 @@ function knownEndpoint(url: string): Endpoint | null {
  * `?core=` would otherwise point this UI at a stranger who then sees every
  * prompt typed here, so the user is asked first, and a missing asker refuses.
  */
+/** The machine this device's key signs for at `url`, when its key is what opens it there. */
+export function signsFor(url: string): string | undefined {
+  const stored = readStoredEndpoint();
+  if (stored?.url === withoutTrailingSlashes(url) && stored.signs !== undefined) return stored.signs;
+  return readEnvironments().find((env) => env.url === withoutTrailingSlashes(url))?.signs;
+}
+
+/** Addresses of the machines of this device's group, as its members last listed them: a link to one asks nothing. */
+export const GROUP_ADDRESSES_STORAGE_KEY = 'boite.group.addresses';
+
+export function rememberGroupAddresses(addresses: readonly string[]): void {
+  try { window.localStorage.setItem(GROUP_ADDRESSES_STORAGE_KEY, JSON.stringify([...new Set(addresses.map(withoutTrailingSlashes))].slice(0, 256))); } catch { /* storage refused */ }
+}
+
+function isGroupAddress(url: string): boolean {
+  try {
+    const list: unknown = JSON.parse(window.localStorage.getItem(GROUP_ADDRESSES_STORAGE_KEY) ?? '[]');
+    return Array.isArray(list) && list.includes(url);
+  } catch {
+    return false;
+  }
+}
+
 async function followLink(endpoint: Endpoint, approve?: (url: string) => Promise<boolean>): Promise<boolean> {
-  const known = endpoint.url === withoutTrailingSlashes(window.location.origin) || knownEndpoint(endpoint.url) !== null;
+  // A machine of this device's own group is no stranger: its key already opens it.
+  const known = endpoint.url === withoutTrailingSlashes(window.location.origin) || knownEndpoint(endpoint.url) !== null || isGroupAddress(endpoint.url);
   // A link that carries a key of its own, a grant or a token, turns a machine the group brought into
   // the owner's, out of the group's hands. A machine the group removed can make such a link itself: the owner is asked.
   const held = heldFor(endpoint.url);
