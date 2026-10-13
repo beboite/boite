@@ -609,9 +609,14 @@ the trusted HTTPS origin described in [phone](phone.md).
 ```sh
 bun run bench               # comparison report in bench/results/<date>.md
 bun run bench/idle-rss.ts    # bare Bun and core idle readings at 4.5 s and 75 s
+bun run bench/agent-startup.ts --offline --runs 7 --delay-ms 150 --output /tmp/agent-startup.json
 ```
 
-Both use fresh data. `--fresh-only` selects the first idle reading. Rerun before
+All use fresh data. The agent-startup benchmark requires `--offline`, uses a
+scripted native process and checks cleanup and attachment preservation. Its
+directory and sparse-worktree samples measure synthetic startup, not provider
+inference. See [performance](performance.md#preparing-the-first-prompt).
+`--fresh-only` selects the first idle reading. Rerun before
 quoting a performance figure and include its command and date.
 
 ## Architecture checks

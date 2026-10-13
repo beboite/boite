@@ -1,3 +1,4 @@
+import { startupMethods, resetStartup } from './fake-client/startup';
 import { sweepMergedPrFixtures, type MergedPrFixture } from './fake-client/merged-pr-archive';
 import {
   RPC_CHUNK_BYTES,
@@ -268,7 +269,9 @@ export class FakeClient implements ObservableClient {
     }
     if (options.onProgress) reportSlices(result, options.onProgress);
     // The real client writes its set from the answer, never from the request.
-    if (method === 'threads.subscribe') {
+    if (method === 'threads.create' && (params as RpcParams<'threads.create'>).subscribe) {
+      bus.clientSubscribed.add((result as RpcResult<'threads.create'>).id);
+    } else if (method === 'threads.subscribe') {
       bus.clientSubscribed.add((params as RpcParams<'threads.subscribe'>).threadId);
     } else if (method === 'threads.get' && (result as RpcResult<'threads.get'>).opened) {
       const request = params as RpcParams<'threads.get'>;
@@ -359,6 +362,7 @@ export class FakeClient implements ObservableClient {
 
   #dropPending(message: string, dropped = false): void {
     this.#transportGeneration += 1;
+    resetStartup(this.#ctx);
     this.#ctx.speechRequests.clear();
     this.#ctx.bus.dropPending(message, dropped);
   }
@@ -382,6 +386,7 @@ export class FakeClient implements ObservableClient {
       ...projects,
       ...projectIconMethods(ctx),
       ...threads,
+      ...startupMethods(ctx, threads),
       ...capabilityMethods(ctx),
       ...forkReturnMethods(ctx),
       ...journalInspectionMethods(ctx),

@@ -31,6 +31,8 @@
 
 import { AGENT_EVENTS, DEVICE_EVENTS, DEVICE_METHODS, type RpcEventName, type RpcMethodName } from '@boite/contracts';
 import { refused } from './errors.ts';
+// Paired devices may prepare their own drafts and upload their own attachments: these are
+// connection-owned subsets of threads.create and turns.start, with identical path and byte checks.
 import type { Connection } from './router.ts';
 
 export { AGENT_EVENTS, DEVICE_EVENTS, DEVICE_METHODS };

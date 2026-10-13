@@ -145,6 +145,10 @@ function writeLateDialogAgent(dataDir: string): string {
       '    setTimeout(run, 0);',
       '    return;',
       '  }',
+      "  if (message.type === 'get_state') {",
+      "    send({ id: message.id, type: 'response', command: 'get_state', success: true, data: { isStreaming: false } });",
+      '    return;',
+      '  }',
       "  if (message.type === 'get_commands') {",
       "    send({ id: message.id, type: 'response', command: 'get_commands', success: true, data: { commands: [] } });",
       '    return;',
@@ -447,6 +451,7 @@ describe('pi driver', () => {
     const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
     await client.call('turns.start', { threadId, prompt: '[slow]' });
     await started;
+    await waitFor(() => fakeLog().includes('waiting for abort'));
 
     expect(await client.call('turns.stop', { threadId })).toEqual({ stopped: true });
     expect((await finished).status).toBe('stopped');

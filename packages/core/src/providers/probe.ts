@@ -100,6 +100,8 @@ async function probeNative(
       accountId: account.id,
       accountEnv: core.accounts.accountEnv(account, provider),
       cwd: directory,
+      catalogThread: core.drafts.catalogThread(provider.id, account.id)
+        ?? core.threads.list({}).find(thread => thread.providerId === provider.id && thread.accountId === account.id && core.threads.focus.viewed(thread.id)),
       ...(model === undefined ? {} : { model }),
       // A probe runs the same executable a turn would, so it holds the same lease:
       // removing a managed install under a probe would be the same crash.

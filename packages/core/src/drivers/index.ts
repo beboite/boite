@@ -24,14 +24,14 @@ const DRIVERS = new Map<Protocol, Driver>([
     'acp',
     lazyDriver('acp', () => import('./acp.ts').then(module => module.createAcpDriver({
       loadSdk: () => import('@agentclientprotocol/sdk'),
-    }))),
+    })), { prepare: true }),
   ],
   [
     'codex-appserver',
     lazyDriver('codex-appserver', () => import('./codex.ts').then((module) => module.createCodexDriver()), { titles: true, prepare: true, forkSession: true }),
   ],
-  ['muse', lazyDriver('muse', () => import('./muse.ts').then((module) => module.createMuseDriver()))],
-  ['pi', lazyDriver('pi', () => import('./pi.ts').then((module) => module.createPiDriver()))],
+  ['muse', lazyDriver('muse', () => import('./muse.ts').then((module) => module.createMuseDriver()), { prepare: true })],
+  ['pi', lazyDriver('pi', () => import('./pi.ts').then((module) => module.createPiDriver()), { prepare: true })],
   ['agy', lazyDriver('agy', () => import('./agy.ts').then((module) => module.createAgyDriver()))],
 ]);
 

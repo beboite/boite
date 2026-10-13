@@ -68,7 +68,7 @@ export function createClaudeDriver(deps: ClaudeDeps): Driver {
   return {
     protocol: 'claude-sdk',
     sideQuestion: ctx => sideQuestion(deps, ctx),
-    prepare: ctx => acquire(ctx).prepare(),
+    prepare: (ctx, options) => acquire(ctx).prepare(options?.forTurn),
     setViewed(threadId, active) {
       if (active) viewed.add(threadId);
       else viewed.delete(threadId);

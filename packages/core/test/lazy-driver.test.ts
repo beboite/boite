@@ -43,7 +43,9 @@ test('registered protocols retain their capabilities before the first module loa
   expect(getDriver('claude-sdk').sideQuestion).toBeFunction();
   expect(getDriver('claude-sdk').prepare).toBeFunction();
   expect(getDriver('acp').sideQuestion).toBeUndefined();
-  expect(getDriver('acp').prepare).toBeUndefined();
+  expect(getDriver('acp').prepare).toBeFunction();
+  expect(getDriver('pi').prepare).toBeFunction();
+  expect(getDriver('muse').prepare).toBeFunction();
 });
 
 test('viewed state, cache reads, invalidation, release and shutdown keep a cold module unloaded', () => {
@@ -80,7 +82,7 @@ test('concurrent first turns, title, side question, preparation and probe share 
   expect(inner.startTurn).toHaveBeenCalledTimes(2);
   expect(inner.title).toHaveBeenCalledWith(title);
   expect(inner.sideQuestion).toHaveBeenCalledWith(expect.objectContaining({ question: 'Side question' }));
-  expect(inner.prepare).toHaveBeenCalledWith(context);
+  expect(inner.prepare).toHaveBeenCalledWith(context, undefined);
   expect(inner.setViewed).toHaveBeenCalledWith('thread', true);
 });
 

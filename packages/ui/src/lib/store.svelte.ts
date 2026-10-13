@@ -100,7 +100,7 @@ export type FileAnswer<T> = { ok: true; value: T } | { ok: false; error: string 
 export class Store {
   readonly #ctx = new StoreContext(this);
   machineId = '';
-  visible = true;
+  visible = $state(true);
   #error = $state<{ message: string; severity: 'minor' | 'major' } | null>(null);
   errorThreadId = $state<string | null>(null);
 
@@ -159,6 +159,7 @@ export class Store {
     this.sidebarCollapsed = layout.sidebarCollapsed;
     listen(ctx, client);
     ctx.off.push(ctx.composer.watchQueues());
+    ctx.off.push(ctx.draftStartup.watch());
     ctx.off.push(watchIncognito(ctx));
     // Each machine hears about this window's own failures. Unit tests drive
     // fake timers through stores by the hundred, so the reporter stays out of them.

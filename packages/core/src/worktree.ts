@@ -38,6 +38,12 @@ export interface PlacedWorktree {
   namingPending?: boolean;
 }
 
+interface WorktreePreparation {
+  beforeMutation: (placed: PlacedWorktree) => void;
+  assertActive: () => void;
+  timeoutMs: number;
+}
+
 /**
  * `git worktree add` for a thread that wants a branch of its own. The git
  * processes run under the thread's id, so the trace shows them like any
@@ -80,7 +86,8 @@ export class Worktrees {
     return this.add(threadId, project, branch, path);
   }
 
-  async add(threadId: ThreadId, project: Project, wanted?: string, recordedPath?: string): Promise<PlacedWorktree> {
+  async add(threadId: ThreadId, project: Project, wanted?: string, recordedPath?: string, preparation?: WorktreePreparation): Promise<PlacedWorktree> {
+    preparation?.assertActive();
     if (!existsSync(project.path)) throw folderGone(project.path, { field: 'projectId', projectId: project.id, project: project.name });
     if (!existsSync(join(project.path, '.git'))) {
       throw refused(`${project.path} is not a git repository: a worktree needs one`, {
@@ -105,7 +112,10 @@ export class Worktrees {
       const suffix = n === 1 ? '' : `-${n}`;
       const branch = wanted ?? `${BRANCH_PREFIX}${slug}${suffix}`;
       const path = recordedPath ?? join(root, `${slug}${suffix}`);
-      if (await this.branchExists(threadId, project.path, branch)) {
+      preparation?.assertActive();
+      const branchExists = await this.branchExists(threadId, project.path, branch, preparation?.timeoutMs);
+      preparation?.assertActive();
+      if (branchExists) {
         if (wanted !== undefined) throw refused(`branch ${branch} already exists in ${project.path}`, { branch, path: project.path });
         continue;
       }
@@ -113,8 +123,11 @@ export class Worktrees {
         if (wanted !== undefined) throw refused(`${path} already exists: pick another branch name`, { path, branch });
         continue;
       }
-      await this.exclude(threadId, project, path);
-      const added = await this.git(threadId, project.path, ['worktree', 'add', '-b', branch, path]);
+      preparation?.beforeMutation({ branch, path });
+      await this.exclude(threadId, project, path, preparation);
+      // Exclusion lookup awaits git. A cancelled reservation must not start a late add.
+      preparation?.assertActive();
+      const added = await this.git(threadId, project.path, ['worktree', 'add', '-b', branch, path], preparation?.timeoutMs);
       if (added.code !== 0) {
         throw refused(`git worktree add failed in ${project.path}: ${added.stderr.trim() || `exit ${added.code}`}`, {
           path: project.path,
@@ -153,30 +166,46 @@ export class Worktrees {
    * clean up must not replace it. What it could not remove goes to the log with
    * the path, so the user can finish the job himself.
    */
-  async remove(threadId: ThreadId, project: Project, placed: PlacedWorktree): Promise<void> {
-    const removed = await this.git(threadId, project.path, ['worktree', 'remove', '--force', placed.path]);
+  async remove(threadId: ThreadId, project: Project, placed: PlacedWorktree, timeoutMs?: number): Promise<boolean> {
+    const deadline = timeoutMs === undefined ? undefined : performance.now() + timeoutMs;
+    const remaining = () => {
+      if (deadline === undefined) return undefined;
+      const left = deadline - performance.now();
+      if (left <= 0) throw refused('git cleanup deadline elapsed', { path: placed.path });
+      return left;
+    };
+    const removed = await this.git(threadId, project.path, ['worktree', 'remove', '--force', placed.path], remaining());
     if (removed.code !== 0) {
       this.core.log('warn', `could not remove the worktree ${placed.path}: ${removed.stderr.trim() || `exit ${removed.code}`}`);
-      return;
+      // An intent can survive before git add, or after removal but before branch deletion.
+      if (timeoutMs === undefined || existsSync(placed.path)) return false;
     }
-    const deleted = await this.git(threadId, project.path, ['branch', '-D', placed.branch]);
+    if (timeoutMs !== undefined) {
+      const branch = await this.git(threadId, project.path, ['rev-parse', '--verify', '--quiet', `refs/heads/${placed.branch}`], remaining());
+      if (branch.code === 1) return true;
+      if (branch.code !== 0) return false;
+    }
+    const deleted = await this.git(threadId, project.path, ['branch', '-D', placed.branch], remaining());
     if (deleted.code !== 0) {
       this.core.log('warn', `could not delete the branch ${placed.branch}: ${deleted.stderr.trim() || `exit ${deleted.code}`}`);
     }
+    return deleted.code === 0;
   }
 
-  private async branchExists(threadId: ThreadId, cwd: string, branch: string): Promise<boolean> {
-    const result = await this.git(threadId, cwd, ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`]);
+  private async branchExists(threadId: ThreadId, cwd: string, branch: string, timeoutMs?: number): Promise<boolean> {
+    const result = await this.git(threadId, cwd, ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], timeoutMs);
     return result.code === 0;
   }
 
   /** Local exclusions keep nested checkouts out of status without editing .gitignore. */
-  private async exclude(threadId: ThreadId, project: Project, path: string): Promise<void> {
+  private async exclude(threadId: ThreadId, project: Project, path: string, preparation?: WorktreePreparation): Promise<void> {
     const local = relative(project.path, dirname(path));
     if (!local || isAbsolute(local) || local === '..' || local.startsWith(`..${sep}`)) return;
     const folder = local.split(sep).join('/');
     const pattern = folder.startsWith('.boite/') ? '/.boite/' : `/${folder.replace(/[\\[\]*?!# ]/g, '\\$&')}/`;
-    const result = await this.git(threadId, project.path, ['rev-parse', '--git-path', 'info/exclude']);
+    preparation?.assertActive();
+    const result = await this.git(threadId, project.path, ['rev-parse', '--git-path', 'info/exclude'], preparation?.timeoutMs);
+    preparation?.assertActive();
     if (result.code !== 0) throw refused(`cannot locate the git exclude file in ${project.path}: ${result.stderr.trim()}`);
     const file = resolve(project.path, result.stdout.trim());
     try {
@@ -187,7 +216,7 @@ export class Worktrees {
     } catch (error) { throw refused(`cannot exclude worktrees in ${file}: ${messageOf(error)}`); }
   }
 
-  private async git(threadId: ThreadId, cwd: string, args: string[]): Promise<{ code: number; stderr: string; stdout: string }> {
+  private async git(threadId: ThreadId, cwd: string, args: string[], timeoutMs?: number): Promise<{ code: number; stderr: string; stdout: string }> {
     let spawned;
     try {
       spawned = this.core.procs.spawn(threadId, 'git', args, { cwd });
@@ -195,8 +224,19 @@ export class Worktrees {
       throw refused(`git did not start (${messageOf(error)}): a worktree needs git on PATH`, { cwd, args });
     }
     const at = performance.now();
-    const [stderr, stdout, code] = await Promise.all([new Response(spawned.proc.stderr).text(), new Response(spawned.proc.stdout).text(), spawned.exited]);
-    try { logGit(this.core, threadId, args, code, performance.now() - at, stderr); } catch { /* A diagnostic storage failure must not break worktrees. */ }
-    return { code, stderr, stdout };
+    const work = Promise.all([new Response(spawned.proc.stderr).text(), new Response(spawned.proc.stdout).text(), spawned.exited]);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = timeoutMs === undefined ? null : new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        // Kill only this captured, launcher-registered child, never a process-name match.
+        try { spawned.proc.kill('SIGKILL'); } catch { /* Exit can win the timer race. */ }
+        reject(refused(`git cleanup did not finish within ${timeoutMs} ms`, { cwd, args }));
+      }, timeoutMs);
+    });
+    try {
+      const [stderr, stdout, code] = await (late === null ? work : Promise.race([work, late]));
+      try { logGit(this.core, threadId, args, code, performance.now() - at, stderr); } catch { /* A diagnostic storage failure must not break worktrees. */ }
+      return { code, stderr, stdout };
+    } finally { clearTimeout(timer); }
   }
 }

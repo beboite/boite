@@ -133,11 +133,20 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 593,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,836,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,845,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,040,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,080,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-13, prompt-free draft preparation, attachment uploads and crash
+recovery measured 4,836,097 UI bytes and 4,067,096 core JavaScript bytes after
+`bun run build:ui`, `bun run build:core` and `bun scripts/ci/budgets.ts` on Linux.
+Compared with `68898598`, the workspace chunk adds 6,904 bytes (0.14% of the UI)
+and the core adds 35,861 bytes (0.89%). The UI entry remains 553,318 bytes and
+the core entry 15,114 bytes. The total budgets rise to 4,845,000 and 4,080,000;
+entry budgets stay unchanged. These are bundle sizes, not runtime memory or
+startup measurements.
 
 On 2026-10-10 on Linux with Bun 1.4.2, `main` at `27aa04a8` measured about
 4,438,500 UI bytes and 3,719,300 emitted core JavaScript bytes. The group relay

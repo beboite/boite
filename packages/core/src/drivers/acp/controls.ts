@@ -9,12 +9,12 @@ import type {
   SessionMode,
   SessionModeState,
 } from '@agentclientprotocol/sdk';
-import type { PermissionMode } from '@boite/contracts';
+import type { ModelInfo, PermissionMode } from '@boite/contracts';
 import { messageOf } from '../../errors.ts';
 import { PROXY_PREFIX_ENV } from '../../subscription-proxy.ts';
 import { grokReasoningEffortOf } from '../grok.ts';
-import type { TurnContext } from '../types.ts';
-import { AGENT_OWN_MODEL, agentModelsOf, categoryOption, selectValues, type AgentModels } from './models.ts';
+import type { SessionContext } from '../types.ts';
+import { AGENT_OWN_MODEL, agentModelsOf, categoryOption, modelsFrom, selectValues, type AgentModels } from './models.ts';
 import { isGrok } from './protocol.ts';
 
 /**
@@ -113,6 +113,11 @@ export class SessionControls {
     if (this.configOptions.length === 0) this.configOptions = structuredClone(options);
   }
 
+  catalog(ctx: SessionContext): ModelInfo[] | null {
+    if (categoryOption(this.configOptions, 'model') === null && this.agentModels === null) return null;
+    return modelsFrom(ctx.provider, this.configOptions, this.agentModels);
+  }
+
   hasOptions(): boolean {
     return this.configOptions.length > 0;
   }
@@ -165,7 +170,7 @@ export class SessionControls {
    * already reports as current. A refusal is one warning: the turn runs on
    * whatever the agent is already on.
    */
-  async applyModel(ctx: TurnContext): Promise<void> {
+  async applyModel(ctx: SessionContext): Promise<void> {
     if (!isGrok(ctx.provider)) return;
     const { agent, sessionId } = this.target();
     if (agent === null || sessionId === null) return;
@@ -219,7 +224,7 @@ export class SessionControls {
    * that lists none, offers no match or refuses the call is one warning in the
    * core log, never a reason to fail the turn.
    */
-  async applyMode(ctx: TurnContext): Promise<boolean> {
+  async applyMode(ctx: SessionContext): Promise<boolean> {
     // Grok's mode went on the command line at spawn and it advertises no
     // `availableModes`: there is nothing to match and nothing to warn about.
     if (isGrok(ctx.provider)) return false;
@@ -258,7 +263,7 @@ export class SessionControls {
    * agent is in, so nothing goes out when it already matches, and the answer
    * refreshes it. No match is one warning, as for `session/set_mode`.
    */
-  private async applyModeOption(ctx: TurnContext, option: SessionConfigOption, wanted: PermissionMode): Promise<boolean> {
+  private async applyModeOption(ctx: SessionContext, option: SessionConfigOption, wanted: PermissionMode): Promise<boolean> {
     const { agent, sessionId } = this.target();
     if (agent === null || sessionId === null) return false;
     const values = selectValues(option);
@@ -288,7 +293,7 @@ export class SessionControls {
    * only what moved since the last turn: a change of either follows the warm
    * process instead of dropping it.
    */
-  async applyConfig(ctx: TurnContext): Promise<void> {
+  async applyConfig(ctx: SessionContext): Promise<void> {
     // Grok took its model and its effort through `session/set_model` and
     // answers `session/set_config_option` with method-not-found: nothing goes
     // out.
@@ -308,14 +313,14 @@ export class SessionControls {
    * the prefix the account's environment names. OpenCode 2 lists the models of
    * its own providers alone and still runs `douane/<model>` when asked.
    */
-  private injectedModelOption(ctx: TurnContext, category: SessionConfigOptionCategory, wanted: string): SessionConfigOption | undefined {
+  private injectedModelOption(ctx: SessionContext, category: SessionConfigOptionCategory, wanted: string): SessionConfigOption | undefined {
     const prefix = ctx.accountEnv[PROXY_PREFIX_ENV];
     if (category !== 'model' || prefix === undefined || prefix.length === 0 || !wanted.startsWith(prefix)) return undefined;
     return categoryOption(this.configOptions, 'model') ?? undefined;
   }
 
   /** One effort level on the session as it runs. False when the agent has no such option or refused it. */
-  async applyEffort(ctx: TurnContext, effort: string): Promise<boolean> {
+  async applyEffort(ctx: SessionContext, effort: string): Promise<boolean> {
     if (isGrok(ctx.provider) || this.configOptions.length === 0) return false;
     if (effort === this.appliedEffort) return true;
     if (!(await this.setOption(ctx, 'thought_level', effort))) return false;
@@ -325,7 +330,7 @@ export class SessionControls {
 
   /** True once that value is what the agent is on, whether it was sent or never needed. */
   private async setOption(
-    ctx: TurnContext,
+    ctx: SessionContext,
     category: SessionConfigOptionCategory,
     wanted: string | null,
   ): Promise<boolean> {
