@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { Core } from '../src/core.ts';
 import { connect } from '../src/client.ts';
-import { startTestCore, waitFor, removeDir, type TestCore } from './harness.ts';
+import { quietAgent as quiet, startTestCore, waitFor, removeDir, type TestCore } from './harness.ts';
 
 async function fixture(h: TestCore) {
   const client = await h.connect();
@@ -20,6 +20,8 @@ async function fixture(h: TestCore) {
   const project = await client.call('projects.add', { path, name: 'Prototype' });
   const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
   const agent = await client.call('agents.profile.save', { value: { name: 'Builder', domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' }, status: 'active', tools: ['missions', 'artifacts', 'decisions'], accountIntegration: 'provider' } });
+  // The subagent guide and memory passes would fill the echo driver's 2,000-token window and compact mid-scenario.
+  await quiet(client, agent);
   const mission = await client.call('agents.mission.save', { value: { title: 'Prototype', objective: 'Build it', expectedResult: 'Source and checks', agentIds: [agent.id], teamId: null, projectId: project.id, status: 'open', maxTurns: 10, maxDurationMs: 60000, maxTokens: null, resourceIds: [] } });
   const task = await client.call('agents.task.save', { value: { missionId: mission.id, title: 'Build', instructions: '[sleep:60000]', dependsOn: [], assigneeId: null, status: 'open', generation: 0, leaseUntil: null, workspace: null, result: null } });
   return { client, agent, mission, task, project };

@@ -1,7 +1,7 @@
 import { secureId } from './secure-id';
 import type { AgentDraft, AgentEntities, AgentEntityKind, AgentRecord, AgentSave, AgentWork, AgentsRpcMethods, AgentsSnapshot, RpcParams, RpcResult, AgentProfile, Turn } from '@boite/contracts';
 import { RpcErrorCode, AGENT_HISTORY_PAGE, AGENT_HISTORY_MAX_PAGE } from '@boite/contracts';
-import type { AgentAccountGrant, AgentBrain, AgentRuntimeConfig, AgentSchedule, AgentHistoryCursor, AgentHistoryKind, AgentsHistoryPage, AgentRun, AgentRunSummary, AgentScope, AgentConversationMessage, AgentEntrustment, ThreadActivity } from '@boite/contracts';
+import type { AgentAccountGrant, AgentBrain, AgentBrainRoot, AgentMessageFile, AgentRuntimeConfig, AgentSchedule, AgentSelection, AgentHistoryCursor, AgentHistoryKind, AgentsHistoryPage, AgentRun, AgentRunSummary, AgentScope, AgentConversationMessage, AgentEntrustment, ThreadActivity } from '@boite/contracts';
 import { RpcFailure } from './client';
 
 /** The core's `nextOccurrence` in local time, without its timezone and DST search. */
@@ -20,6 +20,8 @@ const byCreation = (a: AgentRecord, b: AgentRecord) => a.createdAt - b.createdAt
 const summary = ({ context: { instructions: _instructions, ...context }, ...run }: AgentRun): AgentRunSummary => ({ ...run, context });
 const HISTORY_KIND = { message: 'message', work: 'work', memory: 'memory' } as const;
 const DEFAULT_OBJECTIVE = 'Take over this work where it stands and carry it to a verified result.';
+/** Where brains live until the owner picks a folder: one per agent in the core's data directory. */
+const DEFAULT_BRAIN_ROOT = '/agent-workspaces';
 type EntrustedThread = { title: string; archived: boolean; parentThreadId?: string | null; agentSessionId?: string | null; projectId: string | null; activity?: ThreadActivity };
 
 type AgentHandlers = {
@@ -31,9 +33,13 @@ export class FakeAgents {
   private configs = new Map<string, AgentRuntimeConfig>();
   private brains = new Map<string, AgentBrain>();
   private grants: AgentAccountGrant[] = [];
+  /** The folder the owner chose for brains, null for the default. */
+  private brainFolder: string | null = null;
+  /** Each agent's folder under a chosen root, named after it the first time it was placed there. */
+  private placed = new Map<string, string>();
   private runtime(id: string): AgentRuntimeConfig {
     const agent = this.get('profile', id);
-    return structuredClone(this.configs.get(id) ?? { defaultRoute: agent.selection, allowedRoutes: [{ ...agent.selection, model: agent.selection.model ?? 'default', id: 'default', name: 'Default' }], subagents: { enabled: false, paused: false, profiles: [] }, compactAfterTurns: 12, maxRunMinutes: 10 });
+    return structuredClone(this.configs.get(id) ?? { defaultRoute: agent.selection, allowedRoutes: [{ ...agent.selection, model: agent.selection.model ?? 'default', id: 'default', name: 'Default' }], subagents: { enabled: true, paused: false, profiles: [], anyModel: true }, compactAfterTurns: 12, maxRunMinutes: 10, autoMemory: true });
   }
   private closed = false;
   private pumping = false;
@@ -51,6 +57,8 @@ export class FakeAgents {
     thread?: (threadId: string) => EntrustedThread | undefined;
     /** Starts the thread's goal, or removes it with `null`. */
     goal?: (threadId: string, objective: string | null) => void;
+    /** Whether a folder on this core already holds files: a brain never moves into one, it takes the next name. */
+    occupied?: (path: string) => boolean;
   }) {}
   /** The core's reason to keep a project: a mission, team, resource or memory of an agent names it. */
   referencesProject(projectId: string): boolean {
@@ -58,6 +66,39 @@ export class FakeAgents {
       || this.all('team').some(team => team.projectIds.includes(projectId))
       || this.all('resource').some(resource => resource.scope.kind === 'project' && resource.scope.id === projectId)
       || this.all('memory').some(memory => memory.scope.kind === 'project' && memory.scope.id === projectId);
+  }
+  /**
+   * The agents demo on `?fake=1&agents=1`: Mira looks after one project, has
+   * answered with a picture and updated its memory after it, and has told the
+   * owner about a thread of that project. Records are dated in order, as the
+   * core would have written them.
+   */
+  seedDemo(host: { selection: AgentSelection; project: { id: string; name: string } | null; attach: (threadId: string) => AgentMessageFile }): void {
+    if (!this.runner) return;
+    const start = Date.now() - 2 * 3600_000;
+    const dated = <K extends AgentEntityKind>(kind: K, value: AgentDraft<AgentEntities[K]>, minutes: number): AgentEntities[K] => {
+      const record = { ...this.save(kind, { value }), createdAt: start + minutes * 60_000, updatedAt: start + minutes * 60_000 } as AgentEntities[K];
+      this.rows.set(`${kind}:${record.id}`, record);
+      return structuredClone(record);
+    };
+    const put = <K extends AgentEntityKind>(kind: K, record: AgentEntities[K]) => { this.rows.set(`${kind}:${record.id}`, record); };
+    const agent = dated('profile', { name: 'Mira', domain: 'Product scout', instructions: 'Keep an eye on the product and tell me what matters, with pictures.', avatar: '', selection: host.selection, status: 'active', tools: ['messages', 'memory', 'artifacts', 'decisions', 'routines'], accountIntegration: 'provider', projectIds: host.project ? [host.project.id] : [] }, 0);
+    const scope: AgentScope = { kind: 'agent', id: agent.id };
+    const asked = dated('message', { scope, senderId: null, text: 'Can you look at the new welcome screen and tell me how it reads?', recipientIds: [agent.id], replyTo: null, episodeId: 'demo-episode-1', sourceRunId: null }, 1);
+    const work = (draft: Partial<AgentDraft<AgentWork>> & Pick<AgentWork, 'prompt' | 'episodeId'>, minutes: number) => dated('work', { agentId: agent.id, scope, taskId: null, taskGeneration: null, messageId: null, status: 'done', error: null, runId: null, notBefore: start, ...draft }, minutes);
+    const answered = work({ prompt: asked.text, episodeId: asked.episodeId, messageId: asked.id }, 1);
+    const session = dated('session', { agentId: agent.id, scope, threadId: '' }, 1);
+    const threadId = this.runner.create(agent, session.id, answered);
+    put('session', { ...session, threadId });
+    const run = (of: AgentWork, minutes: number) => dated('run', { workId: of.id, agentId: agent.id, threadId, turnId: null, execution: agent.selection, profileRevision: agent.revision, context: { instructions: of.prompt, memoryIds: [], resources: [], messageIds: of.messageId ? [of.messageId] : [] }, status: 'done', startedAt: start + minutes * 60_000, finishedAt: start + (minutes + 3) * 60_000, actualExecution: null }, minutes);
+    const first = run(answered, 1);
+    dated('delivery', { messageId: asked.id, agentId: agent.id, status: 'processed', workId: answered.id }, 1);
+    put('work', { ...answered, runId: first.id, memory: { threadId, status: 'done', summary: 'Noted that you want the welcome screen to stay under three lines on a phone.', at: start + 5 * 60_000 } });
+    dated('message', { scope, senderId: agent.id, text: 'It reads well: the title is clear and the button stands out. On a phone the subtitle wraps to three lines, so I would cut it to one sentence. Here is how it looks now.', recipientIds: [], replyTo: asked.id, episodeId: asked.episodeId, sourceRunId: first.id, files: [host.attach(threadId)] }, 4);
+    const notice = work({ purpose: 'notice', prompt: 'A thread of your projects finished.', episodeId: 'demo-episode-2' }, 40);
+    const second = run(notice, 40);
+    put('work', { ...notice, runId: second.id, memory: { threadId, status: 'unchanged', summary: null, at: start + 44 * 60_000 } });
+    dated('message', { scope, senderId: agent.id, text: `The login form fix in ${host.project?.name ?? 'your project'} is done: its tests pass and the pull request is open. Nothing needs you for now.`, recipientIds: [], replyTo: null, episodeId: notice.episodeId, sourceRunId: second.id }, 43);
   }
   close(): void { this.closed = true; }
   open(): void { this.closed = false; this.kick(); }
@@ -233,7 +274,8 @@ export class FakeAgents {
     const memories = this.newest('memory', undefined, undefined, null, AGENT_HISTORY_PAGE);
     return { revision: this.revision, routines: this.all('routine'), accountGrants: structuredClone(this.grants), limits: { ...this.limits }, profiles: this.all('profile'), groups: this.all('group'), teams: this.all('team'), missions: this.all('mission'), tasks: this.all('task'), sessions: this.all('session'), messages: messages.items, work, memories: memories.items, ...this.related(messages.items, work), resources: this.all('resource'), artifacts: this.all('artifact'), more: { message: messages.more, work: recent.more, memory: memories.more },
       // The core drops an entrustment when its thread is archived or removed.
-      entrusted: this.entrusted.filter(e => { const thread = this.runner?.thread?.(e.threadId); return thread && !thread.archived; }).map(e => ({ ...e })) };
+      entrusted: this.entrusted.filter(e => { const thread = this.runner?.thread?.(e.threadId); return thread && !thread.archived; }).map(e => ({ ...e })),
+      brainRoot: this.brainRoot() };
   }
   private history(p: RpcParams<'agents.history'>): AgentsHistoryPage {
     const kind = HISTORY_KIND[p.kind];
@@ -256,6 +298,7 @@ export class FakeAgents {
     'agents.accounts.set': p => this.setAccounts(p),
     'agents.brain.get': p => this.getBrain(p),
     'agents.brain.save': p => this.saveBrain(p),
+    'agents.brain.root': p => this.moveBrains(p),
     'agents.routine.save': p => this.saveRoutine(p),
     'agents.routine.run': p => this.runRoutine(p),
     'agents.context.compact': p => this.compactContext(p),
@@ -306,8 +349,38 @@ export class FakeAgents {
 
   private getBrain(p: RpcParams<'agents.brain.get'>): RpcResult<'agents.brain.get'> {
     const agent = this.get('profile', p.agentId);
-    if (!this.brains.has(agent.id)) this.brains.set(agent.id, { path: `/agent-workspaces/${agent.id}/brain`, instructions: agent.instructions, memory: '', revision: '0' });
-    return structuredClone(this.brains.get(agent.id)!);
+    if (!this.brains.has(agent.id)) this.brains.set(agent.id, { path: '', instructions: agent.instructions, memory: '', revision: '0' });
+    return { ...structuredClone(this.brains.get(agent.id)!), path: this.brainPath(agent) };
+  }
+
+  private brainRoot(): AgentBrainRoot { return { path: this.brainFolder ?? DEFAULT_BRAIN_ROOT, custom: this.brainFolder !== null }; }
+  private brainPath(agent: AgentProfile): string {
+    if (this.brainFolder === null) return `${DEFAULT_BRAIN_ROOT}/${agent.id}/brain`;
+    return `${this.brainFolder}/${this.placed.get(agent.id) ?? agent.id}`;
+  }
+
+  /**
+   * The core's move: every brain goes under the new root, each in a folder of
+   * its own, so a root that already holds files (a brain repository) is fine.
+   */
+  private moveBrains(p: RpcParams<'agents.brain.root'>): RpcResult<'agents.brain.root'> {
+    const next = p.path === null ? null : p.path.trim().replace(/[\\/]+$/, '');
+    if (next !== null && !/^(?:\/|[A-Za-z]:[\\/])/.test(next)) this.refuse(`path: expected an absolute folder, got ${next}`);
+    if (next === (this.brainFolder ?? DEFAULT_BRAIN_ROOT)) return this.brainRoot();
+    this.brainFolder = next === DEFAULT_BRAIN_ROOT ? null : next;
+    this.placed.clear();
+    if (this.brainFolder !== null) for (const agent of this.all('profile').sort(byCreation)) this.place(agent);
+    this.changed(++this.revision);
+    return this.brainRoot();
+  }
+  /** Names an agent's folder under a chosen root after the agent, once; a later rename keeps it. */
+  private place(agent: AgentProfile): void {
+    if (this.brainFolder === null || this.placed.has(agent.id)) return;
+    const taken = new Set(this.placed.values());
+    const base = agent.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || agent.id;
+    let name = base;
+    for (let n = 2; taken.has(name) || this.runner?.occupied?.(`${this.brainFolder}/${name}`); n++) name = `${base}-${n}`;
+    this.placed.set(agent.id, name);
   }
 
   private saveBrain(p: RpcParams<'agents.brain.save'>): RpcResult<'agents.brain.save'> {
@@ -349,7 +422,9 @@ export class FakeAgents {
   private saveProfile(p: RpcParams<'agents.profile.save'>): RpcResult<'agents.profile.save'> {
     if (!p.value.name.trim()) this.refuse('name: expected nonempty text');
     if (p.value.accountIntegration === 'kebacc-experiment' && (!this.limits.kebaccExperiment || this.runner?.protocol(p.value.selection.providerId) !== 'agy')) this.refuse('enable the kebacc experiment for an Antigravity CLI agent first');
-    return this.save('profile', p);
+    const saved = this.save('profile', p);
+    this.place(saved);
+    return saved;
   }
 
   private saveGroup(p: RpcParams<'agents.group.save'>): RpcResult<'agents.group.save'> {

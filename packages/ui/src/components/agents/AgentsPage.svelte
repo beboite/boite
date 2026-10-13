@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, untrack, type Component } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
-  import { ArrowLeft, Bot, Brain, CalendarClock, Ellipsis, History, MessageSquare, Settings2, Target, Users } from '@lucide/svelte';
+  import { ArrowLeft, Bot, Brain, CalendarClock, Ellipsis, History, MessageSquare, Settings2, SquareArrowOutUpRight, Target, Users } from '@lucide/svelte';
   import type { AgentScope } from '@boite/contracts';
   import { AgentsView, agentChats, attentionOf, chatKey, liveThreads, missionHome, missionPreset, missionsOf, type AgentChat, type AgentEntryKind, type AgentFocus, type AgentSelection } from '../../lib/agents.svelte';
   import { mobileOverlay } from '../../lib/mobile-history';
@@ -112,10 +112,26 @@
     if (liveHere || chat?.status === 'running') return { text: labels.running, tone: 'running' };
     if (profile?.status === 'archived') return { text: labels.archived };
     if (profile?.status === 'paused' || chat?.status === 'paused') return { text: labels.paused };
-    if (profile) return { text: profile.domain || labels.idle };
+    if (profile) return { text: [profile.domain || labels.idle, ...(entrusted.length ? [fill(labels.looksAfter, { names: entrusted.join(', ') })] : [])].join(' · ') };
     return { text: members.map(a => a.name).join(', ') };
   });
 
+  /** The projects the owner entrusted to this agent, by name, as this machine lists them. */
+  const entrusted = $derived(profile?.projectIds?.flatMap(id => store.projects.find(p => p.id === id)?.name ?? []) ?? []);
+  /**
+   * The thread of an agent's own conversation: what it did, tools and code
+   * included. The conversation itself shows none of it, so the menu opens it.
+   */
+  const workThread = $derived(profile ? snapshot?.sessions.find(s => s.agentId === profile.id && s.scope.kind === 'agent' && s.scope.id === profile.id)?.threadId ?? null : null);
+  const SEE_WORK = 'see-work';
+  const menuItems = $derived([
+    ...layout.more.filter(p => p !== 'routines').map(p => ({ id: p, label: paneLabel(p), glyph: icons[p], active: current === p })),
+    ...(workThread ? [{ id: SEE_WORK, label: labels.seeWork, glyph: SquareArrowOutUpRight }] : []),
+  ]);
+  function pick(id: string) {
+    if (id === SEE_WORK) { if (workThread) void store.open(workThread); return; }
+    toggle(id as Pane);
+  }
   const missions = $derived(snapshot && partner ? missionsOf(snapshot, partner) : []);
   const teamMissions = $derived(team && snapshot ? snapshot.missions.filter(m => m.teamId === team.id) : []);
   const scopes = $derived<AgentScope[]>([
@@ -240,8 +256,8 @@
               <CalendarClock size={16} strokeWidth={1.75} />{#if planned}<span class="ui-label">{planned}</span>{/if}
             </button>
           {/if}
-          {#if layout.more.length}
-            <Menu placement="bottom" align="end" variant="ghost" label={labels.more} testid="agent-panes" items={layout.more.filter(p => p !== 'routines').map(p => ({ id: p, label: paneLabel(p), glyph: icons[p], active: current === p }))} onpick={id => toggle(id as Pane)}>
+          {#if menuItems.length}
+            <Menu placement="bottom" align="end" variant="ghost" label={labels.more} testid="agent-panes" items={menuItems} onpick={pick}>
               <Ellipsis size={18} strokeWidth={1.75} />
             </Menu>
           {/if}

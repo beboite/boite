@@ -209,6 +209,11 @@ export const fr: Translation = {
     machineUnreachable: '{name} n’est pas connectée. Reconnectez-la, puis créez l’agent à nouveau.', whatItDoesHint: 'Ses instructions permanentes. Vous pourrez les changer plus tard dans ses réglages.',
     namePlaceholder: 'Mira, Scout, Pixel', whatItDoes: 'Ce qu’il fait', instructionsPlaceholder: 'Par exemple : chaque matin, lis les nouvelles issues et résume-les en cinq lignes.',
     ownedBy: '{name} gère ce thread', ownedHint: 'Parlez à {name} dans sa discussion. Ce thread montre ce qu’il fait.', openAgent: 'Ouvrir {name}',
+    projects: 'Projets', projectsHint: 'Il suit leurs threads, en lance de nouveaux, répond à leurs questions et vous dit ce qui compte.', noProjects: 'Ouvrez d’abord un projet.', looksAfter: 'S’occupe de {names}',
+    seeWork: 'Voir son travail', aboutProjects: 'À propos de vos projets', memoryUpdated: 'Mémoire mise à jour', memoryUpdating: 'Mise à jour de la mémoire',
+    autoMemory: 'Mettre à jour la mémoire après chaque tâche', autoMemoryHint: 'Un petit assistant réécrit ses notes à partir de ce que vous avez demandé et de ce qu’il a répondu.',
+    brainFolder: 'Dossier des cerveaux', brainFolderHint: 'Où chaque agent garde ses instructions et ses notes sur cette machine. Le changer les déplace tous.', brainDefault: 'Par défaut, dans le dossier de données de Boite',
+    brainChange: 'Changer', brainUseDefault: 'Utiliser le dossier par défaut', brainMove: 'Déplacer les cerveaux ici', brainPath: 'Dossier sur cette machine', brainBrowse: 'Parcourir', brainParent: 'Dossier parent', brainUseFolder: 'Utiliser ce dossier',
     robot: {
       family: 'Style', shape: 'Forme', color: 'Couleur', eyes: 'Yeux', top: 'Accessoire', shuffle: 'Mélanger', customize: 'Personnaliser', done: 'Terminé',
       option: '{part} {n}', families: { jelly: 'Gelée', bubble: 'Bulle', capsule: 'Capsule', retro: 'Rétro' },
@@ -1292,9 +1297,8 @@ export const fr: Translation = {
     replyTo: 'En réponse à',
     more: '+{count} autres',
     relation: {
-      starter: 'A lancé cette conversation', started: 'Lancée d\'ici', parent: 'Parent', child: 'Sous-agent', steward: 'Gardien', stewarded: 'Sous sa garde'
-    },
-    noticeOne: '1 avis de conversation', noticeMany: '{count} avis de conversation'
+      starter: 'A lancé cette conversation', started: 'Lancée d\'ici', parent: 'Parent', child: 'Sous-agent', resident: 'Veille sur le projet'
+    }
   },
   coordination: {
     options: 'Réglages avancés',
@@ -1318,31 +1322,8 @@ export const fr: Translation = {
       queued: 'En attente', received: 'En attente', delivered: 'Envoyé', uncertain: 'Non confirmé', expired: 'Expiré', rejected: 'Échec'
     }
   },
-  steward: {
-    chipFor: 'Gardien : {name}',
-    lookedAfterBy: 'Suivi par {name}',
-    heading: 'Gardien',
-    enable: "Cet agent veille sur des projets",
-    enableHint: "Il lit toutes leurs conversations, les guide, répond à leurs questions et les range pendant votre absence.",
-    ownerOnly: "Seul le propriétaire peut nommer un gardien. Cet appareil peut voir ce qu'il surveille.",
-    unavailable: "Un sous-agent ou une session d'agent persistante ne peut pas être gardien.",
-    allProjects: 'Tous les projets', allProjectsHint: 'Y compris les projets ajoutés plus tard.',
-    projects: 'Projets', projectsEmpty: 'Aucun projet à surveiller sur cette machine.',
-    capabilities: "Ce qu'il peut faire",
-    risky: 'Risqué',
-    capability: {
-      message: { label: 'Envoyer des messages', hint: 'Ses messages atteignent les conversations, même sans communication activée.' },
-      spawn: { label: 'Lancer des conversations', hint: 'Lancer de nouvelles conversations dans ses projets.' },
-      archive: { label: 'Archiver', hint: 'Archiver et restaurer des conversations.' },
-      move: { label: 'Déplacer', hint: 'Déplacer des conversations entre ses projets et ajouter des dossiers de projet.' },
-      stop: { label: 'Arrêter et renommer', hint: 'Arrêter un tour en cours et renommer des conversations.' },
-      answer: { label: 'Répondre aux questions', hint: 'Répondre aux questions que les agents vous posent, ou les passer.' },
-      permissions: { label: 'Répondre aux permissions', hint: "Autoriser ou refuser les demandes d'outils à votre place." },
-      remove: { label: 'Supprimer des conversations', hint: 'Supprimer des conversations. Une conversation supprimée reste restaurable un temps.' }
-    },
-    notify: 'Prévenir des événements',
-    notifyHint: 'Un tour terminé, un échec, une question ou une permission en attente réveille le gardien.',
-    chipOne: 'Gardien · 1 projet', chipMany: 'Gardien · {count} projets', chipAll: 'Gardien · tous les projets'
+  resident: {
+    lookedAfterBy: 'Suivi par {name}'
   },
   delegation: {
     off: 'Désactivés',

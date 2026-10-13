@@ -29,23 +29,17 @@ export interface Parsed {
   archived: boolean;
   /** `answer --skip`: resolve a question without an answer. */
   skip: boolean;
-  /** `stewards set --all`: every project. */
-  all: boolean;
-  /** `stewards set --can a,b`: the capabilities. */
-  can?: string;
-  /** `stewards set --quiet`: no notices. */
-  quiet: boolean;
   /** `settings request|open --why <text>`: the reason the card shows the user. */
   why?: string;
   /** Another core's address; its token comes from BOITE_TOKEN, never the command line. */
   core?: string;
 }
 
-const BOOLEAN_OPTIONS = ['json', 'multiple', 'worktree', 'wait', 'archived', 'skip', 'all', 'quiet'] as const;
+const BOOLEAN_OPTIONS = ['json', 'multiple', 'worktree', 'wait', 'archived', 'skip'] as const;
 const NUMBER_OPTIONS = ['timeout', 'last', 'before'] as const;
 
 export function parse(argv: string[]): Parsed {
-  const parsed: Parsed = { positional: [], json: false, multiple: false, worktree: false, wait: false, archived: false, skip: false, all: false, quiet: false, thread: undefined, dataDir: undefined, channel: 'stable' };
+  const parsed: Parsed = { positional: [], json: false, multiple: false, worktree: false, wait: false, archived: false, skip: false, thread: undefined, dataDir: undefined, channel: 'stable' };
   const number = (flag: string, raw: string): number => {
     const value = Number(raw);
     if (!Number.isFinite(value) || value < 0) throw new Usage(`${flag} needs a number, got ${raw}`);
@@ -75,7 +69,6 @@ export function parse(argv: string[]): Parsed {
     else if (arg === '--title') parsed.title = next();
     else if (arg === '--name') parsed.name = next();
     else if (arg === '--project') parsed.project = next();
-    else if (arg === '--can') parsed.can = next();
     else if (arg === '--why') parsed.why = next();
     else if (arg === '--core') parsed.core = next();
     else if (arg === '--limit') {

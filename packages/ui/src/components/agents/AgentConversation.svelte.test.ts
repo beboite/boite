@@ -1,5 +1,6 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
+import type { ThreadSummary } from '@boite/contracts';
 import type { AgentsView } from '../../lib/agents.svelte';
 import AgentConversation from './AgentConversation.svelte';
 
@@ -87,4 +88,70 @@ test('HTTP agent sending keeps its secure request id for an uncertain retry', as
   expect(call).toHaveBeenCalledTimes(2);
   expect(call.mock.calls[1]![1]).toEqual(first);
   expect(input.value).toBe('');
+});
+
+/** A direct conversation holding one agent reply, from a run of `work`. */
+function replyView(work: Record<string, unknown>, reply: Record<string, unknown> = {}, store: Record<string, unknown> = {}) {
+  return {
+    seen: {
+      messages: [{ ...message('m-reply', 'a-ada'), text: 'Here it is.', replyTo: null, sourceRunId: 'r-1', ...reply }],
+      deliveries: [], decisions: [], runs: [{ id: 'r-1', workId: 'w-1' }],
+      work: [{ id: 'w-1', messageId: null, taskId: null, ...work }],
+    },
+    snapshot: { profiles: [{ id: 'a-ada', name: 'Ada', avatar: '' }], groups: [], work: [], sessions: [], routines: [] },
+    store: { owner: true, threads: [], ...store }, pending: false, loadingOlder: null, fill() {}, markRead() {}, hasOlder: () => false, loadOlder: async () => {}, call: async () => null,
+  } as unknown as AgentsView;
+}
+
+test('an agent reply carries the files it attached, read from its own thread and message', async () => {
+  const readArtifact = vi.fn(async () => ({ ok: true, value: { name: 'shot.png', mimeType: 'image/png', bytes: 2048, url: 'data:image/png;base64,iVBORw0KGgo=' } }));
+  const part = { type: 'artifact', id: 'art-1', name: 'shot.png', mimeType: 'image/png', bytes: 2048 };
+  const view = replyView({ purpose: 'work', messageId: 'm-ask' }, { replyTo: 'm-ask', files: [{ threadId: 't-agent', messageId: 'm-thread', part }] }, { readArtifact });
+  mounted = mount(AgentConversation, { target: document.body, props: { view, scope } });
+  await settle();
+  const files = document.querySelector('[data-testid="agent-files"]');
+  expect(files).not.toBeNull();
+  expect(readArtifact).toHaveBeenCalledWith('t-agent', 'm-thread', 'art-1', undefined);
+  // The picture draws inline with its zoom, inside the agent's reply.
+  expect(files!.closest('.agent-message.from-agent')).not.toBeNull();
+  expect(files!.querySelector('img[alt="shot.png"]')).not.toBeNull();
+});
+
+test('a notice about entrusted projects is labelled as one, not as a planned task', async () => {
+  mounted = mount(AgentConversation, { target: document.body, props: { view: replyView({ purpose: 'notice' }), scope } });
+  await settle();
+  expect(document.querySelector('[data-testid="agent-notice"]')?.textContent).toContain('About your projects');
+  expect(document.querySelector('[data-testid="agent-planned-result"]')).toBeNull();
+});
+
+test('the memory pass shows quietly under a reply: its summary on a tap, dimmed while it runs, nothing otherwise', async () => {
+  const at = Date.now();
+  mounted = mount(AgentConversation, { target: document.body, props: { view: replyView({ purpose: 'work', memory: { threadId: 't', status: 'done', summary: 'Noted your favourite colour.', at } }), scope } });
+  await settle();
+  const chip = document.querySelector<HTMLButtonElement>('[data-testid="agent-memory"] button')!;
+  expect(chip.textContent).toContain('Memory updated');
+  expect(chip.title).toBe('Noted your favourite colour.');
+  expect(document.querySelector('[data-testid="agent-memory-summary"]')).toBeNull();
+  chip.click(); await settle();
+  expect(document.querySelector('[data-testid="agent-memory-summary"]')?.textContent).toBe('Noted your favourite colour.');
+  await unmount(mounted); mounted = undefined;
+
+  mounted = mount(AgentConversation, { target: document.body, props: { view: replyView({ purpose: 'work', memory: { threadId: 't', status: 'running', summary: null, at } }), scope } });
+  await settle();
+  expect(document.querySelector<HTMLElement>('[data-testid="agent-memory"]')?.dataset.status).toBe('running');
+  expect(document.querySelector('[data-testid="agent-memory"]')?.textContent).toContain('Updating memory');
+  for (const status of ['unchanged', 'error']) {
+    await unmount(mounted); mounted = undefined;
+    mounted = mount(AgentConversation, { target: document.body, props: { view: replyView({ purpose: 'work', memory: { threadId: 't', status, summary: null, at } }), scope } });
+    await settle();
+    expect(document.querySelector('[data-testid="agent-memory"]')).toBeNull();
+  }
+});
+
+test('the agent at work shows no way into its thread from the conversation', async () => {
+  const live = { id: 't-live', status: 'running' } as unknown as ThreadSummary;
+  mounted = mount(AgentConversation, { target: document.body, props: { view: replyView({ purpose: 'work' }), scope, live } });
+  await settle();
+  expect(document.querySelector('[data-testid="agent-live"]')).not.toBeNull();
+  expect(document.querySelector('[data-testid="agent-live-open"]')).toBeNull();
 });

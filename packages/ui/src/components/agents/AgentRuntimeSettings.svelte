@@ -92,6 +92,8 @@
 
     <fieldset class="card" disabled={locked}>
       <h2>{labels.engine}</h2>
+      <!-- Missing on configurations saved before it existed: on. -->
+      <label class="switch-row"><span class="text">{labels.autoMemory}<span class="hint">{labels.autoMemoryHint}</span></span><input type="checkbox" role="switch" checked={config.autoMemory !== false} onchange={event => { if (config) config.autoMemory = event.currentTarget.checked; }} data-testid="agent-auto-memory" /></label>
       <div class="agent-columns">
         <label class="agent-field">{labels.compactEvery}<input type="number" min="2" max="100" bind:value={config.compactAfterTurns} required /></label>
         <label class="agent-field">{labels.runMinutes}<input type="number" min="1" max="120" bind:value={config.maxRunMinutes} required /></label>

@@ -1,4 +1,4 @@
-import type { DelegationConfig, DelegationProfile, PermissionMode, TurnExecution } from './index';
+import type { DelegationConfig, DelegationProfile, MessagePart, PermissionMode, TurnExecution } from './index';
 
 export interface AgentRuntimeConfig {
   defaultRoute: AgentSelection;
@@ -6,9 +6,16 @@ export interface AgentRuntimeConfig {
   subagents: DelegationConfig;
   compactAfterTurns: number;
   maxRunMinutes: number;
+  /**
+   * After each finished piece of work in the direct conversation, a small
+   * subagent rewrites MEMORY.md from what was asked and answered. On unless
+   * the owner turns it off; missing on configurations saved before it existed.
+   */
+  autoMemory?: boolean;
 }
 export interface AgentAccountGrant { accountId: string; agentIds: string[] | null }
 export interface AgentBrain {
+  /** The agent's brain folder: under the brain root the owner chose, else in the core's data directory. */
   path: string;
   instructions: string;
   memory: string;
@@ -54,6 +61,13 @@ export interface AgentProfile extends AgentRecord {
   tools: string[];
   /** External plugin integration only. Boite never selects or rotates agy logins. */
   accountIntegration: 'provider' | 'kebacc-experiment';
+  /**
+   * Projects the owner entrusted to this agent. Its direct conversation reads
+   * their threads, starts, steers, archives, moves and stops them, answers
+   * their questions, and hears when one fails, asks or waits. Missing on
+   * profiles saved before it existed: none.
+   */
+  projectIds?: string[];
 }
 export interface AgentGroup extends AgentRecord {
   name: string;
@@ -117,6 +131,29 @@ export interface AgentConversationMessage extends AgentRecord {
    * write the sentence around it in their own language from `event`.
    */
   thread?: { id: string; title: string; event: 'entrusted' | 'done' | 'blocked' | 'stopped' };
+  /**
+   * Files the agent attached with `boite attach` while it worked: pictures,
+   * captures, documents. Each is read with `artifacts.read` on the agent's
+   * own thread and message.
+   */
+  files?: AgentMessageFile[];
+}
+export interface AgentMessageFile {
+  threadId: string;
+  messageId: string;
+  part: Extract<MessagePart, { type: 'artifact' }>;
+}
+/**
+ * The memory pass after a finished piece of work: a small subagent of the
+ * agent's thread reads what was asked and answered and rewrites MEMORY.md.
+ * `summary` says in one line what it changed; null while it runs or when
+ * nothing changed.
+ */
+export interface AgentMemoryPass {
+  threadId: string;
+  status: 'running' | 'done' | 'unchanged' | 'error';
+  summary: string | null;
+  at: number;
 }
 /**
  * An ordinary thread the owner handed to a persistent agent. The thread keeps
@@ -139,7 +176,12 @@ export interface AgentDelivery extends AgentRecord {
   workId: string | null;
 }
 export interface AgentWork extends AgentRecord {
-  purpose?: 'work' | 'compaction';
+  /**
+   * `notice`: the core telling the agent what happened in threads of the
+   * projects entrusted to it. Notices that arrive before it starts join the
+   * same work item. An answer of `[quiet]` posts nothing.
+   */
+  purpose?: 'work' | 'compaction' | 'notice';
   agentId: string;
   scope: AgentScope;
   taskId: string | null;
@@ -151,6 +193,8 @@ export interface AgentWork extends AgentRecord {
   error: string | null;
   runId: string | null;
   notBefore: number;
+  /** The memory pass that followed this work, when one ran. */
+  memory?: AgentMemoryPass;
 }
 export interface AgentRun extends AgentRecord {
   workId: string;
@@ -268,13 +312,27 @@ export interface AgentsSnapshot {
   limits: { backgroundConcurrency: number; paused: boolean; kebaccExperiment: boolean };
   /** Threads entrusted to agents on this core. Missing on older cores. */
   entrusted?: AgentEntrustment[];
+  /** Where agents' brains live on this core. Missing on older cores. */
+  brainRoot?: AgentBrainRoot;
 }
+/**
+ * The folder every agent's brain lives under. `custom` is false for the
+ * default, a folder per agent in the core's data directory; a chosen root
+ * holds one folder per agent, named after it when it was first placed there.
+ */
+export interface AgentBrainRoot { path: string; custom: boolean }
 export interface AgentsRpcMethods {
   'agents.runtime.get': { params: { agentId: string }; result: AgentRuntimeConfig };
   'agents.runtime.configure': { params: { agentId: string; expectedRevision: number; config: AgentRuntimeConfig }; result: AgentProfile };
   'agents.accounts.set': { params: { grants: AgentAccountGrant[] }; result: AgentAccountGrant[] };
   'agents.brain.get': { params: { agentId: string }; result: AgentBrain };
   'agents.brain.save': { params: { agentId: string; expectedRevision: string; instructions: string; memory: string }; result: AgentBrain };
+  /**
+   * Choose the folder agents' brains live under, or null for the default.
+   * Every existing brain moves there; a destination folder that already
+   * holds files refuses the whole change before anything moves. Owner only.
+   */
+  'agents.brain.root': { params: { path: string | null }; result: AgentBrainRoot };
   'agents.routine.save': { params: AgentSave<AgentRoutine> & { threadId?: string }; result: AgentRoutine };
   'agents.routine.run': { params: { routineId: string; requestId: string }; result: AgentWork };
   'agents.context.compact': { params: { sessionId: string; requestId: string }; result: AgentWork };

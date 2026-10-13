@@ -77,7 +77,8 @@
   let groupId = $state(team?.groupId ?? null);
   let teamId = $state(mission?.teamId ?? initial.preset?.teamId ?? null);
   let projectId = $state(mission?.projectId ?? null);
-  let projectIds = $state(team?.projectIds ?? []);
+  /** A team's projects, or the projects the owner entrusts to an agent. */
+  let projectIds = $state(team?.projectIds ?? profile?.projectIds ?? []);
   let objective = $state(mission?.objective ?? '');
   let expectedResult = $state(mission?.expectedResult ?? '');
   let minutes = $state((mission?.maxDurationMs ?? 600000) / 60000);
@@ -98,12 +99,16 @@
     return { id: m.id, label: m.label, active: m.store === host, disabled: !usable, ...(usable ? {} : { hint: offline ? labels.machineOffline : labels.machineNotOwner }) };
   }));
   const busy = $derived(view.pending || moving || saving);
+  /** The projects an agent may be entrusted: those of the machine it lives on, the drafts aside. */
+  const entrustable = $derived(host.projects.filter(p => p.id !== host.draftsProject?.id));
 
   function pickHost(id: string) {
     const next = workspace.machines.find(m => m.id === id)?.store;
     if (!next || next === host) return;
     host = next;
     selection = defaultSelection(next, selection.permissionMode);
+    // Projects are a machine's own: another core knows none of this one's.
+    projectIds = [];
     // The kebacc experiment is a setting of each core, read from this page's snapshot only.
     accountIntegration = 'provider';
   }
@@ -154,12 +159,12 @@
       // field this form edits is unchanged. Anything else keeps the revision it read, so a stale
       // form is refused rather than written over newer values.
       const latest = stored();
-      const edited = (r: AgentProfile) => JSON.stringify([r.name, r.domain, r.instructions, r.avatar, r.status, r.tools, r.accountIntegration]);
+      const edited = (r: AgentProfile) => JSON.stringify([r.name, r.domain, r.instructions, r.avatar, r.status, r.tools, r.accountIntegration, r.projectIds ?? []]);
       const rebase = kind === 'profile' && latest && profile && edited(latest as AgentProfile) === edited(profile);
       const version = initial.record ? { id: initial.record.id, expectedRevision: (rebase ? latest : initial.record).revision } : {};
       let result: AgentEntities[AgentEntryKind] | null = null;
       if (kind === 'profile') {
-        const value = { name, domain, instructions, avatar: robotTouched ? encodeRobot(robot) : profile?.avatar ?? '', selection: creating || !rebase ? selection : (latest as AgentProfile).selection, status, tools, accountIntegration };
+        const value = { name, domain, instructions, avatar: robotTouched ? encodeRobot(robot) : profile?.avatar ?? '', selection: creating || !rebase ? selection : (latest as AgentProfile).selection, status, tools, accountIntegration, projectIds };
         if (creating && host !== view.store) return await createOn(host, value);
         result = await view.call('agents.profile.save', { ...version, value });
       }
@@ -223,6 +228,18 @@
     {#if kind === 'profile'}
       {#if embedded}<label class="agent-field">{labels.domain}<input bind:value={domain} maxlength="500" placeholder={labels.rolePlaceholder} /></label>{/if}
       <label class="agent-field"><span>{creating ? labels.whatItDoes : labels.instructions}{#if creating}<span class="hint">{labels.whatItDoesHint}</span>{/if}</span><textarea bind:value={instructions} rows="4" maxlength="32000" placeholder={labels.instructionsPlaceholder} data-testid="agent-instructions"></textarea></label>
+      <!-- The projects it looks after: it follows their threads, starts new ones and answers for them. -->
+      <fieldset class="agent-field" data-testid="agent-projects">
+        <legend>{labels.projects}</legend>
+        {#if entrustable.length}
+          <div class="agent-checks">
+            {#each entrustable as project (project.id)}
+              <label class="agent-chip-check"><input type="checkbox" checked={projectIds.includes(project.id)} onchange={() => { projectIds = toggle(projectIds, project.id); }} data-testid="agent-project-{project.id}" /><span class="ui-label">{project.name}</span></label>
+            {/each}
+          </div>
+          <p class="hint agent-projects-hint">{labels.projectsHint}</p>
+        {:else}<p class="hint">{labels.noProjects}</p>{/if}
+      </fieldset>
       {#if embedded}
         <div class="agent-field"><span>{labels.status}</span>
           <Menu placement="bottom" label={labels.status} items={(['active', 'paused', 'archived'] as const).map(id => ({ id, label: labels[id], active: status === id }))} onpick={id => { status = id as AgentProfile['status']; }}><span class="ui-label">{labels[status]}</span></Menu>

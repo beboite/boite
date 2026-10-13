@@ -17,7 +17,6 @@ import {
   type Account,
   type BackgroundTask,
   type AgentLetter,
-  type StewardGrant,
   type BrainStatus,
   type CoordinationConfig,
   type CoordinationPeer,
@@ -76,8 +75,12 @@ import { initialServerUpdate } from './server-update';
 import { observeLog } from './logs';
 import type { FakeWorktree } from './worktrees';
 
-/** One handler per contract method; plugins, agents and workflows answer from their own classes. */
-export type FakeMethods = { [M in Exclude<RpcMethodName, `plugins.${string}` | `agents.${string}` | `workflows.${string}`>]: (params: RpcParams<M>) => Promise<RpcResult<M>> };
+/**
+ * One handler per contract method; plugins, agents and workflows answer from
+ * their own classes. `resident.*` is called only by a persistent agent's own
+ * `boite` command, never by the UI: the fake core answers it as unknown.
+ */
+export type FakeMethods = { [M in Exclude<RpcMethodName, `plugins.${string}` | `agents.${string}` | `workflows.${string}` | `resident.${string}`>]: (params: RpcParams<M>) => Promise<RpcResult<M>> };
 
 export interface FakeClientOptions {
   /** Milliseconds between two streamed chunks. Tests pass 0. */
@@ -97,8 +100,8 @@ export interface FakeClientOptions {
   uninstalled?: boolean;
   /** Adds a deterministic active team for visual checks on `?fake=1&team=1`. */
   delegationDemo?: boolean;
-  /** A steward thread with a letter it sent, a notice it received and a thread its agent started, on `?fake=1&steward=1`. */
-  stewardDemo?: boolean;
+  /** An agent with an entrusted project, a picture, a memory pass and a notice, on `?fake=1&agents=1`. */
+  agentsDemo?: boolean;
   /** Who this client is. `'session'` makes it a paired phone, refused like one. */
   principal?: Principal;
   /**
@@ -178,8 +181,6 @@ export class FakeContext {
   readonly delegationRequests = new Map<string, { fingerprint: string; threadId: ThreadId }>();
   readonly delegationSendRequests = new Map<string, { fingerprint: string; letter: AgentLetter }>();
   readonly letters = new Map<ThreadId, AgentLetter[]>();
-  /** Steward grants by steward thread (`stewards.ts`). */
-  readonly stewards = new Map<ThreadId, StewardGrant>();
   readonly peers = new Map<string, CoordinationPeer>();
   readonly groupReads = new Map<string, { groupId: string; epoch: number }>();
   /** The group this fake core is in, shared by reference with the other fake cores of it. */
@@ -270,6 +271,8 @@ export class FakeContext {
         const methods = activityMethods(this);
         void (objective === null ? methods['threads.activity.control']({ threadId, kind: 'goal', action: 'remove' }) : methods['threads.activity.set']({ threadId, goal: { objective } })).catch(() => {});
       },
+      // A project's folder holds files: a brain root refuses it.
+      occupied: path => this.projects.some(p => p.path.replace(/[\\/]+$/, '') === path),
     });
     this.plugins = new FakePlugins({
       emit: (event, payload) => this.emit(event, payload),

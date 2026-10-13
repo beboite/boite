@@ -1,6 +1,6 @@
 <script lang="ts">
   import AgentAvatar from './agents/AgentAvatar.svelte';
-  import { stewardOfThread } from '../lib/steward-view';
+  import { openResident, residentOfThread } from '../lib/resident';
   import { agentDirectory } from '../lib/agent-directory.svelte';
   import { entrust } from '../lib/thread-entrust';
   import { tick } from 'svelte';
@@ -115,8 +115,8 @@
   }
   /** The agent this thread was entrusted to, if any. */
   let carrier = $derived(thread ? agentDirectory(store).entrustmentOf(thread.id) : null);
-  /** The steward looking after this thread, if its project has one. */
-  let watcher = $derived(thread ? stewardOfThread(store, thread) : null);
+  /** The agent the owner entrusted this thread's project to, when the thread itself is not entrusted. */
+  let resident = $derived(thread ? residentOfThread(store, thread) : null);
 </script>
 
 <div class="thread-header" data-testid="thread-header" data-status={thread?.status}>
@@ -198,14 +198,16 @@
         <button type="button" class="chip entrusted" title={fill(strings.agents.entrustedTo, { name: carrier.agent.name })} data-testid="thread-entrusted-chip"
           onclick={(event) => carrierMenu(event.currentTarget)}>
           <AgentAvatar kind="profile" id={carrier.agent.id} name={carrier.agent.name} avatar={carrier.agent.avatar} size={16} />
-          <span class="steward-name ui-label">{fill(strings.agents.entrustedTo, { name: carrier.agent.name })}</span>
+          <span class="chip-name ui-label">{fill(strings.agents.entrustedTo, { name: carrier.agent.name })}</span>
         </button>
       {/if}
-      {#if watcher}
-        <!-- The steward that looks after this thread's project: what it may do here is its grant's. -->
-        <button type="button" class="chip steward" title={fill(strings.steward.lookedAfterBy, { name: watcher.thread.title })} data-testid="thread-steward-chip" onclick={() => void store.open(watcher.thread.id)}>
-          <AgentAvatar kind="profile" id={watcher.thread.id} name={watcher.thread.title} size={16} />
-          <span class="steward-name ui-label">{fill(strings.steward.chipFor, { name: watcher.thread.title })}</span>
+      {#if resident}
+        <!-- The agent that looks after this thread's project: a click opens its conversation. -->
+        <button type="button" class="chip resident" title={fill(strings.resident.lookedAfterBy, { name: resident.name })}
+          aria-label={fill(strings.resident.lookedAfterBy, { name: resident.name })} data-testid="thread-resident-chip" data-agent-id={resident.id}
+          onclick={() => openResident(store, resident!.id)}>
+          <AgentAvatar kind="profile" id={resident.id} name={resident.name} avatar={resident.avatar} size={16} />
+          <span class="chip-name ui-label">{fill(strings.resident.lookedAfterBy, { name: resident.name })}</span>
         </button>
       {/if}
       {#if thread?.branch && work.shows('header.branch')}
@@ -305,9 +307,9 @@
     font-size: var(--text-sm);
   }
 
-  .steward { flex: 0 1 auto; min-width: 0; max-width: 220px; gap: 6px; padding-left: 4px; border-color: color-mix(in oklch, var(--color-steward) 45%, transparent); background: var(--color-steward-soft); color: var(--color-steward); cursor: pointer; }
+  .resident { flex: 0 1 auto; min-width: 0; max-width: 220px; gap: 6px; padding-left: 4px; border-color: color-mix(in oklch, var(--color-resident) 45%, transparent); background: var(--color-resident-soft); color: var(--color-resident); cursor: pointer; }
   .entrusted { flex: 0 1 auto; min-width: 0; max-width: 220px; gap: 6px; padding-left: 4px; border-color: color-mix(in oklch, var(--color-accent) 40%, transparent); background: var(--color-accent-soft); color: var(--color-accent); cursor: pointer; }
-  .steward-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .branch-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .branch :global(svg) { flex: none; }
 
@@ -348,6 +350,8 @@
     .pending-text { display: none; }
     .trace { padding: 0; min-width: var(--touch-target); justify-content: center; }
     .trace .label, .incognito .label { display: none; }
+    .resident { flex: none; padding: 0; min-width: var(--touch-target); justify-content: center; }
+    .resident .chip-name { display: none; }
     /* The title's sheet holds these on a phone. */
     .in-title-menu { display: none; }
     .rename { width: 100%; }

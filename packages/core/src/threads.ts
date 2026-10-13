@@ -862,7 +862,7 @@ export class ThreadStore {
     return this.cards.listPermissions(threadId);
   }
 
-  /** `by` names who decided in the log: the user, or a steward acting for them. */
+  /** `by` names who decided in the log: the user, or an agent acting for them. */
   answerPermission(params: { requestId: RequestId; decision: 'allow' | 'deny' }, by = 'user'): void {
     this.cards.answerPermission(params, by);
   }

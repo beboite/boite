@@ -158,7 +158,7 @@ export class Connection {
             long: params.get('long') === '1',
             heavy: params.get('heavy') === '1',
             delegationDemo: params.get('team') === '1',
-            stewardDemo: params.get('steward') === '1',
+            agentsDemo: params.get('agents') === '1',
             uninstalled: params.get('uninstalled') === '1',
             ...(params.get('principal') === 'session' ? { principal: 'session' as const } : {})
           })
@@ -603,8 +603,6 @@ export class Connection {
       // Beside the lists, not among them: the machines of the group are connected once it answers.
       void s.loadGroup();
       void s.refreshMemory();
-      // Grants already read may have changed while the machine was away; unread ones wait for the settings.
-      if (s.stewards !== null) void s.loadStewards();
       if (open && reopened && s.openThread?.id === open.id) {
         await this.ctx.delegation.refreshDelegated(client);
         if (!current() || s.openThread?.id !== open.id) return;

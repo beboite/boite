@@ -442,6 +442,15 @@ measured 4,450,765 bytes, and Windows desktop CI 4,450,386 on its first head:
 about 9,400 bytes for the search, the keyboard walk, the machine groups and two
 sentences in each language. The UI limit rises to 4,460,000, 9,235 bytes above
 the Linux build; the entry and core limits are unchanged.
+
+On 2026-10-13 on Linux, `origin/main` at `5f19f0b1` measured 4,816,593 UI
+bytes and 3,942,929 emitted core JavaScript bytes. Persistent agents taking
+over from stewards measured 4,812,621 and 3,950,295: removing the steward
+settings saves the UI 3,972 bytes net of the projects field, files, memory chip
+and brain folder, and the core gains 7,366 bytes for the projects entrusted to
+an agent, its notices, the memory pass and the brain folder move. The core
+total limit becomes 3,960,000 bytes, 9,705 above this measurement; the UI,
+entry and `main.js` limits are unchanged.
 Explain measured growth when changing a limit. Shared-runner timings are not gated. Earlier sizes and
 runner observations remain in the [dated report](../bench/results/2026-09-29-resources.md#historical-ci-measurements).
 

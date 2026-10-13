@@ -2,21 +2,24 @@
   import { errorText } from '../../lib/errors';
   import { secureId } from '../../lib/secure-id';
   import { tick, untrack } from 'svelte';
-  import { ArrowUp, CalendarClock, CircleCheck, CircleQuestionMark, CircleStop, Handshake, SquareArrowOutUpRight } from '@lucide/svelte';
-  import type { AgentConversationMessage, AgentScope, ThreadSummary } from '@boite/contracts';
+  import { ArrowUp, Brain, CalendarClock, CircleCheck, CircleQuestionMark, CircleStop, FolderKanban, Handshake } from '@lucide/svelte';
+  import type { AgentConversationMessage, AgentScope, AgentWork, ThreadSummary } from '@boite/contracts';
   import { chatKey, type AgentsView } from '../../lib/agents.svelte';
   import { fill, strings } from '../../lib/strings';
   import { avatarStatus } from '../../lib/thread-state';
   import { dayClock, longDay } from '../../lib/format';
   import Prose from '../Prose.svelte';
+  import ChatFile from '../ChatFile.svelte';
   import AgentAvatar from './AgentAvatar.svelte';
   import AgentWorkCard from './AgentWorkCard.svelte';
 
   /**
    * A conversation with an agent or a group, drawn the way a thread is: the
    * user's messages in bubbles on the right, the agents' answers in the
-   * thread's answer bubbles under their picture and name, a line while one of them works with the way into
-   * the thread it works in, and the thread's composer at the bottom. Decisions
+   * thread's answer bubbles under their picture and name, a line while one of them works,
+   * and the thread's composer at the bottom. An agent
+   * shows no code: its answers carry the pictures and files it attached, and
+   * its thread opens from the page's menu, not from here. Decisions
    * an agent asked for stand in the conversation they belong to. Opening it
    * marks it read up to its newest message.
    */
@@ -70,12 +73,24 @@
    * string for an older run, null for any other message.
    */
   function plannedOf(message: AgentConversationMessage): string | null {
-    if (message.replyTo !== null || message.sourceRunId === null || scope.kind !== 'agent') return null;
-    const run = view.seen.runs.find(r => r.id === message.sourceRunId);
-    const work = run ? view.seen.work.find(w => w.id === run.workId) : undefined;
-    if (!work || work.messageId !== null || work.taskId !== null || work.purpose === 'compaction') return null;
+    if (message.replyTo !== null || scope.kind !== 'agent') return null;
+    const work = workOf(message);
+    if (!work || work.messageId !== null || work.taskId !== null || work.purpose === 'compaction' || work.purpose === 'notice') return null;
     return view.snapshot?.routines.find(r => r.lastWorkId === work.id)?.name ?? '';
   }
+  /** The work an agent's message answers, through the run that wrote it. */
+  function workOf(message: AgentConversationMessage): AgentWork | undefined {
+    if (!message.sourceRunId) return undefined;
+    const run = view.seen.runs.find(r => r.id === message.sourceRunId);
+    return run ? view.seen.work.find(w => w.id === run.workId) : undefined;
+  }
+  /** The memory pass a reply shows: done or under way; nothing changed and failures stay quiet. */
+  function memoryOf(work: AgentWork | undefined) {
+    const pass = work?.memory;
+    return pass && (pass.status === 'done' || pass.status === 'running') ? pass : null;
+  }
+  /** The reply whose memory summary a tap opened, for a phone that has no hover. */
+  let memoryOpen = $state<string | null>(null);
   const placeholder = $derived(agent ? fill(labels.messageTo, { name: agent.name }) : group ? fill(labels.messageTo, { name: group.name }) : labels.message);
 
   async function send() {
@@ -136,7 +151,9 @@
           {@const sender = profileOf(message.senderId!)}
           {@const planned = plannedOf(message)}
           {@const event = message.thread}
-          <article class="agent-message from-agent" class:first data-event={event?.event} data-testid={event ? 'agent-thread-event' : undefined}>
+          {@const work = workOf(message)}
+          {@const memory = memoryOf(work)}
+          <article class="agent-message from-agent" class:first class:labelled={!!event || work?.purpose === 'notice' || planned !== null} data-event={event?.event} data-testid={event ? 'agent-thread-event' : undefined}>
             {#if group && first}
               <header>
                 <AgentAvatar kind="profile" id={message.senderId!} name={sender?.name ?? ''} avatar={sender?.avatar} size={20} />
@@ -149,8 +166,23 @@
                 {#if event.event === 'done'}<CircleCheck size={13} strokeWidth={1.75} />{:else if event.event === 'blocked'}<CircleQuestionMark size={13} strokeWidth={1.75} />{:else}<CircleStop size={13} strokeWidth={1.75} />{/if}
                 <span class="ui-label">{fill(labels.threadEvent[event.event], { name: nameOf(message.senderId!), title: event.title })}</span>
               </button>
+            {:else if work?.purpose === 'notice'}<p class="planned-label" data-testid="agent-notice"><FolderKanban size={13} strokeWidth={1.75} /><span>{labels.aboutProjects}</span></p>
             {:else if planned !== null}<p class="planned-label" data-testid="agent-planned-result"><CalendarClock size={13} strokeWidth={1.75} /><span>{planned || labels.plannedResult}</span></p>{/if}
             {#if message.text.trim()}<div class="answer"><Prose text={message.text} store={view.store} bubble /></div>{/if}
+            {#if message.files?.length}
+              <div class="agent-files" data-testid="agent-files">
+                {#each message.files as file (`${file.threadId}:${file.messageId}:${file.part.id}`)}<ChatFile file={file.part} store={view.store} threadId={file.threadId} messageId={file.messageId} />{/each}
+              </div>
+            {/if}
+            {#if memory}
+              {@const summary = memory.status === 'done' ? memory.summary ?? '' : ''}
+              <div class="agent-memory-pass" data-status={memory.status} data-testid="agent-memory">
+                <button type="button" class="ghost small memory-chip" title={summary || undefined} aria-expanded={summary ? memoryOpen === message.id : undefined} disabled={!summary} onclick={() => { memoryOpen = memoryOpen === message.id ? null : message.id; }}>
+                  <Brain size={12} strokeWidth={1.75} /><span class="ui-label">{memory.status === 'done' ? labels.memoryUpdated : labels.memoryUpdating}</span>
+                </button>
+                {#if summary && memoryOpen === message.id}<p class="memory-summary" data-testid="agent-memory-summary">{summary}</p>{/if}
+              </div>
+            {/if}
             {#if lastOfRun}<footer><time datetime={new Date(message.createdAt).toISOString()}>{dayClock(message.createdAt)}</time></footer>{/if}
           </article>
         {/if}
@@ -164,14 +196,13 @@
       {#each pending as work (work.id)}<AgentWorkCard {view} {work} compact />{/each}
 
       {#if live}
-        <!-- What a messenger shows while the other side types: the agent at work, with the way into its thread. -->
+        <!-- What a messenger shows while the other side types: the agent at work. -->
         <div class="agent-typing" data-status={live.status} data-testid="agent-live">
           <AgentAvatar kind="profile" id={worker?.id ?? ''} name={worker?.name ?? ''} avatar={worker?.avatar} status={avatarStatus(live.status)} size={22} />
           <div class="typing-bubble">
             {#if live.status === 'waiting'}<span>{fill(labels.liveWaiting, { name: worker?.name ?? '' })}</span>
             {:else}<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="typing-text">{fill(labels.liveWorking, { name: worker?.name ?? '' })}</span>{/if}
           </div>
-          <button type="button" class="ghost icon small" title={labels.seeThread} aria-label={labels.seeThread} onclick={() => void view.store.open(live.id)} data-testid="agent-live-open"><SquareArrowOutUpRight size={14} strokeWidth={1.75} /></button>
         </div>
       {/if}
     </div>

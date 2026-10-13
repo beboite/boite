@@ -22,8 +22,8 @@ import { FakeContext, type FakeClientOptions, type FakeMethods } from './fake-cl
 import { hookMethods, recordHookRun } from './fake-client/hooks';
 import { logMethods, seedDiagnostics } from './fake-client/logs';
 import { coordinationMethods, registerCore, unregisterCore } from './fake-client/coordination';
-import { seedStewardDemo, stewardMethods } from './fake-client/stewards';
 import { delegationMethods, seedDelegationDemo } from './fake-client/delegation';
+import { seedAgentsDemo } from './fake-client/agents-demo';
 import { groupMethods } from './fake-client/group';
 import { pairingMethods } from './fake-client/pairing';
 import { projectMethods } from './fake-client/projects';
@@ -89,7 +89,7 @@ export class FakeClient implements ObservableClient {
     registerCore(ctx);
     seed(ctx);
     if (options.delegationDemo) seedDelegationDemo(ctx);
-    if (options.stewardDemo) seedStewardDemo(ctx);
+    if (options.agentsDemo) seedAgentsDemo(ctx);
     if (options.uninstalled) {
       ctx.providers = ctx.providers.filter(provider => provider.id !== 'echo').map(provider => ({
         ...provider, available: false, executable: null,
@@ -398,7 +398,6 @@ export class FakeClient implements ObservableClient {
       ...speechMethods(ctx),
       ...delegationMethods(ctx),
       ...coordinationMethods(ctx),
-      ...stewardMethods(ctx, () => methods),
       ...groupMethods(ctx),
       ...todoMethods(ctx),
       ...workdirMethods(ctx, () => methods),

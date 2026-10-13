@@ -143,9 +143,10 @@ ${CONTROL_HELP}
   workflow start <template>      run a kept plan by name or id
 
   Outside a thread, threads, thread, questions, answer, permissions, allow,
-  deny, stewards and projects need no --thread: the owner drives every thread,
-  and a message it sends is its own prompt. Inside a thread they act as the
-  steward the owner made it, and its messages reach threads as the steward's.
+  deny and projects need no --thread: the owner drives every thread, and a
+  message it sends is its own prompt. Inside a persistent agent's conversation
+  they reach the threads of the projects entrusted to it, and its messages
+  reach them as that agent's.
 
   --core <url>                   another core, with its token in BOITE_TOKEN
                                  (an owner token, or a paired device's session)
@@ -621,7 +622,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
       const { runBoiteMcp } = await import('./mcp/server.ts');
       await runBoiteMcp(client, target.threadId, io.err, () => connect(target.url, target.token, { client: { name: 'mcp-wait', version: CORE_VERSION }, requestTimeoutMs: 3_605_000 }));
     } else {
-      const caller: Caller = io.env[AGENT_ENV.coreUrl] && io.env[AGENT_ENV.token] && io.env[AGENT_ENV.threadId] ? 'steward' : 'owner';
+      const caller: Caller = io.env[AGENT_ENV.coreUrl] && io.env[AGENT_ENV.token] && io.env[AGENT_ENV.threadId] ? 'agent' : 'owner';
       await run(parsed, io, client, target.threadId, print, caller);
     }
     return 0;
