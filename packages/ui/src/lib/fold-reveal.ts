@@ -3,9 +3,13 @@
  * edge, and with the list anchored at its end the user sees nothing happen.
  * This follows the opening frame by frame: the list scrolls by what the fold
  * pushed past the bottom edge, and stops when the fold's header reaches the
- * top, so a fold longer than the list still starts at its header. A wheel or
- * a touch on the list hands it back to the user at once.
+ * top, so a fold longer than the list still starts at its header. A wheel,
+ * a touch, a press on the list or its scrollbar, or a scrolling key hands it
+ * back to the user at once.
  */
+
+/** The keys that scroll a list with the focus inside it. */
+const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ']);
 
 /** Room kept above the header when it rises to the top. */
 const MARGIN = 6;
@@ -36,13 +40,18 @@ export function revealFold(header: Element, follow = FOLLOW_MS): () => void {
   const until = performance.now() + follow;
   const padding = parseFloat(getComputedStyle(scroller).paddingBottom) || 0;
   let frame = 0;
+  const key = (event: KeyboardEvent) => { if (SCROLL_KEYS.has(event.key)) stop(); };
   const stop = () => {
     cancelAnimationFrame(frame);
     scroller.removeEventListener('wheel', stop);
     scroller.removeEventListener('touchstart', stop);
+    scroller.removeEventListener('pointerdown', stop);
+    scroller.removeEventListener('keydown', key);
   };
   scroller.addEventListener('wheel', stop, { passive: true });
   scroller.addEventListener('touchstart', stop, { passive: true });
+  scroller.addEventListener('pointerdown', stop, { passive: true });
+  scroller.addEventListener('keydown', key);
   const step = (time: number) => {
     if (!section.isConnected || !scroller.isConnected) return stop();
     const delta = revealDelta(section.getBoundingClientRect(), scroller.getBoundingClientRect(), padding);
