@@ -177,10 +177,13 @@
        mask, not a scroll-driven animation, because tests and closing elements
        wait on every running animation and that one would never end. */
     --fade: 10px;
-    padding: var(--fade) 6px;
+    /* Shorter on top: the head's tools sit right above, and a deeper fade
+       there opened a wider gap under them than between them and the switch. */
+    --fade-top: 6px;
+    padding: var(--fade-top) 6px var(--fade);
     display: flex;
     flex-direction: column;
-    mask-image: linear-gradient(to bottom, transparent, black var(--fade), black calc(100% - var(--fade)), transparent);
+    mask-image: linear-gradient(to bottom, transparent, black var(--fade-top), black calc(100% - var(--fade)), transparent);
   }
   .scroll > :global(*) { flex-shrink: 0; }
   .foot {
