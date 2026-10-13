@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { workerEntry } from '../src/worker-entry.ts';
 
+// Allow the same compilation budget as main-entry's real executable tests.
 test('worker lookup preserves sibling sources and bundled files before an explicit embedded relative entry', () => {
   const dir = mkdtempSync(join(tmpdir(), 'boite-worker-entry-'));
   const base = pathToFileURL(join(dir, 'main.ts')).href;
@@ -66,4 +67,4 @@ test('worker lookup preserves sibling sources and bundled files before an explic
     expect(staged.exitCode).toBe(0);
     expect(staged.stdout.toString()).toBe('staged worker ready\n');
   } finally { rmSync(dir, { recursive: true, force: true }); }
-}, 15_000);
+}, 60_000);
