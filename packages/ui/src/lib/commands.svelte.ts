@@ -4,41 +4,13 @@
  */
 
 import type { KeybindingCommand } from '@boite/contracts';
-import { archiveThread, reopenLastArchived } from './archive';
-import { lastAnswer } from './message-display';
-import { sidebarRows } from './sidebar-rows.svelte';
-import { workspace } from './workspace.svelte';
-import { projectView } from './project-view.svelte';
 import { experimentOn } from './experiments.svelte';
-import { openTour } from './onboarding.svelte';
 import type { PaletteItem } from './palette';
-import { fill, strings } from './strings';
+import { strings } from './strings';
 import type { Store } from './store.svelte';
-import { setTheme } from './theme';
 
 /** What marks an agent's own command apart from Boite's in a mixed list. */
 export const AGENT_PREFIX = 'agent:';
-
-/** The commands that end in a method only the owner may call. */
-const OWNER_COMMANDS = new Set<string>([
-  'add-project',
-  'import-session',
-  'trace',
-  'changes',
-  'files',
-  'tasks',
-  'providers',
-  'pair',
-  'terminal',
-  'terminal-new',
-  'terminal-split',
-  'terminal-split-vertical',
-  'terminal-close',
-  'terminal-find',
-  'terminal-history',
-  'terminal-previous-command',
-  'terminal-next-command'
-]);
 
 /** True while this row is a command the agent reported, not one of Boite's. */
 export function isAgentCommand(item: PaletteItem): boolean {
@@ -110,108 +82,4 @@ export function appCommands(store: Store, inShell: boolean): PaletteItem[] {
   return items;
 }
 
-/** The label of every command a chord can reach, the palette's words where it has them. */
-export function commandLabel(id: KeybindingCommand): string {
-  switch (id) {
-    case 'new-thread': return strings.palette.newThread;
-    case 'palette': return strings.keyboard.commands.palette;
-    case 'sidebar': return strings.palette.sidebar;
-    case 'panel': return strings.palette.panel;
-    case 'browser': return strings.keyboard.commands.browser;
-    case 'changes': return strings.keyboard.commands.changes;
-    case 'files': return strings.keyboard.commands.files;
-    case 'tasks': return strings.keyboard.commands.tasks;
-    case 'close-surface': return strings.keyboard.commands.closeSurface;
-    case 'settings': return strings.palette.settings;
-    case 'stash': return strings.keyboard.commands.stash;
-    case 'send-and-draft': return strings.keyboard.commands.sendAndDraft;
-    case 'add-project': return strings.palette.addProject;
-    case 'pin': return strings.keyboard.commands.pin;
-    case 'rename': return strings.palette.rename;
-    case 'retitle': return strings.palette.retitle;
-    case 'trace': return strings.palette.trace;
-    case 'appearance': return strings.palette.appearance;
-    case 'providers': return strings.palette.providers;
-    case 'pair': return strings.palette.pair;
-    case 'theme-dark': return strings.palette.themeDark;
-    case 'theme-light': return strings.palette.themeLight;
-    case 'theme-system': return strings.palette.themeSystem;
-    case 'archive': return strings.palette.archive;
-    case 'import-session': return strings.palette.importSession;
-    case 'terminal': return strings.palette.terminal;
-    case 'terminal-new': return strings.keyboard.commands.terminalNew;
-    case 'terminal-split': return strings.keyboard.commands.terminalSplit;
-    case 'terminal-split-vertical': return strings.keyboard.commands.terminalSplitVertical;
-    case 'terminal-close': return strings.keyboard.commands.terminalClose;
-    case 'terminal-find': return strings.keyboard.commands.terminalFind;
-    case 'terminal-history': return strings.keyboard.commands.terminalHistory;
-    case 'terminal-previous-command': return strings.keyboard.commands.terminalPreviousCommand;
-    case 'terminal-next-command': return strings.keyboard.commands.terminalNextCommand;
-    case 'reopen-thread': return strings.keyboard.commands.reopenThread;
-    case 'copy-answer': return strings.keyboard.commands.copyAnswer;
-    case 'find': return strings.keyboard.commands.find;
-    default: return fill(strings.keyboard.commands.thread, { n: id.slice('thread-'.length) });
-  }
-}
-
-/**
- * Runs one of them. `inShell` picks the native folder dialog over the settings
- * page for `add-project`: a browser has no folder picker to offer.
- */
-export function runCommand(store: Store, id: string, inShell: boolean): void {
-  const open = store.openThread;
-  // A chord reaches this without a row to hide, so the boundary is checked here
-  // too: these five are the owner's, whatever key was pressed.
-  if (!store.owner && OWNER_COMMANDS.has(id)) return;
-  switch (id) {
-    case 'new-thread': {
-      const selected = workspace.view === 'recent' ? projectView.selected(workspace.machines.flatMap(machine => machine.store.projects.filter(project => !project.archived).map(project => ({ machine, project })))) : undefined;
-      // Always a new, empty draft: the project's other drafts stay where they are.
-      if (selected) void workspace.select(selected.machine.store, undefined, selected.project.id, { fresh: true });
-      else { store.showChat(); store.startDraft(undefined, { fresh: true }); }
-      break;
-    }
-    case 'palette': store.paletteOpen = !store.paletteOpen; break;
-    case 'add-project':
-      store.projectPickerOpen = true;
-      break;
-    case 'pin': if (open) void store.pin(open.id, !open.pinned); break;
-    case 'rename': store.showChat(); store.renameRequested = true; break;
-    case 'retitle': if (open) void store.retitle(open.id); break;
-    case 'panel': store.showChat(); store.togglePanel(); break;
-    case 'trace': store.showChat(); store.panel.toggleKind('trace'); break;
-    case 'changes': store.showChat(); store.panel.toggleKind('changes'); break;
-    case 'files': store.showChat(); store.panel.toggleKind('files'); break;
-    case 'tasks': store.showChat(); store.panel.toggleKind('tasks'); break;
-    case 'subagents': store.showChat(); store.panel.toggleKind('agents'); break;
-    case 'terminal': if (open) { store.showChat(); store.toggleTerminal(); } break;
-    case 'sidebar': store.toggleSidebar(); break;
-    case 'settings': store.showSettings(); break;
-    case 'appearance': store.showSettings('appearance'); break;
-    case 'task-manager': store.showSettings('task-manager'); break;
-    case 'archived': store.showSettings('general', 'archived'); break;
-    case 'providers': store.showSettings('accounts'); break;
-    case 'pair': store.showSettings('machines', 'machines'); void store.addDevice(); break;
-    case 'tour': store.showChat(); openTour(); break;
-    case 'theme-dark': setTheme('dark'); break;
-    case 'theme-light': setTheme('light'); break;
-    case 'theme-system': setTheme('system'); break;
-    case 'archive': if (open) void archiveThread(store, open.id); break;
-    case 'reopen-thread': void reopenLastArchived(store); break;
-    case 'copy-answer': if (open) { const text = lastAnswer(open.messages); if (text) void store.copy(text); } break;
-    case 'find': if (open) { store.showChat(); store.findOpen = true; store.findRequest += 1; } break;
-    case 'thread-1': case 'thread-2': case 'thread-3': case 'thread-4': case 'thread-5':
-    case 'thread-6': case 'thread-7': case 'thread-8': case 'thread-9': {
-      const target = sidebarRows.list[Number(id.slice('thread-'.length)) - 1];
-      if (target) { store.showChat(); void workspace.select(target.store, target.threadId); }
-      break;
-    }
-    case 'import-session': {
-      // The open thread's project, else the draft's, else the first one.
-      const projectId = open?.projectId ?? store.draft?.projectId ?? store.projects[0]?.id;
-      if (projectId !== undefined) void store.openImports(projectId);
-      break;
-    }
-    default: break;
-  }
-}
+export { commandLabel, runCommand } from './command-table';
