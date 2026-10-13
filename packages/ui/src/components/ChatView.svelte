@@ -6,6 +6,7 @@
   import type { Store } from '../lib/store.svelte';
   import { DRAFT_STASH_KEY } from '../lib/prefs';
   import { lastIndexById } from '../lib/thread-rows';
+  import { slideFrom } from '../lib/motion';
   import Composer from './Composer.svelte';
   import FolderGoneNotice from './FolderGoneNotice.svelte';
   import AgentDock from './AgentDock.svelte';
@@ -56,6 +57,23 @@
   let draftEffort = $derived(draftChoice?.effort ?? draftModel?.effort?.default ?? null);
   let effortLabel = $derived(draftEffort ? effortName(draftModel, draftEffort) : null);
   let modelLabel = $derived(draftModel?.name ?? draftChoice?.model ?? draftProvider?.name ?? '');
+
+  /**
+   * A draft's first prompt takes the composer from the middle of the column to
+   * the bottom. Its place is read before the layout changes, then it slides
+   * from there instead of jumping.
+   */
+  let chat = $state<HTMLElement>();
+  let leftFrom: number | null = null;
+  let leaving = $derived(!thread && !!sending);
+  $effect.pre(() => {
+    if (leaving) leftFrom = untrack(() => chat?.querySelector('[data-testid=composer]')?.getBoundingClientRect().top ?? null);
+  });
+  $effect(() => {
+    const composer = leaving ? chat?.querySelector<HTMLElement>('[data-testid=composer]') : null;
+    if (composer && leftFrom !== null) slideFrom(composer, leftFrom);
+    leftFrom = null;
+  });
 </script>
 
 {#if !thread && !store.draft}
@@ -67,7 +85,7 @@
   <!-- The draft's roomier composer belongs to the middle of the column: once
      the prompt is on its way the composer is at the bottom, at its thread size,
      or it shrinks a second time when the thread opens. -->
-  <section class="chat" class:drafting={!thread && !sending} data-testid="chat">
+  <section class="chat" class:drafting={!thread && !sending} bind:this={chat} data-testid="chat">
     {#if thread?.forkOrigin}{#key thread.id}<ForkReturn {store} {thread} />{/key}{/if}
     {#if thread}
       <!-- One timeline per thread: the heights it measured and the ids that
