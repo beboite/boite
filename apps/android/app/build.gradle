@@ -69,7 +69,7 @@ android {
     namespace "com.boite.two"
     defaultConfig {
         applicationId twaManifest.applicationId
-        minSdk 23
+        minSdk 24
         targetSdk 35
         versionCode appVersionCode
         versionName appVersionName
