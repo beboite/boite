@@ -74,6 +74,17 @@ async function record() {
   try { await page.waitFor(`Number(document.querySelector('[data-testid="dictation"] .duration')?.textContent.split(':')[1]) >= 1`); } catch (error) { console.log(await page.evaluate(`({dictation: document.querySelector('[data-testid="dictation"]')?.outerHTML, contexts: [...window.__audioFixtures].map(f => ({state:f.context.state, time:f.context.currentTime})), hidden:document.hidden})`)); throw error; }
   await page.waitFor(`document.querySelector('${id('dictation-preview')}')?.textContent.includes('Please add a test')`);
   expect(await page.evaluate(`document.querySelector('${id('dictation')}').getBoundingClientRect().height <= 44`)).toBe(true);
+  // The spectrum draws what the microphone hears: resting bars are a dot, the fixture's tone lifts some well above it.
+  await page.waitFor(`(() => {
+    const canvas = document.querySelector('${id('dictation-spectrum')}');
+    if (!canvas?.width || canvas.dataset.mode !== 'live') return false;
+    const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+    let top = canvas.height, bottom = -1;
+    for (let y = 0; y < canvas.height; y++) for (let x = 0; x < canvas.width; x++) if (pixels[(y * canvas.width + x) * 4 + 3] > 0) { top = Math.min(top, y); bottom = Math.max(bottom, y); }
+    return bottom - top > canvas.height * 0.4;
+  })()`);
+  // Something to throw away: the bin sits in the strip while it records.
+  expect(await page.evaluate(`!!document.querySelector('${id('dictation')} .tape ${id('dictation-cancel')}')`)).toBe(true);
   expect(await page.evaluate(`!!document.querySelector('${id('dictation-stop')} svg')`)).toBe(true);
 }
 test('dictation captures audio and appends a transcript without sending or overwriting typed text', async () => {
@@ -104,6 +115,8 @@ test('phone dictation fits, cancels with Escape, and does not change the draft',
         return r.left >= chips.left && r.right <= chips.right && r.top >= chips.top && r.bottom <= chips.bottom;
       });
     })()`)).toBe(true);
+    // The strip takes the row and stays inside the composer.
+    expect(await page.evaluate(`(() => { const strip = document.querySelector('${id('dictation')}').getBoundingClientRect(); const composer = document.querySelector('${id('composer')}').getBoundingClientRect(); return strip.left >= composer.left && strip.right <= composer.right && strip.width > composer.width / 2; })()`)).toBe(true);
     if (width === 320) await capture('speech-phone-narrow-recording.png');
   }
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
