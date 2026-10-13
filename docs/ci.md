@@ -122,6 +122,13 @@ exit failures are retained. A file still running after five minutes, its event
 loop blocked where no test timeout can fire, is ended and reported with what it
 printed (`BOITE_TEST_FILE_DEADLINE_MS`).
 
+Browser command, sharing and profile scenarios run in separate files so their
+combined Chromium startup time does not consume one five-minute file budget.
+Each file registers its own loopback site and fresh-core hooks through a fixture
+factory; individual scenario deadlines and assertions remain unchanged.
+Crash-recovery fixtures disarm resident delegation, coordination, workflow and
+group readers before closing the journal, without draining interrupted work.
+
 The Windows job shares release-profile Rust dependencies, builds the installer
 once, and stages its existing core beside the shell for native E2E. Installer
 regressions set `BOITE_CI_INSTALLER_REQUIRED=1`, so missing NSIS or generated
