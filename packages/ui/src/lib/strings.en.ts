@@ -418,7 +418,7 @@ export const strings = {
     microphoneTestHint: 'Speak to check the level. This test stays on your device.',
     heading: 'Voice', description: 'The microphone beside Send, up to two minutes at a time. The text waits in the composer until you send it.',
     start: 'Dictate', stop: 'Finish dictation', listening: 'Listening', opening: 'Waiting for microphone', transcribing: 'Transcribing',
-    private: 'On this core only', cloud: 'Transcribed by your API provider', retry: 'Retry transcription',
+    private: 'On this core only', cloud: 'Transcribed by your API provider', retry: 'Retry transcription', discard: 'Discard recording',
     live: 'Live preview', previewFailed: 'Live preview paused. Finish to transcribe the full recording.',
     local: 'Local', api: 'API', engine: 'Engine',
     engineHint: 'Local transcribes on this machine and the audio never leaves it. API sends the audio to Groq or OpenRouter with your key.',

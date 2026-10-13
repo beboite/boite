@@ -2041,6 +2041,28 @@ export interface Settings {
    * or missing: never, each agent keeps its own behaviour. Missing on older cores.
    */
   autoCompact?: AutoCompact | null;
+  /**
+   * The models the user starred, one list for all of the owner's machines:
+   * each client keeps the newest one it saw by `at` and writes it to every
+   * machine it controls. Missing on older cores and before the first star.
+   */
+  modelFavorites?: ModelFavorites;
+}
+
+/** One starred model. Accounts are named by label: an id means nothing on another machine. */
+export interface ModelFavorite {
+  providerId: ProviderId;
+  model: { id: string; name: string };
+  /** The label of the account it was starred under. Missing: the account the picker uses for that provider. */
+  account?: string;
+}
+
+/** The starred models, with the time they last changed. */
+export interface ModelFavorites {
+  /** Milliseconds since the epoch of the last change: between two lists, the later one wins. */
+  at: number;
+  /** At most `MODEL_FAVORITES_MAX`, each provider, model and account once. */
+  items: ModelFavorite[];
 }
 
 export interface SubscriptionProxy {
@@ -4596,7 +4618,7 @@ export const CLIENT_NAMES = ['shell', 'pwa', 'cli', 'plugin', 'test', 'bench'] a
 export type ClientName = (typeof CLIENT_NAMES)[number];
 
 export { attachmentError, answerAttachmentError } from './attachment-validation.ts';
-export { AUTO_COMPACT_MOMENTS, AUTO_COMPACT_TOKENS, BROWSER_ORIGINS_MAX, checkSettingsPatch, type AutoCompact, type AutoCompactMoment, type SettingsPatchCheck } from './settings-validation.ts';
+export { AUTO_COMPACT_MOMENTS, AUTO_COMPACT_TOKENS, BROWSER_ORIGINS_MAX, MODEL_FAVORITES_MAX, checkSettingsPatch, compareModelFavorites, keepLaterFavorites, type AutoCompact, type AutoCompactMoment, type SettingsPatchCheck } from './settings-validation.ts';
 import type { AutoCompact } from './settings-validation.ts';
 export { TITLE_MODEL_DEFAULTS, defaultTitleModel } from './title-models.ts';
 export { DEVICE_METHODS, DEVICE_EVENTS, AGENT_EVENTS } from './access.ts';

@@ -432,7 +432,5 @@
     .chips :global(.picker > .trigger > .label) { min-width: 0; max-width: none; }
     .chips :global(.picker > .trigger.connect) { padding: 0 12px; border-radius: var(--radius-md); background: var(--color-accent-soft); color: var(--color-accent); }
     .send, .stop { margin-left: 2px; }
-    /* The composer carries `dictating` while a dictation runs. */
-    :global(.dictating) .send { display: none; }
   }
 </style>
