@@ -1,84 +1,15 @@
-import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
+import { expect } from 'bun:test';
 import type { BrowserAction } from '@boite/contracts';
-import { connect, type CoreClient } from '../src/client.ts';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { AgentBrowser } from '../src/browser.ts';
-import { chromiumArgs, findChromium, waitForEndpoint } from '../src/browser/chromium.ts';
-import { echoThread, startTestCore, type TestCore } from './harness.ts';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { echoThread, startTestCore } from './harness.ts';
+import { createBrowserFixture } from './browser/fixture.ts';
 
-/*
- * The agent browser against a real headless Chromium. A machine without one
- * skips the tests that need it; the one that checks that case runs everywhere.
- */
-const real = findChromium().path ? test : test.skip;
-
-const PAGE = `<!doctype html><title>Fixture</title>
-<style>body{margin:0;font:16px sans-serif} button{position:absolute;left:100px;top:100px;width:200px;height:80px}</style>
-<button id="go" onclick="document.title='clicked'">Go</button>
-<input id="name" style="position:absolute;left:100px;top:220px">
-<a id="pop" href="#" style="position:absolute;left:100px;top:300px" onclick="window.open('/popup','x','width=400,height=300');return false">Popup</a>
-<p id="words" style="position:absolute;left:100px;top:360px;margin:0;width:400px">Select these words</p>
-<script>console.error('boom'); fetch('/missing?token=secret');</script>`;
-
-// agent-browser's commands: refs, a form that navigates, dialogs, a covered element.
-const SHOP = `<!doctype html><title>Shop</title>
-<h1>Shop</h1>
-<form action="/sent"><label>Name <input name="name"></label><button>Send</button></form>
-<select id="size"><option>Small</option><option value="l">Large</option></select>
-<label><input type="checkbox" id="gift" checked> Gift</label>
-<button id="ask" onclick="this.textContent = confirm('Sure?') ? 'yes' : 'no'">Ask</button>
-<button id="later" onclick="setTimeout(() => { document.title = confirm('Later?') ? 'later yes' : 'later no' }, 400)">Later</button>
-<button id="hidden-under" style="position:absolute;left:0;top:400px;width:120px;height:40px">Under</button>
-<div id="cover" style="position:absolute;left:0;top:400px;width:200px;height:60px;background:#ccc">Cover</div>
-<p id="note">Free delivery</p>`;
-
-let site: ReturnType<typeof Bun.serve>;
-/** The user agent of the last request for each path: what a site sees. */
-const agents = new Map<string, string | null>();
-beforeAll(() => {
-  site = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: request => {
-    const path = new URL(request.url).pathname;
-    agents.set(path, request.headers.get('user-agent'));
-    if (path === '/') return new Response(PAGE, { headers: { 'content-type': 'text/html' } });
-    if (path === '/shop') return new Response(SHOP, { headers: { 'content-type': 'text/html' } });
-    if (path === '/sent') return new Response(`<title>Sent</title><h1>Thanks ${new URL(request.url).searchParams.get('name')}</h1>`, { headers: { 'content-type': 'text/html' } });
-    if (path === '/popup') return new Response('<title>Popup</title>popup', { headers: { 'content-type': 'text/html' } });
-    if (path === '/moving') return new Response('<title>Moving</title><div id=box style="width:80px;height:80px;background:red;position:absolute"></div><script>let x=0;setInterval(()=>{x=(x+7)%600;box.style.left=x+"px"},16)</script>', { headers: { 'content-type': 'text/html' } });
-    return new Response('missing', { status: 404 });
-  } });
-});
-afterAll(() => site.stop(true));
-const url = (path = '/') => `http://127.0.0.1:${site.port}${path}`;
-
-let harness: TestCore, owner: CoreClient, agent: CoreClient, threadId: string;
-let opened: { harness?: TestCore; owner?: CoreClient; agent?: CoreClient } = {};
-beforeEach(async () => {
-  opened = {};
-  opened.harness = harness = await startTestCore();
-  opened.owner = owner = await harness.connect();
-  ({ threadId } = await echoThread(harness, owner));
-  opened.agent = agent = await connect(harness.url, harness.core.agents.tokenFor(threadId), { client: { name: 'boite-cli', version: 'test' } });
-});
-afterEach(async () => { opened.agent?.close(); opened.owner?.close(); await opened.harness?.stop(); });
-
-const evaluate = async (expression: string, tabId?: string) =>
-  (await agent.call('browser.command', { threadId, ...(tabId ? { tabId } : {}), action: { kind: 'evaluate', expression } })).value;
-
-/** The pixel size a JPEG declares in its start-of-frame segment. */
-function jpegSize(base64: string): { width: number; height: number } {
-  const bytes = Buffer.from(base64, 'base64');
-  expect([bytes[0], bytes[1]]).toEqual([0xff, 0xd8]);
-  for (let at = 2; at < bytes.length;) {
-    const marker = bytes[at + 1]!, length = bytes.readUInt16BE(at + 2);
-    if (marker >= 0xc0 && marker <= 0xc2) return { height: bytes.readUInt16BE(at + 5), width: bytes.readUInt16BE(at + 7) };
-    at += 2 + length;
-  }
-  throw new Error('no JPEG frame header');
-}
+const browserFixture = createBrowserFixture();
+const { real, url, evaluate } = browserFixture;
 
 real('an agent opens, reads and drives a page in the browser of its own machine', async () => {
+  const { harness, owner, agent, threadId } = browserFixture;
   const open = await agent.call('browser.command', { threadId, action: { kind: 'open', url: url() } });
   expect(open.tabId).toMatch(/^browser:/);
   expect(open.profile).toBe('default');
@@ -118,6 +49,7 @@ real('an agent opens, reads and drives a page in the browser of its own machine'
 }, 150_000);
 
 real('boite browse opens its page as a new tab of the conversation browser, not in a panel of its own', async () => {
+  const { owner, agent, threadId } = browserFixture;
   const mine = await agent.call('browser.command', { threadId, action: { kind: 'open', url: url() } });
   await owner.call('threads.subscribe', { threadId });
   const panels: unknown[] = [];
@@ -130,170 +62,8 @@ real('boite browse opens its page as a new tab of the conversation browser, not 
   expect(panels).toEqual([]);
 }, 150_000);
 
-real('a viewer watching while the agent changes the page size never puts the old size back', async () => {
-  const { tabId } = await agent.call('browser.command', { threadId, action: { kind: 'open', url: url() } });
-  await owner.call('threads.subscribe', { threadId });
-  // The panel on the browser's own machine pulls shrunken frames the whole time.
-  let watching = true, frames = 0;
-  const watch = (async () => {
-    while (watching) {
-      await owner.call('browser.remoteFrame', { threadId, tabId, maxWidth: 300, quality: 40 }).then(() => { frames++; }, () => {});
-      await Bun.sleep(125);
-    }
-  })();
-  try {
-    for (let round = 0; round < 6; round++) {
-      await agent.call('browser.command', { threadId, tabId, action: { kind: 'preset', preset: 'iphone-15-pro' } });
-      expect(await evaluate('[innerWidth, innerHeight]', tabId)).toEqual([393, 852]);
-      await agent.call('browser.command', { threadId, tabId, action: { kind: 'preset', preset: 'iphone-15-pro', orientation: 'landscape' } });
-      expect(await evaluate('[innerWidth, innerHeight]', tabId)).toEqual([852, 393]);
-    }
-  } finally { watching = false; await watch; }
-  // The race needs frames actually taken while the sizes changed.
-  expect(frames).toBeGreaterThan(5);
-}, 150_000);
-
-/**
- * A stand-in for the desktop app hosting the agent's tabs: it relays every
- * DevTools message verbatim to a Chromium of its own over a WebSocket, which
- * answers as the app's webviews would. The app's own translation (one webview
- * per target) is tested in the UI; this is the core's side of the relay.
- */
-async function fakeHost(name = 'shell') {
-  const dir = mkdtempSync(join(tmpdir(), 'boite-host-'));
-  const args = chromiumArgs(dir, 'linux').filter(arg => arg !== '--remote-debugging-pipe');
-  const browser = Bun.spawn([findChromium().path!, ...args, '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1'], { stdout: 'ignore', stderr: 'ignore' });
-  const socket = new WebSocket(await waitForEndpoint(dir, browser.exited));
-  await new Promise(resolve => socket.addEventListener('open', resolve, { once: true }));
-  const app = await connect(harness.url, harness.token, { client: { name, version: 'test' } });
-  const relayed: string[] = [];
-  app.on('browser.hostMessage', ({ profile, message }) => { relayed.push(profile); socket.send(message); });
-  socket.addEventListener('message', event => void app.call('browser.hostReply', { profile: 'default', messages: [String(event.data)] }).catch(() => {}));
-  return {
-    app, relayed,
-    async close() {
-      app.close();
-      // A kill ends the browser process alone: on Windows its helpers keep the
-      // profile open a moment longer, and removing it then fails with EBUSY.
-      // Browser.close ends them first, as the core closes its own browsers.
-      const stuck = setTimeout(() => browser.kill(), 10_000);
-      if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 2 ** 31 - 1, method: 'Browser.close', params: {} }));
-      else browser.kill();
-      await browser.exited;
-      clearTimeout(stuck);
-      socket.close();
-      rmSync(dir, { recursive: true, force: true });
-    },
-  };
-}
-
-real('the desktop app on this machine hosts the agent tabs: the core drives them through it, and they close with it', async () => {
-  // Only the owner's desktop app may host: not a script, not another client.
-  await expect(owner.call('browser.hostAttach', {})).rejects.toThrow('only the desktop app on this machine');
-  await expect(agent.call('browser.hostAttach', {})).rejects.toThrow();
-  const host = await fakeHost();
-  // A sign-in the core kept while the app was closed.
-  const file = join(harness.core.dataDir, 'browser', 'default', 'boite-cookies.json');
-  mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, JSON.stringify([{ name: 'kept', value: 'by-core', domain: '127.0.0.1', path: '/' }]));
-  try {
-    await host.app.call('browser.hostAttach', {});
-    expect((await agent.call('browser.command', { threadId, action: { kind: 'status' } })).value).toMatchObject({ hosted: true });
-    const open = await agent.call('browser.command', { threadId, action: { kind: 'open', url: url() } });
-    expect(open.title).toBe('Fixture');
-    // The app's webviews get it, and a sign-in made in them is on the core's disk too.
-    expect(await evaluate('document.cookie')).toContain('kept=by-core');
-    await agent.call('browser.command', { threadId, action: { kind: 'evaluate', expression: "document.cookie = 'login=hosted; max-age=3600'" } });
-    await agent.call('browser.command', { threadId, action: { kind: 'navigate', url: url() } });
-    const names = () => { try { return (JSON.parse(readFileSync(file, 'utf8')) as { name: string; value: string }[]).map(cookie => `${cookie.name}=${cookie.value}`); } catch { return []; } };
-    for (let i = 0; i < 100 && !names().includes('login=hosted'); i++) await Bun.sleep(50);
-    expect(names()).toContain('login=hosted');
-    expect(host.relayed.length).toBeGreaterThan(0);
-    expect(new Set(host.relayed)).toEqual(new Set(['default']));
-    // The tab names the host's view, so the app shows that page itself.
-    await owner.call('threads.subscribe', { threadId });
-    const [tab] = (await owner.call('browser.remoteStatus', { threadId })).tabs;
-    expect(tab).toMatchObject({ tabId: open.tabId, view: expect.any(String) });
-    await agent.call('browser.command', { threadId, action: { kind: 'click', selector: '#go' } });
-    expect(await evaluate('document.title')).toBe('clicked');
-    // A viewer elsewhere still gets frames, taken through the host.
-    const frame = await owner.call('browser.remoteFrame', { threadId });
-    expect(jpegSize(frame.base64)).toEqual({ width: frame.width, height: frame.height });
-    // A reply from a connection that does not host is refused.
-    await expect(owner.call('browser.hostReply', { profile: 'default', messages: ['{}'] })).rejects.toThrow('does not host');
-  } finally { await host.close(); }
-  // The app is gone: its tabs went with it, and the next one opens in the core's own browser.
-  for (let i = 0; i < 50 && (await owner.call('browser.remoteStatus', { threadId })).tabs.length; i++) await Bun.sleep(50);
-  expect((await owner.call('browser.remoteStatus', { threadId })).tabs).toEqual([]);
-  await agent.call('browser.command', { threadId, action: { kind: 'open', url: url() } });
-  expect((await owner.call('browser.remoteStatus', { threadId })).tabs[0]!.view).toBeUndefined();
-}, 150_000);
-
-real('a viewer on another device watches and drives the tab, and hears it come and go', async () => {
-  const { grant } = await owner.call('pairing.grant', {});
-  const phone = await connect(harness.url, '', { grant, client: { name: 'pwa', version: 'test' } });
-  try {
-    await expect(phone.call('browser.remoteStatus', { threadId })).rejects.toThrow('subscribe');
-    await phone.call('threads.subscribe', { threadId });
-    expect(await phone.call('browser.remoteStatus', { threadId })).toEqual({ live: false, tabs: [], available: true });
-    // A cold browser start can take longer than the default wait on a slow runner.
-    const shown = phone.next('browser.remoteChanged', event => event.threadId === threadId && event.live, 30_000);
-    const { tabId } = await agent.call('browser.command', { threadId, action: { kind: 'open', url: url() } });
-    expect((await shown).tabs[0]).toMatchObject({ tabId, profile: 'default', active: true });
-    const frame = await phone.call('browser.remoteFrame', { threadId });
-    expect(frame).toMatchObject({ tabId, title: 'Fixture', url: url() });
-    expect(jpegSize(frame.base64)).toEqual({ width: frame.width, height: frame.height });
-    await Bun.sleep(150);
-    // A narrow viewer gets a frame no wider than it shows, of the same page.
-    const small = await phone.call('browser.remoteFrame', { threadId, tabId, maxWidth: 400, quality: 40 });
-    expect(jpegSize(small.base64).width).toBe(400);
-    expect([small.width, small.height]).toEqual([frame.width, frame.height]);
-    await expect(phone.call('browser.remoteInput', { threadId, frameId: 'unknown', input: { kind: 'key', key: 'Enter' } })).rejects.toThrow('refresh');
-    await expect(phone.call('browser.remoteInput', { threadId, frameId: small.id, input: { kind: 'tap', x: .5, y: .5, width: small.width + 1, height: small.height } })).rejects.toThrow('viewport');
-    // The button spans 100..300 × 100..180 CSS pixels.
-    await phone.call('browser.remoteInput', { threadId, frameId: small.id, input: { kind: 'tap', x: 200 / small.width, y: 140 / small.height, width: small.width, height: small.height } });
-    expect(await evaluate('document.title')).toBe('clicked');
-    // A computer's keyboard, mouse and clipboard: keys as key events, a paste, a selection read back.
-    await Bun.sleep(150);
-    const live = await phone.call('browser.remoteFrame', { threadId, tabId });
-    const act = (input: Parameters<typeof phone.call<'browser.remoteInput'>>[1]['input']) => phone.call('browser.remoteInput', { threadId, frameId: live.id, input });
-    const at = (x: number, y: number) => ({ x: x / live.width, y: y / live.height, width: live.width, height: live.height });
-    await evaluate('window.keys = []; addEventListener("keydown", e => keys.push(e.key))');
-    await act({ kind: 'tap', ...at(150, 230) });
-    await act({ kind: 'press', keys: ['h', 'i', 'Space', 'A', 'x', 'Backspace'] });
-    expect(await evaluate('document.querySelector("#name").value')).toBe('hi A');
-    expect(await evaluate('keys.join(",")')).toBe('h,i, ,A,x,Backspace');
-    await act({ kind: 'text', text: ' é\u{1F600} pasted' });
-    expect(await evaluate('document.querySelector("#name").value')).toBe('hi A é\u{1F600} pasted');
-    expect(await phone.call('browser.remoteSelection', { threadId, frameId: live.id })).toEqual({ text: '', truncated: false });
-    await act({ kind: 'select-all' });
-    expect(await phone.call('browser.remoteSelection', { threadId, frameId: live.id })).toEqual({ text: 'hi A é\u{1F600} pasted', truncated: false });
-    // A double click selects the word under it, and a key replaces the selection.
-    await act({ kind: 'tap', ...at(104, 230) });
-    await act({ kind: 'tap', ...at(104, 230), count: 2 });
-    expect((await phone.call('browser.remoteSelection', { threadId, frameId: live.id })).text.trim()).toBe('hi');
-    await act({ kind: 'press', keys: ['Delete'] });
-    expect(String(await evaluate('document.querySelector("#name").value')).trim()).toBe('A é\u{1F600} pasted');
-    // A drag selects page text; a password field's selection is never read.
-    await act({ kind: 'drag', from: { x: 100 / live.width, y: 369 / live.height }, to: { x: 480 / live.width, y: 369 / live.height }, width: live.width, height: live.height });
-    expect((await phone.call('browser.remoteSelection', { threadId, frameId: live.id })).text).toBe('Select these words');
-    await evaluate('document.querySelector("#name").type = "password"');
-    await act({ kind: 'tap', ...at(150, 230) });
-    await act({ kind: 'select-all' });
-    expect(await evaluate('document.querySelector("#name").selectionEnd > 0')).toBe(true);
-    expect(await phone.call('browser.remoteSelection', { threadId, frameId: live.id })).toEqual({ text: '', truncated: false });
-    await expect(act({ kind: 'press', keys: ['Hyper+a'] })).rejects.toThrow('remote press');
-    await expect(phone.call('browser.remoteSelection', { threadId, frameId: 'unknown' })).rejects.toThrow('refresh');
-    await expect(phone.call('browser.remoteInput', { threadId, frameId: small.id, input: { kind: 'navigate', url: 'javascript:alert(1)' } })).rejects.toThrow('HTTP');
-    // A viewer never gets the agent's own command, which can run scripts.
-    await expect(phone.call('browser.command', { threadId, action: { kind: 'evaluate', expression: '1' } })).rejects.toThrow();
-    const gone = phone.next('browser.remoteChanged', event => event.threadId === threadId && !event.live, 30_000);
-    await owner.call('threads.archive', { threadId });
-    expect((await gone).tabs).toEqual([]);
-  } finally { phone.close(); }
-}, 150_000);
-
 real('an agent drives a page with agent-browser commands: refs, forms, dialogs and covered elements', async () => {
+  const { agent, threadId } = browserFixture;
   const command = async (action: BrowserAction): Promise<unknown> => (await agent.call('browser.command', { threadId, action })).value;
   const opened = await agent.call('browser.command', { threadId, action: { kind: 'open', url: url('/shop'), reuse: true } });
   const { text } = await command({ kind: 'snapshot', interactive: true }) as { text: string };
@@ -342,6 +112,7 @@ real('an agent drives a page with agent-browser commands: refs, forms, dialogs a
 }, 150_000);
 
 real('a window a page opens joins the conversation as a tab of its own', async () => {
+  const { agent, threadId } = browserFixture;
   await agent.call('browser.command', { threadId, action: { kind: 'open', url: url() } });
   await agent.call('browser.command', { threadId, action: { kind: 'click', selector: '#pop' } });
   let tabs: Array<{ url: string; title: string }> = [];
@@ -351,10 +122,11 @@ real('a window a page opens joins the conversation as a tab of its own', async (
   }
   expect(tabs.map(tab => tab.url)).toEqual([url(), url('/popup')]);
   // Its first request leaves before the core attaches to it: the browser's own flag names it.
-  expect(agents.get('/popup')).toMatch(/ Chrome\/\d+/);
+  expect(browserFixture.agents.get('/popup')).toMatch(/ Chrome\/\d+/);
 }, 150_000);
 
 real('a site sees the browser a person runs with a window, not headless Chrome', async () => {
+  const { agent, threadId } = browserFixture;
   await agent.call('browser.command', { threadId, action: { kind: 'open', url: url() } });
   const seen = JSON.parse(String(await evaluate(`(async () => JSON.stringify({
     page: navigator.userAgent,
@@ -367,7 +139,7 @@ real('a site sees the browser a person runs with a window, not headless Chrome',
   }))()`)));
   expect(seen.page).toMatch(/ Chrome\/\d+/);
   expect(seen.page).not.toContain('Headless');
-  expect([seen.worker, agents.get('/'), agents.get('/missing')]).toEqual([seen.page, seen.page, seen.page]);
+  expect([seen.worker, browserFixture.agents.get('/'), browserFixture.agents.get('/missing')]).toEqual([seen.page, seen.page, seen.page]);
   expect(seen.webdriver).toBe(false);
   // `--user-agent` alone leaves the high-entropy client hints empty; the tab's override restores them.
   expect(seen.versions).toBeGreaterThan(1);
@@ -375,144 +147,8 @@ real('a site sees the browser a person runs with a window, not headless Chrome',
   expect(seen.screen[1]).toBeGreaterThanOrEqual(seen.window[1]);
 }, 150_000);
 
-real('a recording is an MP4 made in the browser itself, and one left running when the turn ends is thrown away', async () => {
-  await agent.call('browser.command', { threadId, action: { kind: 'open', url: url('/moving') } });
-  await agent.call('browser.command', { threadId, action: { kind: 'recording-start' } });
-  await expect(agent.call('browser.command', { threadId, action: { kind: 'recording-start' } })).rejects.toThrow('already running');
-  // A slow encoder drops frames by design: an Intel macOS runner keeps 3 to 5 a second, so 4 s still clears 10.
-  await Bun.sleep(4000);
-  const { recording, tabId } = await agent.call('browser.command', { threadId, action: { kind: 'recording-stop' } });
-  expect(recording).toMatchObject({ mime: 'video/mp4', codec: 'h264', reason: 'stopped', frameRate: 30 });
-  expect(recording!.bytes).toBeGreaterThan(1000);
-  expect(recording!.frames).toBeGreaterThan(10);
-  const chunk = (await agent.call('browser.command', { threadId, tabId, action: { kind: 'recording-read', recordingId: recording!.id, offset: 0, maxBytes: 1024 } })).value as { base64: string; nextOffset: number; done: boolean };
-  expect(Buffer.from(chunk.base64, 'base64').subarray(4, 8).toString()).toBe('ftyp');
-  expect(chunk).toMatchObject({ nextOffset: 1024, done: false });
-  await agent.call('browser.command', { threadId, tabId, action: { kind: 'recording-discard', recordingId: recording!.id } });
-  await agent.call('browser.command', { threadId, action: { kind: 'recording-start' } });
-  const finished = owner.next('turn.finished', row => row.threadId === threadId, 10_000);
-  await owner.call('turns.start', { threadId, prompt: 'hello' });
-  await finished; await Bun.sleep(300);
-  await expect(agent.call('browser.command', { threadId, action: { kind: 'recording-stop' } })).rejects.toThrow('discarded');
-}, 150_000);
-
-test('without a Chromium-based browser the status says why and nothing opens', async () => {
-  const previous = process.env.BOITE_BROWSER;
-  process.env.BOITE_BROWSER = '/nonexistent/chrome';
-  try {
-    await owner.call('threads.subscribe', { threadId });
-    const status = await owner.call('browser.remoteStatus', { threadId });
-    expect(status).toMatchObject({ live: false, available: false });
-    expect(status.reason).toContain('/nonexistent/chrome');
-    await expect(agent.call('browser.command', { threadId, action: { kind: 'open', url: 'http://127.0.0.1:1/' } })).rejects.toThrow('cannot start');
-  } finally {
-    if (previous === undefined) delete process.env.BOITE_BROWSER; else process.env.BOITE_BROWSER = previous;
-  }
-});
-
-test('the browser is found where each OS installs it, and BOITE_BROWSER alone when set', () => {
-  const root = mkdtempSync(join(tmpdir(), 'boite-chromium-'));
-  try {
-    const edge = join(root, 'Microsoft', 'Edge', 'Application', 'msedge.exe');
-    mkdirSync(dirname(edge), { recursive: true }); writeFileSync(edge, '');
-    const none = () => null;
-    expect(findChromium({ ProgramFiles: root }, 'win32', none)).toEqual({ path: edge });
-    expect(findChromium({}, 'linux', name => name === 'chromium' ? '/usr/bin/chromium' : null)).toEqual({ path: '/usr/bin/chromium' });
-    expect(findChromium({ BOITE_BROWSER: edge }, 'linux', () => '/usr/bin/chromium')).toEqual({ path: edge });
-    expect(findChromium({ BOITE_BROWSER: join(root, 'gone') }, 'win32', () => '/usr/bin/chromium').path).toBeNull();
-    expect(findChromium({}, 'linux', none)).toMatchObject({ path: null, reason: expect.stringContaining('BOITE_BROWSER') });
-    expect(chromiumArgs('/profile', 'linux')).toEqual(expect.arrayContaining(['--headless=new', '--disable-software-rasterizer', '--use-angle=gl-egl', '--user-data-dir=/profile']));
-    expect(chromiumArgs('/profile', 'win32')).not.toContain('--use-angle=gl-egl');
-    expect(chromiumArgs('/profile', 'linux', 'Agent/1')).toEqual(expect.arrayContaining(['--disable-blink-features=AutomationControlled', '--user-agent=Agent/1']));
-    expect(chromiumArgs('/profile', 'linux').some(arg => arg.startsWith('--user-agent'))).toBe(false);
-    // The DevTools protocol goes over the browser's own pipes: no port for another process to reach.
-    for (const platform of ['linux', 'darwin'] as const) {
-      expect(chromiumArgs('/profile', platform)).toContain('--remote-debugging-pipe');
-      expect(chromiumArgs('/profile', platform).some(arg => arg.startsWith('--remote-debugging-port'))).toBe(false);
-    }
-    // Bun cannot open the pipe descriptors on Windows: a random port there, on loopback only.
-    expect(chromiumArgs('/profile', 'win32')).toEqual(expect.arrayContaining(['--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1']));
-  } finally { rmSync(root, { recursive: true, force: true }); }
-});
-
-test('a deleted profile loses its folder even when its browser had already closed', async () => {
-  const root = join(harness.dataDir, 'browser');
-  for (const name of ['default', 'p-keep', 'p-gone', 'private-00000000-0000-0000-0000-000000000000', 'Not A Profile']) mkdirSync(join(root, name), { recursive: true });
-  await owner.call('settings.set', { browserProfiles: [{ id: 'p-keep', name: 'Keep' }] });
-  // The first use of the agent browser looks at what is on disk.
-  await agent.call('browser.command', { threadId, action: { kind: 'status' } });
-  let names: string[] = [];
-  for (let i = 0; i < 50; i++) { names = readdirSync(root).sort(); if (!names.includes('p-gone')) break; await Bun.sleep(50); }
-  expect(names).toEqual(['Not A Profile', 'default', 'p-keep']);
-  // Deleting one in Settings later takes its folder too.
-  await owner.call('settings.set', { browserProfiles: [] });
-  for (let i = 0; i < 50 && readdirSync(root).includes('p-keep'); i++) await Bun.sleep(50);
-  expect(readdirSync(root).sort()).toEqual(['Not A Profile', 'default']);
-});
-
-real('each profile keeps its own cookies, across a restart of the browser; a private tab keeps none', async () => {
-  await owner.call('settings.set', { browserProfiles: [{ id: 'p-pro', name: 'Pro' }] });
-  const visit = async (browser: AgentBrowser, profile: string, write?: string) => {
-    const { tabId } = await browser.command({ threadId, action: { kind: 'open', url: url(), profile } });
-    if (write) await browser.command({ threadId, tabId, action: { kind: 'evaluate', expression: `document.cookie = 'login=${write}; max-age=3600'` } });
-    const cookie = (await browser.command({ threadId, tabId, action: { kind: 'evaluate', expression: 'document.cookie' } })).value;
-    await browser.command({ threadId, tabId, action: { kind: 'close' } });
-    return cookie;
-  };
-  expect(await visit(harness.core.browser, 'default', 'nuno')).toBe('login=nuno');
-  expect(await visit(harness.core.browser, 'Pro', 'work')).toBe('login=work');
-  expect(await visit(harness.core.browser, 'private', 'ghost')).toBe('login=ghost');
-  // Every browser process ends, as when the core stops; the next ones read the same folders.
-  await harness.core.browser.close();
-  const again = new AgentBrowser(harness.core);
-  try {
-    expect(await visit(again, 'default')).toBe('login=nuno');
-    expect(await visit(again, 'Pro')).toBe('login=work');
-    expect(await visit(again, 'private')).toBe('');
-  } finally { await again.close(); }
-}, 150_000);
-
-real('a sign-in is on disk while its tab is still open: a core killed there keeps it', async () => {
-  const { tabId } = await harness.core.browser.command({ threadId, action: { kind: 'open', url: url() } });
-  await harness.core.browser.command({ threadId, tabId, action: { kind: 'evaluate', expression: "document.cookie = 'login=kept; max-age=3600'" } });
-  // A sign-in ends on a page change; nothing closes the tab or the browser here.
-  await harness.core.browser.command({ threadId, tabId, action: { kind: 'navigate', url: url() } });
-  const file = join(harness.core.dataDir, 'browser', 'default', 'boite-cookies.json');
-  const names = () => { try { return (JSON.parse(readFileSync(file, 'utf8')) as { name: string; value: string }[]).map(cookie => `${cookie.name}=${cookie.value}`); } catch { return []; } };
-  for (let i = 0; i < 100 && !names().includes('login=kept'); i++) await Bun.sleep(50);
-  expect(names()).toContain('login=kept');
-  await harness.core.browser.command({ threadId, tabId, action: { kind: 'close' } });
-}, 150_000);
-
-real('the owner copies a desktop profile into the agent browser: the profile is made here, its sign-ins open with it and outlive a restart', async () => {
-  const cookies = [
-    { name: 'session', value: 'no-expiry', domain: '127.0.0.1', path: '/' },
-    { name: 'kept', value: 'a-month', domain: '127.0.0.1', path: '/', expires: Math.floor(Date.now() / 1000) + 30 * 86400, sameSite: 'Lax' as const },
-  ];
-  // Sign-ins are the owner's to hand over: never an agent's, never into a private tab, never malformed.
-  await expect(agent.call('browser.importCookies', { profile: { id: 'p-work', name: 'Work' }, cookies })).rejects.toThrow("agent's methods");
-  await expect(owner.call('browser.importCookies', { profile: { id: 'private' }, cookies })).rejects.toThrow('private');
-  await expect(owner.call('browser.importCookies', { profile: { id: 'p-work' }, cookies: [{ ...cookies[0]!, path: 'nope' }] })).rejects.toThrow('path');
-  expect(await owner.call('browser.importCookies', { profile: { id: 'p-work', name: 'Work' }, cookies })).toEqual({ imported: 2, profile: 'p-work' });
-  expect((await owner.call('settings.get', {})).browserProfiles).toEqual([{ id: 'p-work', name: 'Work' }]);
-  const read = async (browser: AgentBrowser, profile: string) => {
-    const { tabId } = await browser.command({ threadId, action: { kind: 'open', url: url(), profile } });
-    const value = (await browser.command({ threadId, tabId, action: { kind: 'evaluate', expression: 'document.cookie.split("; ").sort().join("; ")' } })).value;
-    await browser.command({ threadId, tabId, action: { kind: 'close' } });
-    return value;
-  };
-  expect(await read(harness.core.browser, 'Work')).toBe('kept=a-month; session=no-expiry');
-  expect(await read(harness.core.browser, 'default')).toBe('');
-  // A cookie without an expiry date is a sign-in too: it is still there after every browser process ended.
-  await harness.core.browser.close();
-  const again = new AgentBrowser(harness.core);
-  try {
-    expect(await read(again, 'Work')).toBe('kept=a-month; session=no-expiry');
-    expect(((await again.command({ threadId, action: { kind: 'status' } })).value as { tabs: unknown[] }).tabs).toEqual([]);
-  } finally { await again.close(); }
-}, 150_000);
-
 real('a click right after the viewport changes size lands on its element, and what the page then logs is kept', async () => {
+  const { agent, threadId } = browserFixture;
   const fixture = readFileSync(join(import.meta.dir, '../../../tests/e2e/fixtures/browser-parity.html'), 'utf8');
   const page = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: request => new URL(request.url).pathname === '/'
     ? new Response(fixture, { headers: { 'content-type': 'text/html;charset=utf-8' } }) : new Response('missing', { status: 404 }) });
@@ -535,6 +171,7 @@ real('a click right after the viewport changes size lands on its element, and wh
 }, 150_000);
 
 real('an open agent tab does not hold back an update of the core', async () => {
+  const { agent, threadId } = browserFixture;
   let stopping = 0;
   const updating = await startTestCore({ onShutdown: () => { stopping += 1; } });
   const client = await updating.connect();
