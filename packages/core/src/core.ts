@@ -464,8 +464,8 @@ export class Core {
     this.workforce.close();
     this.#stopping = true;
     await this.#stopDoneRetention();
-    await this.drafts.close();
-    await this.attachmentUploads.close();
+    await this.drafts.close().catch(error => this.log('warn', `draft shutdown cleanup failed: ${String(error)}`));
+    await this.attachmentUploads.close().catch(error => this.log('warn', `attachment shutdown cleanup failed: ${String(error)}`));
     await this.brain.close();
     this.updates.close();
     this.providers.close();

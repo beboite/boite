@@ -24,7 +24,9 @@ export class AttachmentUploads {
         void client.call('attachments.upload', { attachment: made.attachment }).then(({ id }) => {
           made.id = id;
           if (made.released || !this.ctx.currentClient(client, made.generation)) this.#release(made);
-        }, () => { made.released = true; });
+        }, () => {
+          // Retain the selected null-id entry so typing does not retry; Send keeps the bytes.
+        });
       }
       held.selected = true;
     }

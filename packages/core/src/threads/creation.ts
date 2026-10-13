@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import type { Account, Project, ProviderDescriptor, RpcParams, ThreadId, ThreadSummary } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { refused } from '../errors.ts';
+import { logMessageOf } from '../log-errors.ts';
 import { newId } from '../ids.ts';
 import { checkContext } from '../context-mode.ts';
 import { checkCwd, draftFolderName, makeDraftFolder, titleOf } from './inputs.ts';
@@ -44,7 +45,11 @@ export class ThreadCreation {
     try {
       return this.create({ ...params, cwd: placed.path }, { id, branch: placed.branch, branchNamingPending: placed.namingPending }, publish);
     } catch (error) {
-      await this.core.worktrees.remove(id, project, placed, beforeMutation ? DRAFT_CLEANUP_TIMEOUT_MS : undefined);
+      try {
+        await this.core.worktrees.remove(id, project, placed, beforeMutation ? DRAFT_CLEANUP_TIMEOUT_MS : undefined);
+      } catch (cleanupError) {
+        this.core.log('warn', `could not clean up the worktree ${placed.path} after creation failed: ${logMessageOf(cleanupError)}`, { threadId: id });
+      }
       throw error;
     }
   }

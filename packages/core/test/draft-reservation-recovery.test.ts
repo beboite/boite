@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import type { Project, RpcParams } from '@boite/contracts';
+import type { Project, RpcEvents, RpcParams } from '@boite/contracts';
+import { refused } from '../src/errors.ts';
 import { DraftPreparations } from '../src/threads/draft-preparations.ts';
 import { DraftReservationLedger, type DraftOwnership } from '../src/threads/draft-reservation-ledger.ts';
 import { startTestCore, waitFor, type TestCore } from './harness.ts';
@@ -135,6 +136,36 @@ test('failed cleanup retains exact ownership for a later recovery retry', async 
   await new DraftPreparations(h.core).recover();
   expect(ledger.list()).toEqual([]);
   expect(existsSync(thread.cwd)).toBe(false);
+});
+
+test('a worktree creation refusal survives cleanup failure and retains ownership for recovery', async () => {
+  const repo = await repository();
+  const original = refused('creation refused after worktree placement', { field: 'accountId' });
+  const cleanup = new Error('git cleanup did not finish within its deadline');
+  const failedCreate = spyOn(h.core.threads.creation, 'create').mockImplementation(() => { throw original; });
+  const failedCleanup = spyOn(h.core.worktrees, 'remove').mockRejectedValue(cleanup);
+  const logs: RpcEvents['core.log'][] = [];
+  const stopLogs = h.core.bus.onAny((name, payload) => {
+    if (name === 'core.log') logs.push(payload as RpcEvents['core.log']);
+  });
+  let ownership: DraftOwnership | undefined;
+  try {
+    await expect(h.core.threads.creation.createInWorktree({ ...choice, projectId: repo.id, worktree: {} }, false, intent => {
+      ledger.record(intent); ownership = intent;
+    })).rejects.toBe(original);
+    expect(ownership).toBeDefined();
+    expect(new DraftReservationLedger(h.core).list()).toEqual([ownership!]);
+    expect(existsSync(ownership!.path)).toBe(true);
+    expect(git(repo.path, 'branch', '--list', ownership!.branch!).trim()).not.toBe('');
+    expect(h.core.journal.getThread(ownership!.threadId)).toBeNull();
+    expect(logs).toContainEqual(expect.objectContaining({
+      level: 'warn', threadId: ownership!.threadId, message: expect.stringContaining(cleanup.message),
+    }));
+  } finally { failedCreate.mockRestore(); failedCleanup.mockRestore(); stopLogs(); }
+  await new DraftPreparations(h.core).recover();
+  expect(ledger.list()).toEqual([]);
+  expect(existsSync(ownership!.path)).toBe(false);
+  expect(git(repo.path, 'branch', '--list', ownership!.branch!).trim()).toBe('');
 });
 
 test('admission bounds active and detached cleanup per connection without blocking cold Send', async () => {

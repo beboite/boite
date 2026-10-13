@@ -145,6 +145,44 @@ test('selected attachments upload before Send, expired ids retry original bytes 
   expect(store.openThread!.messages.find(m => m.role === 'user')?.parts).toContainEqual(expect.objectContaining({ type: 'image', data: image.data }));
 });
 
+test('a rejected attachment upload is not retried while typing; reselect can retry and Send keeps inline bytes', async ({ ready }) => {
+  visible();
+  const { store, client } = await ready();
+  const call = client.call.bind(client);
+  const spy = vi.spyOn(client, 'call').mockImplementation((method, params) => {
+    if (method === 'attachments.upload') return Promise.reject(new RpcFailure({ code: RpcErrorCode.Refused, message: 'Upload storage unavailable' }));
+    return call(method, params as never);
+  });
+  const choice = draft(store);
+  const state = store.composerStates[DRAFT_STASH_KEY]!;
+  state.attachments = [image];
+  flushSync();
+  await vi.waitFor(() => expect(callsOf(spy, 'attachments.upload')).toHaveLength(1));
+  for (const text of ['First prompt a', 'First prompt ab', 'First prompt abc']) {
+    state.text = text;
+    flushSync();
+    await Promise.resolve();
+  }
+  expect(callsOf(spy, 'attachments.upload')).toHaveLength(1);
+  expect(state.attachments).toEqual([image]);
+  state.attachments = [];
+  flushSync();
+  await Promise.resolve();
+  state.attachments = [image];
+  flushSync();
+  await vi.waitFor(() => expect(callsOf(spy, 'attachments.upload')).toHaveLength(2));
+  state.text = 'Reselected attachment';
+  flushSync();
+  await Promise.resolve();
+  expect(callsOf(spy, 'attachments.upload')).toHaveLength(2);
+  expect(await store.submit(state.text, choice, [image])).toBe(true);
+  const sent = callsOf(spy, 'turns.start')[0]![1] as RpcParams<'turns.start'>;
+  expect(sent.attachments).toEqual([image]);
+  expect(sent).not.toHaveProperty('attachmentIds');
+  expect(store.openThread!.messages.find(message => message.role === 'user')?.parts)
+    .toContainEqual(expect.objectContaining({ type: 'image', data: image.data }));
+});
+
 test('pending preparation and uploads never hold Send', async ({ ready }) => {
   visible();
   const { store, client } = await ready();

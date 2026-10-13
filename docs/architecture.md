@@ -184,6 +184,9 @@ of abandoned reservations. Active reservations and pending cleanup share limits
 of four per connection and 32 globally; failed cleanup keeps its ownership intent.
 Reserved git operations have a ten-second deadline and kill only their captured
 child process when the deadline expires.
+Cleanup failures preserve the original creation error and are logged. During
+shutdown, draft and upload cleanup failures do not prevent process or journal
+closure; retained ownership remains available for recovery.
 
 Checkpoint capture and native preparation can run together, but prompt dispatch
 waits for the checkpoint. This transient preparation does not extend post-turn
@@ -198,6 +201,8 @@ are removed on release, disconnect or shutdown. Expired references retry inline
 with the same input receipt. Upload instances record their owning process before
 writing bodies. Startup removes only instances whose recorded owner is proved
 dead; live owners and unknown legacy directories remain untouched.
+Rejected uploads retain their selected entry, so typing does not retry them.
+Sending uses the original bytes; deselecting and reselecting permits a new upload.
 
 ## Delegation shares the scheduler
 

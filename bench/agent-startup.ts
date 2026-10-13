@@ -88,7 +88,18 @@ async function setup(options: Options, worktree: boolean) {
   };
   // Isolate the first prompt's startup from automatic title model calls.
   driver.title = undefined;
-  const restore = setDriver('codex-appserver', driver);
+  const restoreDriver = setDriver('codex-appserver', driver);
+  const environment = {
+    CODEX_FAKE_LOG: process.env.CODEX_FAKE_LOG,
+    CODEX_FAKE_SLOW_START: process.env.CODEX_FAKE_SLOW_START,
+  };
+  const restore = () => {
+    restoreDriver();
+    for (const [key, value] of Object.entries(environment)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  };
   const records: ProcessRecord[] = [];
   const untrace = harness.core.bus.onAny((event, payload) => { if (event === 'process.started') records.push(payload as ProcessRecord); });
   try {
