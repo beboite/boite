@@ -129,7 +129,9 @@ is often there to answer it. A permission a followed thread waits on is
 reported so the agent can tell the user. At most 60 notices an hour reach one
 agent; the rest are dropped with a line in the log. When nothing needs the
 user, the agent answers `[quiet]` and nothing is posted; otherwise its answer
-lands in the conversation under an About your projects label.
+lands in the conversation under an About your projects label. Taking a
+project back drops what pending notices say about its threads, and cancels a
+notice with nothing left, along with the agent's letters still waiting there.
 
 ### How an agent talks
 

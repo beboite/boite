@@ -131,7 +131,7 @@ test('its messages reach a thread as the agent\'s whatever that thread\'s settin
 });
 
 test('notices: failures and questions from any thread, finished turns only from followed ones, gathered in one work item', async () => {
-  answering(); const { h, owner, worker, outside, project, thread, notices } = await setup(['test']);
+  answering(); const { h, owner, worker, outside, project, thread, notices, entrust } = await setup(['test']);
   // Held, so the notices stay pending where the test can read them.
   h.core.workforce.setLimits({ paused: true, backgroundConcurrency: 2, kebaccExperiment: false });
   const quiet = (await thread('Quiet', project)).id;
@@ -154,6 +154,9 @@ test('notices: failures and questions from any thread, finished turns only from 
     expect(pending!.prompt).toContain('Merge now?');
     // The failure joins at once; the question alone would have waited for the user first.
     expect(pending!.notBefore).toBeLessThan(before + QUESTION_GRACE_MS);
+    // Taking the project back drops what the notices say about its threads, here all of it.
+    await entrust(['Other']);
+    expect(h.core.workforce.records.get('work', pending!.id).status).toBe('cancelled');
   } finally { asker.close(); }
 });
 

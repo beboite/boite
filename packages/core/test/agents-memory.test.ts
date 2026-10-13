@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AgentProfile } from '@boite/contracts';
 import { setDriver } from '../src/drivers/index.ts';
@@ -125,9 +125,11 @@ test('brains move to the folder the owner chooses, named after their agents, and
   writeFileSync(join(before.path, 'skills', 'triage.md'), '# Triage\n');
   h.core.workforce.resident.brain(twin.id);
 
-  const root = join(h.dataDir, '..', `brains-${agent.id}`);
+  mkdirSync(join(h.dataDir, '..', `brains-${agent.id}`, 'open-source-2'), { recursive: true });
+  // The core keeps a chosen folder's real path: macOS's /tmp is a link to /private/tmp.
+  const root = realpathSync(join(h.dataDir, '..', `brains-${agent.id}`));
   const taken = join(root, 'open-source-2');
-  mkdirSync(taken, { recursive: true }); writeFileSync(join(taken, 'note.md'), 'mine');
+  writeFileSync(join(taken, 'note.md'), 'mine');
   await expect(client.call('agents.brain.root', { path: 'relative/brains' })).rejects.toThrow('absolute');
   await expect(client.call('agents.brain.root', { path: join(h.dataDir, 'inside') })).rejects.toThrow("core's own data");
 
@@ -144,8 +146,9 @@ test('brains move to the folder the owner chooses, named after their agents, and
   expect((await client.call('agents.snapshot', {})).brainRoot).toEqual({ path: root, custom: true });
 
   // A folder that already holds someone's files is never merged into: the brain takes the next name.
-  const busy = join(root, '..', `busy-${agent.id}`);
-  mkdirSync(join(busy, 'open-source'), { recursive: true }); writeFileSync(join(busy, 'open-source', 'MEMORY.md'), 'other');
+  mkdirSync(join(root, '..', `busy-${agent.id}`, 'open-source'), { recursive: true });
+  const busy = realpathSync(join(root, '..', `busy-${agent.id}`));
+  writeFileSync(join(busy, 'open-source', 'MEMORY.md'), 'other');
   await expect(client.call('agents.brain.root', { path: busy })).resolves.toEqual({ path: busy, custom: true });
   expect(h.core.workforce.resident.brain(agent.id).path).toBe(join(busy, 'open-source-2'));
 

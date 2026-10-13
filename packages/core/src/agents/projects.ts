@@ -297,6 +297,28 @@ export class AgentProjects {
     return work;
   }
 
+  /**
+   * After the owner takes projects back: pending notices keep only what they
+   * say about threads still in the agent's projects, and one with nothing left
+   * is cancelled, so a thread's answer never reaches an agent that lost it.
+   */
+  forget(agent: AgentProfile): void {
+    const kept = new Set(this.projectsOf(agent));
+    const still = (item: string) => [...item.matchAll(/\((thr_[0-9a-z]+)\)/g)].every(([, id]) => {
+      const projectId = this.core.journal.getThread(id!)?.projectId;
+      return projectId != null && kept.has(projectId);
+    });
+    for (const pending of this.store.records.withStatus('work', ['pending']).filter(w => w.agentId === agent.id && w.purpose === 'notice')) {
+      const items = pending.prompt.slice(NOTICE_HEADER.length).split('\n- ').filter(Boolean).map(item => item.startsWith('- ') ? item : `- ${item}`);
+      const left = items.filter(still);
+      if (left.length === items.length) continue;
+      this.store.records.update('work', pending.id, pending.revision, left.length
+        ? { ...pending, prompt: `${NOTICE_HEADER}\n${left.join('\n')}` }
+        : { ...pending, status: 'cancelled', error: 'The projects these notices were about are no longer entrusted to this agent.' });
+    }
+    this.store.changed();
+  }
+
   private watched(thread: ThreadSummary | null): thread is ThreadSummary {
     return thread !== null && !thread.archived && !thread.agentSessionId && !thread.parentThreadId && thread.projectId !== null;
   }

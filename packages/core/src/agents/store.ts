@@ -96,6 +96,7 @@ export class AgentStore {
     if (previous && saved.status !== 'active') this.resident.enforce();
     // Letters it wrote to threads it no longer looks after go nowhere.
     if (previous) for (const session of this.records.list('session').filter(s => s.agentId === saved.id)) this.core.coordination.residentRevoked(session.threadId);
+    if (previous && (previous.projectIds ?? []).some(id => !projectIds.includes(id))) this.projects.forget(saved);
     return saved;
   }
 
