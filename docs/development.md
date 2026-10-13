@@ -547,8 +547,18 @@ Rust updater unit tests use a local HTTP fixture and a signed inert payload;
 they launch no installer. Windows test executables include the Common Controls
 v6 manifest needed by the native dialog dependency.
 `tests/e2e/app-updates.test.ts` checks update states and phone restrictions.
-Development queries `?fake=1&appUpdate=ready`, `downloading` or `error`, with
-`appUpdateChannel` and `appUpdateCurrentChannel`, preview those states.
+Development queries `?fake=1&appUpdate=available`, `ready`, `downloading` or
+`error`, with `appUpdateChannel` and `appUpdateCurrentChannel`, preview those
+states. `tests/e2e/update-everything.test.ts` opens the foot's update card with
+`updates=1&machines=1&appUpdate=available&serverUpdate=available`, checks that
+nothing downloads before the click, Remind me later, Update the app alone, the
+one request per machine, rows landing one at a time, and the card ending on
+Restart or Everything is up to date, and captures desktop and phone. Its fake
+core finishes a server update started that way (waiting, restarting, current)
+in about three seconds; a plain install stays waiting for the cancel test.
+`packages/core/test/updates.test.ts` holds the core side: a registry read after
+an agent's updater, when none of its processes runs, keeps Boite's own
+installation waiting.
 
 `packages/core/test/server-update.test.ts` checks signatures, archive paths,
 wait/cancel, installation and rollback of SQLite and pairing state using an

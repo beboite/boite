@@ -1,6 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { HarnessUpdate } from '@boite/contracts';
@@ -9,6 +9,7 @@ import { Core } from '../src/core.ts';
 import { newToken } from '../src/ids.ts';
 import { npmInstallOf } from '../src/providers/npm.ts';
 import { compareVersions, inside, readVersion } from '../src/providers/updates.ts';
+import type { ServerUpdatePlatform } from '../src/server-update/types.ts';
 import { holdAccountTurns, echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -91,8 +92,9 @@ async function start(
   updater = 'update',
   updateEnv?: Record<string, string>,
   program?: (dataDir: string) => { kind: 'path' | 'file'; value: string },
+  coreOptions?: Parameters<typeof startTestCore>[0],
 ): Promise<{ client: CoreClient; state: string }> {
-  harness = await startTestCore();
+  harness = await startTestCore(coreOptions);
   // Only the fixture: a check must never run the agents of the machine the tests run on.
   harness.core.updates.only = new Set(['update-fake']);
   harness.core.updates.npmLatest = async (name) => {
@@ -557,6 +559,65 @@ describe('harness updates', () => {
     const loaded = await client.call('providers.reload', {});
     expect(loaded.rejected).toHaveLength(1);
     expect(loaded.rejected[0]?.field).toContain('update.latestNpm');
+  });
+
+  test('one click starts every agent and Boite together, and Boite installs only once the agents are done', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'boite-update-everything-'));
+    let stops = 0;
+    let downloads = 0;
+    const platform: ServerUpdatePlatform = {
+      inspect: async () => ({ directory: join(root, 'install'), executable: join(root, 'install', 'boite-core'), service: 'test.service' }),
+      launch: async (_run, _executable, plan) => { writeFileSync(join(dirname(plan), 'ready'), ''); },
+      control: async () => undefined,
+      mainPid: async () => process.pid,
+    };
+    try {
+      const { client, state } = await start('npm', 'update', undefined, undefined, {
+        onShutdown: () => { stops++; },
+        serverUpdates: { platform, pollMs: 5,
+          findOffer: async () => ({ version: '2.0.0-beta.2', publishedAt: '2026-10-01T00:00:00Z', url: 'https://example.test/signed.zip', signature: 'signed' }),
+          prepare: async () => { downloads++; return 'a'.repeat(64); } },
+      });
+      await client.call('providers.updates', { refresh: true });
+      expect((await client.call('core.updateStatus', { refresh: true })).phase).toBe('available');
+
+      // Bad requests are refused by field before anything starts.
+      await expect(client.call('core.updateEverything', { agents: 'update-fake' as never, server: null })).rejects.toThrow(/agents/);
+      await expect(client.call('core.updateEverything', { agents: [], server: 7 as never })).rejects.toThrow(/server/);
+
+      // The registry read after the updater is the moment no process of the update runs:
+      // held here, it is the gap an idle restart would slip into.
+      let open = (): void => {};
+      const registry = new Promise<void>((done) => (open = done));
+      let asked = false;
+      harness!.core.updates.npmLatest = async () => {
+        asked = true;
+        await registry;
+        return '1.1.0';
+      };
+      const answer = await client.call('core.updateEverything', { agents: ['update-fake', 'not-a-provider' as never], server: '2.0.0-beta.2' });
+      expect(answer.agents).toEqual(['update-fake']);
+      expect(answer.failed.map((entry) => entry.providerId)).toEqual(['not-a-provider']);
+      expect(answer.serverError).toBeNull();
+      // The fixture's download is instant: by the answer it may already wait for the gate.
+      expect(['downloading', 'waiting']).toContain(answer.server.phase);
+
+      // The download ran beside the agent's update; the install waits for it to land.
+      await waitFor(() => asked);
+      expect(readFileSync(state, 'utf8')).toBe('1.2.0');
+      expect(harness!.core.procs.liveCount('update:update-fake')).toBe(0);
+      await waitFor(() => harness!.core.serverUpdates.snapshot().phase === 'waiting');
+      expect(downloads).toBe(1);
+      await Bun.sleep(60);
+      expect(harness!.core.serverUpdates.snapshot().phase).toBe('waiting');
+      expect(harness!.core.updates.updating('update-fake')).toBe(true);
+      expect(stops).toBe(0);
+
+      open();
+      await waitFor(() => harness!.core.serverUpdates.snapshot().phase === 'installing', 20000);
+      await waitFor(() => stops === 1);
+      expect(harness!.core.updates.updating('update-fake')).toBe(false);
+    } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
   test('an updater waiting on a check cannot start after the store closes', async () => {

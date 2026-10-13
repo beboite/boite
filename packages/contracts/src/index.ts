@@ -3418,6 +3418,18 @@ export interface ServerUpdateStatus {
   error: string | null;
 }
 
+/** What `core.updateEverything` started on its machine. */
+export interface UpdateEverythingResult {
+  /** The agents whose update started, or was already under way. */
+  agents: ProviderId[];
+  /** Each agent named that did not start, with the core's reason. */
+  failed: { providerId: ProviderId; message: string }[];
+  /** Boite's own updater once the request is in: downloading, or as it was when `server` was null. */
+  server: ServerUpdateStatus;
+  /** Why Boite's own release did not start, null when it did or was not asked for. */
+  serverError: string | null;
+}
+
 export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, BrowserRpcMethods, PullRequestsRpcMethods, MobileDevicesRpcMethods, DiagnosticsRpcMethods {
   /** Owner-only merged-PR visibility policy; absent defaults to enabled. Disabling reveals automatically hidden roots, retaining manual archives. */
   'projects.setAutoArchiveMergedPr': { params: { projectId: ProjectId; enabled: boolean }; result: Project };
@@ -3431,6 +3443,17 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   /** Confirm the version shown to the owner so a stale dialog cannot install another release. */
   'core.updateInstall': { params: { version: string }; result: ServerUpdateStatus };
   'core.updateCancel': { params: Record<string, never>; result: ServerUpdateStatus };
+  /**
+   * Owner only. One click's worth of updates on this machine: every agent in
+   * `agents` starts its update the way `providers.update` does, and Boite's
+   * own release, when `server` names the version the client showed, starts
+   * downloading at once. That release installs only once the agent updates
+   * are done and the core is idle, so no updater is cut off by the restart.
+   * Answers as soon as everything has started; progress arrives as
+   * `providers.updatesChanged` and `core.updateChanged`. One part failing
+   * leaves the others running.
+   */
+  'core.updateEverything': { params: { agents: ProviderId[]; server: string | null }; result: UpdateEverythingResult };
   'delegation.get': { params: { threadId: ThreadId }; result: DelegationView };
   'delegation.configure': { params: { threadId: ThreadId; config: DelegationConfig }; result: DelegationView };
   /**

@@ -3,7 +3,7 @@
   import { ConnectionGroup } from '../lib/connection-group.svelte';
   import { GroupLinks } from '../lib/group-links.svelte';
   import InfoTip from './InfoTip.svelte';
-  import { ArrowUpRight, ChevronDown, RefreshCw, Settings2, Trash2, ScanLine } from '@lucide/svelte';
+  import { ArrowUpRight, ChevronDown, CircleArrowDown, RefreshCw, Settings2, Trash2, ScanLine } from '@lucide/svelte';
   import { machineHealth, workspace, machineIcons, type Machine } from '../lib/workspace.svelte';
   import { store as primary } from '../lib/store.svelte';
   import { confirm } from '../lib/confirm.svelte';
@@ -17,6 +17,7 @@
   import HarnessUpdatesCard from './HarnessUpdatesCard.svelte';
   import AppUpdateContent from './AppUpdateContent.svelte';
   import { appUpdater, showAppUpdateUi } from '../lib/app-update.svelte';
+  import { updateEverything } from '../lib/update-everything.svelte';
   import { machineUpdateState, type MachineUpdateState } from '../lib/machine-updates';
   import PairMachine from './PairMachine.svelte';
   import type { Store } from '../lib/store.svelte';
@@ -161,9 +162,16 @@
   <section class="connections-section" id="settings-machines" aria-label={strings.machines.heading}>
   <header class="head">
     <h1 class="ui-label-box"><span class="ui-label">{strings.settings.tabs.machines}</span><InfoTip topic={strings.settings.tabs.machines} text={strings.machines.intro} /></h1>
+    <div class="head-actions">
     <button type="button" class="ghost small" data-testid="updates-check-all" disabled={checking || !workspace.machines.some(machine => machine.store.connection === 'ready')} aria-busy={checking} onclick={() => void checkAll()}>
       <RefreshCw size={13} class={checking ? 'spinning' : undefined} /><span class="ui-label">{checking ? strings.appUpdate.checkingAction : strings.appUpdate.check}</span>
     </button>
+    {#if updateEverything.offered}
+      <button type="button" class="primary small" data-testid="updates-run-all" disabled={updateEverything.running} aria-busy={updateEverything.running} onclick={() => void updateEverything.run()}>
+        <CircleArrowDown size={13} /><span class="ui-label">{strings.updateAll.run}</span>
+      </button>
+    {/if}
+    </div>
   </header>
 
   <!-- The desktop app updates the computer it runs on, whichever machine the window shows. -->
@@ -305,6 +313,7 @@
     gap: 16px;
     margin-bottom: 16px;
   }
+  .head-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
   h1 {
     font-size: var(--text-lg);
     margin: 0;

@@ -140,6 +140,8 @@ card listing every agent version and once as a connection.
 
 One Check for updates button at the top reads everything again: the desktop
 app, Boite on every machine connected with full control, and the agents there.
+Update all beside it, shown while something can update, installs all of it
+([update everything](updates.md#update-everything)).
 The row's word is the most pressing of what it finds: a failed update, then
 one in progress, then one available, then a check in progress, then Up to
 date. A row says nothing until something has answered.

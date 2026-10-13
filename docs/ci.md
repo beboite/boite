@@ -133,7 +133,7 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 593,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,872,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,898,000 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 4,070,000 |
 
@@ -254,6 +254,12 @@ cannot scroll, the old first row put back after a page lands, and the fake
 core's budgets. Merged with context modes at `c8e9d2ac` it measured 4,830,160,
 within the 4,836,000 above; merged with the dictation menu at `af3acd8e`,
 4,864,454, within 4,872,000.
+
+The update card, merged with `main` at `8ac1d98f`, measured 4,888,826 UI bytes
+and a 522,879-byte entry chunk on Linux, against 4,864,454 for `main`: 24,372
+bytes for the card, its rows and buttons, the Update all button in Machines and
+their sentences ([performance](performance.md#update-everything)). The UI limit
+rises to 4,898,000.
 
 Several drafts per project, merged with settings cards at `87fca361`, measured
 4,536,091 UI bytes and a 590,215-byte entry chunk on Linux: the done rows and

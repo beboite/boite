@@ -1,8 +1,11 @@
-import { RpcErrorCode, type ServerUpdateStatus } from '@boite/contracts';
+import { RpcErrorCode, type ProviderId, type ServerUpdateStatus, type UpdateEverythingResult } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { confirm } from '../confirm.svelte';
 import { fill, strings } from '../strings';
 import type { StoreContext } from './context';
+
+/** What one machine started for an update-everything click; its progress arrives as events. */
+export type EverythingStarted = Pick<UpdateEverythingResult, 'agents' | 'failed' | 'serverError'>;
 
 /** Requests stay with the machine whose card was clicked, even while the active machine changes. */
 export class ServerUpdater {
@@ -53,6 +56,49 @@ export class ServerUpdater {
     } catch (error) { if (client === this.ctx.client) this.error = this.ctx.reason(error); }
     finally { this.preparing = false; if (client === this.ctx.client) this.busy = false; }
   }
+  /**
+   * Everything this machine updates in one request: the agents named and
+   * Boite's own release when `server` is its offered version. The core runs
+   * them in order, so nothing here waits for them. A core from before that
+   * request gets the same updates one call each, without its ordering.
+   */
+  async everything(agents: ProviderId[], server: string | null): Promise<EverythingStarted | null> {
+    const client = this.ctx.client;
+    if (!client || !this.ctx.store.owner || (agents.length === 0 && server === null)) return null;
+    const generation = ++this.generation;
+    try {
+      const answer = await client.call('core.updateEverything', { agents, server });
+      // The computer the desktop app runs on updates through the app, not this card.
+      if (client === this.ctx.client && generation === this.generation && !this.ctx.store.localCore) this.snapshot = answer.server;
+      for (const entry of answer.failed) console.warn(`updating ${entry.providerId} did not start: ${entry.message}`);
+      if (client === this.ctx.client && answer.serverError) this.error = answer.serverError;
+      return answer;
+    } catch (error) {
+      if (!(error instanceof RpcFailure && error.code === RpcErrorCode.MethodNotFound)) {
+        if (client === this.ctx.client) this.error = this.ctx.reason(error);
+        return null;
+      }
+    }
+    // An older core: one call per update, all at once.
+    const failed: UpdateEverythingResult['failed'] = [];
+    const started: ProviderId[] = [];
+    let serverError: string | null = null;
+    await Promise.all([
+      ...agents.map(async (providerId) => {
+        try {
+          const update = await client.call('providers.update', { providerId });
+          started.push(providerId);
+          if (client === this.ctx.client) this.ctx.accounts.putHarnessUpdate(update);
+        } catch (error) { failed.push({ providerId, message: this.ctx.reason(error) }); }
+      }),
+      ...(server === null ? [] : [client.call('core.updateInstall', { version: server }).then((answer) => {
+        if (client === this.ctx.client && generation === this.generation) this.snapshot = answer;
+      }, (error: unknown) => { serverError = this.ctx.reason(error); })])
+    ]);
+    if (client === this.ctx.client && serverError) this.error = serverError;
+    return { agents: started, failed, serverError };
+  }
+
   async cancel(): Promise<void> {
     const client = this.ctx.client;
     if (!client || this.busy) return;
