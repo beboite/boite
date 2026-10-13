@@ -50,6 +50,9 @@ async function setup(entrusted: ('test' | 'Other' | 'Notes')[] = ['test', 'Other
   const run = async (args: string[], env: Record<string, string>) => {
     let out = '', err = '';
     const code = await runCli(args, { out: s => { out += s; }, err: s => { err += s; }, env, cwd: h.dataDir });
+    // Bun 1.4.2 on Windows can free a closed socket's poll request twice when the next
+    // connection opens in the same tick (uv__fast_poll_process_poll_req): let the close land first.
+    await Bun.sleep(5);
     return { code, out, err };
   };
   /** The agent, from its own direct conversation, or the agent of another thread. */
