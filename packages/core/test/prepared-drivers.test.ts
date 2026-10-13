@@ -96,27 +96,62 @@ for (const entry of cases) describe(`${entry.protocol} prompt-free preparation`,
   test('release during startup closes the owned child, rejects preparation and allows a later turn', async () => {
     const fixture = await setup(entry);
     const stalled = join(harness!.dataDir, 'stall-startup.ts');
-    writeFileSync(stalled, 'setInterval(() => {}, 1000);');
+    const booted = join(harness!.dataDir, 'stall-startup.boot');
+    writeFileSync(stalled, `import { writeFileSync } from 'node:fs';
+writeFileSync(${JSON.stringify(booted)}, String(process.pid));
+setInterval(() => {}, 1000);`);
+    const launches: { pid: number | undefined; cmd: string; args: string[] }[] = [];
+    const launch = fixture.core.procs.spawnChild.bind(fixture.core.procs);
+    fixture.core.procs.spawnChild = (threadId, cmd, args, opts) => {
+      const child = launch(threadId, cmd, args, opts);
+      if (threadId === fixture.ctx.thread.id) launches.push({ pid: child.pid, cmd, args: [...args] });
+      return child;
+    };
     const spawnChild = fixture.ctx.spawnChild;
     fixture.ctx.spawnChild = (cmd, _args, opts) => spawnChild(cmd, [stalled], opts);
     const pending = driver!.prepare!(fixture.ctx).then(() => 'ready', () => 'closed');
+    // A registry start precedes execution of the script. Release a booted agent
+    // stalled in its protocol handshake, rather than racing Windows' native
+    // start events for a process killed before its fixture could run.
+    await waitFor(() => readScriptedLog(booted).length > 0);
+    expect(launches[0]?.pid).toBe(Number(readScriptedLog(booted)));
+    expect(launches).toHaveLength(1);
     await waitFor(() => fixture.processes.started.length === 1);
     driver!.releaseThread!(fixture.ctx.thread.id);
     expect(await pending).toBe('closed');
     await waitFor(() => fixture.core.procs.liveCount(fixture.ctx.thread.id) === 0);
     expect(fixture.core.journal.listTurns(fixture.ctx.thread.id)).toHaveLength(0);
     await fixture.run('recover');
+    if (launches.length !== 2 || fixture.processes.started.length !== 2) {
+      console.error('PREPARED_RELEASE_PROCESS_DIAGNOSTIC', JSON.stringify({
+        protocol: entry.protocol, launches, started: fixture.processes.started, exited: fixture.processes.exited,
+      }));
+    }
+    expect(launches).toHaveLength(2);
     expect(fixture.processes.started).toHaveLength(2);
   });
 
   test('a failed preparation closes its process and a later turn recovers', async () => {
     const fixture = await setup(entry);
+    const launches: { pid: number | undefined; cmd: string; args: string[] }[] = [];
+    const launch = fixture.core.procs.spawnChild.bind(fixture.core.procs);
+    fixture.core.procs.spawnChild = (threadId, cmd, args, opts) => {
+      const child = launch(threadId, cmd, args, opts);
+      if (threadId === fixture.ctx.thread.id) launches.push({ pid: child.pid, cmd, args: [...args] });
+      return child;
+    };
     const spawnChild = fixture.ctx.spawnChild;
     fixture.ctx.spawnChild = (cmd, _args, opts) => spawnChild(cmd, ['-e', 'process.exit(4)'], opts);
     await expect(driver!.prepare!(fixture.ctx)).rejects.toThrow();
     await waitFor(() => fixture.core.procs.liveCount(fixture.ctx.thread.id) === 0);
     expect(fixture.core.journal.listTurns(fixture.ctx.thread.id)).toHaveLength(0);
     await fixture.run('recover');
+    if (launches.length !== 2 || fixture.processes.started.length !== 2) {
+      console.error('PREPARED_FAILURE_PROCESS_DIAGNOSTIC', JSON.stringify({
+        protocol: entry.protocol, launches, started: fixture.processes.started, exited: fixture.processes.exited,
+      }));
+    }
+    expect(launches).toHaveLength(2);
     expect(fixture.processes.started).toHaveLength(2);
   });
 });
