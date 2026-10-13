@@ -179,6 +179,10 @@ android {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
     }
+    // AGP 9 turns resValue off by default; defaultConfig sets the TWA strings with it.
+    buildFeatures {
+        resValues true
+    }
     lint {
         checkReleaseBuilds false
     }
