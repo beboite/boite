@@ -120,9 +120,8 @@ test('phone dictation fits, cancels with Escape, and does not change the draft',
         return r.left >= chips.left && r.right <= chips.right && r.top >= chips.top && r.bottom <= chips.bottom;
       });
     })()`)).toBe(true);
-    // The menu stays in the window at every width.
-    await page.settleAnimations();
-    expect(await page.evaluate(`(() => { const r = document.querySelector('${id('dictation-panel')}').getBoundingClientRect(); return r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight; })()`)).toBe(true);
+    // The menu follows the window's resize event back inside it at every width.
+    await page.waitFor(`(() => { const r = document.querySelector('${id('dictation-panel')}').getBoundingClientRect(); return r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight; })()`);
     if (width === 320) await capture('speech-phone-narrow-recording.png');
   }
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });

@@ -274,12 +274,20 @@ test('the accent persists, the effort track glows brighter as it rises, and a sp
   await page.send('Input.dispatchMouseEvent', { type:'mouseMoved', ...speed });
   await page.waitFor(`getComputedStyle(document.querySelector('[data-testid=effort-speed] svg')).transform !== 'none'`);
   await capture('speed-hover.png');
-  // Switching the speed on sends streaks across the popover, then they clear.
+  // Switching the speed on sends streaks across the popover, then they clear. A runner's own reduced-motion setting must not decide it.
+  await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
   await page.click('[data-testid=effort-speed]');
   await page.waitFor(`document.querySelector('[data-testid=effort-streaks]')?.dataset.power === '1'`);
   expect(await page.evaluate(`document.querySelectorAll('[data-testid=effort-streaks] .streak').length`)).toBe(12);
   await page.waitFor(`!document.querySelector('[data-testid=effort-streaks]')`);
   await page.click('[data-testid=effort-speed]');
+  // Reduced motion switches the speed without them.
+  await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+  await page.click('[data-testid=effort-speed]');
+  await page.waitFor(`document.querySelector('[data-testid=effort-speed]').getAttribute('aria-pressed') === 'true'`);
+  expect(await page.evaluate(`!!document.querySelector('[data-testid=effort-streaks]')`)).toBe(false);
+  await page.click('[data-testid=effort-speed]');
+  await page.send('Emulation.setEmulatedMedia', { features: [] });
   await page.send('Emulation.setDeviceMetricsOverride', {width:390,height:844,deviceScaleFactor:1,mobile:true});
   await page.click('[data-testid=nav-settings]');
   await page.click('[data-testid=settings-tab-appearance]');
