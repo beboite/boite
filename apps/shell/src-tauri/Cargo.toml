@@ -59,7 +59,7 @@ windows = "0.62"
 # `implement`, for the environment wrapper that opens a named browser profile.
 # Matches the windows-core that `windows` and webview2-com depend on, so the
 # interfaces it implements are theirs; a newer windows-core alone would not be.
-windows-core = "0.62"
+windows-core = "0.100"
 # Screencast frames arrive as base64 JPEG; the recorder receives raw bytes.
 base64 = "0.23"
 # A toast when a thread finishes or asks something while the window is not the
