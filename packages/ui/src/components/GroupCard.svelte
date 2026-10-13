@@ -40,6 +40,12 @@
     });
   }
   let group = $derived(store.group);
+  /**
+   * A core from before "Add a device" (it says `deviceKeys` at hello since the
+   * same release) answers `unknown method`: the button says to update it
+   * instead of failing once pressed.
+   */
+  let older = $derived(store.core !== null && store.core.features?.deviceKeys !== true);
   /** The owner as the machine said at hello: before any answer, a page with no key is nobody's yet. */
   let owner = $derived(store.owner && store.principal !== null);
   let members = $derived.by(() => {
@@ -248,10 +254,11 @@
 <!-- The one way in: a device for this group, and for a machine alone, the link of another group to join. -->
 {#snippet ways()}
   <div class="buttons">
-    <button type="button" class="primary" data-testid="group-add-device" disabled={busy !== null} onclick={() => void add()}>
+    <button type="button" class="primary" data-testid="group-add-device" disabled={busy !== null || older} onclick={() => void add()}>
       <Plus size={14} />{busy === 'add' ? strings.group.adding : strings.group.addDevice}
     </button>
   </div>
+  {#if older}<p class="hint" data-testid="group-add-older">{fill(strings.group.addOlder, { machine: store.core?.hostname ?? strings.machines.local })}</p>{/if}
   <AddDevice {store} />
   {#if alone}
     <form class="join" onsubmit={(event) => { event.preventDefault(); void join(); }}>

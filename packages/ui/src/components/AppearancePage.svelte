@@ -413,7 +413,10 @@
     :global(.settings .page) .switch-row:has(.segmented) { flex-direction: column; align-items: stretch; }
     :global(.settings .page) .segmented { display: flex; }
     .faces { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .segmented button { flex: 1; min-width: 0; }
+    /* Each option grows from its own word: equal thirds cut "Soulignement"
+       and "Modifications" past their button's edge. */
+    .segmented button { flex: 1 1 auto; min-width: 0; padding: 0 6px; }
+    .segmented button .ui-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     /* A code face runs wide: each name takes the room it needs, a step smaller. */
     .monos button { flex: 1 1 auto; min-width: auto; padding: 0 6px; font-size: var(--text-xs); }
     .card-head .segmented { flex: 1 1 100%; }

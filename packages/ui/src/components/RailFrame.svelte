@@ -2,13 +2,14 @@
   import { untrack, type Snippet } from 'svelte';
   import { Settings } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
-  import { clampSidebar, SIDEBAR_DEFAULT } from '../lib/prefs';
+  import { clampSidebar, SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN } from '../lib/prefs';
   import { strings } from '../lib/strings';
   import { experimentOn } from '../lib/experiments.svelte';
   import { work } from '../lib/work-prefs.svelte';
   import { controlMenu } from '../lib/controls';
   import LimitsGlance from './LimitsGlance.svelte';
   import WhipButton from './WhipButton.svelte';
+  import ResizeHandle from './ResizeHandle.svelte';
 
   /**
    * The column on the left of the window, for the thread list and the Agents
@@ -85,24 +86,7 @@
   // change, a page change, must not ease.
   $effect(() => unmark);
 
-  function startResize(event: PointerEvent) {
-    if (event.button !== 0) return;
-    event.preventDefault();
-    const handle = event.currentTarget as HTMLElement;
-    const start = event.clientX,
-      width = store.sidebarWidth;
-    handle.setPointerCapture(event.pointerId);
-    const move = (e: PointerEvent) => (store.sidebarWidth = clampSidebar(width + e.clientX - start));
-    const end = () => {
-      handle.removeEventListener('pointermove', move);
-      handle.removeEventListener('pointerup', end);
-      handle.removeEventListener('pointercancel', end);
-      store.setSidebarWidth(store.sidebarWidth);
-    };
-    handle.addEventListener('pointermove', move);
-    handle.addEventListener('pointerup', end);
-    handle.addEventListener('pointercancel', end);
-  }
+  let resizeFrom = 0;
 </script>
 
 <aside
@@ -138,21 +122,22 @@
       onclick={() => store.showSettings()}><Settings size={16} /></button
     >
   </div>
-  <button
-    class="resize"
-    aria-label={strings.sidebar.resize}
-    title={strings.sidebar.resize}
-    data-testid={kind === 'sidebar' ? 'sidebar-resize' : 'agents-resize'}
-    onpointerdown={startResize}
-    ondblclick={() => store.setSidebarWidth(SIDEBAR_DEFAULT)}
-    onkeydown={(e) => {
-      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-        e.preventDefault();
-        store.setSidebarWidth(store.sidebarWidth + (e.key === 'ArrowLeft' ? -16 : 16));
-      }
-      if (e.key === 'Home') store.setSidebarWidth(SIDEBAR_DEFAULT);
-    }}
-  ></button>
+  <div class="resize">
+    <ResizeHandle
+      orientation="vertical"
+      edge="right"
+      label={strings.sidebar.resize}
+      testid={kind === 'sidebar' ? 'sidebar-resize' : 'agents-resize'}
+      value={store.sidebarWidth}
+      min={SIDEBAR_MIN}
+      max={SIDEBAR_MAX}
+      onstart={() => { resizeFrom = store.sidebarWidth; }}
+      onmove={(delta) => (store.sidebarWidth = clampSidebar(resizeFrom + delta))}
+      onend={() => store.setSidebarWidth(store.sidebarWidth)}
+      onstep={(delta) => store.setSidebarWidth(store.sidebarWidth + delta)}
+      onreset={() => store.setSidebarWidth(SIDEBAR_DEFAULT)}
+    />
+  </div>
 </aside>
 
 <style>
@@ -177,10 +162,13 @@
        mask, not a scroll-driven animation, because tests and closing elements
        wait on every running animation and that one would never end. */
     --fade: 10px;
-    padding: var(--fade) 6px;
+    /* Shorter on top: the head's tools sit right above, and a deeper fade
+       there opened a wider gap under them than between them and the switch. */
+    --fade-top: 6px;
+    padding: var(--fade-top) 6px var(--fade);
     display: flex;
     flex-direction: column;
-    mask-image: linear-gradient(to bottom, transparent, black var(--fade), black calc(100% - var(--fade)), transparent);
+    mask-image: linear-gradient(to bottom, transparent, black var(--fade-top), black calc(100% - var(--fade)), transparent);
   }
   .scroll > :global(*) { flex-shrink: 0; }
   .foot {
@@ -211,25 +199,8 @@
   .foot :global(.machines:not(:has(.trigger))) { display: none; }
   .foot :global(button.icon.active) { background: var(--color-active); color: var(--color-foreground); }
 
-  /* Centred in the frame's gap between the list and the card beside it. */
-  .resize {
-    position: absolute;
-    top: 0;
-    right: calc(var(--frame-gap) / -2 - 3px);
-    bottom: 0;
-    width: 6px;
-    height: auto;
-    padding: 0;
-    border: none;
-    border-radius: 0;
-    background: transparent;
-    cursor: col-resize;
-    z-index: 5;
-  }
-  .resize:hover,
-  .resize:focus-visible {
-    background: var(--color-edge);
-  }
+  /* The edge that drags the width, centred in the frame gap (ResizeHandle). */
+  .resize { display: contents; }
   @media (min-width: 721px) {
     /* Folding slides it out past the window's left edge and the chat card
        widens with it: a margin as wide as the list and its gap gives that room
