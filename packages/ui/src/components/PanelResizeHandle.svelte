@@ -1,7 +1,9 @@
 <script lang="ts">
-  import { PANEL_DEFAULT, clampPanel, rightPanel } from '../lib/right-panel.svelte';
+  import { innerWidth } from 'svelte/reactivity/window';
+  import { PANEL_DEFAULT, PANEL_MIN, clampPanel, rightPanel } from '../lib/right-panel.svelte';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
+  import ResizeHandle from './ResizeHandle.svelte';
 
   /**
    * The right panel's left edge: a drag, the arrow keys or a double click set
@@ -9,105 +11,54 @@
    */
   let { store, dragging = $bindable(false) }: { store: Store; dragging?: boolean } = $props();
 
+  let from = 0;
+  let viewport = $derived(innerWidth.current ?? window.innerWidth);
+
   function sibling(): number {
     if (window.innerWidth <= 720 || store.sidebarCollapsed) return 0;
     return store.sidebarWidth;
   }
 
-  function onHandleDown(event: PointerEvent): void {
-    event.preventDefault();
-    dragging = true;
-    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+  function clamp(width: number): number {
+    return clampPanel(width, window.innerWidth, sibling());
   }
 
-  function onHandleMove(event: PointerEvent): void {
-    if (!dragging) return;
-    rightPanel.width = clampPanel(window.innerWidth - event.clientX, window.innerWidth, sibling());
-  }
-
-  function onHandleUp(event: PointerEvent): void {
-    if (!dragging) return;
-    dragging = false;
-    (event.currentTarget as HTMLElement).releasePointerCapture(event.pointerId);
-    // The width reaches localStorage once, on the drag's end.
-    rightPanel.saveWidth();
-  }
-
-  function onHandleKey(event: KeyboardEvent): void {
-    const step = event.key === 'ArrowLeft' ? 16 : event.key === 'ArrowRight' ? -16 : 0;
-    if (step === 0) return;
-    event.preventDefault();
-    rightPanel.width = clampPanel(rightPanel.width + step, window.innerWidth, sibling());
+  function step(delta: number): void {
+    // The handle is on the panel's left: moving it right narrows the panel.
+    rightPanel.width = clamp(rightPanel.width - delta);
     rightPanel.saveWidth();
   }
 
   function reset(): void {
-    rightPanel.width = clampPanel(PANEL_DEFAULT, window.innerWidth, sibling());
+    rightPanel.width = clamp(PANEL_DEFAULT);
     rightPanel.saveWidth();
   }
 </script>
 
-<button
-  type="button"
-  class="handle"
-  aria-label={strings.rightPanel.resize}
-  title={strings.rightPanel.resize}
-  data-testid="panel-resize"
-  onpointerdown={onHandleDown}
-  onpointermove={onHandleMove}
-  onpointerup={onHandleUp}
-  onpointercancel={onHandleUp}
-  ondblclick={reset}
-  onkeydown={onHandleKey}
-></button>
+<div class="edge">
+  <ResizeHandle
+    orientation="vertical"
+    edge="left"
+    label={strings.rightPanel.resize}
+    testid="panel-resize"
+    value={rightPanel.width}
+    min={PANEL_MIN}
+    max={clampPanel(Number.MAX_SAFE_INTEGER, viewport, store.sidebarCollapsed || viewport <= 720 ? 0 : store.sidebarWidth)}
+    bind:dragging
+    onstart={() => { from = rightPanel.width; }}
+    onmove={(delta) => (rightPanel.width = clamp(from - delta))}
+    onend={() => rightPanel.saveWidth()}
+    onstep={step}
+    onreset={reset}
+  />
+</div>
 
 <style>
-  .handle {
-    position: absolute;
-    padding: 0;
-    border: none;
-    border-radius: 0;
-    background: transparent;
-    /* Centred in the frame's gap, outside the card's 1 px edge. */
-    left: calc(var(--frame-gap) / -2 - 5px);
-    top: 0;
-    bottom: 0;
-    width: 8px;
-    z-index: 10;
-    cursor: col-resize;
-    touch-action: none;
-  }
-
-  .handle::after {
-    content: '';
-    position: absolute;
-    left: 3px;
-    top: 0;
-    bottom: 0;
-    width: 1px;
-    background: transparent;
-    transition: background var(--dur-2) var(--ease-out-quint);
-  }
-
-  .handle:hover:not(:disabled),
-  .handle:active:not(:disabled) {
-    background: transparent;
-    transform: none;
-  }
-
-  .handle:hover::after,
-  .handle:focus-visible::after {
-    background: var(--color-border);
-  }
-
-  :global(.panel.dragging) .handle::after {
-    background: color-mix(in srgb, var(--color-foreground) 60%, transparent);
-  }
+  /* The panel's 1 px frame edge moves the handle's origin in. */
+  .edge { display: contents; --resize-inset: 1px; }
 
   /* Under 981 px the panel lies over the chat and keeps the width it has. */
   @media (max-width: 980px) {
-    .handle {
-      display: none;
-    }
+    .edge { display: none; }
   }
 </style>

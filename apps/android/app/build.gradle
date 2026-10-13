@@ -65,12 +65,12 @@ def twaManifest = [
 ]
 
 android {
-    compileSdkVersion 36
+    compileSdk 36
     namespace "com.boite.two"
     defaultConfig {
         applicationId twaManifest.applicationId
-        minSdkVersion 23
-        targetSdkVersion 35
+        minSdk 24
+        targetSdk 35
         versionCode appVersionCode
         versionName appVersionName
 
@@ -179,6 +179,10 @@ android {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
     }
+    // AGP 9 turns resValue off by default; defaultConfig sets the TWA strings with it.
+    buildFeatures {
+        resValues true
+    }
     lint {
         checkReleaseBuilds false
     }
@@ -228,6 +232,6 @@ repositories {
 dependencies {
     implementation fileTree(include: ['*.jar'], dir: 'libs')
     
-        implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.6.2'
+        implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.7.4'
     
 }

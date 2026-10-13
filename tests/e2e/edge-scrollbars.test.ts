@@ -140,6 +140,34 @@ test('edge scrollbars take no room, fade in near the edge, drag, and turn off cl
   const moved = await thumb();
   expect(moved!.y).toBeLessThan(edge!.y - 60);
 
+  // A menu over the timeline's edge covers the timeline's thumb, as it covers
+  // the timeline; a list inside that menu still gets its own thumb on top.
+  await page.evaluate(`(() => {
+    const menu = document.createElement('div');
+    menu.id = 'edge-test-menu';
+    menu.setAttribute('popover', 'manual');
+    Object.assign(menu.style, { position: 'fixed', margin: '0', inset: 'auto', overflow: 'auto', padding: '0',
+      left: '${on.right - 100}px', top: '${on.top + 40}px', width: '100px', height: '${on.bottom - on.top - 40}px' });
+    const list = document.createElement('div');
+    list.style.height = '4000px';
+    menu.append(list);
+    document.body.append(menu);
+    menu.showPopover();
+  })()`);
+  await move(Math.round(on.right - 6), Math.round(on.top + 20));
+  const covered = await thumb();
+  expect(covered?.opacity).toBe(1);
+  expect(await page.evaluate<string | null>(`document.elementFromPoint(${covered!.x}, ${Math.max(on.top + 60, covered!.y)})?.closest('#edge-test-menu')?.id ?? null`)).toBe('edge-test-menu');
+  await page.screenshot(join(artifacts, 'edge-scrollbars-menu.png'));
+  await move(Math.round(on.right - 4), Math.round(on.top + 200));
+  const inMenu = await page.evaluate<string | null>(`(() => {
+    const hit = document.elementFromPoint(${Math.round(on.right - 5)}, ${Math.round(on.top + 50)});
+    return hit?.className ?? null;
+  })()`);
+  expect(inMenu).toBe('edge-scrollbar-thumb');
+  await move(Math.round(on.right - 6), Math.round(on.top + 20));
+  await page.evaluate(`document.getElementById('edge-test-menu').remove()`);
+
   // Leaving the window hides every thumb.
   await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: -10, y: -10 });
   await frames();

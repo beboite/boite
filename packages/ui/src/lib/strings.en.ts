@@ -558,6 +558,7 @@ export const strings = {
     loopback: 'This machine listens only on itself, so the others cannot reach it. Connect it to Tailscale, or turn on listening on the network.',
     copied: 'Copied',
     addDevice: 'Add a device', adding: 'Preparing',
+    addOlder: 'Boite on {machine} is too old to add a device. Update it under Updates on this page, then come back.',
     addHint: 'Scan the code with a phone, or type the code in its Boite app. On a computer, copy the link and paste it under Join. Works once.',
     qr: 'The link that adds a device, as a QR code',
     copyLink: 'Copy link', code: 'Code', link: 'Link for a computer',
@@ -1964,6 +1965,7 @@ export const strings = {
     rates: 'Public API rates of {model}, per million tokens: input {input}, output {output}, cache read {cacheRead}, cache write {cacheWrite}.',
     reportedCost: 'No public rate matches this model, so the cost is the one its agent reported.',
     noRates: 'No public rate matches this model and its agent reported no cost.',
+    olderCore: 'The machine that ran these turns has a Boite older than public API rates, so only a cost its agent reported shows here. Update it in Settings, Machines and updates to price them.',
     noTokens: 'The agent reported no tokens for these turns, so they have no cost.',
     priceOf: 'the price of {model}',
     metrics: { tokens: 'Tokens', cost: 'API estimate', turns: 'Turns' },
@@ -2573,6 +2575,8 @@ export const strings = {
     clipboard: 'The clipboard refused the text.',
     revoked: 'This device was removed from the group. Add it again with a new code from one of your machines.',
     unpaired: 'This device is not in this machine\'s group yet. Add it with the code from Add a device.',
+    olderCore: 'Boite on {machine} is too old for this. Update it in Settings, Machines and updates, then try again.',
+    olderCoreHere: 'This machine runs a Boite too old for this. Update it in Settings, Machines and updates, then try again.',
     pairingLink: 'That is not a link to add a device. Copy the link shown by Add a device on the other machine; it starts with http and contains ?grant=.'
   },
 

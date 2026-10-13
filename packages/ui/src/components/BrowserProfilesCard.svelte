@@ -177,6 +177,11 @@
   .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-sm); }
   .flag { font-size: var(--text-xs); color: var(--color-subtle); }
   li button { flex: none; }
+  /* The copy menu's ghost trigger is a square icon button by default; this one
+     carries words, so it sizes like the row's other small ghost buttons. */
+  li :global(.menu) { flex: none; max-width: 100%; }
+  li :global(.menu .trigger.ghost) { width: auto; max-width: 100%; padding: 0 8px; font-size: var(--text-sm); }
+  li :global(.menu .trigger .ui-label) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .danger { color: var(--color-danger); }
   form { display: flex; gap: 8px; align-items: center; margin: 0; }
   .rename { flex: 1; min-width: 0; }
