@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { ArrowDownLeft, ArrowUpRight, BellRing, ChevronRight } from '@lucide/svelte';
+  import { ArrowDownLeft, ArrowUpRight, ChevronRight } from '@lucide/svelte';
   import { discussionsOf, hierarchyOf, whereOf, type AgentMailGroup } from '../lib/agent-mail';
+  import { agentDirectory } from '../lib/agent-directory.svelte';
   import { count } from '../lib/format';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
@@ -14,8 +15,7 @@
   let { store, group }: { store: Store; group: AgentMailGroup } = $props();
   /** Past this many conversations, the rest is one line that opens the list. */
   const SHOWN = 4;
-  let notices = $derived(group.entries.filter(entry => entry.letter.origin === 'notice'));
-  let discussions = $derived(discussionsOf(group.entries.filter(entry => entry.letter.origin !== 'notice'), store)
+  let discussions = $derived(discussionsOf(group.entries, store, agentDirectory(store))
     .sort((a, b) => a.entries[0]!.letter.createdAt - b.entries[0]!.letter.createdAt || a.key.localeCompare(b.key)));
 </script>
 
@@ -24,11 +24,11 @@
     {@const tag = hierarchyOf(discussion)}
     {@const where = whereOf(discussion)}
     {@const last = discussion.last}
-    <button type="button" class="discussion" class:steward={discussion.steward}
+    <button type="button" class="discussion" class:resident={discussion.resident}
       data-testid="agent-discussion-row" data-peer={discussion.key} data-count={discussion.entries.length}
       title={strings.agentMessages.open}
       onclick={() => store.panel.openMessages(discussion.key, discussion.entries[0]!.letter.id)}>
-      <AgentAvatar title={discussion.title} providerId={discussion.providerId} status={discussion.status} steward={discussion.steward} size={28} />
+      <AgentAvatar title={discussion.title} providerId={discussion.providerId} status={discussion.status} resident={discussion.resident} agent={discussion.agent} size={28} />
       <span class="body">
         <span class="top">
           <strong class="title" data-testid="agent-discussion-title">{discussion.title}</strong>
@@ -52,13 +52,6 @@
       {fill(strings.agentMessages.more, { count: count(discussions.length - SHOWN) })}
     </button>
   {/if}
-  {#if notices.length}
-    <button type="button" class="line notice" data-testid="agent-message-summary" data-kind="notice" data-count={notices.length}
-      onclick={() => new Set(notices.map(entry => entry.peer)).size === 1 ? store.panel.openMessages(notices[0]!.peer, notices[0]!.letter.id) : store.panel.openMessages()}>
-      <BellRing size={14} strokeWidth={1.75} aria-hidden="true" />
-      {fill(notices.length === 1 ? strings.agentMessages.noticeOne : strings.agentMessages.noticeMany, { count: count(notices.length) })}
-    </button>
-  {/if}
 </div>
 
 <style>
@@ -72,13 +65,13 @@
   }
   .discussion:hover { background: var(--color-surface-3); border-color: var(--color-edge); color: var(--color-foreground); }
   .discussion:active { transform: scale(0.99); }
-  .discussion.steward { border-left: 2px solid var(--color-steward); }
+  .discussion.resident { border-left: 2px solid var(--color-resident); }
   .body { min-width: 0; display: grid; gap: 2px; }
   /* The title keeps its line; the tag and the place wrap under it when the row is narrow. */
   .top { min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; }
   .title { flex: 0 1 auto; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-foreground); font-weight: 600; }
   .tag { flex: none; padding: 1px 6px; border-radius: var(--radius-full); background: var(--color-accent-soft); color: var(--color-accent); font-size: var(--text-xs); font-weight: 500; }
-  .steward .tag { background: var(--color-steward-soft); color: var(--color-steward); }
+  .resident .tag { background: var(--color-resident-soft); color: var(--color-resident); }
   .where { flex: 1 1 0; min-width: 6ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-xs); }
   .preview { min-width: 0; display: flex; align-items: center; gap: 4px; font-size: var(--text-xs); }
   .preview :global(svg) { flex: none; }

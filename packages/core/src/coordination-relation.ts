@@ -1,14 +1,14 @@
 /**
  * How two threads relate, and what a recipient reads about a letter's sender
  * beside the letter: that relation, the sender's task and the recipient's own
- * message it answers. Read from the journal each time: a delegation or a
- * steward grant can begin after a letter was written.
+ * message it answers. Read from the journal each time: a delegation or an
+ * entrusted project can begin after a letter was written.
  */
 import type { AgentAddress, AgentLetter, AgentRelation } from '@boite/contracts';
 import { excerpt, type LetterContext } from './coordination-letter.ts';
 import type { Core } from './core.ts';
 
-/** How `other` relates to `threadId`: who started whom, delegation, the steward, else where it is. */
+/** How `other` relates to `threadId`: who started whom, delegation, the agent the project is entrusted to, else where it is. */
 export function relationOf(core: Core, localCore: string, threadId: string, other: AgentAddress): AgentRelation {
   if (other.coreId !== 'local' && other.coreId !== localCore) return 'machine';
   const self = core.journal.getThread(threadId);
@@ -18,8 +18,7 @@ export function relationOf(core: Core, localCore: string, threadId: string, othe
   if (core.threads.spawns.originOf(peer.id)?.threadId === self.id) return 'started';
   if (self.parentThreadId === peer.id) return 'parent';
   if (peer.parentThreadId === self.id) return 'child';
-  if (core.stewards.over(peer.id, self.id) !== null) return 'steward';
-  if (core.stewards.over(self.id, peer.id) !== null) return 'stewarded';
+  if (core.workforce.projects.over(peer.id, self.id) !== null) return 'resident';
   return self.projectId === peer.projectId ? 'project' : 'other-project';
 }
 

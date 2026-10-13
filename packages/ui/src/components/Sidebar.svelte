@@ -27,7 +27,7 @@
   import MachineStatus from './MachineStatus.svelte';
   import ThreadCard from './ThreadCard.svelte';
   import AgentAvatar from './agents/AgentAvatar.svelte';
-  import { stewardsOf } from '../lib/steward-view';
+  import { openResident, residentsOf } from '../lib/resident';
   import DraftRow from './DraftRow.svelte';
   import GroupLabel from './GroupLabel.svelte';
   import MachineIcon from './MachineIcon.svelte';
@@ -116,10 +116,6 @@
             .concat(...(['done', 'archived'] as const).map(kind => projectThreadView.isOpen(entry, kind) ? projectDoneRows[JSON.stringify([kind, projectKey(entry)])] ?? [] : []));
         }).concat(idleRows)
     ).slice(0, 9);
-  });
-  // The grants load once per connection, for the robots on the projects a steward covers; `stewards.changed` keeps them current.
-  $effect(() => {
-    for (const { store: owner } of visible) if (owner.connection === 'ready' && owner.stewards === null) untrack(() => void owner.loadStewards());
   });
   function addProject() {
     store.projectPickerOpen = true;
@@ -228,11 +224,11 @@
                 >{/if}{#if multi}<span class="host" data-testid="project-host" class:offline={owner.connection !== 'ready'}
                   title={`${machine.label} · ${strings.connection[owner.connection]}`} aria-label={machine.label}><MachineIcon icon={machine.icon} os={owner.core?.os} /></span>{/if}
             </button>
-            {#each stewardsOf(owner, project.id).slice(0, 2) as steward (steward.thread.id)}
-              <!-- The steward that looks after this project: its picture, and the way to its thread. -->
-              <button type="button" class="ghost icon small steward-mark" title={fill(strings.steward.lookedAfterBy, { name: steward.thread.title })} aria-label={fill(strings.steward.lookedAfterBy, { name: steward.thread.title })}
-                onclick={() => void workspace.select(owner, steward.thread.id)} data-testid="project-steward" data-thread-id={steward.thread.id}>
-                <AgentAvatar kind="profile" id={steward.thread.id} name={steward.thread.title} status={steward.thread.status === 'running' ? 'running' : 'idle'} size={18} />
+            {#each residentsOf(owner, project.id).slice(0, 2) as resident (resident.id)}
+              <!-- An agent the owner entrusted this project to: its robot, and the way to its conversation. -->
+              <button type="button" class="ghost icon small resident-mark" title={fill(strings.resident.lookedAfterBy, { name: resident.name })} aria-label={fill(strings.resident.lookedAfterBy, { name: resident.name })}
+                onclick={() => openResident(owner, resident.id)} data-testid="project-resident" data-agent-id={resident.id}>
+                <AgentAvatar kind="profile" id={resident.id} name={resident.name} avatar={resident.avatar} size={18} />
               </button>
             {/each}
             <ProjectThreadCounters {entry} working={lists.working.length} {controls} {collapsed} />
@@ -413,7 +409,7 @@
   .host.offline {
     color: var(--color-danger);
   }
-  .steward-mark { flex: none; width: var(--control-sm); height: var(--control-sm); padding: 0; }
+  .resident-mark { flex: none; width: var(--control-sm); height: var(--control-sm); padding: 0; }
   .project-actions {
     opacity: 0;
   }

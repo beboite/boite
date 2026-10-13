@@ -1488,6 +1488,8 @@ export type MessagePart =
       async?: boolean;
       /** A settings card: see `QuestionRequest.setting`. */
       setting?: SettingAsk;
+      /** An agent setting card: see `QuestionRequest.agentSetting`. */
+      agentSetting?: AgentSettingAsk;
     }
   /**
    * The agent compacted its context mid-turn: what it held before, what is
@@ -1781,6 +1783,12 @@ export interface QuestionRequest {
    * points at a page. `text` is its reason. Always asynchronous.
    */
   setting?: SettingAsk;
+  /**
+   * An agent setting card (`agents.settings.request`): a thread, or a
+   * persistent agent about itself, proposes a change to an agent's settings.
+   * `text` is its reason. Always asynchronous.
+   */
+  agentSetting?: AgentSettingAsk;
   createdAt: Timestamp;
 }
 
@@ -2812,12 +2820,11 @@ export interface AgentTranscript {
 export interface AgentLetter {
   /**
    * Who the core says wrote it. Missing on older coordination mail: another
-   * agent. `user` and `result` are delegation mail. `steward` comes from the
-   * steward the owner assigned to the recipient's project, `notice` is the core
-   * telling a steward what happened in a thread it looks after. None of them is
-   * a message the user typed.
+   * agent. `user` and `result` are delegation mail. `resident` comes from the
+   * persistent agent the owner entrusted the recipient's project to. None of
+   * them is a message the user typed.
    */
-  origin?: 'user' | 'agent' | 'result' | 'steward' | 'notice';
+  origin?: 'user' | 'agent' | 'result' | 'resident';
   id: string;
   from: AgentContact;
   to: AgentAddress;
@@ -2841,59 +2848,15 @@ export interface AgentLetter {
  * The other end of a letter, from one thread's side. `starter` started this
  * thread with `boite thread new` and `started` is a thread this one started;
  * `parent` delegated this thread and `child` is one of its subagents;
- * `steward` looks after this thread's project and `stewarded` is a thread this
- * steward looks after. The rest say only where it is.
+ * `resident` is the persistent agent the owner entrusted this thread's
+ * project to. The rest say only where it is.
  */
-export type AgentRelation = 'starter' | 'started' | 'parent' | 'child' | 'steward' | 'stewarded' | 'project' | 'other-project' | 'machine';
+export type AgentRelation = 'starter' | 'started' | 'parent' | 'child' | 'resident' | 'project' | 'other-project' | 'machine';
 /**
- * What a steward may do to the threads of the projects it looks after.
- * Reading them, their state and their requests comes with any grant.
+ * One thread of a project, as the persistent agent the owner entrusted that
+ * project to reads it, and as the owner's `boite threads` prints it.
  */
-export type StewardCapability =
-  /** Messages that reach the thread as the steward's, even when its coordination is off. */
-  | 'message'
-  /** Start threads in its projects, without the communication-settings gates. */
-  | 'spawn'
-  /** Archive and unarchive. */
-  | 'archive'
-  /** Move threads between its projects, and register a new project folder. */
-  | 'move'
-  /** Stop a running turn and rename a thread. */
-  | 'stop'
-  /** Answer and skip the questions agents ask the user. */
-  | 'answer'
-  /** Allow or deny tool permission requests. Never granted by default. */
-  | 'permissions'
-  /** Delete threads. Never granted by default; a deleted thread stays restorable for a while. */
-  | 'remove';
-export const STEWARD_CAPABILITIES: readonly StewardCapability[] = ['message', 'spawn', 'archive', 'move', 'stop', 'answer', 'permissions', 'remove'];
-/** What a new grant carries until the owner picks otherwise: everything but permissions and deletion. */
-export const STEWARD_DEFAULT_CAPABILITIES: readonly StewardCapability[] = ['message', 'spawn', 'archive', 'move', 'stop', 'answer'];
-/**
- * The owner assigns the agent of one thread to look after projects while they
- * are away: it reads every thread there, steers them, answers what they ask
- * and tidies them up, within `capabilities`. One grant per steward thread.
- */
-export interface StewardGrant {
-  /** The steward's own conversation. */
-  threadId: ThreadId;
-  /** The projects it looks after. Empty with `allProjects`. */
-  projectIds: ProjectId[];
-  /** Every project, those added later included. */
-  allProjects: boolean;
-  capabilities: StewardCapability[];
-  /**
-   * The core sends the steward a notice when a thread it looks after finishes
-   * a turn, fails, asks a question or waits on a permission; an idle steward
-   * wakes to read it.
-   */
-  notify: boolean;
-  grantedAt: Timestamp;
-  updatedAt: Timestamp;
-}
-export type StewardGrantInput = Pick<StewardGrant, 'threadId' | 'projectIds' | 'allProjects' | 'capabilities' | 'notify'>;
-/** One thread as a steward sees it in the projects it looks after. */
-export interface StewardThread {
+export interface ProjectThreadRow {
   id: ThreadId;
   title: string;
   projectId: ProjectId | null;
@@ -2901,8 +2864,6 @@ export interface StewardThread {
   status: ThreadStatus;
   archived: boolean;
   branch: string | null;
-  /** The steward's own conversation. */
-  self: boolean;
   /** Unanswered questions and permission requests. */
   questions: number;
   permissions: number;
@@ -2910,17 +2871,22 @@ export interface StewardThread {
   updatedAt: Timestamp;
   lastCompletedAt: Timestamp | null;
 }
-export interface StewardThreadDetail {
-  thread: StewardThread;
+export interface ProjectThreadDetail {
+  thread: ProjectThreadRow;
   questions: QuestionRequest[];
   permissions: PermissionRequest[];
   /** The last assistant text, cut at 4,000 characters. */
   lastAnswer: string | null;
 }
-export type StewardAction = 'archive' | 'unarchive' | 'remove' | 'stop' | 'rename' | 'move';
-/** What the steward reads about itself. Null grant: this thread is no steward. */
-export interface StewardView {
-  grant: StewardGrant | null;
+/**
+ * What a persistent agent does to a thread of a project entrusted to it.
+ * Deleting threads and deciding tool permissions stay the owner's.
+ */
+export type ResidentThreadAction = 'archive' | 'unarchive' | 'stop' | 'rename' | 'move';
+/** The calling agent and the projects the owner entrusted to it. Empty when this thread is not such an agent's. */
+export interface ResidentView {
+  agentId: string | null;
+  name: string | null;
   projects: { id: ProjectId; name: string; path: string }[];
 }
 /** Public contact card. No owner token or private signing key crosses a core. */
@@ -3483,34 +3449,24 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * and hands them over as delivered: they are not injected into the turn a second time.
    */
   'collaboration.wait': { params: { threadId: ThreadId; from?: AgentAddress; timeoutMs: number }; result: { letters: AgentLetter[] } };
-  /** Every steward grant on this core. */
-  'stewards.list': { params: Record<string, never>; result: StewardGrant[] };
   /**
-   * Make the agent of `threadId` the steward of projects, or replace its grant.
-   * Refused for a delegated child, a persistent agent session, an archived
-   * thread, an unknown project or capability, and an empty project list
-   * without `allProjects`.
+   * The calling persistent agent and the projects entrusted to it. The
+   * `resident.*` methods name the agent's own direct conversation as
+   * `threadId`; the core holds them to the projects of its profile.
    */
-  'stewards.set': { params: { grant: StewardGrantInput }; result: StewardGrant };
-  /** Remove a thread's steward grant. Its letters already delivered stay in the timelines. */
-  'stewards.revoke': { params: { threadId: ThreadId }; result: { ok: true } };
-  /** The calling thread's own grant and the projects it covers. */
-  'steward.get': { params: { threadId: ThreadId }; result: StewardView };
-  /** The threads of the projects it looks after, the most recently active first. `project` narrows to one (id, name or folder). */
-  'steward.threads': { params: { threadId: ThreadId; project?: string; archived?: boolean }; result: StewardThread[] };
-  /** One thread it looks after, with its pending questions, permissions and last answer. */
-  'steward.thread': { params: { threadId: ThreadId; target: ThreadId }; result: StewardThreadDetail };
+  'resident.view': { params: { threadId: ThreadId }; result: ResidentView };
+  /** The threads of its projects, the most recently active first. `project` narrows to one (id, name or folder). */
+  'resident.threads': { params: { threadId: ThreadId; project?: string; archived?: boolean }; result: ProjectThreadRow[] };
+  /** One thread of its projects, with its pending questions, permissions and last answer. */
+  'resident.thread': { params: { threadId: ThreadId; target: ThreadId }; result: ProjectThreadDetail };
   /**
-   * Act on a thread it looks after, within its capabilities: `rename` takes
-   * `title`, `move` takes `project` (a project it also looks after). Every
-   * action leaves a system line in the target's timeline naming the steward.
-   * The steward's own thread is refused.
+   * Act on a thread of its projects: `rename` takes `title`, `move` takes
+   * `project` (another project entrusted to it). Every action leaves a system
+   * line in the target's timeline naming the agent.
    */
-  'steward.act': { params: { threadId: ThreadId; target: ThreadId; action: StewardAction; title?: string; project?: string }; result: { thread: StewardThread | null } };
-  /** Answer a pending question of a thread it looks after, as the owner would from the card. */
-  'steward.answer': { params: { threadId: ThreadId; target: ThreadId; questionId: RequestId; optionIds: string[]; text?: string; skip?: boolean }; result: { ok: true } };
-  /** Allow or deny a pending permission request of a thread it looks after. Needs the `permissions` capability. */
-  'steward.permission': { params: { threadId: ThreadId; target: ThreadId; requestId: RequestId; decision: 'allow' | 'deny' }; result: { ok: true } };
+  'resident.act': { params: { threadId: ThreadId; target: ThreadId; action: ResidentThreadAction; title?: string; project?: string }; result: { thread: ProjectThreadRow } };
+  /** Answer or skip a pending question of a thread of its projects, marked as the agent's in that timeline. */
+  'resident.answer': { params: { threadId: ThreadId; target: ThreadId; questionId: RequestId; optionIds: string[]; text?: string; skip?: boolean }; result: { ok: true } };
   'collaboration.identity': { params: Record<string, never>; result: CoordinationPeer };
   'collaboration.peers': { params: Record<string, never>; result: CoordinationPeer[] };
   'collaboration.check': { params: { coreId: string }; result: { ok: true } };
@@ -4383,8 +4339,6 @@ export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents, BrowserR
   'thread.memory': MemoryEvent & { threadId: string };
   'delegation.changed': { threadId: ThreadId };
   'collaboration.changed': { threadId: ThreadId };
-  /** A steward grant was set or revoked; `stewards.list` reads the rest. */
-  'stewards.changed': { threadId: ThreadId };
   /** Sent directly to the owner connection registered for the target core. */
   'collaboration.bridge.request': { requestId: string; fromCoreId: string; toCoreId: string; body: string; signature: string };
   'thread.activity': { threadId: ThreadId; activity: ThreadActivity };
@@ -4657,6 +4611,13 @@ export {
   type SettingRequestParams, type SettingsPage,
 } from './setting-requests.ts';
 import type { SettingAsk, SettingReading, SettingRequestParams } from './setting-requests.ts';
+export {
+  AGENT_PROJECTS_MAX, AGENT_RUN_MINUTES, AGENT_SETTING_KEYS, agentSettingAnswerText, agentSettingValue, checkAgentSettingRequest, isAgentSettingKey,
+  normalizeAgentSetting, settledAgentSetting,
+  type AgentSettingApplyParams, type AgentSettingAsk, type AgentSettingChoice, type AgentSettingContext, type AgentSettingKey, type AgentSettingReading,
+  type AgentSettingRequestCheck, type AgentSettingRequestParams, type AgentSettingsReading, type AgentSettingsReadParams,
+} from './agent-setting-requests.ts';
+import type { AgentSettingAsk } from './agent-setting-requests.ts';
 export { SPEECH_CATALOGUE, SPEECH_CUSTOM_ID, SPEECH_DEFAULT_MODEL, isSpeechModelId, speechUrlProblem, type SpeechCatalogueModel, type SpeechModelTier, type SpeechBackend } from './speech-models.ts';
 import type { SpeechModelTier, SpeechBackend } from './speech-models.ts';
 
