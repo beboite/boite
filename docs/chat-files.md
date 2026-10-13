@@ -134,8 +134,12 @@ an `.html` file inside the thread's working directory, and then:
    loads it once in a headless browser of this machine
    ([the agent's browser](browser.md), in a process of its own that no
    conversation lists). An uncaught error, a `console.error` or a request the
-   policy refused fails the publish. The page's height is measured at 816 px
-   and at 330 px, the answer column on a desktop and on a phone.
+   policy refused fails the publish. The page's height is measured with its
+   content 816 px and 330 px wide, the answer column on a desktop and on a
+   phone. A page wider than its frame at either width also fails, naming the
+   outermost element that sticks out and its container: the frame hides its
+   scrollbars, so the reader would see it cut with no way to scroll to the
+   rest. What a scrolling or clipping box of the page holds does not count.
 
 A refusal is the command's error, with each problem and its line, and nothing
 is stored or shown: the agent fixes the file and runs the command again. A
@@ -159,6 +163,13 @@ views after everything else the turn wrote (`placeViews` in
 running: the answer being written stays the last thing in the thread, and the
 page arrives with the finished answer. Publishing does not cut the running
 answer in two, as a published file does.
+
+The frame reaches 4 px (`VIEW_BLEED`) past the answer column on each side,
+into the conversation's margin, and the kit pads the page's root by as much,
+so the content keeps the column's width. A border, a card's shadow or a focus
+ring on the page's edge is drawn in that room instead of being cut by the
+frame, whatever a fractional display scale (125 % with the app zoomed, for
+instance) rounds the frame's edge to.
 
 `InlineView.svelte` frames the page at the measured height for its width, so
 nothing below it moves when it loads, then at the height the page reports.

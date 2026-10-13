@@ -139,8 +139,11 @@ that edge and fades in along a smoothstep to full opacity at 20 px. A thumb
 is 32 px long at least, follows wheel, keyboard and scripted scrolling while
 shown, and drags like a native one. Leaving the window hides every thumb.
 
-The overlay is a manual popover in the top layer, shown again above each menu
-that opens, so lists inside menus get a thumb too. A press on a thumb is
+Thumbs live in two overlays. A container outside the top layer draws in a
+fixed layer under it, so an open menu covers that container's thumb as it
+covers the container. A list inside a menu or dialog draws in a manual popover,
+shown again above each menu that opens, and skips a thumb that a menu opened
+after its own would cover. A press on a thumb is
 replayed on its scroll container, the target a native scrollbar press has: a
 menu stays open while its own list is dragged and closes on a press on the
 chat's thumb, as before. Only a thumb at 5% opacity or more takes the pointer;
@@ -217,7 +220,8 @@ It requires `BOITE_E2E_CODEX=1` and uses the default Codex login.
 `edge-scrollbars.test.ts` (end to end, desktop 1280x900) checks that the
 timeline takes its gutters' width back with its column still under the
 composer's centre, no thumb mid-chat, rising opacity toward the edge, a mouse drag that
-scrolls, every thumb gone on leaving the window, and the native bar back when
+scrolls, a menu over the edge that covers the timeline's thumb while its own
+list gets one on top, every thumb gone on leaving the window, and the native bar back when
 the switch goes off; headless Linux Chrome reports no mouse, so the test
 answers the one gate query as a desktop would. The unit test of the same name
 covers the opacity ramp, thumb geometry, the pointer and forced-colors gate and

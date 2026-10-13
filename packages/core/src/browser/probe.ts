@@ -5,7 +5,7 @@
  * the browser of each check, with what `AgentBrowser` gives it to do so;
  * `probePage` is what happens in that browser.
  */
-import { VIEW_HEIGHT_EXPRESSION } from '@boite/contracts';
+import { VIEW_BLEED, VIEW_HEIGHT_EXPRESSION } from '@boite/contracts';
 import type { Cdp } from './cdp.ts';
 
 /** A page check gives up after this long and the page is published unchecked: a slow browser never blocks an answer. */
@@ -17,6 +17,30 @@ const ERRORS_MAX = 8;
 
 /** What a page did when it was loaded alone: its errors, and its height at each width asked. */
 export interface PageProbe { errors: string[]; heights: number[] }
+
+/**
+ * How far a page runs past its frame's right edge, and the outermost element
+ * that does: null when it fits. The frame hides its scrollbars, so the rest is
+ * cut and the reader cannot tell it is there. What a clipping or scrolling box
+ * holds, and what is fixed to the window, scrolls nothing and is not counted.
+ */
+const OVERFLOW_EXPRESSION = `(function(){var r=document.documentElement,b=document.body,w=r.clientWidth;if(!b||r.scrollWidth<=w+1)return null;
+function out(e){var x=e.getBoundingClientRect();return x.width>0&&x.right>w+1;}
+function free(e){if(getComputedStyle(e).position==="fixed")return false;for(var a=e.parentElement;a&&a!==r;a=a.parentElement)if(getComputedStyle(a).overflowX!=="visible")return false;return true;}
+var f=out(b)?b:null,all=b.getElementsByTagName("*"),i,e;
+for(i=0;!f&&i<all.length;i++){e=all[i];if(out(e)&&!out(e.parentElement)&&free(e))f=e;}
+function name(e){var d="<"+e.tagName.toLowerCase(),c=e.getAttribute("class");if(e.id)d+=' id="'+e.id+'"';if(c)d+=' class="'+c.trim().replace(/\\s+/g," ").slice(0,60)+'"';return d+">";}
+var d=f?name(f)+(f!==b&&f.parentElement!==b?" inside "+name(f.parentElement):""):null;
+return {width:r.scrollWidth,frame:w,element:d,right:f?Math.ceil(f.getBoundingClientRect().right):0};})()`;
+
+interface Overflow { width: number; frame: number; element: string | null; right: number }
+
+/** The refusal for a page wider than its frame, in the widths the agent was told: the content's, without the bleed. */
+function overflowProblem(found: Overflow): string {
+  const column = found.frame - 2 * VIEW_BLEED;
+  const past = found.element ? `${found.element} ends ${found.right - (found.frame - VIEW_BLEED)}px past the right edge` : `the page is ${found.width - 2 * VIEW_BLEED}px wide`;
+  return `at ${column}px wide the page is cut on the right and the reader cannot scroll sideways: ${past}. Use fluid widths (.grid, minmax(0, 1fr), max-width: 100%) and SVG with a viewBox and width:100%.`;
+}
 
 export async function probePage(cdp: Cdp, url: string, widths: readonly number[]): Promise<PageProbe> {
   const { targetId } = await cdp.send<{ targetId: string }>('Target.createTarget', { url: 'about:blank' });
@@ -60,6 +84,8 @@ export async function probePage(cdp: Cdp, url: string, widths: readonly number[]
       await Bun.sleep(100);
       const { result } = await cdp.send<{ result: { value?: unknown } }>('Runtime.evaluate', { expression: VIEW_HEIGHT_EXPRESSION, returnByValue: true }, sessionId);
       heights.push(typeof result.value === 'number' && Number.isFinite(result.value) ? result.value : 0);
+      const wide = await cdp.send<{ result: { value?: Overflow | null } }>('Runtime.evaluate', { expression: OVERFLOW_EXPRESSION, returnByValue: true }, sessionId);
+      if (wide.result.value) note(overflowProblem(wide.result.value));
     }
     return { errors, heights };
   } finally { for (const stop of off) stop(); }

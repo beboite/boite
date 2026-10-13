@@ -135,7 +135,7 @@ The tested installer becomes the release artifact.
 | UI entry chunk | 593,000 |
 | UI files, excluding `.br` and `.gz` copies | 4,823,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 3,951,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,040,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
@@ -220,6 +220,12 @@ and PowerShell integration scripts the core's. The limits rise to 594,000,
 Merged with `main` at `5feb7d82` on Linux it measured 4,814,973 UI bytes,
 556,942 for the entry chunk and 3,942,646 core bytes, after the device keys
 above. The UI limit rises to 4,823,000 and the core limit to 3,951,000.
+
+On 2026-10-13 on Linux with Bun 1.4.2, `main` at `b5d73b56` measured 3,943,237
+core bytes and the dependency update on top of it 4,022,479. The Claude Agent
+SDK (0.3.283 to 0.3.296) grows its lazy chunk by 70,752 bytes and the ACP SDK
+(1.5.0 to 1.8.0) its own by 7,662; neither loads at startup. The core limit
+rises to 4,030,000.
 
 Several drafts per project, merged with settings cards at `87fca361`, measured
 4,536,091 UI bytes and a 590,215-byte entry chunk on Linux: the done rows and
@@ -443,13 +449,13 @@ about 9,400 bytes for the search, the keyboard walk, the machine groups and two
 sentences in each language. The UI limit rises to 4,460,000, 9,235 bytes above
 the Linux build; the entry and core limits are unchanged.
 
-On 2026-10-13 on Linux, `origin/main` at `5f19f0b1` measured 4,816,593 UI
-bytes and 3,942,929 emitted core JavaScript bytes. Persistent agents taking
-over from stewards measured 4,812,621 and 3,950,295: removing the steward
-settings saves the UI 3,972 bytes net of the projects field, files, memory chip
-and brain folder, and the core gains 7,366 bytes for the projects entrusted to
+On 2026-10-13 on Linux, `origin/main` at `aa0ced74` measured 4,822,797 UI
+bytes and 4,023,886 emitted core JavaScript bytes. Persistent agents taking
+over from stewards measured 4,818,807 and 4,032,180: removing the steward
+settings saves the UI 3,990 bytes net of the projects field, files, memory chip
+and brain folder, and the core gains 8,294 bytes for the projects entrusted to
 an agent, its notices, the memory pass and the brain folder move. The core
-total limit becomes 3,960,000 bytes, 9,705 above this measurement; the UI,
+total limit becomes 4,040,000 bytes, 7,820 above this measurement; the UI,
 entry and `main.js` limits are unchanged.
 Explain measured growth when changing a limit. Shared-runner timings are not gated. Earlier sizes and
 runner observations remain in the [dated report](../bench/results/2026-09-29-resources.md#historical-ci-measurements).
@@ -539,8 +545,9 @@ stable Docker `latest` or GitHub's latest stable release.
 
 Stable and nightly desktop tracks share the regular install and data; Boite Dev
 is separate ([updates](updates.md)). The server uses `dev`; use separate Compose
-volumes ([server](server.md)). A nightly publishes no APK
-([Android](android.md)).
+volumes ([server](server.md)). The signed or reused APK, which opens the phone
+app's address, is required too; [Android](android.md) owns the host, signing
+and reuse rules.
 
 ## The phone app's address
 

@@ -60,7 +60,9 @@
 
 <style>
   .surface-switch { container-type: inline-size; display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: var(--radius-md); background: var(--color-edge); }
-  .view { flex: 1; min-width: 0; padding-inline: 5px; color: var(--color-muted-foreground); }
+  /* Each side grows from its own content, so "Conversations" and its count
+     keep their width beside a short "Agents" instead of an equal half each. */
+  .view { flex: 1 1 auto; min-width: 0; padding-inline: 5px; color: var(--color-muted-foreground); }
   .label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .chosen { background: var(--color-active); color: var(--color-foreground); }
   /* What works on that side: a small accent pill with a breathing dot, the waiting colour once something asks the user. */

@@ -3,6 +3,7 @@ import type { Usage, UsageHistory, UsageHistoryRow } from '@boite/contracts';
 import { fakeUsageHistory } from './fake-usage';
 import { setLocaleSetting } from './i18n.svelte';
 import { dayEdges, formatMetric, formatRate, formatTick, modelName, niceScale, ownModel, priceNote, reportedValue, seriesFor, summarize, topThreads } from './usage';
+import { strings } from './strings';
 
 function usage(inputTokens: number, outputTokens: number, cost: number | null = null): Usage {
   return { inputTokens, outputTokens, cacheReadTokens: 0, cacheWriteTokens: 0, costUsdEquivalent: cost };
@@ -121,6 +122,9 @@ describe('summarize', () => {
     expect(priceNote(luna!)).toBe('No public rate matches this model, so the cost is the one its agent reported.');
     expect(priceNote(house!)).toBe('No public rate matches this model and its agent reported no cost.');
     expect(priceNote({ price: opus, priced: 0, reported: 0 })).toBe('The agent reported no tokens for these turns, so they have no cost.');
+    // A core from before public prices sends no `price` at all: the note says to update it, not that no rate exists.
+    const older = summarize({ edges: [0, 10], rows: [{ ...row(0, 'codex', 'gpt-6.1-sol', 1, usage(5, 0)), priced: 0 }], threads: [] }, 'cost');
+    expect(priceNote(older.models[0]!)).toBe(strings.usage.olderCore);
     expect(formatRate(0.125)).toBe('$0.125');
   });
 

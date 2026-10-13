@@ -8,9 +8,12 @@
  * the pointer approaches, fading in from `REVEAL_DISTANCE` px away to full at
  * `FULL_DISTANCE` px. A thumb drags like a native one.
  *
- * The overlay is a manual popover, so it sits in the top layer with the
- * desktop menus (`floating.ts`); each time another popover opens it is shown
- * again, which moves it back above that menu. A press on a thumb is stopped
+ * Thumbs live in two overlays. A container outside the top layer draws in a
+ * plain fixed layer under it, so every open menu (`floating.ts`) covers its
+ * thumb as it covers the container. A container inside a menu or dialog draws
+ * in a manual popover, shown again each time another popover opens so it stays
+ * above the newest menu; a thumb there that a menu opened after its own would
+ * cover is not drawn. A press on a thumb is stopped
  * before the app sees it and replayed on the scroll container, the target a
  * native scrollbar press has: a menu keeps itself open while its own list is
  * dragged and closes on a press on the chat's thumb, as it does today.
@@ -94,6 +97,8 @@ export function startEdgeScrollbars(): () => void {
 
 interface Bar {
   el: HTMLElement;
+  /** The top-layer element the container sits in, null outside the top layer. */
+  host: Element | null;
   axis: Axis;
   /** Where the thumb was last drawn, which a drag starts from. */
   track: number;
@@ -121,13 +126,27 @@ interface Placement {
 function activate(): () => void {
   const root = document.documentElement;
   root.classList.add(CLASS);
-  const layer = document.createElement('div');
-  layer.className = 'edge-scrollbar-layer';
-  layer.setAttribute('aria-hidden', 'true');
-  const topLayer = typeof layer.showPopover === 'function';
-  if (topLayer) layer.setAttribute('popover', 'manual');
-  document.body.append(layer);
-  if (topLayer) layer.showPopover();
+  const newLayer = () => {
+    const layer = document.createElement('div');
+    layer.className = 'edge-scrollbar-layer';
+    layer.setAttribute('aria-hidden', 'true');
+    document.body.append(layer);
+    return layer;
+  };
+  /** Under the top layer: the thumbs of containers no menu holds. */
+  const base = newLayer();
+  /** In the top layer: the thumbs of containers inside a menu or dialog. */
+  const upper = newLayer();
+  const topLayer = typeof upper.showPopover === 'function';
+  if (topLayer) {
+    upper.setAttribute('popover', 'manual');
+    upper.showPopover();
+  }
+  /** Open top-layer elements, oldest first, as their toggle events report them. */
+  const opened: Element[] = [];
+  try {
+    for (const el of document.querySelectorAll(':popover-open, dialog:modal')) if (el !== upper) opened.push(el);
+  } catch { /* no :popover-open support: nothing is in the top layer */ }
 
   /** Scroll axes by computed overflow, with the class string they were read under. */
   const axesCache = new WeakMap<Element, { axes: number; className: string | null }>();
@@ -143,6 +162,8 @@ function activate(): () => void {
   let target: Element | null = null;
   let pathFrom: Element | null = null;
   let path: HTMLElement[] = [];
+  /** The top-layer element holding the containers of `path`, null when none does. */
+  let pathHost: Element | null = null;
   let frame = 0;
   let drag: Drag | null = null;
   let watching = false;
@@ -162,14 +183,27 @@ function activate(): () => void {
   /** The scroll containers from the hovered element up, stopping at a top-layer element: what lies under it is not under the pointer. */
   function containersFrom(start: Element | null): HTMLElement[] {
     const list: HTMLElement[] = [];
+    pathHost = null;
     for (let el = start; el && el !== document.body && el !== root; el = parentOf(el)) {
       if (el instanceof HTMLElement && axesOf(el)) list.push(el);
-      if (inTopLayer(el)) break;
+      if (inTopLayer(el)) { pathHost = el; break; }
     }
     return list;
   }
 
-  function measure(el: HTMLElement, placements: Placement[]) {
+  /** Whether a top-layer element opened after `host` covers part of the rectangle. */
+  function coveredAbove(host: Element, left: number, top: number, width: number, height: number): boolean {
+    const index = opened.indexOf(host);
+    if (index < 0) return false;
+    for (const el of opened.slice(index + 1)) {
+      if (!el.isConnected) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width && r.height && left < r.right && left + width > r.left && top < r.bottom && top + height > r.top) return true;
+    }
+    return false;
+  }
+
+  function measure(el: HTMLElement, host: Element | null, placements: Placement[]) {
     if (!el.isConnected || !el.offsetWidth || !el.offsetHeight) return;
     const axes = axesOf(el);
     const rect = el.getBoundingClientRect();
@@ -193,10 +227,13 @@ function activate(): () => void {
       const clientSize = axis === 'y' ? el.clientHeight : el.clientWidth;
       const span = thumbSpan(axis === 'y' ? el.scrollTop : el.scrollLeft, scrollSize, clientSize, track);
       if (!span) continue;
-      const bar: Bar = { el, axis, track, length: span.length, scrollSize, clientSize };
-      placements.push(axis === 'y'
+      const bar: Bar = { el, host, axis, track, length: span.length, scrollSize, clientSize };
+      const placement = axis === 'y'
         ? { bar, opacity, left: left + width - THICKNESS, top: top + span.offset, width: THICKNESS, height: span.length }
-        : { bar, opacity, left: left + span.offset, top: top + height - THICKNESS, width: span.length, height: THICKNESS });
+        : { bar, opacity, left: left + span.offset, top: top + height - THICKNESS, width: span.length, height: THICKNESS };
+      // The base layer is under every menu already; the upper one is over all of them.
+      if (host && !held && coveredAbove(host, placement.left, placement.top, placement.width, placement.height)) continue;
+      placements.push(placement);
     }
   }
 
@@ -212,8 +249,8 @@ function activate(): () => void {
     if (inside || drag) {
       if (target && !target.isConnected) target = document.elementFromPoint(x, y);
       if (target !== pathFrom) { pathFrom = target; path = containersFrom(target); }
-      const list = drag && !path.includes(drag.el) ? [...path, drag.el] : path;
-      for (const el of list) measure(el, placements);
+      for (const el of path) measure(el, pathHost, placements);
+      if (drag && !path.includes(drag.el)) measure(drag.el, drag.host, placements);
     }
     const next = new Map<HTMLElement, Partial<Record<Axis, HTMLDivElement>>>();
     for (const placement of placements) {
@@ -229,7 +266,8 @@ function activate(): () => void {
       thumb.style.height = `${placement.height}px`;
       thumb.style.opacity = String(placement.opacity);
       thumb.toggleAttribute('data-live', placement.opacity >= LIVE_OPACITY);
-      if (!thumb.isConnected) layer.append(thumb);
+      const layer = bar.host ? upper : base;
+      if (thumb.parentNode !== layer) layer.append(thumb);
     }
     for (const thumbs of drawn.values()) {
       for (const thumb of Object.values(thumbs)) {
@@ -335,10 +373,20 @@ function activate(): () => void {
   }
 
   function ontoggle(event: Event) {
-    if (event.target === layer || (event as ToggleEvent).newState !== 'open' || !topLayer) return;
-    // Shown again, the overlay moves above the popover that just opened.
-    layer.hidePopover();
-    layer.showPopover();
+    const el = event.target;
+    // <details> toggles too; only popovers and dialogs enter the top layer.
+    if (el === upper || !(el instanceof Element) || !(el.hasAttribute('popover') || el instanceof HTMLDialogElement)) return;
+    const index = opened.indexOf(el);
+    if (index >= 0) opened.splice(index, 1);
+    const open = (event as ToggleEvent).newState === 'open';
+    if (open) opened.push(el);
+    // A menu opening or closing changes which thumbs it covers.
+    pathFrom = null;
+    schedule();
+    if (!open || !topLayer) return;
+    // Shown again, the upper overlay moves above the popover that just opened.
+    upper.hidePopover();
+    upper.showPopover();
   }
 
   function onresize() { pathFrom = null; schedule(); }
@@ -365,7 +413,9 @@ function activate(): () => void {
     watch(false);
     for (const [target, type, listener, options] of listeners) target.removeEventListener(type, listener as EventListener, options);
     owners.clear();
-    layer.remove();
+    opened.length = 0;
+    base.remove();
+    upper.remove();
     root.classList.remove(CLASS);
   };
 }
