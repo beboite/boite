@@ -205,9 +205,12 @@ test('a proxied provider shows one gateway account over its local ones, which co
   expect(store.accountsOf('claude').map(account => [account.id, account.label, account.status, account.identity])).toEqual([['a-claude-main', 'Douane', 'ok', null]]);
   expect(store.accountOf('a-claude-side')).toMatchObject({ id: 'a-claude-side', label: 'Douane', status: 'ok' });
   expect(store.gatewayOf('codex')).toEqual({ kind: 'douane', name: 'Douane', origin: 'http://gateway.test:8787' });
-  // Other protocols keep their own sign-ins, and nothing was written to the accounts.
-  expect(store.gatewayOf('opencode')).toBeNull();
-  expect(store.accountsOf('opencode')[0]!.label).toBe('Default');
+  // Both OpenCode versions use the gateway; other ACP agents keep their own sign-ins.
+  for (const provider of ['opencode', 'opencode-v2']) {
+    expect(store.gatewayOf(provider)).toEqual({ kind: 'douane', name: 'Douane', origin: 'http://gateway.test:8787' });
+  }
+  expect(store.accountsOf('opencode')[0]).toMatchObject({ label: 'Douane', status: 'ok' });
+  expect(store.gatewayOf('antigravity')).toBeNull();
   expect(store.accounts.filter(account => account.providerId === 'claude').map(account => account.label)).toEqual(['Default login', 'Second seat']);
   expect((await client.call('accounts.list', {})).some(account => account.label === 'Douane')).toBe(false);
 
@@ -216,4 +219,6 @@ test('a proxied provider shows one gateway account over its local ones, which co
   store.settings = await client.call('subscriptionProxy.configure', { subscriptionProxy: { ...douane, enabled: false } });
   expect(store.accountsOf('claude').map(account => [account.label, account.status])).toEqual([['Default login', 'ok'], ['Second seat', 'unauthenticated']]);
   expect(store.accountOf('a-claude-side')!.label).toBe('Second seat');
+  expect(store.gatewayOf('opencode')).toBeNull();
+  expect(store.accountsOf('opencode')[0]!.label).toBe('Default');
 });
