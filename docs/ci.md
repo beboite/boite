@@ -240,7 +240,9 @@ ramp, favorites shared through each core's settings with their check, folds
 that follow the list and their English/French sentences measured 4,836,660 and
 562,724 on top of it, as the Windows job did: 13,863 bytes. Merged with context
 modes at `c8e9d2ac`, whose limit was 4,836,000, the branch measured 4,843,049 UI
-bytes. The UI limit rises to 4,850,000.
+bytes. The UI limit rises to 4,850,000. With the earlier reasoning slider back,
+lit by level and crossed by speed streaks, and the dictation in a floating
+menu, it measured 4,845,313 bytes and a 557,726-byte entry chunk.
 
 Several drafts per project, merged with settings cards at `87fca361`, measured
 4,536,091 UI bytes and a 590,215-byte entry chunk on Linux: the done rows and
