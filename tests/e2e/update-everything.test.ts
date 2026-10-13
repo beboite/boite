@@ -17,7 +17,7 @@ async function capture(name: string) {
 }
 /** What each row of the card says, machine by machine. */
 function parts(): Promise<{ part: string; text: string }[]> {
-  return page.evaluate(`[...document.querySelectorAll('${id('updates-part')}')].map(row => ({ part: row.dataset.part, text: row.textContent.replace(/\\s+/g, ' ').trim() }))`);
+  return page.evaluate<{ part: string; text: string }[]>(`[...document.querySelectorAll('${id('updates-part')}')].map(row => ({ part: row.dataset.part, text: row.textContent.replace(/\\s+/g, ' ').trim() }))`);
 }
 
 beforeAll(async () => { const port = await freePort(); base = `http://127.0.0.1:${port}`; server = await startUi(port); }, 90_000);
