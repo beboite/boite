@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { Archive, ArchiveRestore, CheckCheck, FolderX, Trash2 } from '@lucide/svelte';
+  import { Archive, ArchiveRestore, CheckCheck, FolderX } from '@lucide/svelte';
   import type { Project, ThreadId } from '@boite/contracts';
   import { count as formatCount, projectName } from '../lib/format';
-  import { archiveProjectWithUndo, confirmRemoveProject, projectMenu } from '../lib/project-menu';
+  import { archiveProjectWithUndo, projectMenu } from '../lib/project-menu';
   import { projectKey, type ProjectEntry } from '../lib/project-view.svelte';
   import type { Store } from '../lib/store.svelte';
   import { archiveCount, projectThreadView, type ProjectShelfKind } from '../lib/project-threads.svelte';
@@ -20,9 +20,11 @@
    * projects, with no open conversation, then the archived ones, a step
    * quieter and marked with the archive glyph. One compact row per project;
    * choosing it starts a conversation there, restoring an archived project
-   * first. A row's quick action shows under the pointer (archive an idle
-   * project, restore or remove an archived one) and its full menu opens with
-   * a right click or a long press. An idle project that still has done or
+   * first. A row's one quick action shows under the pointer (archive an idle
+   * project, restore an archived one, in the archive glyph's place) and its
+   * full menu, removal included, opens with a right click or a long press.
+   * Removal never sits on the row: a pointer reaching for the archive glyph
+   * would land on it when the hover swaps the buttons in. An idle project that still has done or
    * archived conversations shows their counts, which unfold that history
    * under its row. With several machines the rows group under their machine.
    * `onopen` runs once a draft or a conversation opens from the fold, so the
@@ -191,17 +193,6 @@
                 disabled={busy !== null}
                 onclick={() => void run(machine, project, () => machine.store.archiveProject(project.id, false))}><ArchiveRestore size={13} /></button
               >
-              {#if machine.store.owner}
-                <button
-                  type="button"
-                  class="ghost small icon danger"
-                  data-testid="archived-project-remove"
-                  title={strings.sidebar.removeProject}
-                  aria-label={`${strings.sidebar.removeProject}: ${projectName(project)}`}
-                  disabled={busy !== null}
-                  onclick={() => void run(machine, project, () => confirmRemoveProject(machine.store, project))}><Trash2 size={13} /></button
-                >
-              {/if}
             {/if}
           </span>
         </div>
