@@ -9,12 +9,14 @@ const opus = { id: 'claude-opus-5-5', name: 'Opus 5.5' };
 const astra = { id: 'gpt-6-astra', name: 'Astra' };
 
 /** A core as `settings.set` keeps it, counting the writes that reach it. */
-function machine(options: { favorites?: ModelFavorites; writable?: boolean; accounts?: Account[] } = {}) {
+function machine(options: { favorites?: ModelFavorites; writable?: boolean; accounts?: Account[]; late?: boolean } = {}) {
   let settings = { warmProcessMinutes: 0, ...(options.favorites ? { modelFavorites: options.favorites } : {}) } as Settings;
+  /** A `late` core has not answered `settings.get` yet. */
+  let answered = !options.late;
   const writes: ModelFavorites[] = [];
   let shared: SharedFavorites | null = null;
   const target: FavoritesTarget = {
-    settings: () => settings,
+    settings: () => answered ? settings : null,
     writable: () => options.writable !== false,
     write: async (favorites) => {
       writes.push(favorites);
@@ -33,6 +35,8 @@ function machine(options: { favorites?: ModelFavorites; writable?: boolean; acco
     get favorites() { return settings.modelFavorites; },
     /** Another client wrote this list: the core's event reaches this one. */
     receive(favorites: ModelFavorites) { settings = { ...settings, modelFavorites: favorites }; shared?.sync(target); },
+    /** Its first `settings.get` answers. */
+    answer() { answered = true; shared?.sync(target); },
     join(into: SharedFavorites) { shared = into; return into.register(target); },
   };
 }
@@ -132,4 +136,22 @@ test('old per-device favorites join the machine lists once, named by their accou
   expect(localStorage.getItem(FAVORITES_KEY)).toBeNull();
   expect(pc.favorites).toEqual(shared.current);
   expect(pc.writes).toHaveLength(1);
+});
+
+test('a star during the first start keeps what a machine answering later adds, and what was unstarred stays off', async () => {
+  localStorage.setItem(FAVORITES_KEY, JSON.stringify([{ providerId: 'claude', accountId: 'pc-pro', model: opus }]));
+  const luna = { id: 'gpt-6-luna', name: 'Luna' };
+  const shared = new SharedFavorites();
+  const accounts = [{ id: 'pc-pro', providerId: 'claude', label: 'Pro', status: 'ok' } as Account];
+  const pc = machine({ favorites: { at: 50, items: [{ providerId: 'codex', model: astra }] }, accounts });
+  const server = machine({ favorites: { at: 40, items: [{ providerId: 'codex', model: astra }, { providerId: 'codex', model: luna }] }, accounts, late: true });
+  pc.join(shared); server.join(shared);
+  await settle();
+  // The owner unstars Astra before the server's settings arrive.
+  shared.toggle(null, [{ providerId: 'codex', model: astra }]);
+  server.answer();
+  await settle();
+  expect(shared.current.items).toEqual([{ providerId: 'claude', model: opus, account: 'Pro' }, { providerId: 'codex', model: luna }]);
+  expect(server.favorites).toEqual(shared.current);
+  expect(pc.favorites).toEqual(shared.current);
 });

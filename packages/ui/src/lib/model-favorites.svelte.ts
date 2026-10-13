@@ -68,6 +68,8 @@ export class SharedFavorites {
   /** The machines whose list joined ours on arrival, the first start after the old favorites. */
   #joined = new WeakSet<FavoritesTarget>();
   #migrating = false;
+  /** The owner's stars and unstars while lists still join, replayed over each one that joins after them. */
+  #edits: { add: ModelFavorite | null; remove: Set<string> }[] = [];
 
   constructor() { this.load(); }
 
@@ -77,6 +79,7 @@ export class SharedFavorites {
     this.#legacy = readFavorites();
     this.#migrating = this.#legacy.length > 0;
     this.#joined = new WeakSet();
+    this.#edits = [];
     this.#pushed = new WeakMap();
   }
 
@@ -100,8 +103,9 @@ export class SharedFavorites {
     const remote = cleanFavorites(settings.modelFavorites) ?? EMPTY;
     if (this.#migrating && !this.#joined.has(target)) {
       this.#joined.add(target);
-      const items = unite(this.current.items, remote.items);
-      if (items.length > this.current.items.length) this.#change(items);
+      // What the owner unstarred before this machine answered stays unstarred.
+      const items = this.#replay(unite(this.current.items, remote.items));
+      if (items.length > this.current.items.length) this.#change(items, remote.at);
     }
     if (compareFavorites(remote, this.current) > 0) this.#store(remote);
     if (this.#legacy.length > 0 && target.accountsReady()) this.#absorb(target);
@@ -112,11 +116,19 @@ export class SharedFavorites {
 
   /** Adds the item, or removes every one given. */
   toggle(add: ModelFavorite | null, remove: ModelFavorite[] = []): void {
-    const gone = new Set(remove.map(itemKey));
-    const kept = this.current.items.filter(item => !gone.has(itemKey(item)));
-    this.#migrating = false;
-    this.#change(add ? unite(kept, [add]) : kept);
+    const edit = { add, remove: new Set(remove.map(itemKey)) };
+    // A machine whose settings are still on their way joins its list later: this edit is applied over it then.
+    if (this.#migrating) this.#edits.push(edit);
+    this.#change(this.#replay(this.current.items, [edit]));
     this.#spread();
+  }
+
+  #replay(items: ModelFavorite[], edits = this.#edits): ModelFavorite[] {
+    for (const edit of edits) {
+      items = items.filter(item => !edit.remove.has(itemKey(item)));
+      if (edit.add) items = unite(items, [edit.add]);
+    }
+    return items;
   }
 
   /** Old favorites whose account `target` names join with its label; with no target, every one left joins unlabelled. */
@@ -133,8 +145,9 @@ export class SharedFavorites {
     if (this.#legacy.length === 0) dropLegacy();
   }
 
-  #change(items: ModelFavorite[]): void {
-    const next = cleanFavorites({ at: Math.max(Date.now(), this.current.at + 1), items: items.slice(-MODEL_FAVORITES_MAX) });
+  /** Stores `items` as a change made now, later than our list and than `seen`, a list it was joined with. */
+  #change(items: ModelFavorite[], seen = 0): void {
+    const next = cleanFavorites({ at: Math.max(Date.now(), this.current.at + 1, seen + 1), items: items.slice(-MODEL_FAVORITES_MAX) });
     if (next) this.#store(next);
   }
 

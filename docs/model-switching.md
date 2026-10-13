@@ -99,7 +99,9 @@ unstarring that row removes both stars. Favorites of the earlier per-device
 list are joined to each machine's list on the first start after the change,
 named by the label of the account they were starred on. One whose account no
 connected machine has keeps its model without a label, and the old list is
-removed only once every entry has joined. A paired phone or
+removed only once every entry has joined. A star or unstar made before a
+machine's settings arrive is applied again over its list when it joins, so an
+unstarred model does not come back with it. A paired phone or
 browser reads the favorites and shows their stars, but cannot change them: the
 core keeps `settings.set` for the owner.
 
