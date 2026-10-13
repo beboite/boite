@@ -544,8 +544,9 @@ Development queries `?fake=1&appUpdate=available`, `ready`, `downloading` or
 `error`, with `appUpdateChannel` and `appUpdateCurrentChannel`, preview those
 states. `tests/e2e/update-everything.test.ts` opens the foot's update card with
 `updates=1&machines=1&appUpdate=available&serverUpdate=available`, checks that
-nothing downloads before the click, Later, the one request per machine and the
-app installing last, and captures desktop and phone.
+nothing downloads before the click, Remind me later, Update the app alone, the
+one request per machine and the app installing last, and captures desktop and
+phone.
 `packages/core/test/updates.test.ts` holds the core side: a registry read after
 an agent's updater, when none of its processes runs, keeps Boite's own
 installation waiting.

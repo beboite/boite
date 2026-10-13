@@ -28,10 +28,15 @@ On a wide window the card opens by itself once per release, as soon as a
 check finds it, and never during the tour. It takes no focus. It has two
 buttons:
 
-- Update all (Update when there is one thing) starts everything at once.
-- Later closes the card and puts off those releases, after a restart too. A
-  newer release lights the dot and opens the card again. A press elsewhere
-  only closes the card.
+- Update the app installs this desktop app's release alone, once this
+  computer's agent updates already under way are done. It shows only when the
+  app has a release.
+- Update all (Update when there is one thing) starts everything at once. With
+  only the app to update, Update the app is the one button.
+
+Its close button, Remind me later, puts off those releases, after a restart
+too. A newer release lights the dot and opens the card again. A press
+elsewhere only closes the card.
 
 On a phone the card stays closed until the button is pressed, and opens as a
 sheet. Settings, Machines and updates has the same Update all beside Check for

@@ -202,9 +202,21 @@ export class UpdateEverything {
     catch { /* Kept for this session when storage is unavailable. */ }
   }
 
-  async run(): Promise<void> {
+  /** Whether this computer's app has a release the button can start. */
+  get appOffered(): boolean {
+    return this.plan.some((machine) => machine.local && machine.parts.some((part) => part.id === 'app' && part.startable));
+  }
+
+  /**
+   * Starts the updates: every part of every machine, or with `appOnly` this
+   * app's own release alone. Either way the app restarts only once its own
+   * core's agent updates are done.
+   */
+  async run({ appOnly = false }: { appOnly?: boolean } = {}): Promise<void> {
     if (this.running) return;
-    const plan = this.plan;
+    const plan = appOnly
+      ? this.plan.filter((machine) => machine.local).map((machine) => ({ ...machine, parts: machine.parts.filter((part) => part.id === 'app') }))
+      : this.plan;
     if (!plan.some((machine) => machine.parts.some((part) => part.startable))) return;
     this.running = true;
     try {
@@ -216,7 +228,7 @@ export class UpdateEverything {
         const store = machines.get(machine.id)?.store;
         const agents = machine.parts.filter((part) => part.startable && part.id !== 'app' && part.id !== 'boite').map((part) => part.id as ProviderId);
         const server = machine.parts.find((part) => part.id === 'boite' && part.startable)?.version ?? null;
-        return store ? store.serverUpdater.everything(agents, server) : null;
+        return store && (agents.length > 0 || server !== null) ? store.serverUpdater.everything(agents, server) : null;
       }));
       if (!local || !(await app)) return;
       // A restart stops this computer's core: the agent updaters it runs land first.

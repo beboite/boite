@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
-  import { ArrowRight, CircleArrowDown } from '@lucide/svelte';
+  import { ArrowRight, CircleArrowDown, X } from '@lucide/svelte';
   import MachineIcon from './MachineIcon.svelte';
   import ProviderLogo from './ProviderLogo.svelte';
   import { appUpdater } from '../lib/app-update.svelte';
@@ -15,9 +15,10 @@
   /**
    * The foot's update button and the card it opens, bottom left of the
    * window. A release found anywhere lights the dot and opens the card by
-   * itself on a wide window, once per release: Later puts that release off
-   * until a newer one comes, a press elsewhere only closes the card. Update
-   * all starts every update of every machine at once.
+   * itself on a wide window, once per release: its close button puts that
+   * release off until a newer one comes, a press elsewhere only hides the
+   * card. Update the app installs this app alone; Update all starts every
+   * update of every machine at once.
    */
   const card = new Closing();
   const narrow = new MediaQuery('(max-width: 720px)');
@@ -28,7 +29,12 @@
   let startable = $derived(plan.flatMap((machine) => machine.parts.filter((part) => part.startable)));
   let busy = $derived(updateEverything.running || plan.some((machine) => machine.parts.some((part) => !part.startable)));
   let failed = $derived(startable.some((part) => part.state === 'failed'));
-  let restarts = $derived(plan.some((machine) => machine.local && machine.parts.some((part) => part.id === 'app' && part.startable)));
+  let restarts = $derived(updateEverything.appOffered);
+  /** Beyond this app's own release, something else the second button would start. */
+  let others = $derived(startable.some((part) => part.id !== 'app'));
+  let allLabel = $derived(updateEverything.running || startable.length === 0 ? strings.updateAll.busy
+    : failed && startable.every((part) => part.state === 'failed') ? strings.updateAll.retry
+    : startable.length === 1 ? strings.harnessUpdates.update : strings.updateAll.run);
   let label = $derived(busy ? strings.updateAll.busy : strings.updateAll.trigger);
   /** Boite's own mark for Boite's rows, the nightly one on that track. */
   let mark = $derived(appUpdater.snapshot.currentChannel === 'nightly' ? './icons/icon-nightly.svg' : './icons/icon.svg');
@@ -115,6 +121,8 @@
         <h2>{strings.updateAll.heading}</h2>
         <p>{busy ? strings.updateAll.busy : strings.updateAll.summary(startable.length)}</p>
       </div>
+      <!-- Closing here puts these releases off until a newer one; a press elsewhere only hides the card. -->
+      <button type="button" class="ghost icon small close" title={strings.updateAll.later} aria-label={strings.updateAll.later} onclick={later} data-testid="updates-later"><X size={14} /></button>
     </header>
     <div class="hosts">
       {#each plan as machine (machine.id)}
@@ -146,11 +154,19 @@
     </div>
     {#if restarts}<p class="note">{strings.updateAll.restarts}</p>{/if}
     <footer>
-      <button type="button" class="ghost small" onclick={later} data-testid="updates-later">{strings.updateAll.later}</button>
-      <button type="button" class="primary small" disabled={startable.length === 0 || updateEverything.running}
-        aria-busy={updateEverything.running} onclick={() => void updateEverything.run()} data-testid="updates-run">
-        <span class="ui-label">{updateEverything.running || startable.length === 0 ? strings.updateAll.busy : failed && startable.every((part) => part.state === 'failed') ? strings.updateAll.retry : startable.length === 1 ? strings.harnessUpdates.update : strings.updateAll.run}</span>
-      </button>
+      <!-- This app alone, or everything: with only the app to update, one button does it. -->
+      {#if restarts}
+        <button type="button" class={others ? 'small' : 'primary small'} disabled={updateEverything.running}
+          aria-busy={updateEverything.running} onclick={() => void updateEverything.run({ appOnly: true })} data-testid="updates-app">
+          <span class="ui-label">{updateEverything.running && !others ? strings.updateAll.busy : strings.updateAll.app}</span>
+        </button>
+      {/if}
+      {#if others || !restarts}
+        <button type="button" class="primary small" disabled={startable.length === 0 || updateEverything.running}
+          aria-busy={updateEverything.running} onclick={() => void updateEverything.run()} data-testid="updates-run">
+          <span class="ui-label">{allLabel}</span>
+        </button>
+      {/if}
     </footer>
   </div>
 {/if}
@@ -168,7 +184,8 @@
   header { display: flex; align-items: center; gap: 10px; padding: 12px 14px 10px; }
   .glyph { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: var(--radius-md); color: var(--color-accent); background: var(--color-accent-soft); }
   .glyph.busy :global(svg) { animation: breathe 1.6s ease-in-out infinite; }
-  .title { min-width: 0; }
+  .title { flex: 1; min-width: 0; }
+  .close { flex: none; align-self: flex-start; color: var(--color-muted-foreground); }
   h2 { margin: 0; font-size: var(--text-sm); font-weight: 600; }
   .title p { margin: 1px 0 0; font-size: var(--text-xs); color: var(--color-muted-foreground); }
 
