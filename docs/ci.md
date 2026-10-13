@@ -530,8 +530,9 @@ stable Docker `latest` or GitHub's latest stable release.
 
 Stable and nightly desktop tracks share the regular install and data; Boite Dev
 is separate ([updates](updates.md)). The server uses `dev`; use separate Compose
-volumes ([server](server.md)). A nightly publishes no APK
-([Android](android.md)).
+volumes ([server](server.md)). The signed or reused APK, which opens the phone
+app's address, is required too; [Android](android.md) owns the host, signing
+and reuse rules.
 
 ## The phone app's address
 
