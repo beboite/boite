@@ -133,7 +133,7 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 593,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,823,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,840,000 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 4,030,000 |
 
@@ -226,6 +226,13 @@ core bytes and the dependency update on top of it 4,022,479. The Claude Agent
 SDK (0.3.283 to 0.3.296) grows its lazy chunk by 70,752 bytes and the ACP SDK
 (1.5.0 to 1.8.0) its own by 7,662; neither loads at startup. The core limit
 rises to 4,030,000.
+
+On 2026-10-13 on Linux with Bun 1.4.2, `main` at `aa0ced74` measured 4,822,797
+UI bytes and a 557,709-byte entry chunk. The dictation spectrum, the reasoning
+ramp, favorites shared through each core's settings with their check, folds
+that follow the list and their English/French sentences measured 4,836,660 and
+562,724 on top of it, as the Windows job did: 13,863 bytes. The UI limit rises
+to 4,840,000.
 
 Several drafts per project, merged with settings cards at `87fca361`, measured
 4,536,091 UI bytes and a 590,215-byte entry chunk on Linux: the done rows and
