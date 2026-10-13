@@ -133,9 +133,9 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 593,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,823,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,830,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,030,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,040,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
@@ -448,6 +448,15 @@ measured 4,450,765 bytes, and Windows desktop CI 4,450,386 on its first head:
 about 9,400 bytes for the search, the keyboard walk, the machine groups and two
 sentences in each language. The UI limit rises to 4,460,000, 9,235 bytes above
 the Linux build; the entry and core limits are unchanged.
+On 2026-10-13 on Linux with Bun 1.4.2, `main` at `aa0ced74` measured 4,822,797
+UI bytes and 4,023,886 core bytes, 203 and 6,114 bytes under their limits. The
+audit pass of #476 measured 4,824,688 and 4,030,649: 1,891 UI bytes for the
+modules its splits add (each carries its own imports) and the quota cache key,
+and 6,763 core bytes for the split modules, the terminal's POSIX login and job
+stop, and the Linux birth check before a kill. The entry chunk stays at 557,820
+bytes against main's 557,709, once the fake machine went back behind
+`import.meta.env.DEV` in `workspace.svelte.ts`. The UI limit rises to 4,830,000
+and the core limit to 4,040,000.
 Explain measured growth when changing a limit. Shared-runner timings are not gated. Earlier sizes and
 runner observations remain in the [dated report](../bench/results/2026-09-29-resources.md#historical-ci-measurements).
 
