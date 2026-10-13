@@ -151,7 +151,8 @@ test('a tool disclosure shares its fetch and an obsolete result cannot fill anot
     await store.open('t-scheduler');
     release({ output: 'full output from the previous visit' }); await one;
     const returning = store.open('t-bench');
-    expect(store.openThread!.messages.at(-1)!.parts.at(-1)).toMatchObject({ output: 'preview', outputDeferred: true });
+    // The cached visit kept it folded: a successful call's preview is not kept either.
+    expect(store.openThread!.messages.at(-1)!.parts.at(-1)).toMatchObject({ output: '', outputDeferred: true });
     await returning;
   } finally { release({ output: '' }); spy.mockRestore(); }
 });

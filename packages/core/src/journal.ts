@@ -645,22 +645,22 @@ export class Journal {
   /**
    * One page of a thread's messages, oldest first: the last `limit` of them, or
    * the last `limit` written before `beforeRowid`, within the serialized byte
-   * budget except for one complete transportable message. `project` is what the
-   * caller sends for each message (compacted tool parts, deferred files): the
-   * page holds that, and budgets and the frame ceiling apply to it, not to the
-   * stored row. Without it the read is internal and unbounded in bytes. `before` names the oldest one
-   * returned while the thread still holds older ones, and is null once the page
-   * reaches the first message.
+   * budget (`maxBytes`, `MESSAGE_PAGE_MAX_BYTES` by default) except for one complete
+   * transportable message. `project` is what the caller sends for each message
+   * (compacted tool parts, deferred files): the page holds that, and budgets and the
+   * frame ceiling apply to it, not to the stored row. Without it the read is
+   * internal and unbounded in bytes. `before` names the oldest one returned while
+   * the thread still holds older ones, and is null once the page reaches the first.
    *
    * `messages_by_thread` is `(thread_id)` plus the implicit rowid, so both shapes
    * are an index search, descending, with no sort step and no scan of the rest of
    * the thread.
    */
-  listMessagePage(threadId: string, options: { beforeRowid?: number; limit: number; project?: Projection; toolPreviews?: boolean }): MessagePage {
+  listMessagePage(threadId: string, options: { beforeRowid?: number; limit: number; project?: Projection; toolPreviews?: boolean; maxBytes?: number }): MessagePage {
     // Subscribers have already received buffered deltas. A reload must not replace
     // those messages with an older projection while the next delta is streaming.
     this.flushDeltas();
-    const limit = Math.max(1, Math.trunc(options.limit));
+    const limit = Math.max(1, Math.trunc(options.limit)), budget = options.maxBytes ?? MESSAGE_PAGE_MAX_BYTES;
     const statement = this.db.prepare(options.beforeRowid === undefined
       ? 'SELECT * FROM messages WHERE thread_id = ? ORDER BY rowid DESC LIMIT ?'
       : 'SELECT * FROM messages WHERE thread_id = ? AND rowid < ? ORDER BY rowid DESC LIMIT ?');
@@ -671,12 +671,12 @@ export class Journal {
     let bytes = 2, older = false;
     try {
       for (const row of rows) {
-        if (messages.length >= limit || bytes >= MESSAGE_PAGE_MAX_BYTES) { older = true; break; }
+        if (messages.length >= limit || (messages.length && bytes >= budget)) { older = true; break; }
         // One complete attachment-sized message can exceed the page budget.
         const message = this.currentMessage(row as MessageRow, options.toolPreviews);
         const { sent: projected, size } = sent(message, options.project);
         const next = bytes + size + (messages.length ? 1 : 0);
-        if (messages.length && next > MESSAGE_PAGE_MAX_BYTES) { older = true; break; }
+        if (messages.length && next > budget) { older = true; break; }
         messages.push(message);
         out.push(projected);
         bytes = next;
@@ -693,7 +693,7 @@ export class Journal {
    * newest one returned while the thread holds newer ones, and is null once
    * the page reaches the last message.
    */
-  listMessagesForward(threadId: string, fromRowid: number, limit: number, project?: Projection, toolPreviews = false): { messages: Message[]; sent: Message[]; after: string | null } {
+  listMessagesForward(threadId: string, fromRowid: number, limit: number, project?: Projection, toolPreviews = false, maxBytes = MESSAGE_PAGE_MAX_BYTES): { messages: Message[]; sent: Message[]; after: string | null } {
     this.flushDeltas();
     const cap = Math.max(1, Math.trunc(limit));
     const statement = this.db.prepare('SELECT * FROM messages WHERE thread_id = ? AND rowid >= ? ORDER BY rowid ASC LIMIT ?');
@@ -701,11 +701,11 @@ export class Journal {
     let bytes = 2, newer = false;
     try {
       for (const row of statement.iterate(threadId, fromRowid, cap + 1)) {
-        if (messages.length >= cap || bytes >= MESSAGE_PAGE_MAX_BYTES) { newer = true; break; }
+        if (messages.length >= cap || (messages.length && bytes >= maxBytes)) { newer = true; break; }
         const message = this.currentMessage(row as MessageRow, toolPreviews);
         const { sent: projected, size } = sent(message, project);
         const next = bytes + size + (messages.length ? 1 : 0);
-        if (messages.length && next > MESSAGE_PAGE_MAX_BYTES) { newer = true; break; }
+        if (messages.length && next > maxBytes) { newer = true; break; }
         messages.push(message);
         out.push(projected);
         bytes = next;

@@ -265,11 +265,27 @@ when the core advertises `chunkedAnswers`.
   Its receipt includes pending cards, subscribes this socket, replaces the
   previous subscription and acknowledges unread content after a successful read.
   Older cores keep the four-call burst for subscription, snapshot and cards.
-- A first visit requests 40 messages, then pages backwards by 120. A cached
-  visit allows up to 200 messages to catch up before falling back to a tail.
-  These limits affect the displayed window; the journal retains the history.
-- Completed tool outputs above 16,384 characters arrive as 1,024-character
-  previews. On a core advertising `deferredToolParts`, pages also ask for
+- A first visit requests 40 messages within 128 KiB (`maxBytes`,
+  `INITIAL_PAGE_BYTES`), about one desktop screen, then pages by 120 within
+  256 KiB (`READING_PAGE_BYTES`) as the reader scrolls either way. A list too
+  short to scroll asks for the page beside it at once, again after each one
+  lands, until it reaches 400 px past the viewport or the thread is whole
+  (`fillShort` in `lib/reading-window.ts`). Once a page above has landed and
+  the window is drawn, the row that was first is put back where it stood on
+  screen: counting the new rows at their estimates had moved the text being
+  read by 850 px at 1280x900 (`pullOlder`). A cached visit allows up to 200
+  messages to catch up before falling back to a page. These limits affect the
+  displayed window; the journal retains the history.
+- A history page sends a successful call's output only up to 256 characters
+  (`TOOL_OUTPUT_FOLDED_CHARS`): its folded card draws none of it. A longer one
+  arrives empty with `outputDeferred`, and opening the card fetches it. A
+  message is a whole turn, and a turn of 90 commands with a few kilobytes of
+  output each made pages of megabytes that nobody had opened. A failed or
+  refused call's output above 16,384 characters arrives as a 1,024-character
+  preview, where the opened card reads its error line while the rest loads.
+  Live `message.part` events keep the 16,384 threshold, so a card open on a
+  running call keeps its output when the call ends. On a core advertising
+  `deferredToolParts`, pages also ask for
   `compactToolParts`: an input above 16,384 serialized characters arrives cut to
   about 4,096, its first strings and entries, with `inputDeferred`, and
   documents above 65,536 characters together arrive as stubs that keep their
@@ -360,7 +376,8 @@ when the core advertises `chunkedAnswers`.
   A reconnect tail is complete or replaced by a page; it is never truncated.
 - History pages carry at most 120 messages by default, 200 for `messages.list`,
   and 12 MiB of serialized UTF-8 message data, including JSON escaping and array
-  separators. The journal iterates its thread index and stops at the count or
+  separators, or the lower `maxBytes` the client asks for. A resume tail is
+  never cut to `maxBytes`. The journal iterates its thread index and stops at the count or
   byte boundary, retaining complete messages and a gapless backwards cursor.
   Current buffered parts count toward the budget. Both budgets measure each
   message as the client receives it: with `compactTools` a finished tool's
@@ -409,8 +426,11 @@ a real temporary core, a 750 ms snapshot delay and a large folded tool output.
 eighth prompt, a picture every 25th, 30 tool outputs per answer, 48.9 MB
 of parts) and times `threads.get` on loopback and through a 150 ms relay, then
 the click to the first message in headless Chrome, plain and throttled. `--base`
-skips the parameters an older core does not take. The
-[2026-10-05 report](../bench/results/2026-10-05-thread-open.md) has the numbers;
+skips the parameters an older core does not take, `--rpc-only` the browser. The
+[2026-10-05 report](../bench/results/2026-10-05-thread-open.md) has the numbers,
+and the [2026-10-13 report](../bench/results/2026-10-13-thread-open.md) the
+screen page against main: 1,305 KB to 129 KB, and 1,902 ms to 297 ms from click
+to first message on a throttled link;
 `tests/e2e/thread-open.test.ts` captures the bar at both widths and checks
 its total against the page the core sends. `tests/e2e/thread-reopen.test.ts`
 drives the rest at phone and desktop widths on a real core: a deferred picture

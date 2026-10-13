@@ -811,6 +811,24 @@ test('the top of a paged list asks the store for the page above it, once', async
   expect(paged.calls()).toBe(1);
 });
 
+test('a first page too short to scroll asks for the page above it at once; a list past the screen waits for the reader', async () => {
+  // A first page holds about one screen: with nothing to scroll, no scroll event would ever ask.
+  const short = thread(3);
+  stubLayout(short.length * ESTIMATE);
+  const paged = pagedStore({ openThread: { id: 't-short', turns: [], messages: [] } });
+  running = mount(MessageList, { target: document.body, props: { store: paged.store, threadId: 't-short', messages: short } });
+  await settle();
+  expect(paged.calls()).toBe(1);
+  await unmount(running); running = null;
+
+  const long = thread(200);
+  stubLayout(long.length * ESTIMATE);
+  const tall = pagedStore({ openThread: { id: 't-tall', turns: [], messages: [] } });
+  running = mount(MessageList, { target: document.body, props: { store: tall.store, threadId: 't-tall', messages: long } });
+  await settle();
+  expect(tall.calls()).toBe(0);
+});
+
 test('a thread whose first message is loaded asks for nothing at the top', async () => {
   const messages = thread(200);
   stubLayout(messages.length * ESTIMATE);
@@ -1049,12 +1067,18 @@ function rowsDrawn(): HTMLElement[] {
   return Array.from(document.querySelectorAll<HTMLElement>('[data-testid=message], [data-testid=message-rest]'));
 }
 
+/** The heavy thread whole: its first page holds about one screen, and the tests below walk rows, not pages. */
+async function openWhole(live: Store, threadId: string): Promise<void> {
+  await live.open(threadId);
+  while (live.messagesBefore !== null) if (await live.loadOlder() === 0) throw new Error(`${threadId} stopped paging`);
+}
+
 test('a turn of a thousand calls is drawn as a window of rows, and only its first row names the model', async ({ ready }) => {
   window.localStorage.clear();
   const { store: live } = await ready({ delayMs: 0, heavy: true });
-  await live.open('t-heavy');
+  await openWhole(live, 't-heavy');
   const messages = live.openThread?.messages ?? [];
-  // The whole 11.5 MiB conversation fits one page: nothing is left to load above it.
+  // Paged in whole: nothing is left to load above it.
   expect(messages).toHaveLength(40);
   expect(live.messagesBefore).toBeNull();
   const giant = messages.reduce((a, b) => (b.parts.length > a.parts.length ? b : a));
@@ -1102,7 +1126,7 @@ test('a turn of a thousand calls is drawn as a window of rows, and only its firs
 test('a scroll inside the rows already drawn redraws nothing and reads no tool call again', async ({ ready }) => {
   window.localStorage.clear();
   const { store: live } = await ready({ delayMs: 0, heavy: true });
-  await live.open('t-heavy');
+  await openWhole(live, 't-heavy');
   const messages = live.openThread?.messages ?? [];
   stubLayout(60_000);
   running = mount(MessageList, { target: document.body, props: { store: live, threadId: 't-heavy', messages } });
@@ -1133,7 +1157,7 @@ test('Ctrl+F opens the row of a long message that holds the match, not its first
   window.localStorage.clear();
   Range.prototype.getBoundingClientRect ??= () => new DOMRect(0, 0, 0, 0);
   const { store: live } = await ready({ delayMs: 0, heavy: true });
-  await live.open('t-heavy');
+  await openWhole(live, 't-heavy');
   const messages = live.openThread?.messages ?? [];
   const giant = messages.reduce((a, b) => (b.parts.length > a.parts.length ? b : a));
   // A word no other part holds, in a paragraph deep inside the giant message.
@@ -1168,7 +1192,7 @@ test('Ctrl+F opens the row of a long message that holds the match, not its first
 test('a place read inside a long message is saved by message with its row, and opened again on that row', async ({ ready }) => {
   window.localStorage.clear();
   const { store: live } = await ready({ delayMs: 0, heavy: true });
-  await live.open('t-heavy');
+  await openWhole(live, 't-heavy');
   const messages = live.openThread?.messages ?? [];
   const giant = messages.reduce((a, b) => (b.parts.length > a.parts.length ? b : a));
   stubLayout(60_000);
