@@ -33,7 +33,12 @@ export interface Parsed {
   why?: string;
   /** Another core's address; its token comes from BOITE_TOKEN, never the command line. */
   core?: string;
+  /** `--context`, `--keep`, `--drop`, `--tools`, `--rules`, `--rules-file`, as typed: `contextRequest` reads them. */
+  context?: { preset?: string; keep?: string; drop?: string; tools?: string; rules?: string; rulesFile?: string };
 }
+
+/** The flags that start a thread or a subagent without part of the user's setup. */
+const CONTEXT_FLAGS = { '--context': 'preset', '--keep': 'keep', '--drop': 'drop', '--tools': 'tools', '--rules': 'rules', '--rules-file': 'rulesFile' } as const;
 
 const BOOLEAN_OPTIONS = ['json', 'multiple', 'worktree', 'wait', 'archived', 'skip'] as const;
 const NUMBER_OPTIONS = ['timeout', 'last', 'before'] as const;
@@ -96,6 +101,7 @@ export function parse(argv: string[]): Parsed {
     else if (arg === '--effort') parsed.effort = next();
     else if (arg === '--speed') parsed.speed = next();
     else if (arg === '--profile') parsed.profile = next();
+    else if (Object.hasOwn(CONTEXT_FLAGS, arg)) parsed.context = { ...parsed.context, [CONTEXT_FLAGS[arg as keyof typeof CONTEXT_FLAGS]]: next() };
     else if (arg.startsWith('--')) throw new Usage(`unknown flag ${arg}`);
     else parsed.positional.push(arg);
   }
@@ -108,4 +114,25 @@ export function requiredText(args: string[], start: number, message: string, tri
   if (trim) text = text.trim();
   if (text.length === 0) throw new Usage(message);
   return text;
+}
+
+/**
+ * The `context` a spawn or a new thread sends, from `--context <preset>`,
+ * `--keep`/`--drop <part,part>`, `--tools <Tool,Tool>` and `--rules <text>` or
+ * `--rules-file <path>`; undefined when none was given. The core checks the values.
+ */
+export function contextRequest(parsed: Parsed, readFile: (path: string) => string): Record<string, unknown> | undefined {
+  const flags = parsed.context;
+  if (flags === undefined) return undefined;
+  if (flags.rules !== undefined && flags.rulesFile !== undefined) throw new Usage('--rules and --rules-file exclude each other');
+  const list = (value: string | undefined) => value === undefined ? undefined : value.split(',').map(item => item.trim()).filter(Boolean);
+  const rules = flags.rulesFile === undefined ? flags.rules : readFile(flags.rulesFile);
+  const request: Record<string, unknown> = {
+    ...(flags.preset === undefined ? {} : { preset: flags.preset }),
+    ...(flags.keep === undefined ? {} : { keep: list(flags.keep) }),
+    ...(flags.drop === undefined ? {} : { drop: list(flags.drop) }),
+    ...(flags.tools === undefined ? {} : { tools: list(flags.tools) }),
+    ...(rules === undefined ? {} : { rules }),
+  };
+  return request;
 }

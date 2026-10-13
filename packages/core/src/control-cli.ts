@@ -11,7 +11,7 @@
  * it to its projects, and its messages reach a thread marked as its own, never
  * as the user's. Deleting threads and deciding permissions stay the owner's.
  */
-import type { PermissionRequest, Project, ProjectThreadRow, QuestionRequest, ThreadSummary } from '@boite/contracts';
+import type { PermissionRequest, Project, ProjectThreadRow, QuestionRequest, RpcParams, ThreadSummary } from '@boite/contracts';
 import type { CoreClient } from './client.ts';
 import { requiredText, Usage, type Parsed } from './cli-args.ts';
 
@@ -312,7 +312,7 @@ export async function controlCommand(client: CoreClient, caller: Caller, threadI
  * the most recent thread anywhere; `--model` replaces the model. The brief is
  * the user's own first prompt.
  */
-export async function ownerThreadNew(client: CoreClient, parsed: Parsed, rest: string[], print: Printer): Promise<void> {
+export async function ownerThreadNew(client: CoreClient, parsed: Parsed, rest: string[], print: Printer, context?: Record<string, unknown>): Promise<void> {
   const query = rest[1];
   if (query === undefined) throw new Usage('thread new needs a project name, id or folder');
   const prompt = requiredText(rest, 2, 'thread new needs a brief after the project');
@@ -327,7 +327,7 @@ export async function ownerThreadNew(client: CoreClient, parsed: Parsed, rest: s
   const created = await client.call('threads.create', {
     projectId: project.id, providerId: base.providerId, accountId: base.accountId, title: parsed.title ?? prompt.trim().split('\n')[0]!.slice(0, 80),
     ...(model === undefined ? {} : { model }), effort: parsed.model === undefined ? base.effort : null, permissionMode: base.permissionMode,
-    ...(parsed.worktree ? { worktree: {} } : {}),
+    ...(parsed.worktree ? { worktree: {} } : {}), ...(context === undefined ? {} : { context: context as RpcParams<'threads.create'>['context'] }),
   });
   const turn = await client.call('turns.start', { threadId: created.id, prompt, clientRequestId: parsed.requestId ?? crypto.randomUUID() });
   print([`thread: ${created.id}`, `title: ${created.title}`, `project: ${project.name}`, `cwd: ${created.cwd}`, `agent: ${created.providerId} ${created.model ?? 'default'}`, `turn: ${turn.id}`], { thread: created, turn });

@@ -16,6 +16,7 @@
   import { controlMenu } from '../lib/controls';
   import type { Store } from '../lib/store.svelte';
   import Menu from './Menu.svelte';
+  import ContextModeBadge from './ContextModeBadge.svelte';
   import CoordinationDialog from './CoordinationDialog.svelte';
   let { store }: { store: Store } = $props();
   let thread = $derived(store.openThread);
@@ -187,6 +188,10 @@
         </span>
       {/if}
 
+      {#if thread?.contextMode}
+        <span class="context-chip"><ContextModeBadge mode={thread.contextMode} testid="thread-context-mode" /></span>
+      {/if}
+
       {#if thread?.parentThreadId}
         <button type="button" class="chip parent" data-testid="delegation-back-parent" data-preload-thread={thread!.parentThreadId} onclick={() => void store.open(thread!.parentThreadId!)}>
           <ArrowLeft size={13} strokeWidth={1.75} />
@@ -319,6 +324,7 @@
   }
   .parent { gap: 4px; cursor: pointer; }
   .incognito { gap: 4px; flex: none; }
+  .context-chip { display: contents; }
 
   .on {
     background: var(--color-active);
@@ -349,7 +355,8 @@
     .pending { flex: none; min-width: var(--touch-target); justify-content: center; }
     .pending-text { display: none; }
     .trace { padding: 0; min-width: var(--touch-target); justify-content: center; }
-    .trace .label, .incognito .label { display: none; }
+    .trace .label, .incognito .label, .context-chip :global(.label) { display: none; }
+    .context-chip :global(.chip) { min-width: var(--touch-target); justify-content: center; }
     .resident { flex: none; padding: 0; min-width: var(--touch-target); justify-content: center; }
     .resident .chip-name { display: none; }
     /* The title's sheet holds these on a phone. */

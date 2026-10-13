@@ -24,7 +24,8 @@ import { DELEGATE_ACTIONS, delegateCommand } from './delegate-cli.ts';
 import { browserCommand, BROWSER_HELP } from './browser-cli.ts';
 import { deviceCommand } from './device-cli.ts';
 import { agentsCommand, AgentsUsage, WAIT_MAX_S } from './agents-cli.ts';
-import { parse, requiredText, Usage, type Parsed } from './cli-args.ts';
+import type { RpcParams } from '@boite/contracts';
+import { contextRequest, parse, requiredText, Usage, type Parsed } from './cli-args.ts';
 import { issueCommand, logsCommand } from './logs-cli.ts';
 import { CONTROL_HELP, controlCommand, isControlCommand, ownerThreadNew, ownerWithoutThread, type Caller } from './control-cli.ts';
 
@@ -121,7 +122,9 @@ ${CONTROL_HELP}
   delegate spawn <brief>         start a subagent on one bounded job; its result
                                  comes back as a message (--model <provider/model>,
                                  --effort <level>, --speed <tier>, --title <title>,
-                                 --profile <id>)
+                                 --profile <id>, and a context mode: --context
+                                 light|neutral, --keep|--drop <parts>, --tools
+                                 <Tool,...>, --rules <text>|--rules-file <path>)
   delegate list                  every subagent and workflow: state, model, time
   delegate send <thread-id> <text>
                                  steer or reuse a subagent, or ask the parent
@@ -310,6 +313,8 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
 
   // An agent's token reads the anonymized view; the owner's terminal reads its own records.
   const agentCaller = Boolean(io.env[AGENT_ENV.coreUrl] && io.env[AGENT_ENV.token] && io.env[AGENT_ENV.threadId]);
+  /** `--rules-file`, read from where the command runs. */
+  const readRules = (path: string): string => readFileSync(absolute(io.cwd, path), 'utf8');
   const commands: Record<string, () => Promise<void>> = {
     'journal-check': async () => {
       if (rest.length !== 0 && rest.length !== 2) throw new Usage('journal-check expects no arguments or a cursor table and rowid');
@@ -366,6 +371,7 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
         ...(parsed.requestId === undefined ? {} : { requestId: parsed.requestId }), ...(parsed.timeout === undefined ? {} : { timeout: parsed.timeout }),
         ...(parsed.title === undefined ? {} : { title: parsed.title }), ...(parsed.model === undefined ? {} : { model: parsed.model }),
         ...(parsed.effort === undefined ? {} : { effort: parsed.effort }), ...(parsed.speed === undefined ? {} : { speed: parsed.speed }), ...(parsed.profile === undefined ? {} : { profile: parsed.profile }),
+        ...(parsed.context === undefined ? {} : { context: contextRequest(parsed, readRules) }),
       }, print);
     },
     agents: async () => {
@@ -425,7 +431,7 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
       const action = want(0, 'move or new');
       if (action === 'new' && caller === 'owner') {
         // From a terminal the brief is the user's own prompt, not an agent's.
-        await ownerThreadNew(client, parsed, rest, print);
+        await ownerThreadNew(client, parsed, rest, print, contextRequest(parsed, readRules));
         return;
       }
       if (action === 'new') {
@@ -434,6 +440,7 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
         const spawned = await client.call('agent.spawn', {
           threadId, project, prompt, requestId: parsed.requestId ?? crypto.randomUUID(),
           ...(parsed.title === undefined ? {} : { title: parsed.title }), ...(parsed.worktree ? { worktree: true } : {}),
+          ...(parsed.context === undefined ? {} : { context: contextRequest(parsed, readRules) as RpcParams<'agent.spawn'>['context'] }),
         });
         print([
           `thread: ${spawned.thread.id}`, `title: ${spawned.thread.title}`, `project: ${spawned.project}`, `cwd: ${spawned.thread.cwd}`,

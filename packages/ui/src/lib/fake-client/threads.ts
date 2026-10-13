@@ -1,6 +1,7 @@
 import { dismissMergedPr } from './merged-pr-archive';
 import { assertIdleFamily } from './completion';
 import { isThreadTerminal, protectedThreadIdsError, threadActive } from '@boite/contracts';
+import { fakeContextMode } from './context-mode';
 /** Threads and their messages: create, read, select, archive, and the turn entry points. */
 import { DEFAULT_THREAD_DONE_RETENTION_DAYS, DEFAULT_THREAD_DELETION_RETENTION_DAYS, attachmentError, previewReferencesError, MESSAGE_PAGE, MESSAGE_PAGE_MAX, MESSAGE_PAGE_MAX_BYTES, RPC_MAX_FRAME_BYTES, RpcErrorCode, type AgentProfile, type AgentWork, type AgentWhere, type Attachment, type Message, type MessageId, type MoveEnd, type PreviewReference, type RpcParams, type Thread, type Turn } from '@boite/contracts';
 import { steerUser } from './user-steering';
@@ -302,6 +303,7 @@ export function threadMethods(ctx: FakeContext) {
       const model = checkModel(provider, account.id, models, params.model ?? defaultModel(provider), ctx.modelCatalogs.has(provider.id + '::' + account.id));
       const effort = checkEffort(provider, models, model, params.effort ?? null);
       checkSpeed(ctx, params.providerId, params.accountId, model, params.speed ?? null);
+      const contextMode = fakeContextMode(provider, params.context);
       if (params.incognito === true) {
         // The core's refusals, by field: the drafts only, and a folder it makes itself.
         if (project.kind !== 'drafts') throw refusal('an incognito conversation starts in the drafts project only', { projectId: project.id, field: 'incognito', expected: 'the drafts project' });
@@ -325,6 +327,7 @@ export function threadMethods(ctx: FakeContext) {
       const thread: Thread = {
         id,
         ...(params.incognito === true ? { incognito: true as const } : {}),
+        ...(contextMode ? { contextMode } : {}),
         projectId: params.projectId,
         title,
         titleSource: 'prompt',

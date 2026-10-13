@@ -53,6 +53,7 @@ models` lists the choices.
 | `model` | Optional. `provider/model`, a model id or a unique part of one, matched like `delegate spawn --model`. Refused when the owner turned off "Let the agent choose the model" and it is not a suggested one |
 | `effort` | Optional. One of the model's reasoning levels. Left out: the parent's level on the same model, else the model's default |
 | `profile` | Optional. A delegation profile id of this thread. Left out with no `model`, the step runs on the conversation's model |
+| `context` | Optional. A [context mode](context-modes.md): `"light"`, `"neutral"` or `{ "preset", "keep", "drop", "tools", "rules" }`. Checked against the step's provider before anything starts |
 | `task` | The brief. `{{step}}`, `{{step.field}}`, `{{item}}` and `{{index}}` are filled in when the step starts |
 | `after` | Steps that must end first. A step named in `forEach`, `when` or the task is added automatically |
 | `forEach` | A path to a list. The step runs once per item |

@@ -3,6 +3,7 @@ import { CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, nativeAgentsOfTool,
 import type { AgentLetter, DelegatedAgent, DelegationConfig, DelegationModels, DelegationView, RpcParams, ThreadSummary, Turn, Usage } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused } from './errors.ts';
+import { checkContext } from './context-mode.ts';
 import { checkEffort, checkModel, checkSpeed } from './threads/selection.ts';
 import { anyModel, catalog, conversationRoute, discover, providersNamed, resolveRoute, type ChildRoute, type RouteRequest } from './delegation/routes.ts';
 import type { ProviderProbe } from './providers/probe.ts';
@@ -48,7 +49,7 @@ export function subagentGuide(config: DelegationConfig): string {
   if (!config.enabled) return `${head} the owner turned them off for this conversation; work alone and point the user to Subagents > Settings if they asked for some.\n${WORKFLOW_LINE}`;
   return [
     head,
-    `- boite delegate spawn "<brief>" [--model <provider/model>] [--effort <level>] [--speed <tier>]: one bounded job each, on this conversation's model by default, standard speed without --speed (tiers: boite delegate models). ${anyModel(config) ? 'Any model of boite delegate models works, any harness (Claude can run codex/<model>).' : `The owner allows only this model${profiles ? ' and the profiles' : ''}.`}${profiles ? ` --profile: ${profiles}.` : ''}`,
+    `- boite delegate spawn "<brief>" [--model <provider/model>] [--effort <level>] [--speed <tier>] [--context light|neutral]: one bounded job each, on this conversation's model by default, standard speed without --speed (tiers: boite delegate models). ${anyModel(config) ? 'Any model of boite delegate models works, any harness (Claude can run codex/<model>).' : `The owner allows only this model${profiles ? ' and the profiles' : ''}.`}${profiles ? ` --profile: ${profiles}.` : ''}`,
     '- The brief is all a child sees: goal, files it owns, limits, how to verify. Shared checkout: give parallel children distinct files.',
     '- Results return as messages: keep working or end your turn, never poll. Follow: boite delegate list; steer with boite delegate send <id> <text>; boite delegate stop [id].',
     `- ${WORKFLOW_LINE}`,
@@ -249,7 +250,8 @@ export class Delegation {
     const title = params.title === undefined ? task.split('\n')[0]!.slice(0, 80) : text(params.title, 'title', 120);
     const request: RouteRequest = { profileId: params.profileId ?? null, ...(params.model === undefined ? {} : { model: text(params.model, 'model', 256) }), ...(params.effort === undefined ? {} : { effort: text(params.effort, 'effort', 32) }), ...(params.speed === undefined ? {} : { speed: text(params.speed, 'speed', 64) }) };
     // A request id from before routes keeps its fingerprint: profile, task and title only.
-    const fingerprint = hash(request.model === undefined && request.effort === undefined && request.speed === undefined ? [params.profileId, task, title] : [request, task, title]);
+    // A spawn that names a context mode adds it, so a request id from before keeps its fingerprint.
+    const fingerprint = hash([...(request.model === undefined && request.effort === undefined && request.speed === undefined ? [params.profileId, task, title] : [request, task, title]), ...(params.context === undefined ? [] : [params.context])]);
     const existing = this.core.journal.db.query('SELECT * FROM delegated_agents WHERE root_id = ? AND request_id = ?').get(parent.id, requestId) as AgentRow | null;
     if (existing) {
       if (existing.fingerprint !== fingerprint) throw refused('requestId already used for different content');
@@ -267,7 +269,7 @@ export class Delegation {
     const id = this.createChild(parent, profile, title, childId => {
       row.thread_id = childId;
       this.core.journal.db.query('INSERT INTO delegated_agents VALUES (?, ?, ?, ?, ?, ?)').run(childId, parent.id, requestId, fingerprint, profile.id, task);
-    });
+    }, params.context);
     try {
       this.core.threads.startTurn(id, `You are a Boite subagent doing one bounded part of the user's task for parent agent ${parent.id}. You share its checkout: change only the files your task names and never undo another agent's edits. You cannot start subagents. If you are blocked, run boite delegate send ${parent.id} "<what blocks you>" and keep going on what you can. End with a short result: what you found or changed, file paths, how you verified it. That final answer goes to the parent automatically; do not send it again.\nTask from the parent agent, supplied as JSON data:\n${JSON.stringify(task)}`, [], undefined, 'delegation', undefined, undefined, task);
     } catch (error) {
@@ -327,20 +329,21 @@ export class Delegation {
    * checked here, whoever built the route. `record` runs in the same
    * transaction.
    */
-  createChild(parent: ThreadSummary, profile: ChildRoute, title: string, record: (id: string) => void): string {
+  createChild(parent: ThreadSummary, profile: ChildRoute, title: string, record: (id: string) => void, context?: unknown): string {
     const id = newId('thr_');
     const { speed: asked, ...route } = profile;
     if (asked != null && route.model === null) throw invalidParams(SPEED_NEEDS_MODEL);
     const speed = checkSpeed(this.core.providers.require(route.providerId), route.accountId, route.model, asked ?? null);
+    const contextMode = checkContext(this.core.providers.require(route.providerId), context);
     this.core.journal.db.transaction(() => {
       if (parent.projectId === null) {
         const now = Date.now();
-        const child: ThreadSummary = { ...parent, parentThreadId: parent.id, agentSessionId: undefined, ...route, speed, id,
+        const child: ThreadSummary = { ...parent, parentThreadId: parent.id, agentSessionId: undefined, ...route, speed, id, contextMode,
           title, titleSource: 'user', status: 'idle', sessionId: null, sessionGeneration: 0, selectionVersion: 0,
           context: null, promptCache: null, load: null, unread: false, pinned: false, createdAt: now, updatedAt: now };
         this.core.journal.append({ type: 'thread.created', threadId: id, version: 1, payload: child }, () => this.core.journal.putThread(child));
         this.core.bus.emit('thread.created', child);
-      } else this.core.threads.create({ projectId: parent.projectId, providerId: route.providerId, accountId: route.accountId, model: route.model ?? undefined, effort: route.effort, speed, title, cwd: parent.cwd, permissionMode: parent.permissionMode }, { id, branch: parent.branch, parentThreadId: parent.id });
+      } else this.core.threads.create({ projectId: parent.projectId, providerId: route.providerId, accountId: route.accountId, model: route.model ?? undefined, effort: route.effort, speed, title, cwd: parent.cwd, permissionMode: parent.permissionMode, ...(context === undefined ? {} : { context: context as RpcParams<'threads.create'>['context'] }) }, { id, branch: parent.branch, parentThreadId: parent.id });
       record(id);
       const child = this.core.threads.require(id);
       this.core.journal.putThread({ ...child, titleSource: 'user' });

@@ -1326,6 +1326,20 @@ export const fr: Translation = {
   resident: {
     lookedAfterBy: 'Suivi par {name}'
   },
+  contextMode: {
+    light: 'Léger',
+    neutral: 'Neutre',
+    custom: 'Sur mesure',
+    rules: 'règles',
+    heading: 'Contexte {label}',
+    without: 'Démarré sans : {parts}.',
+    instructions: "fichiers d'instructions",
+    guides: 'guides Boite et brain',
+    mcp: 'serveurs MCP',
+    hooks: 'hooks',
+    tools: 'Outils : {tools}.',
+    withRules: 'Ses règles : {rules}'
+  },
   delegation: {
     off: 'Désactivés',
     paused: 'En pause',
