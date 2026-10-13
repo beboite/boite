@@ -39,7 +39,7 @@ export class ThreadCreation {
     checkSpeed(provider, account.id, model, params.speed ?? null);
     const id = newId('thr_');
     const placed = await this.core.worktrees.add(id, project, params.worktree?.branch, undefined, beforeMutation ? {
-      beforeMutation: placed => { beforeMutation({ threadId: id, project, path: placed.path, branch: placed.branch, kind: 'worktree' }); },
+      beforeMutation: placed => beforeMutation({ threadId: id, project, path: placed.path, branch: placed.branch, kind: 'worktree' }),
       assertActive: () => beforeMutation.assertActive?.(id), timeoutMs: DRAFT_CLEANUP_TIMEOUT_MS,
     } : undefined);
     try {

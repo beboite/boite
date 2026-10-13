@@ -148,6 +148,12 @@ the core entry 15,114 bytes. The total budgets rise to 4,870,000 and 4,110,000;
 entry budgets stay unchanged. These are bundle sizes, not runtime memory or
 startup measurements.
 
+After integrating `af3acd8e` and the reservation ownership audit fixes, fresh
+Linux builds on 2026-10-13 measure 4,870,320 UI bytes and 4,096,583 core
+JavaScript bytes. The entries are 523,170 and 15,114 bytes. The merged UI
+limit remains main's 4,872,000; the core total limit remains 4,110,000.
+`bun scripts/ci/budgets.ts` passes all four measures.
+
 On 2026-10-10 on Linux with Bun 1.4.2, `main` at `27aa04a8` measured about
 4,438,500 UI bytes and 3,719,300 emitted core JavaScript bytes. The group relay
 and notifications forwarded between members measured 4,442,877 and 3,731,676:

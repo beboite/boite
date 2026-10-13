@@ -8,6 +8,8 @@ import { logGit } from './git/git-log.ts';
 
 /** Every branch the core makes on its own starts with this. */
 export const BRANCH_PREFIX = 'boite/';
+/** The branch transaction records the reservation owner, including crash-only leftovers. */
+const draftBranchOwner = (threadId: ThreadId) => `boite draft reservation ${threadId}`;
 const SLUG_MAX = 40;
 /** How many `-2`, `-3` suffixes are tried before a generated name is refused as taken. */
 const SUFFIX_MAX = 20;
@@ -39,7 +41,7 @@ export interface PlacedWorktree {
 }
 
 interface WorktreePreparation {
-  beforeMutation: (placed: PlacedWorktree) => void;
+  beforeMutation: (placed: PlacedWorktree) => (() => void) | void;
   assertActive: () => void;
   timeoutMs: number;
 }
@@ -123,11 +125,23 @@ export class Worktrees {
         if (wanted !== undefined) throw refused(`${path} already exists: pick another branch name`, { path, branch });
         continue;
       }
-      preparation?.beforeMutation({ branch, path });
+      const abandon = preparation?.beforeMutation({ branch, path });
       await this.exclude(threadId, project, path, preparation);
       // Exclusion lookup awaits git. A cancelled reservation must not start a late add.
       preparation?.assertActive();
-      const added = await this.git(threadId, project.path, ['worktree', 'add', '-b', branch, path], preparation?.timeoutMs);
+      if (preparation) {
+        // Creating the ref and its ownership reflog is atomic. A failed compare-and-swap
+        // cannot confer ownership of a branch created concurrently by another actor.
+        const created = await this.git(threadId, project.path,
+          ['update-ref', '--create-reflog', '-m', draftBranchOwner(threadId), `refs/heads/${branch}`, 'HEAD', ''], preparation.timeoutMs);
+        if (created.code !== 0) {
+          abandon?.();
+          throw refused(`cannot reserve branch ${branch}: ${created.stderr.trim()}`, { branch, path });
+        }
+        preparation.assertActive();
+      }
+      const added = await this.git(threadId, project.path,
+        preparation ? ['worktree', 'add', path, branch] : ['worktree', 'add', '-b', branch, path], preparation?.timeoutMs);
       if (added.code !== 0) {
         throw refused(`git worktree add failed in ${project.path}: ${added.stderr.trim() || `exit ${added.code}`}`, {
           path: project.path,
@@ -174,11 +188,30 @@ export class Worktrees {
       if (left <= 0) throw refused('git cleanup deadline elapsed', { path: placed.path });
       return left;
     };
-    const removed = await this.git(threadId, project.path, ['worktree', 'remove', '--force', placed.path], remaining());
-    if (removed.code !== 0) {
-      this.core.log('warn', `could not remove the worktree ${placed.path}: ${removed.stderr.trim() || `exit ${removed.code}`}`);
-      // An intent can survive before git add, or after removal but before branch deletion.
-      if (timeoutMs === undefined || existsSync(placed.path)) return false;
+    if (timeoutMs !== undefined) {
+      const owner = await this.git(threadId, project.path, ['reflog', 'show', '-1', '--format=%gs', `refs/heads/${placed.branch}`], remaining());
+      if (owner.code !== 0) {
+        const branch = await this.git(threadId, project.path, ['rev-parse', '--verify', '--quiet', `refs/heads/${placed.branch}`], remaining());
+        // Only an absent ref proves cleanup already finished. I/O/identity failures
+        // retain the ledger so a later recovery can retry without guessing ownership.
+        return branch.code === 1;
+      }
+      if (owner.stdout.trim() !== draftBranchOwner(threadId)) {
+        // Nothing proved to be ours remains. Never remove another actor's ref or checkout.
+        this.core.log('warn', `preserving unowned branch ${placed.branch} while releasing a draft reservation`);
+        return true;
+      }
+    }
+    const checkoutOwned = timeoutMs === undefined || await this.checkoutBranch(threadId, project.path, placed.path, remaining()) === placed.branch;
+    if (checkoutOwned) {
+      const removed = await this.git(threadId, project.path,
+        ['worktree', 'remove', '--force', ...(timeoutMs === undefined ? [] : ['--force']), placed.path], remaining());
+      if (removed.code !== 0) {
+        this.core.log('warn', `could not remove the worktree ${placed.path}: ${removed.stderr.trim() || `exit ${removed.code}`}`);
+        if (timeoutMs === undefined || existsSync(placed.path)) return false;
+      }
+    } else if (existsSync(placed.path)) {
+      this.core.log('warn', `preserving a competing checkout at ${placed.path} while releasing a draft reservation`);
     }
     if (timeoutMs !== undefined) {
       const branch = await this.git(threadId, project.path, ['rev-parse', '--verify', '--quiet', `refs/heads/${placed.branch}`], remaining());
@@ -190,6 +223,24 @@ export class Worktrees {
       this.core.log('warn', `could not delete the branch ${placed.branch}: ${deleted.stderr.trim() || `exit ${deleted.code}`}`);
     }
     return deleted.code === 0;
+  }
+
+  /** Git's registered checkout must own the reserved branch before its folder is removed. */
+  private async checkoutBranch(threadId: ThreadId, cwd: string, path: string, timeoutMs?: number): Promise<string | null> {
+    const listed = await this.git(threadId, cwd, ['worktree', 'list', '--porcelain', '-z'], timeoutMs);
+    if (listed.code !== 0) throw refused(`cannot inspect worktrees in ${cwd}: ${listed.stderr.trim()}`);
+    const expected = existsSync(path) ? statSync(path, { bigint: true }) : null;
+    for (const entry of listed.stdout.split('\0\0')) {
+      const fields = entry.split('\0');
+      const location = fields.find(field => field.startsWith('worktree '))?.slice(9);
+      if (!location) continue;
+      const registered = expected && existsSync(location) ? statSync(location, { bigint: true }) : null;
+      if (resolve(location) === resolve(path) || (expected && registered && expected.ino !== 0n &&
+        registered.dev === expected.dev && registered.ino === expected.ino)) {
+        return fields.find(field => field.startsWith('branch refs/heads/'))?.slice('branch refs/heads/'.length) ?? null;
+      }
+    }
+    return null;
   }
 
   private async branchExists(threadId: ThreadId, cwd: string, branch: string, timeoutMs?: number): Promise<boolean> {
@@ -226,15 +277,20 @@ export class Worktrees {
     const at = performance.now();
     const work = Promise.all([new Response(spawned.proc.stderr).text(), new Response(spawned.proc.stdout).text(), spawned.exited]);
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let expired: ReturnType<typeof refused> | undefined;
     const late = timeoutMs === undefined ? null : new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
-        // Kill only this captured, launcher-registered child, never a process-name match.
-        try { spawned.proc.kill('SIGKILL'); } catch { /* Exit can win the timer race. */ }
-        reject(refused(`git cleanup did not finish within ${timeoutMs} ms`, { cwd, args }));
+        expired = refused(`git cleanup did not finish within ${timeoutMs} ms`, { cwd, args });
+        // The registry owns POSIX groups and Windows jobs. Drain git's inherited
+        // pipes before cleanup so its checkout/filter descendants stop writing.
+        this.core.procs.killTree(threadId);
+        timer = setTimeout(() => reject(expired), 3000);
+        void work.then(() => reject(expired), () => reject(expired));
       }, timeoutMs);
     });
     try {
       const [stderr, stdout, code] = await (late === null ? work : Promise.race([work, late]));
+      if (expired) throw expired;
       try { logGit(this.core, threadId, args, code, performance.now() - at, stderr); } catch { /* A diagnostic storage failure must not break worktrees. */ }
       return { code, stderr, stdout };
     } finally { clearTimeout(timer); }

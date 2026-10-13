@@ -97,14 +97,12 @@ export class AttachmentUploadInstances {
   }
 
   private dead(owner: Owner): boolean {
-    // Managers in this process are independent. Even a mismatching timestamp
-    // must never let one of them remove another current-PID instance.
-    if (owner.pid === process.pid) return false;
     try { process.kill(owner.pid, 0); }
     catch (error) { return (error as NodeJS.ErrnoException).code === 'ESRCH'; }
     const startedAt = processPlatform.startedAt(owner.pid);
-    // A newer occupant proves PID reuse. Unavailable identity or permissions
-    // remain conservative, including macOS's unsupported start-time reading.
+    // A newer occupant proves PID reuse, including this process's PID after
+    // a container restart. Same-process managers share a start identity;
+    // equal or unavailable identities and permission errors stay conservative.
     return owner.startedAt !== null && startedAt !== null && startedAt > owner.startedAt;
   }
 

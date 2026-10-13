@@ -182,8 +182,12 @@ Private ownership intent is journalled before creating a reserved folder or
 worktree. Startup recovery preserves published conversations and retries cleanup
 of abandoned reservations. Active reservations and pending cleanup share limits
 of four per connection and 32 globally; failed cleanup keeps its ownership intent.
-Reserved git operations have a ten-second deadline and kill only their captured
-child process when the deadline expires.
+Reserved git operations have a ten-second deadline. Expiry stops the reservation's
+registered process group or Windows job and allows up to three seconds to drain
+inherited pipes before cleanup. A reserved branch is created atomically with an
+ownership reflog entry. Rollback checks that entry and the branch registered at
+the checkout path before overriding its initialization lock; a competing branch,
+checkout and its commits remain untouched.
 Cleanup failures preserve the original creation error and are logged. During
 shutdown, draft and upload cleanup failures do not prevent process or journal
 closure; retained ownership remains available for recovery.
@@ -200,7 +204,9 @@ expire after ten minutes, have per-connection and global byte/count budgets, and
 are removed on release, disconnect or shutdown. Expired references retry inline
 with the same input receipt. Upload instances record their owning process before
 writing bodies. Startup removes only instances whose recorded owner is proved
-dead; live owners and unknown legacy directories remain untouched.
+dead, including reuse of the current PID with a newer start identity. Live owners,
+unavailable identities, other hostnames and unknown legacy directories remain
+untouched: a local process probe cannot establish another host's owner is dead.
 Rejected uploads retain their selected entry, so typing does not retry them.
 Sending uses the original bytes; deselecting and reselecting permits a new upload.
 

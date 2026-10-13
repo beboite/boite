@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Project, RpcEvents, RpcParams } from '@boite/contracts';
 import { refused } from '../src/errors.ts';
@@ -107,10 +107,88 @@ test('worktree intent survives before git mutation and covers partial branch-onl
   expect(git(repo.path, 'branch', '--list', thread.branch!).trim()).toBe('');
   const partial = { ...recorded!, threadId: 'thr_partial_crash', path: join(repo.path, '.boite', 'worktrees', 'partial'), branch: 'boite/partial' };
   ledger.record(partial);
-  git(repo.path, 'branch', partial.branch);
+  git(repo.path, 'update-ref', '--create-reflog', '-m', `boite draft reservation ${partial.threadId}`, `refs/heads/${partial.branch}`, 'HEAD', '');
   await new DraftPreparations(h.core).recover();
   expect(git(repo.path, 'branch', '--list', partial.branch).trim()).toBe('');
   expect(ledger.list()).toEqual([]);
+});
+
+test('recovery removes an owned initializing worktree lock and preserves an unrelated locked checkout', async () => {
+  const repo = await repository();
+  const thread = await h.core.threads.creation.createInWorktree({ ...choice, projectId: repo.id, worktree: {} }, false, ownership => ledger.record(ownership));
+  const path = thread.cwd;
+  const unrelated = join(repo.path, '.boite', 'worktrees', 'unrelated');
+  git(repo.path, 'worktree', 'lock', '--reason', 'initializing', path);
+  git(repo.path, 'worktree', 'add', '-b', 'boite/unrelated', unrelated);
+  git(repo.path, 'worktree', 'lock', '--reason', 'keep this checkout', unrelated);
+  await new DraftPreparations(h.core).recover();
+  expect(existsSync(path)).toBe(false);
+  expect(git(repo.path, 'worktree', 'list', '--porcelain')).not.toContain(`refs/heads/${thread.branch}`);
+  expect(git(repo.path, 'branch', '--list', thread.branch!).trim()).toBe('');
+  expect(ledger.list()).toEqual([]);
+  await new DraftPreparations(h.core).recover();
+  expect(ledger.list()).toEqual([]);
+  expect(existsSync(unrelated)).toBe(true);
+  expect(git(repo.path, 'worktree', 'list', '--porcelain')).toContain('locked keep this checkout');
+  expect(git(repo.path, 'branch', '--list', 'boite/unrelated').trim()).not.toBe('');
+});
+
+for (const checkedOut of [false, true]) test(`a concurrent branch and its unmerged commit survive failed draft reservation, checked out: ${checkedOut}`, async () => {
+  const repo = await repository();
+  const branch = 'boite/racing-owner';
+  const competingPath = join(h.dataDir, 'competing-checkout');
+  const spawn = h.core.procs.spawn.bind(h.core.procs);
+  let commit = '';
+  const held = spyOn(h.core.procs, 'spawn').mockImplementation((id, cmd, args, options) => {
+    if (!commit && cmd === 'git' && ((args[0] === 'worktree' && args[1] === 'add') || args[0] === 'update-ref')) {
+      if (checkedOut) git(repo.path, 'worktree', 'add', '-b', branch, competingPath);
+      else { git(repo.path, 'branch', branch); git(repo.path, 'checkout', branch); }
+      const cwd = checkedOut ? competingPath : repo.path;
+      writeFileSync(join(cwd, 'unmerged.txt'), 'another actor owns this work\n');
+      git(cwd, 'add', 'unmerged.txt'); git(cwd, 'commit', '-m', 'unmerged competing work');
+      commit = git(cwd, 'rev-parse', 'HEAD').trim();
+      if (!checkedOut) git(repo.path, 'checkout', '-');
+    }
+    return spawn(id, cmd, args, options);
+  });
+  try {
+    await expect(h.core.drafts.prepare('branch_race_connection', { ...choice, projectId: repo.id,
+      worktree: { branch }, preparationId: 'branch_race_owner' })).rejects.toBeInstanceOf(Error);
+    expect(commit).not.toBe('');
+    expect(git(repo.path, 'rev-parse', `refs/heads/${branch}`).trim()).toBe(commit);
+    expect(git(repo.path, 'show', `${branch}:unmerged.txt`)).toBe('another actor owns this work\n');
+    expect(ledger.list()).toEqual([]);
+    await new DraftPreparations(h.core).recover();
+    expect(git(repo.path, 'rev-parse', `refs/heads/${branch}`).trim()).toBe(commit);
+    if (checkedOut) expect(existsSync(join(competingPath, 'unmerged.txt'))).toBe(true);
+  } finally { held.mockRestore(); }
+});
+
+test('a competing checkout at the reserved path survives rollback of our separately owned branch', async () => {
+  const repo = await repository();
+  const branch = 'boite/shared-path';
+  const otherBranch = 'boite/shared_path';
+  const spawn = h.core.procs.spawn.bind(h.core.procs);
+  let competingPath = '';
+  const held = spyOn(h.core.procs, 'spawn').mockImplementation((id, cmd, args, options) => {
+    if (!competingPath && cmd === 'git' && args[0] === 'worktree' && args[1] === 'add') {
+      competingPath = args[2]!;
+      git(repo.path, 'worktree', 'add', '-b', otherBranch, competingPath);
+      writeFileSync(join(competingPath, 'unmerged.txt'), 'preserve the competing checkout\n');
+      git(competingPath, 'add', 'unmerged.txt'); git(competingPath, 'commit', '-m', 'competing checkout work');
+    }
+    return spawn(id, cmd, args, options);
+  });
+  try {
+    await expect(h.core.drafts.prepare('checkout_race_connection', { ...choice, projectId: repo.id,
+      worktree: { branch }, preparationId: 'checkout_race_owner' })).rejects.toBeInstanceOf(Error);
+    expect(competingPath).not.toBe('');
+    expect(existsSync(join(competingPath, 'unmerged.txt'))).toBe(true);
+    expect(git(competingPath, 'symbolic-ref', '--short', 'HEAD').trim()).toBe(otherBranch);
+    expect(git(repo.path, 'show', `${otherBranch}:unmerged.txt`)).toBe('preserve the competing checkout\n');
+    expect(git(repo.path, 'branch', '--list', branch).trim()).toBe('');
+    expect(ledger.list()).toEqual([]);
+  } finally { held.mockRestore(); }
 });
 
 test('published journal adoption wins over ownership left by a crash', async () => {
@@ -273,21 +351,39 @@ test('disconnect during startup recovery cannot create a late reserved workspace
   expect(ledger.list()).toEqual([]);
 });
 
-test('cleanup deadline terminates only its captured registered child', async () => {
+test('cleanup deadline stops the registered git tree before returning and preserves unrelated processes', async () => {
   await h.core.projects.requireFolder(project.id);
   const spawn = h.core.procs.spawn.bind(h.core.procs);
   const untouched = spawn('unrelated_process', process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { cwd: project.path });
+  const marker = join(h.dataDir, 'git-descendant-pid');
+  const descendant = `import { writeFileSync } from 'node:fs';
+    process.on('SIGTERM', () => {});
+    writeFileSync(${JSON.stringify(marker)}, String(process.pid));
+    setInterval(() => {}, 1000);`;
+  const fixture = `Bun.spawn({ cmd: [${JSON.stringify(process.execPath)}, '-e', ${JSON.stringify(descendant)}],
+    stdin: 'ignore', stdout: 'inherit', stderr: 'inherit', windowsHide: true });
+    setInterval(() => {}, 1000);`;
   let captured: ReturnType<typeof spawn> | undefined;
   const held = spyOn(h.core.procs, 'spawn').mockImplementation((id, _cmd, _args, options) => {
-    captured = spawn(id, process.execPath, ['-e', 'setInterval(() => {}, 1000)'], options);
+    captured = spawn(id, process.execPath, ['-e', fixture], options);
     return captured;
   });
   try {
-    await expect(h.core.worktrees.remove('cleanup_timeout', project, { path: join(project.path, 'unused'), branch: 'boite/unused' }, 30))
+    await expect(h.core.worktrees.remove('cleanup_timeout', project, { path: join(project.path, 'unused'), branch: 'boite/unused' }, 1500))
       .rejects.toThrow('git cleanup did not finish');
+    expect(existsSync(marker)).toBe(true);
+    const pid = Number(readFileSync(marker, 'utf8'));
+    await waitFor(() => {
+      try { process.kill(pid, 0); return false; }
+      catch (error) { return (error as NodeJS.ErrnoException).code === 'ESRCH'; }
+    }, 1500);
     expect(await captured!.exited).not.toBe(0);
     expect(untouched.proc.exitCode).toBeNull();
   } finally {
+    if (existsSync(marker)) {
+      const pid = Number(readFileSync(marker, 'utf8'));
+      try { process.kill(pid, 'SIGKILL'); } catch { /* The registry already stopped this captured descendant. */ }
+    }
     held.mockRestore(); untouched.proc.kill('SIGKILL'); await untouched.exited;
   }
-});
+}, 15_000);

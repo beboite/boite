@@ -361,15 +361,45 @@ test('recovery preserves independent same-process managers and another living pr
     const one = await first.upload('owner', attachment);
     const two = await second.upload('owner', attachment);
     const foreign = await recordedInstance(child.proc.pid, processPlatform.startedAt(child.proc.pid));
-    // Even invalid birth evidence must not delete another manager in our process.
-    const current = await recordedInstance(process.pid, 1);
+    const current = await recordedInstance(process.pid, processPlatform.startedAt(process.pid));
+    const unknown = await recordedInstance(process.pid, null);
     const recovery = await store().recover();
-    expect(recovery).toEqual({ removed: [], preserved: 4 });
+    expect(recovery).toEqual({ removed: [], preserved: 5 });
     expect(existsSync(foreign)).toBe(true);
     expect(existsSync(current)).toBe(true);
+    expect(existsSync(unknown)).toBe(true);
     expect(await first.resolve('owner', [metadata(attachment)], [one.id])).toEqual([attachment]);
     expect(await second.resolve('owner', [metadata(attachment)], [two.id])).toEqual([attachment]);
   } finally { child.proc.kill(); await child.exited; await h.stop(); }
+});
+
+test('recovery removes an older instance reusing the current PID only on the same host and platform', async () => {
+  const stale = await recordedInstance(process.pid, 1_000);
+  const foreignHost = await recordedInstance(process.pid, 1_000);
+  const foreignPlatform = await recordedInstance(process.pid, 1_000);
+  for (const [path, changed] of [
+    [foreignHost, { hostname: `${hostname()}-other`.slice(-255) }],
+    [foreignPlatform, { platform: process.platform === 'win32' ? 'linux' : 'win32' }],
+  ] as const) {
+    const marker = join(path, 'owner.json');
+    await writeFile(marker, JSON.stringify({ ...JSON.parse(await fs.readFile(marker, 'utf8')), ...changed }));
+  }
+  const identity = spyOn(processPlatform, 'startedAt').mockReturnValue(2_000);
+  try {
+    expect(await store().recover()).toEqual({ removed: [stale.split(/[\\/]/).at(-1)!], preserved: 2 });
+    expect(existsSync(stale)).toBe(false);
+    expect(existsSync(foreignHost)).toBe(true);
+    expect(existsSync(foreignPlatform)).toBe(true);
+  } finally { identity.mockRestore(); }
+});
+
+test('recovery preserves a current-PID instance when its current start identity is unavailable', async () => {
+  const recorded = await recordedInstance(process.pid, 1_000);
+  const identity = spyOn(processPlatform, 'startedAt').mockReturnValue(null);
+  try {
+    expect(await store().recover()).toEqual({ removed: [], preserved: 1 });
+    expect(existsSync(recorded)).toBe(true);
+  } finally { identity.mockRestore(); }
 });
 
 test('a process killed during body writing leaves a recorded partial upload recoverable after restart', async () => {
