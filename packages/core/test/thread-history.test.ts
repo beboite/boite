@@ -198,9 +198,10 @@ test('no message keeps a thread from opening: heavy inputs, documents and texts 
     const writes = Array.from({ length: 4 }, (_, index) => ({ type: 'tool' as const, toolId: `write-${index}`, name: 'Write', status: 'done' as const,
       input: { file_path: `out-${index}.txt`, content: file }, output: 'written',
       documents: [{ kind: 'diff' as const, path: `out-${index}.txt`, oldText: '', newText: file }] }));
-    // Calls under every per-call threshold whose inputs alone still outweigh a message's budget.
+    // Calls under every per-call threshold whose inputs alone still outweigh a message's budget;
+    // their outputs fold away whatever their length.
     const many = Array.from({ length: 600 }, (_, index) => ({ type: 'tool' as const, toolId: `grep-${index}`, name: 'Grep', status: 'done' as const,
-      input: { pattern: `p${index}`, note: 'n'.repeat(15_000) }, output: 'o'.repeat(15_000) }));
+      input: { pattern: `p${index}`, note: 'n'.repeat(15_000) }, output: 'o'.repeat(300) }));
     const parts: Record<string, Message['parts']> = { writes, many, prose: [{ type: 'text', text: 'é'.repeat(9_000_000) }], last: [{ type: 'text', text: 'last' }] };
     harness.core.journal.append({ type: 'message.started', threadId, version: 1, payload: {} }, () => {
       for (const [index, id] of Object.keys(parts).entries()) {
