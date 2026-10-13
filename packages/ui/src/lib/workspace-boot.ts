@@ -1,5 +1,4 @@
 // Owns workspace startup, remembered-machine admission and primary-machine entries.
-import { Store } from './store.svelte';
 import type { Machine, Workspace } from './workspace.svelte';
 import {
   clearStoredEndpoint, linkedCore, openOnMainMachine, readEnvironments,
@@ -16,6 +15,8 @@ interface BootLifecycle {
   silent(booting: Promise<void>): Promise<boolean>;
   standIn(): void;
   primaryAnswered(): void;
+  /** The fake second machine stays in the facade: a dynamic import of the fake client here moved shared chunks into the entry. */
+  addFakeMachine(): Promise<void>;
 }
 
 /** What a machine that has not answered yet is called: its address, never "This PC". */
@@ -40,34 +41,6 @@ export function primaryMachine(workspace: Workspace, selected: Endpoint | null, 
   };
   workspace.restoreProfile(machine);
   return machine;
-}
-
-async function addFakeMachine(workspace: Workspace, lifecycle: BootLifecycle): Promise<void> {
-  const store = workspace.primary;
-  const { FakeClient } = await import('./fake-client');
-  if (!lifecycle.current()) return;
-  const remote = new Store();
-  remote.machineId = 'http://builder.test';
-  remote.visible = false;
-  remote.attach(new FakeClient({ coreId: 'fake-builder', coreName: 'Builder', publicUrl: 'https://builder.test' }));
-  await remote.connect();
-  if (!lifecycle.current()) {
-    remote.client?.close();
-    remote.detach();
-    return;
-  }
-  remote.booted = true;
-  if (remote.core) remote.core.os = 'linux';
-  const machine = { id: remote.machineId, label: 'Builder', store: remote };
-  workspace.restoreProfile(machine);
-  workspace.machines = [...workspace.machines, machine];
-  // The two fake machines are one group, so the group card has members to show.
-  if (store.client && remote.client && (await store.client.call('group.get', {})) === null) {
-    await store.client.call('group.create', { name: 'Home' });
-    const { invite } = await store.client.call('group.invite', {});
-    await remote.client.call('group.join', { invite });
-    await Promise.all([store.loadGroup(), remote.loadGroup()]);
-  }
 }
 
 async function connectShellLocal(workspace: Workspace, lifecycle: BootLifecycle): Promise<void> {
@@ -165,7 +138,7 @@ export async function bootWorkspace(workspace: Workspace, thread: string | null,
   lifecycle.standIn();
   if (import.meta.env.DEV && new URLSearchParams(window.location.search).get('fake') === '1') {
     if (new URLSearchParams(window.location.search).get('machines') === '1') {
-      await addFakeMachine(workspace, lifecycle);
+      await lifecycle.addFakeMachine();
     }
     return;
   }

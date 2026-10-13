@@ -221,6 +221,34 @@ export class Workspace {
     this.#standIn(lifecycle, generation);
   }
 
+  async #addFakeMachine(lifecycle: number): Promise<void> {
+    const store = this.primary;
+    const { FakeClient } = await import('./fake-client');
+    if (!this.#current(lifecycle)) return;
+    const remote = new Store();
+    remote.machineId = 'http://builder.test';
+    remote.visible = false;
+    remote.attach(new FakeClient({ coreId: 'fake-builder', coreName: 'Builder', publicUrl: 'https://builder.test' }));
+    await remote.connect();
+    if (!this.#current(lifecycle)) {
+      remote.client?.close();
+      remote.detach();
+      return;
+    }
+    remote.booted = true;
+    if (remote.core) remote.core.os = 'linux';
+    const machine = { id: remote.machineId, label: 'Builder', store: remote };
+    this.restoreProfile(machine);
+    this.machines = [...this.machines, machine];
+    // The two fake machines are one group, so the group card has members to show.
+    if (store.client && remote.client && (await store.client.call('group.get', {})) === null) {
+      await store.client.call('group.create', { name: 'Home' });
+      const { invite } = await store.client.call('group.invite', {});
+      await remote.client.call('group.join', { invite });
+      await Promise.all([store.loadGroup(), remote.loadGroup()]);
+    }
+  }
+
   async #boot(thread: string | null): Promise<void> {
     const lifecycle = ++this.#lifecycle;
     const generation = this.#generation;
@@ -229,7 +257,9 @@ export class Workspace {
       navigationCurrent: () => generation === this.#generation,
       silent: (booting) => this.#silent(booting),
       standIn: () => this.#standIn(lifecycle, generation),
-      primaryAnswered: () => this.#primaryAnswered(lifecycle, generation)
+      primaryAnswered: () => this.#primaryAnswered(lifecycle, generation),
+      // Behind DEV here too, so a release build drops the method and its fake client.
+      addFakeMachine: () => (import.meta.env.DEV ? this.#addFakeMachine(lifecycle) : Promise.resolve())
     });
   }
 
