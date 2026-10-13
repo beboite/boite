@@ -1,5 +1,5 @@
 /** Core settings, the scheduler they size, keybindings and telemetry. */
-import { KEYBINDING_COMMANDS, parseChord, RpcErrorCode, checkSettingsPatch } from '@boite/contracts';
+import { KEYBINDING_COMMANDS, parseChord, RpcErrorCode, checkSettingsPatch, keepLaterFavorites } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import type { FakeContext, FakeMethods } from './context';
 import { gatewayQuotas } from './accounts';
@@ -76,7 +76,7 @@ export function settingsMethods(ctx: FakeContext) {
       if (titleModel && ctx.providers.find(p => p.id === titleModel.providerId)?.titles !== true) {
         throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `titleModel names ${titleModel.providerId}, which is not a loaded provider that writes titles`, data: { field: 'titleModel' } });
       }
-      ctx.settings = { ...ctx.settings, ...checked.patch };
+      ctx.settings = { ...ctx.settings, ...keepLaterFavorites(ctx.settings, checked.patch) };
       ctx.emit('scheduler.updated', structuredClone(ctx.scheduler));
       ctx.emit('settings.updated', { ...ctx.settings });
       settleSettings(ctx, ctx.settings);

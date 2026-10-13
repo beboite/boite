@@ -53,7 +53,13 @@ export class Accounts {
   installStates = $state<Record<ProviderId, ProviderInstallState>>({});
   /** Where each agent of this machine stands against its newest release, the core's own reading. */
   harnessUpdates = $state<HarnessUpdate[]>([]);
-  accounts = $state<Account[]>([]);
+  #accounts = $state<Account[]>([]);
+  get accounts(): Account[] { return this.#accounts; }
+  set accounts(value: Account[]) {
+    this.#accounts = value;
+    // Old favorites named an account by id: its label is known once the accounts are.
+    this.ctx.models.syncFavorites();
+  }
   /** Keyed by account id: one entry while a login runs, and after one failed. */
   logins = $state<Record<string, LoginState>>({});
   loginRevision = 0;

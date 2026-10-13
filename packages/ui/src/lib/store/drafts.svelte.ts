@@ -69,6 +69,8 @@ export class Drafts {
   #backupFailed = false;
   #timer: ReturnType<typeof setTimeout> | undefined;
   #waitingSince = 0;
+  /** When the armed timer writes the durable journal. */
+  #due = 0;
   /** When `resume` last opened a draft: the open one outranks every draft parked before it. */
   #opened = 0;
 
@@ -366,13 +368,23 @@ export class Drafts {
     for (const bytes of this.#assetIds.keys()) if (!retained.has(bytes)) this.#assetIds.delete(bytes);
   }
 
-  /** The durable journal after a pause in typing, never later than the longest wait. */
+  /**
+   * The durable journal after a pause in typing, never later than the longest
+   * wait. A key only moves the deadline: the armed timer, on firing early,
+   * waits out the rest instead of every key clearing and setting a timer.
+   */
   #writeLater(): void {
     const now = Date.now();
     if (this.#timer === undefined) this.#waitingSince = now;
-    else clearTimeout(this.#timer);
-    const wait = Math.min(DURABLE_DELAY_MS, Math.max(0, this.#waitingSince + DURABLE_MAX_WAIT_MS - now));
-    this.#timer = setTimeout(() => this.#writeNow(), wait);
+    this.#due = now + Math.min(DURABLE_DELAY_MS, Math.max(0, this.#waitingSince + DURABLE_MAX_WAIT_MS - now));
+    if (this.#timer === undefined) this.#armWrite();
+  }
+
+  #armWrite(): void {
+    this.#timer = setTimeout(() => {
+      if (Date.now() < this.#due) this.#armWrite();
+      else this.#writeNow();
+    }, Math.max(0, this.#due - Date.now()));
   }
 
   #writeNow(): void {
@@ -431,9 +443,10 @@ export class Drafts {
 function savedInput(input: Input, assetId: (bytes: string) => string) {
   const file = (item: Attachment) => ({ kind: item.kind, mimeType: item.mimeType, name: item.name,
     assetId: unresolvedAssetId(item) ?? assetId(item.data), ...(unresolvedAssetId(item) ? {} : { data: item.data }) });
+  // `$state.snapshot` hands anything but an object to `structuredClone`, which an absent list costs on every key.
   return { text: input.text, editing: input.editing ?? null, attachments: input.attachments.map(file),
-    previewReferences: $state.snapshot(input.previewReferences),
-    queued: input.queued.map(item => ({ text: item.text, attachments: item.attachments.map(file), previewReferences: $state.snapshot(item.previewReferences),
+    previewReferences: input.previewReferences && $state.snapshot(input.previewReferences),
+    queued: input.queued.map(item => ({ text: item.text, attachments: item.attachments.map(file), previewReferences: item.previewReferences && $state.snapshot(item.previewReferences),
       ...(item.request ? { request: $state.snapshot(item.request) } : {}) })) };
 }
 

@@ -1,8 +1,10 @@
 <script lang="ts">
   import { Brain, Zap } from '@lucide/svelte';
   import type { EffortLevel } from '@boite/contracts';
+  import { onDestroy } from 'svelte';
   import { Closing } from '../lib/closing.svelte';
   import { floating } from '../lib/floating';
+  import { glides } from '../lib/motion';
   import { strings } from '../lib/strings';
   import { levelName } from '../lib/format';
 
@@ -10,9 +12,11 @@
    * The reasoning chip and its popover: one dot per level of the model's scale,
    * filled up to the active one. A click on a dot or its name, a drag along the
    * track, or the arrows move it, and none of them close the popover: the level
-   * is a setting of the model the composer already runs. A model with a fast
-   * mode puts its switch at the top left of the popover, and the chip carries
-   * a bolt while it is on.
+   * is a setting of the model the composer already runs. The filled part glows
+   * brighter as the level rises. A model with a fast mode puts its switch at
+   * the top left of the popover, and the chip carries a bolt while it is on;
+   * switching a speed on sends streaks across the popover, more and faster for
+   * the second tier.
    */
   let {
     levels,
@@ -45,8 +49,42 @@
   const label = $derived(current ? levelName(current) : selectedSpeed ? levelName(selectedSpeed) : strings.composer.standardSpeed);
   // An accent above a leading capital raises the label's visible centre.
   const accentedCap = $derived(/^\p{Lu}[\u0300-\u0314]/u.test(label.normalize('NFD')));
-  function cycleSpeed() { const next = speeds.findIndex(entry => entry.id === speed) + 1; onspeed(next >= speeds.length ? null : speeds[next]!.id); }
+  function cycleSpeed() {
+    const next = speeds.findIndex(entry => entry.id === speed) + 1;
+    onspeed(next >= speeds.length ? null : speeds[next]!.id);
+    if (next < speeds.length) burst(Math.min(2, next + 1));
+  }
   let last = $derived(Math.max(0, levels.length - 1));
+  /** 0 at the lowest level, 1 at the highest: how much the filled part glows. */
+  let glow = $derived(last === 0 ? 1 : index / last);
+
+  type Streak = { top: number; from: number; length: number; delay: number; duration: number; thick: number; alpha: number };
+  /** The streaks of the latest switch to a speed; `power` is 1 for the first tier, 2 past it. */
+  let rush = $state<{ id: number; power: number; streaks: Streak[] } | null>(null);
+  let rushes = 0;
+  let rushTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Speed lines running right to left over the popover, as text does when it scrolls by fast. */
+  function burst(power: number) {
+    if (!glides()) return;
+    const strong = power > 1;
+    const count = strong ? 22 : 12;
+    const streaks = Array.from({ length: count }, (_, at) => ({
+      // Spread over the height, jittered so two bursts never draw the same lines.
+      top: 3 + ((at + Math.random() * 0.8) / count) * 94,
+      // The first lines are already inside the popover, so the burst reads at once.
+      from: at % 3 === 0 ? 30 + Math.random() * 60 : 100,
+      length: strong ? 60 + Math.random() * 110 : 34 + Math.random() * 56,
+      delay: Math.random() * (strong ? 260 : 160),
+      duration: strong ? 200 + Math.random() * 140 : 320 + Math.random() * 160,
+      thick: strong ? (Math.random() < 0.4 ? 2.5 : 1.5) : 1.5,
+      alpha: (strong ? 0.6 : 0.45) + Math.random() * 0.35
+    }));
+    rush = { id: ++rushes, power, streaks };
+    clearTimeout(rushTimer);
+    const end = Math.max(...streaks.map(streak => streak.delay + streak.duration));
+    rushTimer = setTimeout(() => { rush = null; }, end + 60);
+  }
+  onDestroy(() => clearTimeout(rushTimer));
 
   /** The dots are evenly spaced over the line, so a level sits at a plain percentage. */
   function offset(at: number): string {
@@ -165,20 +203,32 @@
       onanimationend={popover.end}
       {onkeydown}
     >
+      {#if rush}
+        {#key rush.id}
+          <div class="streaks" class:strong={rush.power > 1} aria-hidden="true" data-testid="effort-streaks" data-power={rush.power}>
+            {#each rush.streaks as streak, at (at)}
+              <span class="streak" style:top={`${streak.top}%`} style:--from={`${streak.from}%`} style:--length={`${streak.length}px`} style:--thick={`${streak.thick}px`} style:--alpha={streak.alpha} style:animation-delay={`${streak.delay}ms`} style:animation-duration={`${streak.duration}ms`}></span>
+            {/each}
+          </div>
+        {/key}
+      {/if}
       <div class="heading">
         {#if speeds.length > 0}
           <button type="button" class="speed" class:active={!!selectedSpeed} data-testid="effort-speed" aria-label={strings.composer.speed} aria-pressed={!!selectedSpeed} title={selectedSpeed?.description ?? (selectedSpeed ? levelName(selectedSpeed) : strings.composer.standardSpeed)} onclick={cycleSpeed}>
-            <Zap size={14} fill={selectedSpeed ? 'currentColor' : 'none'} />
+            {#key rush?.id}<span class="bolt" class:dash={!!rush} class:strong={(rush?.power ?? 0) > 1}><Zap size={14} fill={selectedSpeed ? 'currentColor' : 'none'} /></span>{/key}
             {#if selectedSpeed}<span class="ui-label" data-testid="effort-speed-label">{levelName(selectedSpeed)}</span>{/if}
           </button>
         {/if}
-        <span class="level ui-label">{current ? levelName(current) : strings.composer.standardSpeed}</span>
+        {#key rush?.id}<span class="level ui-label" class:dash={!!rush} class:strong={(rush?.power ?? 0) > 1}>{current ? levelName(current) : strings.composer.standardSpeed}</span>{/key}
       </div>
 
       {#if levels.length > 0}
       <div
         class="track"
-        style:--effort-intensity={`${40 + (last === 0 ? 1 : index / last) * 60}%`}
+        style:--effort-intensity={`${40 + glow * 60}%`}
+        style:--effort-glow={glow}
+        style:--effort-halo={`${Math.round(10 + glow * 55)}%`}
+        style:--effort-blur={`${Math.round(2 + glow * 16)}px`}
         bind:this={track}
         role="slider"
         tabindex="0"
@@ -230,10 +280,52 @@
 .track { padding: 3px 12px; cursor: pointer; touch-action: none; height: 30px; background: var(--color-edge); border-radius: 999px; }
 .track:focus-visible { outline: 1px solid var(--color-reasoning); outline-offset: 3px; }
 .line { position: relative; height: 24px; }
-.progress { position: absolute; inset: 0 auto 0 -12px; border-radius: 999px 0 0 999px; background: color-mix(in oklch, var(--color-accent) var(--effort-intensity), var(--color-surface-3)); transition: background var(--dur-2); }
+/* The filled part lights up with the level: more accent, a brighter end at the thumb and a wider halo. */
+.progress {
+  position: absolute; inset: 0 auto 0 -12px; border-radius: 999px 0 0 999px;
+  background: linear-gradient(90deg, color-mix(in oklch, var(--color-accent) var(--effort-intensity), var(--color-surface-3)), color-mix(in oklch, var(--color-accent) var(--effort-intensity), var(--color-reasoning-on) calc(var(--effort-glow) * 22%)));
+  box-shadow: 0 0 var(--effort-blur) color-mix(in oklch, var(--color-accent) var(--effort-halo), transparent);
+  transition: background var(--dur-3), box-shadow var(--dur-3);
+}
 .dot { position: absolute; top: 50%; width: 16px; height: 24px; padding: 0; border: none; background: transparent; transform: translate(-50%, -50%); }
 .dot::after { content: ""; display: block; width: 4px; height: 4px; margin: auto; border-radius: 50%; background: var(--color-muted-foreground); }
-.dot.on::after { background: var(--color-reasoning-on); opacity: .45; }
-.thumb { position: absolute; top: 50%; width: 28px; height: 28px; transform: translate(-50%, -50%); border-radius: 50%; background: var(--color-reasoning-on); box-shadow: var(--shadow-e1); z-index: 1; }
+.dot.on::after { background: var(--color-reasoning-on); opacity: calc(.35 + var(--effort-glow) * .4); }
+.thumb { position: absolute; top: 50%; width: 28px; height: 28px; transform: translate(-50%, -50%); border-radius: 50%; background: var(--color-reasoning-on); box-shadow: var(--shadow-e1), 0 0 calc(var(--effort-blur) * .8) color-mix(in oklch, var(--color-accent) var(--effort-halo), transparent); z-index: 1; transition: box-shadow var(--dur-3); }
+/* Speed lines: each one crosses the whole popover from right to left, its bright head first. */
+.streaks { position: absolute; inset: 0; z-index: 2; overflow: hidden; border-radius: inherit; pointer-events: none; }
+.streak { position: absolute; left: 0; right: 0; height: var(--thick); transform: translateX(var(--from)); opacity: 0; animation-name: streak; animation-timing-function: cubic-bezier(.3, 0, .7, 1); animation-fill-mode: both; }
+.streak::before { content: ""; position: absolute; inset: 0 auto 0 0; width: var(--length); border-radius: 999px; background: linear-gradient(90deg, var(--color-accent), color-mix(in oklch, var(--color-accent) 40%, transparent) 45%, transparent); }
+.strong .streak::before { background: linear-gradient(90deg, color-mix(in oklch, var(--color-accent), var(--color-reasoning-on) 35%), var(--color-accent) 30%, transparent); }
+@keyframes streak {
+  0% { transform: translateX(var(--from)); opacity: 0; }
+  10% { opacity: var(--alpha); }
+  80% { opacity: var(--alpha); }
+  100% { transform: translateX(-100%); opacity: 0; }
+}
+/* The words seem to arrive at speed: a short slide from the right with a trail behind them. */
+.bolt { display: inline-flex; }
+.level.dash { animation: dash 420ms var(--ease-out-quint) both; }
+.level.dash.strong { animation: dash-strong 560ms var(--ease-out-quint) both; }
+.bolt.dash { animation: bolt 360ms var(--ease-out-quint) both; }
+.bolt.dash.strong { animation: bolt-strong 480ms var(--ease-out-quint) both; }
+@keyframes dash {
+  0% { transform: translateX(10px) skewX(-8deg); text-shadow: 6px 0 2px color-mix(in oklch, var(--color-accent) 45%, transparent), 13px 0 4px color-mix(in oklch, var(--color-accent) 20%, transparent); }
+  100% { transform: none; text-shadow: 0 0 0 transparent, 0 0 0 transparent; }
+}
+@keyframes dash-strong {
+  0% { transform: translateX(22px) skewX(-16deg); text-shadow: 8px 0 2px color-mix(in oklch, var(--color-accent) 60%, transparent), 18px 0 4px color-mix(in oklch, var(--color-accent) 35%, transparent), 30px 0 7px color-mix(in oklch, var(--color-accent) 18%, transparent); }
+  55% { transform: translateX(-2px) skewX(3deg); }
+  100% { transform: none; text-shadow: 0 0 0 transparent, 0 0 0 transparent, 0 0 0 transparent; }
+}
+@keyframes bolt {
+  0% { transform: translateX(6px) skewX(-12deg); filter: drop-shadow(5px 0 1px color-mix(in oklch, var(--color-accent) 50%, transparent)); }
+  100% { transform: none; filter: none; }
+}
+@keyframes bolt-strong {
+  0% { transform: translateX(12px) skewX(-20deg) scale(1.2); filter: drop-shadow(6px 0 1px color-mix(in oklch, var(--color-accent) 70%, transparent)) drop-shadow(12px 0 3px color-mix(in oklch, var(--color-accent) 35%, transparent)); }
+  60% { transform: translateX(-2px) scale(1.08); }
+  100% { transform: none; filter: none; }
+}
 @media (max-width: 720px) { .popover { position: fixed; left: 18px; right: 18px; bottom: 126px; width: auto; } }
+@media (prefers-reduced-motion: reduce) { .streaks { display: none; } .level.dash, .bolt.dash { animation: none; } }
 </style>
