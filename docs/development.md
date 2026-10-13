@@ -81,9 +81,16 @@ one per test process with `BOITE_E2E_PREBUILT_UI=1`, or falls back to Vite.
 Both modes expose the fixture workspace through `globalThis.__boiteTest`, so
 tests that only need the Store can use the prebuilt bundle. Close each scenario's
 browsers in `afterEach` to release their rendering resources before the next test.
+Give browser shutdown hooks an explicit 60-second budget: captured-process exit
+can take 30 seconds and profile removal retries for another 15 seconds. Close
+the fixture server in `finally` so a browser cleanup failure still releases it.
 Pages importing `/src/...` call `startDevUi` directly. That server warms their
 reachable modules before browser interactions. Fixture bundles enable the fake
 client separately from the production assets staged in installers.
+
+For native mouse selection, move to the text and await `document.hasFocus()`
+before pressing. A headless page can already have an active element while its
+window is unfocused; the first mouse move activates it asynchronously.
 
 Pairing, token and remote-core query parameters are removed from the address
 bar. The grant is exchanged once; only an authenticated endpoint and the
@@ -619,9 +626,14 @@ the trusted HTTPS origin described in [phone](phone.md).
 ```sh
 bun run bench               # comparison report in bench/results/<date>.md
 bun run bench/idle-rss.ts    # bare Bun and core idle readings at 4.5 s and 75 s
+bun run bench/agent-startup.ts --offline --runs 7 --delay-ms 150 --output /tmp/agent-startup.json
 ```
 
-Both use fresh data. `--fresh-only` selects the first idle reading. Rerun before
+All use fresh data. The agent-startup benchmark requires `--offline`, uses a
+scripted native process and checks cleanup and attachment preservation. Its
+directory and sparse-worktree samples measure synthetic startup, not provider
+inference. See [performance](performance.md#preparing-the-first-prompt).
+`--fresh-only` selects the first idle reading. Rerun before
 quoting a performance figure and include its command and date.
 
 ## Architecture checks

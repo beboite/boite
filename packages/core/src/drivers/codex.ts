@@ -15,7 +15,16 @@ const MINUTE_MS = 60_000;
 /** One `codex app-server` process per thread, kept between turns like the ACP one. */
 export function createCodexDriver(): Driver {
   const sessions = new Map<ThreadId, CodexSession>();
-  const probes = new ModelProbes(readModels);
+  const probes = new ModelProbes(async context => {
+    const session = context.catalogThread ? sessions.get(context.catalogThread.id) : undefined;
+    if (session) {
+      try {
+        const models = await session.catalog(context);
+        if (models) return models;
+      } catch { /* A host that exited or refused discovery leaves the ordinary probe available. */ }
+    }
+    return readModels(context);
+  });
   const viewed = new Set<ThreadId>();
 
   function acquire(ctx: SessionContext): CodexSession {
@@ -49,7 +58,7 @@ export function createCodexDriver(): Driver {
     forgetProbes: (filter) => probes.forget(filter),
     title: (context) => titleTurn(context),
 
-    prepare: ctx => acquire(ctx).prepare(ctx),
+    prepare: (ctx, options) => acquire(ctx).prepare(ctx, options?.forTurn),
     setViewed(threadId, active) {
       if (active) viewed.add(threadId);
       else viewed.delete(threadId);

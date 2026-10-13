@@ -66,6 +66,8 @@ export class TurnContexts {
       },
       diagnostic: (level, message, context) => { try { this.core.logs.record(level, message, { ...context, source: provider.id, threadId }); } catch { /* A diagnostic storage failure must not break the driver. */ } },
       authenticationFailed: () => this.core.accounts.authenticationFailed(account.id),
+      quota: (reading, observedAt) => this.core.quotas.observe(account.id, reading, observedAt),
+      killTree: () => { this.core.procs.killTree(threadId); },
       commands: list => { if (current()) this.threads.agentState.noteCommands(threadId, list); },
       context: use => { if (current()) this.threads.agentState.noteContext(threadId, use); },
       hook: report => this.core.hooks.record({ providerId: provider.id, accountId: account.id, threadId }, report),

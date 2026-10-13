@@ -347,6 +347,13 @@ export class Composer {
   }
 
   private async submitOwned(prompt: string, choice: Choice, attachments: Attachment[], previewReferences: PreviewReference[]): Promise<{ navigation: number | null } | null> {
+    const draft = this.ctx.store.draft;
+    const unpin = this.ctx.draftStartup.uploads.pin(attachments);
+    try { return await this.submitCurrent(prompt, choice, attachments, previewReferences); }
+    finally { unpin(); this.ctx.draftStartup.finish(draft); }
+  }
+
+  private async submitCurrent(prompt: string, choice: Choice, attachments: Attachment[], previewReferences: PreviewReference[]): Promise<{ navigation: number | null } | null> {
     const s = this.ctx.store;
     const client = this.ctx.client;
     const clientGeneration = this.ctx.clientGeneration;
@@ -361,7 +368,9 @@ export class Composer {
     try {
       if (activityCommand(prompt) && previewReferences.length) throw new Error(strings.previewComments.activityUnsupported);
     } catch (error) { this.ctx.fail(error); return null; }
-    if (s.draft && !s.openThread) {
+    const reservation = s.draft && !s.openThread ? this.ctx.draftStartup.take(s.draft, choice) : null;
+    if (reservation) choice = reservation.choice;
+    if (s.draft && !s.openThread && !reservation) {
       const draft = s.draft;
       const selection = s.draftChoice;
       const prepared = await s.prepareDraftChoice(choice);
@@ -374,10 +383,13 @@ export class Composer {
     }
     const draft = s.draft;
     if (!draft) return null;
-    const projectId = draft.projectId ?? (await this.ctx.projects.ensureDrafts());
+    const projectId = reservation?.projectId ?? draft.projectId ?? (await this.ctx.projects.ensureDrafts());
     if (projectId === null || !current() || s.draft !== draft) return null;
     const composer = this.composerStates[DRAFT_STASH_KEY];
+    const overlap = s.core?.features?.draftPreparation === true;
     const created = await s.createThread({
+      ...(reservation ? { preparationId: reservation.preparationId } : {}),
+      ...(overlap ? { subscribe: true } : {}),
       projectId,
       providerId: choice.providerId,
       accountId: choice.accountId,
@@ -389,7 +401,10 @@ export class Composer {
       ...(draft.worktree ? { worktree: {} } : {}),
       ...(draft.incognito && s.draftInDrafts ? { incognito: true } : {})
     }, { navigate: false });
-    if (!created || !owner()) return null;
+    if (!created || !owner()) {
+      if (reservation) void client.call('drafts.release', { preparationId: reservation.preparationId }).catch(() => undefined);
+      return null;
+    }
     const originalDraft = current() && s.draft === draft && !s.openThread;
     // Only this draft is forgotten: the project's other drafts stay.
     if (!s.draft || draftKey(s.draft) !== draftKey(draft) || originalDraft) this.ctx.drafts.forget(draftKey(draft));
@@ -400,13 +415,19 @@ export class Composer {
     let followupNavigation: number | null = null;
     this.adopt(created.id);
     if (originalDraft) {
-      const opening = s.open(created.id);
+      const opening = s.open(created.id, true, overlap ? { liveCreation: true } : {});
       const openingGeneration = s.navigationGeneration;
-      await opening;
+      if (!overlap) await opening;
+      else void opening;
       if (owner() && s.navigationGeneration === openingGeneration && this.ctx.threads.openThread?.id === created.id) followupNavigation = openingGeneration;
     }
     if (!owner()) return null;
-    return await s.send(prompt, created.id, attachments, previewReferences) ? { navigation: followupNavigation } : null;
+    try { return await s.send(prompt, created.id, attachments, previewReferences) ? { navigation: followupNavigation } : null; }
+    finally {
+      if (overlap && !originalDraft && owner() && this.ctx.threads.subscribedThreadId !== created.id && s.delegationSelectedAgentId !== created.id) {
+        void client.call('threads.unsubscribe', { threadId: created.id }).catch(() => undefined);
+      }
+    }
   }
 
   /**
@@ -508,6 +529,12 @@ export class Composer {
   }
 
   private async start(prompt: string, threadId: string | undefined, attachments: Attachment[], previewReferences: PreviewReference[], request?: OutboxRequest): Promise<Delivery> {
+    const unpin = this.ctx.draftStartup.uploads.pin(attachments);
+    try { return await this.startCurrent(prompt, threadId, attachments, previewReferences, request); }
+    finally { unpin(); }
+  }
+
+  private async startCurrent(prompt: string, threadId: string | undefined, attachments: Attachment[], previewReferences: PreviewReference[], request?: OutboxRequest): Promise<Delivery> {
     const s = this.ctx.store;
     const connection = this.ctx.connection;
     if (attachments.some(unresolvedAssetId)) {
@@ -570,8 +597,19 @@ export class Composer {
         sent = pending;
       }
       const ask = sent;
-      const start = () => client.call('turns.start', { threadId, prompt, clientRequestId: ask.id, expectedSelectionVersion: selectionVersion,
-        ...(attachments.length > 0 ? { attachments } : {}), ...(previewReferences.length > 0 ? { previewReferences } : {}) });
+      const start = async () => {
+        const payload = this.ctx.draftStartup.uploads.payload(attachments);
+        const params = { threadId, prompt, clientRequestId: ask.id, expectedSelectionVersion: selectionVersion,
+          ...(attachments.length > 0 ? payload : {}), ...(previewReferences.length > 0 ? { previewReferences } : {}) };
+        try { return await client.call('turns.start', params); }
+        catch (error) {
+          if (!(error instanceof RpcFailure) || (error.data as { reason?: string } | undefined)?.reason !== 'attachment-upload-expired' ||
+            !payload.attachmentIds || !this.ctx.currentClient(client, clientGeneration)) throw error;
+          this.ctx.draftStartup.uploads.forget(attachments);
+          // The original bytes and request id survive the refused lease.
+          return client.call('turns.start', { ...params, attachments, attachmentIds: undefined });
+        }
+      };
       // A socket lost under the call, or an answer that never came, loses the answer, maybe not the turn:
       // the same request id asks once more, and the core answers with the turn it took.
       const accepted = await start().catch(async (error: unknown) => {
@@ -581,6 +619,7 @@ export class Composer {
         return start();
       });
       if (this.ctx.currentClient(client, clientGeneration)) {
+        this.ctx.draftStartup.uploads.forget(attachments);
         if (!request) { this.pendingSends.delete(threadId); this.accepted(threadId, accepted); }
         this.promptFocus = { threadId, turnId: accepted.id, after: null };
       }

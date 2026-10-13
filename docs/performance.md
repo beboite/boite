@@ -496,6 +496,51 @@ list the core already gave is now picked at once, the core keeps that list for
 its checks while the fresh read runs, and the answer leaves before the process
 exit ([providers](providers.md#the-models-probe)).
 
+## Preparing the first prompt
+
+Typing into a visible draft starts a prompt-free preparation of its final
+workspace and native session. Send adopts only a completed, compatible
+reservation and never waits for speculation. The new conversation subscribes
+before its creation response, so its first turn can start while the UI reads
+the snapshot. Model discovery coalesces requests and can reuse compatible
+prepared Codex and ACP processes. Checkpoint capture overlaps native setup,
+while prompt dispatch still waits for the checkpoint.
+
+Selected attachments upload before Send. Completed references keep the first
+turn request small; pending or expired uploads use the original bytes. This
+moves transfer work earlier and does not reduce total network traffic.
+
+Measured on 2026-10-13 with:
+
+```sh
+bun run bench/agent-startup.ts --offline --runs 7 --delay-ms 150 --output /tmp/agent-startup.json
+```
+
+Seven samples per group, real temporary core and RPC transport, scripted Codex
+process with a 150 ms native-opening delay. Values are median / nearest-rank
+p95 milliseconds; with seven samples, p95 is the observed maximum.
+
+| Workspace and strategy | Send to acceptance | Send to first text | Send to finished |
+| --- | ---: | ---: | ---: |
+| Directory, cold | 11.42 / 33.54 | 201.78 / 227.72 | 205.68 / 238.17 |
+| Directory, prepared | 9.48 / 12.42 | 19.46 / 23.59 | 22.77 / 26.59 |
+| Sparse worktree, cold | 45.64 / 51.17 | 441.73 / 456.77 | 817.19 / 840.51 |
+| Sparse worktree, prepared | 11.34 / 13.37 | 386.64 / 412.20 | 771.78 / 803.80 |
+
+Preparation took a median 185.29 ms for directories and 221.37 ms for sparse
+worktrees before Send. Each sample initialized one native process; cleanup left
+zero live processes. Sparse worktree samples use disposable shared clones and
+still include substantial checkpoint work. These controlled samples demonstrate
+the overlap, not real-provider latency gains. Shared filesystem caches and
+machine contention were not isolated; GUI, remote links and inference were not
+measured.
+
+Sending a 68-byte PNG and a 256 KiB text file reduced the serialized
+`turns.start` request from 349,909 to 385 bytes. The earlier upload requests
+totaled 349,916 bytes, bringing combined request bytes to 350,301. Both paths
+preserved journal bytes, the native image URL and file contents. These counts
+exclude compression, responses, release calls and other RPCs.
+
 ## Core startup
 
 The entry loads the CLI for commands and the Core/server graph for server

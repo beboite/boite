@@ -5,6 +5,8 @@ import { FakeClient } from './fake-client';
 import { upsertEnvironment } from './endpoint';
 import * as endpoints from './endpoint';
 import * as appOrigin from './app-origin';
+import * as draftJournal from './draft-journal';
+import { RpcErrorCode, type RpcMethodName } from '@boite/contracts';
 
 let workspace: Workspace | undefined;
 afterEach(() => {
@@ -95,9 +97,66 @@ test('a pairing link replaces the key of a machine that never stopped connecting
   // Retrying a refused key forever, as a phone whose session is gone does.
   a.connection = 'connecting';
   expect(await w.pair(`${url}/?grant=g2`, '')).toBe(true);
-  expect(connect).toHaveBeenCalledWith({ url, grant: 'g2', token: '' });
+  expect(connect).toHaveBeenCalledWith({ url, grant: 'g2', token: '' }, true);
   expect(w.error).toBeNull();
   expect(w.machines).toHaveLength(1);
+});
+
+test.each(['primary', 'secondary'] as const)('a %s pairing persists its reload endpoint before draft hydration finishes', async (kind) => {
+  const { w, a, b } = await setup();
+  b.client?.close(); b.detach();
+  const primaryUrl = 'https://primary.test';
+  const pairedUrl = kind === 'primary' ? primaryUrl : 'https://secondary.test';
+  const coreId = 'f'.repeat(64);
+  a.endpointUrl = primaryUrl;
+  a.localCore = false;
+  w.machines = [{ id: primaryUrl, label: 'Primary', store: a }];
+  const previous = { url: primaryUrl, token: 'fixture-primary', paired: true };
+  if (kind === 'primary') {
+    a.connection = 'closed';
+    endpoints.clearStoredEndpoint();
+  } else endpoints.storeEndpoint(previous);
+  let release!: () => void;
+  const gate = new Promise<null>(resolve => { release = () => resolve(null); });
+  const read = vi.spyOn(draftJournal, 'readDraftJournal').mockReturnValue(gate);
+  const backend = new FakeClient({ delayMs: 0, coreName: 'Paired machine' });
+  await backend.connect();
+  class PairingSocket {
+    onopen: (() => void) | null = null;
+    onmessage: ((event: { data: string }) => void) | null = null;
+    onclose: ((event: { code: number }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    constructor() { queueMicrotask(() => this.onopen?.()); }
+    send(raw: string) {
+      const frame = JSON.parse(raw) as { id: number; method: RpcMethodName; params: never };
+      void backend.call(frame.method, frame.params).then(result => {
+        const answer = frame.method === 'hello'
+          ? { core: { ...backend.core, coreId }, principal: 'session', device: 'fixture-device' } : result;
+        this.onmessage?.({ data: JSON.stringify({ jsonrpc: '2.0', id: frame.id, result: answer }) });
+      }, error => this.onmessage?.({ data: JSON.stringify({ jsonrpc: '2.0', id: frame.id,
+        error: { code: RpcErrorCode.Internal, message: String(error) } }) }));
+    }
+    close() { this.onclose?.({ code: 1000 }); }
+  }
+  vi.stubGlobal('WebSocket', PairingSocket);
+  let settled = false;
+  const pairing = w.pair(`${pairedUrl}/?grant=fixture-grant`, '').then(ok => { settled = true; return ok; });
+  try {
+    await waitFor(() => read.mock.calls.length === 1);
+    expect(w.machines.find(machine => machine.id === pairedUrl)?.store.connection).toBe('ready');
+    expect(settled).toBe(false);
+    expect(endpoints.readEnvironments().find(entry => entry.url === pairedUrl)).toMatchObject({ token: '', signs: coreId });
+    const expected = kind === 'primary' ? { url: pairedUrl, token: '', paired: true, signs: coreId } : previous;
+    expect(endpoints.readStoredEndpoint()).toEqual(expected);
+    expect(await endpoints.resolveEndpoint()).toEqual(expected);
+    release();
+    expect(await pairing).toBe(true);
+    expect(endpoints.readStoredEndpoint()).toEqual(expected);
+  } finally {
+    release(); await pairing;
+    w.close(); backend.close();
+    vi.unstubAllGlobals();
+  }
 });
 
 test('on the app\'s own address the first machine added is the page\'s, even after a first add that failed left it detached', async () => {

@@ -733,10 +733,15 @@ other interactive-only commands.
 
 ## The models probe
 
-`providers.probe` spawns one short-lived process under the synthetic thread
+`providers.probe` first considers the explicitly scoped composing or viewed
+session for Codex and ACP. It reuses only a compatible account, descriptor,
+environment, workspace and context mode. Codex asks the idle host for its list;
+ACP shares compatible initialization and reads its catalog without changing its
+model. Missing ACP effort metadata and invalidated catalogs use an isolated probe.
+
+Otherwise it spawns one short-lived process under the synthetic thread
 `probe:<providerId>:<accountId>`, exactly the way a session would, so it sits in
-a Job Object and in the trace like any other, then asks the protocol's own
-question:
+a Job Object and in the trace like any other, then asks the protocol's own question:
 
 - Claude: SDK `supportedModels()` without a user prompt, with
   `settings.disableAllHooks` so no `SessionStart` hook fires. Effort levels, adaptive
@@ -785,7 +790,8 @@ question:
   nothing, so the descriptor's models are left standing rather than replaced by an
   empty list.
 
-The child is killed through the registry on every path. The answer keeps the
+The disposable child is killed through the registry on every path; a reused
+session retains its ordinary lifecycle. The answer keeps the
 descriptor's `default` first, so the choice can always go back to the agent, is
 cached per provider and account until a `providers.reload` that changes a
 descriptor, what one resolves to or a rejection, or a change to that
