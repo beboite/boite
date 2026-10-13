@@ -73,6 +73,204 @@ function flag(args: string[], ...names: string[]): boolean {
   return found;
 }
 
+interface BrowserParseContext {
+  rest: string[];
+  command: string;
+  need: (index: number, what: string) => string;
+  none: () => void;
+  integer: (value: string, what: string) => number;
+  output?: string;
+}
+
+function parseNoInput(context: BrowserParseContext): BrowserAction {
+  const { command, none } = context;
+  const kind = command as 'status' | 'profiles' | 'close' | 'reset-viewport' | 'recording-stop';
+  none(); const action: BrowserAction = { kind }; return action;
+}
+
+function parseOpenUrl(context: BrowserParseContext): BrowserAction {
+  const { rest, command, need, none } = context;
+  const profile = command === 'open' ? option(rest, '--profile', command) : undefined;
+  const url = need(0, 'a url'); rest.shift(); none();
+  const action: BrowserAction = command === 'open' ? { kind: 'open', url, reuse: true, ...(profile ? { profile } : {}) } : { kind: 'navigate', url };
+  return action;
+}
+
+function parseHistory(context: BrowserParseContext): BrowserAction {
+  const { command, none } = context;
+  const kind = command as 'back' | 'forward' | 'reload';
+  none(); const action: BrowserAction = { kind: 'history', direction: kind }; return action;
+}
+
+function parseSnapshot(context: BrowserParseContext): BrowserAction {
+  const { rest, command, none, integer } = context;
+  const depth = option(rest, '-d', command) ?? option(rest, '--depth', command);
+  const selector = option(rest, '-s', command) ?? option(rest, '--selector', command);
+  const interactive = flag(rest, '-i', '--interactive'), compact = flag(rest, '-c', '--compact'), urls = flag(rest, '-u', '--urls');
+  none();
+  const action: BrowserAction = { kind: 'snapshot', ...(interactive ? { interactive } : {}), ...(compact ? { compact } : {}), ...(urls ? { urls } : {}), ...(depth ? { depth: integer(depth, '-d') } : {}), ...(selector ? { selector } : {}) };
+  return action;
+}
+
+function parseClick(context: BrowserParseContext): BrowserAction {
+  const { rest, command, need, none } = context;
+  const selector = need(0, 'a target'); rest.shift(); none(); const action: BrowserAction = { kind: 'click', selector, ...(command === 'dblclick' ? { count: 2 as const } : {}) }; return action;
+}
+
+function parseSelector(context: BrowserParseContext): BrowserAction {
+  const { rest, command, need, none } = context;
+  const kind = command as 'hover' | 'focus' | 'check' | 'uncheck' | 'scrollintoview';
+  const selector = need(0, 'a target'); rest.shift(); none(); const action: BrowserAction = { kind, selector }; return action;
+}
+
+function parseText(context: BrowserParseContext): BrowserAction {
+  const { rest, command, need } = context;
+  const kind = command as 'fill' | 'type';
+  const selector = need(0, 'a target'); const text = rest.slice(1).join(' ');
+  if (rest.length < 2) throw new Error(`browser ${command} needs a target and its text`);
+  const action: BrowserAction = { kind, selector, text }; rest.length = 0; return action;
+}
+
+function parsePress(context: BrowserParseContext): BrowserAction {
+  const { rest, need, none } = context;
+  const key = need(0, 'a key'); rest.shift(); none(); const action: BrowserAction = { kind: 'press', key }; return action;
+}
+
+function parseScroll(context: BrowserParseContext): BrowserAction {
+  const { rest, command, need, none, integer } = context;
+  let action: BrowserAction;
+  const selector = option(rest, '--selector', command);
+  const first = need(0, 'up, down, left or right');
+  if (SCROLL[first]) {
+    const amount = rest[1] === undefined ? 300 : integer(rest[1], 'distance');
+    rest.splice(0, 2); none();
+    action = { kind: 'scroll', x: SCROLL[first][0] * amount, y: SCROLL[first][1] * amount, ...(selector ? { selector } : {}) };
+  } else {
+    // Before agent-browser's form: scroll <x> <y> in CSS pixels.
+    action = { kind: 'scroll', x: Number(first), y: Number(need(1, 'a y distance')), ...(selector ? { selector } : {}) }; rest.splice(0, 2); none();
+  }
+  return action;
+}
+
+function parseWait(context: BrowserParseContext): BrowserAction {
+  const { rest, command, none, integer } = context;
+  let action: BrowserAction;
+  const timeout = option(rest, '--timeout', command);
+  const text = option(rest, '--text', command), url = option(rest, '--url', command), fn = option(rest, '--fn', command), load = option(rest, '--load', command);
+  const target = rest.shift(); none();
+  const timeoutMs = timeout === undefined ? undefined : integer(timeout, '--timeout');
+  const base = timeoutMs === undefined ? {} : { timeoutMs };
+  if (target !== undefined && /^\d+$/.test(target) && text === undefined && url === undefined && fn === undefined && load === undefined) action = { kind: 'wait', ms: Number(target) };
+  else action = { kind: 'wait', ...base, ...(target !== undefined ? { selector: target } : {}), ...(text !== undefined ? { text } : {}), ...(url !== undefined ? { url } : {}), ...(fn !== undefined ? { fn } : {}), ...(load !== undefined ? { load: load as 'load' } : {}) };
+  return action;
+}
+
+function parseGet(context: BrowserParseContext): BrowserAction {
+  const { rest, need } = context;
+  const what = need(0, 'what to read: text, html, value, attr, title, url, count or box');
+  const selector = rest[1], name = rest[2];
+  const action: BrowserAction = { kind: 'get', what: what as 'text', ...(selector !== undefined ? { selector } : {}), ...(name !== undefined ? { name } : {}) };
+  if (rest.length > (what === 'attr' ? 3 : 2)) throw new Error(`browser get ${what} takes ${what === 'attr' ? 'a target and an attribute name' : 'one target'}`);
+  rest.length = 0; return action;
+}
+
+function parseIs(context: BrowserParseContext): BrowserAction {
+  const { rest, need, none } = context;
+  const what = need(0, 'visible, enabled or checked'); if (!['visible', 'enabled', 'checked'].includes(what)) throw new Error('browser is takes visible, enabled or checked'); const selector = need(1, 'a target'); rest.splice(0, 2); none(); const action: BrowserAction = { kind: 'get', what: what as 'visible', selector }; return action;
+}
+
+function parseEvaluate(context: BrowserParseContext): BrowserAction {
+  const { rest, need } = context;
+  const action: BrowserAction = { kind: 'evaluate', expression: rest.join(' ') }; if (!rest.length) need(0, 'a JavaScript expression'); rest.length = 0; return action;
+}
+
+function parseDialog(context: BrowserParseContext): BrowserAction {
+  const { rest } = context;
+  const decision = rest.shift() ?? 'status';
+  if (!['accept', 'dismiss', 'status'].includes(decision)) throw new Error('browser dialog takes accept [text], dismiss or status');
+  const text = rest.length ? rest.join(' ') : undefined; rest.length = 0;
+  const action: BrowserAction = { kind: 'dialog', decision: decision as 'accept', ...(text !== undefined ? { text } : {}) }; return action;
+}
+
+function parseScreenshot(context: BrowserParseContext): BrowserAction {
+  const { rest, command, none } = context;
+  context.output = option(rest, '--output', command) ?? (rest.length && !rest[0]!.startsWith('-') ? rest.shift() : undefined); none(); const action: BrowserAction = { kind: 'screenshot' }; return action;
+}
+
+function parsePreset(context: BrowserParseContext): BrowserAction {
+  const { rest, need, none } = context;
+  const preset = need(0, 'a preset name') as BrowserPreset;
+  if (!Object.hasOwn(BROWSER_PRESETS, preset)) throw new Error(`Available presets: ${Object.keys(BROWSER_PRESETS).join(', ')}`);
+  const orientation = rest[1] === 'portrait' || rest[1] === 'landscape' ? rest[1] : undefined;
+  rest.splice(0, orientation ? 2 : 1); none();
+  const action: BrowserAction = { kind: 'preset', preset, ...(orientation ? { orientation } : {}) }; return action;
+}
+
+function parseRecordingStart(context: BrowserParseContext): BrowserAction {
+  const { rest, command, none } = context;
+  const options: { frameRate?: BrowserRecordingFrameRate; codec?: BrowserRecordingCodec } = {};
+  const fps = option(rest, '--fps', command), codec = option(rest, '--codec', command);
+  if (fps !== undefined) options.frameRate = Number(fps) as BrowserRecordingFrameRate;
+  if (codec !== undefined) options.codec = codec.toLowerCase() as BrowserRecordingCodec;
+  none(); const action: BrowserAction = { kind: 'recording-start', ...options }; return action;
+}
+
+const PARSERS: Record<string, (context: BrowserParseContext) => BrowserAction> = {
+  'status': parseNoInput,
+  'profiles': parseNoInput,
+  'close': parseNoInput,
+  'reset-viewport': parseNoInput,
+  'recording-stop': parseNoInput,
+  'open': parseOpenUrl,
+  'goto': parseOpenUrl,
+  'navigate': parseOpenUrl,
+  'back': parseHistory,
+  'forward': parseHistory,
+  'reload': parseHistory,
+  'snapshot': parseSnapshot,
+  'click': parseClick,
+  'dblclick': parseClick,
+  'hover': parseSelector,
+  'focus': parseSelector,
+  'check': parseSelector,
+  'uncheck': parseSelector,
+  'scrollintoview': parseSelector,
+  'fill': parseText,
+  'type': parseText,
+  'select': context => {
+    const { rest, need } = context;
+    const selector = need(0, 'a target'); need(1, 'a value'); const action: BrowserAction = { kind: 'select', selector, values: rest.slice(1) }; rest.length = 0; return action;
+  },
+  'press': parsePress,
+  'key': parsePress,
+  'scroll': parseScroll,
+  'wait': parseWait,
+  'get': parseGet,
+  'is': parseIs,
+  'eval': parseEvaluate,
+  'evaluate': parseEvaluate,
+  'dialog': parseDialog,
+  'screenshot': parseScreenshot,
+  'resize': context => {
+    const { rest, need, none } = context;
+    const action: BrowserAction = { kind: 'resize', width: Number(need(0, 'a width')), height: Number(need(1, 'a height')) }; rest.splice(0, 2); none(); return action;
+  },
+  'appearance': context => {
+    const { rest, need, none } = context;
+    const action: BrowserAction = { kind: 'appearance', colorScheme: need(0, 'light, dark or system') as 'light' }; rest.shift(); none(); return action;
+  },
+  'preset': parsePreset,
+  'diagnostics': context => {
+    const { rest, none } = context;
+    const clear = flag(rest, '--clear'); none(); const action: BrowserAction = { kind: 'diagnostics', ...(clear ? { clear } : {}) }; return action;
+  },
+  'diagnostics-clear': context => {
+    const { none } = context;
+    none(); const action: BrowserAction = { kind: 'diagnostics', clear: true }; return action;
+  },
+  'recording-start': parseRecordingStart,
+};
+
 /** The action a command line asks for, with the tab it names. */
 export function browserAction(args: string[]): { action: BrowserAction; tabId?: string; output?: string } {
   const rest = [...args];
@@ -98,91 +296,10 @@ export function browserAction(args: string[]): { action: BrowserAction; tabId?: 
     else if (what === 'media') command = 'appearance';
     else throw new Error('browser set takes viewport <width> <height> or media light|dark|system');
   }
-  switch (command) {
-    case 'status': case 'profiles': case 'close': case 'reset-viewport': case 'recording-stop': none(); action = { kind: command }; break;
-    case 'open': case 'goto': case 'navigate': {
-      const profile = command === 'open' ? option(rest, '--profile', command) : undefined;
-      const url = need(0, 'a url'); rest.shift(); none();
-      action = command === 'open' ? { kind: 'open', url, reuse: true, ...(profile ? { profile } : {}) } : { kind: 'navigate', url };
-      break;
-    }
-    case 'back': case 'forward': case 'reload': none(); action = { kind: 'history', direction: command }; break;
-    case 'snapshot': {
-      const depth = option(rest, '-d', command) ?? option(rest, '--depth', command);
-      const selector = option(rest, '-s', command) ?? option(rest, '--selector', command);
-      const interactive = flag(rest, '-i', '--interactive'), compact = flag(rest, '-c', '--compact'), urls = flag(rest, '-u', '--urls');
-      none();
-      action = { kind: 'snapshot', ...(interactive ? { interactive } : {}), ...(compact ? { compact } : {}), ...(urls ? { urls } : {}), ...(depth ? { depth: integer(depth, '-d') } : {}), ...(selector ? { selector } : {}) };
-      break;
-    }
-    case 'click': case 'dblclick': { const selector = need(0, 'a target'); rest.shift(); none(); action = { kind: 'click', selector, ...(command === 'dblclick' ? { count: 2 as const } : {}) }; break; }
-    case 'hover': case 'focus': case 'check': case 'uncheck': case 'scrollintoview': { const selector = need(0, 'a target'); rest.shift(); none(); action = { kind: command, selector }; break; }
-    case 'fill': case 'type': {
-      const selector = need(0, 'a target'); const text = rest.slice(1).join(' ');
-      if (rest.length < 2) throw new Error(`browser ${command} needs a target and its text`);
-      action = { kind: command, selector, text }; rest.length = 0; break;
-    }
-    case 'select': { const selector = need(0, 'a target'); need(1, 'a value'); action = { kind: 'select', selector, values: rest.slice(1) }; rest.length = 0; break; }
-    case 'press': case 'key': { const key = need(0, 'a key'); rest.shift(); none(); action = { kind: 'press', key }; break; }
-    case 'scroll': {
-      const selector = option(rest, '--selector', command);
-      const first = need(0, 'up, down, left or right');
-      if (SCROLL[first]) {
-        const amount = rest[1] === undefined ? 300 : integer(rest[1], 'distance');
-        rest.splice(0, 2); none();
-        action = { kind: 'scroll', x: SCROLL[first][0] * amount, y: SCROLL[first][1] * amount, ...(selector ? { selector } : {}) };
-      } else {
-        // Before agent-browser's form: scroll <x> <y> in CSS pixels.
-        action = { kind: 'scroll', x: Number(first), y: Number(need(1, 'a y distance')), ...(selector ? { selector } : {}) }; rest.splice(0, 2); none();
-      }
-      break;
-    }
-    case 'wait': {
-      const timeout = option(rest, '--timeout', command);
-      const text = option(rest, '--text', command), url = option(rest, '--url', command), fn = option(rest, '--fn', command), load = option(rest, '--load', command);
-      const target = rest.shift(); none();
-      const timeoutMs = timeout === undefined ? undefined : integer(timeout, '--timeout');
-      const base = timeoutMs === undefined ? {} : { timeoutMs };
-      if (target !== undefined && /^\d+$/.test(target) && text === undefined && url === undefined && fn === undefined && load === undefined) action = { kind: 'wait', ms: Number(target) };
-      else action = { kind: 'wait', ...base, ...(target !== undefined ? { selector: target } : {}), ...(text !== undefined ? { text } : {}), ...(url !== undefined ? { url } : {}), ...(fn !== undefined ? { fn } : {}), ...(load !== undefined ? { load: load as 'load' } : {}) };
-      break;
-    }
-    case 'get': {
-      const what = need(0, 'what to read: text, html, value, attr, title, url, count or box');
-      const selector = rest[1], name = rest[2];
-      action = { kind: 'get', what: what as 'text', ...(selector !== undefined ? { selector } : {}), ...(name !== undefined ? { name } : {}) };
-      if (rest.length > (what === 'attr' ? 3 : 2)) throw new Error(`browser get ${what} takes ${what === 'attr' ? 'a target and an attribute name' : 'one target'}`);
-      rest.length = 0; break;
-    }
-    case 'is': { const what = need(0, 'visible, enabled or checked'); if (!['visible', 'enabled', 'checked'].includes(what)) throw new Error('browser is takes visible, enabled or checked'); const selector = need(1, 'a target'); rest.splice(0, 2); none(); action = { kind: 'get', what: what as 'visible', selector }; break; }
-    case 'eval': case 'evaluate': action = { kind: 'evaluate', expression: rest.join(' ') }; if (!rest.length) need(0, 'a JavaScript expression'); rest.length = 0; break;
-    case 'dialog': {
-      const decision = rest.shift() ?? 'status';
-      if (!['accept', 'dismiss', 'status'].includes(decision)) throw new Error('browser dialog takes accept [text], dismiss or status');
-      const text = rest.length ? rest.join(' ') : undefined; rest.length = 0;
-      action = { kind: 'dialog', decision: decision as 'accept', ...(text !== undefined ? { text } : {}) }; break;
-    }
-    case 'screenshot': output = option(rest, '--output', command) ?? (rest.length && !rest[0]!.startsWith('-') ? rest.shift() : undefined); none(); action = { kind: 'screenshot' }; break;
-    case 'resize': action = { kind: 'resize', width: Number(need(0, 'a width')), height: Number(need(1, 'a height')) }; rest.splice(0, 2); none(); break;
-    case 'appearance': action = { kind: 'appearance', colorScheme: need(0, 'light, dark or system') as 'light' }; rest.shift(); none(); break;
-    case 'preset': {
-      const preset = need(0, 'a preset name') as BrowserPreset;
-      if (!Object.hasOwn(BROWSER_PRESETS, preset)) throw new Error(`Available presets: ${Object.keys(BROWSER_PRESETS).join(', ')}`);
-      const orientation = rest[1] === 'portrait' || rest[1] === 'landscape' ? rest[1] : undefined;
-      rest.splice(0, orientation ? 2 : 1); none();
-      action = { kind: 'preset', preset, ...(orientation ? { orientation } : {}) }; break;
-    }
-    case 'diagnostics': { const clear = flag(rest, '--clear'); none(); action = { kind: 'diagnostics', ...(clear ? { clear } : {}) }; break; }
-    case 'diagnostics-clear': none(); action = { kind: 'diagnostics', clear: true }; break;
-    case 'recording-start': {
-      const options: { frameRate?: BrowserRecordingFrameRate; codec?: BrowserRecordingCodec } = {};
-      const fps = option(rest, '--fps', command), codec = option(rest, '--codec', command);
-      if (fps !== undefined) options.frameRate = Number(fps) as BrowserRecordingFrameRate;
-      if (codec !== undefined) options.codec = codec.toLowerCase() as BrowserRecordingCodec;
-      none(); action = { kind: 'recording-start', ...options }; break;
-    }
-    default: throw new Error(`unknown browser command ${JSON.stringify(command)}; boite browser help lists the commands`);
-  }
+  const context: BrowserParseContext = { rest, command, need, none, integer };
+  if (!Object.hasOwn(PARSERS, command)) throw new Error(`unknown browser command ${JSON.stringify(command)}; boite browser help lists the commands`);
+  action = PARSERS[command]!(context);
+  output = context.output;
   const problem = browserActionError(action);
   if (problem) throw new Error(problem);
   return { action, ...(tabId ? { tabId } : {}), ...(output !== undefined ? { output } : {}) };
