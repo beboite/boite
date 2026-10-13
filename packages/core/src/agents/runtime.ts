@@ -14,9 +14,12 @@ import { OPEN_WORK } from './repository.ts';
  */
 export const VOICE = 'Talk like a colleague in a chat, in the user\'s language, in short plain sentences. Never paste code, diffs, logs or tool output: '
   + 'show proof with files you attach (boite attach <file>) and markdown links, and hand coding to Boite threads.';
-/** How an agent asks for a change to its own settings; no word here may wake the delegation guide (delegation.ts). */
-export const OWN_SETTINGS = 'Your settings belong to the user. When one should change, such as a project to entrust to you, another model or more time per task, '
-  + 'ask: `boite settings agent request <key> <value> --why <reason>` (`boite settings agent` lists the keys). The user applies it on a card and the outcome comes back later as a message, so keep working meanwhile.';
+/**
+ * How an agent asks for a change to its own settings, told in its direct
+ * conversation only. No word here may wake the delegation guide (delegation.ts).
+ */
+export const OWN_SETTINGS = 'Your settings are the user\'s. To change one (a project to entrust to you, your model, more time per task), ask with '
+  + '`boite settings agent request <key> <value> --why <reason>`; the user applies the card and the outcome comes back as a message.';
 /** Files one reply carries at most. */
 const REPLY_FILES = 20;
 
@@ -223,7 +226,7 @@ export class AgentRuntime {
       'Do this turn once, report and stop: Boite schedules any repeat, so start no background loop.',
       VOICE,
       work.scope.kind === 'agent' ? this.store.projects.instructions(agent) : '',
-      OWN_SETTINGS,
+      work.scope.kind === 'agent' ? OWN_SETTINGS : '',
       `Collaboration tools enabled: ${agent.tools.join(', ')}. Use boite help for commands.`,
       'Save group and mission findings in their scope with boite agent remember; a memory pass updates MEMORY.md after each task. Never launch another paid agent CLI around the configured routes.',
       `Resources (JSON): ${JSON.stringify(resources.map(r => ({ name: r.name, kind: r.kind, value: r.value, access: r.access })))}`,
