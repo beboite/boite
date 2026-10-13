@@ -107,10 +107,10 @@ export class Connection {
     await this.ctx.threads.unsubscribe();
   }
 
-  async connectEndpoint(endpoint: Endpoint): Promise<void> {
+  async connectEndpoint(endpoint: Endpoint, rememberActive = false): Promise<void> {
     const s = this.ctx.store;
     s.closeDeviceInvite();
-    this.attachEndpoint(endpoint, false);
+    this.attachEndpoint(endpoint, rememberActive);
     const client = this.ctx.client;
     let timedOut = false;
     // Only a handshake that never finished is given up on. Once the machine
