@@ -2,7 +2,7 @@ import { startDiagnosticsReport } from './diagnostics-report';
 import type { Message, PermissionMode, ProjectId, ProviderId, ThreadId } from '@boite/contracts';
 import type { Client } from './client';
 import { readModelDefaults } from './model-defaults';
-import { readFavorites } from './model-order';
+import { modelFavorites } from './model-favorites.svelte';
 import { readLayout, readPrefs } from './prefs';
 import { watchIncognito } from './store/incognito.svelte';
 import type { Accounts } from './store/accounts.svelte';
@@ -153,11 +153,11 @@ export class Store {
     this.connection = client.state;
     this.prefs = readPrefs();
     this.modelDefaults = readModelDefaults();
-    this.favorites = readFavorites();
     const layout = readLayout();
     this.sidebarWidth = layout.sidebarWidth;
     this.sidebarCollapsed = layout.sidebarCollapsed;
     listen(ctx, client);
+    ctx.off.push(modelFavorites.register(ctx.models.favoritesTarget));
     ctx.off.push(ctx.composer.watchQueues());
     ctx.off.push(watchIncognito(ctx));
     // Each machine hears about this window's own failures. Unit tests drive
@@ -181,10 +181,6 @@ export class Store {
     this.coordinationLoading = false;
     this.coordinationSaving = false;
     this.coordinationError = null;
-    ctx.delegation.stewardsEpoch++;
-    this.stewards = null;
-    this.stewardsSaving = false;
-    this.stewardsError = null;
     ctx.delegation.delegationEpoch++;
     ctx.delegation.delegationSelectionEpoch++;
     ctx.delegation.delegationConfigureEpoch++;
@@ -382,7 +378,6 @@ export class Store {
   get draftChoice() { return this.#ctx.models.draftChoice; }
   set draftChoice(value) { this.#ctx.models.draftChoice = value; }
   get favorites() { return this.#ctx.models.favorites; }
-  set favorites(value) { this.#ctx.models.favorites = value; }
   get probedModels() { return this.#ctx.models.probedModels; }
   set probedModels(value) { this.#ctx.models.probedModels = value; }
   get probingModels() { return this.#ctx.models.probingModels; }
@@ -621,12 +616,6 @@ export class Store {
   set coordinationSaving(value) { this.#ctx.delegation.coordinationSaving = value; }
   get coordinationError() { return this.#ctx.delegation.coordinationError; }
   set coordinationError(value) { this.#ctx.delegation.coordinationError = value; }
-  get stewards() { return this.#ctx.delegation.stewards; }
-  set stewards(value) { this.#ctx.delegation.stewards = value; }
-  get stewardsSaving() { return this.#ctx.delegation.stewardsSaving; }
-  set stewardsSaving(value) { this.#ctx.delegation.stewardsSaving = value; }
-  get stewardsError() { return this.#ctx.delegation.stewardsError; }
-  set stewardsError(value) { this.#ctx.delegation.stewardsError = value; }
   get delegation() { return this.#ctx.delegation.delegation; }
   set delegation(value) { this.#ctx.delegation.delegation = value; }
   get delegationThread() { return this.#ctx.delegation.delegationThread; }
@@ -642,9 +631,6 @@ export class Store {
 
   loadCoordination(...args: Parameters<Delegation['loadCoordination']>) { return this.#ctx.delegation.loadCoordination(...args); }
   configureCoordination(...args: Parameters<Delegation['configureCoordination']>) { return this.#ctx.delegation.configureCoordination(...args); }
-  loadStewards(...args: Parameters<Delegation['loadStewards']>) { return this.#ctx.delegation.loadStewards(...args); }
-  setSteward(...args: Parameters<Delegation['setSteward']>) { return this.#ctx.delegation.setSteward(...args); }
-  revokeSteward(...args: Parameters<Delegation['revokeSteward']>) { return this.#ctx.delegation.revokeSteward(...args); }
   loadDelegation(...args: Parameters<Delegation['loadDelegation']>) { return this.#ctx.delegation.loadDelegation(...args); }
   configureDelegation(...args: Parameters<Delegation['configureDelegation']>) { return this.#ctx.delegation.configureDelegation(...args); }
   selectDelegatedAgent(...args: Parameters<Delegation['selectDelegatedAgent']>) { return this.#ctx.delegation.selectDelegatedAgent(...args); }

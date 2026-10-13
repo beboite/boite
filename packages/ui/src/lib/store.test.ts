@@ -1226,6 +1226,51 @@ describe('Store', () => {
     }
   });
 
+  test('an asynchronous question notifies while its conversation is open and focused', async ({ store, client }) => {
+    const sent: Toast[] = [];
+    setNotificationSender(async toast => { sent.push(toast); });
+    const focused = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    try {
+      await store.open('t-scheduler');
+      const text = 'Subagents are paused. Should I continue myself?';
+      const { questionId } = await client.call('questions.ask', { threadId: 't-scheduler', text, options: ['Continue'] });
+      expect(store.pendingQuestions.some(request => request.id === questionId && request.async)).toBe(true);
+      await vi.waitFor(() => expect(sent).toHaveLength(1));
+      expect(sent[0]).toMatchObject({ threadId: 't-scheduler', body: text });
+      await store.setNotifications(false);
+      await client.call('questions.ask', { threadId: 't-scheduler', text: 'Another question', options: [] });
+      expect(sent).toHaveLength(1);
+    } finally {
+      focused.mockRestore();
+      setNotificationSender(null);
+    }
+  });
+
+  test('a focused asynchronous question uses push alone on a subscribed PWA', async ({ store, client }) => {
+    const sent: Toast[] = [];
+    setNotificationSender(async toast => { sent.push(toast); });
+    const focused = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    const subscription = vi.fn().mockResolvedValue({ endpoint: 'https://web.push.apple.com/test' });
+    vi.stubGlobal('Notification', Object.assign(vi.fn(), { permission: 'granted' }));
+    vi.stubGlobal('navigator', { serviceWorker: { getRegistration: vi.fn().mockResolvedValue({ pushManager: { getSubscription: subscription } }) } });
+    localStorage.setItem('boite.web-push', 'on');
+    try {
+      store.endpointUrl = location.origin;
+      await store.open('t-scheduler');
+      const { questionId } = await client.call('questions.ask', { threadId: 't-scheduler', text: 'Continue without subagents?', options: [] });
+      expect(store.pendingQuestions.some(request => request.id === questionId)).toBe(true);
+      await vi.waitFor(() => expect(subscription).toHaveBeenCalledOnce());
+      // Drain the delivery microtasks after the subscription check.
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(sent).toHaveLength(0);
+    } finally {
+      localStorage.removeItem('boite.web-push');
+      vi.unstubAllGlobals();
+      focused.mockRestore();
+      setNotificationSender(null);
+    }
+  });
+
   test('a pinned thread floats above the live ones of its project, and unpinning drops it back', async ({ store }) => {
     const project = store.threads.find((t) => t.id === 't-trace')?.projectId ?? '';
     const sorted = () => store.threadsOf(project).slice().sort(compareThreads).map((t) => t.id);

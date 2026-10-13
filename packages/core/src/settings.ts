@@ -1,4 +1,4 @@
-import { checkSettingsPatch, readSettings, DEFAULT_THREAD_DONE_RETENTION_DAYS, DEFAULT_THREAD_DELETION_RETENTION_DAYS, subscriptionProxyOf, type Settings } from '@boite/contracts';
+import { checkSettingsPatch, keepLaterFavorites, readSettings, DEFAULT_THREAD_DONE_RETENTION_DAYS, DEFAULT_THREAD_DELETION_RETENTION_DAYS, subscriptionProxyOf, type Settings } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { writesTitles } from './drivers/index.ts';
 import { invalidParams } from './errors.ts';
@@ -62,8 +62,8 @@ export class SettingsStore {
   }
 
   set(patch: Partial<Settings>, persistPrivate?: () => void): Settings {
-    const checked = this.normalize(patch);
     const previous = this.get();
+    const checked = keepLaterFavorites(previous, this.normalize(patch));
     const next: Settings = { ...previous, ...checked };
     this.core.journal.append({ type: 'settings.changed', threadId: null, version: 1, payload: next }, () => {
       // Private credentials share the transaction, never its public event payload.

@@ -25,6 +25,10 @@ export const SETTING_MARKERS: [string, { reason: string } & ({ key: string; valu
   ['[settings-open]', { reason: 'Claude is not signed in yet. Sign in here, then send me a message.', page: 'accounts', section: 'provider-claude' }],
 ];
 
+/** `[agent-settings]`: the fake agent asks to entrust a project to the first agent, the way `boite settings agent request` would. */
+export const AGENT_SETTING_MARKER = '[agent-settings]';
+export const AGENT_SETTING_REASON = 'This project has threads that need following. Entrusting it to {name} lets it watch them and tell you what matters.';
+
 export const DIFF_PATH = 'src/app.ts';
 
 export const DIFF_OLD = 'export function boot() {\n  return start();\n}';

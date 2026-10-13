@@ -84,6 +84,39 @@ export const strings = {
       warmProcessMinutes: 'Released at once',
     },
   },
+  /** A card asking the user to change one setting of a persistent agent (`agents.settings.request`). */
+  agentSettingRequest: {
+    heading: 'Suggested change to {name}',
+    apply: 'Apply',
+    show: 'Open its settings',
+    refuse: 'Refuse',
+    guestHint: 'Only the computer running Boite can change an agent\'s settings.',
+    projectsHint: 'Untick a project to leave it out.',
+    entrust: 'Entrust',
+    takeBack: 'Take back',
+    loadFailed: 'This agent setting card did not load.',
+    to: 'to',
+    applied: 'Applied',
+    changed: 'Set to {value} instead',
+    refused: 'Refused',
+    closed: 'Closed without an answer',
+    on: 'On',
+    off: 'Off',
+    none: 'None',
+    noProjects: 'No project',
+    defaultEffort: 'Default',
+    minutes: '{count} min',
+    /** A plain question a persistent agent asked without stopping, shown in its conversation. */
+    send: 'Send',
+    keys: {
+      projects: 'Projects',
+      model: 'Model',
+      effort: 'Reasoning effort',
+      autoMemory: 'Update memory after each task',
+      subagents: 'Subagents',
+      maxRunMinutes: 'Maximum minutes per execution',
+    },
+  },
   remoteBrowser: {
     display: 'Display', resolution: 'Page resolution', fitPhone: 'Fit this screen', phone: 'Phone', tablet: 'Tablet', rotate: 'Rotate', width: 'Width', height: 'Height', apply: 'Apply', sharedSize: 'Resolution also changes the page the agent sees.', restoreSize: 'Restore the default size', previewZoom: 'Preview zoom (this device only)', fit: 'Fit', panHint: 'Drag to pan the preview. Use the arrows to scroll the page.',
     address: 'Address', addressPlaceholder: 'Enter an address', back: 'Back', forward: 'Forward', reload: 'Reload', badAddress: 'Enter a web address (http or https).',
@@ -204,6 +237,11 @@ export const strings = {
     machineUnreachable: '{name} is not connected. Reconnect it, then create the agent again.', whatItDoesHint: 'Its standing instructions. You can change them later in its settings.',
     namePlaceholder: 'Mira, Scout, Pixel', whatItDoes: 'What it does', instructionsPlaceholder: 'For example: every morning, read the new issues and sum them up in five lines.',
     ownedBy: '{name} runs this thread', ownedHint: 'Talk to {name} in its conversation. This thread shows what it does.', openAgent: 'Open {name}',
+    projects: 'Projects', projectsHint: 'It follows their threads, starts new ones, answers their questions and tells you what matters.', noProjects: 'Open a project first.', looksAfter: 'Looks after {names}',
+    seeWork: 'See its work', aboutProjects: 'About your projects', memoryUpdated: 'Memory updated', memoryUpdating: 'Updating memory',
+    autoMemory: 'Update memory after each task', autoMemoryHint: 'A small helper rewrites its notes from what you asked and what it answered.',
+    brainFolder: 'Brain folder', brainFolderHint: 'Where every agent keeps its instructions and notes on this machine. Changing it moves them all.', brainDefault: 'Default, in Boite’s data folder',
+    brainChange: 'Change', brainUseDefault: 'Use default', brainMove: 'Move brains here', brainPath: 'Folder on this machine', brainBrowse: 'Browse', brainParent: 'Parent folder', brainUseFolder: 'Use this folder',
     robot: {
       family: 'Style', shape: 'Shape', color: 'Color', eyes: 'Eyes', top: 'Accessory', shuffle: 'Shuffle', customize: 'Customize', done: 'Done',
       option: '{part} {n}', families: { jelly: 'Jelly', bubble: 'Bubble', capsule: 'Capsule', retro: 'Retro' },
@@ -380,7 +418,7 @@ export const strings = {
     microphoneTestHint: 'Speak to check the level. This test stays on your device.',
     heading: 'Voice', description: 'The microphone beside Send, up to two minutes at a time. The text waits in the composer until you send it.',
     start: 'Dictate', stop: 'Finish dictation', listening: 'Listening', opening: 'Waiting for microphone', transcribing: 'Transcribing',
-    private: 'On this core only', cloud: 'Transcribed by your API provider', retry: 'Retry transcription',
+    private: 'On this core only', cloud: 'Transcribed by your API provider', retry: 'Retry transcription', discard: 'Discard recording',
     live: 'Live preview', previewFailed: 'Live preview paused. Finish to transcribe the full recording.',
     local: 'Local', api: 'API', engine: 'Engine',
     engineHint: 'Local transcribes on this machine and the audio never leaves it. API sends the audio to Groq or OpenRouter with your key.',
@@ -1376,10 +1414,8 @@ export const strings = {
     more: '+{count} more',
     /** Who started or delegated whom. Where a conversation runs is said by its project and machine, not a tag. */
     relation: {
-      starter: 'Started this thread', started: 'Started from here', parent: 'Parent', child: 'Subagent', steward: 'Steward', stewarded: 'Looked after'
-    },
-    /** What the core told this steward about the threads it looks after. */
-    noticeOne: '1 thread notice', noticeMany: '{count} thread notices'
+      starter: 'Started this thread', started: 'Started from here', parent: 'Parent', child: 'Subagent', resident: 'Looks after the project'
+    }
   },
   coordination: {
     options: 'Advanced settings',
@@ -1403,31 +1439,9 @@ export const strings = {
       queued: 'Waiting', received: 'Waiting', delivered: 'Sent', uncertain: 'Unconfirmed', expired: 'Expired', rejected: 'Failed'
     }
   },
-  steward: {
-    chipFor: 'Steward: {name}',
-    lookedAfterBy: 'Looked after by {name}',
-    heading: 'Steward',
-    enable: 'This agent looks after projects',
-    enableHint: 'It reads every thread there, steers them, answers their questions and tidies them up while you are away.',
-    ownerOnly: 'Only the owner can make an agent a steward. This device can see what it looks after.',
-    unavailable: 'A subagent or a persistent agent session cannot be a steward.',
-    allProjects: 'All projects', allProjectsHint: 'Projects added later included.',
-    projects: 'Projects', projectsEmpty: 'No project to look after on this machine.',
-    capabilities: 'What it may do',
-    risky: 'Risky',
-    capability: {
-      message: { label: 'Send messages', hint: 'Its messages reach the threads, even where communication is off.' },
-      spawn: { label: 'Start threads', hint: 'Start new threads in its projects.' },
-      archive: { label: 'Archive', hint: 'Archive and restore threads.' },
-      move: { label: 'Move', hint: 'Move threads between its projects and add project folders.' },
-      stop: { label: 'Stop and rename', hint: 'Stop a running turn and rename threads.' },
-      answer: { label: 'Answer questions', hint: 'Answer or skip the questions agents ask you.' },
-      permissions: { label: 'Answer permissions', hint: 'Allow or deny tool permission requests in your place.' },
-      remove: { label: 'Delete threads', hint: 'Delete threads. A deleted thread stays restorable for a while.' }
-    },
-    notify: 'Notify on thread events',
-    notifyHint: 'A finished turn, a failure, a question or a waiting permission wakes the steward.',
-    chipOne: 'Steward · 1 project', chipMany: 'Steward · {count} projects', chipAll: 'Steward · all projects'
+  /** The persistent agent the owner entrusted a project to, where its project and threads show it. */
+  resident: {
+    lookedAfterBy: 'Looked after by {name}'
   },
   contextMode: {
     light: 'Light',

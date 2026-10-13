@@ -2,7 +2,8 @@
 import { previewPrompt, RpcErrorCode, threadActive, type AgentLetter, type Attachment, type Message, type MessagePart, type PreviewReference, type Thread, type ThreadId, type Turn, type TurnInFlightData, type Usage } from '@boite/contracts';
 import { decodedBytes } from '../attachments';
 import { RpcFailure } from '../client';
-import { DIFF_NEW, DIFF_OLD, DIFF_PATH, DOC_TEXT, DOC_TITLE, IMAGE_BASE64, ASYNC_QUESTION_OPTIONS, ASYNC_QUESTION_TEXT, SETTING_MARKERS, SPAWN_MARKER } from './conversation';
+import { DIFF_NEW, DIFF_OLD, DIFF_PATH, DOC_TEXT, DOC_TITLE, IMAGE_BASE64, ASYNC_QUESTION_OPTIONS, ASYNC_QUESTION_TEXT, SETTING_MARKERS, SPAWN_MARKER, AGENT_SETTING_MARKER, AGENT_SETTING_REASON } from './conversation';
+import { requestAgentSetting } from './agent-settings';
 import { FAKE_CONTEXT_FLOOR, FAKE_CONTEXT_PER_TURN, FAKE_CONTEXT_WINDOW } from './providers';
 import { addUsage, chunkText, ECHO_COMMANDS, emptyUsage, SHOUT, toSummary } from './shared';
 import { pauseActivity } from './activity';
@@ -229,6 +230,17 @@ async function stream(
   for (const [marker, params] of SETTING_MARKERS) {
     if (record.cancelled || !prompt.includes(marker)) continue;
     try { requestSetting(ctx, thread, turn, { threadId: thread.id, ...params }); } catch { /* already set, or already asked */ }
+  }
+  // `boite settings agent request`: entrust the first agent this thread's project, or the first project it lacks.
+  if (!record.cancelled && prompt.includes(AGENT_SETTING_MARKER)) {
+    const agent = ctx.agents.liveProfiles()[0];
+    const held = agent?.projectIds ?? [];
+    const project = ctx.projects.find(p => p.id === thread.projectId && p.kind !== 'drafts' && !held.includes(p.id)) ?? ctx.projects.find(p => p.kind !== 'drafts' && !held.includes(p.id));
+    if (agent && project) {
+      try {
+        requestAgentSetting(ctx, thread, turn, { threadId: thread.id, agent: agent.id, key: 'projects', value: { add: [project.id] }, reason: AGENT_SETTING_REASON.replace('{name}', agent.name) });
+      } catch { /* already entrusted, or already asked */ }
+    }
   }
   if (!record.cancelled && prompt.includes('[background]')) {
     await backgroundShell(ctx, thread, message);

@@ -77,7 +77,7 @@ export function resolveAgent(target: string, contacts: AgentContact[], selfCore:
 /** How the other end relates to this thread, in the words `boite agents` prints. */
 const RELATION: Record<AgentRelation, string> = {
   starter: 'started this thread', started: 'you started it', parent: 'your parent', child: 'your subagent',
-  steward: 'steward of your project', stewarded: 'you are its steward', project: 'same project', 'other-project': 'other project', machine: 'other machine',
+  resident: 'the agent your project is entrusted to', project: 'same project', 'other-project': 'other project', machine: 'other machine',
 };
 /** Past this, `send` and `reply` remind the agent that a message is read best short. */
 export const COMPACT_CHARS = 600;

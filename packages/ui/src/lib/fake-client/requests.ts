@@ -1,5 +1,5 @@
 /** Permission requests and questions: asked by a turn, answered by the user. */
-import { RpcErrorCode, checkSettingRequest, checkSettingsPatch, readSettings, settingAnswerText, settledSetting, type Message, type MessagePart, type PermissionRequest, type QuestionAnswer, type QuestionOption, type QuestionRequest, type SettingAsk, type SettingRequestParams, type Settings, type Thread, type ThreadId, type Turn } from '@boite/contracts';
+import { RpcErrorCode, agentSettingAnswerText, checkSettingRequest, checkSettingsPatch, readSettings, settingAnswerText, settledSetting, type Message, type MessagePart, type PermissionRequest, type QuestionAnswer, type QuestionOption, type QuestionRequest, type AgentSettingAsk, type SettingAsk, type SettingRequestParams, type Settings, type Thread, type ThreadId, type Turn } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { checkAnswer, checkAsk } from './checks';
 import { QUESTION_OPTIONS, QUESTION_TEXT } from './conversation';
@@ -107,6 +107,7 @@ export function settleQuestion(
       multiple: request.multiple,
       ...(request.async === true ? { async: true } : {}),
       ...(request.setting === undefined ? {} : { setting: request.setting }),
+      ...(request.agentSetting === undefined ? {} : { agentSetting: request.agentSetting }),
       answer
     }
   });
@@ -125,6 +126,17 @@ export function askAsync(ctx: FakeContext, thread: Thread, turn: Turn, running: 
 /** The core's `requestSetting`: a settings card, drawn and answered like any card asked without stopping. */
 export function askSetting(ctx: FakeContext, thread: Thread, turn: Turn, reason: string, options: QuestionOption[], setting: SettingAsk): string {
   return drawAsync(ctx, thread, turn, null, { text: reason, options, allowText: false, multiple: false, setting });
+}
+
+/** The core's `AgentSettingCards.request`: an agent setting card, drawn and answered like any card asked without stopping. */
+export function askAgentSetting(ctx: FakeContext, thread: Thread, turn: Turn, reason: string, options: QuestionOption[], agentSetting: AgentSettingAsk): string {
+  return drawAsync(ctx, thread, turn, null, { text: reason, options, allowText: false, multiple: false, agentSetting });
+}
+
+/** As the core's `AgentSettingCards.answerText`: what the asking thread reads, projects by name. */
+function agentSettingText(ctx: FakeContext, setting: AgentSettingAsk, answer: QuestionAnswer): string {
+  const names = new Map(ctx.projects.map((project) => [project.id, project.name]));
+  return agentSettingAnswerText(setting, answer, (value) => JSON.stringify(setting.key === 'projects' && Array.isArray(value) ? value.map((id) => names.get(String(id)) ?? id) : value ?? null));
 }
 
 /** As the core's `settleSettings`: a change card closes once its setting left the value it was asked from. */
@@ -153,7 +165,7 @@ function drawAsync(
   thread: Thread,
   turn: Turn,
   running: Message | null,
-  asked: { text: string; options: QuestionOption[]; allowText: boolean; multiple: boolean; setting?: SettingAsk }
+  asked: { text: string; options: QuestionOption[]; allowText: boolean; multiple: boolean; setting?: SettingAsk; agentSetting?: AgentSettingAsk }
 ): string {
   const questionId = `qst-${++ctx.seq}`;
   const text = asked.text;
@@ -178,6 +190,10 @@ function drawAsync(
       if (answer === null) return;
       if (asked.setting) {
         holdAnswer(ctx, thread, `> ${text}\n\n${settingAnswerText(asked.setting, answer)}`);
+        return;
+      }
+      if (asked.agentSetting) {
+        holdAnswer(ctx, thread, `> ${text}\n\n${agentSettingText(ctx, asked.agentSetting, answer)}`);
         return;
       }
       const picked = answer.optionIds.map((id) => asked.options.find((option) => option.id === id)?.label ?? id).join(', ');

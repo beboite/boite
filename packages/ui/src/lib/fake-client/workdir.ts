@@ -2,6 +2,7 @@
 import { ARTIFACT_MAX_BYTES, ATTACHMENT_MAX_BYTES, PANEL_SURFACE_KINDS, RpcErrorCode, VIEW_DEFAULT_HEIGHT, VIEW_TITLE_MAX, viewDocument, viewTitleOf, type ArtifactContent, type FileContent, type FileEntry, type GitDiff, type GitStatus, type Message, type PanelSurface } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { FAKE_CHANGES, FAKE_DIFFS, FAKE_MEDIA, FAKE_MEDIA_PATHS, fakeBytes, fakeLanguage } from './files';
+import { seededArtifact } from './agents-demo';
 import { refusal, T0 } from './shared';
 import type { FakeContext, FakeMethods } from './context';
 
@@ -144,7 +145,7 @@ export function workdirMethods(ctx: FakeContext, all: () => Pick<FakeMethods, 'b
     },
     'artifacts.read': async ({ threadId, messageId, artifactId, view }) => {
       const message = ctx.thread(threadId).messages.find(m => m.id === messageId);
-      const value = snapshots.get(artifactId);
+      const value = snapshots.get(artifactId) ?? seededArtifact(ctx, artifactId);
       const part = message?.parts.find(p => p.type === 'artifact' && p.id === artifactId);
       if (!value || part?.type !== 'artifact') throw refusal('artifacts.read needs an artifact from this message and thread');
       if (view && !part.view) throw refusal('artifacts.read view needs an artifact published with boite view');
