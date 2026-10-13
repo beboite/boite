@@ -9,7 +9,9 @@ beforeAll(async () => {
   const port = await freePort();
   server = await startDevUi(port);
   page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&open=recent`, windowSize: { width: 1280, height: 900 } });
-  await page.waitFor(`document.querySelector('[data-testid="composer-effort"]')`);
+  // A loaded Windows runner kept the dev server's modules unanswered for 14 s, and the page sat on "Starting"
+  // past waitFor's default 15 s (2026-10-13): the first paint gets the hook's budget, not the default.
+  await page.waitFor(`document.querySelector('[data-testid="composer-effort"]')`, 40_000);
 }, 60_000);
 // Closing Chrome and its profile can take seconds on a loaded Windows runner.
 afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
