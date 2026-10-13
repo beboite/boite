@@ -235,7 +235,7 @@ test('legacy models open beside the picker and preserve the page position', asyn
   expect(await page.evaluate(`!!document.querySelector('[data-testid=picker-legacy-menu]')`)).toBe(false);
 }, 30_000);
 
-test('the accent persists and lights the effort ramp up to the chosen level, hotter as it rises', async () => {
+test('the accent persists, the effort track glows brighter as it rises, and a speed sends streaks', async () => {
   await page.navigate(url);
   await page.waitFor(`document.querySelector('[data-testid=nav-settings]')`);
   await page.click('[data-testid=nav-settings]');
@@ -253,30 +253,33 @@ test('the accent persists and lights the effort ramp up to the chosen level, hot
   await page.click('[data-testid=composer-effort]');
   await page.waitFor(`document.querySelector('[data-testid=effort-speed]')`);
   await page.click('[data-value=low]');
-  const lit = () => page.evaluate<string[]>(`[...document.querySelectorAll('[data-testid=composer-effort-menu] [data-dot].on')].map(bar => bar.dataset.dot)`);
-  expect(await lit()).toEqual(['low']);
-  // Move off the ramp: a hovered bar is only a proposal.
-  await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1, y: 1 });
+  const glow = () => page.evaluate<{ fill: string; halo: number }>(`(() => { const style = getComputedStyle(document.querySelector('.progress')); return { fill: style.backgroundImage, halo: parseFloat(style.boxShadow.match(/(\\d+(?:\\.\\d+)?)px/g)?.at(-2) ?? '0') }; })()`);
+  await page.settleAnimations();
+  const low = await glow();
   await page.click('[data-value=max]');
-  await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1, y: 1 });
-  await page.waitFor(`document.querySelector('[data-testid=composer-effort-menu] [data-value=max]').classList.contains('active')`);
   await page.settleAnimations();
   await capture('reasoning-accent-max.png');
-  expect(await lit()).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
-  // Each lit bar wears more of the accent than the one before it, and every bar rises above the last.
-  const bars = await page.evaluate<{ color: string; height: number }[]>(`[...document.querySelectorAll('[data-testid=composer-effort-menu] [data-dot]')].map(bar => ({ color: getComputedStyle(bar).backgroundColor, height: bar.getBoundingClientRect().height }))`);
-  expect(bars[0]!.color).not.toBe(bars[4]!.color);
-  expect(bars.every((bar, at) => at === 0 || bar.height > bars[at - 1]!.height)).toBe(true);
+  // The filled part lights up with the level: another fill and a wider halo at the top of the scale.
+  const max = await glow();
+  expect(max.fill).not.toBe(low.fill);
+  expect(max.halo).toBeGreaterThan(low.halo + 8);
+  const bounds = await page.evaluate<any>(`(() => { const p=document.querySelector('.progress').getBoundingClientRect(); const t=document.querySelector('.thumb').getBoundingClientRect(); return {edge:p.right,center:t.left+t.width/2}; })()`);
+  expect(Math.abs(bounds.edge - bounds.center)).toBeLessThan(1);
   expect(await page.evaluate(`document.querySelector('[data-testid=composer-effort-menu] .heading .level').textContent.trim()`)).toBe('Max');
-  // The fast switch is the menu's one icon, labelled, beside the level's name and above the ramp.
+  // The fast switch is the menu's one icon, at the top left of the slider.
   expect(await page.evaluate(`[...document.querySelectorAll('[data-testid=composer-effort-menu] svg')].every(svg => svg.closest('[data-testid=effort-speed]'))`)).toBe(true);
-  expect(await page.evaluate(`(() => { const s=document.querySelector('[data-testid=effort-speed]').getBoundingClientRect(); const l=document.querySelector('[data-testid=composer-effort-menu] .heading .level').getBoundingClientRect(); const t=document.querySelector('[data-testid=effort-track]').getBoundingClientRect(); return s.bottom <= t.top && s.left > l.right; })()`)).toBe(true);
-  expect(await page.evaluate(`document.querySelector('[data-testid=effort-speed] .ui-label').textContent.trim()`)).toBe('Fast');
+  expect(await page.evaluate(`(() => { const s=document.querySelector('[data-testid=effort-speed]').getBoundingClientRect(); const t=document.querySelector('[data-testid=effort-track]').getBoundingClientRect(); return s.bottom <= t.top && Math.abs(s.left - t.left) < 8; })()`)).toBe(true);
   expect(await page.evaluate(`!!document.querySelector('[data-testid=composer] .hint')`)).toBe(false);
   const speed = await page.evaluate<any>(`(() => { const r=document.querySelector('[data-testid=effort-speed]').getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2}; })()`);
   await page.send('Input.dispatchMouseEvent', { type:'mouseMoved', ...speed });
   await page.waitFor(`getComputedStyle(document.querySelector('[data-testid=effort-speed] svg')).transform !== 'none'`);
   await capture('speed-hover.png');
+  // Switching the speed on sends streaks across the popover, then they clear.
+  await page.click('[data-testid=effort-speed]');
+  await page.waitFor(`document.querySelector('[data-testid=effort-streaks]')?.dataset.power === '1'`);
+  expect(await page.evaluate(`document.querySelectorAll('[data-testid=effort-streaks] .streak').length`)).toBe(12);
+  await page.waitFor(`!document.querySelector('[data-testid=effort-streaks]')`);
+  await page.click('[data-testid=effort-speed]');
   await page.send('Emulation.setDeviceMetricsOverride', {width:390,height:844,deviceScaleFactor:1,mobile:true});
   await page.click('[data-testid=nav-settings]');
   await page.click('[data-testid=settings-tab-appearance]');

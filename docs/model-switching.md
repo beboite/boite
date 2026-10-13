@@ -111,15 +111,15 @@ While the read is pending, model and account rows are disabled and the refresh
 icon spins. Closing the picker or changing its owning machine, connection or
 conversation invalidates the pending choice before it can update another view.
 
-The reasoning popover is a ramp of rising bars, one per level reported by the
-selected model, lit up to the chosen one and hotter in the accent as they rise.
-Ultrathink's bar and name wear the spectrum. A click on a bar picks it; dragging
-previews the level and saves on release. Hovering with a mouse proposes a level
-without picking it: the bars it would add are tinted, the ones it would drop
-dim, and the name above shows it in grey. Arrow keys, Home and End select the
-same discrete values. A model with a fast mode shows a labelled switch beside
-the level's name. The composer's chip draws the same ramp in miniature, at most
-six bars. Ultrathink belongs only to Claude and is offered when its SDK reports
+The reasoning popover has one notch per level reported by the selected model.
+Dragging previews the level and saves on release. Arrow keys, Home, End and
+the dots select the same discrete values. The compact panel shows the model and
+current level centred above the track. The track reaches the thumb and lights
+up as the level rises: more of the accent, a brighter end at the thumb and a
+wider halo. Switching a fast mode on sends speed lines across the popover from
+right to left while the level's name slides in with a trail; the second tier,
+Ultrafast, sends about twice as many, longer and quicker. Reduced motion skips
+them. Ultrathink belongs only to Claude and is offered when its SDK reports
 adaptive thinking.
 
 Claude Code also acts on two words typed anywhere in a prompt: `ultrathink`

@@ -562,9 +562,9 @@ test('a first run shows the reasoning, mode and worktree chips at their defaults
   effortChip()!.click();
   await waitFor(() => document.querySelector('[data-testid=composer-effort-menu]') !== null);
   expect(document.querySelector('[data-testid=composer-pin-effort]')).toBeNull();
-  // Opus 5.5 has a fast mode: its switch sits in the popover's heading, after the level's name.
+  // Opus 5.5 has a fast mode: its switch sits in the popover's heading, before the level.
   const heading = query('[data-testid=composer-effort-menu] .heading');
-  expect(heading.lastElementChild?.getAttribute('data-testid')).toBe('effort-speed');
+  expect(heading.firstElementChild?.getAttribute('data-testid')).toBe('effort-speed');
   expect(document.querySelector('[data-testid=effort-fast-mark]')).toBeNull();
   query<HTMLButtonElement>('[data-testid=effort-speed]').click();
   await waitFor(() => document.querySelector('[data-testid=effort-speed-label]')?.textContent === 'Fast');
