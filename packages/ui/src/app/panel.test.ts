@@ -103,6 +103,15 @@ test('the header button opens the panel on its launcher, which opens the changes
   await waitFor(() => document.querySelector('[data-testid=tasks-panel]') !== null);
   expect(document.querySelectorAll('[data-testid=panel-tab]').length).toBe(2);
 
+  // A finger held on a tab opens the menu a right click opens, so a phone can close the others.
+  const first = query('[data-testid=panel-tab][data-kind=changes]');
+  first.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, isPrimary: true, pointerId: 1, pointerType: 'touch', clientX: 20, clientY: 20 }));
+  await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=others]') !== null);
+  first.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, isPrimary: true, pointerId: 1, pointerType: 'touch' }));
+  query<HTMLButtonElement>('[data-testid=context-menu] [data-value=others]').click();
+  await waitFor(() => document.querySelectorAll('[data-testid=panel-tab]').length === 1);
+  expect(store.panel.active?.kind).toBe('changes');
+
   query<HTMLButtonElement>('[data-testid=panel-toggle]').click();
   await waitFor(() => !store.panelOpen);
   // The panel plays its exit before it unmounts, so the button is what answers here.
