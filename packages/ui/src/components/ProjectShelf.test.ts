@@ -48,9 +48,8 @@ test('the archived fold restores a project alone from its button, or restores it
   expect(toggle.querySelector('.fold-count')?.textContent).toBe('1');
   expect(document.querySelector('[data-testid=archived-project-restore]')).toBeNull();
   await unfold(toggle);
-  // One machine: no machine header, and a paired device gets no remove button.
+  // One machine: no machine header.
   expect(document.querySelector('[data-testid=project-shelf-machine]')).toBeNull();
-  expect(document.querySelector('[data-testid=archived-project-remove]')).toBeNull();
 
   click('[data-testid=archived-project-restore]');
   await settle();
@@ -89,10 +88,10 @@ test('archived projects with matching ids show their machines and restore on the
   expect(localRestore).not.toHaveBeenCalled();
 });
 
-test('the owner removes an archived project only after confirming, on the owning machine', async () => {
+test('an archived row offers only its restore under the pointer; the owner removes it from the menu, after confirming', async () => {
   const { confirm } = await import('../lib/confirm.svelte');
   const removeProject = vi.fn(async () => {});
-  const machine = { id: 'local', label: 'Workstation', store: { ...iconless, owner: true, archiveProject: vi.fn(), removeProject } };
+  const machine = { id: 'local', label: 'Workstation', store: { ...iconless, owner: true, projects: [], archiveProject: vi.fn(), removeProject } };
   running = mount(ProjectShelf, {
     target: document.body,
     props: { archived: [{ machine: machine as never, project: project({ archived: true }) }], multi: false, now: 0 }
@@ -100,15 +99,25 @@ test('the owner removes an archived project only after confirming, on the owning
   flushSync();
   await unfold();
 
+  // The hover swaps the archive glyph for the row's buttons: a delete among them would land under a pointer reaching for the glyph.
+  const row = document.querySelector<HTMLElement>('[data-testid=archived-project]')!;
+  expect([...row.querySelectorAll<HTMLElement>('.actions button')].map(b => b.dataset.testid)).toEqual(['archived-project-restore']);
+
+  const remove = async () => {
+    row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    for (const id of ['manage', 'remove']) {
+      expect(contextMenu.current?.items.some(item => 'id' in item && item.id === id)).toBe(true);
+      contextMenu.current!.onpick(id);
+      await settle();
+    }
+  };
   const refuse = vi.spyOn(confirm, 'ask').mockResolvedValueOnce(false);
-  click('[data-testid=archived-project-remove]');
-  await settle();
+  await remove();
   expect(refuse).toHaveBeenCalledWith(expect.objectContaining({ title: 'Remove boite from Boite?', danger: true }));
   expect(removeProject).not.toHaveBeenCalled();
 
   vi.spyOn(confirm, 'ask').mockResolvedValueOnce(true);
-  click('[data-testid=archived-project-remove]');
-  await settle();
+  await remove();
   expect(removeProject).toHaveBeenCalledWith('p-1');
 });
 
