@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
@@ -64,6 +64,68 @@ async function addTerminalLoginProvider(harness: TestCore, client: CoreClient): 
 }
 
 describe('terminals', () => {
+  test.skipIf(process.platform !== 'linux')('closing a terminal stops jobs in their own process groups even when they ignore hangups', async () => {
+    const id = 'terminal:stubborn-job';
+    const pidFile = join(harness.dataDir, 'job.pid');
+    const chosen = process.env['BOITE_TERMINAL_SHELL'];
+    process.env['BOITE_TERMINAL_SHELL'] = '/bin/bash';
+    let job = 0;
+    const running = () => {
+      try { return readFileSync(`/proc/${job}/stat`, 'utf8').split(') ')[1]!.split(' ')[0] !== 'Z'; }
+      catch { return false; }
+    };
+    try {
+      harness.core.terminals.open(id, { cwd: harness.dataDir, env: { ...process.env, HOME: harness.dataDir }, cols: 80, rows: 24 });
+      // Bash job control gives this background job a group separate from the shell's.
+      harness.core.terminals.write(id, `${commandLine('posix', ['/bin/sh', '-c', 'trap "" HUP TERM; echo $$ > "$1"; exec sleep 60', 'job', pidFile])} &\r`);
+      await waitFor(() => existsSync(pidFile));
+      job = Number(readFileSync(pidFile, 'utf8').trim());
+      expect(job).toBeGreaterThan(0);
+      expect(running()).toBe(true);
+      const group = Number(readFileSync(`/proc/${job}/stat`, 'utf8').split(') ')[1]!.split(' ')[2]);
+      expect(group).toBe(job);
+      expect(group).not.toBe(harness.core.journal.listProcesses(id, 10)[0]!.pid);
+      await harness.core.terminals.close(id);
+      await waitFor(() => !running(), 3000);
+    } finally {
+      if (job > 0 && running()) process.kill(job, 'SIGKILL');
+      await harness.core.terminals.close(id);
+      if (chosen === undefined) delete process.env['BOITE_TERMINAL_SHELL'];
+      else process.env['BOITE_TERMINAL_SHELL'] = chosen;
+    }
+  }, 15_000);
+
+  test.skipIf(process.platform !== 'linux')('a prepared login runs before a shell profile can read its command as an answer', async () => {
+    const id = 'login:profile-read';
+    const result = join(harness.dataDir, 'login.answer');
+    const stolen = join(harness.dataDir, 'profile.answer');
+    writeFileSync(join(harness.dataDir, '.bashrc'), `printf 'profile asks: '\nread answer\nprintf '%s' "$answer" > ${commandLine('posix', [stolen])}\n`);
+    const chosen = process.env['BOITE_TERMINAL_SHELL'];
+    process.env['BOITE_TERMINAL_SHELL'] = '/bin/bash';
+    const client = await harness.connect();
+    const seen = watch(client, id);
+    try {
+      harness.core.terminals.open(id, {
+        cwd: harness.dataDir, env: { ...process.env, HOME: harness.dataDir }, cols: 100, rows: 24,
+        type: ['/bin/sh', '-c', 'printf "login ready:%s\\n" "$1"; read reply; printf "%s" "$reply" > "$2"', 'login', 'literal & | < >', result],
+      });
+      await waitFor(() => seen.text().includes('login ready:literal & | < >'), 1500);
+      expect(existsSync(stolen)).toBe(false);
+      harness.core.terminals.write(id, 'login-answer\r');
+      await waitFor(() => existsSync(result));
+      expect(readFileSync(result, 'utf8')).toBe('login-answer');
+      // The ordinary shell remains available once the login finishes, with its own profile.
+      await waitFor(() => seen.text().includes('profile asks:'));
+      harness.core.terminals.write(id, 'profile-answer\r');
+      await waitFor(() => existsSync(stolen));
+      expect(readFileSync(stolen, 'utf8')).toBe('profile-answer');
+    } finally {
+      await harness.core.terminals.close(id);
+      if (chosen === undefined) delete process.env['BOITE_TERMINAL_SHELL'];
+      else process.env['BOITE_TERMINAL_SHELL'] = chosen;
+    }
+  }, 15_000);
+
   test('a thread shell runs in its working directory, takes keys, resizes, reattaches and closes', async () => {
     const client = await harness.connect();
     const { threadId } = await echoThread(harness, client);
@@ -321,7 +383,7 @@ describe('terminals', () => {
     expect(records(other)).toBeGreaterThan(0);
   }, 30_000);
 
-  test('a terminal login types its command, and closing the shell rechecks the account', async () => {
+  test('a terminal login runs its command, and closing the shell rechecks the account', async () => {
     const client = await harness.connect();
     await addTerminalLoginProvider(harness, client);
     const account = await client.call('accounts.add', { providerId: 'echo-menu', label: 'Menu', useDefaultLocation: false });
@@ -335,9 +397,10 @@ describe('terminals', () => {
 
     const opened = await client.call('accounts.loginTerminal', { accountId: account.id, cols: 120, rows: 30 });
     expect(opened.cwd).toBe(account.isolationDir ?? '');
-    // The shell prompt comes up, the command is typed on it, the CLI prints its link.
+    // The login starts in the PTY, and its CLI prints the sign-in link.
     await waitFor(() => seen.text().includes('example.invalid/login?code=echo'), SHELL_MS);
-    expect(seen.text()).toContain('echo-login.ts');
+    if (process.platform === 'win32') expect(seen.text()).toContain('echo-login.ts');
+    else expect(harness.core.journal.listProcesses(id, 10)[0]?.commandLine).toContain('echo-login.ts');
     // Attaching again is the same shell, not a second login, and no piped one starts beside it.
     expect((await client.call('accounts.loginTerminal', { accountId: account.id, cols: 100, rows: 30 })).id).toBe(id);
     await expect(client.call('accounts.login', { accountId: account.id })).rejects.toThrow(/already running/);

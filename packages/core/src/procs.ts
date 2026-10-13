@@ -369,10 +369,10 @@ export class ProcRegistry {
     const record = this.register(threadId, proc.pid, cmd, args, {
       root: false,
       kill: () => {
-        if (process.platform === 'win32') {
-          proc.kill();
-          return;
-        }
+        if (process.platform === 'win32') return proc.kill();
+        // Interactive jobs have separate groups: capture their descendants
+        // before the shell exits and reparents jobs that ignore its hang-up.
+        if (process.platform === 'linux' && this.platform.terminateProcess(threadId, proc.pid)) return;
         // An interactive shell ignores SIGTERM. A hang-up is what closing a
         // terminal sends: the shell exits on it and passes it to its jobs.
         proc.kill('SIGHUP');
