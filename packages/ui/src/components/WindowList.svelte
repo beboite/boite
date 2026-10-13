@@ -87,7 +87,12 @@
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(refresh);
     observer?.observe(root);
     observer?.observe(container);
-    return () => { root.removeEventListener('scroll', refresh); window.removeEventListener('resize', refresh); window.removeEventListener('pointerdown', outsidePointer, true); observer?.disconnect(); };
+    // A list also moves without a scroll or a resize: rows above it leave or grow. Its own size does not change, so
+    // only its place in the viewport says the window is stale, and a list that slid into view would keep its blank spacer.
+    const placement = typeof IntersectionObserver === 'undefined' ? null
+      : new IntersectionObserver(refresh, { root, threshold: Array.from({ length: 21 }, (_, step) => step / 20) });
+    placement?.observe(container);
+    return () => { root.removeEventListener('scroll', refresh); window.removeEventListener('resize', refresh); window.removeEventListener('pointerdown', outsidePointer, true); observer?.disconnect(); placement?.disconnect(); };
   });
   $effect(() => {
     const present = new Set(keys);

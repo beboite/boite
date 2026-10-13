@@ -7,7 +7,8 @@ let mounted: ReturnType<typeof mount> | undefined;
 const groups: ReturnType<typeof mount>[] = [];
 const OriginalResizeObserver = globalThis.ResizeObserver;
 const settle = async () => { for (let i = 0; i < 10; i++) { await Promise.resolve(); flushSync(); } };
-afterEach(async () => { if (mounted) await unmount(mounted); for (const group of groups.splice(0)) await unmount(group); mounted = undefined; vi.restoreAllMocks(); globalThis.ResizeObserver = OriginalResizeObserver; document.body.innerHTML = ''; });
+const OriginalIntersectionObserver = globalThis.IntersectionObserver;
+afterEach(async () => { if (mounted) await unmount(mounted); for (const group of groups.splice(0)) await unmount(group); mounted = undefined; vi.restoreAllMocks(); globalThis.ResizeObserver = OriginalResizeObserver; globalThis.IntersectionObserver = OriginalIntersectionObserver; document.body.innerHTML = ''; });
 
 function fixture(count: number) {
   const root = document.createElement('div'); document.body.append(root);
@@ -94,6 +95,34 @@ test('many small project lists leave offscreen groups as spacers and remain reac
   expect(root.querySelectorAll('button').length).toBeLessThanOrEqual(100);
 });
 
+
+test('a project list that rows above it pushed into view draws its rows instead of a blank spacer', async () => {
+  // Threads archived in the project above shrink it: nothing scrolls and this list keeps its size, it only moves.
+  const placements: { callback: IntersectionObserverCallback; nodes: Set<Element> }[] = [];
+  globalThis.IntersectionObserver = class {
+    nodes = new Set<Element>();
+    constructor(callback: IntersectionObserverCallback) { placements.push({ callback, nodes: this.nodes }); }
+    observe(node: Element) { this.nodes.add(node); }
+    unobserve(node: Element) { this.nodes.delete(node); }
+    disconnect() { this.nodes.clear(); }
+    takeRecords() { return []; }
+  } as unknown as typeof IntersectionObserver;
+  const root = document.createElement('div'); document.body.append(root);
+  let listTop = 900;
+  vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(400);
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    return new DOMRect(0, this === root ? 0 : listTop, 280, this.dataset.windowKey ? 34 : 68);
+  });
+  const items = [{ id: 'quiet:0' }, { id: 'quiet:1' }];
+  const row = createRawSnippet<[typeof items[number]]>(item => ({ render: () => `<button data-row-id="${item().id}">${item().id}</button>` }));
+  mounted = mount(WindowList<typeof items[number]>, { target: root, props: { items, keyOf: item => item.id, row, scrollRoot: root, estimate: 34 } });
+  await settle();
+  expect(root.querySelectorAll('button')).toHaveLength(0);
+  listTop = 200;
+  for (const observer of placements) if (observer.nodes.size) observer.callback([], {} as IntersectionObserver);
+  await settle();
+  expect(root.querySelectorAll('button')).toHaveLength(2);
+});
 
 test('reordering and filtering preserve keyed controls and update the full reachable model', async () => {
   const root = document.createElement('div'); document.body.append(root);
