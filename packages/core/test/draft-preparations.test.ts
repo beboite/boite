@@ -35,7 +35,16 @@ afterEach(async () => { await h.stop(); restore(); });
 
 const exists = (path: string) => access(path).then(() => true, () => false);
 function git(cwd: string, ...args: string[]): string {
-  const run = Bun.spawnSync({ cmd: ['git', ...args], cwd, stdout: 'pipe', stderr: 'pipe', windowsHide: true });
+  const run = Bun.spawnSync({
+    cmd: ['git', ...args], cwd, stdout: 'pipe', stderr: 'pipe', windowsHide: true,
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: 'boite test',
+      GIT_AUTHOR_EMAIL: 'test@boite.invalid',
+      GIT_COMMITTER_NAME: 'boite test',
+      GIT_COMMITTER_EMAIL: 'test@boite.invalid',
+    },
+  });
   if (!run.success) throw new Error(run.stderr.toString());
   return run.stdout.toString();
 }
