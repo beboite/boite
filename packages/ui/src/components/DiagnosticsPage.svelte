@@ -353,11 +353,11 @@
               {#if record.durationMs !== undefined}<div><dt>{s.duration}</dt><dd>{formatLogDuration(record.durationMs)}</dd></div>{/if}
               {#if who(record)}<div><dt>{s.agent}</dt><dd>{who(record)}</dd></div>{/if}
               <div><dt>{s.ids}</dt><dd class="ids">
-                {#if record.threadId}<span>thread <code>{record.threadId}</code>{#if threadTitle(record.threadId) !== null} <button type="button" class="quiet link" onclick={() => openThread(record.threadId!)}><span class="ui-label">{threadTitle(record.threadId)}</span></button>{/if}</span>{/if}
+                {#if record.threadId}<span>{s.thread} <code>{record.threadId}</code>{#if threadTitle(record.threadId) !== null} <button type="button" class="quiet link" onclick={() => openThread(record.threadId!)}><span class="ui-label">{threadTitle(record.threadId)}</span></button>{/if}</span>{/if}
                 {#if record.parentThreadId}<span>{s.parent} <code>{record.parentThreadId}</code></span>{/if}
-                {#if record.turnId}<span>turn <code>{record.turnId}</code></span>{/if}
-                {#if record.requestId}<span>request <code>{record.requestId}</code></span>{/if}
-                {#if record.runId}<span>run <code>{record.runId}</code></span>{/if}
+                {#if record.turnId}<span>{s.turn} <code>{record.turnId}</code></span>{/if}
+                {#if record.requestId}<span>{s.request} <code>{record.requestId}</code></span>{/if}
+                {#if record.runId}<span>{s.run} <code>{record.runId}</code></span>{/if}
               </dd></div>
               {#if record.data && Object.keys(record.data).length > 0}
                 <div><dt>{s.details}</dt><dd><ul class="data">{#each Object.entries(record.data) as [key, value] (key)}<li><code>{key}</code> {String(value)}</li>{/each}</ul></dd></div>
