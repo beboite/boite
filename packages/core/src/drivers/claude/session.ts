@@ -36,6 +36,11 @@ const WAKE_TEXT = 'Background work finished';
 
 type Timer = ReturnType<typeof setTimeout>;
 
+/** `api_retry`: the CLI is running a request that failed and will try again. */
+function isApiRetry(message: SDKMessage): boolean {
+  return message.type === 'system' && message.subtype === 'api_retry';
+}
+
 /** What the driver has to do for a session that ends, and for turns it hands back. */
 export interface SessionHooks {
   ended(session: ClaudeSession): void;
@@ -595,7 +600,10 @@ export class ClaudeSession {
     // Bookkeeping before any output (a task list, a notification) is kept for
     // the turn that may come, but holds nothing: the linger and the warm rule
     // still close the CLI if no output follows.
-    if (!this.woken && message.type !== 'assistant' && message.type !== 'stream_event') return;
+    // A retried API call is the CLI's own run already under way, before any
+    // output: an unavailable or rate-limited model retries for minutes, and the
+    // idle window must not end the CLI in the middle and lose the wake.
+    if (!this.woken && message.type !== 'assistant' && message.type !== 'stream_event' && !isApiRetry(message)) return;
     this.clearIdle();
     this.clearLinger();
     if (this.woken) return;
