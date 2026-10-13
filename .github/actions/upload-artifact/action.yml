@@ -27,7 +27,7 @@ runs:
       # The caller may be collecting captures after a failed or cancelled job.
       if: always()
       continue-on-error: true
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
       with:
         name: ${{ inputs.name }}
         path: ${{ inputs.path }}
@@ -37,7 +37,7 @@ runs:
         include-hidden-files: ${{ inputs.include-hidden-files }}
     - name: Retry failed artifact upload
       if: ${{ !cancelled() && steps.upload.outcome == 'failure' }}
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
       with:
         name: ${{ inputs.name }}
         path: ${{ inputs.path }}

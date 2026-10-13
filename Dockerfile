@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM oven/bun:1.4.2@sha256:9114c058aeae42162ee16dd5084b95fe9473970bb6bcb5b232ab1630f0546895 AS build
+FROM oven/bun:1.4.3@sha256:ec06c3b6cea04192ae6770c434f668ca41d343ad19fa6472216c7b48be39c598 AS build
 WORKDIR /app
 COPY package.json bun.lock ./
 COPY packages/contracts/package.json packages/contracts/package.json
@@ -19,7 +19,7 @@ RUN if [ -n "$BOITE_VERSION" ]; then bun -e 'const v=process.env.BOITE_VERSION; 
 ARG BOITE_RELEASE_TELEMETRY=
 RUN bun run build:ui && bun run build:core
 
-FROM node:24-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS agents
+FROM node:24-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20 AS agents
 COPY docker/agents/package.json docker/agents/package-lock.json /opt/agents/
 # npm installs both x64 OpenCode builds (185 MB each), and its postinstall picks
 # one by the build host's CPU, which always has AVX2. Keep the baseline build,
@@ -31,7 +31,7 @@ RUN cd /opt/agents && npm ci --omit=dev && npm cache clean --force \
        fi \
     && node_modules/.bin/opencode --version
 
-FROM node:24-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS runtime
+FROM node:24-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20 AS runtime
 ARG BOITE_CHANNEL=stable
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates git ripgrep tini bash \

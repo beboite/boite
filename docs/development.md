@@ -419,10 +419,15 @@ uses eight seconds so failures include page text.
 Owner CLI fixtures remove `AGENT_ENV` from their child environment: an agent's
 inherited thread identity must not override the fixture's explicit `--thread`.
 
-jsdom is pinned to 30.0.1 because
-[jsdom#4347](https://github.com/jsdom/jsdom/issues/4347) changes focus/blur ordering
-when a focused element is removed, closing menus in the same tick. Recheck that
-behavior before changing the pin.
+jsdom 30.1.0 fired a window-targeted blur when a focused element was removed,
+closing menus in the same tick ([jsdom#4347](https://github.com/jsdom/jsdom/issues/4347)).
+30.1.1 fixed it; the context menu tests catch a return of that ordering.
+Since 30.1.2 `focus()` refuses an element hidden by `display`, and jsdom never
+matches `:popover-open`, so its own sheet hides every `[popover]`. `test-setup.ts`
+shows them again; the app mounts a popover only while it is open.
+
+The UI keeps `typescript` 6 beside `@typescript/native` (TypeScript 7):
+svelte-check refuses `--tsgo` unless both are installed.
 
 `bun run e2e` exercises real-core RPC with echo, browser UI and the Windows
 WebView2 shell when available. Shell automation sets `BOITE_SHELL_HIDDEN=1`.

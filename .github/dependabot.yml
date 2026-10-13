@@ -11,7 +11,8 @@ multi-ecosystem-groups:
       include: scope
 updates:
   - package-ecosystem: github-actions
-    directory: /
+    # The composite actions pin their own actions; `/` alone skips them.
+    directories: ['/', '/.github/actions/*']
     multi-ecosystem-group: weekly
     patterns: ['*']
   - package-ecosystem: npm
@@ -27,11 +28,9 @@ updates:
     schedule:
       interval: weekly
     ignore:
-      # 30.1.0 fires a window-targeted blur after the focused element leaves the
-      # DOM, which closes the context menu on its way back up:
-      # https://github.com/jsdom/jsdom/issues/4347
-      - dependency-name: jsdom
-        versions: ['>=30.1.0']
+      # svelte-check's --tsgo needs TypeScript 6 beside @typescript/native 7.
+      - dependency-name: typescript
+        update-types: [version-update:semver-major]
     groups:
       # Majors arrive one pull request each, so a breaking SDK stays isolated.
       workspace:
