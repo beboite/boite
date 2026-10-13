@@ -130,6 +130,7 @@ test('plans are refused by field before anything starts', async () => {
   await expect(bad({ name: 'x', steps: [{ id: 'a', profile: 'fast', task: 't', output: { n: 'integer' } }] })).rejects.toThrow('steps[0].output.n');
   await expect(bad({ name: 'x', steps: [{ id: 'a', profile: 'fast', task: 't', when: { path: 'a.b', equals: 1, empty: true } }] })).rejects.toThrow('exactly one of');
   await expect(bad({ name: 'x', limits: { maxSteps: 500 }, steps: [{ id: 'a', profile: 'fast', task: 't' }] })).rejects.toThrow('limits.maxSteps: expected an integer from 1 to 64');
+  await expect(bad({ name: 'x', steps: [{ id: 'a', profile: 'fast', task: 't', context: { drop: ['memory'] } }] })).rejects.toThrow('steps[0].context.drop: expected a list of instructions, guides, mcp, hooks');
   expect(await bad(REVIEW)).toEqual({ levels: [['scan'], ['review'], ['fix'], ['report']] });
 });
 
@@ -504,10 +505,13 @@ test('a step names its model and reasoning level, and a level the model lacks is
   await expect(owner.call('workflows.check', { threadId, plan: { name: 'Missing', steps: [{ id: 'think', model: 'no-such-model', task: 'Think.' }] } })).rejects.toThrow('no installed model');
   const run = await owner.call('workflows.start', { threadId, requestId: 'routes', plan: { name: 'Routes', steps: [
     { id: 'quick', model: 'echo', effort: 'low', task: 'Look quickly.' },
-    { id: 'plain', after: ['quick'], task: 'Look again.' },
+    { id: 'plain', after: ['quick'], task: 'Look again.', context: { preset: 'neutral', rules: 'No house style.' } },
   ] } });
   const done = await settled(h, threadId, run.id, ['done']);
   const [quick, plain] = done.nodes.map(node => node.instances[0]!);
+  // A step names its context mode the way a spawn does; the step without one gets the whole setup.
+  expect(h.core.threads.require(quick!.threadId!).contextMode).toBeUndefined();
+  expect(h.core.threads.require(plain!.threadId!).contextMode).toMatchObject({ label: 'neutral', hooks: false, rules: 'No house style.' });
   expect([quick!.providerId, quick!.model, quick!.effort]).toEqual(['echo', 'echo', 'low']);
   expect(h.core.threads.require(quick!.threadId!).effort).toBe('low');
   expect(plain!.effort).toBe(h.core.threads.require(threadId).effort);

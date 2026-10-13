@@ -13,6 +13,8 @@ export * from './agents';
 export * from './workflows';
 export * from './workflow-plan';
 export * from './thread-focus';
+export * from './context-mode';
+import type { ContextPreset, ContextRequest, ThreadContextMode } from './context-mode';
 
 /**
  * Boite 2 wire contract: the JSON-RPC methods and events between the core
@@ -1006,6 +1008,8 @@ export interface ThreadSummary {
   archiveReason?: ThreadArchiveReason;
   /** Core-owned delegation relationship. Absent on ordinary conversations. */
   parentThreadId?: ThreadId | null;
+  /** What the conversation starts without, fixed at creation. Absent: the whole setup. */
+  contextMode?: ThreadContextMode | null;
   /** Last accepted user message, independent of assistant activity and renames. */
   lastUserMessageAt?: Timestamp | null;
   pullRequest?: { number: number; url: string; state: 'OPEN' | 'CLOSED' | 'MERGED' } | null;
@@ -3451,9 +3455,10 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * wins over `profileId`. Neither: this conversation's own model. `speed` is
    * a tier of the model the child runs on, by id, by label or as listed
    * (`Fast (priority)`), case-insensitively, and is refused otherwise. Left
-   * out: no tier, never the parent's.
+   * out: no tier, never the parent's. `context` starts the child without
+   * part of the user's setup; left out, it gets all of it.
    */
-  'delegation.spawn': { params: { threadId: ThreadId; profileId?: string; model?: string; effort?: string; speed?: string; task: string; title?: string; requestId: string }; result: DelegatedAgent };
+  'delegation.spawn': { params: { threadId: ThreadId; profileId?: string; model?: string; effort?: string; speed?: string; context?: ContextRequest | ContextPreset; task: string; title?: string; requestId: string }; result: DelegatedAgent };
   'delegation.models': { params: { threadId: ThreadId }; result: DelegationModels };
   'delegation.send': { params: { threadId: ThreadId; toThreadId: ThreadId; text: string; requestId: string }; result: AgentLetter };
   'delegation.stop': { params: { threadId: ThreadId; agentId?: ThreadId }; result: { stopped: number } };
@@ -3728,7 +3733,7 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * thread an agent started until the user has written in it. `requestId`
    * makes a retry return the same thread.
    */
-  'agent.spawn': { params: { threadId: ThreadId; project: string; prompt: string; title?: string; worktree?: boolean; requestId: string }; result: AgentSpawn };
+  'agent.spawn': { params: { threadId: ThreadId; project: string; prompt: string; title?: string; worktree?: boolean; context?: ContextRequest | ContextPreset; requestId: string }; result: AgentSpawn };
   /**
    * Show something in the thread's right panel. Every client subscribed to the
    * thread receives `panel.requested`; `shown` says whether one was. The core
@@ -4040,6 +4045,8 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
        * core makes its folder.
        */
       incognito?: boolean;
+      /** Start without part of the user's setup, fixed for the thread's life ([context modes](../../docs/context-modes.md)). */
+      context?: ContextRequest | ContextPreset;
     };
     result: ThreadSummary;
   };
