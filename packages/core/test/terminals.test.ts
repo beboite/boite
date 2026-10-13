@@ -78,7 +78,8 @@ describe('terminals', () => {
       harness.core.terminals.open(id, { cwd: harness.dataDir, env: { ...process.env, HOME: harness.dataDir }, cols: 80, rows: 24 });
       // Bash job control gives this background job a group separate from the shell's.
       harness.core.terminals.write(id, `${commandLine('posix', ['/bin/sh', '-c', 'trap "" HUP TERM; echo $$ > "$1"; exec sleep 60', 'job', pidFile])} &\r`);
-      await waitFor(() => existsSync(pidFile));
+      // The redirection creates the file before echo writes the pid into it.
+      await waitFor(() => existsSync(pidFile) && readFileSync(pidFile, 'utf8').endsWith('\n'));
       job = Number(readFileSync(pidFile, 'utf8').trim());
       expect(job).toBeGreaterThan(0);
       expect(running()).toBe(true);
