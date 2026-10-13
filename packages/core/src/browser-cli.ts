@@ -307,29 +307,49 @@ export function browserAction(args: string[]): { action: BrowserAction; tabId?: 
 
 interface ActionValue { ok?: boolean; url?: string; title?: string; navigated?: boolean; loading?: boolean; note?: string; value?: unknown; dialogs?: { type: string; message: string; accepted: boolean; value?: string | null }[] }
 
-/** agent-browser's plain output: a check, where the page went, what the page asked. */
-export function browserLines(action: BrowserAction, result: BrowserReply): string[] {
-  const value = result.value as ActionValue | undefined;
-  const raw = (data: unknown) => typeof data === 'string' ? data : JSON.stringify(data, null, 2);
-  switch (action.kind) {
-    case 'snapshot': return [(value as { text?: string })?.text ?? ''];
-    case 'evaluate': case 'get': return [raw(result.value ?? null)];
-    case 'status': {
-      const tabs = (result.value as { tabs?: { tabId: string; url: string; title: string; profileName?: string; active: boolean }[] })?.tabs ?? [];
-      return tabs.length ? tabs.map(tab => `${tab.active ? '*' : ' '} ${tab.tabId}  ${tab.title || '(untitled)'}  ${tab.url}${tab.profileName ? `  [${tab.profileName}]` : ''}`) : ['no browser tab; open one with boite browser open <url>'];
-    }
-    case 'profiles': {
-      const data = result.value as { default: string; profiles: { id: string; name: string; kept: boolean }[] };
-      return data.profiles.map(profile => `${profile.id === data.default ? '*' : ' '} ${profile.id}  ${profile.name}${profile.kept ? '' : '  (kept nowhere)'}`);
-    }
-    case 'close': return [`✓ Closed ${result.tabId ?? 'the tab'}`];
-    case 'diagnostics': case 'recording-start': case 'recording-stop': return [raw(result)];
-    case 'dialog': if (action.decision === 'status') return [raw(result.value)]; break;
-  }
+const raw = (data: unknown) => typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+
+function statusLines(_action: BrowserAction, result: BrowserReply): string[] {
+  const tabs = (result.value as { tabs?: { tabId: string; url: string; title: string; profileName?: string; active: boolean }[] })?.tabs ?? [];
+  return tabs.length ? tabs.map(tab => `${tab.active ? '*' : ' '} ${tab.tabId}  ${tab.title || '(untitled)'}  ${tab.url}${tab.profileName ? `  [${tab.profileName}]` : ''}`) : ['no browser tab; open one with boite browser open <url>'];
+}
+
+function profileLines(_action: BrowserAction, result: BrowserReply): string[] {
+  const data = result.value as { default: string; profiles: { id: string; name: string; kept: boolean }[] };
+  return data.profiles.map(profile => `${profile.id === data.default ? '*' : ' '} ${profile.id}  ${profile.name}${profile.kept ? '' : '  (kept nowhere)'}`);
+}
+
+const valueLines = (_action: BrowserAction, result: BrowserReply) => [raw(result.value ?? null)];
+const replyLines = (_action: BrowserAction, result: BrowserReply) => [raw(result)];
+const LINES: Partial<Record<BrowserAction['kind'], (action: BrowserAction, result: BrowserReply) => string[] | null>> = {
+  snapshot: (_action, result) => [(result.value as { text?: string } | undefined)?.text ?? ''],
+  evaluate: valueLines,
+  get: valueLines,
+  status: statusLines,
+  profiles: profileLines,
+  close: (_action, result) => [`✓ Closed ${result.tabId ?? 'the tab'}`],
+  diagnostics: replyLines,
+  'recording-start': replyLines,
+  'recording-stop': replyLines,
+  dialog: (action, result) => action.kind === 'dialog' && action.decision === 'status' ? [raw(result.value)] : null,
+};
+
+/** The page location and success line shared by actions that act on a tab. */
+function pageLines(action: BrowserAction, result: BrowserReply, value: ActionValue | undefined): string[] {
   const lines: string[] = [];
   if (action.kind === 'open' || action.kind === 'navigate' || (value?.navigated && value.url)) lines.push(`✓ ${value?.title || result.title || 'Done'}`, `  ${value?.url ?? result.url ?? ''}`);
   else lines.push(action.kind === 'select' && Array.isArray(value?.value) ? `✓ Selected ${(value!.value as string[]).join(', ')}` : '✓ Done');
   if (!value?.navigated && value?.url && action.kind !== 'open' && action.kind !== 'navigate') lines.push(`  now at ${value.url}`);
+  return lines;
+}
+
+/** agent-browser's plain output: a check, where the page went, what the page asked. */
+export function browserLines(action: BrowserAction, result: BrowserReply): string[] {
+  const value = result.value as ActionValue | undefined;
+  const format = Object.hasOwn(LINES, action.kind) ? LINES[action.kind] : undefined;
+  const formatted = format?.(action, result);
+  if (formatted !== undefined && formatted !== null) return formatted;
+  const lines = pageLines(action, result, value);
   if (value?.loading) lines.push('  the page is still loading; wait --load load or wait for an element if you need more');
   for (const dialog of value?.dialogs ?? []) lines.push(`  ${dialog.type} ${JSON.stringify(dialog.message)} ${dialog.accepted ? 'accepted' : 'dismissed'}${dialog.value ? ` with ${JSON.stringify(dialog.value)}` : ''}`);
   if (value?.note) lines.push(`  note: ${value.note}`);
