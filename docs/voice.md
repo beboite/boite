@@ -7,14 +7,19 @@ conversations, leaving the page or hiding the app cancels microphone capture.
 Recordings last at most two minutes. A failed transcription can be retried
 while the composer remains open; audio stays in memory until retry or cancel.
 
-Pressing the microphone unrolls a strip to its left: a bin that discards the
-recording, a live spectrum and the elapsed time. The microphone becomes the
-round Finish button where Send stood, and Send returns once the text lands.
-The spectrum reads an analyser beside the recording path, never on it, and
-draws on a canvas: voice bands between 90 Hz and 5.2 kHz, mirrored around the
-middle. While the microphone opens or the core transcribes, it shows a slow
-wave instead; after a failure it rests, with a retry button when the audio is
-kept. The strip appears only while there is something to discard. With Nemotron Streaming, a compact preview receives new audio every
+Pressing the microphone opens a small menu at the composer's corner beside it:
+under the composer when the window has room below, above it otherwise. It holds
+a bin that discards the recording, a live spectrum and the elapsed time, and it
+floats over the page, so no control of the composer moves and the menu never
+covers the draft or the live transcript. The microphone itself turns into the
+Finish button, in place. The spectrum reads an analyser beside the recording
+path, never on it, and draws on a canvas: voice bands between 90 Hz and
+5.2 kHz, mirrored around the middle. While the microphone opens or the core
+transcribes, it shows a slow wave instead; after a failure it rests, with a
+retry button when the audio is kept, else a close button, plus a Voice
+settings button for the owner when the engine is not set up.
+
+With Nemotron Streaming, a compact preview receives new audio every
 400 ms, subject to engine latency. Each sample is uploaded once, including
 silence. Finish waits for the current chunk, sends the remaining audio and
 drains the decoder's lookahead. It does not transcribe the recording again.
@@ -35,10 +40,9 @@ in Voice settings wins over the one heard.
 
 On phones, the composer keeps one row for message options, model, microphone
 and Send. The plus button opens image attachments, reasoning, permissions and
-the draft's worktree switch. While recording, the strip takes the whole row,
-the model and options return with the text, and the transcript stays above
-these controls. Back or Escape closes the options
-panel without losing the draft.
+the draft's worktree switch. While recording, the row keeps its controls and
+the menu floats above the composer. Back or Escape closes the options panel
+without losing the draft.
 
 ## Set it up
 

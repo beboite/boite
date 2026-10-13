@@ -1,8 +1,8 @@
 <script lang="ts">
   import { secureId } from '../lib/secure-id';
   import { Check, Mic, X, LoaderCircle, RotateCcw, Settings2, Trash2 } from '@lucide/svelte';
-  import { cubicOut } from 'svelte/easing';
-  import { glides } from '../lib/motion';
+  import { Closing } from '../lib/closing.svelte';
+  import { floating } from '../lib/floating';
   import DictationSpectrum from './DictationSpectrum.svelte';
   import { onDestroy } from 'svelte';
   import type { Store } from '../lib/store.svelte';
@@ -133,15 +133,17 @@
   }
   /** Something to throw away: a recording under way or kept for a retry. */
   const holding = $derived(phase === 'opening' || phase === 'recording' || phase === 'transcribing' || (phase === 'error' && !!audio));
+  const busy = $derived(phase === 'opening' || phase === 'transcribing');
   const clock = $derived(`${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`);
-  /** The tape unrolls leftwards out of the microphone, without moving what sits beside it. */
-  function unroll(_node: Element) {
-    return { duration: glides() ? 260 : 0, easing: cubicOut, css: (t: number) => `clip-path: inset(0 0 0 ${(1 - t) * 100}% round 999px); opacity: ${Math.min(1, t * 2)}` };
-  }
-  /** Rolled back up out of the row's flow, so Send returns at once without the row jumping. */
-  function rollUp(_node: Element) {
-    return { duration: glides() ? 180 : 0, easing: cubicOut, css: (t: number) => `position: absolute; right: calc(100% + 4px); clip-path: inset(0 0 0 ${(1 - t) * 100}% round 999px); opacity: ${t}` };
-  }
+  let microphone = $state<HTMLButtonElement>();
+  /**
+   * The recording's own menu floats at the composer's corner beside the
+   * microphone: under the composer, or above it when the window has no room
+   * below. Nothing in the composer moves while it runs, and the menu never
+   * covers the draft or the live transcript.
+   */
+  const panel = new Closing();
+  $effect(() => { if (phase === 'idle') panel.hide(); else panel.show(); });
   function keydown(event: KeyboardEvent) {
     if (phase !== 'idle' && event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); cancel(); }
   }
@@ -150,62 +152,62 @@
 <svelte:window onkeydowncapture={keydown} onpagehide={cancel} />
 <svelte:document onvisibilitychange={() => { if (document.hidden && (phase === 'recording' || phase === 'opening')) cancel(); }} />
 
-<div class="dictation" class:holding data-testid="dictation" data-phase={phase}>
-  {#if holding}
-    <div class="tape" class:failed={phase === 'error'} in:unroll out:rollUp>
-      <button type="button" class="icon ghost discard" data-testid="dictation-cancel" title={strings.speech.discard} aria-label={strings.speech.discard} onclick={cancel}><Trash2 size={15} strokeWidth={1.75} /></button>
-      <span class="wave"><DictationSpectrum {analyser} mode={phase === 'recording' ? 'live' : phase === 'error' ? 'still' : 'busy'} /></span>
-      <span class="duration ui-label">{clock}</span>
-      {#if phase === 'error'}<button type="button" class="icon ghost retry" data-testid="dictation-retry" title={strings.speech.retry} aria-label={strings.speech.retry} onclick={() => void transcribe()}><RotateCcw size={15} /></button>{/if}
-    </div>
-  {:else if phase === 'error'}
-    {#if needsSetup && store.owner}<button type="button" class="icon ghost" title={strings.speech.heading} aria-label={strings.speech.heading} onclick={() => store.showSettings('voice')}><Settings2 size={15} /></button>{/if}
-    <button type="button" class="icon ghost dismiss" data-testid="dictation-cancel" title={strings.common.cancel} aria-label={strings.common.cancel} onclick={cancel}><X size={14} /></button>
-  {/if}
-  <button type="button" class="icon microphone" class:primary={holding && phase !== 'error'} class:listening={phase === 'recording'}
+<div class="dictation" data-testid="dictation" data-phase={phase}>
+  <button type="button" class="icon microphone" class:listening={phase === 'recording'} class:busy bind:this={microphone}
     data-testid={phase === 'recording' ? 'dictation-stop' : 'dictation-start'}
     title={phase === 'recording' ? `${strings.speech.stop} · ${engine === 'local' ? strings.speech.private : strings.speech.cloud}` : strings.speech.start}
     aria-label={phase === 'recording' ? strings.speech.stop : strings.speech.start} aria-pressed={phase === 'recording'}
-    disabled={store.connection !== 'ready' || phase === 'opening' || phase === 'transcribing'}
+    disabled={store.connection !== 'ready' || busy}
     onclick={() => { if (phase === 'recording') void stop(); else { cancel(); void start(); } }}>
     {#if phase === 'recording'}<Check size={16} strokeWidth={2.25} />
-    {:else if phase === 'opening' || phase === 'transcribing'}<LoaderCircle size={16} class="spinner" />
+    {:else if busy}<LoaderCircle size={16} class="spinner" />
     {:else}<Mic size={16} strokeWidth={1.75} />{/if}
   </button>
   {#if phase === 'recording'}<span class="sr-only">{strings.speech.listening}</span>{/if}
+  {#if panel.shown}
+    <div class="panel" class:closing={panel.closing} class:failed={phase === 'error'} role="group" aria-label={strings.speech.heading} data-testid="dictation-panel"
+      use:panel.attach use:floating={{ anchor: () => microphone?.closest<HTMLElement>('.composer') ?? microphone ?? null, placement: 'bottom', align: 'end', sheet: false }} onanimationend={panel.end}>
+      {#if holding}
+        <button type="button" class="icon ghost discard" data-testid="dictation-cancel" title={strings.speech.discard} aria-label={strings.speech.discard} onclick={cancel}><Trash2 size={15} strokeWidth={1.75} /></button>
+      {:else}
+        <button type="button" class="icon ghost discard" data-testid="dictation-cancel" title={strings.common.cancel} aria-label={strings.common.cancel} onclick={cancel}><X size={15} /></button>
+      {/if}
+      <span class="wave"><DictationSpectrum {analyser} mode={phase === 'recording' ? 'live' : phase === 'error' || phase === 'idle' ? 'still' : 'busy'} /></span>
+      {#if holding}<span class="duration ui-label">{clock}</span>{/if}
+      {#if phase === 'error' && audio}<button type="button" class="icon ghost" data-testid="dictation-retry" title={strings.speech.retry} aria-label={strings.speech.retry} onclick={() => void transcribe()}><RotateCcw size={15} /></button>{/if}
+      {#if phase === 'error' && needsSetup && store.owner}<button type="button" class="icon ghost" title={strings.speech.heading} aria-label={strings.speech.heading} onclick={() => store.showSettings('voice')}><Settings2 size={15} /></button>{/if}
+    </div>
+  {/if}
 </div>
 
 <style>
-  .dictation { position: relative; display: flex; align-items: center; gap: 4px; flex: none; }
+  .dictation { display: flex; align-items: center; flex: none; }
   .dictation button { flex: none; width: var(--control); height: var(--control); }
-  /* Same face as the attach button beside it until it records: then the round primary button where Send sat. */
-  .microphone { position: relative; transition: border-radius var(--dur-3) var(--ease-out-quint), background var(--dur-2), color var(--dur-2); }
-  .microphone.primary { border-radius: var(--radius-full); }
-  .microphone.primary:disabled { opacity: 1; background: var(--color-accent-soft); border-color: transparent; color: var(--color-accent); }
-  .microphone.listening { box-shadow: 0 0 0 3px var(--color-accent-soft); }
-  .tape {
-    display: flex; align-items: center; gap: 6px;
-    height: var(--control); padding: 0 10px 0 0;
-    border-radius: var(--radius-full);
-    box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--color-accent) 35%, transparent);
-    background: color-mix(in oklch, var(--color-accent) 9%, var(--color-control-surface));
+  /* Same face and place as the attach button beside it; while it records it is the Finish button, tinted. */
+  .microphone { transition: background var(--dur-2), color var(--dur-2), border-color var(--dur-2), box-shadow var(--dur-2); }
+  .microphone.listening { color: var(--color-accent); background: var(--color-accent-soft); border-color: var(--color-accent); box-shadow: 0 0 0 3px var(--color-accent-soft); }
+  .microphone.busy:disabled { opacity: 1; color: var(--color-accent); }
+  .panel {
+    z-index: 40; display: flex; align-items: center; gap: 4px;
+    padding: 4px 10px 4px 4px;
+    background: var(--color-surface-3); border: 1px solid var(--color-border); border-radius: var(--radius-full);
+    box-shadow: var(--shadow-e2);
+    animation: pop var(--dur-2) var(--ease-out-quint);
   }
-  .tape.failed { box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--color-danger) 45%, transparent); background: color-mix(in oklch, var(--color-danger) 8%, var(--color-control-surface)); }
-  .tape .discard, .tape .retry { border-radius: var(--radius-full); color: var(--color-muted-foreground); }
-  .tape .retry { margin-right: -8px; }
-  .tape .discard:hover { color: var(--color-danger); background: color-mix(in oklch, var(--color-danger) 14%, transparent); }
-  .wave { display: block; width: 132px; height: 20px; }
+  .panel.closing { animation-name: pop-out; pointer-events: none; }
+  .panel.failed { border-color: color-mix(in oklch, var(--color-danger) 45%, var(--color-border)); }
+  .panel button { flex: none; width: var(--control-sm); height: var(--control-sm); border-radius: var(--radius-full); color: var(--color-muted-foreground); }
+  .panel .discard:hover { color: var(--color-danger); background: color-mix(in oklch, var(--color-danger) 14%, transparent); }
+  .wave { display: block; width: 140px; height: 22px; margin: 0 4px; }
   .duration { min-width: 3.4ch; font-size: var(--text-xs); font-variant-numeric: tabular-nums; color: var(--color-muted-foreground); text-align: right; }
-  .dismiss { color: var(--color-muted-foreground); }
   .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   :global(.dictation .spinner) { animation: spin 1s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   @media (max-width: 720px) {
     .dictation button { width: var(--touch-target); height: var(--touch-target); border-radius: 50%; }
-    .dictation.holding { flex: 1; min-width: 0; }
-    .tape { flex: 1; min-width: 0; height: var(--touch-target); }
-    .wave { flex: 1; width: auto; min-width: 40px; height: 24px; }
-    .microphone:not(.primary) { background: transparent; border-color: transparent; }
+    .microphone:not(.listening) { background: transparent; border-color: transparent; }
+    .panel button { width: var(--touch-target); height: var(--touch-target); }
+    .wave { width: 150px; height: 26px; }
   }
   @media (prefers-reduced-motion: reduce) { :global(.dictation .spinner) { animation: none; } }
 </style>
