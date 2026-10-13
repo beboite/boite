@@ -6,7 +6,6 @@
   import { agentLabel } from '../lib/format';
   import { hasUnsentDraft } from '../lib/composer-queue';
   import { agentDirectory } from '../lib/agent-directory.svelte';
-  import { stewardChip } from '../lib/steward';
   import { strings } from '../lib/strings';
   import MachineIcon from './MachineIcon.svelte';
   import ProviderLogo from './ProviderLogo.svelte';
@@ -15,7 +14,7 @@
 
   /**
    * A thread row's first line, in the sidebar and in a phone's list: who runs
-   * it (a steward's robot, the agent it belongs or was entrusted to, else the
+   * it (the agent it belongs or was entrusted to, else the
    * provider's logo, whose tooltip names the provider and the model), the
    * title, an unsent draft, the pin, then the state or the time.
    */
@@ -42,8 +41,6 @@
   let draft = $derived(!open && hasUnsentDraft(owner.composerStates[thread.id]));
   /** A persistent agent's thread, a sub-thread and an entrusted thread wear that agent's picture where the logo goes. */
   let runner = $derived(thread.agentSessionId || thread.parentThreadId ? agentDirectory(owner).ownerOf(thread) : agentDirectory(owner).entrustmentOf(thread.id)?.agent ?? null);
-  /** A steward's own thread wears the robot its id draws, the picture its projects show. */
-  let steward = $derived(owner.stewards?.find(grant => grant.threadId === thread.id) ?? null);
 </script>
 
 <span class="headline" class:wrap class:unread={thread.unread && !wrap}>
@@ -53,11 +50,7 @@
       <MachineIcon icon={machine.icon} os={owner.core?.os} />
     </span>
   {/if}
-  {#if steward}
-    <span class="picture" data-testid="thread-steward" role="img" title={`${stewardChip(steward)} · ${agent}`} aria-label={stewardChip(steward)}>
-      <AgentAvatar kind="profile" id={thread.id} name={thread.title} size={16} />
-    </span>
-  {:else if runner}
+  {#if runner}
     <span class="picture" data-testid="thread-agent" role="img" title={`${runner.name} · ${agent}`} aria-label={runner.name}>
       <AgentAvatar kind="profile" id={runner.id} name={runner.name} avatar={runner.avatar} size={16} />
     </span>

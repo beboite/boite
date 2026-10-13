@@ -501,12 +501,12 @@ p95 milliseconds; with seven samples, p95 is the observed maximum.
 
 | Workspace and strategy | Send to acceptance | Send to first text | Send to finished |
 | --- | ---: | ---: | ---: |
-| Directory, cold | 8.55 / 22.67 | 191.91 / 208.30 | 194.67 / 215.60 |
-| Directory, prepared | 8.99 / 10.89 | 17.17 / 18.67 | 19.32 / 21.37 |
-| Sparse worktree, cold | 33.14 / 36.00 | 337.08 / 344.50 | 626.44 / 642.65 |
-| Sparse worktree, prepared | 10.41 / 11.35 | 304.89 / 310.81 | 594.05 / 608.74 |
+| Directory, cold | 11.42 / 33.54 | 201.78 / 227.72 | 205.68 / 238.17 |
+| Directory, prepared | 9.48 / 12.42 | 19.46 / 23.59 | 22.77 / 26.59 |
+| Sparse worktree, cold | 45.64 / 51.17 | 441.73 / 456.77 | 817.19 / 840.51 |
+| Sparse worktree, prepared | 11.34 / 13.37 | 386.64 / 412.20 | 771.78 / 803.80 |
 
-Preparation took a median 177.57 ms for directories and 203.09 ms for sparse
+Preparation took a median 185.29 ms for directories and 221.37 ms for sparse
 worktrees before Send. Each sample initialized one native process; cleanup left
 zero live processes. Sparse worktree samples use disposable shared clones and
 still include substantial checkpoint work. These controlled samples demonstrate

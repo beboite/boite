@@ -133,18 +133,18 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 593,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,845,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,870,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,080,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,110,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
 On 2026-10-13, prompt-free draft preparation, attachment uploads and crash
-recovery measured 4,836,097 UI bytes and 4,067,096 core JavaScript bytes after
+recovery measured 4,853,814 UI bytes and 4,092,165 core JavaScript bytes after
 `bun run build:ui`, `bun run build:core` and `bun scripts/ci/budgets.ts` on Linux.
-Compared with `68898598`, the workspace chunk adds 6,904 bytes (0.14% of the UI)
-and the core adds 35,861 bytes (0.89%). The UI entry remains 553,318 bytes and
-the core entry 15,114 bytes. The total budgets rise to 4,845,000 and 4,080,000;
+Compared with `2893abd8`, the workspace chunk adds 6,904 bytes (0.14% of the UI)
+and the core adds 35,861 bytes (0.88%). The UI entry remains 518,508 bytes and
+the core entry 15,114 bytes. The total budgets rise to 4,870,000 and 4,110,000;
 entry budgets stay unchanged. These are bundle sizes, not runtime memory or
 startup measurements.
 
@@ -464,6 +464,23 @@ measured 4,450,765 bytes, and Windows desktop CI 4,450,386 on its first head:
 about 9,400 bytes for the search, the keyboard walk, the machine groups and two
 sentences in each language. The UI limit rises to 4,460,000, 9,235 bytes above
 the Linux build; the entry and core limits are unchanged.
+
+On 2026-10-13 on Linux, `origin/main` at `c8e9d2ac` measured 4,829,171 UI
+bytes and 4,031,205 emitted core JavaScript bytes. Persistent agents taking
+over from stewards measured 4,825,176 and 4,039,499: removing the steward
+settings saves the UI 3,995 bytes net of the projects field, files, memory chip
+and brain folder, and the core gains 8,294 bytes for the projects entrusted to
+an agent, its notices, the memory pass and the brain folder move. The core
+total limit becomes 4,050,000 bytes, 10,501 above this measurement; the UI,
+entry and `main.js` limits are unchanged.
+Cards asking the user to change an agent's settings, merged with `68898598`
+the same day, measured 4,846,910 UI bytes and 4,056,373 core bytes: about
+21,700 UI bytes for the lazy card, the conversation's card for an agent's
+pending questions, the in-memory client's three methods and the sentences in
+both languages, and about 16,900 core bytes for the cards, their shared checks,
+the CLI command and two MCP tools. The UI limit becomes 4,860,000 and the core
+total limit 4,070,000; the entry chunk (518,508 bytes) and `main.js` limits are
+unchanged.
 Explain measured growth when changing a limit. Shared-runner timings are not gated. Earlier sizes and
 runner observations remain in the [dated report](../bench/results/2026-09-29-resources.md#historical-ci-measurements).
 
