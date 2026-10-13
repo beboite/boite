@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DEFAULT_DELEGATION_CONFIG } from '../../packages/contracts/src/index.ts';
 import { connect, type CoreClient } from '../../packages/core/src/client.ts';
@@ -29,11 +30,15 @@ test('an agent starts a light child with rules through the CLI, and the list and
   // The parent's agent runs the real `boite` command, the way a model would from its shell.
   const done = owner.next('turn.finished', turn => turn.threadId === threadId, 30_000);
   await owner.call('threads.subscribe', { threadId });
-  await owner.call('turns.start', { threadId, prompt: `[spawn:boite delegate spawn "Count the parser lines" --context light --rules "${RULES}" --title "Light count"] [spawn:boite delegate spawn "Count again" --title "Plain count"]` });
+  // No quotes in the commands: `cmd /c` on Windows and `sh -c` elsewhere read them differently. The rules come from a
+  // file, named by its full path since the fake agent's commands run from the core's own directory.
+  const rulesFile = join(core.dataDir, 'rules.md');
+  writeFileSync(rulesFile, `${RULES}\n`);
+  await owner.call('turns.start', { threadId, prompt: `[spawn:boite delegate spawn Count-the-parser-lines --context light --rules-file ${rulesFile} --title Light-count] [spawn:boite delegate spawn Count-again --title Plain-count]` });
   expect((await done).status).toBe('done');
   const view = await owner.call('delegation.get', { threadId });
-  const light = view.agents.find(agent => agent.thread.title === 'Light count')!;
-  const plain = view.agents.find(agent => agent.thread.title === 'Plain count')!;
+  const light = view.agents.find(agent => agent.thread.title === 'Light-count')!;
+  const plain = view.agents.find(agent => agent.thread.title === 'Plain-count')!;
   expect(light.thread.contextMode).toMatchObject({ label: 'light', guides: false, rules: RULES });
   expect(plain.thread.contextMode).toBeUndefined();
 
@@ -50,14 +55,14 @@ test('an agent starts a light child with rules through the CLI, and the list and
   await page.click('[data-testid=thread-menu-trigger-menu] [data-value=agents]');
   await page.waitFor('document.querySelectorAll("[data-testid=delegation-member]").length === 2');
   const badges = await page.evaluate(`[...document.querySelectorAll('[data-testid=delegation-member]')].map(row => [row.querySelector('.title')?.textContent.trim(), row.querySelector('[data-testid=delegation-member-context]')?.dataset.mode ?? null, row.querySelector('[data-testid=delegation-member-context]')?.textContent.trim() ?? null])`) as [string, string | null, string | null][];
-  expect(badges).toContainEqual(['Light count', 'light', 'Light + rules']);
-  expect(badges).toContainEqual(['Plain count', null, null]);
+  expect(badges).toContainEqual(['Light-count', 'light', 'Light + rules']);
+  expect(badges).toContainEqual(['Plain-count', null, null]);
   expect(await page.evaluate(`document.querySelector('[data-testid=delegation-member-context]').title`)).toContain('Started without: instruction files, Boite and brain guides, MCP servers.');
   await page.waitFor(settledAnimations);
   await page.screenshot(join(import.meta.dir, '.artifacts/context-mode-subagents-desktop.png'));
 
   // Its own conversation carries the same badge in the header.
-  await page.evaluate(`[...document.querySelectorAll('[data-testid=delegation-member]')].find(row => row.textContent.includes('Light count')).click()`);
+  await page.evaluate(`[...document.querySelectorAll('[data-testid=delegation-member]')].find(row => row.textContent.includes('Light-count')).click()`);
   await page.click('[data-testid="delegation-open-thread"]');
   await page.waitFor('!!document.querySelector("[data-testid=thread-context-mode]")');
   expect(await page.evaluate('document.querySelector("[data-testid=thread-context-mode]").dataset.mode')).toBe('light');
