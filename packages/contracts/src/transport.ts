@@ -4,7 +4,10 @@ import { longerThan, previewToolPart } from './message-preview.ts';
 
 /** What a client asks a page, and its live events, to leave on the core until it is looked at. */
 export interface TransportOptions {
-  /** Long outputs of finished tool calls. */
+  /**
+   * Outputs of finished tool calls: past 256 characters for a call that
+   * succeeded, whose folded card draws none of it, past 16 KiB for any other.
+   */
   compactTools?: boolean;
   /** Files of a page, read with `messages.attachment`. */
   compactFiles?: boolean;
@@ -32,7 +35,7 @@ function compacts(options: TransportOptions): boolean {
   return !!(options.compactTools || options.compactFiles || options.compactImages || options.compactToolParts);
 }
 
-function toolParts(message: Message, options: { inputs: boolean; strict: boolean }): Message {
+function toolParts(message: Message, options: { inputs: boolean; strict: boolean; folded: true }): Message {
   let changed = false;
   const parts = message.parts.map(part => {
     if (part.type !== 'tool') return part;
@@ -44,8 +47,9 @@ function toolParts(message: Message, options: { inputs: boolean; strict: boolean
 }
 
 function project(message: Message, options: TransportOptions, strict: boolean, previews?: ImagePreviews): Message {
+  // A page is history: its cards are drawn folded.
   const tools = options.compactTools || options.compactToolParts
-    ? toolParts(message, { inputs: !!options.compactToolParts, strict }) : message;
+    ? toolParts(message, { inputs: !!options.compactToolParts, strict, folded: true }) : message;
   const files = options.compactFiles ? previewFileData([tools], previews)[0]! : tools;
   return options.compactImages ? previewImageData([files], strict ? 0 : undefined, previews)[0]! : files;
 }

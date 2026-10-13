@@ -247,8 +247,16 @@ persistent agents and their setting cards at `2893abd8`, whose limit was
 4,860,000 and which measured 4,846,910, the branch measured 4,863,429 UI bytes,
 the same 16,519 bytes on top. The UI limit becomes 4,872,000.
 
-The update card, merged with that at `af3acd8e`, measured 4,887,797 UI bytes
-and a 522,398-byte entry chunk on Linux, against 4,863,429 for `main`: 24,368
+Opening a thread on one screen of history (#472) measured 4,823,117 UI bytes
+merged with `main` at `224597ed` (4,822,128), as the Windows job did: 989 bytes
+for the page byte budgets the store sends, the list that pages itself when it
+cannot scroll, the old first row put back after a page lands, and the fake
+core's budgets. Merged with context modes at `c8e9d2ac` it measured 4,830,160,
+within the 4,836,000 above; merged with the dictation menu at `af3acd8e`,
+4,864,454, within 4,872,000.
+
+The update card, merged with `main` at `8ac1d98f`, measured 4,888,826 UI bytes
+and a 522,879-byte entry chunk on Linux, against 4,864,454 for `main`: 24,372
 bytes for the card, its rows and buttons, the Update all button in Machines and
 their sentences ([performance](performance.md#update-everything)). The UI limit
 rises to 4,898,000.

@@ -17,7 +17,7 @@ import { modelsOf, checkSpeed, discoverSelection } from './provider-catalog';
 import { delegationConfig, stopDelegation } from './delegation';
 import type { FakeContext, FakeMethods } from './context';
 import { registerFakeWorktree, requireFakeCwd } from './worktrees';
-import { boundedMessageWindow, projectMessage, resumeAnchor, snapshotOptionsProblem, type TransportOptions } from '@boite/contracts';
+import { boundedMessageWindow, pageBytes, pageBytesProblem, projectMessage, resumeAnchor, snapshotOptionsProblem, type TransportOptions } from '@boite/contracts';
 import { dropWaitingMove, fakeMoveNote } from './thread-move';
 import { cancelFamilySideQuestions, cancelSide, sideQuestionMethods } from './side-questions';
 
@@ -78,10 +78,11 @@ function pageOf(
   messages: Message[],
   end: number,
   limit: number,
-  project?: Projection
+  project?: Projection,
+  maxBytes = MESSAGE_PAGE_MAX_BYTES
 ): { messages: Message[]; before: MessageId | null } {
   let start = end, bytes = 2;
-  while (start > 0 && end - start < limit && bytes < MESSAGE_PAGE_MAX_BYTES) {
+  while (start > 0 && end - start < limit && (start === end || bytes < maxBytes)) {
     const message = messages[start - 1]!;
     const size = sentBytes(message, project);
     const next = bytes + size + (start < end ? 1 : 0);
@@ -90,7 +91,7 @@ function pageOf(
         message: `message ${message.id} is ${size} serialized UTF-8 bytes; expected a complete message below ${RPC_MAX_FRAME_BYTES} bytes`,
         data: { threadId: message.threadId, messageId: message.id, field: 'messages', bytes: size, max: RPC_MAX_FRAME_BYTES, expected: `a complete message below ${RPC_MAX_FRAME_BYTES} serialized UTF-8 bytes` } });
     }
-    if (start < end && next > MESSAGE_PAGE_MAX_BYTES) break;
+    if (start < end && next > maxBytes) break;
     bytes = next;
     start -= 1;
   }
@@ -102,11 +103,11 @@ function pageOf(
  * The core's forward page: at most `limit` within the byte budget, except for
  * one complete legal message. The cursor names its retained edge while more follow.
  */
-function forwardOf(messages: Message[], from: number, limit: number, project: Projection): { messages: Message[]; after: string | null } {
+function forwardOf(messages: Message[], from: number, limit: number, project: Projection, maxBytes = MESSAGE_PAGE_MAX_BYTES): { messages: Message[]; after: string | null } {
   // Reuse the backward page's byte and single-message rules, iterating from
   // the first newer message instead of from the last older one.
   const candidates = messages.slice(from, from + limit).reverse();
-  const page = pageOf(candidates, candidates.length, limit, project).messages.reverse();
+  const page = pageOf(candidates, candidates.length, limit, project, maxBytes).messages.reverse();
   return { messages: page, after: from + page.length < messages.length ? (page.at(-1)?.id ?? null) : null };
 }
 
@@ -115,14 +116,14 @@ function forwardOf(messages: Message[], from: number, limit: number, project: Pr
  * Both halves share the byte and count budgets, retaining a complete single
  * anchor when needed; cuts rewrite cursors to the retained edges.
  */
-function aroundOf(messages: Message[], around: string | undefined, limit: number, project: Projection): { messages: Message[]; before: string | null; after: string | null } | null {
+function aroundOf(messages: Message[], around: string | undefined, limit: number, project: Projection, maxBytes: number): { messages: Message[]; before: string | null; after: string | null } | null {
   const at = around === undefined ? -1 : messages.findIndex(message => message.id === around);
   if (at < 0 || messages.length - at <= limit) return null;
   const half = Math.max(1, Math.floor(limit / 2));
-  const older = pageOf(messages, at, half, project);
-  const newer = forwardOf(messages, at, Math.max(1, limit - half), project);
+  const older = pageOf(messages, at, half, project, maxBytes);
+  const newer = forwardOf(messages, at, Math.max(1, limit - half), project, maxBytes);
   const candidates = [...older.messages, ...newer.messages];
-  const { start, end } = boundedMessageWindow(candidates.map(project), older.messages.length, MESSAGE_PAGE_MAX_BYTES, limit);
+  const { start, end } = boundedMessageWindow(candidates.map(project), older.messages.length, maxBytes, limit);
   return {
     messages: candidates.slice(start, end),
     before: start > 0 ? candidates[start]!.id : older.before,
@@ -362,8 +363,9 @@ export function threadMethods(ctx: FakeContext) {
     },
     'threads.get': async (params) => {
       const thread = ctx.thread(params.threadId);
-      const problem = snapshotOptionsProblem(params);
+      const problem = snapshotOptionsProblem(params) ?? pageBytesProblem(params.maxBytes);
       if (problem) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `threads.get.${problem.field}: expected ${problem.expected}`, data: problem });
+      const maxBytes = pageBytes(params.maxBytes);
       const asked = params.limit ?? MESSAGE_PAGE;
       if (!Number.isFinite(asked)) throw refusal('threads.get limit must be a finite number');
       const limit = Math.min(Math.max(1, Math.trunc(asked)), MESSAGE_PAGE_MAX);
@@ -373,7 +375,7 @@ export function threadMethods(ctx: FakeContext) {
       const project = projection(params);
       const tail = from === -1 ? null : tailOf(thread.messages, from, limit, project);
       const page = tail !== null ? { messages: tail, before: null, after: null }
-        : aroundOf(thread.messages, params.around, limit, project) ?? { ...pageOf(thread.messages, thread.messages.length, limit, project), after: null };
+        : aroundOf(thread.messages, params.around, limit, project, maxBytes) ?? { ...pageOf(thread.messages, thread.messages.length, limit, project, maxBytes), after: null };
       const sent = new Set(page.messages.map(message => message.turnId));
       const turns = thread.turns.filter(turn => turn.status === 'queued' || turn.status === 'running' || sent.has(turn.id));
       const anchor = params.sync ? resumeAnchor({ messages: page.messages, turns }) : null;
@@ -399,6 +401,8 @@ export function threadMethods(ctx: FakeContext) {
       const thread = ctx.thread(params.threadId);
       const cursor = params.before ?? params.after;
       if ((params.before === undefined) === (params.after === undefined)) throw refusal('messages.list takes exactly one cursor: before, for older messages, or after, for newer ones');
+      const bad = pageBytesProblem(params.maxBytes);
+      if (bad) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `messages.list.${bad.field}: expected ${bad.expected}`, data: bad });
       const at = thread.messages.findIndex((message) => message.id === cursor);
       if (at < 0) {
         throw new RpcFailure({
@@ -410,7 +414,8 @@ export function threadMethods(ctx: FakeContext) {
       const asked = params.limit ?? MESSAGE_PAGE;
       const limit = Math.min(Math.max(1, Math.trunc(asked)), MESSAGE_PAGE_MAX);
       const project = projection(params);
-      const page = params.before === undefined ? { ...forwardOf(thread.messages, at + 1, limit, project), before: null } : pageOf(thread.messages, at, limit, project);
+      const maxBytes = pageBytes(params.maxBytes);
+      const page = params.before === undefined ? { ...forwardOf(thread.messages, at + 1, limit, project, maxBytes), before: null } : pageOf(thread.messages, at, limit, project, maxBytes);
       page.messages = page.messages.map(project);
       const turns = new Set(page.messages.map((message) => message.turnId));
       return pagingReply({ ...page, turns: thread.turns.filter((turn) => turns.has(turn.id)) });

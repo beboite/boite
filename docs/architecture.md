@@ -96,8 +96,9 @@ again from the message when missing ([performance](performance.md)).
 A tool output, tool input text, file or image of 32 KiB or more is stored in
 `part_blobs`, one row per value, and its part in the message row names it under
 `$blob`. Journal reads put the values back. A page asked with `compactTools`
-reads only the first 1,024 characters of a finished tool's output; its resume
-proof hashes a digest of the whole value. A streaming message stores only the
+reads only the first 1,024 characters of a finished tool's output, and sends
+them only for a call that failed or was refused; its resume proof hashes a
+digest of the whole value. A streaming message stores only the
 parts that changed since its last committed write. Rows written before schema
 31 kept their values inline; three minutes after startup the core moves them
 one message per tick, pauses while a message streams, and records the last

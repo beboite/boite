@@ -10,7 +10,7 @@
  * screen, events patch it like the open thread (`Threads.threadSnapshots`).
  */
 
-import { INITIAL_MESSAGE_PAGE, MESSAGE_PAGE_MAX, type MessageId, type Thread, type ThreadId, type ThreadSnapshot } from '@boite/contracts';
+import { INITIAL_MESSAGE_PAGE, INITIAL_PAGE_BYTES, MESSAGE_PAGE_MAX, type MessageId, type Thread, type ThreadId, type ThreadSnapshot } from '@boite/contracts';
 import type { Client } from '../client';
 import { resumeRequest } from '../thread-rows';
 import type { StoreContext } from './context';
@@ -64,7 +64,8 @@ export function askPage(ctx: StoreContext, opener: Opener, client: Client, threa
   // page around the message at the top of their view, not the last one.
   const saved = held || !features?.readingPages ? undefined : opener.readingPositions.get(threadId);
   const around = saved && !saved.pinned ? saved.anchor?.id : undefined;
-  const fetched = client.call('threads.get', { ...resume, limit: held ? MESSAGE_PAGE_MAX : INITIAL_MESSAGE_PAGE, ...lightPage(ctx), ...(around ? { around } : {}),
+  // A page holds about one screen; the rest comes as the reader scrolls. A resume tail is never cut.
+  const fetched = client.call('threads.get', { ...resume, limit: held ? MESSAGE_PAGE_MAX : INITIAL_MESSAGE_PAGE, maxBytes: INITIAL_PAGE_BYTES, ...lightPage(ctx), ...(around ? { around } : {}),
     ...(bundled ? { sync: held?.messagesSync && held.messagesSync.from === resume.after ? held.messagesSync : true, open } : {})
   }, held || !features?.chunkedAnswers ? {} : {
     // The loading view counts the page in as the core slices it.

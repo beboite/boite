@@ -11,7 +11,7 @@ import type {
 } from '@boite/contracts';
 import { readingCacheBytes, READING_CACHE_BYTES } from '../reading-cache';
 import type { ToolPart } from '../tool-groups';
-import { MESSAGE_PAGE_MAX, forTransport } from '@boite/contracts';
+import { INITIAL_MESSAGE_PAGE, INITIAL_PAGE_BYTES, MESSAGE_PAGE_MAX, READING_PAGE_BYTES, forTransport } from '@boite/contracts';
 import { askPage, ThreadPreloads } from './thread-preload';
 import { lightPage, NewerPages, setMessagesAfter, type ReadingPosition } from './reading-pages.svelte';
 export type { ReadingPosition } from './reading-pages.svelte';
@@ -275,7 +275,8 @@ export class Threads {
     const clientGeneration = this.ctx.clientGeneration;
     if (!client) return;
     try {
-      const fresh = await client.call('threads.get', { threadId });
+      // The page a first visit reads: what the copies held cannot be patched, so they start over.
+      const fresh = await client.call('threads.get', { threadId, limit: INITIAL_MESSAGE_PAGE, maxBytes: INITIAL_PAGE_BYTES, ...lightPage(this.ctx) });
       if (!this.ctx.currentClient(client, clientGeneration)) return;
       for (const held of this.threadSnapshots(threadId)) {
         held.messages = fresh.messages;
@@ -518,7 +519,7 @@ export class Threads {
     const navigation = this.openGeneration;
     const current = () => generation === this.#olderGeneration && this.ctx.currentNavigation(client, navigation);
     try {
-      const page = await client.call('messages.list', { threadId: open.id, before: cursor, ...lightPage(this.ctx) });
+      const page = await client.call('messages.list', { threadId: open.id, before: cursor, maxBytes: READING_PAGE_BYTES, ...lightPage(this.ctx) });
       const still = this.openThread;
       if (!current() || !still || still.id !== open.id || still.messagesBefore !== cursor) return 0;
       const known = new Set(still.messages.map((m) => m.id));

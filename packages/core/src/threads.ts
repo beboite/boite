@@ -149,7 +149,7 @@ export class ThreadStore {
    * one page here; the rest is walked back through `messages`, whose cursor is
    * `messagesBefore`.
    */
-  get(threadId: ThreadId, after?: MessageId, options: Pick<RpcParams<'threads.get'>, 'limit' | 'compactTools' | 'compactFiles' | 'compactImages' | 'compactToolParts' | 'around' | 'sync' | 'open'> = {}): Thread {
+  get(threadId: ThreadId, after?: MessageId, options: Pick<RpcParams<'threads.get'>, 'limit' | 'maxBytes' | 'compactTools' | 'compactFiles' | 'compactImages' | 'compactToolParts' | 'around' | 'sync' | 'open'> = {}): Thread {
     return threadSnapshot(this.core, this.withLoad(this.require(threadId)), after, options, this.agentState);
   }
 
