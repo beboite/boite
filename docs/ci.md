@@ -133,7 +133,7 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 593,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,823,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,830,000 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 3,951,000 |
 
@@ -220,6 +220,13 @@ and PowerShell integration scripts the core's. The limits rise to 594,000,
 Merged with `main` at `5feb7d82` on Linux it measured 4,814,973 UI bytes,
 556,942 for the entry chunk and 3,942,646 core bytes, after the device keys
 above. The UI limit rises to 4,823,000 and the core limit to 3,951,000.
+
+On 2026-10-13 on Linux with Bun 1.4.2, `main` at `224597ed` measured 4,822,128
+UI bytes. Opening a thread on one screen of history (#472) measured 4,823,117
+merged with it, as the Windows job did: 989 bytes for the page byte budgets the
+store sends, the list that pages itself when it cannot scroll, the old first
+row put back after a page lands, and the fake core's budgets. The UI limit
+rises to 4,830,000.
 
 Several drafts per project, merged with settings cards at `87fca361`, measured
 4,536,091 UI bytes and a 590,215-byte entry chunk on Linux: the done rows and
