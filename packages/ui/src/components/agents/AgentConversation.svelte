@@ -12,6 +12,7 @@
   import ChatFile from '../ChatFile.svelte';
   import AgentAvatar from './AgentAvatar.svelte';
   import AgentWorkCard from './AgentWorkCard.svelte';
+  import AgentPendingQuestions from './AgentPendingQuestions.svelte';
 
   /**
    * A conversation with an agent or a group, drawn the way a thread is: the
@@ -194,6 +195,7 @@
       {/each}
 
       {#each pending as work (work.id)}<AgentWorkCard {view} {work} compact />{/each}
+      <AgentPendingQuestions {view} {scope} />
 
       {#if live}
         <!-- What a messenger shows while the other side types: the agent at work. -->

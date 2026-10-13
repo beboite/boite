@@ -17,6 +17,7 @@ import { AgentEntrustments } from './entrust.ts';
 import { ResidentAgents } from './resident.ts';
 import { AgentRoutines } from './routines.ts';
 import { AgentProjects } from './projects.ts';
+import { AgentSettingCards, registerAgentSettingMethods } from './setting-cards.ts';
 import { MemoryKeeper } from './memory.ts';
 import { boolean, ids, integer, object, oneOf, sameScope, scope, text } from './validation.ts';
 import { invalidParams } from '../errors.ts';
@@ -38,13 +39,14 @@ export class AgentStore {
   readonly entrusted: AgentEntrustments;
   readonly projects: AgentProjects;
   readonly memory: MemoryKeeper;
+  readonly settingCards: AgentSettingCards;
   constructor(readonly core: Core) {
     this.records = new AgentsRepository(core.journal); this.resident = new ResidentAgents(core); this.routines = new AgentRoutines(core); this.entrusted = new AgentEntrustments(core, this);
-    this.projects = new AgentProjects(core, this); this.memory = new MemoryKeeper(core, this);
+    this.projects = new AgentProjects(core, this); this.memory = new MemoryKeeper(core, this); this.settingCards = new AgentSettingCards(core, this);
     // Stewards became agents with projects; their grants have nothing left to grant.
     core.journal.db.query("DELETE FROM settings WHERE key LIKE 'steward:%'").run();
   }
-  close(): void { this.projects.close(); this.memory.close(); }
+  close(): void { this.projects.close(); this.memory.close(); this.settingCards.close(); }
 
   changed(): void { this.core.bus.emit('agents.changed', { revision: this.records.revision() }); }
   /** Read on every scheduler pass; `setLimits` is its only writer, so it is read from disk once. */
@@ -573,4 +575,5 @@ export function registerPersistentAgents(core: Core): void {
   core.router.register('agents.decision.answer', p => store.answerDecision(p));
   core.router.register('agents.work.control', p => store.control(p));
   core.router.register('agents.entrust', p => store.entrusted.entrust(p));
+  registerAgentSettingMethods(core, store.settingCards);
 }

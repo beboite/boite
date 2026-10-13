@@ -35,6 +35,12 @@
   let creating = $state<Creating | null>(null);
   /** The pane the header opened; null is the record's first pane. */
   let pane = $state<Pane | null>(null);
+  /**
+   * Each link from elsewhere draws the pane afresh: the page stays mounted
+   * behind a thread, and a settings form opened before a card applied would
+   * show the values it read then.
+   */
+  let visit = $state(0);
   /** The conversation a mission was opened from: its back arrow returns there. */
   let origin = $state<AgentSelection | null>(null);
   /** A message the user asked to plan instead of sending: the planned tasks open with it. */
@@ -176,7 +182,7 @@
   $effect(() => {
     const target = store.agentsTarget;
     if (!target) return;
-    untrack(() => { open({ kind: 'profile', id: target.agentId }); store.agentsTarget = null; });
+    untrack(() => { open({ kind: 'profile', id: target.agentId }); if (target.pane) pane = target.pane; visit++; store.agentsTarget = null; });
   });
 
   function open(next: AgentFocus, from: AgentSelection | null = null) {
@@ -263,7 +269,7 @@
           {/if}
         </nav>
       </header>
-      {#key `${selected.kind}:${selected.id}:${current}`}
+      {#key `${selected.kind}:${selected.id}:${current}:${visit}`}
         <div class="agents-body" class:chat={current === 'conversation'}>
           {#if current === 'conversation' && conversation}
             <AgentConversation {view} scope={conversation} live={liveHere} onschedule={profile ? plan : undefined} />

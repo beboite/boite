@@ -11,7 +11,7 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
-import { AGENT_ENV, SETTINGS_PAGES, VIEW_HELP } from '@boite/contracts';
+import { AGENT_ENV, AGENT_SETTING_KEYS, SETTINGS_PAGES, VIEW_HELP } from '@boite/contracts';
 import { VIEW_EXAMPLE } from './view-example.ts';
 import type { AgentTask, GitChange, PanelSurface, Todo } from '@boite/contracts';
 import { connect } from './client.ts';
@@ -89,6 +89,13 @@ ${CONTROL_HELP}
                                  a card with a button to that Settings page,
                                  for what is not one value: a provider login,
                                  a pairing (pages: ${SETTINGS_PAGES.join(', ')})
+  settings agent [key]           a persistent agent's settings a card may
+                                 change: ${AGENT_SETTING_KEYS.join(', ')}
+                                 (--agent <name>; yours in your own conversation)
+  settings agent request <key> <value> --why <text>
+                                 a card asking the user to change one, such as
+                                 projects +boite -old or a list; the outcome
+                                 arrives as a message (applied, changed, refused)
   task list                      the agent's task list
   task add <text>                add a task (id t1, t2, ...)
   task start|done|remove <id>    move or drop one task
@@ -255,6 +262,21 @@ export function settingValue(raw: string): unknown {
   } catch {
     return raw;
   }
+}
+
+/**
+ * An agent setting as typed: `projects` takes `+name -name` edits or a list
+ * (`a,b`, `a b` or JSON), the other keys a value as `settingValue` reads it.
+ */
+export function agentSettingArg(key: string, tokens: string[]): unknown {
+  const raw = tokens.join(' ').trim();
+  if (key !== 'projects') return settingValue(raw);
+  if (raw.startsWith('[') || raw.startsWith('{')) return settingValue(raw);
+  const items = raw.split(/[\s,]+/).filter(item => item.length > 0);
+  const edits = items.filter(item => /^[+-]./.test(item));
+  if (edits.length === 0) return items;
+  if (edits.length !== items.length) throw new Usage('settings agent request projects takes +name -name edits or a list, not both');
+  return { add: edits.filter(item => item.startsWith('+')).map(item => item.slice(1)), remove: edits.filter(item => item.startsWith('-')).map(item => item.slice(1)) };
 }
 
 /** `resources#limits` into a page and a card. */
@@ -527,6 +549,33 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
             : [`card: opens Settings at ${setting.section === null ? setting.page : `${setting.page}#${setting.section}`}`]),
           'Keep working. The outcome arrives as a message quoting your reason; without one, nothing changed.',
         ], asked);
+        return;
+      }
+      if (action === 'agent') {
+        const agent = parsed.agent === undefined ? {} : { agent: parsed.agent };
+        if (rest[1] === 'request') {
+          if (parsed.why === undefined || parsed.why.trim().length === 0) throw new Usage('settings agent request needs --why <text>, the reason the user reads on the card');
+          const key = want(2, `a key: ${AGENT_SETTING_KEYS.join(', ')}`);
+          if (rest.length < 4) throw new Usage('settings agent request needs a value after the key');
+          const asked = await client.call('agents.settings.request', { threadId, reason: parsed.why, key, value: agentSettingArg(key, rest.slice(3)), ...agent });
+          const setting = asked.setting;
+          print([
+            `requested: ${asked.questionId}`,
+            `change: ${setting.agentName}'s ${setting.key} ${JSON.stringify(setting.previous)} -> ${JSON.stringify(setting.value)}`,
+            'card: Apply, or the user changes it in the agent\'s settings',
+            'Keep working. The outcome arrives as a message quoting your reason; without one, nothing changed.',
+          ], asked);
+          return;
+        }
+        if (rest.length > 2) throw new Usage('settings agent expects a key or request <key> <value>');
+        const read = await client.call('agents.settings.read', { threadId, ...agent });
+        const shown = rest[1] === undefined ? read.settings : read.settings.filter(reading => reading.key === rest[1]);
+        if (shown.length === 0) throw new Usage(`settings agent: unknown key ${rest[1]}; the keys are ${AGENT_SETTING_KEYS.join(', ')}`);
+        const named = (reading: (typeof shown)[number], value: unknown): string => JSON.stringify(reading.key === 'projects' && Array.isArray(value) ? value.map(id => reading.choices?.find(choice => choice.id === id)?.label ?? id) : value ?? null);
+        print([
+          `agent: ${read.agentName} (${read.agentId})`,
+          ...shown.map(reading => `${reading.key} ${named(reading, reading.value)}${reading.choices?.length ? `\n    choices: ${reading.choices.map(choice => choice.label === choice.id ? choice.id : `${choice.label} (${choice.id})`).join(', ')}` : ''}`),
+        ], rest[1] === undefined ? read : shown[0]);
         return;
       }
       if (rest.length > 1) throw new Usage('settings expects a key, request <key> <value> or open <page>');

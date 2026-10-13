@@ -24,6 +24,8 @@ import { logMethods, seedDiagnostics } from './fake-client/logs';
 import { coordinationMethods, registerCore, unregisterCore } from './fake-client/coordination';
 import { delegationMethods, seedDelegationDemo } from './fake-client/delegation';
 import { seedAgentsDemo } from './fake-client/agents-demo';
+import { agentSettingMethods } from './fake-client/agent-settings';
+import type { AgentSettingMethod } from './fake-agents';
 import { groupMethods } from './fake-client/group';
 import { pairingMethods } from './fake-client/pairing';
 import { projectMethods } from './fake-client/projects';
@@ -78,6 +80,7 @@ function reportSlices(result: unknown, onProgress: (received: number, total: num
 export class FakeClient implements ObservableClient {
   readonly #ctx: FakeContext;
   readonly #methods: FakeMethods;
+  readonly #agentSettings: ReturnType<typeof agentSettingMethods>;
   #mergedPrSweep: Promise<number> | null = null;
   #doneSweep: Promise<void> | null = null;
   #transportGeneration = 0;
@@ -86,6 +89,7 @@ export class FakeClient implements ObservableClient {
     const ctx = new FakeContext(options);
     this.#ctx = ctx;
     this.#methods = this.#answer(ctx);
+    this.#agentSettings = agentSettingMethods(ctx);
     registerCore(ctx);
     seed(ctx);
     if (options.delegationDemo) seedDelegationDemo(ctx);
@@ -347,6 +351,10 @@ export class FakeClient implements ObservableClient {
 
   #dispatch(method: RpcMethodName, rawParams: unknown): Promise<unknown> {
     const ctx = this.#ctx;
+    if (Object.hasOwn(this.#agentSettings, method)) {
+      const handler = this.#agentSettings[method as AgentSettingMethod] as (params: unknown) => unknown;
+      return Promise.resolve().then(() => handler(rawParams));
+    }
     if (method.startsWith('agents.')) return Promise.resolve(ctx.agents.call(method as Extract<RpcMethodName, `agents.${string}`>, rawParams));
     if (ctx.plugins.handles(method)) return ctx.plugins.call(method, rawParams);
     if (ctx.workflows.handles(method)) return ctx.workflows.call(method, rawParams);

@@ -79,6 +79,10 @@
   let projectId = $state(mission?.projectId ?? null);
   /** A team's projects, or the projects the owner entrusts to an agent. */
   let projectIds = $state(team?.projectIds ?? profile?.projectIds ?? []);
+  const projectKey = (ids: readonly string[] | undefined) => JSON.stringify([...(ids ?? [])].sort());
+  /** The agent's projects this form last read: what tells an edit here from a change made elsewhere. */
+  let projectsRead = projectKey(profile?.projectIds);
+  let revisionRead = profile?.revision ?? 0;
   let objective = $state(mission?.objective ?? '');
   let expectedResult = $state(mission?.expectedResult ?? '');
   let minutes = $state((mission?.maxDurationMs ?? 600000) / 60000);
@@ -131,6 +135,25 @@
     target.showAgents(created.id);
   }
 
+  /**
+   * An agent's projects change outside this form too: a card in a thread
+   * applied, or the snapshot this page drew first was older. The form follows
+   * while its own projects are untouched, and keeps an edit in progress.
+   */
+  $effect(() => {
+    if (kind !== 'profile') return;
+    const latest = stored() as AgentProfile | undefined;
+    if (!latest) return;
+    const next = projectKey(latest.projectIds);
+    untrack(() => {
+      if (latest.revision <= revisionRead) return;
+      revisionRead = latest.revision;
+      if (next === projectsRead) return;
+      if (projectKey(projectIds) === projectsRead) projectIds = [...(latest.projectIds ?? [])];
+      projectsRead = next;
+    });
+  });
+
   function toggle(values: string[], id: string): string[] { return values.includes(id) ? values.filter(v => v !== id) : [...values, id]; }
 
   function stored(): AgentEntities[AgentEntryKind] | undefined {
@@ -159,8 +182,9 @@
       // field this form edits is unchanged. Anything else keeps the revision it read, so a stale
       // form is refused rather than written over newer values.
       const latest = stored();
-      const edited = (r: AgentProfile) => JSON.stringify([r.name, r.domain, r.instructions, r.avatar, r.status, r.tools, r.accountIntegration, r.projectIds ?? []]);
-      const rebase = kind === 'profile' && latest && profile && edited(latest as AgentProfile) === edited(profile);
+      const edited = (r: AgentProfile) => JSON.stringify([r.name, r.domain, r.instructions, r.avatar, r.status, r.tools, r.accountIntegration]);
+      // Projects this form followed from elsewhere count as read, not as a stale copy.
+      const rebase = kind === 'profile' && latest && profile && edited(latest as AgentProfile) === edited(profile) && projectKey((latest as AgentProfile).projectIds) === projectsRead;
       const version = initial.record ? { id: initial.record.id, expectedRevision: (rebase ? latest : initial.record).revision } : {};
       let result: AgentEntities[AgentEntryKind] | null = null;
       if (kind === 'profile') {

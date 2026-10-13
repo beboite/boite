@@ -31,6 +31,8 @@ export interface Parsed {
   skip: boolean;
   /** `settings request|open --why <text>`: the reason the card shows the user. */
   why?: string;
+  /** `settings agent --agent <name>`: the agent, by name or id; omitted, the one whose conversation this is. */
+  agent?: string;
   /** Another core's address; its token comes from BOITE_TOKEN, never the command line. */
   core?: string;
   /** `--context`, `--keep`, `--drop`, `--tools`, `--rules`, `--rules-file`, as typed: `contextRequest` reads them. */
@@ -75,6 +77,7 @@ export function parse(argv: string[]): Parsed {
     else if (arg === '--name') parsed.name = next();
     else if (arg === '--project') parsed.project = next();
     else if (arg === '--why') parsed.why = next();
+    else if (arg === '--agent') parsed.agent = next();
     else if (arg === '--core') parsed.core = next();
     else if (arg === '--limit') {
       const value = number(arg, next());

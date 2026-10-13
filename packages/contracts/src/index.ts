@@ -1488,6 +1488,8 @@ export type MessagePart =
       async?: boolean;
       /** A settings card: see `QuestionRequest.setting`. */
       setting?: SettingAsk;
+      /** An agent setting card: see `QuestionRequest.agentSetting`. */
+      agentSetting?: AgentSettingAsk;
     }
   /**
    * The agent compacted its context mid-turn: what it held before, what is
@@ -1781,6 +1783,12 @@ export interface QuestionRequest {
    * points at a page. `text` is its reason. Always asynchronous.
    */
   setting?: SettingAsk;
+  /**
+   * An agent setting card (`agents.settings.request`): a thread, or a
+   * persistent agent about itself, proposes a change to an agent's settings.
+   * `text` is its reason. Always asynchronous.
+   */
+  agentSetting?: AgentSettingAsk;
   createdAt: Timestamp;
 }
 
@@ -4581,6 +4589,13 @@ export {
   type SettingRequestParams, type SettingsPage,
 } from './setting-requests.ts';
 import type { SettingAsk, SettingReading, SettingRequestParams } from './setting-requests.ts';
+export {
+  AGENT_PROJECTS_MAX, AGENT_RUN_MINUTES, AGENT_SETTING_KEYS, agentSettingAnswerText, agentSettingValue, checkAgentSettingRequest, isAgentSettingKey,
+  normalizeAgentSetting, settledAgentSetting,
+  type AgentSettingApplyParams, type AgentSettingAsk, type AgentSettingChoice, type AgentSettingContext, type AgentSettingKey, type AgentSettingReading,
+  type AgentSettingRequestCheck, type AgentSettingRequestParams, type AgentSettingsReading, type AgentSettingsReadParams,
+} from './agent-setting-requests.ts';
+import type { AgentSettingAsk } from './agent-setting-requests.ts';
 export { SPEECH_CATALOGUE, SPEECH_CUSTOM_ID, SPEECH_DEFAULT_MODEL, isSpeechModelId, speechUrlProblem, type SpeechCatalogueModel, type SpeechModelTier, type SpeechBackend } from './speech-models.ts';
 import type { SpeechModelTier, SpeechBackend } from './speech-models.ts';
 

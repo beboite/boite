@@ -1,4 +1,5 @@
-import type { DelegationConfig, DelegationProfile, MessagePart, PermissionMode, TurnExecution } from './index';
+import type { DelegationConfig, DelegationProfile, MessagePart, PermissionMode, RequestId, TurnExecution } from './index';
+import type { AgentSettingApplyParams, AgentSettingAsk, AgentSettingRequestParams, AgentSettingsReading, AgentSettingsReadParams } from './agent-setting-requests';
 
 export interface AgentRuntimeConfig {
   defaultRoute: AgentSelection;
@@ -369,6 +370,23 @@ export interface AgentsRpcMethods {
    * Owner only.
    */
   'agents.entrust': { params: { threadId: string; agentId: string | null; objective?: string }; result: AgentEntrustment | null };
+  /**
+   * An agent's settings a card may propose a change to, with their values and
+   * choices (`boite settings agent`). Any thread reads them; a persistent
+   * agent's conversation reads its own without naming it.
+   */
+  'agents.settings.read': { params: AgentSettingsReadParams; result: AgentSettingsReading };
+  /**
+   * A card on the caller's thread asking the user to change one setting of an
+   * agent, asked without stopping like `questions.ask`, with `reason` as its
+   * text. Refused for an unknown key or agent, a value the agent's settings
+   * would refuse, the value already set, or a card already open on that key.
+   * The card settles when the setting moves, from Apply or from the agent's
+   * settings; the thread reads `applied`, `changed` or `refused`.
+   */
+  'agents.settings.request': { params: AgentSettingRequestParams; result: { questionId: RequestId; setting: AgentSettingAsk } };
+  /** Apply a pending agent setting card, or the user's edit of it. Owner only, like `agents.profile.save`. */
+  'agents.settings.apply': { params: AgentSettingApplyParams; result: AgentProfile };
 }
 export interface AgentsRpcEvents {
   /** Invalidation only: clients fetch an authorized snapshot, never another agent's private data. */

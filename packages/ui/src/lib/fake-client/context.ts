@@ -58,6 +58,7 @@ import {
 } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { FakeAgents } from '../fake-agents';
+import { settleAgentSettings } from './agent-settings';
 import type { FakeFinishedTurn } from '../fake-usage';
 import { activityMethods, finishActivityTurn } from './activity';
 import { FakeBus } from './bus';
@@ -143,6 +144,8 @@ export class FakeContext {
   serverUpdate: ServerUpdateStatus = initialServerUpdate();
   readonly bus: FakeBus;
   readonly agents: FakeAgents;
+  /** A settle of the agent setting cards is queued after the current change. */
+  private settlingAgentCards = false;
   readonly plugins: FakePlugins;
   readonly workflows: FakeWorkflows;
   /** How far in the past the demo seeds its run, so its steps show real durations. */
@@ -261,7 +264,13 @@ export class FakeContext {
   constructor(options: FakeClientOptions = {}) {
     this.quotaExtras = options.quotaExtras ?? (typeof location !== 'undefined' && new URLSearchParams(location.search).get('quotaExtras') === '1');
     this.bus = new FakeBus(options.principal ?? 'owner');
-    this.agents = new FakeAgents(revision => this.emit('agents.changed', { revision }), {
+    this.agents = new FakeAgents(revision => {
+      this.emit('agents.changed', { revision });
+      // As the core: a change to any agent may answer a card, settled once per burst after it commits.
+      if (this.settlingAgentCards) return;
+      this.settlingAgentCards = true;
+      queueMicrotask(() => { this.settlingAgentCards = false; settleAgentSettings(this); });
+    }, {
       create: (agent, sessionId, work) => createAgentSession(this, agent, sessionId, work),
       start: (threadId, prompt, agent) => { Object.assign(this.thread(threadId), agent.selection); return this.startTurn(threadId, prompt); },
       stop: threadId => { void this.stopTurn(threadId); },

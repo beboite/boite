@@ -469,6 +469,27 @@ one value, a provider login (`accounts#provider-claude`) or a device to add
 `opened: the user opened Settings at <page>`; Dismiss sends `dismissed`. The
 MCP tools `boite_settings` and `boite_settings_request` do the same.
 
+`settings agent [key]` reads a persistent agent's settings a card may change:
+`projects` (those entrusted to it), `model`, `effort`, `autoMemory` (the memory
+pass), `subagents` and `maxRunMinutes`. It prints the agent's name, each value
+and, for projects, models and efforts, the choices. `--agent <name or id>`
+names the agent; in an agent's own conversation it defaults to that agent.
+`settings agent request <key> <value> --why <text>` draws the card. `projects`
+takes `+name -name` edits or a whole list (`Notes,Other`, or JSON), resolved
+by name or id and stored as ids; the other keys read their value as `settings
+request` does. The refusals are the same, plus an unknown or ambiguous agent
+(the refusal lists them) and a model the agent's policy does not allow.
+
+The card names the agent and the change; for projects, each project added or
+removed has a tick the owner can clear before Apply. Apply calls
+`agents.settings.apply`, owner only, which writes through the agent's own
+settings checks. Any change to the agent, from the card or from its settings
+page, settles every card it answers; a card about an agent that is archived or
+removed closes unanswered. The asking thread reads `applied: <agent>'s <key>
+is now <value>`, `changed: the user set <agent>'s <key> to <value>, not
+<proposed>` or `refused: <agent>'s <key> stays <value>`, projects by name
+(`are` and `stay` for them).
+
 Exit codes: 0, 1 on a refusal or a failure (`error: ...` on stderr), 2 on a
 usage error (the usage text on stderr).
 

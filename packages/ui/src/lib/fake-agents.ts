@@ -24,8 +24,10 @@ const DEFAULT_OBJECTIVE = 'Take over this work where it stands and carry it to a
 const DEFAULT_BRAIN_ROOT = '/agent-workspaces';
 type EntrustedThread = { title: string; archived: boolean; parentThreadId?: string | null; agentSessionId?: string | null; projectId: string | null; activity?: ThreadActivity };
 
+/** Agent setting cards live with the threads' questions: `fake-client/agent-settings.ts` answers them. */
+export type AgentSettingMethod = Extract<keyof AgentsRpcMethods, `agents.settings.${string}`>;
 type AgentHandlers = {
-  [M in keyof AgentsRpcMethods]: (params: RpcParams<M>) => RpcResult<M>;
+  [M in Exclude<keyof AgentsRpcMethods, AgentSettingMethod>]: (params: RpcParams<M>) => RpcResult<M>;
 };
 
 /** In-memory projection for interface journeys. Real process and crash behavior is tested against the core. */
@@ -99,6 +101,24 @@ export class FakeAgents {
     const second = run(notice, 40);
     put('work', { ...notice, runId: second.id, memory: { threadId, status: 'unchanged', summary: null, at: start + 44 * 60_000 } });
     dated('message', { scope, senderId: agent.id, text: `The login form fix in ${host.project?.name ?? 'your project'} is done: its tests pass and the pull request is open. Nothing needs you for now.`, recipientIds: [], replyTo: null, episodeId: notice.episodeId, sourceRunId: second.id }, 43);
+  }
+  /** An agent's profile as stored, or null once removed: what an agent setting card reads. */
+  profileOf(id: string): AgentProfile | null {
+    const row = this.rows.get(`profile:${id}`) as AgentProfile | undefined;
+    return row ? structuredClone(row) : null;
+  }
+  /** Every agent not archived, oldest first. */
+  liveProfiles(): AgentProfile[] { return this.all('profile').filter(agent => agent.status !== 'archived').sort(byCreation); }
+  configOf(id: string): AgentRuntimeConfig { return this.runtime(id); }
+  /** Whether the owner set the agent's runtime policy: only then does it limit the models. */
+  hasPolicy(id: string): boolean { return this.configs.has(id); }
+  /** The agent whose session the thread is, as the core's `resident.ownerOf`. */
+  ownerOf(threadId: string): string | null { return this.all('session').find(s => s.threadId === threadId)?.agentId ?? null; }
+  /** An applied agent setting card, written as the agent's settings page would. */
+  writeSetting(agentId: string, change: { selection?: AgentSelection; projectIds?: string[]; config?: AgentRuntimeConfig }): AgentProfile {
+    const agent = this.get('profile', agentId);
+    if (change.config) this.configs.set(agentId, structuredClone(change.config));
+    return this.update('profile', { ...agent, ...(change.selection ? { selection: change.selection } : {}), ...(change.projectIds ? { projectIds: change.projectIds } : {}) });
   }
   close(): void { this.closed = true; }
   open(): void { this.closed = false; this.kick(); }
@@ -325,7 +345,7 @@ export class FakeAgents {
   private dispatch(method: keyof AgentsRpcMethods, raw: unknown): unknown {
     // The registry checks each method's params/result; call keeps the transport's unknown input.
     const handler = Object.hasOwn(this.handlers, method)
-      ? this.handlers[method] as (params: unknown) => unknown
+      ? this.handlers[method as keyof AgentHandlers] as (params: unknown) => unknown
       : undefined;
     return handler?.(raw);
   }

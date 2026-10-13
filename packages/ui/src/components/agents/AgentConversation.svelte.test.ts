@@ -155,3 +155,29 @@ test('the agent at work shows no way into its thread from the conversation', asy
   expect(document.querySelector('[data-testid="agent-live"]')).not.toBeNull();
   expect(document.querySelector('[data-testid="agent-live-open"]')).toBeNull();
 });
+
+test('a question the agent asked in its hidden session thread stands in its conversation and answers through the store', async () => {
+  const answerQuestion = vi.fn(async () => true);
+  const asked = (id: string, threadId: string) => ({ id, threadId, turnId: 'turn-1', text: `Which port? ${id}`, options: [{ id: '1', label: '5173' }, { id: '2', label: '4173' }], allowText: true, multiple: false, async: true, createdAt: 1 });
+  const view = replyView({ purpose: 'work' }, {}, { answerQuestion, pendingQuestions: [asked('q-own', 't-ada'), asked('q-group', 't-group'), asked('q-other', 't-user')] });
+  // Ada's session of this conversation, and another of hers in a group.
+  view.snapshot!.sessions = [
+    { id: 's-1', agentId: 'a-ada', scope, threadId: 't-ada' },
+    { id: 's-2', agentId: 'a-ada', scope: { kind: 'group', id: 'g-1' }, threadId: 't-group' },
+  ] as never;
+  mounted = mount(AgentConversation, { target: document.body, props: { view, scope } });
+  await settle();
+  const cards = [...document.querySelectorAll<HTMLElement>('[data-testid="agent-question"]')];
+  expect(cards.map(card => card.dataset.question)).toEqual(['q-own']);
+  expect(cards[0]!.textContent).toContain('Ada asks you');
+  (document.querySelector('[data-testid="agent-question-text"]') as HTMLInputElement).value = 'the free one';
+  document.querySelector('[data-testid="agent-question-text"]')!.dispatchEvent(new Event('input'));
+  await settle();
+  document.querySelector<HTMLButtonElement>('[data-testid="agent-question-send"]')!.click();
+  await settle();
+  expect(answerQuestion).toHaveBeenLastCalledWith('t-ada', 'q-own', [], 'the free one');
+  document.querySelectorAll<HTMLButtonElement>('[data-testid="agent-question-option"]')[1]!.click();
+  await settle();
+  // Once answered the card only waits to leave the list: a second press sends nothing.
+  expect(answerQuestion).toHaveBeenCalledOnce();
+});

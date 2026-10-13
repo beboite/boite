@@ -1,4 +1,5 @@
-import type { AgentMessageFile, ArtifactContent, Message } from '@boite/contracts';
+import type { AgentMessageFile, ArtifactContent, Message, Turn } from '@boite/contracts';
+import { requestAgentSetting } from './agent-settings';
 import type { FakeContext } from './context';
 import { FAKE_MEDIA } from './files';
 
@@ -39,4 +40,21 @@ export function seedAgentsDemo(ctx: FakeContext): void {
       return { threadId, messageId: message.id, part: { type: 'artifact', id, name, mimeType, bytes } };
     },
   });
+  askForAnotherProject(ctx);
+}
+
+/**
+ * The agent asks, from its own conversation, to be entrusted the next project
+ * too: a pending agent setting card the conversation draws under its messages.
+ */
+function askForAnotherProject(ctx: FakeContext): void {
+  const session = ctx.agents.snapshot().sessions[0];
+  const agent = session ? ctx.agents.profileOf(session.agentId) : null;
+  const next = ctx.projects.find(p => p.kind !== 'drafts' && !(agent?.projectIds ?? []).includes(p.id));
+  if (!session || !agent || !next) return;
+  const thread = ctx.thread(session.threadId);
+  const at = Date.now() - 30 * 60_000;
+  const turn: Turn = { id: `turn-agents-demo-${++ctx.seq}`, threadId: thread.id, status: 'done', queuedAt: at, startedAt: at, finishedAt: at + 60_000, usage: null, error: null };
+  thread.turns.push(turn);
+  requestAgentSetting(ctx, thread, turn, { threadId: thread.id, key: 'projects', value: { add: [next.id] }, reason: `${next.name} has threads nobody follows. Entrust it to me and I will watch them the way I watch the others.` });
 }

@@ -42,7 +42,7 @@ export class Layout {
   dropping = $state(false);
   search = $state('');
   /** The agent an outside link asked the Agents page to open, with a fresh key for repeated asks; the page takes it once. */
-  agentsTarget = $state<{ agentId: string; request: number } | null>(null);
+  agentsTarget = $state<{ agentId: string; request: number; pane?: 'settings' } | null>(null);
 
   constructor(private readonly ctx: StoreContext) {}
 
@@ -91,11 +91,11 @@ export class Layout {
     this.page = 'chat';
   }
 
-  /** The Agents page is an experiment: with it off, nothing leads there. */
-  showAgents(agentId: string | null = null): void {
+  /** The Agents page is an experiment: with it off, nothing leads there. `pane` opens the agent on its settings. */
+  showAgents(agentId: string | null = null, pane?: 'settings'): void {
     if (!experimentOn('resident-agents')) return;
     this.ctx.threads.invalidateNavigation();
-    if (agentId) this.agentsTarget = { agentId, request: (this.agentsTarget?.request ?? 0) + 1 };
+    if (agentId) this.agentsTarget = { agentId, request: (this.agentsTarget?.request ?? 0) + 1, ...(pane ? { pane } : {}) };
     this.page = 'agents';
     this.sidebarOpen = false;
   }

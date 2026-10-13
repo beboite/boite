@@ -143,6 +143,25 @@ publishes with `boite attach` while it works rides with its answer
 pictures inline with the zoomable viewer and other files as cards, read with
 `artifacts.read` on the agent's own thread and message.
 
+### Asking to change an agent's settings
+
+An agent's settings stay the owner's, but a thread, or the agent about itself,
+can propose a change with a card: `boite settings agent request <key> <value>
+--why <reason>`, the same flow as a card about a Boite setting ([CLI](cli.md)).
+The keys are the projects entrusted to it, its model and reasoning effort, the
+memory pass (`autoMemory`), its subagents and `maxRunMinutes`. A run tells the
+agent how to ask, so one that needs a project it was not given asks for it
+instead of working around it. The card is asked without stopping and outlives
+its turn. In a thread it sits in the timeline; an agent's own cards, and any
+other card its hidden work threads raise, show in its conversation above the
+composer. Apply (`agents.settings.apply`, owner only) goes through the same
+checks as the agent's settings page, and for projects the owner can untick
+part of the proposal first. Any change to the agent, from the card or from
+the page, settles the cards it answers; the asking thread reads the outcome as
+a message, which a persistent agent receives as new work. Code:
+`packages/core/src/agents/setting-cards.ts`, shared checks in
+`packages/contracts/src/agent-setting-requests.ts`.
+
 ## Conversations and teams
 
 A group is a shared conversation without a required project. Each agent/group
