@@ -178,12 +178,11 @@ test('no push about a thread someone is looking at and uses, on the PC or the ph
     harness.core.journal.putThread(other);
     let n = 0;
     const finish = (id: string) => harness.core.bus.emit('turn.finished', { id: `attention_${++n}`, threadId: id, status: 'done', queuedAt: 1, startedAt: 1, finishedAt: 2, usage: null, error: null, execution: { providerId: other.providerId, accountId: other.accountId, model: null, effort: null, permissionMode: other.permissionMode, sessionId: null, sessionGeneration: 0, selectionVersion: 0 } });
-    const ask = (id: string) => harness.core.bus.emit('question.asked', { id: `ask_${++n}`, threadId: id, text: 'Which branch?' } as RpcEvents['question.asked']);
     const delivered = async (count: number) => { await waitFor(() => deliveries.length === count); await Bun.sleep(30); expect(deliveries).toHaveLength(count); };
 
     // The phone in the foreground on the thread: news about it waits, news about another one goes.
     await phone.call('threads.focus', { threadId, attentive: true, idleMs: 0 });
-    finish(threadId); ask(threadId); finish(other.id);
+    finish(threadId); finish(threadId); finish(other.id);
     await delivered(1);
     expect(deliveries[0]!.threadId).toBe(other.id);
     // A touch on that screen afterwards shows it was seen: locking the phone then sends nothing.
@@ -193,7 +192,7 @@ test('no push about a thread someone is looking at and uses, on the PC or the ph
     await delivered(1);
     // The desktop window in front and used: the same. Use of another thread is not use of this one.
     await desktop.call('threads.focus', { threadId, attentive: true, idleMs: 0 });
-    ask(threadId);
+    finish(threadId);
     await Bun.sleep(5);
     await phone.call('threads.focus', { threadId: other.id, attentive: true, idleMs: 0 });
     await phone.call('threads.focus', { threadId: null });
@@ -202,7 +201,7 @@ test('no push about a thread someone is looking at and uses, on the PC or the ph
     await delivered(1);
     // A window in front that nobody used for a while is not believed; one with the thread merely open does not count.
     await desktop.call('threads.focus', { threadId, attentive: true, idleMs: 60_000 });
-    ask(threadId);
+    finish(threadId);
     await desktop.call('threads.focus', { threadId });
     finish(threadId);
     await delivered(3);
@@ -221,6 +220,24 @@ test('no push about a thread someone is looking at and uses, on the PC or the ph
     await expect(phone.call('threads.focus', { threadId, idleMs: -1 })).rejects.toThrow('idleMs');
   } finally { phone.close(); }
 });
+test('questions and permissions push immediately even when their thread is attended', async () => {
+  const paired = session();
+  harness.core.push.subscribe(paired.id, subscription());
+  const deliveries: { threadId: string; tag: string }[] = [];
+  harness.core.push.send = async (_target, payload) => { deliveries.push(JSON.parse(payload)); };
+  const desktop = await harness.connect();
+  const { threadId } = await echoThread(harness, desktop);
+  await desktop.call('threads.focus', { threadId, attentive: true, idleMs: 0 });
+  harness.core.bus.emit('question.asked', { id: 'focused_question', threadId, turnId: 'focused_turn', async: true, text: 'Subagents are paused. Continue?', options: [], allowText: true, multiple: false, createdAt: Date.now() });
+  harness.core.bus.emit('permission.requested', { id: 'focused_permission', threadId, turnId: 'focused_turn', toolName: 'Edit', input: {}, description: 'Allow file edit?', createdAt: Date.now() });
+  await waitFor(() => deliveries.length === 2);
+  expect(deliveries.map(row => row.tag).sort()).toEqual(['request-focused_permission', 'request-focused_question']);
+  expect(deliveries.every(row => row.threadId === threadId)).toBe(true);
+  await desktop.call('threads.focus', { threadId: null });
+  await Bun.sleep(30);
+  expect(deliveries).toHaveLength(2);
+});
+
 test('a notification carries the icon badge: the threads waiting on the user, the notified one included', async () => {
   const paired = session();
   harness.core.push.subscribe(paired.id, subscription());
