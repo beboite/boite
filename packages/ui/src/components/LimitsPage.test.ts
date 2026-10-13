@@ -161,7 +161,7 @@ test('renaming a tracked subscription updates cached cards immediately and cance
     expect(row().querySelector('.account')!.textContent).toBe('Personal');
     // No quota refresh is needed and the cache itself still has the older label.
     expect(read.mock.calls.filter(([method]) => method === 'quotas.list')).toHaveLength(1);
-    expect(quotaReader(store.endpointUrl ?? 'here').rows!.find(row => row.accountId === 'a-codex')!.label).toBe('Default');
+    expect(quotaReader(store.endpointUrl ?? 'here', store.core).rows!.find(row => row.accountId === 'a-codex')!.label).toBe('Default');
     row().querySelector<HTMLButtonElement>('[data-testid="account-rename"]')!.click(); flushSync();
     row().querySelector<HTMLInputElement>('[data-testid="account-name"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     await settle();

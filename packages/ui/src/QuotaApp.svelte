@@ -7,7 +7,7 @@
   import { strings } from './lib/strings';
   import { quotaReader, shownQuotas, type QuotaReader } from './lib/quota-reader.svelte';
   import QuotaPopup from './components/QuotaPopup.svelte';
-  // The last reading this computer saw draws the first frame; the fresh one replaces it.
+  // Wait for the core identity before restoring its last reading.
   let reader = $state<QuotaReader>(quotaReader('here'));
   let accounts = $state.raw<Account[] | undefined>(undefined);
   let rows = $derived(shownQuotas(reader.rows ?? [], accounts));
@@ -58,6 +58,7 @@
   onMount(() => {
     const off = [startTheme()];
     const initialize = async () => {
+      let endpointUrl = 'here';
       // Same gate as `Store.boot`: the constant folds, so the fake core is in
       // the dev bundle and in vitest, never in what ships.
       if (import.meta.env.DEV && new URLSearchParams(location.search).get('fake') === '1') {
@@ -65,13 +66,18 @@
       } else {
         const endpoint = await resolveEndpoint();
         if (!endpoint) throw new Error(strings.errors.noEndpoint);
-        reader = quotaReader(endpoint.url);
+        endpointUrl = endpoint.url;
         const ws = new WsClient({ ...endpoint, clientName: 'shell' }); client = ws;
-        off.push(ws.onState((state) => { if (state === 'ready' && visible) void refresh(); }));
+        off.push(ws.onState((state) => {
+          if (state !== 'ready') return;
+          reader = quotaReader(endpointUrl, ws.core);
+          if (visible) void refresh();
+        }));
       }
       if (disposed) { client.close(); return; }
-      await client.connect();
+      const core = await client.connect();
       if (disposed) { client.close(); return; }
+      reader = quotaReader(endpointUrl, core);
       off.push(client.on('settings.updated', (value) => { settingsRevision++; settings = value; }));
       off.push(client.on('quotas.updated', (value) => reader.accept(value)));
       off.push(client.on('accounts.updated', (account) => {

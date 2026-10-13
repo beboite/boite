@@ -26,7 +26,7 @@
   const proxyEnabled = $derived(proxy?.enabled === true);
   const proxyName = $derived(proxy ? subscriptionProxyName(proxy.kind) : '');
 
-  let reader = $derived(quotaReader(store.endpointUrl ?? 'here'));
+  let reader = $derived(quotaReader(store.endpointUrl ?? 'here', store.core));
   let gateway = $derived(gatewayReader(store.endpointUrl ?? 'here'));
   /**
    * Douane serving its quotas: its entries are native bars like any account's.
