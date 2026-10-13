@@ -498,14 +498,21 @@ test('CLI exposes approved profiles, launches one agent and sends/stops under th
   expect(await call(['delegate', 'stop'])).toContain('stopped: 2');
 });
 
-test('a parent failure pauses the team and stops its active children', async () => {
+test('a parent failure leaves its team working, and the result reaches the next prompt', async () => {
   const runs = scripted(); const { h, threadId, spawn } = await setup();
   h.core.threads.startTurn(threadId, 'Coordinate work');
   const child = await spawn();
+  // A provider error ("model at capacity") on the parent is not the owner's Stop.
   runs.get(threadId)!.finish('', 'error');
   await waitFor(() => h.core.threads.require(threadId).status === 'error');
-  expect(h.core.delegation.get(threadId).config.paused).toBe(true);
-  await waitFor(() => h.core.threads.require(child.thread.id).status === 'idle');
+  expect(h.core.delegation.get(threadId).config.paused).toBe(false);
+  expect(h.core.threads.require(child.thread.id).status).toBe('running');
+  await spawn('second');
+  runs.get(child.thread.id)!.finish('Child result');
+  await waitFor(() => h.core.delegation.get(threadId).messages.some(m => m.text.includes('Child result')));
+  // A failed parent is not woken by mail; the owner's next prompt carries it.
+  h.core.threads.startTurn(threadId, 'Go on');
+  await waitFor(() => runs.get(threadId)?.ctx.prompt.includes('Child result') === true);
 });
 
 test('the regular Stop command reports a stopped child and preserves sibling work', async () => {

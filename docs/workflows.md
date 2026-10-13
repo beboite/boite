@@ -118,8 +118,9 @@ the team.
 
 Stop cancels every running step and marks the steps that did not start as
 stopped; retry runs them again. Stopping or archiving the parent conversation
-stops its runs too. A parent turn that ends in an error pauses every running
-run, and the team when there is one, until the owner resumes it. A team that is
+stops its runs too. A parent turn that ends in an error or is cut by the system
+(a provider at capacity, an agent update) pauses nothing: its runs go on and
+their summary reaches it when they end. A team that is
 merely disabled holds nothing: only a paused one does. Pause launches nothing new, but
 the steps already running still finish, and a paused run whose every step ended
 is done. A core restart never resumes paid work by itself: running runs pause,

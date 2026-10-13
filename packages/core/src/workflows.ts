@@ -491,10 +491,8 @@ export class Workflows {
   private turnFinished(turn: Turn): void {
     const entry = this.stepOf.get(turn.threadId);
     if (!entry) {
-      // A failed turn of the conversation holds its runs, whether or not it has a team.
-      if (turn.status !== 'done' && turn.status !== 'stopped') {
-        for (const run of this.runsWhere("root_id = ? AND status = 'running'", turn.threadId)) this.save({ ...run, status: 'paused', error: 'A turn of the conversation failed. Resume to continue.' });
-      }
+      // A failed turn of the conversation leaves its runs going: their steps run in threads of
+      // their own, and the result waits for the conversation's next turn. Only a Stop holds them.
       // The root finished a turn of its own: an undelivered result may go now.
       const pending = this.runsWhere("root_id = ? AND status IN ('done', 'failed') AND json_extract(data, '$.delivered') = 0", turn.threadId);
       if (pending.length) setTimeout(() => { for (const run of pending) this.deliver(run.id); }, 0).unref?.();
