@@ -79,11 +79,14 @@ export class SpeechRecorder {
       this.source = context.createMediaStreamSource(stream);
       this.source.connect(this.node);
       // A side branch: an analyser with no output is still pulled, as the settings meter's is.
-      const analyser = context.createAnalyser();
-      analyser.fftSize = 512; analyser.smoothingTimeConstant = 0.6;
-      analyser.minDecibels = -88; analyser.maxDecibels = -28;
-      this.source.connect(analyser);
-      this.analyser = analyser;
+      // It only draws the spectrum, so a context without one records all the same.
+      try {
+        const analyser = context.createAnalyser();
+        analyser.fftSize = 512; analyser.smoothingTimeConstant = 0.6;
+        analyser.minDecibels = -88; analyser.maxDecibels = -28;
+        this.source.connect(analyser);
+        this.analyser = analyser;
+      } catch { this.analyser = null; }
       this.node.connect(context.destination);
       this.deadline = setTimeout(ended, SPEECH_MAX_SECONDS * 1000);
     } catch (error) { this.dispose(); throw error; }
