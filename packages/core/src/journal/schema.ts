@@ -5,7 +5,7 @@ import { nativeAgentPartSql } from './native-agent-parts.ts';
 import { createPartBlobs } from './part-blobs.ts';
 import { parseJson } from './rows.ts';
 
-export const SCHEMA_VERSION = 33;
+export const SCHEMA_VERSION = 34;
 
 /** Raised when the journal was written by a newer core than this one. */
 export class JournalTooNewError extends Error {
@@ -414,6 +414,11 @@ export function migrate(db: Database, file: string): { from: number; to: number 
   if (!hasColumn('threads', 'archived_at')) {
     db.exec('ALTER TABLE threads ADD COLUMN archived_at INTEGER');
     version = 33;
+  }
+  // What a conversation starts without (`ThreadContextMode`), as JSON; null for the whole setup.
+  if (!hasColumn('threads', 'context_mode')) {
+    db.exec('ALTER TABLE threads ADD COLUMN context_mode TEXT');
+    version = 34;
   }
   version = Math.max(version, SCHEMA_VERSION);
   if (row?.user_version !== version) db.exec(`PRAGMA user_version = ${version}`);

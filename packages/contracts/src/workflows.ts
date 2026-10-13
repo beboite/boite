@@ -1,4 +1,5 @@
 import type { ProjectId, ProviderId, ThreadId, Timestamp, Usage } from './index';
+import type { ContextPreset, ContextRequest } from './context-mode';
 
 /**
  * The shape a step promises for its structured output: a type name, a list of
@@ -25,6 +26,8 @@ export interface WorkflowStepPlan {
   model?: string;
   /** A reasoning level the step's model offers. */
   effort?: string;
+  /** Start the step without part of the user's setup: a preset name or a `ContextRequest`. */
+  context?: ContextRequest | ContextPreset;
   /** The brief. `{{step.field}}`, `{{item}}` and `{{index}}` are filled in when the step starts. */
   task: string;
   /** Steps that must end first. Steps named in `forEach`, `when` or the task are added automatically. */

@@ -11,6 +11,7 @@ import { childEnv, liveSetup, PROMPT_EFFORT, PromptQueue, STDERR_MAX } from './q
 import type { ClaudeDeps, LiveSetup } from './query.ts';
 import type { ClaudeTurn } from './turn.ts';
 import { SessionRetention } from '../session-retention.ts';
+import { CONTEXT_ENV, CONTEXT_GUIDES_ENV } from '../../context-mode.ts';
 import { noteClaudeMessage } from './diagnostics.ts';
 
 /** How long `stop()` lets the CLI end its turn before the abort signal takes it. */
@@ -694,6 +695,7 @@ export class ClaudeSession {
     // The same values the setters carry later, so what the query opens on
     // and what the session records as applied can never say different things.
     const setup = liveSetup(ctx.thread);
+    const mode = ctx.thread.contextMode ?? null;
     return {
       resume: ctx.sessionId ?? undefined,
       // A rewind or a fork: the transcript up to that entry, under a new
@@ -711,15 +713,23 @@ export class ClaudeSession {
       // Subagents in Boite are Boite conversations (`boite delegate spawn`), so the user
       // can follow, steer and stop them; the CLI's own subagent tools never reach the model.
       disallowedTools: [...NATIVE_SUBAGENT_TOOLS],
+      // A context mode: what the conversation starts without (docs/context-modes.md).
+      ...(mode?.tools ? { tools: [...mode.tools] } : {}),
+      ...(mode && !mode.mcp ? { strictMcpConfig: true, mcpServers: {} } : {}),
       settings: {
         fastMode: setup.fastMode,
-        ...(ctx.thread.permissionMode === 'yolo' ? { disableAllHooks: true } : {}),
+        ...(setup.disableHooks ? { disableAllHooks: true } : {}),
       },
       includePartialMessages: true,
       // Every run of the user's own hooks, for the ledger Settings shows.
       includeHookEvents: true,
       abortController: this.abortController,
-      env: childEnv(ctx.accountEnv),
+      env: mode === null ? childEnv(ctx.accountEnv) : {
+        ...childEnv(ctx.accountEnv),
+        [CONTEXT_ENV]: mode.label,
+        ...(mode.guides ? {} : { [CONTEXT_GUIDES_ENV]: '0' }),
+        ...(mode.instructions ? {} : { CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1' }),
+      },
       canUseTool: this.gate.canUseTool,
       hooks: {
         PreToolUse: [{ hooks: [this.gate.preToolUse] }],

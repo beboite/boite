@@ -9,6 +9,7 @@ import type {
 } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused } from './errors.ts';
+import { checkContext } from './context-mode.ts';
 import { newId } from './ids.ts';
 import { assertDriverRunnable } from './drivers/index.ts';
 import type { ChildRoute } from './delegation/routes.ts';
@@ -150,9 +151,10 @@ export class Workflows {
   /** Every step that names a model or a level runs on a route that exists and the owner allows, checked before anything starts. */
   private checkRoutes(rootId: string, steps: WorkflowStepPlan[], field = 'steps'): void {
     steps.forEach((step, i) => {
-      if (step.model === undefined && step.effort === undefined) return;
+      if (step.model === undefined && step.effort === undefined && step.context === undefined) return;
       try {
-        this.core.delegation.resolve(rootId, { profileId: step.profile ?? null, ...(step.model === undefined ? {} : { model: step.model }), ...(step.effort === undefined ? {} : { effort: step.effort }) });
+        const route = this.core.delegation.resolve(rootId, { profileId: step.profile ?? null, ...(step.model === undefined ? {} : { model: step.model }), ...(step.effort === undefined ? {} : { effort: step.effort }) });
+        if (step.context !== undefined) checkContext(this.core.providers.require(route.providerId), step.context);
       } catch (error) {
         throw invalidParams(`${field}[${i}] (${step.id}): ${messageOf(error)}`);
       }
@@ -389,7 +391,7 @@ export class Workflows {
         const key = inst.key;
         threadId = this.core.delegation.createChild(root, profile, title, id => {
           this.core.journal.db.query('INSERT INTO workflow_steps VALUES (?, ?, ?)').run(id, run.id, key);
-        });
+        }, step?.context);
         this.stepOf.set(threadId, { runId: run.id, key });
         Object.assign(inst, { threadId, providerId: profile.providerId, model: profile.model, effort: profile.effort });
       } catch (error) {

@@ -1348,6 +1348,20 @@ export const fr: Translation = {
     notifyHint: 'Un tour terminé, un échec, une question ou une permission en attente réveille le gardien.',
     chipOne: 'Gardien · 1 projet', chipMany: 'Gardien · {count} projets', chipAll: 'Gardien · tous les projets'
   },
+  contextMode: {
+    light: 'Léger',
+    neutral: 'Neutre',
+    custom: 'Sur mesure',
+    rules: 'règles',
+    heading: 'Contexte {label}',
+    without: 'Démarré sans : {parts}.',
+    instructions: "fichiers d'instructions",
+    guides: 'guides Boite et brain',
+    mcp: 'serveurs MCP',
+    hooks: 'hooks',
+    tools: 'Outils : {tools}.',
+    withRules: 'Ses règles : {rules}'
+  },
   delegation: {
     off: 'Désactivés',
     paused: 'En pause',

@@ -56,6 +56,7 @@ import { markQueuedStopped } from './threads/turn-settlement.ts';
 import { ThreadFocus } from './threads/focus.ts';
 import { ProgressState } from './threads/progress.ts';
 import { checkIncognito, eraseIncognito, makeIncognitoFolder } from './threads/incognito.ts';
+import { checkContext } from './context-mode.ts';
 import { accountRemoved, followAgent } from './threads/account-fallback.ts';
 
 type CreateParams = RpcParams<'threads.create'>;
@@ -203,7 +204,7 @@ export class ThreadStore {
     const now = Date.now();
     const model = checkModel(provider, account.id, params.model ?? defaultModel(provider));
     const effort = checkEffort(provider, account.id, model, params.effort ?? null);
-    const speed = checkSpeed(provider, account.id, model, params.speed ?? null);
+    const speed = checkSpeed(provider, account.id, model, params.speed ?? null), contextMode = checkContext(provider, params.context);
     const id = placed?.id ?? newId('thr_');
     // A worktree's directory is the core's own and uses the configured storage;
     // anything a client names has to be inside it. A draft with no directory
@@ -221,7 +222,7 @@ export class ThreadStore {
             : project.path;
     const thread: ThreadSummary = {
       id,
-      ...(placed?.parentThreadId ? { parentThreadId: placed.parentThreadId } : {}),
+      ...(placed?.parentThreadId ? { parentThreadId: placed.parentThreadId } : {}), ...(contextMode ? { contextMode } : {}),
       ...(incognito ? { incognito: true as const } : {}),
       projectId: project.id,
       title: titleOf(params.title),
