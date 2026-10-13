@@ -123,11 +123,15 @@ async function boundedJson(response: Response, max: number): Promise<unknown> {
   catch { throw new Error('Douane quotas returned invalid JSON.'); }
 }
 
-/** `null` means the route does not exist: an older Douane answers 404. */
-export async function fetchGatewayQuotas(proxy: SubscriptionProxy, key: string, names?: (providerId: string) => string | null, max = MAX_BYTES): Promise<Pick<SubscriptionProxyQuotas, 'providers' | 'updatedAt'> | null> {
+/**
+ * `null` means the route does not exist: an older Douane answers 404.
+ * `refresh` marks a read the user asked for: Douane reads every account first
+ * and reports a failure at once instead of after several in a row.
+ */
+export async function fetchGatewayQuotas(proxy: SubscriptionProxy, key: string, names?: (providerId: string) => string | null, max = MAX_BYTES, refresh = false): Promise<Pick<SubscriptionProxyQuotas, 'providers' | 'updatedAt'> | null> {
   let response: Response;
   try {
-    response = await fetch(`${proxyApiUrl(proxy)}/quotas`, {
+    response = await fetch(`${proxyApiUrl(proxy)}/quotas${refresh ? '?refresh=1' : ''}`, {
       headers: { Authorization: `Bearer ${key}`, Accept: 'application/json' },
       signal: AbortSignal.timeout(15_000), redirect: 'error',
     });
@@ -200,7 +204,7 @@ export class GatewayQuotas {
       let next: SubscriptionProxyQuotas;
       try {
         const names = (id: string) => this.core.providers.get(id)?.name ?? null;
-        const answer = await fetchGatewayQuotas(proxy, proxyKey(this.core), names, this.max);
+        const answer = await fetchGatewayQuotas(proxy, proxyKey(this.core), names, this.max, refresh);
         next = answer ? { status: 'ready', ...answer, checkedAt: Date.now(), error: null } : { ...OFF, status: 'unsupported' };
       } catch (error) {
         const good = this.last.checkedAt !== null ? this.last : null;
