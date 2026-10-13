@@ -152,7 +152,8 @@ export class Connection {
         // `&long=1` adds the four-hundred-message thread the windowed list is
         // looked at on, `&heavy=1` the forty messages and 11.5 MiB of tool calls
         // a long agent session leaves, `&principal=session` answers as a paired
-        // phone, so the screens a device is refused can be walked without pairing one.
+        // phone, so the screens a device is refused can be walked without pairing one,
+        // and `&missing=<method>,...` answers those methods like an older machine.
         s.attach(
           new FakeClient({
             long: params.get('long') === '1',
@@ -160,7 +161,8 @@ export class Connection {
             delegationDemo: params.get('team') === '1',
             agentsDemo: params.get('agents') === '1',
             uninstalled: params.get('uninstalled') === '1',
-            ...(params.get('principal') === 'session' ? { principal: 'session' as const } : {})
+            ...(params.get('principal') === 'session' ? { principal: 'session' as const } : {}),
+            ...(params.get('missing') ? { missing: params.get('missing')!.split(',') } : {})
           })
         );
       } else {

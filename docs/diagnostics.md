@@ -47,6 +47,10 @@ The page is for the owner, on the desktop and on a phone connected as owner
   opens on its ids, its duration and its `data`. While the page is open, new
   core records that pass the filters arrive at the bottom. "Load older" pages
   backwards with `until`.
+- A machine whose core predates these methods still shows its log through
+  `core.logs`. Its summary answers `unknown method`, so the Status card says
+  to update Boite on that machine, naming it, hides Problems and turns off the
+  export and the report instead of failing on each press.
 - Export anonymized logs: `diagnostics.export` writes the file in
   `logs/exports/` on the core's machine and returns its text. The desktop app
   saves a copy in Downloads; a phone offers the share sheet when it can, and a
@@ -100,4 +104,6 @@ The in-memory core (`packages/ui/src/lib/fake-client/logs.ts`) answers the
 same methods with the same validation and access. It never has `gh`, so an
 issue there is always a draft with a prefilled link, and it seeds a recent day
 of records so the page has something to show. `?fake=1&settings=diagnostics`
-opens the page directly in a development build.
+opens the page directly in a development build. Adding
+`&missing=diagnostics.summary,diagnostics.export,diagnostics.issue` answers
+those like an older machine.

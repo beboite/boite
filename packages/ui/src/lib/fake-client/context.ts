@@ -106,6 +106,11 @@ export interface FakeClientOptions {
   /** Who this client is. `'session'` makes it a paired phone, refused like one. */
   principal?: Principal;
   /**
+   * Methods this core answers `unknown method` to, like a machine on an older
+   * Boite; `?fake=1&missing=diagnostics.summary,diagnostics.export` sets them.
+   */
+  missing?: readonly string[];
+  /**
    * A round trip, in milliseconds, each call waits half of on the way out and
    * half on the way back, like a remote machine; `?fake=1&rtt=150` sets it.
    * Pushed events are not delayed.

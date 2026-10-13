@@ -80,6 +80,7 @@ function reportSlices(result: unknown, onProgress: (received: number, total: num
 export class FakeClient implements ObservableClient {
   readonly #ctx: FakeContext;
   readonly #methods: FakeMethods;
+  readonly #missing: ReadonlySet<string>;
   readonly #agentSettings: ReturnType<typeof agentSettingMethods>;
   #mergedPrSweep: Promise<number> | null = null;
   #doneSweep: Promise<void> | null = null;
@@ -89,6 +90,7 @@ export class FakeClient implements ObservableClient {
     const ctx = new FakeContext(options);
     this.#ctx = ctx;
     this.#methods = this.#answer(ctx);
+    this.#missing = new Set(options.missing ?? []);
     this.#agentSettings = agentSettingMethods(ctx);
     registerCore(ctx);
     seed(ctx);
@@ -253,6 +255,7 @@ export class FakeClient implements ObservableClient {
     if (generation !== this.#transportGeneration || (bus.state !== 'ready' && method !== 'hello')) {
       throw new RpcFailure({ code: RpcErrorCode.Internal, message: 'connection changed before RPC dispatch' });
     }
+    if (this.#missing.has(method)) throw new RpcFailure({ code: RpcErrorCode.MethodNotFound, message: `unknown method ${method}` });
     // The fixture has no thread-bound agent token; do not widen this scoped read.
     if (bus.principal === 'agent' && (method === 'threads.capabilities' || method === 'threads.mergeBack')) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method} requires a thread-bound agent identity` });
     if (bus.principal === 'agent' && (method === 'core.logs' || method === 'projects.setAutoArchiveMergedPr' || method === 'quotas.reset')) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method} is not one of the agent's methods` });

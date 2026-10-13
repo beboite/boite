@@ -390,7 +390,9 @@ export const strings = {
     close: 'Close',
     agentAccess: 'Agents can read anonymized logs',
     agentAccessHint: 'An agent can check whether Boite itself failed and draft an issue about it. It reads the anonymized view only, never the files on disk.',
-    failed: 'Diagnostics did not load: {reason}'
+    failed: 'Diagnostics did not load: {reason}',
+    outdated: 'Boite on {machine} is older than these diagnostics: its log shows below, but the status, the export and the report need an update. Update it in Settings, Machines and updates.',
+    outdatedHere: 'Boite on this machine is older than these diagnostics: its log shows below, but the status, the export and the report need an update. Update it in Settings, Machines and updates.'
   },
   telemetry: {
     heading: 'Privacy and analytics',

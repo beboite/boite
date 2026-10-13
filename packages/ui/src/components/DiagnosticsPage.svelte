@@ -8,7 +8,7 @@
   import DiagnosticsReport from './DiagnosticsReport.svelte';
   import { browserDownload, saveAttachment } from '../lib/attachment-save';
   import { bytes, count, exactTime, millis, relativeTime, time } from '../lib/format';
-  import { errorText } from '../lib/errors';
+  import { errorText, olderCore } from '../lib/errors';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
 
@@ -45,6 +45,12 @@
   let exporting = $state(false);
   let exportNote = $state('');
   let reporting = $state(false);
+  /**
+   * The machine's core predates the anonymized log (#411): it still answers
+   * `core.logs`, so the log reads, but the status, the export and the report
+   * would only fail. Its summary says so once and those actions stay off.
+   */
+  let outdated = $state(false);
 
   // The search waits for a pause in the typing rather than asking on every key.
   $effect(() => {
@@ -66,9 +72,14 @@
     if (!client || !store.owner || store.connection !== 'ready') return;
     let active = true;
     failure = '';
+    outdated = false;
     client.call('diagnostics.summary', {})
       .then(value => { if (active) summary = value; })
-      .catch(error => { if (active) failure = fill(s.failed, { reason: errorText(error) }); });
+      .catch(error => {
+        if (!active) return;
+        if (olderCore(error)) { outdated = true; return; }
+        failure = fill(s.failed, { reason: errorText(error) });
+      });
     return () => { active = false; };
   });
 
@@ -211,7 +222,9 @@
       setTimeout(() => URL.revokeObjectURL(url), 1000);
       exportNote = fill(s.exportDownloaded, { name: result.name, size });
     } catch (error) {
-      if (store.client === client) exportNote = errorText(error);
+      if (store.client !== client) return;
+      if (olderCore(error)) outdated = true;
+      else exportNote = errorText(error);
     } finally { exporting = false; }
   }
 
@@ -258,17 +271,20 @@
           </dd>
         </div>
       </dl>
+    {:else if outdated}
+      <p class="hint alert" role="alert" data-testid="diagnostics-outdated">{store.core?.hostname ? fill(s.outdated, { machine: store.core.hostname }) : s.outdatedHere}</p>
     {:else if !failure}
       <p class="hint">{s.loading}</p>
     {/if}
     <div class="actions buttons">
-      <button type="button" data-testid="diagnostics-export" disabled={exporting || store.connection !== 'ready'} onclick={() => void exportLogs()}><FileDown size={15} /><span class="ui-label">{s.export}</span></button>
-      <button type="button" data-testid="diagnostics-report" disabled={store.connection !== 'ready'} onclick={() => { reporting = true; }}><Bug size={15} /><span class="ui-label">{s.report}</span></button>
+      <button type="button" data-testid="diagnostics-export" disabled={exporting || outdated || store.connection !== 'ready'} onclick={() => void exportLogs()}><FileDown size={15} /><span class="ui-label">{s.export}</span></button>
+      <button type="button" data-testid="diagnostics-report" disabled={outdated || store.connection !== 'ready'} onclick={() => { reporting = true; }}><Bug size={15} /><span class="ui-label">{s.report}</span></button>
       <InfoTip topic={s.export} text={`${s.exportHint} ${s.reportHint}`} />
     </div>
     {#if exportNote}<p class="hint note" data-testid="diagnostics-export-note">{exportNote}</p>{/if}
   </section>
 
+  {#if !outdated}
   <section class="card" id="settings-diagnostics-problems" data-testid="diagnostics-problems">
     <h2 class="ui-label-box"><span class="ui-label">{s.problems}</span><InfoTip topic={s.problems} text={s.problemsHint} /></h2>
     {#if summary && errorsFirst.length === 0}
@@ -310,6 +326,7 @@
       </ul>
     {/if}
   </section>
+  {/if}
 
   <section class="card log-card" id="settings-diagnostics-log" data-testid="diagnostics-log">
     <h2 class="ui-label-box"><span class="ui-label">{s.log}</span><InfoTip topic={s.log} text={s.live} /></h2>
