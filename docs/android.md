@@ -1,50 +1,50 @@
 # The Android app
 
 `apps/android` is a Trusted Web Activity: a small Android package that opens
-one core's page in Chrome, full screen, without an address bar. The core serves
-the UI, so core updates change the app without an APK update. Chrome runs the
+one HTTPS page in Chrome, full screen, without an address bar. The nightly's
+opens the phone app's own address, `APP_ORIGIN` in the contracts
+([phone](phone.md#the-app-on-its-own-address)), so UI updates change the app
+without an APK update. Chrome runs the
 page and keeps the service worker, Web Push and microphone working as they do
 in the installed web app
 ([phone.md](phone.md)). The package is `com.boite.two`.
 
 ## One host per APK
 
-A TWA trusts a single origin, fixed at build time. The repository has no
-hard-coded origin: `android.yml` takes it as its `host` input, a bare hostname
-such as `boite.example.com`. The page must be served over HTTPS at that host,
-through a proxy as in [phone.md](phone.md).
-
-The nightly publishes no APK. One built for one core's host sent every phone
-that installed it to that core, whoever's phone it was. The app that replaces
-it opens a neutral address every core trusts, and reaches the machines of the
-group its phone was added to ([phone.md](phone.md)).
+A TWA trusts a single origin, fixed at build time. `android.yml` takes the
+hostname of `APP_ORIGIN`, a page no machine serves and every core trusts: the
+app reaches the machines of the group its phone was added to. Its `host` input,
+a bare hostname such as `boite.example.com`, builds one for another HTTPS page
+instead, a fork's own address or one core's behind a proxy as in
+[phone.md](phone.md).
 
 Android opens the page full screen only after it has checked both halves of
 Digital Asset Links. The app half is inside the APK and names the host. The site
-half is `/.well-known/assetlinks.json`, served by every core from
-`packages/ui/public/.well-known/`. It names the package and its signing
+half is `/.well-known/assetlinks.json`, from `packages/ui/public/.well-known/`,
+which the app's address and every core serve. It names the package and its signing
 certificate. If validation fails, the app opens in a Custom Tab with an address
 bar.
 
-The APK also claims `https://<host>/` links. Set the core's Public HTTPS address
-to that same host, and a pairing QR code scanned on the phone opens the app
-instead of the browser.
+The APK also claims `https://<host>/` links. A pairing QR code names the
+machine that drew it, so it opens the app only in an APK built for that
+machine's Public HTTPS address; the nightly's reads it with **Scan the code**.
 
-## Installing one built by hand
+## Installing it
 
-Run `android.yml` by hand with `release` on and `host` set to your own core's
-HTTPS host, then install its artifact: allow the browser to install unknown
-apps when Android asks, and open Boite. Android updates the app over an older
-one when the certificate matches and the version code is higher.
+Each nightly release carries `boite-<version>.apk`: download it on the phone,
+allow the browser to install unknown apps when Android asks, and open Boite.
+Android updates the app over an older one when the certificate matches and the
+version code is higher. For another host, run `android.yml` by hand with
+`release` on and `host` set, then install its `android-apk` artifact.
 
 ## Building a signed APK
 
-With `release` on, `scripts/ci/android-apk.ts reuse` checks the newest published
+The nightly runs `android.yml` with `release` on. Then `scripts/ci/android-apk.ts reuse` checks the newest published
 release with a signed APK. It reuses that file under its original name when all
 of these hold:
 
 - `apps/android/` has no change between that release's tag and this commit;
-- the APK opens the host given now;
+- the APK opens the host chosen now;
 - its certificate is the one `assetlinks.json` publishes.
 
 Otherwise the job builds the APK, signs it with `apksigner` and checks the

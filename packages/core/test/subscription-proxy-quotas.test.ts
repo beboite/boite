@@ -36,9 +36,11 @@ const DOUANE = {
 
 test('quotas come from Douane through the core, in both display modes, with the key as Bearer and the native cadence', async () => {
   const seen: { path: string; auth: string | null }[] = [];
+  const searches: string[] = [];
   gateway = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
-    const path = new URL(request.url).pathname;
+    const { pathname: path, search } = new URL(request.url);
     seen.push({ path, auth: request.headers.get('authorization') });
+    searches.push(search);
     return path === '/v1/quotas' ? Response.json(DOUANE) : new Response('not found', { status: 404 });
   } });
   harness = await startTestCore();
@@ -80,6 +82,8 @@ test('quotas come from Douane through the core, in both display modes, with the 
   harness.core.bus.onAny((name, payload) => { if (name === 'quotas.progress') progress.push((payload as RpcEvents['quotas.progress']).quota.accountId); });
   await owner.call('quotas.list', { refresh: true, requestId: 'gateway-refresh' });
   expect(seen).toHaveLength(2);
+  // Only the refresh asked by hand tells Douane to read its accounts first.
+  expect(searches).toEqual(['', '?refresh=1']);
   expect(progress).toEqual(expect.arrayContaining(['proxy:claude:3b317ce1e503', 'proxy:antigravity:antigravity']));
   expect(events.at(-1)?.status).toBe('ready');
 

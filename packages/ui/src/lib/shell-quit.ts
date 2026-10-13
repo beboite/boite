@@ -4,6 +4,7 @@ import type { Store } from './store.svelte';
 import { fill, strings } from './strings';
 import { count as formatCount } from './format';
 import { QuitHold } from './quit-hold';
+import { isThisPC, type Machine } from './workspace.svelte';
 
 export const QUIT_CHECK_TIMEOUT_MS = 1500;
 
@@ -32,6 +33,15 @@ async function quitState(store: Store) {
   } catch {
     return { threads: store.threads, unknown: true };
   } finally { clearTimeout(timer); }
+}
+
+/**
+ * The machines whose work the close question counts: this PC's own core. An
+ * agent on another machine keeps working after the window closes, so its
+ * threads, or that machine being unreachable, never hold the app open.
+ */
+export function closingStores(machines: Machine[]): Store[] {
+  return machines.filter(isThisPC).map((machine) => machine.store);
 }
 
 export function desktopQuit(stores: () => Store[], closed: () => void): () => Promise<void> {

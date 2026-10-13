@@ -12,11 +12,19 @@ export const VIEW_ROUTE = '/view';
 /** The page with its local files embedded. Above it the publish is refused. */
 export const VIEW_MAX_BYTES = 4 * 1024 * 1024;
 /**
- * The widths a page is measured at when it is published: the answer column on
- * a desktop (`--content` less its 4 px rest), then on a 390 px phone.
+ * The widths a page's content is measured at when it is published: the answer
+ * column on a desktop (`--content` less its 4 px rest), then on a 390 px phone.
  */
 export const VIEW_WIDTH = 816;
 export const VIEW_NARROW_WIDTH = 330;
+/**
+ * The room the frame keeps around the page on each side, taken from the
+ * conversation's own margin, with the page padded by as much: what it draws on
+ * its edge (a border, a card's shadow, a focus ring) is never cut by the frame,
+ * whatever a fractional display scale rounds the frame to. The content keeps
+ * the column's width; the frame is `2 * VIEW_BLEED` wider and taller.
+ */
+export const VIEW_BLEED = 4;
 /** A frame narrower than this takes the phone measurement. */
 export const VIEW_NARROW_BELOW = 520;
 export const VIEW_MIN_HEIGHT = 24;
@@ -28,7 +36,7 @@ export const VIEW_TITLE_MAX = 120;
 /** What an artifact part carries when it is a view: enough to keep its room before the page loads. */
 export interface InlineView {
   title: string;
-  /** The page's height in CSS pixels at `VIEW_WIDTH`. */
+  /** The frame's height in CSS pixels when the content is `VIEW_WIDTH` wide, the bleed included. */
   height: number;
   /** The same at `VIEW_NARROW_WIDTH`, when the page was measured. */
   narrowHeight?: number;
@@ -123,7 +131,7 @@ export function readViewMessage(data: unknown): ViewPageMessage | null {
  */
 const baseCss = (): string => [
   // The page: the answer's own text, on the conversation's own background.
-  'html{background:transparent;color:var(--color-foreground);font-family:var(--font-sans);font-size:var(--text-reading);line-height:var(--leading-reading);-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;scrollbar-width:none}',
+  `html{padding:${VIEW_BLEED}px;background:transparent;color:var(--color-foreground);font-family:var(--font-sans);font-size:var(--text-reading);line-height:var(--leading-reading);-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;scrollbar-width:none}`,
   'html::-webkit-scrollbar{display:none}',
   ':where(*,*::before,*::after){box-sizing:border-box}',
   ':where(body){margin:0}',
@@ -370,9 +378,10 @@ Motion
 
 The check at publish
 The page is loaded once in a headless browser before anything is shown. A
-script error, a console.error, a remote resource or an unreadable local file
-refuses the publish and prints the reason with its line: fix the file and run
-the command again. The user never sees a page that failed.
+script error, a console.error, a remote resource, an unreadable local file or
+a page wider than the answer at either width (the user cannot scroll sideways)
+refuses the publish and prints the reason: fix the file and run the command
+again. The user never sees a page that failed.
 It also prints advice that does not stop the publish, such as a fixed color
 that will not follow the user's theme. Fix what it names, then publish again.
 `;

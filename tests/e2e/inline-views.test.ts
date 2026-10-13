@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from 'bun:test';
+import { VIEW_BLEED } from '../../packages/contracts/src/index.ts';
 import { connect } from '../../packages/core/src/client.ts';
 import { VIEW_EXAMPLE } from '../../packages/core/src/view-example.ts';
 import { BrowserPage } from './lib/cdp.ts';
@@ -70,9 +71,17 @@ test('a view published during a turn is drawn at the end of the finished answer,
       const tools = await page.evaluate<{ opacity: string; below: boolean }>(`(() => {
         const tools = document.querySelector('[data-testid=inline-view] .tools');
         const stage = document.querySelector('[data-testid=inline-view-stage]');
-        return { opacity: getComputedStyle(tools).opacity, below: tools.getBoundingClientRect().top >= stage.getBoundingClientRect().bottom - 1 };
+        return { opacity: getComputedStyle(tools).opacity, below: tools.getBoundingClientRect().top >= stage.getBoundingClientRect().bottom - ${VIEW_BLEED} - 1 };
       })()`);
       expect(tools).toEqual(mobile ? { opacity: '1', below: true } : { opacity: '0', below: false });
+      // The frame reaches past the column by the bleed on each side, so a border or a shadow on the page's edge is never cut by it.
+      const edges = await page.evaluate<{ left: number; right: number }>(`(() => {
+        const column = document.querySelector('[data-testid=inline-view]').getBoundingClientRect();
+        const frame = document.querySelector('[data-testid=inline-view] iframe').getBoundingClientRect();
+        return { left: column.left - frame.left, right: frame.right - column.right };
+      })()`);
+      expect(edges.left).toBeCloseTo(VIEW_BLEED, 1);
+      expect(edges.right).toBeCloseTo(VIEW_BLEED, 1);
       expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
       expect(await page.evaluate('document.querySelector("[data-testid=inline-view] iframe").getAttribute("sandbox")')).toBe('allow-scripts');
       expect(await page.evaluate('document.querySelector("[data-testid=timeline]").textContent.includes("pendulum.html")')).toBe(false);

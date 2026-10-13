@@ -27,8 +27,9 @@
 </div>
 
 <style>
-  /* No rule under it: the rows fade out beneath it instead (RailFrame.svelte). */
-  .rail-head { container-type: inline-size; min-width: 0; padding: 8px 0 6px; }
+  /* No rule under it: the rows fade out beneath it instead (RailFrame.svelte),
+     whose top fade is the only space between the tools and the first row. */
+  .rail-head { container-type: inline-size; min-width: 0; padding: 8px 0 0; }
   .tools { display: flex; align-items: center; gap: 6px; min-height: var(--control-sm); }
   /* Under the Threads and Agents switch, when the Agents experiment draws it. */
   .tools:not(:first-child) { margin-top: 5px; }

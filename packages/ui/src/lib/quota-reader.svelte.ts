@@ -91,8 +91,8 @@ export function quotaCredits(row: AccountQuota) {
 
 /**
  * How long a refresh asked by hand looks busy at least: one turn of the
- * refresh icon. A gateway like Douane answers from its own cache in a few
- * milliseconds, which would otherwise show no sign that anything was read.
+ * refresh icon. A gateway can answer from its own cache in a few milliseconds
+ * (an older Douane does), which would otherwise show no sign of a read.
  */
 export const REFRESH_SHOWN_MS = 900;
 

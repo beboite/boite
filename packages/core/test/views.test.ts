@@ -254,6 +254,16 @@ real('a page is loaded in a headless browser before it is shown: its height is m
   expect(bare.height).toBeGreaterThanOrEqual(120);
   expect(bare.height).toBeLessThan(200);
 
+  // A page wider than the answer is refused, naming the outermost element that sticks out; what a scrolling box holds is the page's own business.
+  write('views/wide.html', page('<div class="flow" style="display:flex;gap:8px"><div style="flex:none;width:200px">a</div><div style="flex:none;width:200px">b</div></div>\n<div style="overflow-x:auto"><div style="width:2000px">scrolls</div></div>'));
+  const wide = await agent.call('artifacts.view', { threadId, path: 'views/wide.html' }).then(() => null, (error: Error) => error.message);
+  expect(wide).toContain('at 330px wide the page is cut on the right');
+  expect(wide).toContain('<div> inside <div class="flow"> ends 78px past the right edge');
+  expect(wide).not.toContain('at 816px');
+  // A card on the very edge of the column fits: the frame keeps room for its border and shadow.
+  write('views/edge.html', page('<div class="grid"><div class="card">1</div><div class="card">2</div><div class="card">3</div><div class="card">4</div><div class="card">5</div></div>'));
+  expect((await agent.call('artifacts.view', { threadId, path: 'views/edge.html' })).checked).toBe(true);
+
   write('views/throws.html', page('<p>before</p>\n<script>\n  const stage = document.querySelector("#stage");\n  stage.getContext("2d");\n</script>'));
   const thrown = await agent.call('artifacts.view', { threadId, path: 'views/throws.html' }).then(() => null, (error: Error) => error.message);
   expect(thrown).toContain('not ready to show');
@@ -268,7 +278,7 @@ real('a page is loaded in a headless browser before it is shown: its height is m
   write('views/stores.html', page('<script>localStorage.setItem("seen", "1");</script>'));
   const stored = await agent.call('artifacts.view', { threadId, path: 'views/stores.html' }).then(() => null, (error: Error) => error.message);
   expect(stored).toMatch(/SecurityError/);
-  expect(readdirSync(join(harness.dataDir, 'artifacts')).length).toBe(4);
+  expect(readdirSync(join(harness.dataDir, 'artifacts')).length).toBe(5);
 }, 90_000);
 
 /** The gated test runs with the machine's browser: the core started without one is replaced. */

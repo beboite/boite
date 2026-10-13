@@ -7,6 +7,14 @@ starts with the panel closed, without changing the stored desktop layout.
 `lib/right-panel.svelte.ts` owns layout and `RightPanel.svelte` renders it;
 `lib/surface-labels.ts` defines labels and availability.
 
+The panel's left edge, the thread list's right edge, the terminal drawer's top
+edge and the line between two terminal panes share `ResizeHandle.svelte`. It is
+invisible at rest; after 160 ms of hover it draws a 2 px line with a grip, and a
+drag turns both to the accent. During a drag `html[data-resizing]` keeps the
+resize cursor on the whole page, turns off text selection and stops iframes
+from taking the pointer. Arrow keys step 16 px, Home and a double click restore
+the default, Escape cancels a drag. The size is saved once, when the drag ends.
+
 ## Browser tools
 
 On Windows, the browser's screen menu selects phone, tablet and desktop
