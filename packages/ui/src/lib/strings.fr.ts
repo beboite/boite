@@ -559,6 +559,7 @@ export const fr: Translation = {
     loopback: "Cette machine n'écoute que sur elle-même : les autres ne peuvent pas la joindre. Connectez-la à Tailscale, ou activez l'écoute sur le réseau.",
     copied: 'Copié',
     addDevice: 'Ajouter un appareil', adding: 'Préparation',
+    addOlder: "Boite sur {machine} est trop ancien pour ajouter un appareil. Mettez-le à jour dans Mises à jour sur cette page, puis revenez.",
     addHint: "Scannez le code avec un téléphone, ou tapez le code dans son application Boite. Sur un ordinateur, copiez le lien et collez-le sous Rejoindre. Sert une fois.",
     qr: "Le lien qui ajoute un appareil, en QR code",
     copyLink: 'Copier le lien', code: 'Code', link: 'Lien pour un ordinateur',
@@ -2442,6 +2443,8 @@ export const fr: Translation = {
     clipboard: 'Le presse-papiers a refusé le texte.',
     revoked: "Cet appareil a été retiré du groupe. Rajoutez-le avec un nouveau code depuis l'une de vos machines.",
     unpaired: "Cet appareil n'est pas encore dans le groupe de cette machine. Ajoutez-le avec le code d'Ajouter un appareil.",
+    olderCore: "Boite sur {machine} est trop ancien pour cette action. Mettez-le à jour dans Réglages, Machines et mises à jour, puis réessayez.",
+    olderCoreHere: "Cette machine a une version de Boite trop ancienne pour cette action. Mettez-la à jour dans Réglages, Machines et mises à jour, puis réessayez.",
     pairingLink: "Ce n'est pas un lien pour ajouter un appareil. Copiez le lien affiché par Ajouter un appareil sur l'autre machine ; il commence par http et contient ?grant=."
   },
 
