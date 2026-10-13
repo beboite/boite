@@ -75,6 +75,17 @@
     target.setPointerCapture?.(event.pointerId);
     dragging = true;
     mark(true);
+    // A pointer drag leaves the focus where it was (the pointerdown is
+    // cancelled): Escape is heard on the window, ahead of any other handler.
+    window.addEventListener('keydown', escape, true);
+  }
+
+  function escape(event: KeyboardEvent): void {
+    if (!dragging || event.key !== 'Escape') return;
+    event.preventDefault();
+    event.stopPropagation();
+    onmove(0, origin);
+    finish();
   }
 
   function move(event: PointerEvent): void {
@@ -85,6 +96,7 @@
   function finish(): void {
     if (!dragging) return;
     if (pointer !== null && handle?.hasPointerCapture?.(pointer)) handle.releasePointerCapture(pointer);
+    window.removeEventListener('keydown', escape, true);
     pointer = null;
     dragging = false;
     mark(false);
@@ -96,12 +108,6 @@
   }
 
   function key(event: KeyboardEvent): void {
-    if (dragging && event.key === 'Escape') {
-      event.preventDefault();
-      onmove(0, origin);
-      finish();
-      return;
-    }
     const back = orientation === 'vertical' ? 'ArrowLeft' : 'ArrowUp';
     const forth = orientation === 'vertical' ? 'ArrowRight' : 'ArrowDown';
     if (event.key === back || event.key === forth) {
@@ -116,6 +122,7 @@
   // Unmounted mid-drag (the panel closed, the phone width reached): the
   // document must not keep the resize cursor.
   onDestroy(() => {
+    window.removeEventListener('keydown', escape, true);
     if (dragging) mark(false);
   });
 </script>

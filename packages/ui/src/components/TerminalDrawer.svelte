@@ -31,6 +31,7 @@
   let height = $state(readHeight());
   let room = $state(window.innerHeight);
   let visibleHeight = $derived(Math.min(height, Math.max(MIN_HEIGHT, Math.round(room * 0.7))));
+  /** Some handle of the drawer is being dragged. Each handle keeps its own state; this only stills the drawer's height transition. */
   let dragging = $state(false);
   let layout = $derived(store.terminalLayout(threadId));
   let tabs = $derived<TerminalTab[]>(layout === null ? [] : narrow.current
@@ -161,10 +162,9 @@
       value={visibleHeight}
       min={MIN_HEIGHT}
       max={maxHeight()}
-      bind:dragging
-      onstart={() => { dragFrom = visibleHeight; }}
+      onstart={() => { dragFrom = visibleHeight; dragging = true; }}
       onmove={(delta) => setHeight(dragFrom - delta)}
-      onend={saveHeight}
+      onend={() => { dragging = false; saveHeight(); }}
       onstep={(delta) => { setHeight(visibleHeight - delta); saveHeight(); }}
       onreset={() => { setHeight(DEFAULT_HEIGHT); saveHeight(); }}
     />
@@ -262,13 +262,14 @@
                   value={sharePercent(tab, index - 1)}
                   min={MIN_SHARE * 100}
                   max={(1 - MIN_SHARE) * 100}
-                  bind:dragging
                   onstart={(handle) => {
                     const room = pair(handle, tab);
                     if (room === null) return false;
                     splitFrom = room.from;
                     splitSpan = room.span;
+                    dragging = true;
                   }}
+                  onend={() => { dragging = false; }}
                   onmove={(_, at) => store.resizeTerminalPanes(threadId, tab.id, index - 1, (at - splitFrom) / splitSpan)}
                   onstep={(delta, handle) => {
                     const room = pair(handle, tab);

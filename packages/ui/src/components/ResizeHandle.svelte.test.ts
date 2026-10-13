@@ -59,7 +59,8 @@ test('a drag marks the whole document, reports the distance and ends once; Escap
 
   handle.dispatchEvent(pointer('pointerdown', { clientX: 200 }));
   handle.dispatchEvent(pointer('pointermove', { clientX: 120 }));
-  handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  // The focus stays where it was during a pointer drag: Escape reaches the window, not the handle.
+  document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   flushSync();
   expect(calls.move.at(-1)).toEqual([0, 200]);
   expect(calls.end).toBe(2);
