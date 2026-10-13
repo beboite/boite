@@ -247,6 +247,14 @@ persistent agents and their setting cards at `2893abd8`, whose limit was
 4,860,000 and which measured 4,846,910, the branch measured 4,863,429 UI bytes,
 the same 16,519 bytes on top. The UI limit becomes 4,872,000.
 
+Opening a thread on one screen of history (#472) measured 4,823,117 UI bytes
+merged with `main` at `224597ed` (4,822,128), as the Windows job did: 989 bytes
+for the page byte budgets the store sends, the list that pages itself when it
+cannot scroll, the old first row put back after a page lands, and the fake
+core's budgets. Merged with context modes at `c8e9d2ac` it measured 4,830,160,
+within the 4,836,000 above; merged with the dictation menu at `af3acd8e`,
+4,864,454, within 4,872,000.
+
 Several drafts per project, merged with settings cards at `87fca361`, measured
 4,536,091 UI bytes and a 590,215-byte entry chunk on Linux: the done rows and
 the project fold's rows load outside the entry chunk, which stays under 593,000.

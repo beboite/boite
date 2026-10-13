@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, vi } from 'vitest';
 import { test } from '../test/fake-client';
-import { PROTOCOL_VERSION, RpcErrorCode, type Thread, type ThreadStatus } from '@boite/contracts';
+import { INITIAL_PAGE_BYTES, PROTOCOL_VERSION, RpcErrorCode, type Thread, type ThreadStatus } from '@boite/contracts';
 import { RpcFailure, WsClient, droppedFailure, type SocketLike } from './client';
 import { FakeClient } from './fake-client';
 import { setNotificationSender, type Toast } from './notify';
@@ -791,7 +791,8 @@ test('a reconnect catches up the agent transcript and the team statuses the gap 
   await waitFor(() => ((store.delegationThread?.messages.at(-1)?.parts[0] as { text?: string } | undefined)?.text === full ? true : undefined));
   expect(store.delegationSelectedAgentId).toBe('t-team-running');
   expect(store.delegationThread?.messages.map((message) => message.id)).toEqual(['m-t-team-running-1', 'm-t-team-running-2']);
-  expect(called).toHaveBeenCalledWith('threads.get', { threadId: 't-team-running', after: 'm-t-team-running-1' });
+  // Light like the thread's own pages: the transcript draws a call's name and status, never its output.
+  expect(called).toHaveBeenCalledWith('threads.get', expect.objectContaining({ threadId: 't-team-running', after: 'm-t-team-running-1', maxBytes: INITIAL_PAGE_BYTES, compactTools: true }));
 });
 
 test('starting a draft cancels a pending child subscription even without an open subscription', async ({ createStore }) => {
@@ -1117,8 +1118,8 @@ test.for(['input', 'inputText', 'output', 'documents'])('reading cache excludes 
   await store.open('t-scheduler');
   await store.open('t-bench');
   const cached = store.openThread!.messages.find(message => message.id === 'cached-only');
-  // What a page would defer stays a preview in the cache; a streaming input has nothing to fetch back.
-  if (field === 'output') expect(cached?.parts[0]).toMatchObject({ outputDeferred: true, output: large.slice(0, 1024) });
+  // What a page would defer stays deferred in the cache, a successful output with no preview; a streaming input has nothing to fetch back.
+  if (field === 'output') expect(cached?.parts[0]).toMatchObject({ outputDeferred: true, output: '' });
   else if (field === 'input') expect(cached?.parts[0]).toMatchObject({ inputDeferred: true, input: { nested: { text: large.slice(0, 1024) } } });
   else if (field === 'documents') expect(cached?.parts[0]).toMatchObject({ documentsDeferred: true, documents: [{ kind: 'markdown', text: '' }] });
   else expect(cached).toBeUndefined();

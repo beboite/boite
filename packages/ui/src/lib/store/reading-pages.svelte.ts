@@ -1,4 +1,4 @@
-import { INITIAL_MESSAGE_PAGE, type Message, type MessageId, type Thread, type ThreadId } from '@boite/contracts';
+import { INITIAL_MESSAGE_PAGE, INITIAL_PAGE_BYTES, READING_PAGE_BYTES, type Message, type MessageId, type Thread, type ThreadId } from '@boite/contracts';
 import type { StoreContext } from './context';
 
 /**
@@ -81,7 +81,7 @@ export class NewerPages {
     const { client, open, current } = run;
     const cursor = open.messagesAfter!;
     try {
-      const page = await client.call('messages.list', { threadId: open.id, after: cursor, ...lightPage(this.ctx) });
+      const page = await client.call('messages.list', { threadId: open.id, after: cursor, maxBytes: READING_PAGE_BYTES, ...lightPage(this.ctx) });
       const still = this.ctx.threads.openThread;
       if (!current() || !still || still.id !== open.id || still.messagesAfter !== cursor) return 0;
       const known = new Set(still.messages.map((message) => message.id));
@@ -108,7 +108,7 @@ export class NewerPages {
     if (!run) return;
     const { client, open, current } = run;
     try {
-      const fresh = await client.call('threads.get', { threadId: open.id, limit: INITIAL_MESSAGE_PAGE, ...lightPage(this.ctx) });
+      const fresh = await client.call('threads.get', { threadId: open.id, limit: INITIAL_MESSAGE_PAGE, maxBytes: INITIAL_PAGE_BYTES, ...lightPage(this.ctx) });
       const still = this.ctx.threads.openThread;
       if (!current() || !still || still.id !== open.id) return;
       still.messages = fresh.messages;

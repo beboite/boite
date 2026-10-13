@@ -17,6 +17,8 @@ import { untrack } from 'svelte';
 import { strings } from '../strings';
 import { mergeResumed, patchRow, resumeRequest } from '../thread-rows';
 import type { StoreContext } from './context';
+import { lightPage } from './reading-pages.svelte';
+import { INITIAL_MESSAGE_PAGE, INITIAL_PAGE_BYTES } from '@boite/contracts';
 
 interface RefreshJob {
   client: Client;
@@ -248,7 +250,8 @@ export class Delegation {
     if (threadId === null) return;
     const current = (): boolean => epoch === this.delegationSelectionEpoch && client === this.ctx.client;
     const subscribed = threadId !== threads.subscribedThreadId ? client.call('threads.subscribe', { threadId }) : null;
-    const fetched = client.call('threads.get', { threadId });
+    // The transcript draws a call's name and status, never its output.
+    const fetched = client.call('threads.get', { threadId, limit: INITIAL_MESSAGE_PAGE, maxBytes: INITIAL_PAGE_BYTES, ...lightPage(this.ctx) });
     // A run that a newer selection overtakes returns early and never awaits the read.
     fetched.catch(() => undefined);
     try {
@@ -360,7 +363,7 @@ export class Delegation {
     const epoch = this.delegationSelectionEpoch;
     const current = () => epoch === this.delegationSelectionEpoch && client === this.ctx.client && this.delegationThread === held;
     try {
-      const thread = await client.call('threads.get', resumeRequest(threadId, held));
+      const thread = await client.call('threads.get', { ...resumeRequest(threadId, held), maxBytes: INITIAL_PAGE_BYTES, ...lightPage(this.ctx) });
       if (!current()) return;
       mergeResumed(held, thread);
       this.delegationThread = thread;

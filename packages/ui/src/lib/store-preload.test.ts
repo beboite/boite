@@ -70,8 +70,8 @@ test('a press that never becomes a click gives its subscription back, and never 
     await store.selectDelegatedAgent('t-team-running');
     const child = store.preload('t-team-running');
     // Released only once its page answered, so a wrong give-back would have been sent by now.
-    // The panel's own read carries no limit: the one page counted is the press's.
-    expect(pages('t-team-running')).toHaveLength(1);
+    // The panel's own read subscribes nothing: the one page that opens is the press's.
+    expect(pages('t-team-running').filter(page => page.open)).toHaveLength(1);
     await landed('t-team-running');
     child();
     for (let tick = 0; tick < 3; tick++) await new Promise(resolve => setTimeout(resolve, 0));

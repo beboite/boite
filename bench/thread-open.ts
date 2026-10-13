@@ -7,7 +7,7 @@
  * journal of a fresh temporary data directory.
  *
  *   bun run build:ui
- *   bun run bench/thread-open.ts [--runs 5] [--rtt 150] [--kbps 10000] [--core path/to/main.ts] [--base] [--json out.json]
+ *   bun run bench/thread-open.ts [--runs 5] [--rtt 150] [--kbps 10000] [--core path/to/main.ts] [--base] [--rpc-only] [--json out.json]
  *
  * Three measures, each the median of `--runs`:
  * - `threads.get`, whole and as the UI asks for its first page, on loopback: milliseconds and JSON bytes.
@@ -20,6 +20,7 @@
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { INITIAL_PAGE_BYTES } from '../packages/contracts/src/index.ts';
 import { connect } from '../packages/core/src/client.ts';
 import { BrowserPage } from '../tests/e2e/lib/cdp.ts';
 import { pairingUrlOf, removeDirectory } from '../tests/e2e/lib/core.ts';
@@ -38,14 +39,18 @@ const CORE_MAIN = flag('core', '');
 const JSON_OUT = flag('json', '');
 /**
  * The whole last page; the first page main's UI asked for (40 messages, compact
- * tool outputs and files); the same with large pictures left on the core; and
- * that page opened around a message far up, as a reader who left it there.
- * `--base` skips the last two, for a core that does not take them.
+ * tool outputs and files); the same with large pictures, long inputs and heavy
+ * documents left on the core; that page cut to one screen's byte budget, as
+ * the UI asks since 2026-10-13; and that page opened around a message far up,
+ * as a reader who left it there. `--base` skips the last three, for a core
+ * that does not take them. `--rpc-only` skips the browser.
  */
 const FIRST_PAGE = { limit: 40, compactTools: true, compactFiles: true };
+const LIGHT_PAGE = { ...FIRST_PAGE, compactImages: true, compactToolParts: true };
 const PARAMS: Record<string, unknown>[] = [{}, FIRST_PAGE, ...(process.argv.includes('--base') ? [] : [
-  { ...FIRST_PAGE, compactImages: true },
-  { ...FIRST_PAGE, compactImages: true, around: 'msg_fixture0050u' },
+  LIGHT_PAGE,
+  { ...LIGHT_PAGE, maxBytes: INITIAL_PAGE_BYTES },
+  { ...LIGHT_PAGE, maxBytes: INITIAL_PAGE_BYTES, around: 'msg_fixture0050u' },
 ])];
 const REMOTE = { client: { name: 'bench', version: '2.0.0-beta.1' }, timeoutMs: 120_000, headers: { host: 'phone.bench.test' } };
 
@@ -95,7 +100,7 @@ async function main(): Promise<void> {
     }
     remote.close();
 
-    for (const throttled of [false, true]) {
+    for (const throttled of process.argv.includes('--rpc-only') ? [] : [false, true]) {
       const times: number[] = [];
       let never = 0;
       for (let run = 0; run < RUNS; run += 1) {

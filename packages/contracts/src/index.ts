@@ -1518,7 +1518,7 @@ export interface Message {
 export const MESSAGE_PAGE = 120;
 /** The first paint needs a small tail; older history uses the ordinary page size. */
 export const INITIAL_MESSAGE_PAGE = 40;
-export { previewToolOutputs, previewToolPart, inputPreview, longerThan, TOOL_OUTPUT_INLINE_CHARS, TOOL_OUTPUT_PREVIEW_CHARS, TOOL_INPUT_INLINE_CHARS, TOOL_INPUT_PREVIEW_CHARS, TOOL_DOCUMENTS_INLINE_CHARS } from './message-preview';
+export { previewToolOutputs, previewToolPart, inputPreview, longerThan, TOOL_OUTPUT_INLINE_CHARS, TOOL_OUTPUT_PREVIEW_CHARS, TOOL_OUTPUT_FOLDED_CHARS, TOOL_INPUT_INLINE_CHARS, TOOL_INPUT_PREVIEW_CHARS, TOOL_DOCUMENTS_INLINE_CHARS } from './message-preview';
 export { forTransport, projectMessage, MESSAGE_SENT_MAX_BYTES, type TransportOptions } from './transport.ts';
 export { boundedMessageWindow } from './message-window.ts';
 export { lastAgentText, notificationExcerpt, requestExcerpt, NOTIFICATION_TEXT_CHARS } from './notification-text';
@@ -1555,6 +1555,23 @@ export const MESSAGE_PAGE_MAX = 200;
  * tail must fit this budget in full; otherwise `threads.get` returns a page.
  */
 export const MESSAGE_PAGE_MAX_BYTES = 12 * 1024 * 1024;
+/**
+ * The `maxBytes` of a first visit: about what a desktop screen draws, once
+ * successful tool outputs stay on the core. Forty messages of one long thread
+ * weighed 9.5 MB on 2026-10-13, for one screen of answers and folded runs.
+ */
+export const INITIAL_PAGE_BYTES = 128 * 1024;
+/** The `maxBytes` of each page a reader scrolls into, above or below the window. */
+export const READING_PAGE_BYTES = 256 * 1024;
+/** Why a `maxBytes` is refused, or null: a positive whole count of bytes. */
+export function pageBytesProblem(maxBytes: unknown): { field: 'maxBytes'; expected: string } | null {
+  return maxBytes === undefined || (Number.isSafeInteger(maxBytes) && (maxBytes as number) > 0) ? null
+    : { field: 'maxBytes', expected: 'a positive integer count of serialized UTF-8 bytes' };
+}
+/** The byte budget a page read with `maxBytes` gets: never above `MESSAGE_PAGE_MAX_BYTES`. */
+export function pageBytes(maxBytes: number | undefined): number {
+  return maxBytes === undefined ? MESSAGE_PAGE_MAX_BYTES : Math.min(maxBytes, MESSAGE_PAGE_MAX_BYTES);
+}
 
 /**
  * A command the agent of a thread takes at the start of a prompt, sent as the
@@ -4030,10 +4047,16 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * tool inputs and heavy documents on the core as well, and caps each message
    * at `MESSAGE_SENT_MAX_BYTES`; it needs `features.deferredToolParts`. A
    * subscription opened with it receives live tool parts the same way.
+   *
+   * `maxBytes` lowers the page's byte budget below `MESSAGE_PAGE_MAX_BYTES`,
+   * counted as the client receives the messages: a first visit asks for what
+   * fills a screen (`INITIAL_PAGE_BYTES`). It bounds a page, around a saved
+   * position too, never a resume tail, which comes whole or not at all. Older
+   * cores ignore it and send their page.
    */
   'threads.get': {
     params: {
-      threadId: ThreadId; after?: MessageId; around?: MessageId; limit?: number; compactTools?: boolean; compactFiles?: boolean; compactImages?: boolean; compactToolParts?: boolean;
+      threadId: ThreadId; after?: MessageId; around?: MessageId; limit?: number; maxBytes?: number; compactTools?: boolean; compactFiles?: boolean; compactImages?: boolean; compactToolParts?: boolean;
       /** Request a resume proof, or reuse a proof previously supplied by this core. */
       sync?: true | MessageSync;
       /** Subscribe after a successful snapshot, optionally replacing the previous subscription and acknowledging unread content. */
@@ -4056,9 +4079,10 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * page a reader scrolls down into from a page cut by `around`. The result's
    * `after` is then the next cursor, null once the page reaches the last
    * message, and its `before` is null. Exactly one of the two is given.
+   * `maxBytes` lowers the byte budget as it does for `threads.get`.
    */
   'messages.list': {
-    params: { threadId: ThreadId; before?: MessageId; after?: MessageId; limit?: number; compactTools?: boolean; compactFiles?: boolean; compactImages?: boolean; compactToolParts?: boolean };
+    params: { threadId: ThreadId; before?: MessageId; after?: MessageId; limit?: number; maxBytes?: number; compactTools?: boolean; compactFiles?: boolean; compactImages?: boolean; compactToolParts?: boolean };
     result: { messages: Message[]; before: MessageId | null; after?: MessageId | null; turns?: Turn[] };
   };
   /** The full output of a tool already visible in this conversation. No filesystem path is accepted. */
