@@ -279,9 +279,11 @@ name exactly. Cancel, Escape and Back keep it active. Archiving stops its work
 and removes it from the active list; its profile and history remain searchable.
 
 Closing the desktop window, the native Quit menu and Ctrl+Q share a confirmation
-when any connected machine has queued, running or waiting turns. The check reads
-fresh thread lists, including agent sessions and delegated children. Unreachable
-machines also require confirmation. Close to tray still hides the window without
+when this PC's own core has queued, running or waiting turns. The check reads a
+fresh thread list, including agent sessions and delegated children, and asks
+too when that core cannot answer. Another machine's agents keep working after
+the window closes, so its turns and its reachability never hold the app open
+(`closingStores` in `lib/shell-quit.ts`). Close to tray still hides the window without
 quitting. The warning distinguishes resident engines, which keep working, from
 engines configured to stop with the shell.
 
