@@ -232,7 +232,7 @@ threads as the steward's letters, never as the user's.
 boite where                      thread, title, project, cwd, branch, worktree, agent
 boite thread move <project>      move this thread to another project (name, id or
                                  folder) when this turn ends
-boite thread new <project> <brief> [--worktree] [--title <title>]
+boite thread new <project> <brief> [--worktree] [--title <title>] [context flags]
                                  start a thread in a project; its first answer
                                  comes back as an agent message
 boite projects                   the projects added to Boite
@@ -286,7 +286,7 @@ boite agent remember <json>
 boite agent routines
 boite agent schedule <json>
 boite delegate models|profiles|list
-boite delegate spawn <brief> [--model <provider/model>] [--effort <level>] [--speed <tier>] [--profile <id>] [--title <t>]
+boite delegate spawn <brief> [--model <provider/model>] [--effort <level>] [--speed <tier>] [--profile <id>] [--title <t>] [context flags]
 boite delegate send <thread-id> <text>
 boite delegate wait [thread-id] [--timeout <s>]
 boite delegate result <thread-id> <turn-id> [offset]
@@ -295,6 +295,10 @@ boite workflow help|check|run|list|show|extend|pause|resume|stop|retry
 boite workflow output|templates|save|start
 boite help
 ```
+
+The context flags, `--context light|neutral`, `--keep|--drop <parts>`,
+`--tools <Tool,...>` and `--rules <text>` or `--rules-file <path>`, start the
+thread without part of the user's setup ([context modes](context-modes.md)).
 
 Coordination commands are documented in [coordination](coordination.md#agent-commands),
 child controls in [delegation](delegation.md#agent-commands), and plan/output

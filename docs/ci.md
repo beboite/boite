@@ -133,9 +133,9 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 593,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,830,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,836,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,030,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,040,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
@@ -227,12 +227,19 @@ SDK (0.3.283 to 0.3.296) grows its lazy chunk by 70,752 bytes and the ACP SDK
 (1.5.0 to 1.8.0) its own by 7,662; neither loads at startup. The core limit
 rises to 4,030,000.
 
-On 2026-10-13 on Linux with Bun 1.4.2, `main` at `224597ed` measured 4,822,128
-UI bytes. Opening a thread on one screen of history (#472) measured 4,823,117
-merged with it, as the Windows job did: 989 bytes for the page byte budgets the
-store sends, the list that pages itself when it cannot scroll, the old first
-row put back after a page lands, and the fake core's budgets. The UI limit
-rises to 4,830,000.
+Context modes, the same day on Linux, measured 4,829,171 UI bytes and 4,031,205
+core bytes against 4,822,797 and 4,023,886 for `main` at `aa0ced74`: 6,374 UI
+bytes for the badge, the fake client's checks and the English/French sentences,
+and 7,319 core bytes for the resolution, the journal column, the CLI flags and
+the driver options. The UI limit rises to 4,836,000 and the core limit to
+4,040,000.
+
+Opening a thread on one screen of history (#472) measured 4,823,117 UI bytes
+merged with `main` at `224597ed` (4,822,128), as the Windows job did: 989 bytes
+for the page byte budgets the store sends, the list that pages itself when it
+cannot scroll, the old first row put back after a page lands, and the fake
+core's budgets. Merged with context modes at `c8e9d2ac` it measured 4,830,160,
+within the 4,836,000 above.
 
 Several drafts per project, merged with settings cards at `87fca361`, measured
 4,536,091 UI bytes and a 590,215-byte entry chunk on Linux: the done rows and

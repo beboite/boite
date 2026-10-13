@@ -4,7 +4,7 @@
  * its model and reasoning, its time, then the one next step that makes sense.
  */
 import { CONVERSATION_PROFILE_ID, speedName } from '@boite/contracts';
-import type { DelegatedAgent, DelegationModelChoice, DelegationView, WorkflowRun } from '@boite/contracts';
+import type { DelegatedAgent, DelegationModelChoice, DelegationView, RpcParams, WorkflowRun } from '@boite/contracts';
 import type { CoreClient } from './client.ts';
 import { requiredText, Usage } from './cli-args.ts';
 
@@ -18,6 +18,8 @@ export interface DelegateOptions {
   effort?: string;
   speed?: string;
   profile?: string;
+  /** What `contextRequest` built from the context flags; the core checks it. */
+  context?: Record<string, unknown>;
 }
 
 export const DELEGATE_ACTIONS = 'models, spawn, list, send, stop, wait, result or profiles';
@@ -46,8 +48,8 @@ function stateOf(agent: DelegatedAgent): string {
 
 /** `codex/gpt-5.5 effort=high speed=priority`: what a child runs on, the speed as its stored tier id. */
 export function routeOf(agent: DelegatedAgent): string {
-  const { providerId, model, effort, speed } = agent.thread;
-  return `${providerId}/${model ?? 'default'}${effort ? ` effort=${effort}` : ''}${speed ? ` speed=${speed}` : ''}`;
+  const { providerId, model, effort, speed, contextMode } = agent.thread;
+  return `${providerId}/${model ?? 'default'}${effort ? ` effort=${effort}` : ''}${speed ? ` speed=${speed}` : ''}${contextMode ? ` context=${contextMode.label}${contextMode.rules ? '+rules' : ''}` : ''}`;
 }
 
 function agentRow(agent: DelegatedAgent, now: number): string[] {
@@ -145,6 +147,7 @@ export async function delegateCommand(client: CoreClient, threadId: string, rest
         ...(profileId === undefined ? {} : { profileId }),
         ...(options.model === undefined ? {} : { model: options.model }),
         ...(options.effort === undefined ? {} : { effort: options.effort }),
+        ...(options.context === undefined ? {} : { context: options.context as RpcParams<'delegation.spawn'>['context'] }),
         ...(speed === undefined ? {} : { speed }),
         ...(options.title === undefined ? {} : { title: options.title }),
       });

@@ -32,14 +32,15 @@ export interface LiveSetup {
 }
 
 /** What this turn asks the running query to be, whatever the last one asked for. */
-export function liveSetup(thread: { model: string | null; effort: string | null; permissionMode: PermissionMode; speed?: string | null }): LiveSetup {
+export function liveSetup(thread: { model: string | null; effort: string | null; permissionMode: PermissionMode; speed?: string | null; contextMode?: { hooks: boolean } | null }): LiveSetup {
   const effort = thread.effort;
   return {
     model: thread.model,
     effortLevel: effort !== null && SDK_EFFORTS.includes(effort) ? (effort as EffortLevel) : null,
     fastMode: thread.speed === 'fast',
     permissionMode: thread.permissionMode === 'yolo' ? 'bypassPermissions' : thread.permissionMode,
-    disableHooks: thread.permissionMode === 'yolo',
+    // A context mode without hooks keeps them off whatever the permission mode.
+    disableHooks: thread.permissionMode === 'yolo' || thread.contextMode?.hooks === false,
   };
 }
 

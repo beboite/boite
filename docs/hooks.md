@@ -35,6 +35,11 @@ failure rules. Codex's copied `config.toml` retargets reviewed `hooks.json`
 paths to the isolated directory. New hook trust must be reviewed in the user's
 own Codex profile; a later spawn copies it.
 
+A conversation started in a [context mode](context-modes.md) carries
+`BOITE_CONTEXT=<label>` in its environment, and `BOITE_GUIDES=0` when it drops
+guides. A hook that adds context at session start or on each prompt can check
+the second and print nothing; `neutral` runs none of the user's hooks.
+
 ## What Boite reports
 
 Claude runs with the SDK's `includeHookEvents`, which sends a `hook_response`
