@@ -46,7 +46,7 @@ export class ThreadSpawns {
     if (params.worktree !== undefined && typeof params.worktree !== 'boolean') throw invalidParams('agent.spawn.worktree: expected true or false');
     const worktree = params.worktree === true;
     const requestId = text(params.requestId, 'requestId', 128);
-    const fingerprint = createHash('sha256').update(JSON.stringify([params.project, prompt, params.title ?? null, worktree])).digest('hex');
+    const fingerprint = createHash('sha256').update(JSON.stringify([params.project, prompt, params.title ?? null, worktree, ...(params.context === undefined ? [] : [params.context])])).digest('hex');
     const ledger = (this.core.journal.getSetting(`${LEDGER}${threadId}`) as Started[] | undefined) ?? [];
     const retried = ledger.find((entry) => entry.requestId === requestId);
     if (retried) {
@@ -85,6 +85,7 @@ export class ThreadSpawns {
       const base = {
         projectId: target.id, providerId: caller.providerId, accountId: caller.accountId, title,
         ...(caller.model === null ? {} : { model: caller.model }), effort: caller.effort, speed: caller.speed ?? null, permissionMode: caller.permissionMode,
+        ...(params.context === undefined ? {} : { context: params.context }),
       };
       const created = worktree ? await this.threads.createInWorktree({ ...base, worktree: {} }) : this.threads.create(base);
       // Worktree preparation can outlive the caller's agent socket and its archive.

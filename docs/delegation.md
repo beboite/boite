@@ -42,19 +42,13 @@ with delegation off, and only a paused team holds them. Communication between
 conversations is a separate setting in the title's menu; its Off label does not
 disable provider-native subagents.
 
-## Light Haiku children
+## Context modes
 
-A Claude child on a Haiku model, delegated or a workflow step, starts light. It
-reads no `CLAUDE.md` or `AGENTS.md`, connects no MCP server and keeps only the
-Bash, PowerShell, Read, Write, Edit, Glob and Grep tools. Its first message
-holds the brief and nothing from the brain, the Boite guide or the team guide.
-The user's settings still load, so their hooks and compaction window apply,
-and `BOITE_LIGHT=1` in its environment lets those hooks leave out their own
-context. Such a child does one small job in a window the owner may keep small:
-on Windows with a 100k window, the whole setup took 35k before the brief, light
-takes 13k (`/context`, 2026-10-13). A brief that relies on a project rule must
-quote it. Switching the child to another model restarts its process with the
-full setup.
+`--context light|neutral`, `--keep`, `--drop`, `--tools` and `--rules` or
+`--rules-file` start a child without part of the user's setup, with rules of
+its own; the child's row and header then carry a badge. A small Haiku chore
+fits `light`, a neutral review `neutral`. [Context modes](context-modes.md)
+lists the presets, the fields and what each provider honours.
 
 ## Native provider subagents
 

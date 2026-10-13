@@ -1428,6 +1428,20 @@ export const strings = {
     notifyHint: 'A finished turn, a failure, a question or a waiting permission wakes the steward.',
     chipOne: 'Steward · 1 project', chipMany: 'Steward · {count} projects', chipAll: 'Steward · all projects'
   },
+  contextMode: {
+    light: 'Light',
+    neutral: 'Neutral',
+    custom: 'Custom',
+    rules: 'rules',
+    heading: '{label} context',
+    without: 'Started without: {parts}.',
+    instructions: 'instruction files',
+    guides: 'Boite and brain guides',
+    mcp: 'MCP servers',
+    hooks: 'hooks',
+    tools: 'Tools: {tools}.',
+    withRules: 'Its rules: {rules}'
+  },
   delegation: {
     off: 'Off',
     paused: 'Paused',

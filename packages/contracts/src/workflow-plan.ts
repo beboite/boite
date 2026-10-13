@@ -5,6 +5,7 @@
  */
 import type { WorkflowCondition, WorkflowLimits, WorkflowPlan, WorkflowShape, WorkflowStepPlan } from './workflows';
 import { DEFAULT_WORKFLOW_LIMITS, WORKFLOW_LIMITS } from './workflows';
+import { ContextRequestError, resolveContext } from './context-mode';
 
 const STEP_ID = /^[A-Za-z][A-Za-z0-9_-]{0,31}$/;
 const SEGMENT = /^[A-Za-z0-9_-]+$/;
@@ -137,7 +138,12 @@ export function checkSteps(value: unknown, options: CheckOptions, field = 'steps
     if (when) needStep(when.path.split('.'), `${at}.when.path`, false);
     for (const ref of templateRefs(task, `${at}.task`)) needStep(ref, `${at}.task`, forEach !== undefined);
     const output = raw.output === undefined ? undefined : checkShapeDefinition(raw.output, `${at}.output`);
-    return { id, ...(profile && (profile !== CONVERSATION_PROFILE || options.profiles.includes(profile)) ? { profile } : {}), ...(model ? { model } : {}), ...(effort ? { effort } : {}), task, deps: [...deps], ...(title ? { title } : {}), ...(raw.after ? { after: raw.after.map(String) } : {}), ...(forEach ? { forEach } : {}), ...(when ? { when } : {}), ...(output ? { output } : {}) };
+    const context = raw.context === undefined || raw.context === null ? undefined : raw.context as WorkflowStepPlan['context'];
+    // The shape here; whether the step's provider can honour it is checked with its route.
+    if (context !== undefined) {
+      try { resolveContext(context); } catch (error) { if (error instanceof ContextRequestError) fail(`${at}.${error.message}`); throw error; }
+    }
+    return { id, ...(profile && (profile !== CONVERSATION_PROFILE || options.profiles.includes(profile)) ? { profile } : {}), ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(context !== undefined ? { context } : {}), task, deps: [...deps], ...(title ? { title } : {}), ...(raw.after ? { after: raw.after.map(String) } : {}), ...(forEach ? { forEach } : {}), ...(when ? { when } : {}), ...(output ? { output } : {}) };
   });
   // Existing steps cannot depend on new ones, so a cycle can only run through the new ones.
   const graph = new Map<string, string[]>([...existing.map(s => [s.id, s.after] as const), ...steps.map(s => [s.id, s.deps] as const)]);
