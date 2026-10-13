@@ -7,7 +7,8 @@ let mounted: ReturnType<typeof mount> | undefined;
 const groups: ReturnType<typeof mount>[] = [];
 const OriginalResizeObserver = globalThis.ResizeObserver;
 const settle = async () => { for (let i = 0; i < 10; i++) { await Promise.resolve(); flushSync(); } };
-afterEach(async () => { if (mounted) await unmount(mounted); for (const group of groups.splice(0)) await unmount(group); mounted = undefined; vi.restoreAllMocks(); globalThis.ResizeObserver = OriginalResizeObserver; document.body.innerHTML = ''; });
+const OriginalIntersectionObserver = globalThis.IntersectionObserver;
+afterEach(async () => { if (mounted) await unmount(mounted); for (const group of groups.splice(0)) await unmount(group); mounted = undefined; vi.restoreAllMocks(); globalThis.ResizeObserver = OriginalResizeObserver; globalThis.IntersectionObserver = OriginalIntersectionObserver; document.body.innerHTML = ''; });
 
 function fixture(count: number) {
   const root = document.createElement('div'); document.body.append(root);
@@ -94,6 +95,54 @@ test('many small project lists leave offscreen groups as spacers and remain reac
   expect(root.querySelectorAll('button').length).toBeLessThanOrEqual(100);
 });
 
+
+test('a project list that rows above it pushed into view draws its rows instead of a blank spacer', async () => {
+  // Threads archived in the projects above shrink them: nothing scrolls and the list keeps its size, it only moves.
+  // The observer stand-in calls back only when a node's visible share changes, as the browser's does.
+  const placements: { callback: IntersectionObserverCallback; shares: Map<Element, number> }[] = [];
+  globalThis.IntersectionObserver = class {
+    shares = new Map<Element, number>();
+    constructor(callback: IntersectionObserverCallback) { placements.push({ callback, shares: this.shares }); }
+    observe(node: Element) { this.shares.set(node, -1); }
+    unobserve(node: Element) { this.shares.delete(node); }
+    disconnect() { this.shares.clear(); }
+    takeRecords() { return []; }
+  } as unknown as typeof IntersectionObserver;
+  const share = (node: Element) => { const r = node.getBoundingClientRect(); return Math.max(0, Math.min(400, r.bottom) - Math.max(0, r.top)) / r.height; };
+  const move = async () => {
+    for (const observer of placements) {
+      let changed = false;
+      for (const [node, previous] of observer.shares) { const next = share(node); if (next !== previous) { changed = true; observer.shares.set(node, next); } }
+      if (changed) observer.callback([], {} as IntersectionObserver);
+    }
+    await settle();
+  };
+  const drawn = (root: HTMLElement) => [...root.querySelectorAll<HTMLElement>('[data-row-id]')].map(node => Number(node.dataset.rowId));
+  let listTop = 0, count = 0;
+  const root = document.createElement('div'); document.body.append(root);
+  vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(400);
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    if (this === root) return new DOMRect(0, 0, 280, 400);
+    if (this.dataset.windowKey) return new DOMRect(0, listTop + Number(this.dataset.windowKey) * 34, 280, 34);
+    return new DOMRect(0, listTop, 280, count * 34);
+  });
+  const row = createRawSnippet<[number]>(item => ({ render: () => `<button data-row-id="${item()}">${item()}</button>` }));
+  // Mounted, then the first notification every observed node gets, as in the browser.
+  const list = async (items: number[]) => { count = items.length; mounted = mount(WindowList<number>, { target: root, props: { items, keyOf: String, row, scrollRoot: root, estimate: 34 } }); await settle(); await move(); };
+
+  // A short list below the viewport slides into it.
+  listTop = 900; await list([0, 1]);
+  expect(drawn(root)).toEqual([]);
+  listTop = 200; await move();
+  expect(drawn(root)).toEqual([0, 1]);
+  await unmount(mounted!); mounted = undefined; root.innerHTML = '';
+
+  // A windowed list covering the whole viewport moves up: its visible share stays the same, the drawn rows' does not.
+  listTop = -3000; await list(Array.from({ length: 200 }, (_, index) => index));
+  expect(drawn(root)).toContain(90);
+  listTop = -1000; await move();
+  expect(drawn(root)).toEqual(expect.arrayContaining([30, 35, 40]));
+});
 
 test('reordering and filtering preserve keyed controls and update the full reachable model', async () => {
   const root = document.createElement('div'); document.body.append(root);
