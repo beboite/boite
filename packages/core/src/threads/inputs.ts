@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync, statSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { attachmentError } from '@boite/contracts';
 import type { Attachment, PreviewReference, Project, ProviderDescriptor, ThreadId, Turn } from '@boite/contracts';
@@ -43,10 +43,12 @@ export function draftFolderName(title: string, at: Date): string {
  * A new folder for a draft in the drafts directory, never an existing one:
  * two drafts with the same title on the same day get `name 2`, `name 3`.
  */
-export function makeDraftFolder(root: string, name: string): string {
-  mkdirSync(root, { recursive: true });
+export function makeDraftFolder(root: string, name: string, beforeMutation?: (path: string) => (() => void) | void): string {
+  if (!beforeMutation) mkdirSync(root, { recursive: true });
   for (let index = 1; index < 1000; index += 1) {
     const path = join(root, index === 1 ? name : `${name} ${index}`);
+    if (beforeMutation && existsSync(path)) continue;
+    const abandon = beforeMutation?.(path);
     try {
       mkdirSync(path);
       return path;
@@ -54,6 +56,8 @@ export function makeDraftFolder(root: string, name: string): string {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
         throw refused(`the draft's folder cannot be made: ${messageOf(error)}`, { path });
       }
+      // Another creator won the target after the check; it is not ours to erase.
+      abandon?.();
     }
   }
   throw refused('every folder name for this draft is taken', { root, name });

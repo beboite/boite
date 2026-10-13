@@ -285,6 +285,48 @@ test('Stop during checkpoint preparation prevents the provider from starting', a
   } finally { held.resolve(); preparation.mockRestore(); }
 });
 
+test('native initialization overlaps the file checkpoint but cannot dispatch the prompt before it', async () => {
+  const held = Promise.withResolvers<void>();
+  const begun = spyOn(h.core.threads.codeCheckpoints, 'begin').mockReturnValue(held.promise);
+  const native: string[] = [];
+  const endNative = setDriver('echo', { protocol: 'echo',
+    prepare: async (ctx, options) => {
+      expect(ctx).not.toHaveProperty('prompt');
+      expect(options).toEqual({ forTurn: true });
+      native.push('ready');
+    },
+    startTurn: () => { native.push('prompt'); return { stop() {}, done: Promise.resolve({ status: 'done', sessionId: null, usage: null }) }; },
+  });
+  try {
+    const turn = await client.call('turns.start', { threadId, prompt: 'snapshot first' });
+    await waitFor(() => native.length > 0);
+    expect(native).toEqual(['ready']);
+    held.resolve();
+    await waitFor(() => h.core.journal.getTurn(turn.id)?.finishedAt != null);
+    expect(native).toEqual(['ready', 'prompt']);
+  } finally { held.resolve(); begun.mockRestore(); endNative(); }
+});
+
+test.each(['stop', 'failure'])('checkpoint %s releases a prepared session and prevents prompt dispatch', async action => {
+  const held = Promise.withResolvers<void>();
+  const begun = spyOn(h.core.threads.codeCheckpoints, 'begin').mockReturnValue(held.promise);
+  let initialized = false, released = false, dispatched = false;
+  const endNative = setDriver('echo', { protocol: 'echo',
+    prepare: async () => { initialized = true; }, releaseThread: () => { released = true; },
+    startTurn: () => { dispatched = true; return { stop() {}, done: Promise.resolve({ status: 'done', sessionId: null, usage: null }) }; },
+  });
+  try {
+    const turn = await client.call('turns.start', { threadId, prompt: 'never dispatch' });
+    await waitFor(() => initialized);
+    if (action === 'stop') { expect(await client.call('turns.stop', { threadId })).toEqual({ stopped: true }); held.resolve(); }
+    else held.reject(new Error('snapshot refused'));
+    await waitFor(() => h.core.journal.getTurn(turn.id)?.finishedAt != null);
+    expect(dispatched).toBe(false);
+    expect(released).toBe(true);
+    expect(h.core.journal.getTurn(turn.id)?.status).toBe(action === 'stop' ? 'stopped' : 'error');
+  } finally { held.resolve(); begun.mockRestore(); endNative(); }
+});
+
 test('rewinding a created file tolerates an empty parent directory that cannot be removed', async () => {
   if (process.platform === 'win32') return;
   change = async () => {

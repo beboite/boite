@@ -146,7 +146,8 @@ export class ClaudeSession {
     if (!viewed) this.afterTurns();
   }
 
-  prepare(): Promise<void> {
+  prepare(forTurn = false): Promise<void> {
+    this.retention.prepare(forTurn);
     if (!this.started) {
       this.started = true;
       this.applied = liveSetup(this.ctx.thread);
@@ -171,6 +172,7 @@ export class ClaudeSession {
   }
 
   attach(turn: ClaudeTurn, warmMs: number): void {
+    this.retention.beginTurn();
     this.warmMs = warmMs;
     this.ctx = turn.ctx;
     this.clearIdle();

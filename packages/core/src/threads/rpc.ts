@@ -76,13 +76,26 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
   core.router.register('threads.mergeBack', params => core.threads.branching.mergeBack(params));
   core.router.register('threads.fork', (params) => core.threads.fork(params.threadId, params.messageId, params.worktree === true));
   core.router.register('threads.list', (params) => core.threads.list(params));
-  core.router.register('threads.create', async (params) => {
+  core.router.register('drafts.prepare', (params, ctx) => core.drafts.prepare(ctx.connection.id, params));
+  core.router.register('drafts.release', async (params, ctx) => {
+    await core.drafts.release(ctx.connection.id, params.preparationId);
+    return { ok: true };
+  });
+  core.router.register('attachments.upload', (params, ctx) => core.attachmentUploads.upload(ctx.connection.id, params.attachment));
+  core.router.register('attachments.release', async (params, ctx) => {
+    await core.attachmentUploads.release(ctx.connection.id, params.ids);
+    return { ok: true };
+  });
+  core.router.register('threads.create', async (params, ctx) => {
     // A thread made in a folder that is gone could never run a turn: refused here, by the folder.
     const project = core.projects.require(params.projectId);
     await core.projects.requireFolder(project.id);
     const provider = core.providers.require(params.providerId);
     await discover(provider.id, params.accountId, params.model ?? defaultModel(provider), params.effort ?? null, params.speed ?? null);
-    return params.worktree === undefined ? core.threads.create(params) : core.threads.createInWorktree(params);
+    const adopted = await core.drafts.claim(ctx.connection.id, params);
+    const thread = adopted ?? (params.worktree === undefined ? core.threads.create(params) : await core.threads.createInWorktree(params));
+    if (params.subscribe === true) ctx.connection.subscriptions.add(thread.id);
+    return thread;
   });
   // The blurs of a light page are made before it is read, never between the
   // read and the answer (`MediaPreviews.warm`).
@@ -156,7 +169,8 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
   });
   core.router.register('turns.start', async (params, ctx) => {
     await requireCwd(core, params.threadId);
-    return core.threads.startTurn(params.threadId, params.prompt, params.attachments ?? [], params.expectedSelectionVersion, undefined, undefined, params.clientRequestId, undefined, params.previewReferences ?? [], undefined, undefined, ctx.connection.sentFrom ?? null);
+    const attachments = await core.attachmentUploads.resolve(ctx.connection.id, params.attachments ?? [], params.attachmentIds);
+    return core.threads.startTurn(params.threadId, params.prompt, attachments, params.expectedSelectionVersion, undefined, undefined, params.clientRequestId, undefined, params.previewReferences ?? [], undefined, undefined, ctx.connection.sentFrom ?? null);
   });
   core.router.register('turns.stop', (params, ctx) => {
     const by = ctx.connection.identity.principal === 'agent' ? `agent of ${ctx.connection.identity.threadId}` : `${ctx.connection.identity.principal} from ${ctx.connection.sentFrom?.client ?? 'a client'}`;

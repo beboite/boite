@@ -13,7 +13,7 @@ function snapshot(protocol: Protocol | null): ThreadCapabilitySnapshot {
   return { threadId: 't', providerId: 'p', protocol, selectionVersion: 0,
     providerCapabilities: protocol === null ? null : { approvals: true, images: true, planMode: true, checkpoint: false, resume: true, hooks: false },
     runtimeReason: null, conversationReason: null, busy: false, steeringSupported: protocol !== 'agy' && protocol !== 'acp' && protocol !== null,
-    steeringReason: 'not-running', compactionReason: 'no-session', preparationSupported: protocol === 'claude-sdk' || protocol === 'codex-appserver',
+    steeringReason: 'not-running', compactionReason: 'no-session', preparationSupported: protocol !== null && ['claude-sdk', 'codex-appserver', 'acp', 'pi', 'muse'].includes(protocol),
     pendingApprovals: false, pendingQuestions: false, hasForkHistory: true, hasRewindHistory: true,
     nativeForkSupported: protocol === 'claude-sdk', nativeForkAvailable: false, nativeRewindSupported: protocol === 'claude-sdk', nativeRewindAvailable: false,
     backgroundSupported: protocol === 'claude-sdk' };
@@ -25,7 +25,7 @@ test('capability mapping covers every protocol without inventing interactive agy
     expect(result.protocol).toBe(protocol);
     expect(result.compaction.reason).toBe(protocol === 'agy' || protocol === null ? 'unsupported' : 'no-session');
     expect(result.steering.available).toBe(false);
-    expect(result.sessionPreparation.supported).toBe(protocol === 'claude-sdk' || protocol === 'codex-appserver');
+    expect(result.sessionPreparation.supported).toBe(protocol !== null && ['claude-sdk', 'codex-appserver', 'acp', 'pi', 'muse'].includes(protocol));
     expect(result.fork.native.available).toBe(false);
   }
 });
@@ -87,7 +87,7 @@ test('registered protocol metadata stays cold and live steering uses the action 
       get.mockImplementation(() => ({ ...provider, protocol }));
       const result = threadCapabilities(h.core, threadId);
       expect(result.protocol).toBe(protocol);
-      expect(result.sessionPreparation.supported).toBe(protocol === 'claude-sdk' || protocol === 'codex-appserver');
+      expect(result.sessionPreparation.supported).toBe(['claude-sdk', 'codex-appserver', 'acp', 'pi', 'muse'].includes(protocol));
       expect(result.steering.supported).toBe(protocol !== 'acp' && protocol !== 'agy');
       expect(result.steering.available).toBe(false);
     }

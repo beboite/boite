@@ -1,3 +1,4 @@
+import { createWithPreparation, mergeCreationSnapshot } from './thread-creation';
 import type {
   Message,
   MessageId,
@@ -296,7 +297,7 @@ export class Threads {
    * refused subscribe leaves the thread on screen with the socket it had
    * rather than with none at all.
    */
-  async open(threadId: ThreadId, navigate = true, options: { requests?: boolean } = {}): Promise<void> {
+  async open(threadId: ThreadId, navigate = true, options: { requests?: boolean; liveCreation?: boolean } = {}): Promise<void> {
     const s = this.ctx.store;
     const { delegation } = this.ctx;
     const client = this.ctx.client;
@@ -385,6 +386,7 @@ export class Threads {
       }
       // A window that now reaches the end says so, over the cursor a held copy had.
       if (held && thread.messagesAfter === undefined) delete held.messagesAfter;
+      if (options.liveCreation && this.openThread?.id === threadId) mergeCreationSnapshot(thread, this.openThread);
       this.#show(held ? reconcileThread(held, thread) : thread, navigate, true);
       this.preloads.done(preloaded);
       loaded = true;
@@ -587,13 +589,15 @@ export class Threads {
     speed?: string | null;
     worktree?: { branch?: string };
     incognito?: boolean;
+    preparationId?: string;
+    subscribe?: boolean;
   }, options: { navigate?: boolean } = {}): Promise<ThreadSummary | null> {
     const client = this.ctx.client;
     const clientGeneration = this.ctx.clientGeneration;
     if (!client) return null;
     const generation = this.openGeneration;
     try {
-      const summary = await client.call('threads.create', input);
+      const summary = await createWithPreparation(client, input, () => this.ctx.currentClient(client, clientGeneration));
       if (!this.ctx.currentClient(client, clientGeneration)) return null;
       this.upsertThread(summary);
       if (options.navigate !== false && this.ctx.currentNavigation(client, generation)) await this.ctx.store.open(summary.id);

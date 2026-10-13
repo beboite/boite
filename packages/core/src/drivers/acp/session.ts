@@ -8,7 +8,7 @@ import type {
   SessionConfigOption,
   SessionNotification,
 } from '@agentclientprotocol/sdk';
-import type { OsProfile, PermissionMode, ProviderDescriptor, ProviderId } from '@boite/contracts';
+import type { OsProfile, PermissionMode, ProviderDescriptor, ProviderId, ModelInfo } from '@boite/contracts';
 import pkg from '../../../package.json';
 import { messageOf, unavailable } from '../../errors.ts';
 import type { SpawnedChild } from '../../procs.ts';
@@ -16,7 +16,7 @@ import { agentEnv, launchPrefix, profileFor, resolveExecutable } from '../../pro
 import { grokLaunchArgs } from '../grok.ts';
 import { stderrLines } from '../lines.ts';
 import { exitWithin } from '../exit.ts';
-import type { LiveTurnSettings, TurnContext } from '../types.ts';
+import type { LiveTurnSettings, ProbeContext, ProbeFilter, SessionContext } from '../types.ts';
 import { SessionControls } from './controls.ts';
 import { loadRefusal, LoadRefused, rpcReason, rpcRefusal } from './load.ts';
 import { AGENT_OWN_MODEL } from './models.ts';
@@ -25,6 +25,7 @@ import { jsonLinesOnly } from './stdout.ts';
 import { commandsOf, imageBlocksOf, usdCostOf, type AcpTurn } from './turn.ts';
 import { answerPermission, drawUpdate } from './updates.ts';
 import { errorCodeOf, noteReady } from '../driver-log.ts';
+import { SessionRetention } from '../session-retention.ts';
 
 /** A glog line at info severity: `I0921 09:51:32.917720 10292 main.py:80] ...`. */
 const GLOG_INFO = /^I\d{4} \d{2}:\d{2}:\d{2}\.\d+\s/;
@@ -59,23 +60,24 @@ export interface AcpMemory {
 
 /**
  * One ACP agent process for a thread: one `initialize`, one `session/new` or
- * `session/load`, then one `session/prompt` per turn. With
- * `warmProcessMinutes` at zero the process goes with the turn; above zero it
- * takes the next turns of the thread until the idle window, a stop, an
- * archive, core shutdown or a changed setup ends it.
+ * `session/load`, then one `session/prompt` per turn. Viewed and prepared
+ * sessions stay resident through navigation; other sessions follow the
+ * post-turn `warmProcessMinutes` policy. A stop, archive, shutdown or changed
+ * setup closes the process.
  */
 export class AcpSession {
   private child: SpawnedChild | null = null;
+  private killTree: (() => void) | null = null;
   private connection: ClientConnection | null = null;
   private agent: ClientContext | null = null;
   private starting: Promise<void> | null = null;
   /**
-   * The thread's latest `TurnContext`, kept across turns. `available_commands_update`
+   * The thread's latest session context, kept across turns. `available_commands_update`
    * typically arrives right after `session/new` or `session/load`, before any
    * turn is in flight, so the update handler reports through this rather than
    * through `current`, or the list would be dropped between turns.
    */
-  private ctx: TurnContext | null = null;
+  private ctx: SessionContext | null = null;
 
   private sessionId: string | null = null;
   private canLoad = false;
@@ -98,6 +100,7 @@ export class AcpSession {
   private lastStderr = '';
   private exited: Promise<number | null> | null = null;
   private idle: Timer | null = null;
+  private readonly retention = new SessionRetention();
   /** The turn whose `session/prompt` is in flight; updates outside one are dropped. */
   private current: AcpTurn | null = null;
   /** The turn the queue is running, from its start to its end, prompt or not. */
@@ -110,6 +113,7 @@ export class AcpSession {
   private running = 0;
   private closing = false;
   private ended = false;
+  private catalogValid = true;
 
   constructor(
     readonly key: string,
@@ -121,13 +125,54 @@ export class AcpSession {
     private readonly onOptions: (options: SessionConfigOption[]) => void = () => undefined,
   ) {}
 
+  async catalog(ctx: ProbeContext): Promise<ModelInfo[] | null> {
+    const setup = this.ctx;
+    const scope = ctx.catalogThread;
+    if (!this.catalogValid || this.ended || this.closing || setup === null || scope === undefined
+      || setup.thread.id !== scope.id || scope.providerId !== ctx.provider.id || scope.accountId !== ctx.accountId
+      || setup.thread.cwd !== scope.cwd
+      || JSON.stringify(setup.thread.contextMode ?? null) !== JSON.stringify(scope.contextMode ?? null)
+      || setup.provider.id !== ctx.provider.id || setup.account.id !== ctx.accountId
+      || JSON.stringify(setup.accountEnv) !== JSON.stringify(ctx.accountEnv)
+      || JSON.stringify(setup.provider) !== JSON.stringify(ctx.provider)) return null;
+    // Composition may ask for models while the matching prompt-free opener is
+    // still initializing. Share that work before deciding a probe is needed.
+    try { await this.starting; } catch { return null; }
+    if (!this.catalogValid || this.ended || this.closing || this.sessionId === null) return null;
+    return this.controls.catalog(setup);
+  }
+
+  forgetCatalog(filter: ProbeFilter): void {
+    if (this.ctx === null) return;
+    if (filter.providerId !== undefined && filter.providerId !== this.ctx.provider.id) return;
+    if (filter.accountId !== undefined && filter.accountId !== this.ctx.account.id) return;
+    this.catalogValid = false;
+  }
+
   seedConfig(options: SessionConfigOption[]): void {
     this.controls.seed(options);
   }
 
   /** Reusable only while the process is up and the turn asks for the very same setup. */
   usable(key: string, warmMs: number): boolean {
-    return !this.ended && !this.closing && this.key === key && warmMs > 0 && this.warmMs > 0;
+    return !this.ended && !this.closing && this.key === key && this.retention.reusable(warmMs, this.warmMs);
+  }
+
+  setViewed(viewed: boolean): void {
+    this.retention.setViewed(viewed);
+    this.clearIdle();
+    if (!viewed && !this.busy() && !this.ended) this.armIdle();
+  }
+
+  async prepare(ctx: SessionContext, forTurn = false): Promise<void> {
+    this.retention.prepare(forTurn);
+    this.clearIdle();
+    try { await this.start(ctx); }
+    catch (error) { this.drop(); throw error; }
+    finally {
+      ctx.finishStartup?.();
+      if (!this.ended && !this.busy() && !this.retention.viewed) this.armIdle();
+    }
   }
 
   busy(): boolean {
@@ -136,6 +181,7 @@ export class AcpSession {
 
   attach(turn: AcpTurn, warmMs: number): void {
     this.warmMs = warmMs;
+    this.retention.beginTurn();
     this.running += 1;
     this.clearIdle();
     this.queue = this.queue.then(async () => {
@@ -205,7 +251,7 @@ export class AcpSession {
   }
 
   /** Archive, shutdown, an idle window, a changed setup: the process goes. */
-  close(reason: string | null, ctx?: TurnContext): void {
+  close(reason: string | null, ctx?: SessionContext): void {
     if (this.ended) return;
     this.closing = true;
     if (reason !== null && ctx !== undefined) ctx.log('warn', `acp session: ${reason}`);
@@ -372,28 +418,35 @@ export class AcpSession {
       this.stopTimer = null;
     }
     if (this.active === turn) this.active = null;
-    const dropping = drop || this.closing || this.warmMs <= 0;
+    const dropping = drop || this.closing || this.retention.idleMs(this.warmMs) <= 0;
     turn.settle();
     this.running = Math.max(0, this.running - 1);
     if (dropping) {
       this.drop();
       return;
     }
-    if (this.running === 0) this.armIdle();
+    if (this.running === 0 && !this.retention.viewed) this.armIdle();
   }
 
-  private start(ctx: TurnContext): Promise<void> {
+  private start(ctx: SessionContext): Promise<void> {
+    this.ctx = ctx;
     if (this.starting === null) {
-      this.starting = noteReady(ctx, `${ctx.provider.id} ACP`, () => this.open(ctx), () => ({
+      this.starting = noteReady(ctx, `${ctx.provider.id} ACP`, async () => {
+        await this.open(ctx);
+        await this.controls.applyModel(ctx);
+        await this.controls.applyConfig(ctx);
+        await this.controls.applyMode(ctx);
+        if (this.ended) throw new Error('the acp session was closed while it started');
+      }, () => ({
         text: this.loaded ? ', loaded the saved session' : this.replaces !== null ? ', a new one replacing a session it cannot load' : '',
         data: { loaded: this.loaded, canLoad: this.canLoad, replaced: this.replaces !== null, images: this.imagesSupported },
         ...(this.replaces !== null ? { resumed: false } : {}),
-      }), () => this.active?.isStopped === true);
+      }), () => this.active?.isStopped === true || this.ended || this.closing);
     }
     return this.starting;
   }
 
-  private async open(ctx: TurnContext): Promise<void> {
+  private async open(ctx: SessionContext): Promise<void> {
     const sdk = await this.deps.loadSdk();
     // A stop while the SDK loaded: nothing may be spawned for a session that is over.
     if (this.ended) throw Object.assign(new Error('the acp session was closed before it started'), { abandoned: true });
@@ -408,6 +461,7 @@ export class AcpSession {
       env: agentEnv(ctx.provider, ctx.accountEnv),
     });
     this.child = child;
+    this.killTree = ctx.killTree ?? null;
     this.watch(child, ctx);
 
     const stream = sdk.ndJsonStream(
@@ -511,7 +565,7 @@ export class AcpSession {
     this.onOptions(created.configOptions ?? []);
   }
 
-  private watch(child: SpawnedChild, ctx: TurnContext): void {
+  private watch(child: SpawnedChild, ctx: SessionContext): void {
     child.stdin.on('error', () => undefined);
     stderrLines(child.stderr, (text) => {
       this.lastStderr = text.slice(0, STDERR_MAX);
@@ -562,7 +616,8 @@ export class AcpSession {
         // the pipe is already gone
       }
       try {
-        child.kill();
+        if (this.killTree !== null) this.killTree();
+        else child.kill();
       } catch {
         // already exited
       }
@@ -571,10 +626,11 @@ export class AcpSession {
   }
 
   private armIdle(): void {
+    this.clearIdle();
     this.idle = setTimeout(() => {
       this.idle = null;
       this.drop();
-    }, this.warmMs);
+    }, this.retention.idleMs(this.warmMs));
     this.idle?.unref?.();
   }
 
@@ -635,10 +691,12 @@ export class AcpSession {
  * is in here for Grok alone, whose mode is a command line option, so a change
  * there drops the process the way it does for Codex.
  */
-export function sessionKey(ctx: TurnContext): string {
+export function sessionKey(ctx: SessionContext): string {
   return JSON.stringify({
     permissionMode: isGrok(ctx.provider) ? ctx.thread.permissionMode : null,
     cwd: ctx.thread.cwd,
+    contextMode: ctx.thread.contextMode,
+    launch: profileFor(ctx.provider),
     accountId: ctx.account.id,
     providerId: ctx.provider.id,
     env: ctx.accountEnv,

@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp.ts';
 import { startDevUi } from './lib/ui.ts';
@@ -15,9 +15,17 @@ beforeAll(async () => {
   const port = await freePort();
   uiUrl = `http://127.0.0.1:${port}`;
   server = await startDevUi(port);
+}, 60_000);
+
+beforeEach(async () => {
   page = await BrowserPage.launch({ url: `${uiUrl}/?fake=1&open=recent` });
   await page.waitFor(`document.querySelector('[data-testid="chat"]')`);
   await page.evaluate(`window.__boiteTest.setTheme('dark')`);
+  // Cold Vite imports belong to fixture setup, before panel interaction deadlines.
+  await page.evaluate(`Promise.all([import('/src/components/RightPanel.svelte'), import('/src/components/CoordinationDialog.svelte')])`, 60_000);
+}, 60_000);
+
+async function prepareDiscussions() {
   await page.evaluate(`(async () => {
     const [{ workspace }, { FakeClient }] = await Promise.all([import('/src/lib/workspace.svelte.ts'), import('/src/lib/fake-client.ts')]);
     const local = workspace.active.client;
@@ -65,11 +73,13 @@ beforeAll(async () => {
   })()`);
   await page.waitFor(`document.querySelector('[data-testid="agent-discussion-row"][data-peer="core-build-pc/t-bench"][data-count="9"]')`);
   await page.waitFor(`document.querySelector('[data-testid="thread-menu-trigger"]')`);
-}, 60_000);
+}
 
-afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
+afterEach(async () => { await page?.close(); }, 15_000);
+afterAll(async () => { await server?.close(); }, 15_000);
 
 test('the chat shows one row per discussion, and the panel lists discussions and opens their back and forth at desktop and phone widths', async () => {
+  await prepareDiscussions();
   const deployment = '[data-testid="agent-discussion-row"][data-peer="core-build-pc/t-bench"][data-count="9"]';
   const notesId = await page.evaluate<string>('window.__notes');
   const notesRow = `[data-testid="agent-discussion-row"][data-peer="here/${notesId}"]`;
@@ -209,6 +219,7 @@ test('the chat shows one row per discussion, and the panel lists discussions and
 }, 30_000);
 
 test('exchanges remain between answers and mail-only turns retain their completion footer', async () => {
+  await page.evaluate(`window.__boiteTest.workspace.active.open('t-bench')`);
   await page.evaluate(`(() => {
     const store = window.__boiteTest.workspace.active;
     const thread = store.openThread;

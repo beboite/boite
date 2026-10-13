@@ -85,9 +85,13 @@ export function lazyDriver(
       }, cancelled, ctx.signal).result,
     } : {}),
     ...(options.prepare ? {
-      prepare: ctx => defer({ threadId: ctx.thread.id }, async driver => {
-        if (viewed.has(ctx.thread.id)) await driver.prepare?.(ctx);
-      }, () => undefined).result,
+      prepare: (ctx, request) => {
+        // Mark a loaded session before a synchronous startTurn can acquire it at zero retention.
+        if (loaded !== null) return viewed.has(ctx.thread.id) || request?.forTurn ? loaded.prepare?.(ctx, request) ?? Promise.resolve() : Promise.resolve();
+        return defer({ threadId: ctx.thread.id }, async driver => {
+          if (viewed.has(ctx.thread.id) || request?.forTurn) await driver.prepare?.(ctx, request);
+        }, () => undefined).result;
+      },
       setViewed(threadId: ThreadId, active: boolean) {
         if (active) viewed.add(threadId);
         else viewed.delete(threadId);

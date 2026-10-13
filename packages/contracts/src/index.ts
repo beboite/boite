@@ -2369,6 +2369,10 @@ export interface CoreInfo {
     deferredToolParts?: boolean;
     /** A device of its group says hello with a signature of its own device key (`hello` `device`). */
     deviceKeys?: boolean;
+    /** Prompt-free draft reservations and create-time subscription. */
+    draftPreparation?: boolean;
+    /** Connection-owned attachment uploads resolved by turns.start. */
+    attachmentUploads?: boolean;
   };
   /** The fingerprint of this core's identity key: the id its group knows it by, and the one a device signs its hello for. */
   coreId?: string;
@@ -4043,9 +4047,23 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
       incognito?: boolean;
       /** Start without part of the user's setup, fixed for the thread's life ([context modes](../../docs/context-modes.md)). */
       context?: ContextRequest | ContextPreset;
+      /** Adopt this connection's compatible, prompt-free draft reservation. */
+      preparationId?: string;
+      /** Subscribe this connection before returning the newly created conversation. */
+      subscribe?: boolean;
     };
     result: ThreadSummary;
   };
+  /** Reserve the final workspace and initialize a native session without publishing a conversation or sending text. */
+  'drafts.prepare': {
+    params: Omit<RpcMethods['threads.create']['params'], 'title' | 'preparationId' | 'subscribe'> & { preparationId: string };
+    result: { preparationId: string; threadId: ThreadId };
+  };
+  /** Release only the named reservation owned by this connection, including preparation still in flight. */
+  'drafts.release': { params: { preparationId: string }; result: { ok: true } };
+  /** Transfer one validated attachment before Send. The lease belongs to this connection. */
+  'attachments.upload': { params: { attachment: Attachment }; result: { id: string } };
+  'attachments.release': { params: { ids: string[] }; result: { ok: true } };
   /** Supported operations and their current availability for this thread. */
   'threads.capabilities': { params: { threadId: ThreadId }; result: ThreadCapabilities };
   /**
@@ -4250,7 +4268,7 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'threads.focus': { params: { threadId: ThreadId | null; protectedThreadIds?: ThreadId[]; protectAllThreads?: boolean; attentive?: boolean; idleMs?: number }; result: { ok: true } };
 
   /** `attachments` are journalled with the prompt. Files become host paths; images use native provider payloads. */
-  'turns.start': { params: { threadId: ThreadId; prompt: string; attachments?: Attachment[]; previewReferences?: PreviewReference[]; expectedSelectionVersion?: number; clientRequestId?: string }; result: Turn };
+  'turns.start': { params: { threadId: ThreadId; prompt: string; attachments?: Attachment[]; attachmentIds?: (string | null)[]; previewReferences?: PreviewReference[]; expectedSelectionVersion?: number; clientRequestId?: string }; result: Turn };
   /** Sends user input into the active turn; false leaves it queued for a later boundary or turn. */
   'turns.steer': { params: { threadId: ThreadId; turnId: TurnId; prompt: string; attachments?: Attachment[]; previewReferences?: PreviewReference[]; expectedSelectionVersion?: number; clientRequestId: string }; result: { accepted: boolean } };
   'turns.stop': { params: { threadId: ThreadId }; result: { stopped: boolean } };

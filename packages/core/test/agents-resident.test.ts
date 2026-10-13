@@ -169,7 +169,9 @@ test('subagents use their own approved routes on a projectless persistent sessio
  const session=h.core.workforce.records.list('session')[0]!;
  const child=await client.call('delegation.spawn',{threadId:session.threadId,profileId:'main',task:'Check one source',requestId:'delegate-child-001'});
  expect(child.thread.projectId).toBeNull();
- await waitFor(()=>h.core.workforce.records.list('work').filter(w=>w.status==='done').length>=2,5000);
+ // Echo streams both the child and the parent's result reply. Windows timer
+ // granularity can make their combined 416 chunks take over six seconds.
+ await waitFor(()=>h.core.workforce.records.list('work').filter(w=>w.status==='done').length>=2,15000);
 });
 
 test('revoking an account stops active work and holds queued work until explicit review', async () => {

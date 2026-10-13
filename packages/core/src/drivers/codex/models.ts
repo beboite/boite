@@ -3,7 +3,7 @@ import type { EffortLevel, ModelInfo, ProviderDescriptor, QuotaResetOutcome } fr
 import pkg from '../../../package.json';
 import { messageOf, unavailable } from '../../errors.ts';
 import { profileFor, resolveExecutable } from '../../providers/resolve.ts';
-import type { ProbeContext } from '../types.ts';
+import type { ProbeContext, SessionContext } from '../types.ts';
 import { subscriptionProxyCodexArgs } from '../../subscription-proxy.ts';
 import type { CodexModel, CodexModelListResponse, Timer } from './protocol.ts';
 import { AGENT_OWN_MODEL, CLIENT_NAME, PROBE_MAX_PAGES, PROBE_TIMEOUT_MS, STDERR_MAX } from './protocol.ts';
@@ -89,6 +89,29 @@ function modelsFrom(provider: ProviderDescriptor, data: CodexModel[]): ModelInfo
   return models.length === (own === undefined ? 0 : 1) ? provider.models : models;
 }
 
+/** Same bounded pagination for a prepared host and a disposable discovery process. */
+export async function listModels(rpc: CodexRpc, provider: ProviderDescriptor): Promise<ModelInfo[]> {
+  const data: CodexModel[] = [];
+  let cursor: string | null = null;
+  const deadline = Date.now() + PROBE_TIMEOUT_MS;
+  for (let page = 0; page < PROBE_MAX_PAGES; page += 1) {
+    const answer: CodexModelListResponse = await rpc.request<CodexModelListResponse>('model/list', cursor === null ? {} : { cursor }, { timeoutMs: Math.max(1, deadline - Date.now()) });
+    data.push(...(answer.data ?? []));
+    cursor = answer.nextCursor ?? null;
+    if (cursor === null) break;
+  }
+  return modelsFrom(provider, data);
+}
+
+export function preparedModels(ctx: ProbeContext, opener: SessionContext | null, rpc: CodexRpc | null): Promise<ModelInfo[] | null> {
+  const scope = ctx.catalogThread;
+  if (!opener || !scope || !rpc || opener.provider.id !== ctx.provider.id || opener.account.id !== ctx.accountId
+    || opener.thread.cwd !== scope.cwd || JSON.stringify(opener.thread.contextMode ?? null) !== JSON.stringify(scope.contextMode ?? null)
+    || JSON.stringify(opener.accountEnv) !== JSON.stringify(ctx.accountEnv)
+    || JSON.stringify(opener.provider) !== JSON.stringify(ctx.provider)) return Promise.resolve(null);
+  return listModels(rpc, ctx.provider);
+}
+
 /**
  * One short-lived `codex app-server`: `initialize`, the `initialized`
  * notification, then `model/list` until the server stops handing back a cursor.
@@ -144,28 +167,17 @@ export async function readModels(ctx: ProbeContext): Promise<ModelInfo[]> {
       timer.unref?.();
     });
 
-    const read = (async (): Promise<CodexModel[]> => {
+    const read = (async (): Promise<ModelInfo[]> => {
       await rpc.request('initialize', {
         clientInfo: { name: CLIENT_NAME, title: null, version: pkg.version },
         capabilities: null,
       });
       rpc.notify('initialized', {});
 
-      const data: CodexModel[] = [];
-      let cursor: string | null = null;
-      for (let page = 0; page < PROBE_MAX_PAGES; page += 1) {
-        const answer: CodexModelListResponse = await rpc.request<CodexModelListResponse>(
-          'model/list',
-          cursor === null ? {} : { cursor },
-        );
-        data.push(...(answer.data ?? []));
-        cursor = answer.nextCursor ?? null;
-        if (cursor === null) break;
-      }
-      return data;
+      return listModels(rpc, ctx.provider);
     })();
 
-    return modelsFrom(ctx.provider, await Promise.race([read, died, expired]));
+    return await Promise.race([read, died, expired]);
   } finally {
     if (timer !== null) clearTimeout(timer);
     rpc.fail('the codex probe is over');

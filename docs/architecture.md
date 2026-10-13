@@ -163,14 +163,53 @@ input. Work that may already have reached a provider is never replayed by this
 recovery path. Explicit restart handoff keeps its own authorization rules.
 
 Owner and paired-device connections name one visible conversation through
-`threads.focus`. Claude and Codex can prepare their traced process and native
-session before a prompt, without creating a turn, message or model prompt.
+`threads.focus`. Claude, Codex, ACP, pi and Muse can prepare their traced process
+and native session before a prompt, without creating a turn, message or model prompt.
 Viewed sessions stay ready across completed turns even when
 `warmProcessMinutes` is zero. The last viewer leaving starts a 30-second grace,
 extended by a longer configured warm period. Hidden pages and machine or phone
 navigation release focus. Preparation uses the normal account isolation and
 install leases; failure is logged and a later prompt can start normally.
-Other drivers retain their post-turn lifecycle.
+
+A visible draft with text or attachments reserves its final directory or
+worktree through `drafts.prepare`. Each connection holds one invisible workspace;
+the reservation expires after ten minutes. No prompt text, turn or conversation
+is published during preparation. `threads.create` adopts a matching reservation
+and can subscribe before answering, allowing the first turn to start while the
+UI hydrates its conversation. Late snapshots preserve newer streamed messages,
+turns and summary updates. Selection changes, abandonment and disconnect release
+the native session and reserved workspace. Older cores use ordinary creation.
+Private ownership intent is journalled before creating a reserved folder or
+worktree. Startup recovery preserves published conversations and retries cleanup
+of abandoned reservations. Active reservations and pending cleanup share limits
+of four per connection and 32 globally; failed cleanup keeps its ownership intent.
+Reserved git operations have a ten-second deadline. Expiry stops the reservation's
+registered process group or Windows job and allows up to three seconds to drain
+inherited pipes before cleanup. A reserved branch is created atomically with an
+ownership reflog entry. Rollback checks that entry and the branch registered at
+the checkout path before overriding its initialization lock; a competing branch,
+checkout and its commits remain untouched.
+Cleanup failures preserve the original creation error and are logged. During
+shutdown, draft and upload cleanup failures do not prevent process or journal
+closure; retained ownership remains available for recovery.
+
+Checkpoint capture and native preparation can run together, but prompt dispatch
+waits for the checkpoint. This transient preparation does not extend post-turn
+retention. Stop or checkpoint failure releases it before a prompt can leave.
+
+Attachments selected in the composer upload through connection-owned leases.
+Completed upload IDs replace only the wire bytes when sending; durable drafts
+retain the original bytes. The core validates ownership, metadata and SHA-256
+before restoring the original attachment for validation and journaling. Leases
+expire after ten minutes, have per-connection and global byte/count budgets, and
+are removed on release, disconnect or shutdown. Expired references retry inline
+with the same input receipt. Upload instances record their owning process before
+writing bodies. Startup removes only instances whose recorded owner is proved
+dead, including reuse of the current PID with a newer start identity. Live owners,
+unavailable identities, other hostnames and unknown legacy directories remain
+untouched: a local process probe cannot establish another host's owner is dead.
+Rejected uploads retain their selected entry, so typing does not retry them.
+Sending uses the original bytes; deselecting and reselecting permits a new upload.
 
 ## Delegation shares the scheduler
 
@@ -284,11 +323,15 @@ hook discovery and reports; [usage](usage.md) owns limits and monitoring.
 
 ## The models probe
 
-`providers.probe` uses a short-lived traced process and the agent's own discovery
-operation. Concurrent reads share an operation; caches belong to a provider and
+`providers.probe` uses the agent's own discovery operation. Codex and ACP can
+read through an explicitly targeted, compatible prepared session; other reads
+use a short-lived traced process. Compatibility includes account, descriptor,
+environment, workspace and context mode. Missing ACP effort metadata uses an
+isolated probe rather than changing a prepared session's selection.
+Concurrent reads share an operation; caches belong to a provider and
 account. Changed descriptors or account state invalidate them, and a stale
-completion cannot replace a newer cache entry. The process is closed on every
-path. Background failures retain display fallbacks; explicit refreshes report
+completion cannot replace a newer cache entry. Disposable processes close on
+every path. Background failures retain display fallbacks; explicit refreshes report
 their reason. See [provider discovery](providers.md#the-models-probe).
 
 ## The UI streams, and stops streaming

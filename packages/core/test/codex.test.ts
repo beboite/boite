@@ -1473,6 +1473,21 @@ describe('codex driver', () => {
     expect(countLines('model/list')).toBe(2);
   });
 
+  test('a refreshed catalog uses the compatible prepared host without a disposable process', async () => {
+    const client = await startCore({ warmProcessMinutes: 0 });
+    const threadId = await codexThread(client);
+    const thread = harness!.core.threads.require(threadId);
+    await client.call('threads.focus', { threadId });
+    await waitFor(() => fakeLog().includes('thread/start'));
+    const result = await client.call('providers.probe', { providerId: thread.providerId, accountId: thread.accountId, refresh: true });
+    expect(result.models.map(model => model.id)).toContain('fake-smart');
+    expect(countLines('initialize')).toBe(1);
+    expect(countLines('model/list')).toBe(1);
+    expect(harness!.core.procs.liveCount(threadId)).toBe(1);
+    expect(harness!.core.procs.liveCount(`probe:${thread.providerId}:${thread.accountId}`)).toBe(0);
+    expect(fakeLog()).not.toContain('turn/start');
+  });
+
   test('a refresh keeps the last catalog for model checks until the agent answers', async () => {
     const client = await startCore();
     const { projectId, accountId } = await codexAccount(client);

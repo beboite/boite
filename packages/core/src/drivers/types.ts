@@ -192,7 +192,7 @@ export interface TurnContext {
 export type SessionContext = Pick<TurnContext,
   'thread' | 'account' | 'provider' | 'sessionId' | 'resumeAt' | 'sessionBefore' |
   'accountEnv' | 'warmProcessMinutes' | 'log' | 'diagnostic' | 'authenticationFailed' | 'commands' | 'context' | 'hook' |
-  'background' | 'backgroundFinished' | 'wake' | 'spawnChild' | 'finishStartup'>;
+  'background' | 'backgroundFinished' | 'wake' | 'spawnChild' | 'finishStartup' | 'killTree' | 'quota'>;
 
 export type DiagnosticLevel = 'debug' | 'info' | 'warn' | 'error';
 /** Scalars only: never a prompt, a tool input or output, a command line or a token. */
@@ -268,6 +268,8 @@ export interface ProbeContext {
   accountEnv: Record<string, string>;
   /** The core's data directory: the probe session belongs to no project. */
   cwd: string;
+  /** Core-selected composing/viewed workspace whose already prepared host may answer discovery. */
+  catalogThread?: ThreadSummary;
   /** Also read this model's own effort scale, for an agent that names it per model. */
   model?: string;
   /** The registry that traces the probe process, under the thread `probe:<providerId>:<accountId>`. */
@@ -338,7 +340,7 @@ export interface Driver {
   /** A separate, tool-free request. No native session or chat transcript is changed. */
   sideQuestion?(ctx: SideQuestionContext): Promise<string>;
   /** Initialize or resume a session without submitting a prompt. Unsupported protocols remain cold. */
-  prepare?(ctx: SessionContext): Promise<void>;
+  prepare?(ctx: SessionContext, options?: { forTurn?: boolean }): Promise<void>;
   /** Keep a viewed session resident; releasing the last viewer starts its idle grace. */
   setViewed?(threadId: ThreadId, viewed: boolean): void;
   /**

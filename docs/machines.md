@@ -22,6 +22,11 @@ The client saves the exchanged session key and discards the grant
 connects remembered machines. A fresh local core without threads yields to a
 remembered core on the same computer that already has them.
 
+Repairing the primary connection saves its accepted device credential or session
+key before reporting the handshake as ready. Draft storage and list loading may
+still be pending; reloading then needs no new pairing code. Connecting another
+machine saves its credentials without replacing the primary startup endpoint.
+
 A machine that is off does not hold the others back. When the machine the
 window opens on has not said hello after two seconds, the other remembered
 machines are connected without it, and the window opens on the first that
