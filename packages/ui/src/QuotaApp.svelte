@@ -26,8 +26,12 @@
     const value = await client.call('settings.get', {});
     if (!disposed && revision === settingsRevision) settings = value;
   }
+  /** A refresh asked while another was out, such as a reconnect to another core; null when none waits. */
+  let queued: boolean | null = null;
   async function refresh(force = false) {
-    if (reader.loading || pendingAccounts || !client || disposed) return;
+    if (!client || disposed) return;
+    if (pendingAccounts) { queued = (queued ?? false) || force; return; }
+    if (reader.loading) return;
     const updates = new Map<string, Account | null>();
     pendingAccounts = updates;
     try {
@@ -38,7 +42,12 @@
           if (account) list.push(account);
         }
         accounts = list;
-      }).finally(() => { if (pendingAccounts === updates) pendingAccounts = null; })]);
+      }).finally(() => {
+        if (pendingAccounts !== updates) return;
+        pendingAccounts = null;
+        // The read that waited goes to the reader selected now, so a new core is not left unread.
+        if (queued !== null) { const again = queued; queued = null; void refresh(again); }
+      })]);
       error = '';
     }
     catch (cause) { error = String(cause); }
