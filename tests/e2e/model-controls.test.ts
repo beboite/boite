@@ -209,7 +209,7 @@ test('favorites survive reload, reasoning has discrete stops, and the context ri
   await page.waitFor(`document.querySelector('[data-testid=favorite-model]')`);
   await page.click('[aria-label="Remove from favorites"]');
   await page.waitFor(`document.querySelector('[data-testid=favorites-empty]')`);
-  expect(await page.evaluate(`JSON.parse(localStorage.getItem('boite.model-favorites.v1')).length`)).toBe(0);
+  expect(await page.evaluate(`JSON.parse(localStorage.getItem('boite.model-favorites.v2')).items.length`)).toBe(0);
 }, 30_000);
 
 test('legacy models open beside the picker and preserve the page position', async () => {
@@ -235,7 +235,7 @@ test('legacy models open beside the picker and preserve the page position', asyn
   expect(await page.evaluate(`!!document.querySelector('[data-testid=picker-legacy-menu]')`)).toBe(false);
 }, 30_000);
 
-test('the accent persists and colours the effort track continuously to the thumb', async () => {
+test('the accent persists and lights the effort ramp up to the chosen level, hotter as it rises', async () => {
   await page.navigate(url);
   await page.waitFor(`document.querySelector('[data-testid=nav-settings]')`);
   await page.click('[data-testid=nav-settings]');
@@ -253,16 +253,25 @@ test('the accent persists and colours the effort track continuously to the thumb
   await page.click('[data-testid=composer-effort]');
   await page.waitFor(`document.querySelector('[data-testid=effort-speed]')`);
   await page.click('[data-value=low]');
-  const low = await page.evaluate(`getComputedStyle(document.querySelector('.progress')).backgroundColor`);
+  const lit = () => page.evaluate<string[]>(`[...document.querySelectorAll('[data-testid=composer-effort-menu] [data-dot].on')].map(bar => bar.dataset.dot)`);
+  expect(await lit()).toEqual(['low']);
+  // Move off the ramp: a hovered bar is only a proposal.
+  await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1, y: 1 });
   await page.click('[data-value=max]');
+  await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1, y: 1 });
+  await page.waitFor(`document.querySelector('[data-testid=composer-effort-menu] [data-value=max]').classList.contains('active')`);
+  await page.settleAnimations();
   await capture('reasoning-accent-max.png');
-  expect(await page.evaluate(`getComputedStyle(document.querySelector('.progress')).backgroundColor`)).not.toBe(low);
-  const bounds = await page.evaluate<any>(`(() => { const p=document.querySelector('.progress').getBoundingClientRect(); const t=document.querySelector('.thumb').getBoundingClientRect(); return {edge:p.right,center:t.left+t.width/2}; })()`);
-  expect(Math.abs(bounds.edge - bounds.center)).toBeLessThan(1);
+  expect(await lit()).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+  // Each lit bar wears more of the accent than the one before it, and every bar rises above the last.
+  const bars = await page.evaluate<{ color: string; height: number }[]>(`[...document.querySelectorAll('[data-testid=composer-effort-menu] [data-dot]')].map(bar => ({ color: getComputedStyle(bar).backgroundColor, height: bar.getBoundingClientRect().height }))`);
+  expect(bars[0]!.color).not.toBe(bars[4]!.color);
+  expect(bars.every((bar, at) => at === 0 || bar.height > bars[at - 1]!.height)).toBe(true);
   expect(await page.evaluate(`document.querySelector('[data-testid=composer-effort-menu] .heading .level').textContent.trim()`)).toBe('Max');
-  // The fast switch is the menu's one icon, at the top left of the slider.
+  // The fast switch is the menu's one icon, labelled, beside the level's name and above the ramp.
   expect(await page.evaluate(`[...document.querySelectorAll('[data-testid=composer-effort-menu] svg')].every(svg => svg.closest('[data-testid=effort-speed]'))`)).toBe(true);
-  expect(await page.evaluate(`(() => { const s=document.querySelector('[data-testid=effort-speed]').getBoundingClientRect(); const t=document.querySelector('[data-testid=effort-track]').getBoundingClientRect(); return s.bottom <= t.top && Math.abs(s.left - t.left) < 8; })()`)).toBe(true);
+  expect(await page.evaluate(`(() => { const s=document.querySelector('[data-testid=effort-speed]').getBoundingClientRect(); const l=document.querySelector('[data-testid=composer-effort-menu] .heading .level').getBoundingClientRect(); const t=document.querySelector('[data-testid=effort-track]').getBoundingClientRect(); return s.bottom <= t.top && s.left > l.right; })()`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('[data-testid=effort-speed] .ui-label').textContent.trim()`)).toBe('Fast');
   expect(await page.evaluate(`!!document.querySelector('[data-testid=composer] .hint')`)).toBe(false);
   const speed = await page.evaluate<any>(`(() => { const r=document.querySelector('[data-testid=effort-speed]').getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2}; })()`);
   await page.send('Input.dispatchMouseEvent', { type:'mouseMoved', ...speed });

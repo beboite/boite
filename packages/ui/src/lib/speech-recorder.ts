@@ -34,6 +34,8 @@ export class SpeechRecorder {
   private context: AudioContext | null = null;
   private node: AudioWorkletNode | null = null;
   private source: MediaStreamAudioSourceNode | null = null;
+  /** What the composer draws its spectrum from, beside the recording path and never on it. */
+  analyser: AnalyserNode | null = null;
   private chunks: Float32Array[] = [];
   private samples = 0;
   private disposed = false;
@@ -76,6 +78,12 @@ export class SpeechRecorder {
       stream.getTracks().forEach(track => { track.onended = ended; });
       this.source = context.createMediaStreamSource(stream);
       this.source.connect(this.node);
+      // A side branch: an analyser with no output is still pulled, as the settings meter's is.
+      const analyser = context.createAnalyser();
+      analyser.fftSize = 512; analyser.smoothingTimeConstant = 0.6;
+      analyser.minDecibels = -88; analyser.maxDecibels = -28;
+      this.source.connect(analyser);
+      this.analyser = analyser;
       this.node.connect(context.destination);
       this.deadline = setTimeout(ended, SPEECH_MAX_SECONDS * 1000);
     } catch (error) { this.dispose(); throw error; }
@@ -135,6 +143,7 @@ export class SpeechRecorder {
     this.stream?.getTracks().forEach(track => { track.onended = null; if (track.readyState !== 'ended') track.stop(); });
     this.node?.disconnect();
     this.source?.disconnect(); this.source = null;
+    this.analyser?.disconnect(); this.analyser = null;
     if (this.node) this.node.port.onmessage = null;
     if (this.context && this.context.state !== 'closed') void this.context.close().catch(() => {});
     this.context = null; this.stream = null; this.node = null; this.chunks = []; this.flush?.(); this.flush = null;

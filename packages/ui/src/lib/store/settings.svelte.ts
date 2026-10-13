@@ -15,7 +15,13 @@ import type { StoreContext } from './context';
 /** What the core keeps for the whole machine: its settings, the scheduler, the keybindings file and telemetry. */
 export class CoreSettings {
   scheduler = $state<SchedulerState | null>(null);
-  settings = $state<Settings | null>(null);
+  #settings = $state<Settings | null>(null);
+  get settings(): Settings | null { return this.#settings; }
+  set settings(value: Settings | null) {
+    this.#settings = value;
+    // Every arrival, whether read, pushed by the core or answered to a save.
+    this.ctx.models.syncFavorites();
+  }
   /** The keybindings file as the core last read it; null until the first `keybindings.get`. */
   keybindings = $state<Keybindings | null>(null);
   /** Every command with its chord: the defaults, the file's entries over them. */

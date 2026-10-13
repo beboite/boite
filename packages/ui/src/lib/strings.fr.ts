@@ -382,7 +382,7 @@ export const fr: Translation = {
     microphoneTestHint: 'Parlez pour vérifier le niveau. Ce test reste sur votre appareil.',
     heading: 'Voix', description: 'Le micro à côté d\'Envoyer, deux minutes au plus à la fois. Le texte attend dans la zone de saisie jusqu\'à l\'envoi.',
     start: 'Dicter', stop: 'Terminer la dictée', listening: 'Écoute', opening: 'Attente du micro', transcribing: 'Transcription',
-    private: 'Sur ce cœur uniquement', cloud: 'Transcrit par votre fournisseur d\'API', retry: 'Relancer la transcription',
+    private: 'Sur ce cœur uniquement', cloud: 'Transcrit par votre fournisseur d\'API', retry: 'Relancer la transcription', discard: 'Supprimer l\'enregistrement',
     live: 'Aperçu en direct', previewFailed: 'Aperçu en direct en pause. Terminez pour transcrire tout l\'enregistrement.',
     local: 'Local', api: 'API', engine: 'Moteur',
     engineHint: 'Local transcrit sur cette machine et l\'audio n\'en sort jamais. API envoie l\'audio à Groq ou OpenRouter avec votre clé.',

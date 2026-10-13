@@ -432,7 +432,9 @@
     .chips :global(.picker > .trigger > .label) { min-width: 0; max-width: none; }
     .chips :global(.picker > .trigger.connect) { padding: 0 12px; border-radius: var(--radius-md); background: var(--color-accent-soft); color: var(--color-accent); }
     .send, .stop { margin-left: 2px; }
-    /* The composer carries `dictating` while a dictation runs. */
-    :global(.dictating) .send { display: none; }
+    /* The dictation's tape takes the row; the model and options come back with the text. */
+    :global(.dictating) .chips, :global(.dictating) .context-control, :global(.dictating) .bar > :global(.options) { display: none; }
   }
+  /* The composer carries `dictating` while a dictation runs: the microphone's round button stands where Send was. */
+  :global(.dictating) .send { display: none; }
 </style>

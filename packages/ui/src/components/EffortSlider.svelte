@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Brain, Zap } from '@lucide/svelte';
+  import { Zap } from '@lucide/svelte';
   import type { EffortLevel } from '@boite/contracts';
   import { Closing } from '../lib/closing.svelte';
   import { floating } from '../lib/floating';
@@ -7,12 +7,13 @@
   import { levelName } from '../lib/format';
 
   /**
-   * The reasoning chip and its popover: one dot per level of the model's scale,
-   * filled up to the active one. A click on a dot or its name, a drag along the
-   * track, or the arrows move it, and none of them close the popover: the level
-   * is a setting of the model the composer already runs. A model with a fast
-   * mode puts its switch at the top left of the popover, and the chip carries
-   * a bolt while it is on.
+   * The reasoning chip and its popover: a ramp of rising bars, one per level of
+   * the model's scale, lit up to the active one, the way a power meter reads.
+   * A click on a bar, a drag along the ramp, or the arrows move it, and none of
+   * them close the popover: the level is a setting of the model the composer
+   * already runs. The chip carries the same ramp in miniature. A model with a
+   * fast mode puts a labelled switch beside the level's name, and the chip
+   * carries a bolt while it is on.
    */
   let {
     levels,
@@ -35,12 +36,16 @@
   let root = $state<HTMLDivElement | undefined>(undefined);
   let trigger = $state<HTMLButtonElement | undefined>(undefined);
   let track = $state<HTMLDivElement | undefined>(undefined);
-  let line = $state<HTMLDivElement | undefined>(undefined);
   let dragging = $state(false);
+  /** The bar under the pointer while it hovers or drags: the heading reads it before it is picked. */
   let preview = $state<number | null>(null);
 
-  let index = $derived(preview ?? Math.max(0, levels.findIndex((level) => level.id === active)));
-  let current = $derived(levels[index] ?? null);
+  let chosen = $derived(Math.max(0, levels.findIndex((level) => level.id === active)));
+  let index = $derived(preview ?? chosen);
+  /** The level the model runs, what the chip names. */
+  let current = $derived(levels[chosen] ?? null);
+  /** The level the popover shows: the hovered or dragged bar, else the chosen one. */
+  let viewed = $derived(levels[index] ?? null);
   const selectedSpeed = $derived(speeds.find(entry => entry.id === speed));
   const label = $derived(current ? levelName(current) : selectedSpeed ? levelName(selectedSpeed) : strings.composer.standardSpeed);
   // An accent above a leading capital raises the label's visible centre.
@@ -48,10 +53,20 @@
   function cycleSpeed() { const next = speeds.findIndex(entry => entry.id === speed) + 1; onspeed(next >= speeds.length ? null : speeds[next]!.id); }
   let last = $derived(Math.max(0, levels.length - 1));
 
-  /** The dots are evenly spaced over the line, so a level sits at a plain percentage. */
-  function offset(at: number): string {
-    return last === 0 ? '50%' : `${(at / last) * 100}%`;
+  /** A bar's height on the ramp, from a third of it to all of it. */
+  function rise(at: number): string {
+    return `${34 + (last === 0 ? 1 : at / last) * 66}%`;
   }
+  /** How strongly a lit bar wears the accent: the higher the level, the hotter. */
+  function heat(at: number): string {
+    return `${45 + (last === 0 ? 1 : at / last) * 55}%`;
+  }
+  /** The chip's ramp: at most six bars, the level scaled onto them. */
+  const mini = $derived.by(() => {
+    const count = Math.min(6, Math.max(levels.length, 3));
+    const lit = levels.length === 0 ? 0 : Math.round(((chosen + 1) / levels.length) * count);
+    return Array.from({ length: count }, (_, at) => ({ x: 1 + at * (12 / count), height: 3 + (at / Math.max(1, count - 1)) * 9, on: at < lit }));
+  });
 
   /** The keyboard lands on the track the moment it is there, so the arrows work at once. */
   $effect(() => {
@@ -70,12 +85,12 @@
     onpick(level.id);
   }
 
-  /** The dot the pointer is nearest, out of the line's own width. */
+  /** The bar under the pointer, out of the ramp's own width: every bar is as wide as the others. */
   function nearest(clientX: number): number {
-    const box = line?.getBoundingClientRect();
+    const box = track?.getBoundingClientRect();
     if (!box || box.width === 0 || last === 0) return index;
     const ratio = (clientX - box.left) / box.width;
-    return Math.round(Math.min(Math.max(ratio, 0), 1) * last);
+    return Math.min(last, Math.max(0, Math.floor(ratio * levels.length)));
   }
 
   function onpointerdown(event: PointerEvent) {
@@ -88,22 +103,27 @@
   }
 
   function onpointermove(event: PointerEvent) {
-    if (!dragging) return;
+    // A mouse previews the bar it hovers; a finger only while it drags.
+    if (!dragging && event.pointerType !== 'mouse') return;
     preview = nearest(event.clientX);
+  }
+
+  function onpointerleave() {
+    if (!dragging) preview = null;
   }
 
   function onpointerup(event: PointerEvent) {
     if (!dragging) return;
     dragging = false;
-    const chosen = preview;
-    preview = null;
-    if (chosen !== null) pick(chosen);
+    const picked = preview;
+    preview = event.pointerType === 'mouse' && event.type === 'pointerup' ? picked : null;
+    if (picked !== null) pick(picked);
     if (track?.hasPointerCapture(event.pointerId)) track.releasePointerCapture(event.pointerId);
   }
 
   function ontrackkeydown(event: KeyboardEvent) {
-    if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') pick(index - 1);
-    else if (event.key === 'ArrowRight' || event.key === 'ArrowUp') pick(index + 1);
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') pick(chosen - 1);
+    else if (event.key === 'ArrowRight' || event.key === 'ArrowUp') pick(chosen + 1);
     else if (event.key === 'Home') pick(0);
     else if (event.key === 'End') pick(last);
     else return;
@@ -146,7 +166,10 @@
     onclick={toggle}
     {onkeydown}
   >
-    <Brain size={14} strokeWidth={1.75} />
+    <!-- The popover's ramp in miniature: how hard the model thinks, at a glance. -->
+    <svg class="meter" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+      {#each mini as bar, at (at)}<rect class:on={bar.on} x={bar.x} y={13 - bar.height} width={Math.max(1.4, 12 / mini.length - 0.9)} height={bar.height} rx="0.8" />{/each}
+    </svg>
     <span class="ui-label" class:accented-cap={accentedCap}>{label}</span>
     <!-- A fast mode switched on stays in sight with the popover closed. -->
     {#if current && selectedSpeed}<span class="fast-mark" data-testid="effort-fast-mark" title={levelName(selectedSpeed)}><Zap size={12} fill="currentColor" /></span>{/if}
@@ -166,41 +189,44 @@
       {onkeydown}
     >
       <div class="heading">
+        <span class="level ui-label" class:previewing={preview !== null && preview !== chosen} class:spectrum={viewed?.id === 'ultrathink'} title={viewed?.description}>{viewed ? levelName(viewed) : strings.composer.standardSpeed}</span>
         {#if speeds.length > 0}
           <button type="button" class="speed" class:active={!!selectedSpeed} data-testid="effort-speed" aria-label={strings.composer.speed} aria-pressed={!!selectedSpeed} title={selectedSpeed?.description ?? (selectedSpeed ? levelName(selectedSpeed) : strings.composer.standardSpeed)} onclick={cycleSpeed}>
-            <Zap size={14} fill={selectedSpeed ? 'currentColor' : 'none'} />
-            {#if selectedSpeed}<span class="ui-label" data-testid="effort-speed-label">{levelName(selectedSpeed)}</span>{/if}
+            <Zap size={13} fill={selectedSpeed ? 'currentColor' : 'none'} />
+            {#if selectedSpeed}<span class="ui-label" data-testid="effort-speed-label">{levelName(selectedSpeed)}</span>{:else}<span class="ui-label">{levelName(speeds[0]!)}</span>{/if}
           </button>
         {/if}
-        <span class="level ui-label">{current ? levelName(current) : strings.composer.standardSpeed}</span>
       </div>
 
       {#if levels.length > 0}
       <div
         class="track"
-        style:--effort-intensity={`${40 + (last === 0 ? 1 : index / last) * 60}%`}
+        class:dragging
         bind:this={track}
         role="slider"
         tabindex="0"
         aria-label={strings.composer.effortTitle}
         aria-valuemin={0}
         aria-valuemax={last}
-        aria-valuenow={index}
-        aria-valuetext={current ? levelName(current) : ''}
+        aria-valuenow={dragging ? index : chosen}
+        aria-valuetext={(dragging ? viewed : current) ? levelName((dragging ? viewed : current)!) : ''}
         data-testid="effort-track"
         onkeydown={ontrackkeydown}
         {onpointerdown}
         {onpointermove}
         {onpointerup}
+        {onpointerleave}
         onpointercancel={onpointerup}
       >
-        <div class="line" bind:this={line}>
-          <span class="progress" style="width: calc({offset(index)} + 12px)"></span>
-          <span class="thumb" style="left: {offset(index)}"></span>
-          {#each levels as level, at (level.id)}
-            <button type="button" class="dot" class:on={at <= index} data-dot={level.id} data-value={level.id} title={levelName(level)} aria-label={levelName(level)} tabindex="-1" style="left: {offset(at)}" onclick={() => pick(at)}></button>
-          {/each}
-        </div>
+        {#each levels as level, at (level.id)}
+          {@const lit = dragging ? index : chosen}
+          {@const hovering = !dragging && preview !== null && preview !== chosen}
+          <button type="button" class="dot" class:on={at <= lit} class:active={at === lit} class:spectrum={level.id === 'ultrathink'}
+            class:ghost={hovering && at > chosen && at <= preview!} class:fading={hovering && at > preview! && at <= chosen} class:aim={hovering && at === preview}
+            data-dot={level.id} data-value={level.id} title={levelName(level)} aria-label={levelName(level)} tabindex="-1"
+            style:--rise={rise(at)} style:--heat={heat(at)} style:--order={at}
+            onclick={() => pick(at)}></button>
+        {/each}
       </div>
       {/if}
 
@@ -215,25 +241,35 @@
   .trigger .accented-cap { translate: 0 0.1em; }
 }
 .trigger:hover, .trigger[aria-expanded='true'] { background: var(--control-glaze) var(--color-control-hover); color: var(--color-foreground); }
+.meter { flex: none; }
+.meter rect { fill: currentColor; opacity: .28; transition: opacity var(--dur-2), fill var(--dur-2); }
+.meter rect.on { fill: var(--color-accent); opacity: 1; }
 .fast-mark { display: inline-flex; margin-left: -2px; color: var(--color-accent); }
-.popover { position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 40; width: 280px; padding: 10px 12px 12px; background: var(--color-surface-3); border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-e2); animation: pop var(--dur-2) var(--ease-out-quint); transform-origin: bottom left; }
+.popover { position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 40; width: 264px; padding: 12px 14px 14px; background: var(--color-surface-3); border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-e2); animation: pop var(--dur-2) var(--ease-out-quint); transform-origin: bottom left; }
 .popover.closing { animation-name: pop-out; pointer-events: none; }
-/* Three columns: the fast switch on the left, the level in the middle whatever the switch's width. */
-.heading { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; min-height: 24px; margin-bottom: 8px; color: var(--color-foreground); font-size: var(--text-sm); font-weight: 600; }
-.level { grid-column: 2; white-space: nowrap; }
-.speed { grid-column: 1; justify-self: start; display: inline-flex; align-items: center; gap: 5px; height: 24px; margin-left: -4px; padding: 0 6px; border: none; border-radius: var(--radius-md); background: transparent; font-size: var(--text-xs); font-weight: 500; color: var(--color-muted-foreground); transition: color var(--dur-2), background var(--dur-2), box-shadow var(--dur-2); }
+.heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 26px; margin-bottom: 10px; color: var(--color-foreground); font-size: var(--text-sm); font-weight: 600; }
+.level { white-space: nowrap; transition: color var(--dur-2); }
+.level.previewing { color: var(--color-muted-foreground); }
+.level.spectrum { background: var(--accent-spectrum); -webkit-background-clip: text; background-clip: text; color: transparent; }
+/* A labelled switch: off, an outline that says what it would do; on, the accent. */
+.speed { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 9px 0 7px; border: 1px solid var(--color-edge); border-radius: var(--radius-full); background: transparent; font-size: var(--text-xs); font-weight: 500; color: var(--color-muted-foreground); transition: color var(--dur-2), background var(--dur-2), border-color var(--dur-2), box-shadow var(--dur-2); }
 .speed :global(svg) { transition: transform var(--dur-2) var(--ease-out-quint); }
-.speed:hover { color: var(--color-accent); background: var(--color-accent-soft); box-shadow: 0 0 12px var(--color-accent-soft); }
+.speed:hover { color: var(--color-accent); border-color: color-mix(in oklch, var(--color-accent) 40%, transparent); }
 .speed:hover :global(svg) { transform: rotate(-12deg) scale(1.16); }
-.speed.active { color: var(--color-accent); background: var(--color-accent-soft); }
+.speed.active { color: var(--color-accent); border-color: transparent; background: var(--color-accent-soft); box-shadow: 0 0 14px var(--color-accent-soft); }
 .speed:active :global(svg) { transform: scale(.9); }
-.track { padding: 3px 12px; cursor: pointer; touch-action: none; height: 30px; background: var(--color-edge); border-radius: 999px; }
-.track:focus-visible { outline: 1px solid var(--color-reasoning); outline-offset: 3px; }
-.line { position: relative; height: 24px; }
-.progress { position: absolute; inset: 0 auto 0 -12px; border-radius: 999px 0 0 999px; background: color-mix(in oklch, var(--color-accent) var(--effort-intensity), var(--color-surface-3)); transition: background var(--dur-2); }
-.dot { position: absolute; top: 50%; width: 16px; height: 24px; padding: 0; border: none; background: transparent; transform: translate(-50%, -50%); }
-.dot::after { content: ""; display: block; width: 4px; height: 4px; margin: auto; border-radius: 50%; background: var(--color-muted-foreground); }
-.dot.on::after { background: var(--color-reasoning-on); opacity: .45; }
-.thumb { position: absolute; top: 50%; width: 28px; height: 28px; transform: translate(-50%, -50%); border-radius: 50%; background: var(--color-reasoning-on); box-shadow: var(--shadow-e1); z-index: 1; }
+.track { display: flex; align-items: flex-end; gap: 5px; height: 46px; padding: 0 1px; cursor: pointer; touch-action: none; border-radius: var(--radius-md); }
+.track:focus-visible { outline: 1px solid var(--color-reasoning); outline-offset: 4px; }
+.dot { flex: 1; height: var(--rise); min-width: 0; padding: 0; border: none; border-radius: 5px; background: var(--color-edge); transition: background var(--dur-2) var(--ease-out-quint), box-shadow var(--dur-3) var(--ease-out-quint), transform var(--dur-3) var(--ease-out-quint), opacity var(--dur-2); transition-delay: calc(var(--order) * 14ms); transform-origin: bottom; }
+.track .dot:hover { background: color-mix(in oklch, var(--color-accent) 22%, var(--color-edge)); }
+.track .dot.on { background: color-mix(in oklch, var(--color-accent) var(--heat), var(--color-surface-3)); }
+.track .dot.on.spectrum { background: var(--accent-spectrum); }
+.track .dot.active { box-shadow: 0 0 16px color-mix(in oklch, var(--color-accent) 45%, transparent), inset 0 1px 0 rgb(255 255 255 / .28); transform: scaleY(1.04); }
+/* A hovered bar is a proposal: what it would add is tinted, what it would drop dims, and the chosen level stays lit. */
+.track .dot.ghost { background: color-mix(in oklch, var(--color-accent) 24%, var(--color-edge)); }
+.dot.fading { opacity: .45; }
+.dot.aim { box-shadow: inset 0 0 0 1.5px color-mix(in oklch, var(--color-accent) 70%, transparent); }
+.dragging .dot, .track:hover .dot { transition-delay: 0ms; }
 @media (max-width: 720px) { .popover { position: fixed; left: 18px; right: 18px; bottom: 126px; width: auto; } }
+@media (prefers-reduced-motion: reduce) { .dot { transition-delay: 0ms; } }
 </style>

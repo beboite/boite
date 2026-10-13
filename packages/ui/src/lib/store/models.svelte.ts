@@ -1,6 +1,7 @@
-import type { ModelInfo, ProviderId, ProviderSummary } from '@boite/contracts';
+import type { ModelFavorites, ModelInfo, ProviderId, ProviderSummary } from '@boite/contracts';
 import { BUILT_IN_MODELS, DEFAULT_MODEL_NAMES, INITIAL_MODEL_DEFAULTS, writeModelDefaults, resolveModelDefault, fallbackModelDefault, type ModelDefaults } from '../model-defaults';
-import { FAVORITES_KEY, isNamedModel, readFavorites, type FavoriteModel } from '../model-order';
+import { isNamedModel } from '../model-order';
+import { modelFavorites, resolveFavorites, type FavoritesTarget, type ResolvedFavorite } from '../model-favorites.svelte';
 import { defaultPrefs, writePrefs, type ComposerPrefs } from '../prefs';
 import { strings } from '../strings';
 import { work, type Profile } from '../work-prefs.svelte';
@@ -22,7 +23,8 @@ export class Models {
   prefs = $state<ComposerPrefs>(defaultPrefs());
   modelDefaults = $state<ModelDefaults>({});
   draftChoice = $state<Choice | null>(null);
-  favorites = $state<FavoriteModel[]>(readFavorites());
+  /** The shared favorites as this machine offers them (`lib/model-favorites.svelte.ts`). */
+  favorites = $derived.by((): ResolvedFavorite[] => resolveFavorites(modelFavorites.current.items, this.ctx.store));
   /**
    * What an agent answered `providers.probe` with, keyed `providerId::accountId`.
    * An ACP agent owns its model list; the descriptor only carries `default`.
@@ -48,11 +50,39 @@ export class Models {
 
   constructor(private readonly ctx: StoreContext) {}
 
+  /**
+   * Stars or unstars a model of this machine's account, for every machine. The
+   * star names the account by label; unstarring removes every shared favorite
+   * this row stands for. A paired device reads the favorites and never writes them.
+   */
   toggleFavorite(providerId: string, accountId: string, model: ModelInfo): void {
-    const matches = (f: FavoriteModel) => f.providerId === providerId && f.accountId === accountId && f.model.id === model.id;
-    this.favorites = this.favorites.some(matches) ? this.favorites.filter((f) => !matches(f))
-      : [...this.favorites, { providerId, accountId, model }];
-    try { localStorage.setItem(FAVORITES_KEY, JSON.stringify(this.favorites)); } catch { /* session only */ }
+    if (!this.ctx.store.owner) return;
+    const shown = this.favorites.find((f) => f.providerId === providerId && f.accountId === accountId && f.model.id === model.id);
+    if (shown) { modelFavorites.toggle(null, shown.items); return; }
+    const label = this.ctx.store.accountOf(accountId)?.label;
+    modelFavorites.toggle({ providerId, model: { id: model.id, name: model.name }, ...(label ? { account: label } : {}) });
+  }
+
+  /** This machine as the shared favorites reach it; registered while a client is attached. */
+  readonly favoritesTarget: FavoritesTarget = {
+    settings: () => this.ctx.store.settings,
+    writable: () => this.ctx.store.principal === 'owner' && this.ctx.client?.state === 'ready',
+    write: async (favorites: ModelFavorites) => {
+      const client = this.ctx.client;
+      if (!client) return;
+      const settings = await client.call('settings.set', { modelFavorites: favorites });
+      if (client === this.ctx.client) this.ctx.store.settings = settings;
+    },
+    accountsReady: () => this.ctx.store.accounts.length > 0,
+    accountLabel: (accountId, providerId) => {
+      const account = this.ctx.store.accountOf(accountId);
+      return account?.providerId === providerId ? account.label : null;
+    },
+  };
+
+  /** This machine's settings or accounts changed: the shared favorites compare with its copy. */
+  syncFavorites(): void {
+    modelFavorites.sync(this.favoritesTarget);
   }
 
   #modelCacheKey(): string { return 'boite.models.v1:' + JSON.stringify([this.ctx.store.endpointUrl, this.ctx.store.core?.dataDir]); }
