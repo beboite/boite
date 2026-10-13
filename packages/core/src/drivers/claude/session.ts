@@ -737,8 +737,8 @@ export class ClaudeSession {
       env: mode === null ? childEnv(ctx.accountEnv) : {
         ...childEnv(ctx.accountEnv),
         [CONTEXT_ENV]: mode.label,
-        ...(mode.guides ? {} : { [CONTEXT_GUIDES_ENV]: '0' }),
-        ...(mode.instructions ? {} : { CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1' }),
+        [CONTEXT_GUIDES_ENV]: mode.guides ? undefined : '0',
+        CLAUDE_CODE_DISABLE_CLAUDE_MDS: mode.instructions ? undefined : '1',
       },
       canUseTool: this.gate.canUseTool,
       hooks: {
