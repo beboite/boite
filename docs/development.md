@@ -88,6 +88,10 @@ Pages importing `/src/...` call `startDevUi` directly. That server warms their
 reachable modules before browser interactions. Fixture bundles enable the fake
 client separately from the production assets staged in installers.
 
+For native mouse selection, move to the text and await `document.hasFocus()`
+before pressing. A headless page can already have an active element while its
+window is unfocused; the first mouse move activates it asynchronously.
+
 Pairing, token and remote-core query parameters are removed from the address
 bar. The grant is exchanged once; only an authenticated endpoint and the
 resulting client credential are retained. See [machines](machines.md) and

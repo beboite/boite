@@ -26,6 +26,8 @@ async function drag(page: BrowserPage, selector: string) {
     const r = e.matches('p') ? range.getClientRects()[0] : e.getBoundingClientRect(); return { x: r.left + 5, y: r.top + r.height / 2, width: r.width - 10 };
   })()`);
   await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: box.x, y: box.y });
+  // The first native move activates the headless page asynchronously.
+  await page.waitFor('document.hasFocus()');
   await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: box.x, y: box.y, button: 'left', buttons: 1, clickCount: 1 });
   for (let step = 1; step <= 5; step++) {
     await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: box.x + Math.min(100, box.width) * step / 5, y: box.y, button: 'left', buttons: 1 });
