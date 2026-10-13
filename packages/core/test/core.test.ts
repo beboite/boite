@@ -32,8 +32,9 @@ test('shutdown still stops owned children and closes the journal when both start
     expect(drafts).toHaveBeenCalledTimes(1);
     expect(uploads).toHaveBeenCalledTimes(1);
     expect(core.journal.isClosed()).toBe(true);
-    expect(core.procs.liveCount('shutdown-cleanup-fixture')).toBe(0);
-    await child.exited;
+    expect(await child.exited).not.toBe(0);
+    // Shutdown closes native exit tracing; inspect the captured child itself.
+    expect(processPlatform.runningSince(child.record.pid)).toBeNull();
     const warnings = log.mock.calls.filter(([level]) => level === 'warn').map(([, message]) => message);
     expect(warnings).toContain('draft shutdown cleanup failed: Error: draft cleanup fixture');
     expect(warnings).toContain('attachment shutdown cleanup failed: Error: upload cleanup fixture');
