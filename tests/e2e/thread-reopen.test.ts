@@ -179,7 +179,13 @@ for (const phone of [true, false]) {
       // out of the reading cache, which a light thread now fits; the place read is kept for 32.
       expect(await page.evaluate<boolean | string>(reveal(FAR, { top: true }), 120_000)).toBe(true);
       await page.waitFor(inView(FAR));
-      await page.evaluate(`(async () => { for (const id of ${JSON.stringify(others)}) await ${STORE}.open(id); })()`, 60_000);
+      // The page finds them in its own list: no id from outside is written into the expression.
+      const visited = await page.evaluate<number>(`(async () => {
+        const visits = ${STORE}.threads.filter((thread) => thread.title.startsWith('Visit ')).map((thread) => thread.id);
+        for (const id of visits) await ${STORE}.open(id);
+        return visits.length;
+      })()`, 60_000);
+      expect(visited).toBe(others.length);
       await open(short);
       await open(long);
 
