@@ -177,8 +177,11 @@
   .block { display: flex; flex-direction: column; gap: 10px; }
   .block + .block { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--color-border); }
   .fields { display: flex; flex-direction: column; gap: 10px; padding-top: 10px; }
-  label { display: flex; flex-direction: column; gap: 6px; }
+  /* A field's label sits over its input. The LAN switch's row is the shared
+     `.switch-row` (app.css): a column there turned the switch's 40 px flex
+     basis into its height and drew it as a 40 px circle. */
+  label:not(.switch-row) { display: flex; flex-direction: column; gap: 6px; }
   label > span { margin: 0; }
-  input { width: 100%; }
+  input:not([role='switch']) { width: 100%; }
   [role='alert'] { color: var(--color-danger); }
 </style>
