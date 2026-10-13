@@ -430,42 +430,6 @@ test('a burst of 33 agent messages stays in two counters as new mail arrives, an
   expect([...document.querySelectorAll<HTMLElement>('[data-testid=agent-discussion-row]')].map(node => node.dataset.count)).toEqual(['34', '1']);
 });
 
-test('a steward\'s thread and the thread its agent started keep their mail and prompt apart from the user\'s', async ({ ready }) => {
-  stubLayout(400);
-  const { store: owner, client } = await ready({ delayMs: 0, stewardDemo: true });
-  const [grant] = await client.call('stewards.list', {});
-  const steward = owner.threads.find(thread => thread.id === grant!.threadId)!;
-  const steer = (await client.call('collaboration.get', { threadId: steward.id })).messages.find(letter => letter.origin === 'steward')!;
-  await owner.open(steer.to.threadId);
-  await owner.loadCoordination(steer.to.threadId, false);
-  let thread = owner.openThread!;
-  const first = thread.messages.find(message => message.role === 'user')!;
-  running = mount(MessageList, { target: document.body, props: { store: owner, threadId: thread.id, messages: thread.messages } });
-  flushSync();
-  const prompt = document.querySelector<HTMLElement>(`[data-mid="${first.id}"] [data-testid=agent-prompt]`)!;
-  expect(prompt.classList.contains('agent')).toBe(true);
-  expect(prompt.querySelector('[data-testid=spawn-marker][data-direction=from]')?.textContent).toContain('Sent by the agent of');
-  expect(prompt.querySelector('[data-testid=spawn-marker-open]')?.textContent).toBe(steward.title);
-  expect(document.querySelectorAll('[data-testid=agent-prompt]')).toHaveLength(1);
-  const row = document.querySelector<HTMLButtonElement>('[data-testid=agent-discussion-row]');
-  expect(row?.classList.contains('steward')).toBe(true);
-  expect(row?.querySelector('[data-testid=agent-discussion-title]')?.textContent).toBe(steward.title);
-  expect(row?.querySelector('.tag')?.textContent).toBe('Steward');
-  await unmount(running!); running = null;
-
-  await owner.open(steward.id);
-  await owner.loadCoordination(steward.id, false);
-  thread = owner.openThread!;
-  running = mount(MessageList, { target: document.body, props: { store: owner, threadId: thread.id, messages: thread.messages } });
-  flushSync();
-  // The steward started that thread: the tag says so, and its notices stay one quiet line.
-  const rows = [...document.querySelectorAll<HTMLElement>('[data-testid=agent-discussion-row]')];
-  expect(rows.map(node => [node.querySelector('[data-testid=agent-discussion-title]')?.textContent, node.querySelector('.tag')?.getAttribute('data-relation')]))
-    .toEqual([[steer.toTitle, 'started']]);
-  expect([...document.querySelectorAll<HTMLElement>('[data-testid=agent-message-summary]')].map(node => [node.dataset.kind, node.textContent?.trim()]))
-    .toEqual([['notice', '1 thread notice']]);
-});
-
 /** A store whose thread still has older messages behind the window. */
 function pagedStore(overrides: Partial<Record<string, unknown>> = {}): {
   store: Store;

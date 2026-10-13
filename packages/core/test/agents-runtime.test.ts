@@ -1,6 +1,6 @@
 import { expect, spyOn, test } from 'bun:test';
 import type { AgentProfile } from '@boite/contracts';
-import { startTestCore, waitFor } from './harness.ts';
+import { quietAgent as quiet, startTestCore, waitFor } from './harness.ts';
 import { connect } from '../src/client.ts';
 
 test('declared shared write resources serialize agents until the holder stops', async () => {
@@ -58,6 +58,8 @@ test('autonomous groups take bounded turns and paused groups retain their delive
     const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
     const agents = [];
     for (const name of ['Researcher', 'Reviewer']) agents.push(await client.call('agents.profile.save', { value: { name, domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' }, status: 'active', tools: ['messages'], accountIntegration: 'provider' } }));
+    // The subagent guide would fill the echo driver's 2,000-token window and add compactions to the count.
+    for (const agent of agents) await quiet(client, agent);
     const group = await client.call('agents.group.save', { value: { name: 'Ideas', memberIds: agents.map(a => a.id), mode: 'autonomous', maxTurns: 3, maxTurnsPerAgent: 2, paused: true } });
     await client.call('agents.message.send', { scope: { kind: 'group', id: group.id }, recipientIds: [agents[0]!.id], text: 'Discuss the design', requestId: 'bounded_001' });
     expect(h.core.workforce.records.list('work')).toHaveLength(1);

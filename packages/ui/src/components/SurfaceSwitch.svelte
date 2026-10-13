@@ -34,10 +34,6 @@
     // A reconnection is a new client: each directory follows its own.
     for (const owner of stores) { void owner.client; untrack(() => agentDirectory(owner).refresh()); }
   });
-  $effect(() => {
-    if (!on) return;
-    for (const owner of stores) if (owner.connection === 'ready' && owner.stewards === null) untrack(() => void owner.loadStewards());
-  });
 </script>
 
 {#snippet badge(work: WorkCount, testid: string)}

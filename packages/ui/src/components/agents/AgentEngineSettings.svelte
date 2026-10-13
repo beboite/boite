@@ -4,6 +4,7 @@
   import { confirm } from '../../lib/confirm.svelte';
   import { strings } from '../../lib/strings';
   import AgentAccountAccess from './AgentAccountAccess.svelte';
+  import AgentBrainRoot from './AgentBrainRoot.svelte';
 
   let { view }: { view: AgentsView } = $props();
   const labels = $derived(strings.agents);
@@ -34,6 +35,8 @@
 </section>
 
 <AgentAccountAccess {view} />
+
+<AgentBrainRoot {view} />
 
 <section class="card">
   <h2>{labels.dangerZone}</h2>
