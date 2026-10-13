@@ -497,6 +497,11 @@ bun run apps/shell/scripts/stage-sidecar.ts
 bun run e2e
 ```
 
+On Linux, `test:shell` and the shell builds need the WebKitGTK headers first;
+without them `glib-sys` stops at `pkg-config` and no test runs. CI installs the
+same list in `.github/workflows/desktop.yml`:
+`sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf`.
+
 Use Tauri to build the executable, including a no-bundle development build:
 `bun run --cwd apps/shell tauri build --no-bundle`. A plain Cargo build is useful
 for compile errors but does not establish the shell's packaged UI/IPC behavior.
