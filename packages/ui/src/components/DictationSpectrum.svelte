@@ -58,7 +58,6 @@
     frame = 0;
     const context = canvas?.getContext('2d');
     if (!canvas || !context) return;
-    if (canvas.clientWidth !== size.width || canvas.clientHeight !== size.height) measure();
     const { width, height, ratio } = size;
     const count = Math.max(5, Math.floor((width + GAP) / (BAR + GAP)));
     const half = Math.ceil(count / 2);
@@ -85,12 +84,20 @@
       else context.fillRect(x, y, BAR, tall);
     }
     context.globalAlpha = 1;
-    if (drawn !== 'still' || heights.some(value => value > 0.01)) frame = requestAnimationFrame(draw);
+    // Live bars and the busy wave move on their own; anything else only settles, then the loop stops.
+    if (drawn === 'live' || (drawn === 'busy' && motion) || heights.some(value => value > 0.01)) frame = requestAnimationFrame(draw);
   }
 
   function schedule(): void { if (!frame && !gone) frame = requestAnimationFrame(draw); }
 
-  onMount(() => { measure(); schedule(); });
+  // The size is read when it changes, never in a frame: a read there would force a layout on every one.
+  onMount(() => {
+    measure(); schedule();
+    if (typeof ResizeObserver !== 'function' || !canvas) return;
+    const observer = new ResizeObserver(() => { measure(); schedule(); });
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  });
   // A new mode or analyser repaints in its colour; `still` lets the bars settle, then stops.
   $effect(() => {
     source = analyser; drawn = mode;
