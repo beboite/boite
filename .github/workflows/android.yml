@@ -1,11 +1,10 @@
 name: android
 
 # The Android app: a Trusted Web Activity in apps/android that opens one
-# host, given as the `host` input. ci builds it unsigned to prove it compiles.
-# The nightly publishes none: one APK for one host sent every phone to the same
-# core. Run by hand with release on, it signs one for the host given, or takes
-# the previous release's back when nothing that goes into it changed
-# (scripts/ci/android-apk.ts). docs/android.md.
+# host: the phone app's own address (APP_ORIGIN in the contracts), or the
+# `host` input. ci builds it unsigned to prove it compiles; the nightly signs
+# it, or takes the previous release's back when nothing that goes into it
+# changed (scripts/ci/android-apk.ts). docs/android.md.
 
 on:
   workflow_call:
@@ -18,7 +17,7 @@ on:
         type: string
         default: ''
       host:
-        description: The bare hostname the app opens; required to sign one.
+        description: The bare hostname the app opens; empty opens the phone app's own address.
         type: string
         default: ''
     secrets:
@@ -34,7 +33,7 @@ on:
         type: boolean
         default: false
       host:
-        description: The bare hostname the app opens; required to sign one.
+        description: The bare hostname the app opens; empty opens the phone app's own address.
         type: string
         default: ''
 
@@ -60,17 +59,13 @@ jobs:
       - name: Choose the host and version
         id: meta
         env:
-          RELEASE: ${{ inputs.release }}
           ANDROID_HOST: ${{ inputs.host }}
           INPUT_VERSION: ${{ inputs.version }}
         run: |
           host="$ANDROID_HOST"
           if [[ -z "$host" ]]; then
-            if [[ "$RELEASE" == 'true' ]]; then
-              echo '::error::the host input is empty: a signed APK has to name the host it opens' >&2
-              exit 1
-            fi
-            host=boite.example.com
+            # The address no machine serves, which every core trusts.
+            host=$(bun -e "import { APP_ORIGIN } from './packages/contracts/src/index.ts'; console.log(new URL(APP_ORIGIN).hostname)")
           fi
           version="${INPUT_VERSION:-$(jq -r .version package.json)}"
           {
