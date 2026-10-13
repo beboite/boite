@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 import type { HarnessUpdate, ProviderId } from '@boite/contracts';
-import { offerKeys, planOf, type AppReading, type MachineReading } from './update-everything.svelte';
+import { DONE_LINGER_MS, offerKeys, planOf, reconcileRows, type AppReading, type MachineReading, type UpdateRow } from './update-everything.svelte';
 
 function agent(providerId: string, overrides: Partial<HarnessUpdate> = {}): HarnessUpdate {
   return { providerId: providerId as ProviderId, name: providerId, route: 'self', current: '1.0.0', latest: '1.1.0', pending: true,
@@ -64,4 +64,33 @@ test("the app's own release is offered even when this computer's core is not amo
     ['app', 'This PC', ['app']],
     ['m2', 'm2', ['boite']]
   ]);
+});
+
+test('the card empties one row at a time: a part that lands shows its check, then goes', () => {
+  const reachable = () => true;
+  const running = planOf([machine('m2', { agents: [agent('claude', { state: 'updating', pending: false }), agent('codex', { state: 'updating', pending: false })] })], null);
+  let rows: UpdateRow[] = reconcileRows([], running, reachable, 0);
+  expect(rows.map((row) => [row.part.id, row.doneAt])).toEqual([['boite', null], ['claude', null], ['codex', null]]);
+
+  // Claude lands first: its row stays with a check, the others go on.
+  const claudeDone = planOf([machine('m2', { agents: [agent('codex', { state: 'updating', pending: false })] })], null);
+  rows = reconcileRows(rows, claudeDone, reachable, 1000);
+  expect(rows.map((row) => [row.part.id, row.doneAt])).toEqual([['boite', null], ['claude', 1000], ['codex', null]]);
+  // Past the linger it goes, in place.
+  rows = reconcileRows(rows, claudeDone, reachable, 1000 + DONE_LINGER_MS);
+  expect(rows.map((row) => row.part.id)).toEqual(['boite', 'codex']);
+});
+
+test('Boite restarting on a machine out of reach is not done, and an offer put off goes without a check', () => {
+  const installing = planOf([machine('m2', { server: { mode: 'systemd', phase: 'installing', currentVersion: '2.0.0', version: '2.1.0', received: 0, total: null, error: null } })], null);
+  let rows = reconcileRows([], installing, () => true, 0);
+  // The core restarts: the machine drops, its row keeps saying Restarting.
+  rows = reconcileRows(rows, [], () => false, 500);
+  expect(rows.map((row) => [row.part.id, row.part.state, row.doneAt])).toEqual([['boite', 'installing', null]]);
+  // Back, on the new version: now it is done.
+  rows = reconcileRows(rows, [], () => true, 900);
+  expect(rows.map((row) => [row.part.id, row.doneAt])).toEqual([['boite', 900]]);
+
+  const offered = reconcileRows([], planOf([machine('m2')], null), () => true, 0);
+  expect(reconcileRows(offered, [], () => true, 100)).toEqual([]);
 });

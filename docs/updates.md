@@ -28,9 +28,9 @@ On a wide window the card opens by itself once per release, as soon as a
 check finds it, and never during the tour. It takes no focus. It has two
 buttons:
 
-- Update the app installs this desktop app's release alone, once this
-  computer's agent updates already under way are done. It shows only when the
-  app has a release.
+- Update the app downloads this desktop app's release alone. It shows only
+  when the app has a release; once that release is downloaded it becomes
+  Restart.
 - Update all (Update when there is one thing) starts everything at once. With
   only the app to update, Update the app is the one button.
 
@@ -56,14 +56,21 @@ and no machine waits for another:
    work under way, its pause and its registry reads included: the restart
    cannot replace the core under a half-written agent install.
 
-This computer's app downloads at the same moment and installs last, once the
-agents of its own core are done, because its restart stops that core. The
-click is the confirmation; the card says the app restarts last. Each part
-shows its own progress in the card: download percentage, the threads an
-agent waits for, Waits for work to finish, Restarting, or Failed with the
-reason on hover. A failed part stays in the card and the button tries it
-again. A core released before this request receives the same updates one call
-each, without that ordering.
+This computer's app downloads at the same moment and never restarts by
+itself. Once its release is verified, the card offers Restart, disabled while
+an agent of this computer's core still updates, because the restart stops
+that core. Remote machines go on without it.
+
+Each part shows its own progress in the card: download percentage, the
+threads an agent waits for, Waits for work to finish, Restarting, or Failed
+with the reason on hover. A part that lands keeps its row with a check and Up
+to date for about a second, then the row slides away, so the list empties
+one row at a time. A machine whose core is restarting keeps its row on
+Restarting until it answers again. A failed part stays in the card and the
+button tries it again. The card ends on Everything is up to date, which
+puts itself away after a few seconds, or on "Boite is ready: restart it to
+finish." with Restart. A core released before this request receives the same
+updates one call each, without that ordering.
 
 ## Boite and Boite Nightly
 

@@ -119,6 +119,59 @@ export function offerKeys(plan: readonly PlannedMachine[]): string[] {
   return plan.flatMap((machine) => machine.parts.filter((part) => part.startable).map((part) => `${machine.id}/${part.id}@${part.version}`));
 }
 
+/** One row of the card: a part as last seen, and when it finished if it did. */
+export interface UpdateRow {
+  key: string;
+  machineId: string;
+  label: string;
+  local: boolean;
+  part: PlannedPart;
+  /** When the part left the plan after being under way; it shows its check until `DONE_LINGER_MS` later. */
+  doneAt: number | null;
+}
+
+/** How long a finished row keeps its check before it goes. */
+export const DONE_LINGER_MS = 1400;
+
+const UNDER_WAY: readonly PartState[] = ['downloading', 'waiting', 'installing', 'updating'];
+
+/**
+ * The card's rows from the previous ones and the current plan, so the list
+ * empties one row at a time instead of all at once. A part that was under way
+ * and left the plan is done: it keeps its row with a check for a moment, then
+ * goes. A machine out of reach keeps its rows as they were, since Boite
+ * restarting there, or a link that drops, is not an update done. A part that
+ * was only offered and left (put off, skipped elsewhere) goes without a check.
+ */
+export function reconcileRows(previous: readonly UpdateRow[], plan: readonly PlannedMachine[], reachable: (machineId: string) => boolean, now: number): UpdateRow[] {
+  const fresh = new Map<string, UpdateRow>();
+  for (const machine of plan) {
+    for (const part of machine.parts) {
+      const key = `${machine.id}/${part.id}`;
+      fresh.set(key, { key, machineId: machine.id, label: machine.label, local: machine.local, part, doneAt: null });
+    }
+  }
+  const rows: UpdateRow[] = [];
+  for (const row of previous) {
+    const next = fresh.get(row.key);
+    if (next) {
+      rows.push(next);
+      fresh.delete(row.key);
+    } else if (row.doneAt !== null) {
+      if (now - row.doneAt < DONE_LINGER_MS) rows.push(row);
+    } else if (UNDER_WAY.includes(row.part.state)) {
+      rows.push(reachable(row.machineId) ? { ...row, doneAt: now } : row);
+    }
+  }
+  // A new row joins the rows of its machine, or comes last in the plan's order.
+  for (const row of fresh.values()) {
+    const last = rows.findLastIndex((entry) => entry.machineId === row.machineId);
+    if (last === -1) rows.push(row);
+    else rows.splice(last + 1, 0, row);
+  }
+  return rows;
+}
+
 const DISMISSED_KEY = 'boite.updates-later';
 /** Old entries go: a list that only grows would be read on every start. */
 const DISMISSED_CAP = 200;
@@ -130,17 +183,9 @@ function readDismissed(): string[] {
   } catch { return []; }
 }
 
-/** Resolves once `ready` reads true, rechecking each time what it read changes. */
-function until(ready: () => boolean): Promise<void> {
-  return new Promise((resolve) => {
-    const stop = $effect.root(() => {
-      $effect(() => {
-        if (!ready()) return;
-        resolve();
-        queueMicrotask(() => stop());
-      });
-    });
-  });
+/** The computer the desktop app runs on. A core with no address runs in this window, the development harness's: it stands for this computer. */
+function isLocal(machine: Machine): boolean {
+  return machine.store.localCore || (machine.store.endpointUrl == null && machine.id === 'local');
 }
 
 function readingOf(machine: Machine): MachineReading {
@@ -148,8 +193,7 @@ function readingOf(machine: Machine): MachineReading {
   return {
     id: machine.id,
     label: machine.label,
-    // A core with no address runs in this window, the development harness's: it stands for this computer.
-    local: store.localCore || (store.endpointUrl == null && machine.id === 'local'),
+    local: isLocal(machine),
     ready: store.connection === 'ready' && store.owner,
     server: store.localCore ? null : store.serverUpdater.snapshot,
     agents: store.owner ? store.harnessUpdates : []
@@ -207,10 +251,21 @@ export class UpdateEverything {
     return this.plan.some((machine) => machine.local && machine.parts.some((part) => part.id === 'app' && part.startable));
   }
 
+  /** True while an agent update runs on this computer's core: restarting the app now would cut it off. */
+  get localBusy(): boolean {
+    return workspace.machines.some((machine) => isLocal(machine) && machine.store.harnessUpdates.some((update) => update.state === 'updating'));
+  }
+
+  /** Installs the app's downloaded release, which restarts it. Nothing while this computer's agents still update. */
+  restart(): void {
+    if (!appUpdater.ready || this.localBusy) return;
+    appUpdater.install();
+  }
+
   /**
    * Starts the updates: every part of every machine, or with `appOnly` this
-   * app's own release alone. Either way the app restarts only once its own
-   * core's agent updates are done.
+   * app's own release alone. The app only downloads: the card then says to
+   * restart, which `restart` does, so nothing restarts under the user.
    */
   async run({ appOnly = false }: { appOnly?: boolean } = {}): Promise<void> {
     if (this.running) return;
@@ -221,7 +276,7 @@ export class UpdateEverything {
     this.running = true;
     try {
       const machines = new Map(workspace.machines.map((machine) => [machine.id, machine]));
-      const local = plan.find((machine) => machine.local && machine.parts.some((part) => part.id === 'app' && part.startable));
+      const local = plan.some((machine) => machine.local && machine.parts.some((part) => part.id === 'app' && part.startable));
       // The app's download is the longest step and touches nothing that runs: it starts first.
       const app = local ? appUpdater.prepare() : Promise.resolve(false);
       await Promise.all(plan.map((machine) => {
@@ -230,11 +285,7 @@ export class UpdateEverything {
         const server = machine.parts.find((part) => part.id === 'boite' && part.startable)?.version ?? null;
         return store && (agents.length > 0 || server !== null) ? store.serverUpdater.everything(agents, server) : null;
       }));
-      if (!local || !(await app)) return;
-      // A restart stops this computer's core: the agent updaters it runs land first.
-      const localStore = machines.get(local.id)?.store;
-      if (localStore) await until(() => localStore.connection !== 'ready' || !localStore.harnessUpdates.some((update) => update.state === 'updating'));
-      if (appUpdater.ready) appUpdater.install();
+      await app;
     } finally {
       this.running = false;
     }

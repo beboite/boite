@@ -38,7 +38,7 @@ test('a release found opens the card bottom left at once, without downloading, a
   const rows = await parts();
   expect(rows.map((row) => row.part)).toEqual(expect.arrayContaining(['app', 'boite', 'claude', 'codex']));
   expect(rows.every((row) => !/Downloading|Updating/.test(row.text))).toBe(true);
-  expect(await page.text(id('updates-card'))).toContain('Boite restarts last');
+  expect(await page.text(id('updates-card'))).toContain('then asks to restart');
   // Bottom left: the card's left edge on the sidebar's, its bottom just above the foot.
   await page.evaluate('Promise.all(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {})))');
   const place = await page.evaluate<{ left: number; gap: number }>(`(() => {
@@ -69,7 +69,7 @@ test('a release found opens the card bottom left at once, without downloading, a
   await page.waitFor(`document.querySelector('${id('updates-card')}')`);
 }, 60_000);
 
-test('Update all starts every machine at once and the app installs last', async () => {
+test('Update all starts every machine at once, rows land one by one, and the card ends on Restart', async () => {
   await page.navigate(`${base}${fixture}`);
   await page.waitFor(`window.__boiteTest?.workspace.machines.length === 2 && document.querySelectorAll('${id('updates-part')}').length >= 5`);
   await page.evaluate(`window.__calls = []; for (const machine of window.__boiteTest.workspace.machines) {
@@ -87,15 +87,36 @@ test('Update all starts every machine at once and the app installs last', async 
     Builder: { agents: ['claude', 'codex'], server: '2.0.0-beta.2' }
   });
   await page.waitFor(`[...document.querySelectorAll('${id('updates-part')}')].some(row => /Updating|Downloading|Waits/.test(row.textContent))`);
+  // Downloaded while this computer's agents still update: the restart waits for them.
+  await page.waitFor(`window.__boiteTest.appUpdater?.snapshot.phase === 'ready'`, 10_000);
+  if (await page.evaluate(`[...document.querySelectorAll('${id('updates-part')}')].some(row => ['claude', 'codex'].includes(row.dataset.part) && !row.dataset.done && /Updating/.test(row.textContent))`)) {
+    expect(await page.evaluate(`document.querySelector('${id('updates-restart')}').disabled`)).toBe(true);
+  }
   await capture('running-desktop');
-  // The fixture's installer stands in for the restart once the app's download is verified.
-  await page.waitFor(`window.__boiteTest.appUpdater?.snapshot.phase === 'installing'`, 20_000);
-  // The agents land and leave the card; Boite on each machine waits for its own restart.
+  // A part that lands keeps its row with a check for a moment, then the row goes.
+  await page.waitFor(`document.querySelector('${id('updates-part')}[data-done]')?.textContent.includes('Up to date')`, 20_000);
+  await capture('landing-desktop');
   await page.waitFor(`![...document.querySelectorAll('${id('updates-part')}')].some(row => ['claude', 'codex'].includes(row.dataset.part))`, 20_000);
-  expect((await parts()).filter((row) => row.part === 'boite').every((row) => /Waits for work to finish/.test(row.text))).toBe(true);
-}, 60_000);
+  // Boite on the other machine restarts and lands too; what is left is this app, downloaded, and nothing restarted by itself.
+  await page.waitFor(`[...document.querySelectorAll('${id('updates-part')}')].map(row => row.dataset.part).join() === 'app'`, 20_000);
+  expect(await page.text(id('updates-status'))).toBe('Boite is ready: restart it to finish.');
+  expect(await page.evaluate('window.__boiteTest.appUpdater?.snapshot.phase')).toBe('ready');
+  await capture('restart-desktop');
+  await page.click(id('updates-restart'));
+  await page.waitFor(`window.__boiteTest.appUpdater?.snapshot.phase === 'installing'`, 10_000);
+}, 90_000);
 
-test('Update the app installs this app alone and asks no machine for anything', async () => {
+test('with no app release, the card ends on Everything is up to date and puts itself away', async () => {
+  await page.navigate(`${base}/?fake=1&updates=1&open=recent&machines=1&serverUpdate=available`);
+  await page.waitFor(`window.__boiteTest?.workspace.machines.length === 2 && document.querySelectorAll('${id('updates-part')}').length >= 4`);
+  expect(await page.evaluate(`document.querySelector('${id('updates-app')}') === null`)).toBe(true);
+  await page.click(id('updates-run'));
+  await page.waitFor(`document.querySelector('${id('updates-status')}')?.textContent === 'Everything is up to date'`, 30_000);
+  await capture('all-done-desktop');
+  await page.waitFor(`!document.querySelector('${id('updates-card')}') && !document.querySelector('${id('nav-updates')}')`, 10_000);
+}, 90_000);
+
+test('Update the app downloads this app alone, asks no machine for anything, then offers Restart', async () => {
   await page.navigate(`${base}${fixture}`);
   await page.waitFor(`window.__boiteTest?.workspace.machines.length === 2 && document.querySelectorAll('${id('updates-part')}').length >= 5`);
   await page.evaluate(`window.__calls = []; for (const machine of window.__boiteTest.workspace.machines) {
@@ -103,10 +124,13 @@ test('Update the app installs this app alone and asks no machine for anything', 
     client.call = (method, params) => { if (method.startsWith('core.update') || method === 'providers.update') window.__calls.push([machine.label, method]); return call(method, params); };
   }`);
   await page.click(id('updates-app'));
-  await page.waitFor(`window.__boiteTest.appUpdater?.snapshot.phase === 'installing'`, 20_000);
+  await page.waitFor(`document.querySelector('${id('updates-restart')}')`, 20_000);
+  expect(await page.evaluate('window.__boiteTest.appUpdater?.snapshot.phase')).toBe('ready');
   expect(await page.evaluate('window.__calls')).toEqual([]);
   // The agents and the other machine are still offered.
   expect((await parts()).filter((row) => row.part !== 'app').every((row) => !/Updating|Downloading/.test(row.text))).toBe(true);
+  await page.click(id('updates-restart'));
+  await page.waitFor(`window.__boiteTest.appUpdater?.snapshot.phase === 'installing'`, 10_000);
 }, 60_000);
 
 test('the phone keeps the card closed until asked and opens it as a sheet', async () => {

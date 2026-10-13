@@ -552,8 +552,10 @@ Development queries `?fake=1&appUpdate=available`, `ready`, `downloading` or
 states. `tests/e2e/update-everything.test.ts` opens the foot's update card with
 `updates=1&machines=1&appUpdate=available&serverUpdate=available`, checks that
 nothing downloads before the click, Remind me later, Update the app alone, the
-one request per machine and the app installing last, and captures desktop and
-phone.
+one request per machine, rows landing one at a time, and the card ending on
+Restart or Everything is up to date, and captures desktop and phone. Its fake
+core finishes a server update started that way (waiting, restarting, current)
+in about three seconds; a plain install stays waiting for the cancel test.
 `packages/core/test/updates.test.ts` holds the core side: a registry read after
 an agent's updater, when none of its processes runs, keeps Boite's own
 installation waiting.

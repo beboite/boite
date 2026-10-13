@@ -20,11 +20,22 @@ export function serverUpdateMethods(ctx: FakeContext): Pick<FakeMethods, 'core.u
     ctx.emit('core.updateChanged', structuredClone(ctx.serverUpdate));
     return structuredClone(ctx.serverUpdate);
   };
-  const install = (version: string): ServerUpdateStatus => {
+  /**
+   * `finish` stands in for the real core going idle and restarting on the new
+   * version, which the update-everything card follows to its end; a plain
+   * install stays waiting, as the card's cancel test needs.
+   */
+  const install = (version: string, finish = false): ServerUpdateStatus => {
     if (!ctx.serverUpdate.version || ctx.serverUpdate.version !== version || ctx.serverUpdate.mode !== 'systemd') throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'core.updateInstall.version must match the available server update' });
     if (['downloading', 'waiting', 'installing'].includes(ctx.serverUpdate.phase)) return structuredClone(ctx.serverUpdate);
     const answer = move({ phase: 'downloading', received: 0, total: 60_000_000, error: null });
     setTimeout(() => { if (ctx.serverUpdate.phase === 'downloading') move({ phase: 'waiting', received: 60_000_000 }); }, 500);
+    if (finish) {
+      setTimeout(() => { if (ctx.serverUpdate.phase === 'waiting') move({ phase: 'installing' }); }, 2200);
+      setTimeout(() => {
+        if (ctx.serverUpdate.phase === 'installing') move({ phase: 'current', currentVersion: version, version: null, publishedAt: null, received: 0, total: null });
+      }, 3400);
+    }
     return answer;
   };
   return {
@@ -42,7 +53,7 @@ export function serverUpdateMethods(ctx: FakeContext): Pick<FakeMethods, 'core.u
       }
       let serverError: string | null = null;
       if (server !== null) {
-        try { install(server); } catch (error) { serverError = error instanceof Error ? error.message : String(error); }
+        try { install(server, true); } catch (error) { serverError = error instanceof Error ? error.message : String(error); }
       }
       return { agents: started, failed, server: structuredClone(ctx.serverUpdate), serverError };
     },
