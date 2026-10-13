@@ -1,6 +1,7 @@
 /** Delegation: a parent thread's team of child threads, their usage and letters. */
 import { errorText } from '../errors';
 import { collectNativeAgents, collectProcessAgents, CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, matchSpeed, providerEnabled, RpcErrorCode, SPEED_NEEDS_MODEL, speedRefusal, threadActive, type AgentLetter, type DelegatedAgent, type DelegationConfig, type DelegationModelChoice, type DelegationProfile, type DelegationView, type DelegationWaitResult, type RpcParams, type Message, type Thread, type ThreadId, type Turn } from '@boite/contracts';
+import { fakeContextMode } from './context-mode';
 import { RpcFailure } from '../client';
 import { addUsage, emptyUsage, toSummary } from './shared';
 import { modelsOf, PROBED_PROTOCOLS, probe } from './provider-catalog';
@@ -347,7 +348,7 @@ export function delegationMethods(ctx: FakeContext) {
       const task = params.task.trim();
       if (!task || task.length > 12000) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'task must contain 1 to 12000 characters' });
       if (params.speed !== undefined) checkSpeedText(params.speed);
-      const fingerprint = JSON.stringify([params.profileId ?? null, params.model ?? null, params.effort ?? null, params.speed ?? null, task, params.title ?? null]);
+      const fingerprint = JSON.stringify([params.profileId ?? null, params.model ?? null, params.effort ?? null, params.speed ?? null, task, params.title ?? null, params.context ?? null]);
       const requestKey = `${parent.id}:${params.requestId}`;
       const prior = ctx.delegationRequests.get(requestKey);
       if (prior) {
@@ -363,6 +364,7 @@ export function delegationMethods(ctx: FakeContext) {
       const profile: ChildRoute | undefined = params.model !== undefined ? pickModel(ctx, parent, config, params.model, params.effort) : namedRoute(parent, config, params.profileId);
       if (!profile) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'unknown delegation profile' });
       const speed = pickSpeed(ctx, profile, params.speed);
+      const contextMode = fakeContextMode(ctx.providers.find(entry => entry.id === profile.providerId) ?? { protocol: 'echo', name: profile.providerId }, params.context);
       const id = `t-${++ctx.seq}`;
       const at = ctx.now();
       const child: Thread = {
@@ -376,6 +378,7 @@ export function delegationMethods(ctx: FakeContext) {
         model: profile.model,
         effort: params.model === undefined && params.effort !== undefined ? params.effort : profile.effort,
         speed,
+        contextMode,
         status: 'idle', unread: false, archived: false, pinned: false,
         sessionId: null, sessionGeneration: 0, selectionVersion: 0, load: null, context: null, moveNote: null,
         createdAt: at, updatedAt: at, messagesBefore: null, messages: [], turns: [], commands: []

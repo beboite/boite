@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ContextModeBadge from './ContextModeBadge.svelte';
   import { ArrowLeft, Pause, Play, Plus, Settings, Square, Trash2, UsersRound, Workflow } from '@lucide/svelte';
   import { onDestroy } from 'svelte';
   import { DEFAULT_DELEGATION_CONFIG, threadActive, type DelegationConfig, type DelegationProfile } from '@boite/contracts';
@@ -163,6 +164,7 @@
       <strong class="title"><span class="ui-label">{agent.thread.title}</span></strong>
       <span class="route" data-testid="delegation-member-route" title={route.label}>
         <span class="model ui-label">{route.name}</span>{#if route.effort}<span class="effort ui-label">{route.effort}</span>{/if}
+        {#if agent.thread.contextMode}<ContextModeBadge mode={agent.thread.contextMode} compact testid="delegation-member-context" />{/if}
       </span>
     </span>
     <span class="meta">

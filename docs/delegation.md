@@ -42,6 +42,14 @@ with delegation off, and only a paused team holds them. Communication between
 conversations is a separate setting in the title's menu; its Off label does not
 disable provider-native subagents.
 
+## Context modes
+
+`--context light|neutral`, `--keep`, `--drop`, `--tools` and `--rules` or
+`--rules-file` start a child without part of the user's setup, with rules of
+its own; the child's row and header then carry a badge. A small Haiku chore
+fits `light`, a neutral review `neutral`. [Context modes](context-modes.md)
+lists the presets, the fields and what each provider honours.
+
 ## Native provider subagents
 
 Boite subagents replace the providers' own. Claude starts with its `Agent`,
