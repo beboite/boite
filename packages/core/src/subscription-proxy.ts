@@ -307,8 +307,8 @@ function openCodeModels(core: Core, proxy: SubscriptionProxy, rows: Record<strin
     const name = row.name ?? row.display_name;
     const thinking = row.thinking !== null && typeof row.thinking === 'object' && !Array.isArray(row.thinking)
       ? row.thinking as Record<string, unknown> : null;
-    const reasoning = thinking !== null && (positiveTokenLimit(thinking.min) !== undefined || positiveTokenLimit(thinking.max) !== undefined
-      || thinking.dynamic_allowed === true || proxyEffort(row) !== undefined);
+    const reasoning = proxyEffort(row) !== undefined || (thinking !== null && (positiveTokenLimit(thinking.min) !== undefined
+      || positiveTokenLimit(thinking.max) !== undefined || thinking.dynamic_allowed === true));
     const limit = gatewayModelLimits(positiveTokenLimit(row.context_length) ?? row.context_window, row.max_output_tokens);
     catalog.push({ id: row.id, name: typeof name === 'string' && name ? name.slice(0, 200) : row.id,
       ...(reasoning ? { reasoning: true } : {}), ...(limit ? { limit } : {}) });

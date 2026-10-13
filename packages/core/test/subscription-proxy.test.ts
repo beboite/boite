@@ -250,6 +250,8 @@ for (const providerId of ['opencode', 'opencode-v2'] as const) test(`${providerI
         thinking: { min: 1024, max: 32_768, zero_allowed: false, dynamic_allowed: true, levels: [] } },
       { id: 'antigravity/gemini-alias', supported_endpoint_types: ['openai'], context_window: 8192, max_output_tokens: 4096, thinking: null },
       { id: 'antigravity/gemini-invalid', context_length: '200000', max_output_tokens: -1, thinking: { min: -1, max: '32000', levels: [] } },
+      { id: 'antigravity/gemini-effort-only', supported_endpoint_types: ['openai'],
+        supportedReasoningEfforts: [{ reasoningEffort: 'high' }] },
     ] });
   } });
   harness = await startTestCore({ settings: { subscriptionProxy: config(`http://127.0.0.1:${gateway.port}/v1`) } });
@@ -267,6 +269,11 @@ for (const providerId of ['opencode', 'opencode-v2'] as const) test(`${providerI
   });
   expect(catalog['antigravity/gemini-alias']).toEqual({ name: 'antigravity/gemini-alias', limit: { context: 8192, output: 4096 } });
   expect(catalog['antigravity/gemini-invalid']).toEqual({ name: 'antigravity/gemini-invalid' });
+  expect(catalog['antigravity/gemini-effort-only']).toEqual({ name: 'antigravity/gemini-effort-only',
+    ...(providerId === 'opencode'
+      ? { reasoning: true, interleaved: { field: 'reasoning_content' } }
+      : { compatibility: { reasoningField: 'reasoning_content' } }),
+  });
 });
 
 test('Grok runs through Douane by its environment alone, and keeps its own sign-in behind CLIProxyAPI', async () => {
