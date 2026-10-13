@@ -29,6 +29,7 @@ import { registerTerminalMethods } from './terminals.ts';
 import { registerWorkflowMethods } from './workflows.ts';
 import { registerWorktreeMethods } from './worktree-sweep.ts';
 import { reveal } from './reveal.ts';
+import { updateEverything } from './update-everything.ts';
 
 /** Adding a module is one file plus one line here. `hello` is the server's own. */
 export function registerModules(core: Core): void {
@@ -47,6 +48,7 @@ export function registerModules(core: Core): void {
   core.router.register('core.updateStatus', params => core.serverUpdates.status(params.refresh));
   core.router.register('core.updateInstall', params => core.serverUpdates.install(params.version));
   core.router.register('core.updateCancel', () => core.serverUpdates.cancel());
+  core.router.register('core.updateEverything', params => updateEverything(core, params));
   registerPersistentAgents(core);
   core.router.register('brain.status', () => core.brain.status());
   core.router.register('brain.configure', params => core.brain.configure(params));

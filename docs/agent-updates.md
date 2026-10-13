@@ -19,7 +19,9 @@ Settings, Machines and updates lists each machine's agents under that
 machine's details, with their installed and available versions, Update and
 Skip. A machine with a release waiting for one of its agents says Update
 available on its row before the details are opened; a skipped release does
-not. Updates create no pinned chat notice.
+not. Updates create no pinned chat notice: the sidebar's update button and
+its card list them with the rest, and Update all starts every agent of every
+machine at once ([update everything](updates.md#update-everything)).
 
 - Update releases the provider's warm processes and runs the update in the
   background. The row shows progress, or how many running threads of that

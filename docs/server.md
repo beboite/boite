@@ -142,6 +142,10 @@ list. Cards show the installed and offered versions together. The card's own
 Details expands the idle wait, backup and recovery behavior without adding it
 to the confirmation.
 
+The sidebar's update card lists that release too, and its Update all
+installs it after the machine's agents
+([update everything](updates.md#update-everything)).
+
 Server updates require an owner connection, including on a phone. Ordinary
 paired devices cannot stop or update the server. The action always goes to the
 machine on the card, even after switching to another machine.

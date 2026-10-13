@@ -9,6 +9,7 @@
   import { controlMenu } from '../lib/controls';
   import LimitsGlance from './LimitsGlance.svelte';
   import WhipButton from './WhipButton.svelte';
+  import UpdatesNotice from './UpdatesNotice.svelte';
 
   /**
    * The column on the left of the window, for the thread list and the Agents
@@ -124,6 +125,7 @@
     {@render lead?.()}
     <span class="grow"></span>
     {@render foot?.()}
+    <UpdatesNotice />
     {#if work.shows('sidebar.limits')}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <span class="control" oncontextmenu={(event) => controlMenu(event, store, 'sidebar.limits')}><LimitsGlance {store} /></span>
@@ -195,6 +197,11 @@
     padding-top: 8px;
   }
   .grow { flex: 1; }
+  /* Five square buttons and their gaps need 220 pixels: below that, the
+     update button's arrival closes the gaps instead of pushing Settings out. */
+  @container sidebar (max-width: 219.98px) {
+    .foot:has(:global(.update-trigger)) { gap: 0; }
+  }
   .control {
     display: contents;
   }
