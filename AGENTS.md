@@ -30,6 +30,7 @@ prerequisites, adjacent runtime files and shell E2E coverage.
   integration belongs in `apps/shell/src-tauri/src/platform/`.
 - Change `packages/contracts/src/index.ts` before implementing an RPC method,
   event or shared type. Update the real core and the in-memory client together.
+  Follow [Adding an RPC method](docs/development.md#adding-an-rpc-method).
 - Tests and benches use a fresh temporary `BOITE_DATA_DIR`. Real data directories
   and CLI logins are only for explicitly enabled live tests.
 - Kill only a process whose PID the test captured at spawn, or use
@@ -39,8 +40,10 @@ prerequisites, adjacent runtime files and shell E2E coverage.
 - Reject bad descriptors, paths, origins and tokens with the file or field and
   the expected value. Rejected providers remain visible to the client.
 - Keep SDKs and Workers lazy. Nothing heavy loads at core startup.
-- New RPC methods are owner-only unless `packages/core/src/access.ts` explicitly
-  permits paired devices. Record the reason beside the permission.
+- New RPC methods are owner-only unless `DEVICE_METHODS` in
+  `packages/contracts/src/access.ts` permits paired devices or `AGENT_METHODS`
+  in `packages/core/src/access.ts` permits agents. Record the reason beside
+  the permission.
 - The shell owns windows, the tray, native dialogs and core startup. Execution
   and application logic belong in the core.
 - Reach the main window through `window::main_window`. Tauri's

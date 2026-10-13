@@ -63,9 +63,9 @@ pages to recover transcript output. Do not repeat a mutation to recover a
 truncated response. The stdio input frame is limited to 64 KiB.
 
 Implementation: `packages/core/src/mcp/`, pinned
-`@modelcontextprotocol/server` 2.3.0 and Zod 4.6.5. The source CLI dispatch is
-already included in the normal core build and sidecar, so no extra executable
-or staging path is required. See the official SDK
+`@modelcontextprotocol/server` 2.3.1 and Zod 4.6.7 in `packages/core/package.json`.
+The source CLI dispatch is included in the normal core build and sidecar, so
+no extra executable or staging path is required. See the official SDK
 [stdio guide](https://github.com/modelcontextprotocol/typescript-sdk/blob/main/docs/serving/stdio.md)
 and [tool guide](https://github.com/modelcontextprotocol/typescript-sdk/blob/main/docs/servers/tools.md).
 
