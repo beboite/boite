@@ -1,7 +1,7 @@
 import { chmodSync, existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { echoThread, removeDir, startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
 import { newId } from '../src/ids.ts';
@@ -18,6 +18,32 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await harness.stop();
+});
+
+test('shutdown still stops owned children and closes the journal when both startup cleanups fail', async () => {
+  const core = harness.core;
+  const child = core.procs.spawn('shutdown-cleanup-fixture', process.execPath,
+    ['-e', 'setInterval(() => {}, 1000);'], { cwd: harness.dataDir });
+  const drafts = spyOn(core.drafts, 'close').mockRejectedValue(new Error('draft cleanup fixture'));
+  const uploads = spyOn(core.attachmentUploads, 'close').mockRejectedValue(new Error('upload cleanup fixture'));
+  const log = spyOn(core, 'log');
+  try {
+    await expect(harness.stop()).resolves.toBeUndefined();
+    expect(drafts).toHaveBeenCalledTimes(1);
+    expect(uploads).toHaveBeenCalledTimes(1);
+    expect(core.journal.isClosed()).toBe(true);
+    expect(await child.exited).not.toBe(0);
+    // Shutdown closes native exit tracing; inspect the captured child itself.
+    expect(processPlatform.runningSince(child.record.pid)).toBeNull();
+    const warnings = log.mock.calls.filter(([level]) => level === 'warn').map(([, message]) => message);
+    expect(warnings).toContain('draft shutdown cleanup failed: Error: draft cleanup fixture');
+    expect(warnings).toContain('attachment shutdown cleanup failed: Error: upload cleanup fixture');
+  } finally {
+    drafts.mockRestore(); uploads.mockRestore(); log.mockRestore();
+    if (!core.journal.isClosed()) await core.close();
+    await child.exited;
+    await removeDir(harness.dataDir);
+  }
 });
 
 describe('projects', () => {

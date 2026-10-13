@@ -53,7 +53,13 @@ export class Accounts {
   installStates = $state<Record<ProviderId, ProviderInstallState>>({});
   /** Where each agent of this machine stands against its newest release, the core's own reading. */
   harnessUpdates = $state<HarnessUpdate[]>([]);
-  accounts = $state<Account[]>([]);
+  #accounts = $state<Account[]>([]);
+  get accounts(): Account[] { return this.#accounts; }
+  set accounts(value: Account[]) {
+    this.#accounts = value;
+    // Old favorites named an account by id: its label is known once the accounts are.
+    this.ctx.models.syncFavorites();
+  }
   /** Keyed by account id: one entry while a login runs, and after one failed. */
   logins = $state<Record<string, LoginState>>({});
   loginRevision = 0;
@@ -325,7 +331,7 @@ export class Accounts {
     try {
       const update = await client.call('providers.update', { providerId });
       if (!this.ctx.currentClient(client, generation)) return;
-      this.#putHarnessUpdate(update);
+      this.putHarnessUpdate(update);
     } catch (error) {
       if (this.ctx.currentClient(client, generation)) this.ctx.fail(error);
     }
@@ -338,13 +344,14 @@ export class Accounts {
     try {
       const update = await client.call('providers.updateSkip', { providerId, version });
       if (!this.ctx.currentClient(client, generation)) return;
-      this.#putHarnessUpdate(update);
+      this.putHarnessUpdate(update);
     } catch (error) {
       if (this.ctx.currentClient(client, generation)) this.ctx.fail(error);
     }
   }
 
-  #putHarnessUpdate(update: HarnessUpdate): void {
+  /** One agent's row as its core answered it, in place. */
+  putHarnessUpdate(update: HarnessUpdate): void {
     this.harnessUpdates = this.harnessUpdates.some((entry) => entry.providerId === update.providerId)
       ? this.harnessUpdates.map((entry) => (entry.providerId === update.providerId ? update : entry))
       : [...this.harnessUpdates, update];

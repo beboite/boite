@@ -1,6 +1,7 @@
-import { RpcErrorCode, type ServerUpdateStatus } from '@boite/contracts';
+import { RpcErrorCode, type ProviderId, type ServerUpdateStatus } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import type { FakeContext, FakeMethods } from './context';
+import { updateHarness } from './provider-installs';
 
 export function initialServerUpdate(): ServerUpdateStatus {
   const query = new URLSearchParams(typeof location === 'undefined' ? '' : location.search);
@@ -13,20 +14,48 @@ export function initialServerUpdate(): ServerUpdateStatus {
     error: phase === 'error' ? 'Update download could not reach the release server.' : null };
 }
 
-export function serverUpdateMethods(ctx: FakeContext): Pick<FakeMethods, 'core.updateStatus' | 'core.updateInstall' | 'core.updateCancel'> {
+export function serverUpdateMethods(ctx: FakeContext): Pick<FakeMethods, 'core.updateStatus' | 'core.updateInstall' | 'core.updateCancel' | 'core.updateEverything'> {
   const move = (patch: Partial<ServerUpdateStatus>) => {
     ctx.serverUpdate = { ...ctx.serverUpdate, ...patch };
     ctx.emit('core.updateChanged', structuredClone(ctx.serverUpdate));
     return structuredClone(ctx.serverUpdate);
   };
+  /**
+   * `finish` stands in for the real core going idle and restarting on the new
+   * version, which the update-everything card follows to its end; a plain
+   * install stays waiting, as the card's cancel test needs.
+   */
+  const install = (version: string, finish = false): ServerUpdateStatus => {
+    if (!ctx.serverUpdate.version || ctx.serverUpdate.version !== version || ctx.serverUpdate.mode !== 'systemd') throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'core.updateInstall.version must match the available server update' });
+    if (['downloading', 'waiting', 'installing'].includes(ctx.serverUpdate.phase)) return structuredClone(ctx.serverUpdate);
+    const answer = move({ phase: 'downloading', received: 0, total: 60_000_000, error: null });
+    setTimeout(() => { if (ctx.serverUpdate.phase === 'downloading') move({ phase: 'waiting', received: 60_000_000 }); }, 500);
+    if (finish) {
+      setTimeout(() => { if (ctx.serverUpdate.phase === 'waiting') move({ phase: 'installing' }); }, 2200);
+      setTimeout(() => {
+        if (ctx.serverUpdate.phase === 'installing') move({ phase: 'current', currentVersion: version, version: null, publishedAt: null, received: 0, total: null });
+      }, 3400);
+    }
+    return answer;
+  };
   return {
     'core.updateStatus': async ({ refresh }) => refresh ? move({ checkedAt: Date.now() }) : structuredClone(ctx.serverUpdate),
-    'core.updateInstall': async ({ version }) => {
-      if (!ctx.serverUpdate.version || ctx.serverUpdate.version !== version || ctx.serverUpdate.mode !== 'systemd') throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'core.updateInstall.version must match the available server update' });
-      if (['downloading', 'waiting', 'installing'].includes(ctx.serverUpdate.phase)) return structuredClone(ctx.serverUpdate);
-      const answer = move({ phase: 'downloading', received: 0, total: 60_000_000, error: null });
-      setTimeout(() => { if (ctx.serverUpdate.phase === 'downloading') move({ phase: 'waiting', received: 60_000_000 }); }, 500);
-      return answer;
+    'core.updateInstall': async ({ version }) => install(version),
+    // The real core's order, without its restart: the agents first, then Boite's download.
+    'core.updateEverything': async ({ agents, server }) => {
+      const started: ProviderId[] = [];
+      const failed: { providerId: ProviderId; message: string }[] = [];
+      for (const providerId of agents) {
+        try {
+          if (ctx.harnessUpdates.find((entry) => entry.providerId === providerId)?.state !== 'updating') updateHarness(ctx, providerId);
+          started.push(providerId);
+        } catch (error) { failed.push({ providerId, message: error instanceof Error ? error.message : String(error) }); }
+      }
+      let serverError: string | null = null;
+      if (server !== null) {
+        try { install(server, true); } catch (error) { serverError = error instanceof Error ? error.message : String(error); }
+      }
+      return { agents: started, failed, server: structuredClone(ctx.serverUpdate), serverError };
     },
     'core.updateCancel': async () => ['downloading', 'waiting'].includes(ctx.serverUpdate.phase)
       ? move({ phase: 'available', received: 0, total: null }) : structuredClone(ctx.serverUpdate),

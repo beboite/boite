@@ -28,8 +28,6 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   // A phone's own rendering errors and failed calls land in the owner's diagnostics, bounded per connection.
   'diagnostics.report',
   'collaboration.directory',
-  // Which conversations act as stewards and over what: shown beside Communication settings. Only the owner grants or revokes.
-  'stewards.list',
   // Dictation uses the owner's configured engine. Devices cannot change paths or credentials.
   'speech.status',
   'speech.transcribe',
@@ -79,6 +77,10 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   // conversation, runs no command a device names and returns no host path: what the phone could ask of the agent.
   'devices.list', 'devices.sessions', 'devices.frame', 'devices.input', 'devices.open', 'devices.close', 'devices.screenshot',
   'threads.create',
+  // Composing a phone draft uses the same creation authority, with no prompt or arbitrary executable.
+  'drafts.prepare', 'drafts.release',
+  // Only this phone connection's bounded attachment bytes, with the same validation as Send.
+  'attachments.upload', 'attachments.release',
   'threads.get',
   'threads.capabilities', // Read-only controls for the conversation already visible; never prepares or probes a runtime.
   // A phone can manage continued prompts in the same thread it can already send to.
@@ -164,7 +166,6 @@ export const DEVICE_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
   // Invalidation naming the subscribed root; workflows.list applies the read scope.
   'workflows.changed',
   'collaboration.changed', 'thread.activity',
-  'stewards.changed', // Invalidation only, naming the steward thread; stewards.list is device-readable.
   'project.added', 'project.removed', 'project.updated',
   'thread.created', 'thread.updated', 'thread.removed', 'thread.commands', 'thread.background', 'thread.btw',
   'turn.started', 'turn.finished',

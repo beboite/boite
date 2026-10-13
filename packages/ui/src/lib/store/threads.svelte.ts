@@ -1,3 +1,4 @@
+import { createWithPreparation, mergeCreationSnapshot } from './thread-creation';
 import type {
   Message,
   MessageId,
@@ -11,7 +12,7 @@ import type {
 } from '@boite/contracts';
 import { readingCacheBytes, READING_CACHE_BYTES } from '../reading-cache';
 import type { ToolPart } from '../tool-groups';
-import { MESSAGE_PAGE_MAX, forTransport } from '@boite/contracts';
+import { INITIAL_MESSAGE_PAGE, INITIAL_PAGE_BYTES, MESSAGE_PAGE_MAX, READING_PAGE_BYTES, forTransport } from '@boite/contracts';
 import { askPage, ThreadPreloads } from './thread-preload';
 import { lightPage, NewerPages, setMessagesAfter, type ReadingPosition } from './reading-pages.svelte';
 export type { ReadingPosition } from './reading-pages.svelte';
@@ -275,7 +276,8 @@ export class Threads {
     const clientGeneration = this.ctx.clientGeneration;
     if (!client) return;
     try {
-      const fresh = await client.call('threads.get', { threadId });
+      // The page a first visit reads: what the copies held cannot be patched, so they start over.
+      const fresh = await client.call('threads.get', { threadId, limit: INITIAL_MESSAGE_PAGE, maxBytes: INITIAL_PAGE_BYTES, ...lightPage(this.ctx) });
       if (!this.ctx.currentClient(client, clientGeneration)) return;
       for (const held of this.threadSnapshots(threadId)) {
         held.messages = fresh.messages;
@@ -295,7 +297,7 @@ export class Threads {
    * refused subscribe leaves the thread on screen with the socket it had
    * rather than with none at all.
    */
-  async open(threadId: ThreadId, navigate = true, options: { requests?: boolean } = {}): Promise<void> {
+  async open(threadId: ThreadId, navigate = true, options: { requests?: boolean; liveCreation?: boolean } = {}): Promise<void> {
     const s = this.ctx.store;
     const { delegation } = this.ctx;
     const client = this.ctx.client;
@@ -384,6 +386,7 @@ export class Threads {
       }
       // A window that now reaches the end says so, over the cursor a held copy had.
       if (held && thread.messagesAfter === undefined) delete held.messagesAfter;
+      if (options.liveCreation && this.openThread?.id === threadId) mergeCreationSnapshot(thread, this.openThread);
       this.#show(held ? reconcileThread(held, thread) : thread, navigate, true);
       this.preloads.done(preloaded);
       loaded = true;
@@ -518,7 +521,7 @@ export class Threads {
     const navigation = this.openGeneration;
     const current = () => generation === this.#olderGeneration && this.ctx.currentNavigation(client, navigation);
     try {
-      const page = await client.call('messages.list', { threadId: open.id, before: cursor, ...lightPage(this.ctx) });
+      const page = await client.call('messages.list', { threadId: open.id, before: cursor, maxBytes: READING_PAGE_BYTES, ...lightPage(this.ctx) });
       const still = this.openThread;
       if (!current() || !still || still.id !== open.id || still.messagesBefore !== cursor) return 0;
       const known = new Set(still.messages.map((m) => m.id));
@@ -586,13 +589,15 @@ export class Threads {
     speed?: string | null;
     worktree?: { branch?: string };
     incognito?: boolean;
+    preparationId?: string;
+    subscribe?: boolean;
   }, options: { navigate?: boolean } = {}): Promise<ThreadSummary | null> {
     const client = this.ctx.client;
     const clientGeneration = this.ctx.clientGeneration;
     if (!client) return null;
     const generation = this.openGeneration;
     try {
-      const summary = await client.call('threads.create', input);
+      const summary = await createWithPreparation(client, input, () => this.ctx.currentClient(client, clientGeneration));
       if (!this.ctx.currentClient(client, clientGeneration)) return null;
       this.upsertThread(summary);
       if (options.navigate !== false && this.ctx.currentNavigation(client, generation)) await this.ctx.store.open(summary.id);

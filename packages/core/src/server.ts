@@ -614,6 +614,8 @@ export function startServer(options: ServerOptions): RunningServer {
         core.coordination.bridge.disconnect(socket.data.connection.id);
         core.browser.disconnect(socket.data.connection.id);
         core.threads.focus.disconnect(socket.data.connection.id);
+        void core.drafts.disconnect(socket.data.connection.id).catch(error => core.log('warn', `draft cleanup failed: ${String(error)}`));
+        void core.attachmentUploads.disconnect(socket.data.connection.id).catch(error => core.log('warn', `attachment cleanup failed: ${String(error)}`));
         incoming.drop(socket.data.connection);
         socket.data.connection.close(1000);
         clearTimeout(helloTimers.get(socket.data.connection));

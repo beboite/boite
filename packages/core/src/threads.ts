@@ -41,7 +41,7 @@ import { AUTO_COMPACT_LABEL, AutoCompaction } from './threads/auto-compact.ts';
 import { DeferredInput } from './threads/deferred.ts';
 import { MOVE_NOTE_PREFIX, pendingMove, ThreadMove } from './threads/move.ts';
 import { ThreadSpawns } from './threads/spawn.ts';
-import { checkAttachmentArray, checkAttachments, checkCwd, checkTurnRequest, draftFolderName, makeDraftFolder, titleOf } from './threads/inputs.ts';
+import { checkAttachmentArray, checkAttachments, checkTurnRequest, titleOf } from './threads/inputs.ts';
 import { RestartHandoff } from './threads/handoff.ts';
 import { SYSTEM_LABEL, nativeCommandPrompt, systemOperation } from './threads/operations.ts';
 import { saveThread, setThreadStatus, withLoad } from './threads/records.ts';
@@ -55,8 +55,8 @@ import { TurnRunner } from './threads/turn-runner.ts';
 import { markQueuedStopped } from './threads/turn-settlement.ts';
 import { ThreadFocus } from './threads/focus.ts';
 import { ProgressState } from './threads/progress.ts';
-import { checkIncognito, eraseIncognito, makeIncognitoFolder } from './threads/incognito.ts';
-import { checkContext } from './context-mode.ts';
+import { eraseIncognito } from './threads/incognito.ts';
+import { ThreadCreation } from './threads/creation.ts';
 import { accountRemoved, followAgent } from './threads/account-fallback.ts';
 
 type CreateParams = RpcParams<'threads.create'>;
@@ -87,6 +87,7 @@ export class ThreadStore {
   /** Builds what a driver gets for a turn. */
   readonly contexts: TurnContexts;
   readonly focus: ThreadFocus;
+  readonly creation: ThreadCreation;
   readonly progress: ProgressState;
   /** Permission and question cards. */
   readonly cards: ThreadCards;
@@ -114,6 +115,7 @@ export class ThreadStore {
     this.runner = new TurnRunner(core, this);
     this.contexts = new TurnContexts(core, this);
     this.focus = new ThreadFocus(core);
+    this.creation = new ThreadCreation(core);
     this.progress = new ProgressState(core);
     this.cards = new ThreadCards(core, this);
     this.deferred = new DeferredInput(core, this);
@@ -149,7 +151,7 @@ export class ThreadStore {
    * one page here; the rest is walked back through `messages`, whose cursor is
    * `messagesBefore`.
    */
-  get(threadId: ThreadId, after?: MessageId, options: Pick<RpcParams<'threads.get'>, 'limit' | 'compactTools' | 'compactFiles' | 'compactImages' | 'compactToolParts' | 'around' | 'sync' | 'open'> = {}): Thread {
+  get(threadId: ThreadId, after?: MessageId, options: Pick<RpcParams<'threads.get'>, 'limit' | 'maxBytes' | 'compactTools' | 'compactFiles' | 'compactImages' | 'compactToolParts' | 'around' | 'sync' | 'open'> = {}): Thread {
     return threadSnapshot(this.core, this.withLoad(this.require(threadId)), after, options, this.agentState);
   }
 
@@ -166,93 +168,9 @@ export class ThreadStore {
 
   // -- writes ---------------------------------------------------------------
 
-  /**
-   * The thread in its own git worktree: the branch and directory are made
-   * first, under the id the thread will carry, and the record is written only
-   * once git succeeded. Everything a refusal can come from is checked before
-   * git makes anything, and a refusal after that removes the worktree and its
-   * branch again, so nothing is left behind but the trace of the git processes.
-   */
-  async createInWorktree(params: CreateParams): Promise<ThreadSummary> {
-    if (params.cwd !== undefined) {
-      throw refused('cwd and worktree exclude each other: a worktree is the working directory', { cwd: params.cwd });
-    }
-    if (params.incognito === true) {
-      throw refused('incognito and worktree exclude each other: an incognito conversation works in a folder the core makes', { field: 'incognito', expected: 'absent or false with worktree' });
-    }
-    const { project, provider, account } = this.check(params);
-    if (project.kind === 'drafts') {
-      throw refused('a draft has no worktree: the drafts folder is not a git repository', { projectId: project.id });
-    }
-    const model = checkModel(provider, account.id, params.model ?? defaultModel(provider));
-    checkEffort(provider, account.id, model, params.effort ?? null);
-    checkSpeed(provider, account.id, model, params.speed ?? null);
-    const id = newId('thr_');
-    const placed = await this.core.worktrees.add(id, project, params.worktree?.branch);
-    try {
-      return this.create({ ...params, cwd: placed.path }, { id, branch: placed.branch, branchNamingPending: placed.namingPending });
-    } catch (error) {
-      await this.core.worktrees.remove(id, project, placed);
-      throw error;
-    }
-  }
-
+  createInWorktree(params: CreateParams): Promise<ThreadSummary> { return this.creation.createInWorktree(params); }
   create(params: CreateParams, placed?: { id: ThreadId; branch: string | null; branchNamingPending?: boolean; parentThreadId?: ThreadId }): ThreadSummary {
-    const { project, provider, account } = this.check(params);
-    const incognito = checkIncognito(params, project, placed !== undefined);
-
-    const now = Date.now();
-    const model = checkModel(provider, account.id, params.model ?? defaultModel(provider));
-    const effort = checkEffort(provider, account.id, model, params.effort ?? null);
-    const speed = checkSpeed(provider, account.id, model, params.speed ?? null), contextMode = checkContext(provider, params.context);
-    const id = placed?.id ?? newId('thr_');
-    // A worktree's directory is the core's own and uses the configured storage;
-    // anything a client names has to be inside it. A draft with no directory
-    // named gets a new folder of its own, made once everything else passed;
-    // an incognito one gets it in the data directory, away from the drafts.
-    const cwd =
-      params.cwd !== undefined && params.cwd.length > 0
-        ? placed !== undefined
-          ? params.cwd
-          : checkCwd(project, params.cwd)
-        : incognito
-          ? makeIncognitoFolder(this.core.dataDir, id)
-          : project.kind === 'drafts'
-            ? makeDraftFolder(project.path, draftFolderName(titleOf(params.title), new Date(now)))
-            : project.path;
-    const thread: ThreadSummary = {
-      id,
-      ...(placed?.parentThreadId ? { parentThreadId: placed.parentThreadId } : {}), ...(contextMode ? { contextMode } : {}),
-      ...(incognito ? { incognito: true as const } : {}),
-      projectId: project.id,
-      title: titleOf(params.title),
-      titleSource: 'prompt',
-      providerId: provider.id,
-      accountId: account.id,
-      model,
-      effort,
-      speed,
-      cwd,
-      branch: placed?.branch ?? null,
-      branchNamingPending: placed?.branchNamingPending ?? false,
-      permissionMode: params.permissionMode ?? 'default',
-      status: 'idle',
-      unread: false,
-      archived: false,
-      pinned: false,
-      sessionId: null,
-      load: null,
-      context: null,
-      createdAt: now,
-      updatedAt: now,
-    };
-    this.core.journal.append({ type: 'thread.created', threadId: thread.id, version: 1, payload: thread }, () => {
-      this.core.journal.putThread(thread);
-    });
-    this.core.bus.emit('thread.created', thread);
-    // A thread started in a project put away says the project is in use again.
-    if (project.archived === true) this.core.projects.archive(project.id, false);
-    return thread;
+    return this.creation.create(params, placed);
   }
 
   /**
@@ -355,19 +273,7 @@ export class ThreadStore {
   }
 
   /** The project, provider and account a new thread names, each refused by name when wrong. */
-  private check(params: CreateParams): { project: Project; provider: ProviderDescriptor; account: Account } {
-    const project = this.core.projects.require(params.projectId);
-    const provider = this.core.providers.require(params.providerId);
-    const account = this.core.accounts.require(params.accountId);
-    if (account.providerId !== provider.id) {
-      throw refused('the account belongs to another provider', {
-        accountId: account.id,
-        accountProviderId: account.providerId,
-        providerId: provider.id,
-      });
-    }
-    return { project, provider, account };
-  }
+  private check(params: CreateParams): { project: Project; provider: ProviderDescriptor; account: Account } { return this.creation.check(params); }
 
   update(params: {
     threadId: ThreadId;
@@ -863,7 +769,7 @@ export class ThreadStore {
     return this.cards.listPermissions(threadId);
   }
 
-  /** `by` names who decided in the log: the user, or a steward acting for them. */
+  /** `by` names who decided in the log: the user, or an agent acting for them. */
   answerPermission(params: { requestId: RequestId; decision: 'allow' | 'deny' }, by = 'user'): void {
     this.cards.answerPermission(params, by);
   }

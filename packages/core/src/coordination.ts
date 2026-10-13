@@ -6,7 +6,7 @@ import type { AgentAddress, AgentContact, AgentLetter, AgentMatch, AgentTranscri
 import { checkMatchExtras, checkTranscript, searchContacts, searchWords, transcript } from './coordination-lookup.ts';
 import { CoordinationBridge } from './coordination-bridge.ts';
 import { dropGroupRead, groupPeers, migrateGroupPeer } from './coordination-group.ts';
-import { address, coordinationGuide, coordinationUrl, LETTER_TTL_MS, letterPrompt, same, STEWARD_LETTER_TTL_MS, text } from './coordination-letter.ts';
+import { address, coordinationGuide, coordinationUrl, LETTER_TTL_MS, letterPrompt, RESIDENT_LETTER_TTL_MS, same, text } from './coordination-letter.ts';
 import { senderContext, withRelations } from './coordination-relation.ts';
 import { boundedBody, firstAnswer, MAX_BODY, PeerGone, PeerRefusal, post, ROUTE, settle, type Answer } from './coordination-wire.ts';
 import { pack, SEALED, sealResponse, unpack, type Sealing } from './group/seal.ts';
@@ -26,7 +26,7 @@ export const SWEEP_PROBES = [
 ] as const;
 /** The longest `collaboration.wait`: a CLI call stays under its five-minute RPC deadline. */
 export const WAIT_MAX_MS = 300_000;
-export { coordinationUrl, letterPrompt, STEWARD_LETTER_TTL_MS };
+export { coordinationUrl, letterPrompt, RESIDENT_LETTER_TTL_MS };
 type Row = { data: string; fingerprint: string | null };
 type Operation = 'directory' | 'deliver' | 'receipt' | 'search' | 'read' | 'group.sync' | 'group.push' | 'group.redeem';
 type Envelope = { from: string; to: string; at: number; nonce: string; operation: Operation; payload: unknown };
@@ -240,11 +240,11 @@ export class Coordination {
       toProject: letter.toProject ?? (letter.to.coreId === local ? this.projectName(letter.to.threadId) : undefined),
     };
   }
-  /** `steward`: a steward and the threads it looks after reach each other whatever their communication settings say. */
-  private contact(threadId: string, steward = false): AgentContact {
+  /** `resident`: a persistent agent reaches the threads of its projects whatever their communication settings, or its own, say. */
+  private contact(threadId: string, resident = false): AgentContact {
     const thread = this.core.threads.require(threadId);
     const config = this.config(threadId);
-    if (thread.archived || (config.mode === 'off' && !steward)) throw refused('recipient is unavailable or coordination is disabled');
+    if (thread.archived || (config.mode === 'off' && !resident)) throw refused('recipient is unavailable or coordination is disabled');
     const project = thread.projectId === null ? null : this.core.journal.getProject(thread.projectId);
     return {
       ...this.self(threadId), title: thread.title.slice(0, 200), machine: this.core.info().hostname ?? 'Boite', resources: config.resources, status: thread.status, mode: config.mode,
@@ -370,10 +370,10 @@ export class Coordination {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw invalidParams('limit: expected 1 to 100');
     if (before !== undefined && !Number.isSafeInteger(before)) throw invalidParams('before: expected a timestamp');
     const config = this.config(threadId);
-    const stewarded = to.coreId === this.self('').coreId && this.core.stewards.over(threadId, to.threadId) !== null;
-    if (this.core.threads.require(threadId).archived || (config.mode === 'off' && !stewarded)) throw refused('coordination is disabled for this thread');
+    const resident = to.coreId === this.self('').coreId && this.core.workforce.projects.over(threadId, to.threadId) !== null;
+    if (this.core.threads.require(threadId).archived || (config.mode === 'off' && !resident)) throw refused('coordination is disabled for this thread');
     if (to.coreId === this.self('').coreId) {
-      const contact = (stewarded ? this.contact(to.threadId, true) : undefined) ?? this.localReach(threadId).find(a => same(a, to)) ?? (to.threadId === threadId ? this.contact(threadId) : undefined);
+      const contact = (resident ? this.contact(to.threadId, true) : undefined) ?? this.localReach(threadId).find(a => same(a, to)) ?? (to.threadId === threadId ? this.contact(threadId) : undefined);
       if (!contact) throw refused(`target: ${to.threadId} is not a contact this thread may reach; see boite agents list`);
       return { contact, ...transcript(this.core.journal.db, to.threadId, limit, before) };
     }
@@ -433,8 +433,8 @@ export class Coordination {
   async send(params: RpcParams<'collaboration.send'>): Promise<AgentLetter> {
     const to = address(params.to, 'to');
     const local = to.coreId === this.self('').coreId;
-    const { asSteward, toSteward } = this.core.stewards.between(local, params.threadId, to.threadId);
-    const from = this.contact(params.threadId, asSteward || toSteward);
+    const resident = local ? this.core.workforce.projects.over(params.threadId, to.threadId) : null;
+    const from = this.contact(params.threadId, resident !== null);
     const config = this.config(params.threadId);
     if (config.paused) throw refused('coordination paused by the owner');
     const body = text(params.text, 'text');
@@ -450,8 +450,8 @@ export class Coordination {
     let toProject: string | undefined;
     let toMachine: string | undefined;
     if (to.coreId === from.coreId) {
-      if (!asSteward && !toSteward && this.core.threads.require(to.threadId).projectId !== this.core.threads.require(from.threadId).projectId && !(config.remote && this.config(to.threadId).remote)) throw refused('both threads must enable coordination across projects');
-      const target = this.contact(to.threadId, asSteward || toSteward);
+      if (resident === null && this.core.threads.require(to.threadId).projectId !== this.core.threads.require(from.threadId).projectId && !(config.remote && this.config(to.threadId).remote)) throw refused('both threads must enable coordination across projects');
+      const target = this.contact(to.threadId, resident !== null);
       toTitle = target.title;
       toProject = target.project;
       toMachine = target.machine;
@@ -471,9 +471,11 @@ export class Coordination {
     }
     // Recheck budgets after all validation, before the synchronous durable write.
     const createdAt = Date.now();
-    const letter: AgentLetter = { ...(asSteward ? { origin: 'steward' as const } : {}), id: randomUUID(), from, to, toTitle, toProject, toMachine, text: body, replyTo: params.replyTo ?? null, createdAt, expiresAt: createdAt + (asSteward || toSteward ? STEWARD_LETTER_TTL_MS : LETTER_TTL_MS), status: 'queued', error: null };
+    const letter: AgentLetter = { ...(resident ? { origin: 'resident' as const } : {}), id: randomUUID(), from, to, toTitle, toProject, toMachine, text: body, replyTo: params.replyTo ?? null, createdAt, expiresAt: createdAt + (resident ? RESIDENT_LETTER_TTL_MS : LETTER_TTL_MS), status: 'queued', error: null };
     this.core.journal.append({ type: 'coordination.sent', threadId: from.threadId, version: 1, payload: letter }, () => this.put(letter, 'out', from.threadId, requestId, fingerprint));
     this.core.threads.runner.noteMail(from.threadId, letter.createdAt);
+    // The thread's turns now report back to the agent that wrote to it.
+    if (resident) this.core.workforce.projects.follow(resident.id, to.threadId);
     this.changed(from.threadId);
     if (to.coreId === from.coreId) {
       try { this.receive(letter); } catch (error) { this.update(letter, 'rejected', messageOf(error)); }
@@ -485,12 +487,12 @@ export class Coordination {
     text(letter.id, 'letter.id', 100);
     address(letter.to, 'letter.to');
     if (letter.to.coreId !== this.self('').coreId) throw refused('message belongs to another core');
-    // Only this core marks a letter as the steward's or a notice, and only while the grant holds. A remote origin is never believed.
-    const { asSteward, toSteward } = this.core.stewards.between(!peer, letter.from.threadId, letter.to.threadId);
-    if (!peer && letter.origin === 'steward' && !asSteward) throw refused('the steward grant no longer covers this thread');
-    const target = this.contact(letter.to.threadId, asSteward || toSteward);
+    // Only this core marks a letter as a persistent agent's, and only while the project is entrusted to it. A remote origin is never believed.
+    const resident = !peer && this.core.workforce.projects.over(letter.from.threadId, letter.to.threadId) !== null;
+    if (!peer && letter.origin === 'resident' && !resident) throw refused('the project is no longer entrusted to this agent');
+    const target = this.contact(letter.to.threadId, resident);
     const config = this.config(target.threadId);
-    const from = peer ? this.checkContact(letter.from, peer) : this.contact(letter.from.threadId, asSteward || toSteward);
+    const from = peer ? this.checkContact(letter.from, peer) : this.contact(letter.from.threadId, resident);
     if (peer && !config.remote) throw refused('recipient has not enabled cross-machine coordination');
     for (const row of this.rows('id = ?', letter.id)) {
       const known = JSON.parse(row.data) as AgentLetter;
@@ -501,8 +503,8 @@ export class Coordination {
       if (!same(existing.from, from) || !same(existing.to, target) || existing.text !== letter.text || existing.replyTo !== letter.replyTo) throw refused('message id already used for different content');
       return existing;
     }
-    if (!Number.isSafeInteger(letter.createdAt) || !Number.isSafeInteger(letter.expiresAt) || letter.createdAt > Date.now() + 60_000 || letter.expiresAt <= Date.now() || letter.expiresAt > letter.createdAt + (asSteward || toSteward ? STEWARD_LETTER_TTL_MS : LETTER_TTL_MS)) throw refused('message expired or timestamps invalid');
-    const origin = asSteward ? 'steward' as const : toSteward && letter.origin === 'notice' ? 'notice' as const : undefined;
+    if (!Number.isSafeInteger(letter.createdAt) || !Number.isSafeInteger(letter.expiresAt) || letter.createdAt > Date.now() + 60_000 || letter.expiresAt <= Date.now() || letter.expiresAt > letter.createdAt + (resident ? RESIDENT_LETTER_TTL_MS : LETTER_TTL_MS)) throw refused('message expired or timestamps invalid');
+    const origin = resident ? 'resident' as const : undefined;
     const accepted: AgentLetter = { ...(origin ? { origin } : {}), id: letter.id, from, to: this.self(target.threadId), toTitle: target.title, toProject: target.project, toMachine: target.machine, text: text(letter.text, 'letter.text'), replyTo: letter.replyTo === null ? null : text(letter.replyTo, 'letter.replyTo', 100), createdAt: Date.now(), expiresAt: letter.expiresAt, status: 'received', error: null };
     this.core.journal.append({ type: 'coordination.received', threadId: target.threadId, version: 1, payload: accepted }, () => this.put(accepted, 'in', target.threadId));
     this.core.threads.runner.noteMail(target.threadId, accepted.createdAt);
@@ -528,16 +530,10 @@ export class Coordination {
   }
   private changed(threadId: string): void { this.core.bus.emit('collaboration.changed', { threadId }); }
 
-  /** A notice the core sends a steward: a letter from one of its threads, received like any other. `key` makes it land once. */
-  notice(stewardId: string, fromThreadId: string, body: string, key: string): AgentLetter | null {
-    const id = createHash('sha256').update(key).digest('hex').slice(0, 32), createdAt = Date.now();
-    return this.closed ? null : this.find(id, 'in') ?? this.receive({ origin: 'notice', id, from: this.contact(fromThreadId, true), to: this.self(stewardId), toTitle: '',
-      text: body, replyTo: null, createdAt, expiresAt: createdAt + STEWARD_LETTER_TTL_MS, status: 'queued', error: null });
-  }
-  /** A revoked steward's undelivered letters and notices go nowhere. */
-  stewardRevoked(stewardId: string): void {
-    const pending = this.rows("status IN ('queued', 'received') AND json_extract(data, '$.origin') IN ('steward', 'notice')").map(row => JSON.parse(row.data) as AgentLetter);
-    for (const letter of pending.filter(l => l.from.threadId === stewardId || l.to.threadId === stewardId)) this.update(letter, 'rejected', 'Steward grant revoked');
+  /** Letters an agent wrote to threads it no longer looks after go nowhere. */
+  residentRevoked(agentThreadId: string): void {
+    const pending = this.rows("status IN ('queued', 'received') AND json_extract(data, '$.origin') = 'resident'").map(row => JSON.parse(row.data) as AgentLetter);
+    for (const letter of pending.filter(l => l.from.threadId === agentThreadId && this.core.workforce.projects.over(agentThreadId, l.to.threadId) === null)) this.update(letter, 'rejected', 'The project is no longer entrusted to this agent');
   }
 
   instructions(threadId: string): string {
@@ -547,7 +543,7 @@ export class Coordination {
 
   /** Hook delivery: one batch at a provider's next safe tool boundary. */
   take(threadId: string, turnId: string): string | null {
-    // Off and paused hold ordinary letters through mayReceive; a steward's still pass.
+    // Off and paused hold ordinary letters through mayReceive; a persistent agent's still pass.
     if (this.delivering.has(threadId)) return null;
     const letters = this.inbox(threadId);
     if (!letters.length) return null;
@@ -569,8 +565,8 @@ export class Coordination {
   private mayReceive(letter: AgentLetter): boolean {
     const thread = this.core.journal.getThread(letter.to.threadId);
     if (!thread || thread.archived) return false;
-    const stewarded = this.core.stewards.mayReceive(letter, letter.from.coreId === this.self('').coreId, this.config(letter.to.threadId).paused);
-    if (stewarded !== null) return stewarded;
+    const resident = this.core.workforce.projects.mayReceive(letter, letter.from.coreId === this.self('').coreId);
+    if (resident !== null) return resident;
     const recipient = this.config(letter.to.threadId);
     if (recipient.mode === 'off' || recipient.paused) return false;
     if (letter.from.coreId !== this.self('').coreId) return recipient.remote && this.trusted().some(peer => peer.coreId === letter.from.coreId);

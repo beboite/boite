@@ -438,7 +438,8 @@ export class Workspace {
     // Read back from the list: the name the core reports is written through the
     // reactive entry, or a card already drawn under the address keeps showing it.
     const machine = existing ?? this.machines.find((m) => m.store === target)!;
-    const connecting = target.connectEndpoint({ ...endpoint, url: id });
+    // The primary pairing must survive reload before draft hydration finishes.
+    const connecting = target.connectEndpoint({ ...endpoint, url: id }, target === store);
     const client = target.client;
     await connecting;
     // A later add replaced this attempt's client: the outcome is that one's to report.

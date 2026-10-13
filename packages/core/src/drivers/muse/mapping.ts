@@ -11,7 +11,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { messageOf, unavailable } from '../../errors.ts';
 import { profileFor, resolveExecutable } from '../../providers/resolve.ts';
-import type { TurnContext } from '../types.ts';
+import type { SessionContext } from '../types.ts';
 import type {
   ApprovalChoice,
   MuseAnswer,
@@ -64,14 +64,14 @@ export function museExecutable(provider: ProviderDescriptor): string {
 }
 
 /** The model this turn asks for, or null for the agent's own. */
-export function modelOf(ctx: TurnContext): string | null {
+export function modelOf(ctx: SessionContext): string | null {
   const model = ctx.thread.model;
   if (model === null || model === AGENT_OWN_MODEL) return null;
   return model;
 }
 
 /** The thread's effort when it is one `ReasoningEffort` names, else the host's own. */
-export function effortOf(ctx: TurnContext): string | null {
+export function effortOf(ctx: SessionContext): string | null {
   const effort = ctx.thread.effort;
   if (effort === null) return null;
   return (EFFORTS as readonly string[]).includes(effort) ? effort : null;
@@ -242,7 +242,7 @@ export function addUsage(left: Usage | null, right: Usage): Usage {
  * the account and the host's sandbox flags. The model, the effort and the
  * approval mode are not in here, they are sent on the running host.
  */
-export function sessionKey(ctx: TurnContext): string {
+export function sessionKey(ctx: SessionContext): string {
   return JSON.stringify({
     cwd: ctx.thread.cwd,
     flags: MODE_POSTURE[ctx.thread.permissionMode].flags,

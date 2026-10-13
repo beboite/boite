@@ -17,7 +17,6 @@ import {
   type Account,
   type BackgroundTask,
   type AgentLetter,
-  type StewardGrant,
   type BrainStatus,
   type CoordinationConfig,
   type CoordinationPeer,
@@ -59,6 +58,7 @@ import {
 } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { FakeAgents } from '../fake-agents';
+import { settleAgentSettings } from './agent-settings';
 import type { FakeFinishedTurn } from '../fake-usage';
 import { activityMethods, finishActivityTurn } from './activity';
 import { FakeBus } from './bus';
@@ -76,8 +76,12 @@ import { initialServerUpdate } from './server-update';
 import { observeLog } from './logs';
 import type { FakeWorktree } from './worktrees';
 
-/** One handler per contract method; plugins, agents and workflows answer from their own classes. */
-export type FakeMethods = { [M in Exclude<RpcMethodName, `plugins.${string}` | `agents.${string}` | `workflows.${string}`>]: (params: RpcParams<M>) => Promise<RpcResult<M>> };
+/**
+ * One handler per contract method; plugins, agents and workflows answer from
+ * their own classes. `resident.*` is called only by a persistent agent's own
+ * `boite` command, never by the UI: the fake core answers it as unknown.
+ */
+export type FakeMethods = { [M in Exclude<RpcMethodName, `plugins.${string}` | `agents.${string}` | `workflows.${string}` | `resident.${string}`>]: (params: RpcParams<M>) => Promise<RpcResult<M>> };
 
 export interface FakeClientOptions {
   /** Milliseconds between two streamed chunks. Tests pass 0. */
@@ -97,10 +101,15 @@ export interface FakeClientOptions {
   uninstalled?: boolean;
   /** Adds a deterministic active team for visual checks on `?fake=1&team=1`. */
   delegationDemo?: boolean;
-  /** A steward thread with a letter it sent, a notice it received and a thread its agent started, on `?fake=1&steward=1`. */
-  stewardDemo?: boolean;
+  /** An agent with an entrusted project, a picture, a memory pass and a notice, on `?fake=1&agents=1`. */
+  agentsDemo?: boolean;
   /** Who this client is. `'session'` makes it a paired phone, refused like one. */
   principal?: Principal;
+  /**
+   * Methods this core answers `unknown method` to, like a machine on an older
+   * Boite; `?fake=1&missing=diagnostics.summary,diagnostics.export` sets them.
+   */
+  missing?: readonly string[];
   /**
    * A round trip, in milliseconds, each call waits half of on the way out and
    * half on the way back, like a remote machine; `?fake=1&rtt=150` sets it.
@@ -140,6 +149,8 @@ export class FakeContext {
   serverUpdate: ServerUpdateStatus = initialServerUpdate();
   readonly bus: FakeBus;
   readonly agents: FakeAgents;
+  /** A settle of the agent setting cards is queued after the current change. */
+  private settlingAgentCards = false;
   readonly plugins: FakePlugins;
   readonly workflows: FakeWorkflows;
   /** How far in the past the demo seeds its run, so its steps show real durations. */
@@ -178,8 +189,6 @@ export class FakeContext {
   readonly delegationRequests = new Map<string, { fingerprint: string; threadId: ThreadId }>();
   readonly delegationSendRequests = new Map<string, { fingerprint: string; letter: AgentLetter }>();
   readonly letters = new Map<ThreadId, AgentLetter[]>();
-  /** Steward grants by steward thread (`stewards.ts`). */
-  readonly stewards = new Map<ThreadId, StewardGrant>();
   readonly peers = new Map<string, CoordinationPeer>();
   readonly groupReads = new Map<string, { groupId: string; epoch: number }>();
   /** The group this fake core is in, shared by reference with the other fake cores of it. */
@@ -260,7 +269,13 @@ export class FakeContext {
   constructor(options: FakeClientOptions = {}) {
     this.quotaExtras = options.quotaExtras ?? (typeof location !== 'undefined' && new URLSearchParams(location.search).get('quotaExtras') === '1');
     this.bus = new FakeBus(options.principal ?? 'owner');
-    this.agents = new FakeAgents(revision => this.emit('agents.changed', { revision }), {
+    this.agents = new FakeAgents(revision => {
+      this.emit('agents.changed', { revision });
+      // As the core: a change to any agent may answer a card, settled once per burst after it commits.
+      if (this.settlingAgentCards) return;
+      this.settlingAgentCards = true;
+      queueMicrotask(() => { this.settlingAgentCards = false; settleAgentSettings(this); });
+    }, {
       create: (agent, sessionId, work) => createAgentSession(this, agent, sessionId, work),
       start: (threadId, prompt, agent) => { Object.assign(this.thread(threadId), agent.selection); return this.startTurn(threadId, prompt); },
       stop: threadId => { void this.stopTurn(threadId); },
@@ -270,6 +285,8 @@ export class FakeContext {
         const methods = activityMethods(this);
         void (objective === null ? methods['threads.activity.control']({ threadId, kind: 'goal', action: 'remove' }) : methods['threads.activity.set']({ threadId, goal: { objective } })).catch(() => {});
       },
+      // A project's folder holds files: a brain root refuses it.
+      occupied: path => this.projects.some(p => p.path.replace(/[\\/]+$/, '') === path),
     });
     this.plugins = new FakePlugins({
       emit: (event, payload) => this.emit(event, payload),
@@ -323,7 +340,7 @@ export class FakeContext {
     this.core = {
       version: '2.0.0-beta.1',
       protocolVersion: PROTOCOL_VERSION,
-      features: { threadSnapshots: true, chunkedAnswers: true, readingPages: true, deferredToolParts: true, deviceKeys: true },
+      features: { draftPreparation: true, attachmentUploads: true, threadSnapshots: true, chunkedAnswers: true, readingPages: true, deferredToolParts: true, deviceKeys: true },
       os: 'windows',
       channel: 'stable',
       pid: 4242,

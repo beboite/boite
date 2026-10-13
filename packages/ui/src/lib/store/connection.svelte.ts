@@ -107,10 +107,10 @@ export class Connection {
     await this.ctx.threads.unsubscribe();
   }
 
-  async connectEndpoint(endpoint: Endpoint): Promise<void> {
+  async connectEndpoint(endpoint: Endpoint, rememberActive = false): Promise<void> {
     const s = this.ctx.store;
     s.closeDeviceInvite();
-    this.attachEndpoint(endpoint, false);
+    this.attachEndpoint(endpoint, rememberActive);
     const client = this.ctx.client;
     let timedOut = false;
     // Only a handshake that never finished is given up on. Once the machine
@@ -152,15 +152,17 @@ export class Connection {
         // `&long=1` adds the four-hundred-message thread the windowed list is
         // looked at on, `&heavy=1` the forty messages and 11.5 MiB of tool calls
         // a long agent session leaves, `&principal=session` answers as a paired
-        // phone, so the screens a device is refused can be walked without pairing one.
+        // phone, so the screens a device is refused can be walked without pairing one,
+        // and `&missing=<method>,...` answers those methods like an older machine.
         s.attach(
           new FakeClient({
             long: params.get('long') === '1',
             heavy: params.get('heavy') === '1',
             delegationDemo: params.get('team') === '1',
-            stewardDemo: params.get('steward') === '1',
+            agentsDemo: params.get('agents') === '1',
             uninstalled: params.get('uninstalled') === '1',
-            ...(params.get('principal') === 'session' ? { principal: 'session' as const } : {})
+            ...(params.get('principal') === 'session' ? { principal: 'session' as const } : {}),
+            ...(params.get('missing') ? { missing: params.get('missing')!.split(',') } : {})
           })
         );
       } else {
@@ -603,8 +605,6 @@ export class Connection {
       // Beside the lists, not among them: the machines of the group are connected once it answers.
       void s.loadGroup();
       void s.refreshMemory();
-      // Grants already read may have changed while the machine was away; unread ones wait for the settings.
-      if (s.stewards !== null) void s.loadStewards();
       if (open && reopened && s.openThread?.id === open.id) {
         await this.ctx.delegation.refreshDelegated(client);
         if (!current() || s.openThread?.id !== open.id) return;

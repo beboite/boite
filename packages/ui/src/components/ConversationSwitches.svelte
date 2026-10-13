@@ -21,7 +21,8 @@
 </script>
 
 {#each options as option (option.id)}
-  <label for="{uid}-{option.id}" class="grouping-row" class:mobile>
+  <!-- On a desktop the rows are the settings page's own switch rows, the same face as the card's others. -->
+  <label for="{uid}-{option.id}" class={mobile ? 'grouping-row mobile' : 'switch-row'}>
     {#if mobile}<option.icon size={20} />{/if}
     <span class="text ui-label-box">
       <span class="ui-label" id="{uid}-{option.id}-name">{option.label}</span><InfoTip topic={option.label} text={option.hint} />
@@ -32,9 +33,11 @@
 {/each}
 
 <style>
-  .grouping-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 42px; padding: 10px 0; }
-  .text { flex: 1; min-width: 0; font-size: var(--text-sm); }
-  .mobile { min-height: var(--touch-target); padding: 13px 14px; border-bottom: 1px solid var(--color-border); }
+  .grouping-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .grouping-row .text { flex: 1; min-width: 0; font-size: var(--text-sm); }
+  /* The phone's settings rows (MobileSettings.svelte): the same height, padding and type as the links beside them. */
+  .mobile { min-height: 56px; padding: 12px 16px; border-bottom: 1px solid var(--color-border); }
+  .mobile .text { font-size: var(--text-base); font-weight: 500; color: var(--color-foreground); }
   .mobile:last-child { border-bottom: 0; }
   .mobile :global(svg) { flex: none; color: var(--color-muted-foreground); }
   input { flex: none; }

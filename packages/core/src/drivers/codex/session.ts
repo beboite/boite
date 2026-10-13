@@ -1,5 +1,5 @@
 import { logMessageOf, withLogDiagnostic } from '../../log-errors.ts';
-import type { HookOutcome, QuestionAnswer } from '@boite/contracts';
+import type { HookOutcome, ModelInfo, QuestionAnswer } from '@boite/contracts';
 import pkg from '../../../package.json';
 import { messageOf, unavailable } from '../../errors.ts';
 import { tildePath } from '../../paths.ts';
@@ -7,7 +7,8 @@ import { openAiCacheLife } from '../../prompt-cache.ts';
 import type { SpawnedChild } from '../../procs.ts';
 import { profileFor, resolveExecutable } from '../../providers/resolve.ts';
 import { subscriptionProxyCodexArgs } from '../../subscription-proxy.ts';
-import type { LiveTurnSettings, QuestionAsk, SessionContext, TurnContext } from '../types.ts';
+import type { LiveTurnSettings, ProbeContext, QuestionAsk, SessionContext, TurnContext } from '../types.ts';
+import { preparedModels } from './models.ts';
 import { exitWithin } from '../exit.ts';
 import {
   addCounts,
@@ -129,10 +130,17 @@ export class CodexSession {
     if (!viewed && !this.busy() && !this.ended) this.armIdle();
   }
 
-  async prepare(ctx: SessionContext): Promise<void> {
+  async prepare(ctx: SessionContext, forTurn = false): Promise<void> {
+    this.retention.prepare(forTurn);
     try { await this.start(ctx); }
     catch (error) { this.drop(); throw error; }
     finally { ctx.finishStartup?.(); }
+  }
+
+  /** Read-only account discovery on a ready host in the explicitly selected workspace. */
+  async catalog(ctx: ProbeContext): Promise<ModelInfo[] | null> {
+    if (!this.threadId || this.ended || this.closing || this.initializing || this.busy()) return null;
+    return preparedModels(ctx, this.opener, this.rpc);
   }
 
   busy(): boolean {
@@ -140,6 +148,7 @@ export class CodexSession {
   }
 
   attach(turn: CodexTurn, warmMs: number): void {
+    this.retention.beginTurn();
     this.warmMs = warmMs;
     this.running += 1;
     this.clearIdle();

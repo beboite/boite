@@ -2,7 +2,8 @@
 import { previewPrompt, RpcErrorCode, threadActive, type AgentLetter, type Attachment, type Message, type MessagePart, type PreviewReference, type Thread, type ThreadId, type Turn, type TurnInFlightData, type Usage } from '@boite/contracts';
 import { decodedBytes } from '../attachments';
 import { RpcFailure } from '../client';
-import { DIFF_NEW, DIFF_OLD, DIFF_PATH, DOC_TEXT, DOC_TITLE, IMAGE_BASE64, ASYNC_QUESTION_OPTIONS, ASYNC_QUESTION_TEXT, SETTING_MARKERS, SPAWN_MARKER } from './conversation';
+import { DIFF_NEW, DIFF_OLD, DIFF_PATH, DOC_TEXT, DOC_TITLE, IMAGE_BASE64, ASYNC_QUESTION_OPTIONS, ASYNC_QUESTION_TEXT, SETTING_MARKERS, SPAWN_MARKER, AGENT_SETTING_MARKER, AGENT_SETTING_REASON } from './conversation';
+import { requestAgentSetting } from './agent-settings';
 import { FAKE_CONTEXT_FLOOR, FAKE_CONTEXT_PER_TURN, FAKE_CONTEXT_WINDOW } from './providers';
 import { addUsage, chunkText, ECHO_COMMANDS, emptyUsage, SHOUT, toSummary } from './shared';
 import { pauseActivity } from './activity';
@@ -265,6 +266,17 @@ const TURN_MARKERS: TurnMarker[] = [
       try { requestSetting(ctx, thread, turn, { threadId: thread.id, ...params }); } catch { /* already set, or already asked */ }
     },
   })),
+  { matches: prompt => prompt.includes(AGENT_SETTING_MARKER), run: (ctx, thread, turn) => {
+    const agent = ctx.agents.liveProfiles()[0];
+    const held = agent?.projectIds ?? [];
+    const project = ctx.projects.find(p => p.id === thread.projectId && p.kind !== 'drafts' && !held.includes(p.id))
+      ?? ctx.projects.find(p => p.kind !== 'drafts' && !held.includes(p.id));
+    if (agent && project) {
+      try {
+        requestAgentSetting(ctx, thread, turn, { threadId: thread.id, agent: agent.id, key: 'projects', value: { add: [project.id] }, reason: AGENT_SETTING_REASON.replace('{name}', agent.name) });
+      } catch { /* already entrusted, or already asked */ }
+    }
+  } },
   { matches: prompt => prompt.includes('[background]'), run: (ctx, thread, _turn, message) => backgroundShell(ctx, thread, message) },
   { matches: prompt => prompt.includes('[monitor]'), run: (ctx, thread, _turn, message) => backgroundShell(ctx, thread, message, 'monitor') },
   { matches: prompt => prompt.includes('[tool-stream]'), run: (ctx, thread, _turn, message) => streamToolInput(ctx, thread, message) },

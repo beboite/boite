@@ -59,7 +59,8 @@
   let shownProviderId = $state<string | null>(null);
   let favoritesOpen = $state(false);
   let pickPending = $state(false);
-  const favorites = $derived(store.favorites.filter((f) => store.accountOf(f.accountId)?.providerId === f.providerId && store.providerOn(f.providerId)));
+  /** Shared by every machine; each is resolved to an account of this one (`lib/model-favorites.svelte.ts`). */
+  const favorites = $derived(store.favorites);
   const favoriteSet = $derived.by(() => favoriteIds(store.favorites, shown?.id, shownAccountId));
   function favorite(model: ModelInfo): boolean {
     return favoriteSet.has(model.id);
@@ -376,7 +377,11 @@
               <span class="badge ui-label-box"><span class="ui-label">{strings.composer.newBadge}</span></span>
             {/if}
           </button>
-          <button type="button" class="favorite-button" data-testid="model-favorite" data-favorite-model={model.id} aria-label={favorite(model) ? strings.composer.unfavorite : strings.composer.favorite} aria-pressed={favorite(model)} onclick={() => { if (shown && shownAccountId) store.toggleFavorite(shown.id, shownAccountId, model); }}><Star size={14} fill={favorite(model) ? 'currentColor' : 'none'} /></button>
+          {#if store.owner}
+            <button type="button" class="favorite-button" data-testid="model-favorite" data-favorite-model={model.id} aria-label={favorite(model) ? strings.composer.unfavorite : strings.composer.favorite} aria-pressed={favorite(model)} onclick={() => { if (shown && shownAccountId) store.toggleFavorite(shown.id, shownAccountId, model); }}><Star size={14} fill={favorite(model) ? 'currentColor' : 'none'} /></button>
+          {:else if favorite(model)}
+            <span class="favorite-button favorite-mark" aria-hidden="true"><Star size={14} fill="currentColor" /></span>
+          {/if}
           </div>
         {/snippet}
 
@@ -388,7 +393,11 @@
               <button type="button" class="row model favorite-row" role="menuitem" data-row data-testid="favorite-model" disabled={disabled || pickPending || !store.providerOf(entry.providerId)?.available} onclick={() => void pickFavorite(entry)}>
                 <ProviderLogo providerId={entry.providerId} size={16} /><span class="name">{store.modelsOf(entry.providerId, entry.accountId).find(m => m.id === entry.model.id)?.name ?? entry.model.name}{#if favorites.some(other => other.providerId === entry.providerId && other.model.id === entry.model.id && other.accountId !== entry.accountId)}<span class="account-label">{store.accountOf(entry.accountId)?.label}</span>{/if}</span>
               </button>
-              <button type="button" class="favorite-button" aria-label={strings.composer.unfavorite} onclick={() => store.toggleFavorite(entry.providerId, entry.accountId, entry.model)}><Star size={14} fill="currentColor" /></button>
+              {#if store.owner}
+                <button type="button" class="favorite-button" aria-label={strings.composer.unfavorite} onclick={() => store.toggleFavorite(entry.providerId, entry.accountId, entry.model)}><Star size={14} fill="currentColor" /></button>
+              {:else}
+                <span class="favorite-button favorite-mark" aria-hidden="true"><Star size={14} fill="currentColor" /></span>
+              {/if}
             </div>
           {:else}<p class="none subtle" data-testid="favorites-empty">{strings.composer.favoritesEmpty}</p>{/each}
           </div>
@@ -493,7 +502,11 @@
                     <span class="mark"></span>
                     <span class="name ui-label">{model.name}</span>
                   </button>
-                  <button type="button" class="favorite-button" tabindex={legacyOpen ? 0 : -1} aria-label={favorite(model) ? strings.composer.unfavorite : strings.composer.favorite} aria-pressed={favorite(model)} onclick={() => { if (shown && shownAccountId) store.toggleFavorite(shown.id, shownAccountId, model); }}><Star size={14} fill={favorite(model) ? 'currentColor' : 'none'} /></button>
+                  {#if store.owner}
+                    <button type="button" class="favorite-button" tabindex={legacyOpen ? 0 : -1} aria-label={favorite(model) ? strings.composer.unfavorite : strings.composer.favorite} aria-pressed={favorite(model)} onclick={() => { if (shown && shownAccountId) store.toggleFavorite(shown.id, shownAccountId, model); }}><Star size={14} fill={favorite(model) ? 'currentColor' : 'none'} /></button>
+                  {:else if favorite(model)}
+                    <span class="favorite-button favorite-mark" aria-hidden="true"><Star size={14} fill="currentColor" /></span>
+                  {/if}
                   </div>
                 {/each}
       </div>
@@ -506,6 +519,8 @@
   .model-entry .model { flex: 1; min-width: 0; }
   .favorite-button { width: var(--control-sm); height: var(--control-sm); padding: 0; flex: none; color: var(--color-muted-foreground); background: transparent; border: none; }
   .favorite-button[aria-pressed='true'] { color: var(--color-foreground); }
+  /** A paired device reads the owner's stars without changing them. */
+  .favorite-mark { display: inline-flex; align-items: center; justify-content: center; color: var(--color-foreground); }
   .account-label { margin-left: 8px; font-size: var(--text-xs); color: var(--color-muted-foreground); }
   .row.favorite-row { min-height: 42px; }
   .popover.legacy-menu { width: min(320px, calc(100vw - 24px)); height: auto; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); z-index: 41; }

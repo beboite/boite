@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, vi } from 'vitest';
 import { test } from '../test/fake-client';
-import { PROTOCOL_VERSION, RpcErrorCode, type Thread, type ThreadStatus } from '@boite/contracts';
+import { INITIAL_PAGE_BYTES, PROTOCOL_VERSION, RpcErrorCode, type Thread, type ThreadStatus } from '@boite/contracts';
 import { RpcFailure, WsClient, droppedFailure, type SocketLike } from './client';
 import { FakeClient } from './fake-client';
 import { setNotificationSender, type Toast } from './notify';
@@ -791,7 +791,8 @@ test('a reconnect catches up the agent transcript and the team statuses the gap 
   await waitFor(() => ((store.delegationThread?.messages.at(-1)?.parts[0] as { text?: string } | undefined)?.text === full ? true : undefined));
   expect(store.delegationSelectedAgentId).toBe('t-team-running');
   expect(store.delegationThread?.messages.map((message) => message.id)).toEqual(['m-t-team-running-1', 'm-t-team-running-2']);
-  expect(called).toHaveBeenCalledWith('threads.get', { threadId: 't-team-running', after: 'm-t-team-running-1' });
+  // Light like the thread's own pages: the transcript draws a call's name and status, never its output.
+  expect(called).toHaveBeenCalledWith('threads.get', expect.objectContaining({ threadId: 't-team-running', after: 'm-t-team-running-1', maxBytes: INITIAL_PAGE_BYTES, compactTools: true }));
 });
 
 test('starting a draft cancels a pending child subscription even without an open subscription', async ({ createStore }) => {
@@ -1117,8 +1118,8 @@ test.for(['input', 'inputText', 'output', 'documents'])('reading cache excludes 
   await store.open('t-scheduler');
   await store.open('t-bench');
   const cached = store.openThread!.messages.find(message => message.id === 'cached-only');
-  // What a page would defer stays a preview in the cache; a streaming input has nothing to fetch back.
-  if (field === 'output') expect(cached?.parts[0]).toMatchObject({ outputDeferred: true, output: large.slice(0, 1024) });
+  // What a page would defer stays deferred in the cache, a successful output with no preview; a streaming input has nothing to fetch back.
+  if (field === 'output') expect(cached?.parts[0]).toMatchObject({ outputDeferred: true, output: '' });
   else if (field === 'input') expect(cached?.parts[0]).toMatchObject({ inputDeferred: true, input: { nested: { text: large.slice(0, 1024) } } });
   else if (field === 'documents') expect(cached?.parts[0]).toMatchObject({ documentsDeferred: true, documents: [{ kind: 'markdown', text: '' }] });
   else expect(cached).toBeUndefined();
@@ -1220,6 +1221,51 @@ describe('Store', () => {
       await client.settled();
       expect(sent).toHaveLength(1);
     } finally {
+      focused.mockRestore();
+      setNotificationSender(null);
+    }
+  });
+
+  test('an asynchronous question notifies while its conversation is open and focused', async ({ store, client }) => {
+    const sent: Toast[] = [];
+    setNotificationSender(async toast => { sent.push(toast); });
+    const focused = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    try {
+      await store.open('t-scheduler');
+      const text = 'Subagents are paused. Should I continue myself?';
+      const { questionId } = await client.call('questions.ask', { threadId: 't-scheduler', text, options: ['Continue'] });
+      expect(store.pendingQuestions.some(request => request.id === questionId && request.async)).toBe(true);
+      await vi.waitFor(() => expect(sent).toHaveLength(1));
+      expect(sent[0]).toMatchObject({ threadId: 't-scheduler', body: text });
+      await store.setNotifications(false);
+      await client.call('questions.ask', { threadId: 't-scheduler', text: 'Another question', options: [] });
+      expect(sent).toHaveLength(1);
+    } finally {
+      focused.mockRestore();
+      setNotificationSender(null);
+    }
+  });
+
+  test('a focused asynchronous question uses push alone on a subscribed PWA', async ({ store, client }) => {
+    const sent: Toast[] = [];
+    setNotificationSender(async toast => { sent.push(toast); });
+    const focused = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    const subscription = vi.fn().mockResolvedValue({ endpoint: 'https://web.push.apple.com/test' });
+    vi.stubGlobal('Notification', Object.assign(vi.fn(), { permission: 'granted' }));
+    vi.stubGlobal('navigator', { serviceWorker: { getRegistration: vi.fn().mockResolvedValue({ pushManager: { getSubscription: subscription } }) } });
+    localStorage.setItem('boite.web-push', 'on');
+    try {
+      store.endpointUrl = location.origin;
+      await store.open('t-scheduler');
+      const { questionId } = await client.call('questions.ask', { threadId: 't-scheduler', text: 'Continue without subagents?', options: [] });
+      expect(store.pendingQuestions.some(request => request.id === questionId)).toBe(true);
+      await vi.waitFor(() => expect(subscription).toHaveBeenCalledOnce());
+      // Drain the delivery microtasks after the subscription check.
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(sent).toHaveLength(0);
+    } finally {
+      localStorage.removeItem('boite.web-push');
+      vi.unstubAllGlobals();
       focused.mockRestore();
       setNotificationSender(null);
     }

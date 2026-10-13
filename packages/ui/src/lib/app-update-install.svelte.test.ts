@@ -18,10 +18,10 @@ const ready: UpdateSnapshot = {
   supported: true
 };
 
-function setup() {
+function setup(initial: UpdateSnapshot = ready) {
   let publish!: (snapshot: UpdateSnapshot) => void;
   const backend: AppUpdateBackend = {
-    status: vi.fn(async () => ready),
+    status: vi.fn(async () => initial),
     check: vi.fn(async () => ready),
     download: vi.fn(async () => ready),
     install: vi.fn(async () => undefined),
@@ -72,6 +72,22 @@ test('a confirmed update installs only while its ready version and channel are u
   const current = install.request(updater);
   confirm.answer(true);
   await expect(current).resolves.toBe(true);
+  expect(backend.install).toHaveBeenCalledOnce();
+  stop();
+});
+
+test('a release only found downloads after the answer, then installs once verified', async () => {
+  const { backend, updater, stop } = setup({ ...ready, phase: 'available', received: 0, total: null });
+  await updater.settled();
+  const install = new AppUpdateInstall();
+
+  const asked = install.request(updater);
+  flushSync();
+  // Nothing downloads while the question is open.
+  expect(backend.download).not.toHaveBeenCalled();
+  confirm.answer(true);
+  await expect(asked).resolves.toBe(true);
+  expect(backend.download).toHaveBeenCalledOnce();
   expect(backend.install).toHaveBeenCalledOnce();
   stop();
 });

@@ -1,4 +1,4 @@
-import { RpcErrorCode, PREVIEW_REFERENCES_PER_TURN, previewReferencesError, threadActive, type PreviewReference } from '@boite/contracts';
+import { RpcErrorCode, PREVIEW_REFERENCES_PER_TURN, previewReferencesError, threadActive, type PreviewReference, type RpcParams } from '@boite/contracts';
 import { untrack } from 'svelte';
 import type { Attachment, Message, MessageId, MessagePart, ThreadId, ThreadSummary, Turn, TurnInFlightData } from '@boite/contracts';
 import { drainQueue, SENDING_PREFIX, sentPrompt } from '../composer-queue';
@@ -355,6 +355,13 @@ export class Composer {
   }
 
   private async submitOwned(prompt: string, choice: Choice, attachments: Attachment[], previewReferences: PreviewReference[]): Promise<{ navigation: number | null } | null> {
+    const draft = this.ctx.store.draft;
+    const unpin = this.ctx.draftStartup.uploads.pin(attachments);
+    try { return await this.submitCurrent(prompt, choice, attachments, previewReferences); }
+    finally { unpin(); this.ctx.draftStartup.finish(draft); }
+  }
+
+  private async submitCurrent(prompt: string, choice: Choice, attachments: Attachment[], previewReferences: PreviewReference[]): Promise<{ navigation: number | null } | null> {
     const s = this.ctx.store;
     const client = this.ctx.client;
     const clientGeneration = this.ctx.clientGeneration;
@@ -362,11 +369,13 @@ export class Composer {
     const owner = () => this.ctx.client === client && this.ctx.clientGeneration === clientGeneration;
     const current = () => owner() && s.navigationGeneration === navigation;
     const input = this.submissionInput(client, prompt, choice, attachments, previewReferences);
-    if (!input) return null;
+    if (!input || !client) return null;
     choice = input.choice;
     attachments = input.attachments;
     previewReferences = input.previewReferences;
-    if (s.draft && !s.openThread) {
+    const reservation = s.draft && !s.openThread ? this.ctx.draftStartup.take(s.draft, choice) : null;
+    if (reservation) choice = reservation.choice;
+    if (s.draft && !s.openThread && !reservation) {
       const draft = s.draft;
       const selection = s.draftChoice;
       const prepared = await s.prepareDraftChoice(choice);
@@ -379,15 +388,27 @@ export class Composer {
     }
     const draft = s.draft;
     if (!draft) return null;
-    const projectId = draft.projectId ?? (await this.ctx.projects.ensureDrafts());
+    const projectId = reservation?.projectId ?? draft.projectId ?? (await this.ctx.projects.ensureDrafts());
     if (projectId === null || !current() || s.draft !== draft) return null;
     const composer = this.composerStates[DRAFT_STASH_KEY];
-    const created = await this.createDraftThread(projectId, prompt, choice, draft);
-    if (!created || !owner()) return null;
+    const overlap = s.core?.features?.draftPreparation === true;
+    const created = await this.createDraftThread(projectId, prompt, choice, draft, {
+      ...(reservation ? { preparationId: reservation.preparationId } : {}),
+      ...(overlap ? { subscribe: true } : {})
+    });
+    if (!created || !owner()) {
+      if (reservation) void client.call('drafts.release', { preparationId: reservation.preparationId }).catch(() => undefined);
+      return null;
+    }
     const originalDraft = this.adoptCreated(created, draft, composer, current);
-    const followupNavigation = originalDraft ? await this.openCreated(created.id, owner) : null;
+    const followupNavigation = originalDraft ? await this.openCreated(created.id, owner, overlap) : null;
     if (!owner()) return null;
-    return await s.send(prompt, created.id, attachments, previewReferences) ? { navigation: followupNavigation } : null;
+    try { return await s.send(prompt, created.id, attachments, previewReferences) ? { navigation: followupNavigation } : null; }
+    finally {
+      if (overlap && !originalDraft && owner() && this.ctx.threads.subscribedThreadId !== created.id && s.delegationSelectedAgentId !== created.id) {
+        void client.call('threads.unsubscribe', { threadId: created.id }).catch(() => undefined);
+      }
+    }
   }
 
   /** Validate and copy user input before asynchronous preparation can change its source. */
@@ -410,9 +431,10 @@ export class Composer {
     return current() && s.draft === draft && s.draftChoice === selection && !s.openThread;
   }
 
-  private createDraftThread(projectId: string, prompt: string, choice: Choice, draft: Draft): Promise<ThreadSummary | null> {
+  private createDraftThread(projectId: string, prompt: string, choice: Choice, draft: Draft, preparation: Pick<RpcParams<'threads.create'>, 'preparationId' | 'subscribe'>): Promise<ThreadSummary | null> {
     const s = this.ctx.store;
     return s.createThread({
+      ...preparation,
       projectId,
       providerId: choice.providerId,
       accountId: choice.accountId,
@@ -440,11 +462,12 @@ export class Composer {
     return originalDraft;
   }
 
-  private async openCreated(threadId: string, owner: () => boolean): Promise<number | null> {
+  private async openCreated(threadId: string, owner: () => boolean, overlap: boolean): Promise<number | null> {
     const s = this.ctx.store;
-    const opening = s.open(threadId);
+    const opening = s.open(threadId, true, overlap ? { liveCreation: true } : {});
     const openingGeneration = s.navigationGeneration;
-    await opening;
+    if (!overlap) await opening;
+    else void opening;
     return owner() && s.navigationGeneration === openingGeneration && this.ctx.threads.openThread?.id === threadId ? openingGeneration : null;
   }
 
@@ -547,6 +570,12 @@ export class Composer {
   }
 
   private async start(prompt: string, threadId: string | undefined, attachments: Attachment[], previewReferences: PreviewReference[], request?: OutboxRequest): Promise<Delivery> {
+    const unpin = this.ctx.draftStartup.uploads.pin(attachments);
+    try { return await this.startCurrent(prompt, threadId, attachments, previewReferences, request); }
+    finally { unpin(); }
+  }
+
+  private async startCurrent(prompt: string, threadId: string | undefined, attachments: Attachment[], previewReferences: PreviewReference[], request?: OutboxRequest): Promise<Delivery> {
     const s = this.ctx.store;
     const connection = this.ctx.connection;
     if (attachments.some(unresolvedAssetId)) {
@@ -580,12 +609,24 @@ export class Composer {
       sent = this.rememberPending(threadId, prompt, attachments, previewReferences, request);
       const selectionVersion = sent.selectionVersion;
       const ask = sent;
-      const start = () => client.call('turns.start', { threadId, prompt, clientRequestId: ask.id, expectedSelectionVersion: selectionVersion,
-        ...(attachments.length > 0 ? { attachments } : {}), ...(previewReferences.length > 0 ? { previewReferences } : {}) });
+      const start = async () => {
+        const payload = this.ctx.draftStartup.uploads.payload(attachments);
+        const params = { threadId, prompt, clientRequestId: ask.id, expectedSelectionVersion: selectionVersion,
+          ...(attachments.length > 0 ? payload : {}), ...(previewReferences.length > 0 ? { previewReferences } : {}) };
+        try { return await client.call('turns.start', params); }
+        catch (error) {
+          if (!(error instanceof RpcFailure) || (error.data as { reason?: string } | undefined)?.reason !== 'attachment-upload-expired' ||
+            !payload.attachmentIds || !this.ctx.currentClient(client, clientGeneration)) throw error;
+          this.ctx.draftStartup.uploads.forget(attachments);
+          // The original bytes and request id survive the refused lease.
+          return client.call('turns.start', { ...params, attachments, attachmentIds: undefined });
+        }
+      };
       // A socket lost under the call, or an answer that never came, loses the answer, maybe not the turn:
       // the same request id asks once more, and the core answers with the turn it took.
       const accepted = await this.retryUnanswered(start, client, clientGeneration, threadId, ask, request);
       if (this.ctx.currentClient(client, clientGeneration)) {
+        this.ctx.draftStartup.uploads.forget(attachments);
         if (!request) { this.pendingSends.delete(threadId); this.accepted(threadId, accepted); }
         this.promptFocus = { threadId, turnId: accepted.id, after: null };
       }

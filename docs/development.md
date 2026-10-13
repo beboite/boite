@@ -81,9 +81,16 @@ one per test process with `BOITE_E2E_PREBUILT_UI=1`, or falls back to Vite.
 Both modes expose the fixture workspace through `globalThis.__boiteTest`, so
 tests that only need the Store can use the prebuilt bundle. Close each scenario's
 browsers in `afterEach` to release their rendering resources before the next test.
+Give browser shutdown hooks an explicit 60-second budget: captured-process exit
+can take 30 seconds and profile removal retries for another 15 seconds. Close
+the fixture server in `finally` so a browser cleanup failure still releases it.
 Pages importing `/src/...` call `startDevUi` directly. That server warms their
 reachable modules before browser interactions. Fixture bundles enable the fake
 client separately from the production assets staged in installers.
+
+For native mouse selection, move to the text and await `document.hasFocus()`
+before pressing. A headless page can already have an active element while its
+window is unfocused; the first mouse move activates it asynchronously.
 
 Pairing, token and remote-core query parameters are removed from the address
 bar. The grant is exchanged once; only an authenticated endpoint and the
@@ -584,8 +591,18 @@ Rust updater unit tests use a local HTTP fixture and a signed inert payload;
 they launch no installer. Windows test executables include the Common Controls
 v6 manifest needed by the native dialog dependency.
 `tests/e2e/app-updates.test.ts` checks update states and phone restrictions.
-Development queries `?fake=1&appUpdate=ready`, `downloading` or `error`, with
-`appUpdateChannel` and `appUpdateCurrentChannel`, preview those states.
+Development queries `?fake=1&appUpdate=available`, `ready`, `downloading` or
+`error`, with `appUpdateChannel` and `appUpdateCurrentChannel`, preview those
+states. `tests/e2e/update-everything.test.ts` opens the foot's update card with
+`updates=1&machines=1&appUpdate=available&serverUpdate=available`, checks that
+nothing downloads before the click, Remind me later, Update the app alone, the
+one request per machine, rows landing one at a time, and the card ending on
+Restart or Everything is up to date, and captures desktop and phone. Its fake
+core finishes a server update started that way (waiting, restarting, current)
+in about three seconds; a plain install stays waiting for the cancel test.
+`packages/core/test/updates.test.ts` holds the core side: a registry read after
+an agent's updater, when none of its processes runs, keeps Boite's own
+installation waiting.
 
 `packages/core/test/server-update.test.ts` checks signatures, archive paths,
 wait/cancel, installation and rollback of SQLite and pairing state using an
@@ -646,9 +663,14 @@ the trusted HTTPS origin described in [phone](phone.md).
 ```sh
 bun run bench               # comparison report in bench/results/<date>.md
 bun run bench/idle-rss.ts    # bare Bun and core idle readings at 4.5 s and 75 s
+bun run bench/agent-startup.ts --offline --runs 7 --delay-ms 150 --output /tmp/agent-startup.json
 ```
 
-Both use fresh data. `--fresh-only` selects the first idle reading. Rerun before
+All use fresh data. The agent-startup benchmark requires `--offline`, uses a
+scripted native process and checks cleanup and attachment preservation. Its
+directory and sparse-worktree samples measure synthetic startup, not provider
+inference. See [performance](performance.md#preparing-the-first-prompt).
+`--fresh-only` selects the first idle reading. Rerun before
 quoting a performance figure and include its command and date.
 
 ## Architecture checks

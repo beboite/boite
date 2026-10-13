@@ -347,9 +347,10 @@ export class HarnessUpdates {
   }
 
   /** True while this provider's update is asked for and not done. */
-  updating(providerId: ProviderId): boolean {
-    return this.entries.get(providerId)?.state === 'updating';
-  }
+  updating(providerId: ProviderId): boolean { return this.entries.get(providerId)?.state === 'updating'; }
+
+  /** Any update asked for and not done, its pause included: an idle restart must not land inside one. */
+  get busy(): boolean { return [...this.entries.values()].some((entry) => entry.state === 'updating'); }
 
   /** True while this provider's turns should pause at their next tool boundary. */
   wantsPause(providerId: ProviderId): boolean {

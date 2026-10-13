@@ -52,7 +52,13 @@ beforeEach(async () => {
   [main, remote] = await page.evaluate<[string, string]>('globalThis.__boiteTest.workspace.machines.map(machine => machine.id)');
   await showThreadView(page, 'recent');
 });
-afterAll(async () => { await page?.close(); await server?.close(); });
+afterAll(async () => {
+  try {
+    await page?.close();
+  } finally {
+    await server?.close();
+  }
+}, 60_000);
 
 test('Done is collapsed, can be read and reopened, and keeps the other machine with the same thread id', async () => {
   await page.waitFor(`document.querySelector('${desktopRow(main)}')`);

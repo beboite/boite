@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
-import { INITIAL_MESSAGE_PAGE } from '../../packages/contracts/src/index.ts';
+import { INITIAL_MESSAGE_PAGE, INITIAL_PAGE_BYTES } from '../../packages/contracts/src/index.ts';
 import { connect } from '../../packages/core/src/client.ts';
 import { BrowserPage } from './lib/cdp.ts';
 import { pairingUrlOf, type RunningCore } from './lib/core.ts';
@@ -8,13 +8,13 @@ import { startCoreWithLongThread } from './lib/long-thread.ts';
 import { mobileAction } from './lib/mobile.ts';
 
 const artifacts = process.env.BOITE_OPEN_CAPTURES ?? join(import.meta.dir, '.artifacts');
-/** Slow enough that the bar is on screen for seconds, as on a phone link. */
-const THROTTLE = { offline: false, latency: 150, downloadThroughput: 150 * 1024, uploadThroughput: 64 * 1024 };
+/** Slow enough that the bar is on screen for seconds with a one-screen page, as on a poor phone link. */
+const THROTTLE = { offline: false, latency: 150, downloadThroughput: 24 * 1024, uploadThroughput: 16 * 1024 };
 
 let core: RunningCore;
 let long: string;
 let short: string;
-/** What the first page of the long thread weighs, as the core serializes it. */
+/** What the first page of the long thread weighs, as the core serializes it for the UI's request. */
 let pageBytes = 0;
 
 beforeAll(async () => {
@@ -24,7 +24,10 @@ beforeAll(async () => {
   short = seeded.short;
   const client = await connect(core.url, core.token, { client: { name: 'test', version: '0' }, timeoutMs: 30_000 });
   try {
-    pageBytes = Buffer.byteLength(JSON.stringify(await client.call('threads.get', { threadId: long, limit: INITIAL_MESSAGE_PAGE, compactTools: true, compactFiles: true, compactImages: true })));
+    pageBytes = Buffer.byteLength(JSON.stringify(await client.call('threads.get', { threadId: long, limit: INITIAL_MESSAGE_PAGE, maxBytes: INITIAL_PAGE_BYTES,
+      compactTools: true, compactFiles: true, compactImages: true, compactToolParts: true })));
+    // About one screen: what the bar counts is the page cut to its byte budget, not 40 heavy turns.
+    expect(pageBytes).toBeLessThan(INITIAL_PAGE_BYTES + 32 * 1024);
   } finally {
     client.close();
   }

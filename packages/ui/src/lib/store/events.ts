@@ -33,7 +33,11 @@ export function listen(ctx: StoreContext, client: Client): void {
     ctx.off.push(
       client.onState((state) => {
         if (!current()) return;
-        if (state !== 'ready') ctx.connection.invalidateReads();
+        if (state !== 'ready') {
+          ctx.connection.invalidateReads();
+          ctx.draftStartup.reset();
+          models.probeRequests.clear();
+        }
         s.connection = state;
         ctx.connection.watchLocalCore(client, state);
         if (state === 'ready') {
@@ -106,10 +110,6 @@ export function listen(ctx: StoreContext, client: Client): void {
   });
   on('collaboration.changed', ({ threadId }) => {
     if (s.openThread?.id === threadId) void s.loadCoordination(threadId, false);
-  });
-  // Invalidation only: grants already read are read again, an unread list stays unread.
-  on('stewards.changed', () => {
-    if (s.stewards !== null) void s.loadStewards();
   });
   on('workflows.changed', ({ threadId }) => {
     const open = s.openThread;

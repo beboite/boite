@@ -34,6 +34,8 @@ import { SessionStore } from './sessions.ts';
 import { SettingsStore } from './settings.ts';
 import { eraseIncognitoRoot } from './threads/incognito.ts';
 import { ThreadStore } from './threads.ts';
+import { DraftPreparations } from './threads/draft-preparations.ts';
+import { AttachmentUploads } from './attachment-uploads.ts';
 import { scheduleThreadDeletionRetention } from './threads/deletion-retention.ts';
 import { scheduleDoneRetention } from './threads/done-retention.ts';
 import { scheduleArtifactRetention } from './artifact-retention.ts';
@@ -49,7 +51,6 @@ import { SpeechStore } from './speech.ts';
 import { Telemetry } from './telemetry.ts';
 import { HarnessUpdates } from './providers/updates.ts';
 import { Coordination } from './coordination.ts';
-import { Stewards } from './stewards.ts';
 import { GroupStore, type NetworkSink } from './group.ts';
 import type { RelaySink } from './group/relay.ts';
 import { Delegation } from './delegation.ts';
@@ -143,6 +144,8 @@ export class Core {
   readonly procs: ProcRegistry;
   readonly scheduler: Scheduler;
   readonly threads: ThreadStore;
+  readonly drafts: DraftPreparations;
+  readonly attachmentUploads: AttachmentUploads;
   readonly quotas: QuotaStore;
   readonly plugins: PluginStore;
   readonly sessions: SessionStore;
@@ -164,7 +167,6 @@ export class Core {
   readonly updates: HarnessUpdates;
   readonly serverUpdates: ServerUpdates;
   readonly coordination: Coordination;
-  readonly stewards: Stewards;
   /** The machines this core trusts as one owner's, and what it hands their clients. */
   readonly group: GroupStore;
   readonly delegation: Delegation;
@@ -213,7 +215,7 @@ export class Core {
       // An agent's open tab is not work under way: its browser stays up after the turn and would hold an
       // update back for good. Closing saves each profile's cookies; a browser command in flight is an active request.
       || this.agentRuntime.busy || this.procs.liveThreads().some(scope => scope !== BROWSER_SCOPE)
-      || threads.sideQuestions.busy
+      || threads.sideQuestions.busy || this.updates.busy
       || threads.runner.handles.size > 0 || threads.runner.steering.size > 0
       || threads.deferred.pendingWakes.size > 0 || threads.deferred.deferredAnswers.size > 0 || threads.deferred.consumed.size > 0
       || [...threads.agentState.background.values()].some(tasks => tasks.length > 0)) return 'busy';
@@ -303,6 +305,8 @@ export class Core {
     attachResourceLog(this);
     this.scheduler = new Scheduler(this);
     this.threads = new ThreadStore(this);
+    this.drafts = new DraftPreparations(this);
+    this.attachmentUploads = new AttachmentUploads(this.dataDir);
     this.quotas = new QuotaStore(this);
     this.plugins = new PluginStore(this);
     this.sessions = new SessionStore(this);
@@ -316,7 +320,6 @@ export class Core {
     this.updates = new HarnessUpdates(this);
     this.serverUpdates = new ServerUpdates(this, options.serverUpdates);
     this.coordination = new Coordination(this);
-    this.stewards = new Stewards(this);
     this.group = new GroupStore(this);
     this.group.restore();
     this.delegation = new Delegation(this);
@@ -349,6 +352,10 @@ export class Core {
     const recovered = this.threads.recoverStuckTurns();
     this.threads.cards.restoreAsyncQuestions();
     phase('startup.recovered', `Previous run recovered, ${recovered} unfinished turns`, { stuckTurns: recovered });
+    queueMicrotask(() => {
+      void this.drafts.recover().catch(error => this.log('warn', `draft recovery failed: ${String(error)}`));
+      void this.attachmentUploads.recover().catch(error => this.log('warn', `attachment recovery failed: ${String(error)}`));
+    });
     queueMicrotask(() => this.threads.titles.recover());
     this.agentRuntime = new AgentRuntime(this);
     this.brain.start();
@@ -398,7 +405,7 @@ export class Core {
       version: this.version,
       ...(this.bundleHash ? { bundleHash: this.bundleHash } : {}),
       protocolVersion: PROTOCOL_VERSION,
-      features: { threadSnapshots: true, chunkedAnswers: true, readingPages: true, deferredToolParts: true, deviceKeys: true },
+      features: { threadSnapshots: true, chunkedAnswers: true, readingPages: true, deferredToolParts: true, deviceKeys: true, draftPreparation: true, attachmentUploads: true },
       coreId: this.coordination.card().coreId,
       hostname: hostname(),
       os: currentOs(),
@@ -456,15 +463,17 @@ export class Core {
     this.threads.titles.close();
     this.threads.autoCompact.close();
     await this.agentRuntime.close();
+    this.workforce.close();
     this.#stopping = true;
     await this.#stopDoneRetention();
+    await this.drafts.close().catch(error => this.log('warn', `draft shutdown cleanup failed: ${String(error)}`));
+    await this.attachmentUploads.close().catch(error => this.log('warn', `attachment shutdown cleanup failed: ${String(error)}`));
     await this.brain.close();
     this.updates.close();
     this.providers.close();
     this.serverUpdates.close();
     await this.drain();
     await this.delegation.close();
-    this.stewards.close();
     await this.coordination.close();
     await this.group.close();
     await this.speech.close();

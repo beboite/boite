@@ -1488,6 +1488,8 @@ export type MessagePart =
       async?: boolean;
       /** A settings card: see `QuestionRequest.setting`. */
       setting?: SettingAsk;
+      /** An agent setting card: see `QuestionRequest.agentSetting`. */
+      agentSetting?: AgentSettingAsk;
     }
   /**
    * The agent compacted its context mid-turn: what it held before, what is
@@ -1516,7 +1518,7 @@ export interface Message {
 export const MESSAGE_PAGE = 120;
 /** The first paint needs a small tail; older history uses the ordinary page size. */
 export const INITIAL_MESSAGE_PAGE = 40;
-export { previewToolOutputs, previewToolPart, inputPreview, longerThan, TOOL_OUTPUT_INLINE_CHARS, TOOL_OUTPUT_PREVIEW_CHARS, TOOL_INPUT_INLINE_CHARS, TOOL_INPUT_PREVIEW_CHARS, TOOL_DOCUMENTS_INLINE_CHARS } from './message-preview';
+export { previewToolOutputs, previewToolPart, inputPreview, longerThan, TOOL_OUTPUT_INLINE_CHARS, TOOL_OUTPUT_PREVIEW_CHARS, TOOL_OUTPUT_FOLDED_CHARS, TOOL_INPUT_INLINE_CHARS, TOOL_INPUT_PREVIEW_CHARS, TOOL_DOCUMENTS_INLINE_CHARS } from './message-preview';
 export { forTransport, projectMessage, MESSAGE_SENT_MAX_BYTES, type TransportOptions } from './transport.ts';
 export { boundedMessageWindow } from './message-window.ts';
 export { lastAgentText, notificationExcerpt, requestExcerpt, NOTIFICATION_TEXT_CHARS } from './notification-text';
@@ -1553,6 +1555,23 @@ export const MESSAGE_PAGE_MAX = 200;
  * tail must fit this budget in full; otherwise `threads.get` returns a page.
  */
 export const MESSAGE_PAGE_MAX_BYTES = 12 * 1024 * 1024;
+/**
+ * The `maxBytes` of a first visit: about what a desktop screen draws, once
+ * successful tool outputs stay on the core. Forty messages of one long thread
+ * weighed 9.5 MB on 2026-10-13, for one screen of answers and folded runs.
+ */
+export const INITIAL_PAGE_BYTES = 128 * 1024;
+/** The `maxBytes` of each page a reader scrolls into, above or below the window. */
+export const READING_PAGE_BYTES = 256 * 1024;
+/** Why a `maxBytes` is refused, or null: a positive whole count of bytes. */
+export function pageBytesProblem(maxBytes: unknown): { field: 'maxBytes'; expected: string } | null {
+  return maxBytes === undefined || (Number.isSafeInteger(maxBytes) && (maxBytes as number) > 0) ? null
+    : { field: 'maxBytes', expected: 'a positive integer count of serialized UTF-8 bytes' };
+}
+/** The byte budget a page read with `maxBytes` gets: never above `MESSAGE_PAGE_MAX_BYTES`. */
+export function pageBytes(maxBytes: number | undefined): number {
+  return maxBytes === undefined ? MESSAGE_PAGE_MAX_BYTES : Math.min(maxBytes, MESSAGE_PAGE_MAX_BYTES);
+}
 
 /**
  * A command the agent of a thread takes at the start of a prompt, sent as the
@@ -1781,6 +1800,12 @@ export interface QuestionRequest {
    * points at a page. `text` is its reason. Always asynchronous.
    */
   setting?: SettingAsk;
+  /**
+   * An agent setting card (`agents.settings.request`): a thread, or a
+   * persistent agent about itself, proposes a change to an agent's settings.
+   * `text` is its reason. Always asynchronous.
+   */
+  agentSetting?: AgentSettingAsk;
   createdAt: Timestamp;
 }
 
@@ -2033,6 +2058,28 @@ export interface Settings {
    * or missing: never, each agent keeps its own behaviour. Missing on older cores.
    */
   autoCompact?: AutoCompact | null;
+  /**
+   * The models the user starred, one list for all of the owner's machines:
+   * each client keeps the newest one it saw by `at` and writes it to every
+   * machine it controls. Missing on older cores and before the first star.
+   */
+  modelFavorites?: ModelFavorites;
+}
+
+/** One starred model. Accounts are named by label: an id means nothing on another machine. */
+export interface ModelFavorite {
+  providerId: ProviderId;
+  model: { id: string; name: string };
+  /** The label of the account it was starred under. Missing: the account the picker uses for that provider. */
+  account?: string;
+}
+
+/** The starred models, with the time they last changed. */
+export interface ModelFavorites {
+  /** Milliseconds since the epoch of the last change: between two lists, the later one wins. */
+  at: number;
+  /** At most `MODEL_FAVORITES_MAX`, each provider, model and account once. */
+  items: ModelFavorite[];
 }
 
 export interface SubscriptionProxy {
@@ -2322,6 +2369,10 @@ export interface CoreInfo {
     deferredToolParts?: boolean;
     /** A device of its group says hello with a signature of its own device key (`hello` `device`). */
     deviceKeys?: boolean;
+    /** Prompt-free draft reservations and create-time subscription. */
+    draftPreparation?: boolean;
+    /** Connection-owned attachment uploads resolved by turns.start. */
+    attachmentUploads?: boolean;
   };
   /** The fingerprint of this core's identity key: the id its group knows it by, and the one a device signs its hello for. */
   coreId?: string;
@@ -2790,12 +2841,11 @@ export interface AgentTranscript {
 export interface AgentLetter {
   /**
    * Who the core says wrote it. Missing on older coordination mail: another
-   * agent. `user` and `result` are delegation mail. `steward` comes from the
-   * steward the owner assigned to the recipient's project, `notice` is the core
-   * telling a steward what happened in a thread it looks after. None of them is
-   * a message the user typed.
+   * agent. `user` and `result` are delegation mail. `resident` comes from the
+   * persistent agent the owner entrusted the recipient's project to. None of
+   * them is a message the user typed.
    */
-  origin?: 'user' | 'agent' | 'result' | 'steward' | 'notice';
+  origin?: 'user' | 'agent' | 'result' | 'resident';
   id: string;
   from: AgentContact;
   to: AgentAddress;
@@ -2819,59 +2869,15 @@ export interface AgentLetter {
  * The other end of a letter, from one thread's side. `starter` started this
  * thread with `boite thread new` and `started` is a thread this one started;
  * `parent` delegated this thread and `child` is one of its subagents;
- * `steward` looks after this thread's project and `stewarded` is a thread this
- * steward looks after. The rest say only where it is.
+ * `resident` is the persistent agent the owner entrusted this thread's
+ * project to. The rest say only where it is.
  */
-export type AgentRelation = 'starter' | 'started' | 'parent' | 'child' | 'steward' | 'stewarded' | 'project' | 'other-project' | 'machine';
+export type AgentRelation = 'starter' | 'started' | 'parent' | 'child' | 'resident' | 'project' | 'other-project' | 'machine';
 /**
- * What a steward may do to the threads of the projects it looks after.
- * Reading them, their state and their requests comes with any grant.
+ * One thread of a project, as the persistent agent the owner entrusted that
+ * project to reads it, and as the owner's `boite threads` prints it.
  */
-export type StewardCapability =
-  /** Messages that reach the thread as the steward's, even when its coordination is off. */
-  | 'message'
-  /** Start threads in its projects, without the communication-settings gates. */
-  | 'spawn'
-  /** Archive and unarchive. */
-  | 'archive'
-  /** Move threads between its projects, and register a new project folder. */
-  | 'move'
-  /** Stop a running turn and rename a thread. */
-  | 'stop'
-  /** Answer and skip the questions agents ask the user. */
-  | 'answer'
-  /** Allow or deny tool permission requests. Never granted by default. */
-  | 'permissions'
-  /** Delete threads. Never granted by default; a deleted thread stays restorable for a while. */
-  | 'remove';
-export const STEWARD_CAPABILITIES: readonly StewardCapability[] = ['message', 'spawn', 'archive', 'move', 'stop', 'answer', 'permissions', 'remove'];
-/** What a new grant carries until the owner picks otherwise: everything but permissions and deletion. */
-export const STEWARD_DEFAULT_CAPABILITIES: readonly StewardCapability[] = ['message', 'spawn', 'archive', 'move', 'stop', 'answer'];
-/**
- * The owner assigns the agent of one thread to look after projects while they
- * are away: it reads every thread there, steers them, answers what they ask
- * and tidies them up, within `capabilities`. One grant per steward thread.
- */
-export interface StewardGrant {
-  /** The steward's own conversation. */
-  threadId: ThreadId;
-  /** The projects it looks after. Empty with `allProjects`. */
-  projectIds: ProjectId[];
-  /** Every project, those added later included. */
-  allProjects: boolean;
-  capabilities: StewardCapability[];
-  /**
-   * The core sends the steward a notice when a thread it looks after finishes
-   * a turn, fails, asks a question or waits on a permission; an idle steward
-   * wakes to read it.
-   */
-  notify: boolean;
-  grantedAt: Timestamp;
-  updatedAt: Timestamp;
-}
-export type StewardGrantInput = Pick<StewardGrant, 'threadId' | 'projectIds' | 'allProjects' | 'capabilities' | 'notify'>;
-/** One thread as a steward sees it in the projects it looks after. */
-export interface StewardThread {
+export interface ProjectThreadRow {
   id: ThreadId;
   title: string;
   projectId: ProjectId | null;
@@ -2879,8 +2885,6 @@ export interface StewardThread {
   status: ThreadStatus;
   archived: boolean;
   branch: string | null;
-  /** The steward's own conversation. */
-  self: boolean;
   /** Unanswered questions and permission requests. */
   questions: number;
   permissions: number;
@@ -2888,17 +2892,22 @@ export interface StewardThread {
   updatedAt: Timestamp;
   lastCompletedAt: Timestamp | null;
 }
-export interface StewardThreadDetail {
-  thread: StewardThread;
+export interface ProjectThreadDetail {
+  thread: ProjectThreadRow;
   questions: QuestionRequest[];
   permissions: PermissionRequest[];
   /** The last assistant text, cut at 4,000 characters. */
   lastAnswer: string | null;
 }
-export type StewardAction = 'archive' | 'unarchive' | 'remove' | 'stop' | 'rename' | 'move';
-/** What the steward reads about itself. Null grant: this thread is no steward. */
-export interface StewardView {
-  grant: StewardGrant | null;
+/**
+ * What a persistent agent does to a thread of a project entrusted to it.
+ * Deleting threads and deciding tool permissions stay the owner's.
+ */
+export type ResidentThreadAction = 'archive' | 'unarchive' | 'stop' | 'rename' | 'move';
+/** The calling agent and the projects the owner entrusted to it. Empty when this thread is not such an agent's. */
+export interface ResidentView {
+  agentId: string | null;
+  name: string | null;
   projects: { id: ProjectId; name: string; path: string }[];
 }
 /** Public contact card. No owner token or private signing key crosses a core. */
@@ -3413,6 +3422,18 @@ export interface ServerUpdateStatus {
   error: string | null;
 }
 
+/** What `core.updateEverything` started on its machine. */
+export interface UpdateEverythingResult {
+  /** The agents whose update started, or was already under way. */
+  agents: ProviderId[];
+  /** Each agent named that did not start, with the core's reason. */
+  failed: { providerId: ProviderId; message: string }[];
+  /** Boite's own updater once the request is in: downloading, or as it was when `server` was null. */
+  server: ServerUpdateStatus;
+  /** Why Boite's own release did not start, null when it did or was not asked for. */
+  serverError: string | null;
+}
+
 export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, BrowserRpcMethods, PullRequestsRpcMethods, MobileDevicesRpcMethods, DiagnosticsRpcMethods {
   /** Owner-only merged-PR visibility policy; absent defaults to enabled. Disabling reveals automatically hidden roots, retaining manual archives. */
   'projects.setAutoArchiveMergedPr': { params: { projectId: ProjectId; enabled: boolean }; result: Project };
@@ -3426,6 +3447,17 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   /** Confirm the version shown to the owner so a stale dialog cannot install another release. */
   'core.updateInstall': { params: { version: string }; result: ServerUpdateStatus };
   'core.updateCancel': { params: Record<string, never>; result: ServerUpdateStatus };
+  /**
+   * Owner only. One click's worth of updates on this machine: every agent in
+   * `agents` starts its update the way `providers.update` does, and Boite's
+   * own release, when `server` names the version the client showed, starts
+   * downloading at once. That release installs only once the agent updates
+   * are done and the core is idle, so no updater is cut off by the restart.
+   * Answers as soon as everything has started; progress arrives as
+   * `providers.updatesChanged` and `core.updateChanged`. One part failing
+   * leaves the others running.
+   */
+  'core.updateEverything': { params: { agents: ProviderId[]; server: string | null }; result: UpdateEverythingResult };
   'delegation.get': { params: { threadId: ThreadId }; result: DelegationView };
   'delegation.configure': { params: { threadId: ThreadId; config: DelegationConfig }; result: DelegationView };
   /**
@@ -3461,34 +3493,24 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * and hands them over as delivered: they are not injected into the turn a second time.
    */
   'collaboration.wait': { params: { threadId: ThreadId; from?: AgentAddress; timeoutMs: number }; result: { letters: AgentLetter[] } };
-  /** Every steward grant on this core. */
-  'stewards.list': { params: Record<string, never>; result: StewardGrant[] };
   /**
-   * Make the agent of `threadId` the steward of projects, or replace its grant.
-   * Refused for a delegated child, a persistent agent session, an archived
-   * thread, an unknown project or capability, and an empty project list
-   * without `allProjects`.
+   * The calling persistent agent and the projects entrusted to it. The
+   * `resident.*` methods name the agent's own direct conversation as
+   * `threadId`; the core holds them to the projects of its profile.
    */
-  'stewards.set': { params: { grant: StewardGrantInput }; result: StewardGrant };
-  /** Remove a thread's steward grant. Its letters already delivered stay in the timelines. */
-  'stewards.revoke': { params: { threadId: ThreadId }; result: { ok: true } };
-  /** The calling thread's own grant and the projects it covers. */
-  'steward.get': { params: { threadId: ThreadId }; result: StewardView };
-  /** The threads of the projects it looks after, the most recently active first. `project` narrows to one (id, name or folder). */
-  'steward.threads': { params: { threadId: ThreadId; project?: string; archived?: boolean }; result: StewardThread[] };
-  /** One thread it looks after, with its pending questions, permissions and last answer. */
-  'steward.thread': { params: { threadId: ThreadId; target: ThreadId }; result: StewardThreadDetail };
+  'resident.view': { params: { threadId: ThreadId }; result: ResidentView };
+  /** The threads of its projects, the most recently active first. `project` narrows to one (id, name or folder). */
+  'resident.threads': { params: { threadId: ThreadId; project?: string; archived?: boolean }; result: ProjectThreadRow[] };
+  /** One thread of its projects, with its pending questions, permissions and last answer. */
+  'resident.thread': { params: { threadId: ThreadId; target: ThreadId }; result: ProjectThreadDetail };
   /**
-   * Act on a thread it looks after, within its capabilities: `rename` takes
-   * `title`, `move` takes `project` (a project it also looks after). Every
-   * action leaves a system line in the target's timeline naming the steward.
-   * The steward's own thread is refused.
+   * Act on a thread of its projects: `rename` takes `title`, `move` takes
+   * `project` (another project entrusted to it). Every action leaves a system
+   * line in the target's timeline naming the agent.
    */
-  'steward.act': { params: { threadId: ThreadId; target: ThreadId; action: StewardAction; title?: string; project?: string }; result: { thread: StewardThread | null } };
-  /** Answer a pending question of a thread it looks after, as the owner would from the card. */
-  'steward.answer': { params: { threadId: ThreadId; target: ThreadId; questionId: RequestId; optionIds: string[]; text?: string; skip?: boolean }; result: { ok: true } };
-  /** Allow or deny a pending permission request of a thread it looks after. Needs the `permissions` capability. */
-  'steward.permission': { params: { threadId: ThreadId; target: ThreadId; requestId: RequestId; decision: 'allow' | 'deny' }; result: { ok: true } };
+  'resident.act': { params: { threadId: ThreadId; target: ThreadId; action: ResidentThreadAction; title?: string; project?: string }; result: { thread: ProjectThreadRow } };
+  /** Answer or skip a pending question of a thread of its projects, marked as the agent's in that timeline. */
+  'resident.answer': { params: { threadId: ThreadId; target: ThreadId; questionId: RequestId; optionIds: string[]; text?: string; skip?: boolean }; result: { ok: true } };
   'collaboration.identity': { params: Record<string, never>; result: CoordinationPeer };
   'collaboration.peers': { params: Record<string, never>; result: CoordinationPeer[] };
   'collaboration.check': { params: { coreId: string }; result: { ok: true } };
@@ -4025,9 +4047,23 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
       incognito?: boolean;
       /** Start without part of the user's setup, fixed for the thread's life ([context modes](../../docs/context-modes.md)). */
       context?: ContextRequest | ContextPreset;
+      /** Adopt this connection's compatible, prompt-free draft reservation. */
+      preparationId?: string;
+      /** Subscribe this connection before returning the newly created conversation. */
+      subscribe?: boolean;
     };
     result: ThreadSummary;
   };
+  /** Reserve the final workspace and initialize a native session without publishing a conversation or sending text. */
+  'drafts.prepare': {
+    params: Omit<RpcMethods['threads.create']['params'], 'title' | 'preparationId' | 'subscribe'> & { preparationId: string };
+    result: { preparationId: string; threadId: ThreadId };
+  };
+  /** Release only the named reservation owned by this connection, including preparation still in flight. */
+  'drafts.release': { params: { preparationId: string }; result: { ok: true } };
+  /** Transfer one validated attachment before Send. The lease belongs to this connection. */
+  'attachments.upload': { params: { attachment: Attachment }; result: { id: string } };
+  'attachments.release': { params: { ids: string[] }; result: { ok: true } };
   /** Supported operations and their current availability for this thread. */
   'threads.capabilities': { params: { threadId: ThreadId }; result: ThreadCapabilities };
   /**
@@ -4052,10 +4088,16 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * tool inputs and heavy documents on the core as well, and caps each message
    * at `MESSAGE_SENT_MAX_BYTES`; it needs `features.deferredToolParts`. A
    * subscription opened with it receives live tool parts the same way.
+   *
+   * `maxBytes` lowers the page's byte budget below `MESSAGE_PAGE_MAX_BYTES`,
+   * counted as the client receives the messages: a first visit asks for what
+   * fills a screen (`INITIAL_PAGE_BYTES`). It bounds a page, around a saved
+   * position too, never a resume tail, which comes whole or not at all. Older
+   * cores ignore it and send their page.
    */
   'threads.get': {
     params: {
-      threadId: ThreadId; after?: MessageId; around?: MessageId; limit?: number; compactTools?: boolean; compactFiles?: boolean; compactImages?: boolean; compactToolParts?: boolean;
+      threadId: ThreadId; after?: MessageId; around?: MessageId; limit?: number; maxBytes?: number; compactTools?: boolean; compactFiles?: boolean; compactImages?: boolean; compactToolParts?: boolean;
       /** Request a resume proof, or reuse a proof previously supplied by this core. */
       sync?: true | MessageSync;
       /** Subscribe after a successful snapshot, optionally replacing the previous subscription and acknowledging unread content. */
@@ -4078,9 +4120,10 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * page a reader scrolls down into from a page cut by `around`. The result's
    * `after` is then the next cursor, null once the page reaches the last
    * message, and its `before` is null. Exactly one of the two is given.
+   * `maxBytes` lowers the byte budget as it does for `threads.get`.
    */
   'messages.list': {
-    params: { threadId: ThreadId; before?: MessageId; after?: MessageId; limit?: number; compactTools?: boolean; compactFiles?: boolean; compactImages?: boolean; compactToolParts?: boolean };
+    params: { threadId: ThreadId; before?: MessageId; after?: MessageId; limit?: number; maxBytes?: number; compactTools?: boolean; compactFiles?: boolean; compactImages?: boolean; compactToolParts?: boolean };
     result: { messages: Message[]; before: MessageId | null; after?: MessageId | null; turns?: Turn[] };
   };
   /** The full output of a tool already visible in this conversation. No filesystem path is accepted. */
@@ -4225,7 +4268,7 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'threads.focus': { params: { threadId: ThreadId | null; protectedThreadIds?: ThreadId[]; protectAllThreads?: boolean; attentive?: boolean; idleMs?: number }; result: { ok: true } };
 
   /** `attachments` are journalled with the prompt. Files become host paths; images use native provider payloads. */
-  'turns.start': { params: { threadId: ThreadId; prompt: string; attachments?: Attachment[]; previewReferences?: PreviewReference[]; expectedSelectionVersion?: number; clientRequestId?: string }; result: Turn };
+  'turns.start': { params: { threadId: ThreadId; prompt: string; attachments?: Attachment[]; attachmentIds?: (string | null)[]; previewReferences?: PreviewReference[]; expectedSelectionVersion?: number; clientRequestId?: string }; result: Turn };
   /** Sends user input into the active turn; false leaves it queued for a later boundary or turn. */
   'turns.steer': { params: { threadId: ThreadId; turnId: TurnId; prompt: string; attachments?: Attachment[]; previewReferences?: PreviewReference[]; expectedSelectionVersion?: number; clientRequestId: string }; result: { accepted: boolean } };
   'turns.stop': { params: { threadId: ThreadId }; result: { stopped: boolean } };
@@ -4361,8 +4404,6 @@ export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents, BrowserR
   'thread.memory': MemoryEvent & { threadId: string };
   'delegation.changed': { threadId: ThreadId };
   'collaboration.changed': { threadId: ThreadId };
-  /** A steward grant was set or revoked; `stewards.list` reads the rest. */
-  'stewards.changed': { threadId: ThreadId };
   /** Sent directly to the owner connection registered for the target core. */
   'collaboration.bridge.request': { requestId: string; fromCoreId: string; toCoreId: string; body: string; signature: string };
   'thread.activity': { threadId: ThreadId; activity: ThreadActivity };
@@ -4624,7 +4665,7 @@ export const CLIENT_NAMES = ['shell', 'pwa', 'cli', 'plugin', 'test', 'bench'] a
 export type ClientName = (typeof CLIENT_NAMES)[number];
 
 export { attachmentError, answerAttachmentError } from './attachment-validation.ts';
-export { AUTO_COMPACT_MOMENTS, AUTO_COMPACT_TOKENS, BROWSER_ORIGINS_MAX, checkSettingsPatch, type AutoCompact, type AutoCompactMoment, type SettingsPatchCheck } from './settings-validation.ts';
+export { AUTO_COMPACT_MOMENTS, AUTO_COMPACT_TOKENS, BROWSER_ORIGINS_MAX, MODEL_FAVORITES_MAX, checkSettingsPatch, compareModelFavorites, keepLaterFavorites, type AutoCompact, type AutoCompactMoment, type SettingsPatchCheck } from './settings-validation.ts';
 import type { AutoCompact } from './settings-validation.ts';
 export { TITLE_MODEL_DEFAULTS, defaultTitleModel } from './title-models.ts';
 export { DEVICE_METHODS, DEVICE_EVENTS, AGENT_EVENTS } from './access.ts';
@@ -4635,6 +4676,13 @@ export {
   type SettingRequestParams, type SettingsPage,
 } from './setting-requests.ts';
 import type { SettingAsk, SettingReading, SettingRequestParams } from './setting-requests.ts';
+export {
+  AGENT_PROJECTS_MAX, AGENT_RUN_MINUTES, AGENT_SETTING_KEYS, agentSettingAnswerText, agentSettingValue, checkAgentSettingRequest, isAgentSettingKey,
+  normalizeAgentSetting, settledAgentSetting,
+  type AgentSettingApplyParams, type AgentSettingAsk, type AgentSettingChoice, type AgentSettingContext, type AgentSettingKey, type AgentSettingReading,
+  type AgentSettingRequestCheck, type AgentSettingRequestParams, type AgentSettingsReading, type AgentSettingsReadParams,
+} from './agent-setting-requests.ts';
+import type { AgentSettingAsk } from './agent-setting-requests.ts';
 export { SPEECH_CATALOGUE, SPEECH_CUSTOM_ID, SPEECH_DEFAULT_MODEL, isSpeechModelId, speechUrlProblem, type SpeechCatalogueModel, type SpeechModelTier, type SpeechBackend } from './speech-models.ts';
 import type { SpeechModelTier, SpeechBackend } from './speech-models.ts';
 

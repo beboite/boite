@@ -430,42 +430,6 @@ test('a burst of 33 agent messages stays in two counters as new mail arrives, an
   expect([...document.querySelectorAll<HTMLElement>('[data-testid=agent-discussion-row]')].map(node => node.dataset.count)).toEqual(['34', '1']);
 });
 
-test('a steward\'s thread and the thread its agent started keep their mail and prompt apart from the user\'s', async ({ ready }) => {
-  stubLayout(400);
-  const { store: owner, client } = await ready({ delayMs: 0, stewardDemo: true });
-  const [grant] = await client.call('stewards.list', {});
-  const steward = owner.threads.find(thread => thread.id === grant!.threadId)!;
-  const steer = (await client.call('collaboration.get', { threadId: steward.id })).messages.find(letter => letter.origin === 'steward')!;
-  await owner.open(steer.to.threadId);
-  await owner.loadCoordination(steer.to.threadId, false);
-  let thread = owner.openThread!;
-  const first = thread.messages.find(message => message.role === 'user')!;
-  running = mount(MessageList, { target: document.body, props: { store: owner, threadId: thread.id, messages: thread.messages } });
-  flushSync();
-  const prompt = document.querySelector<HTMLElement>(`[data-mid="${first.id}"] [data-testid=agent-prompt]`)!;
-  expect(prompt.classList.contains('agent')).toBe(true);
-  expect(prompt.querySelector('[data-testid=spawn-marker][data-direction=from]')?.textContent).toContain('Sent by the agent of');
-  expect(prompt.querySelector('[data-testid=spawn-marker-open]')?.textContent).toBe(steward.title);
-  expect(document.querySelectorAll('[data-testid=agent-prompt]')).toHaveLength(1);
-  const row = document.querySelector<HTMLButtonElement>('[data-testid=agent-discussion-row]');
-  expect(row?.classList.contains('steward')).toBe(true);
-  expect(row?.querySelector('[data-testid=agent-discussion-title]')?.textContent).toBe(steward.title);
-  expect(row?.querySelector('.tag')?.textContent).toBe('Steward');
-  await unmount(running!); running = null;
-
-  await owner.open(steward.id);
-  await owner.loadCoordination(steward.id, false);
-  thread = owner.openThread!;
-  running = mount(MessageList, { target: document.body, props: { store: owner, threadId: thread.id, messages: thread.messages } });
-  flushSync();
-  // The steward started that thread: the tag says so, and its notices stay one quiet line.
-  const rows = [...document.querySelectorAll<HTMLElement>('[data-testid=agent-discussion-row]')];
-  expect(rows.map(node => [node.querySelector('[data-testid=agent-discussion-title]')?.textContent, node.querySelector('.tag')?.getAttribute('data-relation')]))
-    .toEqual([[steer.toTitle, 'started']]);
-  expect([...document.querySelectorAll<HTMLElement>('[data-testid=agent-message-summary]')].map(node => [node.dataset.kind, node.textContent?.trim()]))
-    .toEqual([['notice', '1 thread notice']]);
-});
-
 /** A store whose thread still has older messages behind the window. */
 function pagedStore(overrides: Partial<Record<string, unknown>> = {}): {
   store: Store;
@@ -811,6 +775,33 @@ test('the top of a paged list asks the store for the page above it, once', async
   expect(paged.calls()).toBe(1);
 });
 
+test('a first page too short to scroll asks for the page above it at once; a list past the screen waits for the reader', async () => {
+  // A first page holds about one screen: with nothing to scroll, no scroll event would ever ask.
+  const short = thread(3);
+  stubLayout(short.length * ESTIMATE);
+  const paged = pagedStore({ openThread: { id: 't-short', turns: [], messages: [] } });
+  running = mount(MessageList, { target: document.body, props: { store: paged.store, threadId: 't-short', messages: short } });
+  await settle();
+  expect(paged.calls()).toBe(1);
+  await unmount(running); running = null;
+
+  const long = thread(200);
+  stubLayout(long.length * ESTIMATE);
+  const tall = pagedStore({ openThread: { id: 't-tall', turns: [], messages: [] } });
+  running = mount(MessageList, { target: document.body, props: { store: tall.store, threadId: 't-tall', messages: long } });
+  await settle();
+  expect(tall.calls()).toBe(0);
+  await unmount(running); running = null;
+
+  // A list laid out with no height is hidden: it waits until it is shown.
+  stubLayout(short.length * ESTIMATE);
+  Object.defineProperty(Element.prototype, 'clientHeight', { configurable: true, get: () => 0 });
+  const hidden = pagedStore({ openThread: { id: 't-hidden', turns: [], messages: [] } });
+  running = mount(MessageList, { target: document.body, props: { store: hidden.store, threadId: 't-hidden', messages: short } });
+  await settle();
+  expect(hidden.calls()).toBe(0);
+});
+
 test('a thread whose first message is loaded asks for nothing at the top', async () => {
   const messages = thread(200);
   stubLayout(messages.length * ESTIMATE);
@@ -1049,12 +1040,18 @@ function rowsDrawn(): HTMLElement[] {
   return Array.from(document.querySelectorAll<HTMLElement>('[data-testid=message], [data-testid=message-rest]'));
 }
 
+/** The heavy thread whole: its first page holds about one screen, and the tests below walk rows, not pages. */
+async function openWhole(live: Store, threadId: string): Promise<void> {
+  await live.open(threadId);
+  while (live.messagesBefore !== null) if (await live.loadOlder() === 0) throw new Error(`${threadId} stopped paging`);
+}
+
 test('a turn of a thousand calls is drawn as a window of rows, and only its first row names the model', async ({ ready }) => {
   window.localStorage.clear();
   const { store: live } = await ready({ delayMs: 0, heavy: true });
-  await live.open('t-heavy');
+  await openWhole(live, 't-heavy');
   const messages = live.openThread?.messages ?? [];
-  // The whole 11.5 MiB conversation fits one page: nothing is left to load above it.
+  // Paged in whole: nothing is left to load above it.
   expect(messages).toHaveLength(40);
   expect(live.messagesBefore).toBeNull();
   const giant = messages.reduce((a, b) => (b.parts.length > a.parts.length ? b : a));
@@ -1102,7 +1099,7 @@ test('a turn of a thousand calls is drawn as a window of rows, and only its firs
 test('a scroll inside the rows already drawn redraws nothing and reads no tool call again', async ({ ready }) => {
   window.localStorage.clear();
   const { store: live } = await ready({ delayMs: 0, heavy: true });
-  await live.open('t-heavy');
+  await openWhole(live, 't-heavy');
   const messages = live.openThread?.messages ?? [];
   stubLayout(60_000);
   running = mount(MessageList, { target: document.body, props: { store: live, threadId: 't-heavy', messages } });
@@ -1133,7 +1130,7 @@ test('Ctrl+F opens the row of a long message that holds the match, not its first
   window.localStorage.clear();
   Range.prototype.getBoundingClientRect ??= () => new DOMRect(0, 0, 0, 0);
   const { store: live } = await ready({ delayMs: 0, heavy: true });
-  await live.open('t-heavy');
+  await openWhole(live, 't-heavy');
   const messages = live.openThread?.messages ?? [];
   const giant = messages.reduce((a, b) => (b.parts.length > a.parts.length ? b : a));
   // A word no other part holds, in a paragraph deep inside the giant message.
@@ -1168,7 +1165,7 @@ test('Ctrl+F opens the row of a long message that holds the match, not its first
 test('a place read inside a long message is saved by message with its row, and opened again on that row', async ({ ready }) => {
   window.localStorage.clear();
   const { store: live } = await ready({ delayMs: 0, heavy: true });
-  await live.open('t-heavy');
+  await openWhole(live, 't-heavy');
   const messages = live.openThread?.messages ?? [];
   const giant = messages.reduce((a, b) => (b.parts.length > a.parts.length ? b : a));
   stubLayout(60_000);

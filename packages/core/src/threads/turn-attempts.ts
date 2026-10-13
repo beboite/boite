@@ -108,7 +108,18 @@ export class TurnAttempts {
     this.stopRequested.delete(threadId);
     this.preparing.add(threadId);
     const checkpoint = this.threads.codeCheckpoints.begin(state.thread, turnId);
-    if (checkpoint) await checkpoint;
+    if (checkpoint && driver.prepare) {
+      const context = this.threads.contexts.makeSessionContext(state.thread, provider, account);
+      void driver.prepare(context, { forTurn: true }).catch(error => {
+        if (!this.stopRequested.has(threadId)) this.core.log('warn', `preparing the turn failed: ${String(error)}`, { source: provider.id, threadId, event: 'provider.prepareFailed' });
+      });
+    }
+    try { if (checkpoint) await checkpoint; }
+    catch (error) {
+      releaseThread(threadId);
+      this.core.procs.killTree(threadId);
+      throw error;
+    }
     this.preparing.delete(threadId);
     if (this.stopRequested.has(threadId)) return { status: 'stopped', sessionId: state.thread.sessionId, usage: null };
 
@@ -341,6 +352,8 @@ export class TurnAttempts {
     if (handle === undefined) {
       if (!this.preparing.has(threadId)) return false;
       this.stopRequested.add(threadId);
+      releaseThread(threadId);
+      this.core.procs.killTree(threadId);
       return true;
     }
     // An open card is what the driver is parked on. Aborting without answering

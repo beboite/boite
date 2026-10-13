@@ -20,6 +20,7 @@ import { Workbench } from './workbench.svelte';
 import { Workflows } from './workflows.svelte';
 import { ServerUpdater } from './server-update.svelte';
 import type { Account, Project, ThreadSummary } from '@boite/contracts';
+import { DraftStartup } from './draft-startup.svelte';
 import { SnapshotReads } from './snapshot-reads';
 
 /**
@@ -56,6 +57,7 @@ export class StoreContext {
   readonly imports: Imports;
   readonly composer: Composer;
   readonly drafts: Drafts;
+  readonly draftStartup: DraftStartup;
   readonly requests: Requests;
   readonly delegation: Delegation;
   readonly workbench: Workbench;
@@ -76,6 +78,7 @@ export class StoreContext {
     this.imports = new Imports(this);
     this.composer = new Composer(this);
     this.drafts = new Drafts(this);
+    this.draftStartup = new DraftStartup(this);
     this.requests = new Requests(this);
     this.delegation = new Delegation(this);
     this.workbench = new Workbench(this);

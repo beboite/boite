@@ -6,6 +6,13 @@ type ToolPart = Extract<MessagePart, { type: 'tool' }>;
 export const TOOL_OUTPUT_INLINE_CHARS = 16 * 1024;
 export const TOOL_OUTPUT_PREVIEW_CHARS = 1024;
 /**
+ * The longest output a successful call keeps in a history page. A folded card
+ * draws nothing of it, and a turn of 90 commands of a few kilobytes each made
+ * pages of megabytes that no reader had opened; past this it stays on the
+ * core with no preview, and opening the card fetches it.
+ */
+export const TOOL_OUTPUT_FOLDED_CHARS = 256;
+/**
  * A tool input past this many serialized characters reaches a page as a
  * preview: a Write of a large file carries the whole file in its input, and
  * the card's line only needs the path or the command.
@@ -96,6 +103,13 @@ export interface ToolPreviewOptions {
   inputs?: boolean;
   /** Defer every finished call's content whatever its size: the message is still too heavy. */
   strict?: boolean;
+  /**
+   * Read from history, where the card is folded: a successful call keeps no
+   * output past `TOOL_OUTPUT_FOLDED_CHARS`. A failed or refused one keeps its
+   * preview, which the opened card shows while the rest arrives. Live events
+   * leave it out, so a card open on a running call keeps what it showed.
+   */
+  folded?: boolean;
 }
 
 /**
@@ -109,7 +123,10 @@ export function previewToolPart(part: ToolPart, options: ToolPreviewOptions = {}
   const strict = options.strict === true;
   let next = part;
   const output = part.output;
-  if (!part.outputDeferred && output !== null && output.length > (strict ? TOOL_OUTPUT_PREVIEW_CHARS : TOOL_OUTPUT_INLINE_CHARS)) {
+  if (options.folded && part.status === 'done' && output !== null && output.length > (part.outputDeferred ? 0 : TOOL_OUTPUT_FOLDED_CHARS)) {
+    // A preview read from `part_blobs` is cut too: no folded line reads it.
+    next = { ...next, output: '', outputDeferred: true };
+  } else if (!part.outputDeferred && output !== null && output.length > (strict ? TOOL_OUTPUT_PREVIEW_CHARS : TOOL_OUTPUT_INLINE_CHARS)) {
     // A slice can retain the original megabytes in V8. Flatten the bounded
     // preview before keeping it in a browser's reading cache.
     next = { ...next, output: output.slice(0, TOOL_OUTPUT_PREVIEW_CHARS).split('').join(''), outputDeferred: true };

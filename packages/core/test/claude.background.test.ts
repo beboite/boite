@@ -71,6 +71,34 @@ describe('claude driver: questions and background work', () => {
     await waitFor(() => (queries[0] as unknown as { ended: boolean }).ended);
   });
 
+  test('a run the CLI starts by itself and retries before any output holds the CLI and fails its turn visibly', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    const sessionId = 'sess-bg-retry';
+    scripted((fake) => {
+      fake.emit(init(sessionId));
+      fake.emit(sdk({ type: 'system', subtype: 'background_tasks_changed', session_id: sessionId, tasks: [{ task_id: 'mon-ci', task_type: 'monitor', description: 'watch CI' }] }));
+      fake.emit(success(sessionId));
+    });
+    expect(await runTurn(client, threadId, 'watch the CI')).toBe('done');
+    const fake = queries[0]!;
+    const opened = client.next('turn.started', (turn) => turn.threadId === threadId, 5000);
+    const woke = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    // The monitor ends, the CLI answers its notification, and the API refuses:
+    // no output until every retry is spent, which takes minutes for real.
+    fake.emit(sdk({ type: 'system', subtype: 'background_tasks_changed', session_id: sessionId, tasks: [] }));
+    fake.emit(sdk({ type: 'system', subtype: 'task_notification', session_id: sessionId, task_id: 'mon-ci', status: 'completed', output_file: '', summary: 'CI failed' }));
+    fake.emit(sdk({ type: 'system', subtype: 'api_retry', session_id: sessionId, attempt: 1, max_retries: 10, retry_delay_ms: 500, error_status: 503, error: 'server_error' }));
+    // The wake turn opens on the retry alone and keeps the CLI from the idle window.
+    expect((await opened).execution?.operation).toBe('background');
+    expect(fake.closes).toBe(0);
+    const said = 'API Error: 503 no available subscription for this model';
+    fake.emit(sdk({ ...(success(sessionId) as object), is_error: true, result: said, api_error_status: 503 }));
+    const turn = await woke;
+    expect(turn.status).toBe('error');
+    expect(turn.error).toContain('no available subscription');
+  });
+
   test('a resume that reports the dead background work of the previous CLI still answers the prompt', async () => {
     const client = await harness.connect();
     const threadId = await claudeThread(client);

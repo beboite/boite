@@ -66,6 +66,8 @@ export class TurnContexts {
       },
       diagnostic: (level, message, context) => { try { this.core.logs.record(level, message, { ...context, source: provider.id, threadId }); } catch { /* A diagnostic storage failure must not break the driver. */ } },
       authenticationFailed: () => this.core.accounts.authenticationFailed(account.id),
+      quota: (reading, observedAt) => this.core.quotas.observe(account.id, reading, observedAt),
+      killTree: () => { this.core.procs.killTree(threadId); },
       commands: list => { if (current()) this.threads.agentState.noteCommands(threadId, list); },
       context: use => { if (current()) this.threads.agentState.noteContext(threadId, use); },
       hook: report => this.core.hooks.record({ providerId: provider.id, accountId: account.id, threadId }, report),
@@ -285,7 +287,7 @@ export class TurnContexts {
       // Boite's own text, so the guide switch turns it off with the rest.
       const said = origin && inject && guideEnabled && (sessionId === null || !sameOrigin(origin, this.sentFromBefore(threadId, origin.messageId)))
         ? sentFromNote(origin.from) : '';
-      const coordinationGuide = inject && operation !== 'compact' && guideEnabled ? this.core.coordination.instructions(threadId) + this.core.stewards.instructions(threadId) + this.core.workforce.entrusted.instructions(threadId) : '';
+      const coordinationGuide = inject && operation !== 'compact' && guideEnabled ? this.core.coordination.instructions(threadId) + this.core.workforce.entrusted.instructions(threadId) : '';
       const guide = inject && sessionId === null && guideEnabled
         ? agentGuide(provider.protocol !== 'echo' && this.core.settings.get().asyncQuestions !== false, this.core.settings.get().agentLogAccess !== false, this.core.settings.get().agentLogAccess === false ? [] : builtinSkills(this.core.dataDir, message => { try { this.core.logs.warn(message, { source: 'skills', event: 'skills.write-failed' }); } catch { /* The guide is built without that skill. */ } })) : '';
       // Custom rules lead every fresh session, whatever the guides, on every provider.

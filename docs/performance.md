@@ -265,11 +265,28 @@ when the core advertises `chunkedAnswers`.
   Its receipt includes pending cards, subscribes this socket, replaces the
   previous subscription and acknowledges unread content after a successful read.
   Older cores keep the four-call burst for subscription, snapshot and cards.
-- A first visit requests 40 messages, then pages backwards by 120. A cached
-  visit allows up to 200 messages to catch up before falling back to a tail.
-  These limits affect the displayed window; the journal retains the history.
-- Completed tool outputs above 16,384 characters arrive as 1,024-character
-  previews. On a core advertising `deferredToolParts`, pages also ask for
+- A first visit requests 40 messages within 128 KiB (`maxBytes`,
+  `INITIAL_PAGE_BYTES`), about one desktop screen, then pages by 120 within
+  256 KiB (`READING_PAGE_BYTES`) as the reader scrolls either way. A list too
+  short to scroll asks for the page beside it at once, again after each one
+  lands, until it reaches 400 px past the viewport or the thread is whole
+  (`fillShort` in `lib/reading-window.ts`). A hidden list, with no height,
+  waits until it is shown. Once a page above has landed and
+  the window is drawn, the row that was first is put back where it stood on
+  screen: counting the new rows at their estimates had moved the text being
+  read by 850 px at 1280x900 (`pullOlder`). A cached visit allows up to 200
+  messages to catch up before falling back to a page. These limits affect the
+  displayed window; the journal retains the history.
+- A history page sends a successful call's output only up to 256 characters
+  (`TOOL_OUTPUT_FOLDED_CHARS`): its folded card draws none of it. A longer one
+  arrives empty with `outputDeferred`, and opening the card fetches it. A
+  message is a whole turn, and a turn of 90 commands with a few kilobytes of
+  output each made pages of megabytes that nobody had opened. A failed or
+  refused call's output above 16,384 characters arrives as a 1,024-character
+  preview, where the opened card reads its error line while the rest loads.
+  Live `message.part` events keep the 16,384 threshold, so a card open on a
+  running call keeps its output when the call ends. On a core advertising
+  `deferredToolParts`, pages also ask for
   `compactToolParts`: an input above 16,384 serialized characters arrives cut to
   about 4,096, its first strings and entries, with `inputDeferred`, and
   documents above 65,536 characters together arrive as stubs that keep their
@@ -360,7 +377,8 @@ when the core advertises `chunkedAnswers`.
   A reconnect tail is complete or replaced by a page; it is never truncated.
 - History pages carry at most 120 messages by default, 200 for `messages.list`,
   and 12 MiB of serialized UTF-8 message data, including JSON escaping and array
-  separators. The journal iterates its thread index and stops at the count or
+  separators, or the lower `maxBytes` the client asks for. A resume tail is
+  never cut to `maxBytes`. The journal iterates its thread index and stops at the count or
   byte boundary, retaining complete messages and a gapless backwards cursor.
   Current buffered parts count toward the budget. Both budgets measure each
   message as the client receives it: with `compactTools` a finished tool's
@@ -409,8 +427,11 @@ a real temporary core, a 750 ms snapshot delay and a large folded tool output.
 eighth prompt, a picture every 25th, 30 tool outputs per answer, 48.9 MB
 of parts) and times `threads.get` on loopback and through a 150 ms relay, then
 the click to the first message in headless Chrome, plain and throttled. `--base`
-skips the parameters an older core does not take. The
-[2026-10-05 report](../bench/results/2026-10-05-thread-open.md) has the numbers;
+skips the parameters an older core does not take, `--rpc-only` the browser. The
+[2026-10-05 report](../bench/results/2026-10-05-thread-open.md) has the numbers,
+and the [2026-10-13 report](../bench/results/2026-10-13-thread-open.md) the
+screen page against main: 1,305 KB to 129 KB, and 1,902 ms to 297 ms from click
+to first message on a throttled link;
 `tests/e2e/thread-open.test.ts` captures the bar at both widths and checks
 its total against the page the core sends. `tests/e2e/thread-reopen.test.ts`
 drives the rest at phone and desktop widths on a real core: a deferred picture
@@ -474,6 +495,51 @@ click on a model could hang for 2.6 to 3.7 s before it closed. A row from a
 list the core already gave is now picked at once, the core keeps that list for
 its checks while the fresh read runs, and the answer leaves before the process
 exit ([providers](providers.md#the-models-probe)).
+
+## Preparing the first prompt
+
+Typing into a visible draft starts a prompt-free preparation of its final
+workspace and native session. Send adopts only a completed, compatible
+reservation and never waits for speculation. The new conversation subscribes
+before its creation response, so its first turn can start while the UI reads
+the snapshot. Model discovery coalesces requests and can reuse compatible
+prepared Codex and ACP processes. Checkpoint capture overlaps native setup,
+while prompt dispatch still waits for the checkpoint.
+
+Selected attachments upload before Send. Completed references keep the first
+turn request small; pending or expired uploads use the original bytes. This
+moves transfer work earlier and does not reduce total network traffic.
+
+Measured on 2026-10-13 with:
+
+```sh
+bun run bench/agent-startup.ts --offline --runs 7 --delay-ms 150 --output /tmp/agent-startup.json
+```
+
+Seven samples per group, real temporary core and RPC transport, scripted Codex
+process with a 150 ms native-opening delay. Values are median / nearest-rank
+p95 milliseconds; with seven samples, p95 is the observed maximum.
+
+| Workspace and strategy | Send to acceptance | Send to first text | Send to finished |
+| --- | ---: | ---: | ---: |
+| Directory, cold | 11.42 / 33.54 | 201.78 / 227.72 | 205.68 / 238.17 |
+| Directory, prepared | 9.48 / 12.42 | 19.46 / 23.59 | 22.77 / 26.59 |
+| Sparse worktree, cold | 45.64 / 51.17 | 441.73 / 456.77 | 817.19 / 840.51 |
+| Sparse worktree, prepared | 11.34 / 13.37 | 386.64 / 412.20 | 771.78 / 803.80 |
+
+Preparation took a median 185.29 ms for directories and 221.37 ms for sparse
+worktrees before Send. Each sample initialized one native process; cleanup left
+zero live processes. Sparse worktree samples use disposable shared clones and
+still include substantial checkpoint work. These controlled samples demonstrate
+the overlap, not real-provider latency gains. Shared filesystem caches and
+machine contention were not isolated; GUI, remote links and inference were not
+measured.
+
+Sending a 68-byte PNG and a 256 KiB text file reduced the serialized
+`turns.start` request from 349,909 to 385 bytes. The earlier upload requests
+totaled 349,916 bytes, bringing combined request bytes to 350,301. Both paths
+preserved journal bytes, the native image URL and file contents. These counts
+exclude compression, responses, release calls and other RPCs.
 
 ## Core startup
 
@@ -636,6 +702,20 @@ their translations add about 12.1 KB, net of the removed message bubble. The
 total UI budget increases from 4,475,000 to 4,500,000 bytes, leaving 16,373
 bytes of headroom; entry and core limits stay unchanged. Totals exclude
 precompressed copies, as `bun scripts/ci/budgets.ts` does.
+
+### Update everything
+
+On 2026-10-13, after integrating `main` at `8ac1d98f`, `bun run build:ui` with
+Bun 1.4.2 on Linux measured 4,888,826 bytes for the complete UI and 522,879
+bytes for its entry chunk. Main measured 4,864,454 and 523,647 at that commit
+([CI](ci.md#build-cost)). The sidebar's update card, its plan, its rows that
+land one at a time, its two buttons and Restart, and the Update all button in
+Machines add 24,372 bytes: the card's chunk, its styles, the icon chunks split
+out now that it draws machine icons, and the translations. The entry chunk is
+768 bytes smaller. The total UI budget
+increases from 4,872,000 to 4,898,000 bytes, leaving 9,174 bytes of headroom;
+entry and core limits stay unchanged. Totals exclude precompressed copies, as
+`bun scripts/ci/budgets.ts` does.
 
 ## The desktop browser on a phone
 

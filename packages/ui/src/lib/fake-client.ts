@@ -1,3 +1,4 @@
+import { startupMethods, resetStartup } from './fake-client/startup';
 import { sweepMergedPrFixtures, type MergedPrFixture } from './fake-client/merged-pr-archive';
 import {
   RPC_CHUNK_BYTES,
@@ -22,8 +23,10 @@ import { FakeContext, type FakeClientOptions, type FakeMethods } from './fake-cl
 import { hookMethods, recordHookRun } from './fake-client/hooks';
 import { logMethods, seedDiagnostics } from './fake-client/logs';
 import { coordinationMethods, registerCore, unregisterCore } from './fake-client/coordination';
-import { seedStewardDemo, stewardMethods } from './fake-client/stewards';
 import { delegationMethods, seedDelegationDemo } from './fake-client/delegation';
+import { seedAgentsDemo } from './fake-client/agents-demo';
+import { agentSettingMethods } from './fake-client/agent-settings';
+import type { AgentSettingMethod } from './fake-agents';
 import { groupMethods } from './fake-client/group';
 import { pairingMethods } from './fake-client/pairing';
 import { projectMethods } from './fake-client/projects';
@@ -78,6 +81,8 @@ function reportSlices(result: unknown, onProgress: (received: number, total: num
 export class FakeClient implements ObservableClient {
   readonly #ctx: FakeContext;
   readonly #methods: FakeMethods;
+  readonly #missing: ReadonlySet<string>;
+  readonly #agentSettings: ReturnType<typeof agentSettingMethods>;
   #mergedPrSweep: Promise<number> | null = null;
   #doneSweep: Promise<void> | null = null;
   #transportGeneration = 0;
@@ -86,10 +91,12 @@ export class FakeClient implements ObservableClient {
     const ctx = new FakeContext(options);
     this.#ctx = ctx;
     this.#methods = this.#answer(ctx);
+    this.#missing = new Set(options.missing ?? []);
+    this.#agentSettings = agentSettingMethods(ctx);
     registerCore(ctx);
     seed(ctx);
     if (options.delegationDemo) seedDelegationDemo(ctx);
-    if (options.stewardDemo) seedStewardDemo(ctx);
+    if (options.agentsDemo) seedAgentsDemo(ctx);
     if (options.uninstalled) {
       ctx.providers = ctx.providers.filter(provider => provider.id !== 'echo').map(provider => ({
         ...provider, available: false, executable: null,
@@ -249,6 +256,7 @@ export class FakeClient implements ObservableClient {
     if (generation !== this.#transportGeneration || (bus.state !== 'ready' && method !== 'hello')) {
       throw new RpcFailure({ code: RpcErrorCode.Internal, message: 'connection changed before RPC dispatch' });
     }
+    if (this.#missing.has(method)) throw new RpcFailure({ code: RpcErrorCode.MethodNotFound, message: `unknown method ${method}` });
     // The fixture has no thread-bound agent token; do not widen this scoped read.
     if (bus.principal === 'agent' && (method === 'threads.capabilities' || method === 'threads.mergeBack')) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method} requires a thread-bound agent identity` });
     if (bus.principal === 'agent' && (method === 'core.logs' || method === 'projects.setAutoArchiveMergedPr' || method === 'quotas.reset')) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method} is not one of the agent's methods` });
@@ -268,7 +276,9 @@ export class FakeClient implements ObservableClient {
     }
     if (options.onProgress) reportSlices(result, options.onProgress);
     // The real client writes its set from the answer, never from the request.
-    if (method === 'threads.subscribe') {
+    if (method === 'threads.create' && (params as RpcParams<'threads.create'>).subscribe) {
+      bus.clientSubscribed.add((result as RpcResult<'threads.create'>).id);
+    } else if (method === 'threads.subscribe') {
       bus.clientSubscribed.add((params as RpcParams<'threads.subscribe'>).threadId);
     } else if (method === 'threads.get' && (result as RpcResult<'threads.get'>).opened) {
       const request = params as RpcParams<'threads.get'>;
@@ -347,6 +357,10 @@ export class FakeClient implements ObservableClient {
 
   #dispatch(method: RpcMethodName, rawParams: unknown): Promise<unknown> {
     const ctx = this.#ctx;
+    if (Object.hasOwn(this.#agentSettings, method)) {
+      const handler = this.#agentSettings[method as AgentSettingMethod] as (params: unknown) => unknown;
+      return Promise.resolve().then(() => handler(rawParams));
+    }
     if (method.startsWith('agents.')) return Promise.resolve(ctx.agents.call(method as Extract<RpcMethodName, `agents.${string}`>, rawParams));
     if (ctx.plugins.handles(method)) return ctx.plugins.call(method, rawParams);
     if (ctx.workflows.handles(method)) return ctx.workflows.call(method, rawParams);
@@ -359,6 +373,7 @@ export class FakeClient implements ObservableClient {
 
   #dropPending(message: string, dropped = false): void {
     this.#transportGeneration += 1;
+    resetStartup(this.#ctx);
     this.#ctx.speechRequests.clear();
     this.#ctx.bus.dropPending(message, dropped);
   }
@@ -382,6 +397,7 @@ export class FakeClient implements ObservableClient {
       ...projects,
       ...projectIconMethods(ctx),
       ...threads,
+      ...startupMethods(ctx, threads),
       ...capabilityMethods(ctx),
       ...forkReturnMethods(ctx),
       ...journalInspectionMethods(ctx),
@@ -398,7 +414,6 @@ export class FakeClient implements ObservableClient {
       ...speechMethods(ctx),
       ...delegationMethods(ctx),
       ...coordinationMethods(ctx),
-      ...stewardMethods(ctx, () => methods),
       ...groupMethods(ctx),
       ...todoMethods(ctx),
       ...workdirMethods(ctx, () => methods),

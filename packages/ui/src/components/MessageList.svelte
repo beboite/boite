@@ -34,7 +34,7 @@
   import { glides } from '../lib/motion';
   import { BottomEdge, BottomGlide, PointerHold, keysUp, pointedTurn, typingKey, watchWheel, wheelsUp } from '../lib/timeline-follow';
   import { selectionClicks } from '../lib/selection-clicks';
-  import { editWhole, pullNewer, pullOlder } from '../lib/reading-window';
+  import { editWhole, fillShort, pullNewer, pullOlder } from '../lib/reading-window';
   import { ReadingAnchor, type RowAnchor } from '../lib/reading-anchor';
   import { MediaQuery } from 'svelte/reactivity';
   import { placeViews, viewPart } from '../lib/inline-view';
@@ -591,12 +591,9 @@
   const LOAD_AT = 400;
 
   /** The page above the window, its height put back into the scroll position (`pullOlder`). */
-  function loadAbove(box: HTMLDivElement): void {
-    pullOlder(store, box, LOAD_AT, rows[0]?.id, (head) => {
-      const before = head ? rows.findIndex(row => row.id === head) : rows.length;
-      return totals(rows)[Math.max(0, before)] ?? 0;
-    }, () => { scrollTop = box.scrollTop; });
-  }
+  const loadAbove = (box: HTMLElement) => pullOlder(store, box, LOAD_AT, rows[0]?.id, head => totals(rows)[Math.max(0, head ? rows.findIndex(row => row.id === head) : rows.length)] ?? 0, () => { scrollTop = box.scrollTop; }, id => anchors.nodes.get(id));
+  // A list too short to scroll asks for the pages beside it, again after each lands (`fillShort`).
+  $effect(() => { void rows.length; void viewHeight; fillShort(viewport, store.openThread?.id === threadId, () => !!(navigationTarget || promptTarget), LOAD_AT, box => { loadAbove(box); pullNewer(store, box, LOAD_AT); }); });
 
   // The reader's own prompt takes the bottom, wherever the history was scrolled to.
   let jumpedFor = '';

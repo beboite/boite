@@ -236,7 +236,8 @@ test('an unavailable onboarding chunk keeps agent updates accessible in Machines
     await offline.waitFor(`document.querySelector('[data-testid=nav-settings]')`);
     expect(await offline.evaluate(`document.querySelector('[data-testid=onboarding]') === null`)).toBe(true);
     expect(await offline.evaluate(`document.querySelector('[data-testid=harness-update-notices]') === null`)).toBe(true);
-    expect(await offline.evaluate(`document.querySelector('[data-testid=nav-app-update]') === null`)).toBe(true);
+    // The tour that could not load still holds the update card back.
+    expect(await offline.evaluate(`document.querySelector('[data-testid=updates-card]') === null`)).toBe(true);
     await offline.click('[data-testid=nav-settings]');
     await offline.waitFor(`document.querySelector('[data-testid=settings-tab-machines]')`);
     await offline.click('[data-testid=settings-tab-machines]');

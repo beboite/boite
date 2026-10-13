@@ -87,7 +87,7 @@ class FakeClock implements UpdateClock {
   }
 }
 
-test('serializes checks, keeps the latest channel, then downloads it once', async () => {
+test('serializes checks, keeps the latest channel, announces it at once and downloads it once asked', async () => {
   let releaseStable!: (value: UpdateSnapshot) => void;
   const stable = new Promise<UpdateSnapshot>((resolve) => { releaseStable = resolve; });
   let checkedChannel: UpdateChannel = 'stable';
@@ -114,6 +114,13 @@ test('serializes checks, keeps the latest channel, then downloads it once', asyn
   await updater.settled();
 
   expect(vi.mocked(native.check).mock.calls.map(([channel]) => channel)).toEqual(['stable', 'nightly']);
+  // Found is shown: nothing downloads before the user asks, so the offer appears without waiting for one.
+  expect(native.download).not.toHaveBeenCalled();
+  expect(updater.snapshot).toMatchObject({ phase: 'available', channel: 'nightly', version: '2.1.0-nightly.4' });
+  expect(updater.hasUpdate).toBe(true);
+
+  expect(await updater.prepare()).toBe(true);
+  expect(await updater.prepare()).toBe(true);
   expect(native.download).toHaveBeenCalledTimes(1);
   expect(updater.snapshot).toMatchObject({ phase: 'ready', channel: 'nightly', version: '2.1.0-nightly.4' });
   stop();
@@ -145,6 +152,8 @@ test('allows restoring an older stable release from installed nightly', async ()
   const stop = updater.start();
   await updater.settled();
   updater.check('stable');
+  await updater.settled();
+  updater.download();
   await updater.settled();
 
   expect(native.check).toHaveBeenCalledWith('stable');
@@ -214,9 +223,14 @@ test('keeps a download error snapshot returned by the native command', async () 
   await updater.settled();
   updater.check('stable');
   await updater.settled();
+  expect(await updater.prepare()).toBe(false);
 
   expect(native.download).toHaveBeenCalledOnce();
   expect(updater.snapshot).toMatchObject({ phase: 'error', error: 'signature verification failed' });
+  // Asked again after a failure, it checks again before downloading again.
+  expect(await updater.prepare()).toBe(false);
+  expect(native.check).toHaveBeenCalledTimes(2);
+  expect(native.download).toHaveBeenCalledTimes(2);
   stop();
 });
 
