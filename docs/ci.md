@@ -133,11 +133,22 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 593,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,898,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,902,000 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 4,110,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-13, the audit refactors and fixes measure 4,899,213 UI bytes,
+compared with 4,897,240 at `bc3244ef`: an increase of 1,973 bytes (0.04%).
+Fresh Linux builds match the Windows CI total. The existing workspace chunk
+adds 1,585 bytes from composer helpers and boot lifecycle arguments; the
+remaining changes include quota fixes and diagnostic labels. Both builds
+contain 135 JavaScript chunks, with unchanged public-asset sizes and no
+duplicate rendered module IDs. The UI total limit becomes 4,902,000, leaving
+2,787 bytes; the entry and core limits stay unchanged. Reproduce with
+`bun run build:ui` and compare files excluding compression sidecars, or run
+`bun scripts/ci/budgets.ts` after building both UI and core.
 
 On 2026-10-13, prompt-free draft preparation, attachment uploads and crash
 recovery measured 4,853,814 UI bytes and 4,092,165 core JavaScript bytes after
