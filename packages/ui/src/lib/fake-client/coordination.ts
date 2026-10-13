@@ -3,7 +3,6 @@ import { defaultCoordinationConfig, RpcErrorCode, type AgentAddress, type AgentC
 import { RpcFailure } from '../client';
 import { archiveProject } from './project-archive';
 import type { FakeContext, FakeMethods } from './context';
-import { stewardOver } from './stewards';
 
 /** Every fake core of this page by id, what a remote letter or directory reaches. */
 const cores = new Map<string, FakeContext>();
@@ -55,6 +54,15 @@ function starterOf(thread: Thread): ThreadId | undefined {
   return undefined;
 }
 
+/** Whether `peer` is the session of an active persistent agent the owner entrusted `self`'s project to. */
+function residentOver(ctx: FakeContext, peer: Thread, self: Thread): boolean {
+  if (!peer.agentSessionId || self.agentSessionId || self.projectId === null) return false;
+  const snapshot = ctx.agents.snapshot();
+  const agentId = snapshot.sessions.find(session => session.id === peer.agentSessionId)?.agentId;
+  const agent = snapshot.profiles.find(profile => profile.id === agentId);
+  return agent?.status === 'active' && (agent.projectIds ?? []).includes(self.projectId);
+}
+
 /** How `other` relates to `threadId`, worked out the way the real core's `Coordination.relation` does. */
 function relationOf(ctx: FakeContext, threadId: ThreadId, other: AgentAddress): AgentRelation {
   if (other.coreId !== 'local' && other.coreId !== ctx.identity.coreId) return 'machine';
@@ -65,8 +73,7 @@ function relationOf(ctx: FakeContext, threadId: ThreadId, other: AgentAddress): 
   if (starterOf(peer) === self.id) return 'started';
   if (self.parentThreadId === peer.id) return 'parent';
   if (peer.parentThreadId === self.id) return 'child';
-  if (stewardOver(ctx, peer.id, self.id)) return 'steward';
-  if (stewardOver(ctx, self.id, peer.id)) return 'stewarded';
+  if (residentOver(ctx, peer, self)) return 'resident';
   return self.projectId === peer.projectId ? 'project' : 'other-project';
 }
 

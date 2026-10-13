@@ -416,7 +416,7 @@
   :global(html[data-motion='reduced']) .head :global(.spinning) { animation: none; }
   .fold.open :global(svg) { transform: rotate(180deg); }
   .details { padding: 12px 0 4px 52px; }
-  .address { display: flex; flex-wrap: wrap; gap: 4px 8px; margin: 0; font-size: var(--text-sm); color: var(--color-muted-foreground); }
+  .address { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin: 0; font-size: var(--text-sm); color: var(--color-muted-foreground); }
   .address .value { color: var(--color-subtle); overflow-wrap: anywhere; }
   .detail-actions { display: flex; flex-wrap: wrap; gap: 4px 8px; margin: 12px 0 0 -8px; }
   .detail-actions:empty { display: none; }

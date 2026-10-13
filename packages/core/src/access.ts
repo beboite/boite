@@ -100,15 +100,14 @@ export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMeth
   ['collaboration.search', 'contacts it may already reach, found by their title, project, branch, model, resources or chat'],
   ['collaboration.read', 'the conversation of a contact it may already reach, text and tool names only; the user wants agents to help with each other'],
   ['collaboration.wait', 'blocks on its own inbox until a reply arrives'],
-  // Steward methods name the steward's own thread like every agent method; the
-  // grant the owner gave that thread is checked in stewards.ts against the
-  // project of the thread each call names. Without a grant every one is refused.
-  ['steward.get', 'its own steward grant and the projects it covers, so it knows what it may touch'],
-  ['steward.threads', 'the state of the threads in the projects the owner made it steward of, nothing outside them'],
-  ['steward.thread', 'one of those threads with its pending questions, permissions and last answer'],
-  ['steward.act', 'archiving, moving, stopping, renaming or deleting one of those threads, each only with the capability the owner granted, and a line in its timeline saying so'],
-  ['steward.answer', 'answering a question one of those threads asked, with the answer capability, marked as the steward\'s in that timeline'],
-  ['steward.permission', 'deciding a tool permission in one of those threads, only with the permissions capability the owner must grant explicitly'],
+  // Resident methods name the persistent agent's own direct conversation like
+  // every agent method; agents/projects.ts holds each call to the projects the
+  // owner entrusted to that agent's profile. Any other thread is refused.
+  ['resident.view', 'the projects the owner entrusted to it, so it knows what it may touch'],
+  ['resident.threads', 'the state of the threads in those projects, nothing outside them'],
+  ['resident.thread', 'one of those threads with its pending questions, permissions and last answer'],
+  ['resident.act', 'archiving, moving between its projects, stopping or renaming one of those threads, with a line in its timeline saying so; deleting stays the owner\'s'],
+  ['resident.answer', 'answering a question one of those threads asked, marked as the agent\'s in that timeline; tool permissions stay the owner\'s'],
   ['agent.where', 'the thread, its project, its working directory and its branch: what the CLI prints first'],
   ['agent.projects', 'the names and folders of the projects the owner added, so it can name one to delegation.spawn or agent.move; reading them opens nothing'],
   ['agent.addProject', 'registering an existing folder as a project, which the owner sees appear and can remove; it opens no file access the agent\'s process lacks, and it stays within the communication settings and one agent generation, like agent.spawn'],
@@ -125,6 +124,8 @@ export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMeth
   ['questions.ask','a question card on its own thread that it does not wait on; the answer comes back as a message'],
   ['agent.settings', 'the settings it may ask the user about, with their values and pages; credentials, accounts and browser profiles are not among them'],
   ['settings.request', 'a settings card on its own thread proposing a change or pointing at a page; only the owner applies it, through settings.set'],
+  ['agents.settings.read', 'the settings of one of the owner\'s agents a card may propose to change (projects, model, effort, memory pass, subagents, time per task), so it reads before it proposes; never their brains or conversations'],
+  ['agents.settings.request', 'a card on its own thread proposing a change to one agent setting; only the owner applies it, through agents.settings.apply'],
   ['artifacts.publish', 'explicitly sharing a bounded snapshot from its own working directory in its own conversation'],
   ['artifacts.read', 'reading back only a published snapshot belonging to its own conversation'],
   ['artifacts.view', 'showing one HTML page of its own working directory in its own conversation, embedded whole, on an opaque origin that loads and calls nothing'],

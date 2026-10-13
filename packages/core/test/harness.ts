@@ -197,3 +197,13 @@ export async function removeDir(dir: string, attempts = 20): Promise<void> {
     }
   }
 }
+
+/**
+ * Subagents and memory passes off for a persistent agent: what a scenario
+ * reads then stays within the echo driver's 2,000-token context window, which
+ * the subagent guide would fill and compact in the middle of it.
+ */
+export async function quietAgent(client: { call: Awaited<ReturnType<TestCore['connect']>>['call'] }, agent: { id: string; revision: number }) {
+  const runtime = await client.call('agents.runtime.get', { agentId: agent.id });
+  return client.call('agents.runtime.configure', { agentId: agent.id, expectedRevision: agent.revision, config: { ...runtime, subagents: { ...runtime.subagents, enabled: false }, autoMemory: false } });
+}

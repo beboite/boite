@@ -91,6 +91,37 @@ export const fr: Translation = {
       warmProcessMinutes: 'Libéré tout de suite',
     },
   },
+  agentSettingRequest: {
+    heading: 'Changement suggéré pour {name}',
+    apply: 'Appliquer',
+    show: 'Ouvrir ses réglages',
+    refuse: 'Refuser',
+    guestHint: "Seul l'ordinateur qui fait tourner Boite peut changer les réglages d'un agent.",
+    projectsHint: 'Décochez un projet pour le laisser de côté.',
+    entrust: 'Confier',
+    takeBack: 'Reprendre',
+    loadFailed: "Cette carte de réglage d'agent n'a pas chargé.",
+    to: 'vers',
+    applied: 'Appliqué',
+    changed: 'Réglé sur {value} à la place',
+    refused: 'Refusé',
+    closed: 'Fermé sans réponse',
+    on: 'Activé',
+    off: 'Désactivé',
+    none: 'Aucun',
+    noProjects: 'Aucun projet',
+    defaultEffort: 'Par défaut',
+    minutes: '{count} min',
+    send: 'Envoyer',
+    keys: {
+      projects: 'Projets',
+      model: 'Modèle',
+      effort: 'Niveau de raisonnement',
+      autoMemory: 'Mettre à jour la mémoire après chaque tâche',
+      subagents: 'Sous-agents',
+      maxRunMinutes: 'Minutes maximum par exécution',
+    },
+  },
   remoteBrowser: {
     display: 'Affichage', resolution: 'Résolution de la page', fitPhone: 'Adapter à cet écran', phone: 'Téléphone', tablet: 'Tablette', rotate: 'Pivoter', width: 'Largeur', height: 'Hauteur', apply: 'Appliquer', sharedSize: 'La résolution change aussi la page que voit l’agent.', restoreSize: 'Revenir à la taille par défaut', previewZoom: 'Zoom de l’aperçu (cet appareil seulement)', fit: 'Ajuster', panHint: 'Glissez pour déplacer l’aperçu. Utilisez les flèches pour défiler dans la page.',
     address: 'Adresse', addressPlaceholder: 'Saisir une adresse', back: 'Précédent', forward: 'Suivant', reload: 'Recharger', badAddress: 'Saisissez une adresse web (http ou https).',
@@ -209,6 +240,11 @@ export const fr: Translation = {
     machineUnreachable: '{name} n’est pas connectée. Reconnectez-la, puis créez l’agent à nouveau.', whatItDoesHint: 'Ses instructions permanentes. Vous pourrez les changer plus tard dans ses réglages.',
     namePlaceholder: 'Mira, Scout, Pixel', whatItDoes: 'Ce qu’il fait', instructionsPlaceholder: 'Par exemple : chaque matin, lis les nouvelles issues et résume-les en cinq lignes.',
     ownedBy: '{name} gère ce thread', ownedHint: 'Parlez à {name} dans sa discussion. Ce thread montre ce qu’il fait.', openAgent: 'Ouvrir {name}',
+    projects: 'Projets', projectsHint: 'Il suit leurs threads, en lance de nouveaux, répond à leurs questions et vous dit ce qui compte.', noProjects: 'Ouvrez d’abord un projet.', looksAfter: 'S’occupe de {names}',
+    seeWork: 'Voir son travail', aboutProjects: 'À propos de vos projets', memoryUpdated: 'Mémoire mise à jour', memoryUpdating: 'Mise à jour de la mémoire',
+    autoMemory: 'Mettre à jour la mémoire après chaque tâche', autoMemoryHint: 'Un petit assistant réécrit ses notes à partir de ce que vous avez demandé et de ce qu’il a répondu.',
+    brainFolder: 'Dossier des cerveaux', brainFolderHint: 'Où chaque agent garde ses instructions et ses notes sur cette machine. Le changer les déplace tous.', brainDefault: 'Par défaut, dans le dossier de données de Boite',
+    brainChange: 'Changer', brainUseDefault: 'Utiliser le dossier par défaut', brainMove: 'Déplacer les cerveaux ici', brainPath: 'Dossier sur cette machine', brainBrowse: 'Parcourir', brainParent: 'Dossier parent', brainUseFolder: 'Utiliser ce dossier',
     robot: {
       family: 'Style', shape: 'Forme', color: 'Couleur', eyes: 'Yeux', top: 'Accessoire', shuffle: 'Mélanger', customize: 'Personnaliser', done: 'Terminé',
       option: '{part} {n}', families: { jelly: 'Gelée', bubble: 'Bulle', capsule: 'Capsule', retro: 'Rétro' },
@@ -382,7 +418,7 @@ export const fr: Translation = {
     microphoneTestHint: 'Parlez pour vérifier le niveau. Ce test reste sur votre appareil.',
     heading: 'Voix', description: 'Le micro à côté d\'Envoyer, deux minutes au plus à la fois. Le texte attend dans la zone de saisie jusqu\'à l\'envoi.',
     start: 'Dicter', stop: 'Terminer la dictée', listening: 'Écoute', opening: 'Attente du micro', transcribing: 'Transcription',
-    private: 'Sur ce cœur uniquement', cloud: 'Transcrit par votre fournisseur d\'API', retry: 'Relancer la transcription',
+    private: 'Sur ce cœur uniquement', cloud: 'Transcrit par votre fournisseur d\'API', retry: 'Relancer la transcription', discard: 'Supprimer l\'enregistrement',
     live: 'Aperçu en direct', previewFailed: 'Aperçu en direct en pause. Terminez pour transcrire tout l\'enregistrement.',
     local: 'Local', api: 'API', engine: 'Moteur',
     engineHint: 'Local transcrit sur cette machine et l\'audio n\'en sort jamais. API envoie l\'audio à Groq ou OpenRouter avec votre clé.',
@@ -1315,9 +1351,8 @@ export const fr: Translation = {
     replyTo: 'En réponse à',
     more: '+{count} autres',
     relation: {
-      starter: 'A lancé cette conversation', started: 'Lancée d\'ici', parent: 'Parent', child: 'Sous-agent', steward: 'Gardien', stewarded: 'Sous sa garde'
-    },
-    noticeOne: '1 avis de conversation', noticeMany: '{count} avis de conversation'
+      starter: 'A lancé cette conversation', started: 'Lancée d\'ici', parent: 'Parent', child: 'Sous-agent', resident: 'Veille sur le projet'
+    }
   },
   coordination: {
     options: 'Réglages avancés',
@@ -1341,31 +1376,8 @@ export const fr: Translation = {
       queued: 'En attente', received: 'En attente', delivered: 'Envoyé', uncertain: 'Non confirmé', expired: 'Expiré', rejected: 'Échec'
     }
   },
-  steward: {
-    chipFor: 'Gardien : {name}',
-    lookedAfterBy: 'Suivi par {name}',
-    heading: 'Gardien',
-    enable: "Cet agent veille sur des projets",
-    enableHint: "Il lit toutes leurs conversations, les guide, répond à leurs questions et les range pendant votre absence.",
-    ownerOnly: "Seul le propriétaire peut nommer un gardien. Cet appareil peut voir ce qu'il surveille.",
-    unavailable: "Un sous-agent ou une session d'agent persistante ne peut pas être gardien.",
-    allProjects: 'Tous les projets', allProjectsHint: 'Y compris les projets ajoutés plus tard.',
-    projects: 'Projets', projectsEmpty: 'Aucun projet à surveiller sur cette machine.',
-    capabilities: "Ce qu'il peut faire",
-    risky: 'Risqué',
-    capability: {
-      message: { label: 'Envoyer des messages', hint: 'Ses messages atteignent les conversations, même sans communication activée.' },
-      spawn: { label: 'Lancer des conversations', hint: 'Lancer de nouvelles conversations dans ses projets.' },
-      archive: { label: 'Archiver', hint: 'Archiver et restaurer des conversations.' },
-      move: { label: 'Déplacer', hint: 'Déplacer des conversations entre ses projets et ajouter des dossiers de projet.' },
-      stop: { label: 'Arrêter et renommer', hint: 'Arrêter un tour en cours et renommer des conversations.' },
-      answer: { label: 'Répondre aux questions', hint: 'Répondre aux questions que les agents vous posent, ou les passer.' },
-      permissions: { label: 'Répondre aux permissions', hint: "Autoriser ou refuser les demandes d'outils à votre place." },
-      remove: { label: 'Supprimer des conversations', hint: 'Supprimer des conversations. Une conversation supprimée reste restaurable un temps.' }
-    },
-    notify: 'Prévenir des événements',
-    notifyHint: 'Un tour terminé, un échec, une question ou une permission en attente réveille le gardien.',
-    chipOne: 'Gardien · 1 projet', chipMany: 'Gardien · {count} projets', chipAll: 'Gardien · tous les projets'
+  resident: {
+    lookedAfterBy: 'Suivi par {name}'
   },
   contextMode: {
     light: 'Léger',

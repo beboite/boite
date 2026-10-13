@@ -15,6 +15,7 @@ import type {
   QuestionAnswer,
   QuestionOption,
   SettingAsk,
+  AgentSettingAsk,
   RequestId,
   ThreadId,
   ThreadSummary,
@@ -57,6 +58,8 @@ export interface QuestionAsk {
    */
   async?: boolean;  /** A settings card (`settings.request`), always asynchronous. */
   setting?: SettingAsk;
+  /** An agent setting card (`agents.settings.request`), always asynchronous. */
+  agentSetting?: AgentSettingAsk;
 }
 
 /**

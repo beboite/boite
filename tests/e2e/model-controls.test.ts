@@ -209,7 +209,7 @@ test('favorites survive reload, reasoning has discrete stops, and the context ri
   await page.waitFor(`document.querySelector('[data-testid=favorite-model]')`);
   await page.click('[aria-label="Remove from favorites"]');
   await page.waitFor(`document.querySelector('[data-testid=favorites-empty]')`);
-  expect(await page.evaluate(`JSON.parse(localStorage.getItem('boite.model-favorites.v1')).length`)).toBe(0);
+  expect(await page.evaluate(`JSON.parse(localStorage.getItem('boite.model-favorites.v2')).items.length`)).toBe(0);
 }, 30_000);
 
 test('legacy models open beside the picker and preserve the page position', async () => {
@@ -235,7 +235,7 @@ test('legacy models open beside the picker and preserve the page position', asyn
   expect(await page.evaluate(`!!document.querySelector('[data-testid=picker-legacy-menu]')`)).toBe(false);
 }, 30_000);
 
-test('the accent persists and colours the effort track continuously to the thumb', async () => {
+test('the accent persists, the effort track glows brighter as it rises, and a speed sends streaks', async () => {
   await page.navigate(url);
   await page.waitFor(`document.querySelector('[data-testid=nav-settings]')`);
   await page.click('[data-testid=nav-settings]');
@@ -253,10 +253,16 @@ test('the accent persists and colours the effort track continuously to the thumb
   await page.click('[data-testid=composer-effort]');
   await page.waitFor(`document.querySelector('[data-testid=effort-speed]')`);
   await page.click('[data-value=low]');
-  const low = await page.evaluate(`getComputedStyle(document.querySelector('.progress')).backgroundColor`);
+  const glow = () => page.evaluate<{ fill: string; halo: number }>(`(() => { const style = getComputedStyle(document.querySelector('.progress')); return { fill: style.backgroundImage, halo: parseFloat(style.boxShadow.match(/(\\d+(?:\\.\\d+)?)px/g)?.at(-2) ?? '0') }; })()`);
+  await page.settleAnimations();
+  const low = await glow();
   await page.click('[data-value=max]');
+  await page.settleAnimations();
   await capture('reasoning-accent-max.png');
-  expect(await page.evaluate(`getComputedStyle(document.querySelector('.progress')).backgroundColor`)).not.toBe(low);
+  // The filled part lights up with the level: another fill and a wider halo at the top of the scale.
+  const max = await glow();
+  expect(max.fill).not.toBe(low.fill);
+  expect(max.halo).toBeGreaterThan(low.halo + 8);
   const bounds = await page.evaluate<any>(`(() => { const p=document.querySelector('.progress').getBoundingClientRect(); const t=document.querySelector('.thumb').getBoundingClientRect(); return {edge:p.right,center:t.left+t.width/2}; })()`);
   expect(Math.abs(bounds.edge - bounds.center)).toBeLessThan(1);
   expect(await page.evaluate(`document.querySelector('[data-testid=composer-effort-menu] .heading .level').textContent.trim()`)).toBe('Max');
@@ -268,6 +274,20 @@ test('the accent persists and colours the effort track continuously to the thumb
   await page.send('Input.dispatchMouseEvent', { type:'mouseMoved', ...speed });
   await page.waitFor(`getComputedStyle(document.querySelector('[data-testid=effort-speed] svg')).transform !== 'none'`);
   await capture('speed-hover.png');
+  // Switching the speed on sends streaks across the popover, then they clear. A runner's own reduced-motion setting must not decide it.
+  await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
+  await page.click('[data-testid=effort-speed]');
+  await page.waitFor(`document.querySelector('[data-testid=effort-streaks]')?.dataset.power === '1'`);
+  expect(await page.evaluate(`document.querySelectorAll('[data-testid=effort-streaks] .streak').length`)).toBe(12);
+  await page.waitFor(`!document.querySelector('[data-testid=effort-streaks]')`);
+  await page.click('[data-testid=effort-speed]');
+  // Reduced motion switches the speed without them.
+  await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+  await page.click('[data-testid=effort-speed]');
+  await page.waitFor(`document.querySelector('[data-testid=effort-speed]').getAttribute('aria-pressed') === 'true'`);
+  expect(await page.evaluate(`!!document.querySelector('[data-testid=effort-streaks]')`)).toBe(false);
+  await page.click('[data-testid=effort-speed]');
+  await page.send('Emulation.setEmulatedMedia', { features: [] });
   await page.send('Emulation.setDeviceMetricsOverride', {width:390,height:844,deviceScaleFactor:1,mobile:true});
   await page.click('[data-testid=nav-settings]');
   await page.click('[data-testid=settings-tab-appearance]');

@@ -79,9 +79,34 @@ tier and numeric version, with legacy models folded away. This is a display
 heuristic, not a benchmark ranking.
 
 Each model has a star. The first provider-rail entry, Favorites, contains only
-starred models and shows their associated account. Favorites persist in the
-client's local storage, not across devices. Selecting a dynamic favorite checks
-the account's current model list; a removed model is refused explicitly.
+starred models. One list serves every machine and every client of the owner:
+each core keeps a copy in its settings (`modelFavorites`), and each client
+caches it in local storage (`boite.model-favorites.v2`) with the time it last
+changed. When a client reads a machine's settings, the later list wins: it
+takes the machine's copy when that is newer and writes its own to every
+machine it controls that holds an older one. Two lists of the same time are
+ordered by content, a client never writes the same list twice to one machine,
+and the core itself ignores a list older than the one it stores, so two
+clients writing at once leave the later list. A star sets the time past the
+newest list seen, so a computer whose clock runs late still wins with it.
+
+A favorite names its account by label, since account ids differ between
+machines. A machine shows it when its provider is on there, on the account with
+the same label, else on the account the picker would use for that provider.
+The same model starred on two accounts shows twice with their labels on a
+machine that has both, and once on a machine where both land on one account;
+unstarring that row removes both stars. Favorites of the earlier per-device
+list are joined to each machine's list on the first start after the change,
+named by the label of the account they were starred on. One whose account no
+connected machine has keeps its model without a label, and the old list is
+removed only once every entry has joined. A star or unstar made before a
+machine's settings arrive is applied again over its list when it joins, so an
+unstarred model does not come back with it. A paired phone or
+browser reads the favorites and shows their stars, but cannot change them: the
+core keeps `settings.set` for the owner.
+
+Selecting a dynamic favorite checks the account's current model list; a
+removed model is refused explicitly.
 
 Account selection reads that account's catalog before applying its model.
 While the read is pending, model and account rows are disabled and the refresh
@@ -91,9 +116,13 @@ conversation invalidates the pending choice before it can update another view.
 The reasoning popover has one notch per level reported by the selected model.
 Dragging previews the level and saves on release. Arrow keys, Home, End and
 the dots select the same discrete values. The compact panel shows the model and
-current level centred above the track. The track reaches the thumb and becomes
-more saturated at higher levels. Ultrathink belongs only to Claude and is offered
-when its SDK reports adaptive thinking.
+current level centred above the track. The track reaches the thumb and lights
+up as the level rises: more of the accent, a brighter end at the thumb and a
+wider halo. Switching a fast mode on sends speed lines across the popover from
+right to left while the level's name slides in with a trail; the second tier,
+Ultrafast, sends about twice as many, longer and quicker. Reduced motion skips
+them. Ultrathink belongs only to Claude and is offered when its SDK reports
+adaptive thinking.
 
 Claude Code also acts on two words typed anywhere in a prompt: `ultrathink`
 asks for the deepest thinking on that turn, and `ultracode` opts the turn into

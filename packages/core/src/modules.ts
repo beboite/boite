@@ -23,7 +23,7 @@ import { registerPushMethods } from './push.ts';
 import { registerSpeechMethods } from './speech.ts';
 import { registerTelemetry } from './telemetry.ts';
 import { registerCoordination } from './coordination.ts';
-import { registerStewardMethods } from './stewards.ts';
+import { registerResidentMethods } from './agents/projects.ts';
 import { registerGroupMethods } from './group/rpc.ts';
 import { registerTerminalMethods } from './terminals.ts';
 import { registerWorkflowMethods } from './workflows.ts';
@@ -56,7 +56,7 @@ export function registerModules(core: Core): void {
   registerHookMethods(core);
   registerTelemetry(core);
   registerCoordination(core);
-  registerStewardMethods(core);
+  registerResidentMethods(core);
   registerGroupMethods(core);
   registerSpeechMethods(core);
   registerPushMethods(core);

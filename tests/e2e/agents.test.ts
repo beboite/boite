@@ -342,3 +342,72 @@ test('a new agent runs on the machine picked in its form, and opens there', asyn
   expect(Object.entries(byMachine).filter(([label]) => label !== 'Builder').flatMap(([, list]) => list)).not.toContain('Scout');
   await capture('agents-created-on-builder-desktop.png');
 }, 60000);
+
+test('an agent answers with pictures, keeps its memory, looks after projects, and its work opens from the menu', async () => {
+  await page.navigate(`${base}/?fake=1&agents=1`);
+  await page.waitFor(`window.__boiteTest?.workspace.active.connection === 'ready' && document.querySelector('[data-testid="view-agents"]')`);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+  await page.click('[data-testid="view-agents"]');
+  const mira = `(async () => (await window.__boiteTest.workspace.active.client.call('agents.snapshot', {})).profiles.find(a => a.name === 'Mira'))()`;
+  const agent = await page.evaluate<{ id: string; projectIds: string[] }>(mira);
+  expect(agent.projectIds).toHaveLength(1);
+  await page.waitFor(`document.querySelector('[data-testid="agent-entry-${agent.id}"]')`);
+  await page.click(`[data-testid="agent-entry-${agent.id}"]`);
+  // The reply carries its picture, drawn inline, and the quiet memory chip under it; the notice wears its own label.
+  await page.waitFor(`document.querySelector('[data-testid="agent-files"] img')?.complete && document.querySelector('[data-testid="agent-files"] img').naturalWidth > 0`);
+  await page.waitFor(`document.querySelector('[data-testid="agent-memory"]')?.dataset.status === 'done'`);
+  expect(await page.evaluate(`document.querySelector('[data-testid="agent-notice"]').textContent`)).toContain('About your projects');
+  expect(await page.evaluate(`!!document.querySelector('[data-testid="agent-planned-result"]')`)).toBe(false);
+  expect(await page.evaluate(`document.querySelector('.agents-identity small').textContent`)).toContain('Looks after');
+  await page.click('[data-testid="agent-memory"] button');
+  await page.waitFor(`document.querySelector('[data-testid="agent-memory-summary"]')?.textContent.includes('three lines')`);
+  await page.evaluate(`document.querySelector('[data-testid="agent-memory"]').scrollIntoView({ block: 'center' })`);
+  await capture('agents-files-memory-desktop.png');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await page.evaluate(`document.querySelector('[data-testid="agent-files"]').scrollIntoView({ block: 'center' })`);
+  await capture('agents-files-memory-phone.png');
+  expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+  // The picture opens in the zoom viewer, on a phone too.
+  await page.click('[data-testid="agent-files"] [data-testid="artifact-enlarge"]');
+  await page.waitFor(`document.querySelector('[data-testid="image-viewer"]')`);
+  await page.evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+  await page.waitFor(`!document.querySelector('[data-testid="image-viewer"]')`);
+
+  // Its settings: the projects it looks after, among the main options.
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+  await openPane('settings');
+  await page.waitFor(`document.querySelector('[data-testid="agent-projects"]')`);
+  expect(await page.evaluate(`document.querySelector('[data-testid="agent-project-${agent.projectIds[0]}"]').checked`)).toBe(true);
+  expect(await page.evaluate(`!!document.querySelector('[data-testid="agent-projects"]').closest('details')`)).toBe(false);
+  await page.evaluate(`document.querySelector('[data-testid="agent-projects"]').scrollIntoView({ block: 'center' })`);
+  await capture('agents-editor-projects-desktop.png');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await page.evaluate(`document.querySelector('[data-testid="agent-projects"]').scrollIntoView({ block: 'center' })`);
+  await capture('agents-editor-projects-phone.png');
+  expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+
+  // The brain folder: a relative path is refused with the core's sentence, an absolute one takes every brain.
+  await page.click('[data-testid="agents-engine"]');
+  await page.waitFor(`document.querySelector('[data-testid="agents-brain-root-path"]')`);
+  await page.click('[data-testid="agents-brain-root-change"]');
+  await page.type('[data-testid="agents-brain-root-input"]', 'agent-brains');
+  await page.click('[data-testid="agents-brain-root-save"]');
+  await page.waitFor(`document.querySelector('[data-testid="agents-brain-root-error"]')?.textContent.includes('expected an absolute folder')`);
+  await page.evaluate(`document.querySelector('[data-testid="agents-brain-root"]').scrollIntoView({ block: 'center' })`);
+  await capture('agents-brain-root-desktop.png');
+  await page.evaluate(`(() => { const input = document.querySelector('[data-testid="agents-brain-root-input"]'); input.value = ''; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await page.type('[data-testid="agents-brain-root-input"]', '/srv/agent-brains');
+  await page.click('[data-testid="agents-brain-root-save"]');
+  await page.waitFor(`document.querySelector('[data-testid="agents-brain-root-path"]').textContent === '/srv/agent-brains' && document.querySelector('[data-testid="agents-brain-root-default"]')`);
+  expect(await page.evaluate(`(async () => (await window.__boiteTest.workspace.active.client.call('agents.brain.get', { agentId: '${agent.id}' })).path)()`)).toBe('/srv/agent-brains/mira');
+
+  // Its work opens from the header's menu: the thread it works in, code and all.
+  await page.click(`[data-testid="agent-entry-${agent.id}"]`);
+  await page.waitFor(`document.querySelector('[data-testid="agent-panes"]')`);
+  await page.click('[data-testid="agent-panes"]');
+  await page.click('[data-value="see-work"]');
+  const session = `(async () => (await window.__boiteTest.workspace.active.client.call('agents.snapshot', {})).sessions.find(s => s.agentId === '${agent.id}' && s.scope.kind === 'agent').threadId)()`;
+  const threadId = await page.evaluate<string>(session);
+  await page.waitFor(`window.__boiteTest.workspace.active.page === 'chat' && window.__boiteTest.workspace.active.openThread?.id === '${threadId}'`);
+}, 60000);

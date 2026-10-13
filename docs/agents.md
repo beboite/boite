@@ -20,16 +20,19 @@ under it. On desktop, the foot adds the engine settings for the owner; a phone d
 
 A conversation is the whole page, drawn with the thread's bubbles and
 composer: the user asks, the agent answers in its bubble, works (three dots in
-a bubble, with a button into the thread it works in) and comes back with the
-result. A planned task's result is labelled with the task's name. A question
-the agent asks stands in the conversation with its answers to pick and a free
-answer. A group names who speaks and shows only deliveries that failed. The
+a bubble) and comes back with the result, in words, with the pictures and files
+it attached under the bubble. The agent's own thread, where its tools and code
+run, stays one step away: See its work in the header's menu opens it. A
+planned task's result is labelled with the task's name. A question the agent
+asks stands in the conversation with its answers to pick and a free answer. A group names who speaks and shows only deliveries that failed. The
 header keeps the picture, the name and how the agent stands; its planned tasks
 have a button with their count, and memory, settings, activity and missions
 wait in its menu.
 
 A new agent needs a name and what it does; its robot, model and permissions
-come filled in, and role, tools and the rest wait under More options.
+come filled in. The projects entrusted to it are picked beside its
+instructions, and role, tools and the rest wait under More options. The header
+says which projects it looks after.
 
 ### Robots
 
@@ -58,8 +61,7 @@ stills it.
 An agent works in threads of its own (`agentSessionId`). The Threads and
 Agents switch over the thread list counts the agents at work on every machine
 beside Agents: every agent whose own thread runs, is queued or waits on the
-user, and every [steward](stewards.md) or entrusted thread mid-turn, each
-thread once. The count turns to the waiting colour while one of them needs the
+user, and every entrusted thread mid-turn, each thread once. The count turns to the waiting colour while one of them needs the
 user, and Threads carries the same count for the conversations at work
 (`lib/work-counts.ts`). A project thread an agent runs, a mission task in a
 worktree for example, wears the agent's picture in place of the provider logo,
@@ -92,6 +94,73 @@ its id, title and event; clients write the sentence from the event.
 The thread list reads all this from the agents snapshot
 (`lib/agent-directory.svelte.ts`), loaded only with the Agents experiment on
 and refreshed on `agents.changed` at most every 1.5 seconds.
+
+### Projects entrusted to an agent
+
+An agent can be given projects (`AgentProfile.projectIds`, picked in its
+settings; drafts and unknown folders are refused). Its direct conversation
+then looks after every thread there, the way a person in charge of a project
+would, through the `boite threads`, `boite thread` and `boite answer` commands
+([CLI](cli.md)), which go through `resident.*` (`agents/projects.ts`):
+
+- it lists and reads their threads, with their questions and last answers;
+- it starts a thread in one of its projects (`boite thread new`), which codes,
+  verifies and opens the pull request: an agent hands code work to threads and
+  never shows code itself;
+- it steers a thread with a letter marked as its own (`origin: 'resident'`,
+  see [coordination](coordination.md#letters-from-the-agent-of-a-project)),
+  whatever that thread's communication settings;
+- it archives, restores, renames, stops, or moves a thread to another of its
+  projects, and answers or skips a thread's question; each action leaves a
+  line in that thread's timeline naming the agent.
+
+Deleting a thread and allowing a tool permission stay the owner's. A group or
+mission session of the same agent has none of this; neither has an agent that
+is paused or archived.
+
+The core tells the agent what happens there with notices, queued as one work
+item in its direct conversation (`AgentWork.purpose: 'notice'`): a notice
+waits 30 seconds for others to join it, and the item stops growing past 16,000
+characters, dropping its oldest notices. A thread the agent started, wrote to
+or answered for is followed for a week: every turn it ends comes back with its
+final answer and pull request. Any thread of its projects that fails or asks a
+question is reported too; a question waits three minutes first, since the user
+is often there to answer it. A permission a followed thread waits on is
+reported so the agent can tell the user. At most 60 notices an hour reach one
+agent; the rest are dropped with a line in the log. When nothing needs the
+user, the agent answers `[quiet]` and nothing is posted; otherwise its answer
+lands in the conversation under an About your projects label. Taking a
+project back drops what pending notices say about its threads, and cancels a
+notice with nothing left, along with the agent's letters still waiting there.
+
+### How an agent talks
+
+Every run tells the agent to write like a colleague in a chat, in the user's
+language, in short plain sentences: no code, diffs, logs or tool output in its
+answers, proof given with files it attaches and markdown links. A file it
+publishes with `boite attach` while it works rides with its answer
+(`AgentConversationMessage.files`, at most 20): the conversation draws
+pictures inline with the zoomable viewer and other files as cards, read with
+`artifacts.read` on the agent's own thread and message.
+
+### Asking to change an agent's settings
+
+An agent's settings stay the owner's, but a thread, or the agent about itself,
+can propose a change with a card: `boite settings agent request <key> <value>
+--why <reason>`, the same flow as a card about a Boite setting ([CLI](cli.md)).
+The keys are the projects entrusted to it, its model and reasoning effort, the
+memory pass (`autoMemory`), its subagents and `maxRunMinutes`. A run tells the
+agent how to ask, so one that needs a project it was not given asks for it
+instead of working around it. The card is asked without stopping and outlives
+its turn. In a thread it sits in the timeline; an agent's own cards, and any
+other card its hidden work threads raise, show in its conversation above the
+composer. Apply (`agents.settings.apply`, owner only) goes through the same
+checks as the agent's settings page, and for projects the owner can untick
+part of the proposal first. Any change to the agent, from the card or from
+the page, settles the cards it answers; the asking thread reads the outcome as
+a message, which a persistent agent receives as new work. Code:
+`packages/core/src/agents/setting-cards.ts`, shared checks in
+`packages/contracts/src/agent-setting-requests.ts`.
 
 ## Conversations and teams
 
@@ -221,13 +290,39 @@ or implement another switcher. Collaboration uses the provider-independent
 
 ## Individual brain and compaction
 
-Each identity owns `agent-workspaces/<agent-id>/brain` in the host's data
-directory. `AGENTS.md` holds its reusable instructions, `MEMORY.md` its personal
+Each identity owns a brain folder: `agent-workspaces/<agent-id>/brain` in the
+host's data directory by default. The owner can choose another folder for every
+brain, a Git repository of their own for example, under Brain folder in the
+engine settings (`agents.brain.root`). There each agent gets a folder named
+after it (`open-source`, then `open-source-2` when that name already holds
+files), kept through renames. Choosing a folder moves every existing brain
+there, and the default puts them back; a folder inside the core's data
+directory, or containing it, is refused, and so is a change while an agent
+works or a memory pass runs. A move that fails halfway puts back what moved.
+`AGENTS.md` holds its reusable instructions, `MEMORY.md` its personal
 notes, and `skills/` its procedures. The Brain tab edits both text files with a
 content revision check. The brain stays on the host across model changes and
 client disconnects. Personal notes are supplied only in direct conversations;
 shared contexts use scoped memory. Filesystem access still follows provider
 permissions, not a separate OS sandbox per identity.
+
+After each finished piece of work in the direct conversation (a message,
+a planned task or notices it answered), a memory pass rewrites `MEMORY.md`
+(`agents/memory.ts`). It is a subagent of the agent's thread that the core
+owns, like a goal reviewer: it reads the current file, what was asked and what
+the agent answered, and returns the whole file rewritten with a one-line
+summary, keeping dated facts about the user, their projects, decisions and
+open follow-ups and dropping what the exchange made wrong or finished. It runs
+on the provider's small model (the one that titles threads) when the agent's
+subagent policy allows it, else on the agent's own model. The core writes the
+file, so the pass needs no tools; it keeps the old file when the owner edited
+it meanwhile, when the answer is too long, or when it would drop most of a
+file past 1,500 characters. The agent's next work waits up to five minutes for
+the pass, so it starts from the new notes; a pass still running after ten
+minutes is stopped. The pass is recorded on the work (`AgentWork.memory`), and
+the conversation shows Memory updated under the answer with the summary.
+Its answer never reaches the agent as mail. The agent's settings turn it off
+(`autoMemory`).
 
 Compaction runs after twelve completed turns by default, configurable from two
 to one hundred, at 85% of a reported context window, or on demand from Brain.
@@ -270,8 +365,10 @@ now, Pause or Resume, Edit and the way into that run's thread.
 
 Models and limits separates the required default route, allowed main routes,
 and allowed subagent profiles. A route names a provider, account and model.
-An allowed main route can delegate only to configured subagent profiles,
-without gaining other main routes. Provider/account probes determine availability.
+Subagents are on by default: with no profile listed, an agent's children run
+on any model of an account granted to it, unless the owner turns free model
+choice off; listing profiles restricts children to them, without gaining other
+main routes. The subagent guide joins a fresh session while they are on. Provider/account probes determine availability.
 There is no silent fallback to an unapproved model.
 
 Account access grants each subscription to all identities or an explicit list.

@@ -217,14 +217,15 @@ since the first frame carries the token.
 
 The commands that drive other threads (`threads`, `thread show|send|stop|
 archive|unarchive|remove|rename`, `thread move <project> <id>`, `questions`,
-`answer`, `permissions`, `allow`, `deny`, `stewards`, `projects
-archive|unarchive|remove`) and `thread new` need no `--thread` from a terminal.
-There they use the owner methods: `thread send` is the owner's own prompt,
-queued behind a running turn, and `thread new` copies the agent of `--thread`,
-else of the project's most recent thread (`--model` replaces the model). Inside
-a thread the same words act as the [steward](stewards.md) the owner made that
-thread, held to its projects and capabilities, and its messages reach other
-threads as the steward's letters, never as the user's.
+`answer`, `permissions`, `allow`, `deny`, `projects archive|unarchive|remove`)
+and `thread new` need no `--thread` from a terminal. There they use the owner
+methods: `thread send` is the owner's own prompt, queued behind a running turn,
+and `thread new` copies the agent of `--thread`, else of the project's most
+recent thread (`--model` replaces the model). Inside the direct conversation of
+a [persistent agent](agents.md#projects-entrusted-to-an-agent) the same words
+reach the threads of the projects the owner entrusted to it, through
+`resident.*`, and its messages reach them as that agent's letters, never as the
+user's. Deleting a thread and deciding a tool permission stay the owner's.
 
 ## Commands
 
@@ -241,9 +242,9 @@ boite projects add <folder> [--name <name>]
 boite projects archive|unarchive|remove <project>
                                  the owner's; removing leaves the folder on disk
 boite threads [--project <p>] [--archived]
-                                 every thread as the owner, a steward's own
+                                 every thread as the owner, an agent's projects'
 boite thread show <id>           state, pending questions and permissions, last answer
-boite thread send <id> <text>    the owner's prompt, or the steward's letter
+boite thread send <id> <text>    the owner's prompt, or the agent's letter
 boite thread stop|archive|unarchive|remove <id>
 boite thread rename <id> <title>
 boite thread move <project> <id> move another thread
@@ -251,8 +252,6 @@ boite questions [<id>]           pending questions
 boite answer <id> <question-id> <option|text ...> [--skip]
 boite permissions [<id>]         pending tool permissions
 boite allow|deny <id> <request-id>
-boite stewards [set <thread> <project ...> [--all] [--can <a,b>] [--quiet] | revoke <thread>]
-boite steward                    this thread's steward grant
 boite attach <file>               publish a file snapshot in chat, at most 512 MB
 boite view <file.html>            draw the page at the end of the answer (--title <text>)
 boite view help                   the rules of a page: layout, the app's look, theme, motion, checks
@@ -469,6 +468,27 @@ one value, a provider login (`accounts#provider-claude`) or a device to add
 (`machines#machines`). Open Settings goes there with the same ring and sends
 `opened: the user opened Settings at <page>`; Dismiss sends `dismissed`. The
 MCP tools `boite_settings` and `boite_settings_request` do the same.
+
+`settings agent [key]` reads a persistent agent's settings a card may change:
+`projects` (those entrusted to it), `model`, `effort`, `autoMemory` (the memory
+pass), `subagents` and `maxRunMinutes`. It prints the agent's name, each value
+and, for projects, models and efforts, the choices. `--agent <name or id>`
+names the agent; in an agent's own conversation it defaults to that agent.
+`settings agent request <key> <value> --why <text>` draws the card. `projects`
+takes `+name -name` edits or a whole list (`Notes,Other`, or JSON), resolved
+by name or id and stored as ids; the other keys read their value as `settings
+request` does. The refusals are the same, plus an unknown or ambiguous agent
+(the refusal lists them) and a model the agent's policy does not allow.
+
+The card names the agent and the change; for projects, each project added or
+removed has a tick the owner can clear before Apply. Apply calls
+`agents.settings.apply`, owner only, which writes through the agent's own
+settings checks. Any change to the agent, from the card or from its settings
+page, settles every card it answers; a card about an agent that is archived or
+removed closes unanswered. The asking thread reads `applied: <agent>'s <key>
+is now <value>`, `changed: the user set <agent>'s <key> to <value>, not
+<proposed>` or `refused: <agent>'s <key> stays <value>`, projects by name
+(`are` and `stay` for them).
 
 Exit codes: 0, 1 on a refusal or a failure (`error: ...` on stderr), 2 on a
 usage error (the usage text on stderr).

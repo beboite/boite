@@ -26,17 +26,19 @@
 
   type Item =
     | { kind: 'time'; key: string; at: number }
-    | { kind: 'notice'; key: string; entry: AgentMail }
     | { kind: 'message'; key: string; entry: AgentMail; right: boolean; first: boolean; last: boolean; stamp?: boolean; quote?: AgentMail; label?: string };
 
-  /** The user's side holds what reaches this agent and what the user typed; the steward never sits there. */
+  /**
+   * The user's side holds what reaches this agent and what the user typed; the
+   * persistent agent that looks after the project never sits there.
+   */
   function onRight(entry: AgentMail): boolean {
-    return entry.letter.origin !== 'steward' && (entry.direction === 'incoming' || entry.letter.origin === 'user');
+    return entry.letter.origin !== 'resident' && (entry.direction === 'incoming' || entry.letter.origin === 'user');
   }
   function labelOf(entry: AgentMail): string | undefined {
     if (entry.letter.origin === 'user') return strings.agentMessages.you;
     if (entry.letter.origin === 'result') return strings.agentMessages.result;
-    if (entry.letter.origin === 'steward') return strings.agentMessages.relation.steward;
+    if (entry.letter.origin === 'resident') return discussion.agent?.name ?? strings.agentMessages.relation.resident;
     return undefined;
   }
   let items = $derived.by(() => {
@@ -47,7 +49,6 @@
     for (const entry of discussion.entries) {
       const at = entry.letter.createdAt;
       if (!previous || at - previous.letter.createdAt >= STRETCH_MS) { out.push({ kind: 'time', key: `time:${entry.letter.id}`, at }); open = undefined; }
-      if (entry.letter.origin === 'notice') { out.push({ kind: 'notice', key: entry.letter.id, entry }); open = undefined; previous = entry; continue; }
       const right = onRight(entry);
       const label = labelOf(entry);
       const joins = open !== undefined && open.right === right && open.label === label && at - open.entry.letter.createdAt < GROUP_MS && !FAILED.includes(open.entry.letter.status);
@@ -125,11 +126,11 @@
     <button type="button" class="ghost small icon back" data-testid="agent-discussion-back" aria-label={strings.agentMessages.back} title={strings.agentMessages.back} onclick={onback}>
       <ArrowLeft size={15} />
     </button>
-    <AgentAvatar title={discussion.title} providerId={discussion.providerId} status={discussion.status} steward={discussion.steward} size={32} />
+    <AgentAvatar title={discussion.title} providerId={discussion.providerId} status={discussion.status} resident={discussion.resident} agent={discussion.agent} size={32} />
     <div class="who">
       <strong data-testid="agent-discussion-heading" tabindex="-1">{discussion.title}</strong>
       <span class="facts">
-        {#if tag}<span class="tag" class:steward={discussion.steward} data-relation={tag}>{strings.agentMessages.relation[tag]}</span>{/if}
+        {#if tag}<span class="tag" class:resident={discussion.resident} data-relation={tag}>{strings.agentMessages.relation[tag]}</span>{/if}
         {#if where}<span class="where" data-testid="agent-discussion-where">{where}</span>{/if}
         {#if discussion.model}<span class="model">{discussion.model}</span>{/if}
       </span>
@@ -146,12 +147,10 @@
     {#each items as item (item.key)}
       {#if item.kind === 'time'}
         <time class="stretch" datetime={new Date(item.at).toISOString()} title={exactTime(item.at)}>{clockTime(item.at)}</time>
-      {:else if item.kind === 'notice'}
-        <p class="notice" data-testid="agent-notice" data-letter-id={item.entry.letter.id} title={exactTime(item.entry.letter.createdAt)}>{item.entry.letter.text}</p>
       {:else}
         {@const letter = item.entry.letter}
         {@const failed = FAILED.includes(letter.status)}
-        <div class="msg" class:right={item.right} class:first={item.first} class:last={item.last} class:steward={letter.origin === 'steward'}
+        <div class="msg" class:right={item.right} class:first={item.first} class:last={item.last} class:resident={letter.origin === 'resident'}
           class:flash={flash === letter.id} class:failed
           data-testid="agent-discussion-message" data-letter-id={letter.id} data-direction={item.entry.direction}>
           {#if item.first && item.label}<span class="label">{item.label}</span>{/if}
@@ -198,14 +197,13 @@
   .facts { min-width: 0; display: flex; align-items: center; gap: 6px; color: var(--color-muted-foreground); font-size: var(--text-xs); }
   .facts > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .facts .tag { flex: none; padding: 1px 6px; border-radius: var(--radius-full); background: var(--color-accent-soft); color: var(--color-accent); font-weight: 500; }
-  .facts .tag.steward { background: var(--color-steward-soft); color: var(--color-steward); }
+  .facts .tag.resident { background: var(--color-resident-soft); color: var(--color-resident); }
   .facts .model { font-family: var(--font-mono); }
   .about { flex: none; margin: 0; padding: 8px 14px; border-bottom: 1px solid var(--color-border); color: var(--color-muted-foreground); font-size: var(--text-xs); line-height: 1.45; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
   .about > span { color: var(--color-foreground); font-weight: 600; }
   .letters { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 12px 12px 16px; overflow-y: auto; overscroll-behavior: contain; }
   .stretch { align-self: center; margin: 12px 0 8px; padding: 2px 8px; border-radius: var(--radius-full); background: var(--color-surface-2); color: var(--color-muted-foreground); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
   .stretch:first-child { margin-top: 0; }
-  .notice { align-self: stretch; margin: 6px 0; padding: 4px 10px; border-left: 2px solid var(--color-border); color: var(--color-muted-foreground); font-size: var(--text-xs); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
   .msg { display: flex; flex-direction: column; align-items: flex-start; max-width: 86%; margin-top: 2px; }
   .msg.first { margin-top: 10px; }
   .msg.right { align-self: flex-end; align-items: flex-end; }
@@ -215,8 +213,8 @@
   .msg:not(.first) .bubble { border-top-left-radius: var(--radius-sm); }
   .msg.right .bubble { border-color: color-mix(in oklch, var(--color-accent) 55%, transparent); border-bottom-left-radius: var(--radius-lg); border-bottom-right-radius: var(--radius-sm); background: var(--color-accent-soft); }
   .msg.right:not(.first) .bubble { border-top-left-radius: var(--radius-lg); border-top-right-radius: var(--radius-sm); }
-  .msg.steward .bubble { border-color: color-mix(in oklch, var(--color-steward) 45%, transparent); border-left: 2px solid var(--color-steward); background: var(--color-steward-soft); }
-  .msg.steward .label { color: var(--color-steward); }
+  .msg.resident .bubble { border-color: color-mix(in oklch, var(--color-resident) 45%, transparent); border-left: 2px solid var(--color-resident); background: var(--color-resident-soft); }
+  .msg.resident .label { color: var(--color-resident); }
   .msg.failed .bubble { border-style: dashed; }
   .msg.flash .bubble { box-shadow: 0 0 0 2px var(--color-accent); }
   .text { margin: 0; font-size: var(--text-sm); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }

@@ -66,7 +66,10 @@ async function leaveSettings(draft?: string) {
   }
   await page.waitFor(`document.querySelector('${id('composer-input')}')`);
 }
+/** Where every button of the composer's bar sits, the dictation's floating menu aside. */
+const barLayout = `[...document.querySelectorAll('${id('composer')} .bar button')].filter(button => button.getClientRects().length && !button.closest('${id('dictation-panel')}')).map(button => { const r = button.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)].join(); })`;
 async function record() {
+  const before = await page.evaluate<string[]>(barLayout);
   await page.send('Runtime.evaluate', { expression: `document.querySelector('${id('dictation-start')}').click()`, userGesture: true });
   await page.waitFor(`['recording','error'].includes(document.querySelector('${id('dictation')}')?.dataset.phase)`);
   expect(await page.evaluate(`document.querySelector('${id('dictation')}')?.textContent`)).toContain('Listening');
@@ -74,6 +77,19 @@ async function record() {
   try { await page.waitFor(`Number(document.querySelector('[data-testid="dictation"] .duration')?.textContent.split(':')[1]) >= 1`); } catch (error) { console.log(await page.evaluate(`({dictation: document.querySelector('[data-testid="dictation"]')?.outerHTML, contexts: [...window.__audioFixtures].map(f => ({state:f.context.state, time:f.context.currentTime})), hidden:document.hidden})`)); throw error; }
   await page.waitFor(`document.querySelector('${id('dictation-preview')}')?.textContent.includes('Please add a test')`);
   expect(await page.evaluate(`document.querySelector('${id('dictation')}').getBoundingClientRect().height <= 44`)).toBe(true);
+  // The spectrum draws what the microphone hears: resting bars are a dot, the fixture's tone lifts some well above it.
+  await page.waitFor(`(() => {
+    const canvas = document.querySelector('${id('dictation-spectrum')}');
+    if (!canvas?.width || canvas.dataset.mode !== 'live') return false;
+    const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+    let top = canvas.height, bottom = -1;
+    for (let y = 0; y < canvas.height; y++) for (let x = 0; x < canvas.width; x++) if (pixels[(y * canvas.width + x) * 4 + 3] > 0) { top = Math.min(top, y); bottom = Math.max(bottom, y); }
+    return bottom - top > canvas.height * 0.4;
+  })()`);
+  // The recording's menu floats beside the microphone: the bin is in it, inside the window, and nothing in the bar moved.
+  expect(await page.evaluate(`!!document.querySelector('${id('dictation-panel')} ${id('dictation-cancel')}')`)).toBe(true);
+  expect(await page.evaluate(`(() => { const r = document.querySelector('${id('dictation-panel')}').getBoundingClientRect(); return r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight; })()`)).toBe(true);
+  expect(await page.evaluate<string[]>(barLayout)).toEqual(before);
   expect(await page.evaluate(`!!document.querySelector('${id('dictation-stop')} svg')`)).toBe(true);
 }
 test('dictation captures audio and appends a transcript without sending or overwriting typed text', async () => {
@@ -104,6 +120,8 @@ test('phone dictation fits, cancels with Escape, and does not change the draft',
         return r.left >= chips.left && r.right <= chips.right && r.top >= chips.top && r.bottom <= chips.bottom;
       });
     })()`)).toBe(true);
+    // The menu follows the window's resize event back inside it at every width.
+    await page.waitFor(`(() => { const r = document.querySelector('${id('dictation-panel')}').getBoundingClientRect(); return r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight; })()`);
     if (width === 320) await capture('speech-phone-narrow-recording.png');
   }
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });

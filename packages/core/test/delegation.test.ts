@@ -303,7 +303,8 @@ test('the parent learns dynamic workflows and coordination within a compact prom
   // Then about 130 for the line naming `boite logs problems` and the built-in skill's path. The
   // path starts with the data directory, whose length is the runner's, so it counts as `<data>`.
   // Then 26 for `[--context light|neutral]`; `boite help` holds the rest of the context flags.
-  expect(Buffer.byteLength(prompt.replaceAll(h.dataDir, '<data>'))).toBeLessThan(3162);
+  // Then 36 for `[agent]` and "or a persistent agent's": a thread can ask to change an agent's settings.
+  expect(Buffer.byteLength(prompt.replaceAll(h.dataDir, '<data>'))).toBeLessThan(3200);
   runs.get(threadId)!.finish();
   await waitFor(() => h.core.threads.require(threadId).status === 'idle');
   await owner.call('turns.start', { threadId, prompt: 'Continue' });
