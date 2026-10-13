@@ -827,6 +827,15 @@ test('a first page too short to scroll asks for the page above it at once; a lis
   running = mount(MessageList, { target: document.body, props: { store: tall.store, threadId: 't-tall', messages: long } });
   await settle();
   expect(tall.calls()).toBe(0);
+  await unmount(running); running = null;
+
+  // A list laid out with no height is hidden: it waits until it is shown.
+  stubLayout(short.length * ESTIMATE);
+  Object.defineProperty(Element.prototype, 'clientHeight', { configurable: true, get: () => 0 });
+  const hidden = pagedStore({ openThread: { id: 't-hidden', turns: [], messages: [] } });
+  running = mount(MessageList, { target: document.body, props: { store: hidden.store, threadId: 't-hidden', messages: short } });
+  await settle();
+  expect(hidden.calls()).toBe(0);
 });
 
 test('a thread whose first message is loaded asks for nothing at the top', async () => {

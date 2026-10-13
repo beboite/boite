@@ -12,7 +12,8 @@ import type { Store } from './store.svelte';
 export function fillShort(box: HTMLElement | undefined, open: boolean, navigating: () => boolean, reach: number, page: (box: HTMLElement) => void): void {
   if (!box || !open) return;
   void tick().then(() => {
-    if (!box.isConnected || navigating() || box.scrollHeight - box.clientHeight > reach) return;
+    // A list with no height is hidden, not short: it would page in the whole thread unseen.
+    if (!box.isConnected || !box.clientHeight || navigating() || box.scrollHeight - box.clientHeight > reach) return;
     untrack(() => page(box));
   });
 }

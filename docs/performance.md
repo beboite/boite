@@ -270,7 +270,8 @@ when the core advertises `chunkedAnswers`.
   256 KiB (`READING_PAGE_BYTES`) as the reader scrolls either way. A list too
   short to scroll asks for the page beside it at once, again after each one
   lands, until it reaches 400 px past the viewport or the thread is whole
-  (`fillShort` in `lib/reading-window.ts`). Once a page above has landed and
+  (`fillShort` in `lib/reading-window.ts`). A hidden list, with no height,
+  waits until it is shown. Once a page above has landed and
   the window is drawn, the row that was first is put back where it stood on
   screen: counting the new rows at their estimates had moved the text being
   read by 850 px at 1280x900 (`pullOlder`). A cached visit allows up to 200
