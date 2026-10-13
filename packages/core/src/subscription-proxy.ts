@@ -72,7 +72,8 @@ function openCodeGatewayEnv(core: Core, provider: ProviderDescriptor, proxy: Sub
   const others = declaredProviders !== null && typeof declaredProviders === 'object' && !Array.isArray(declaredProviders) ? declaredProviders as Record<string, unknown> : {};
   const models = Object.fromEntries(openCodeGatewayModels(core).map((model) => [model.id, {
     name: model.name,
-    ...(model.limit ? { limit: model.limit } : {}),
+    ...(model.limit && (provider.id === OPENCODE_V2 || (model.limit.context !== undefined && model.limit.output !== undefined))
+      ? { limit: model.limit } : {}),
     ...(model.reasoning ? provider.id === OPENCODE_V2
       ? { compatibility: { reasoningField: 'reasoning_content' } }
       : { reasoning: true, interleaved: { field: 'reasoning_content' } } : {}),

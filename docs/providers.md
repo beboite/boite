@@ -111,6 +111,8 @@ calls the gateway with `antigravity/claude-opus-4-6-thinking`.
 
 The injected models preserve positive integer `context_length` (or
 `context_window`) and `max_output_tokens` as their context and output limits.
+OpenCode 1 requires both values to emit a valid limit object; an incomplete
+pair is omitted. OpenCode 2 accepts either validated limit independently.
 Advertised thinking budgets, dynamic thinking or effort levels enable
 OpenCode 1's `reasoning` capability and its `reasoning_content` replay field;
 OpenCode 2 receives `compatibility.reasoningField` instead. Missing or malformed

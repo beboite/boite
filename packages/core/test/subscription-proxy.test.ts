@@ -252,6 +252,10 @@ for (const providerId of ['opencode', 'opencode-v2'] as const) test(`${providerI
       { id: 'antigravity/gemini-invalid', context_length: '200000', max_output_tokens: -1, thinking: { min: -1, max: '32000', levels: [] } },
       { id: 'antigravity/gemini-effort-only', supported_endpoint_types: ['openai'],
         supportedReasoningEfforts: [{ reasoningEffort: 'high' }] },
+      { id: 'antigravity/gemini-context-only', supported_endpoint_types: ['openai'], context_length: 8192 },
+      { id: 'antigravity/gemini-output-only', supported_endpoint_types: ['openai'], max_output_tokens: 4096 },
+      { id: 'antigravity/gemini-invalid-output', supported_endpoint_types: ['openai'], context_length: 8192, max_output_tokens: -1 },
+      { id: 'antigravity/gemini-invalid-context', supported_endpoint_types: ['openai'], context_length: '8192', max_output_tokens: 4096 },
     ] });
   } });
   harness = await startTestCore({ settings: { subscriptionProxy: config(`http://127.0.0.1:${gateway.port}/v1`) } });
@@ -274,6 +278,15 @@ for (const providerId of ['opencode', 'opencode-v2'] as const) test(`${providerI
       ? { reasoning: true, interleaved: { field: 'reasoning_content' } }
       : { compatibility: { reasoningField: 'reasoning_content' } }),
   });
+  // OpenCode 1 requires both limits when the block is present; OpenCode 2 accepts each independently.
+  for (const [id, limit] of [
+    ['antigravity/gemini-context-only', { context: 8192 }],
+    ['antigravity/gemini-output-only', { output: 4096 }],
+    ['antigravity/gemini-invalid-output', { context: 8192 }],
+    ['antigravity/gemini-invalid-context', { output: 4096 }],
+  ] as const) {
+    expect(catalog[id]).toEqual({ name: id, ...(providerId === 'opencode-v2' ? { limit } : {}) });
+  }
 });
 
 test('Grok runs through Douane by its environment alone, and keeps its own sign-in behind CLIProxyAPI', async () => {
