@@ -8,7 +8,7 @@ import type {
   Settings,
   TelemetryState
 } from '@boite/contracts';
-import { chordLabel, commandForKey, isMac, resolveBindings, type KeyScope } from '../keybindings';
+import { chordLabel, commandForKey, isMac, resolveBindings, type BindingTable, type KeyScope } from '../keybindings';
 import { strings } from '../strings';
 import type { StoreContext } from './context';
 
@@ -46,9 +46,16 @@ export class CoreSettings {
   // The keyboard
   // -------------------------------------------------------------------------
 
+  /** The last keydown's answer: the composer asks for its chords, then the app for its own, all on one key. */
+  #lastKey: { event: KeyboardEvent; scope: KeyScope; table: BindingTable; command: KeybindingCommand | null } | null = null;
+
   /** The command this keydown is bound to, or null when the key is nobody's. A terminal asks for its own first. */
   commandForKey(event: KeyboardEvent, scope: KeyScope = 'app'): KeybindingCommand | null {
-    return commandForKey(this.ctx.store.bindings, event, isMac(), scope);
+    const table = this.ctx.store.bindings, last = this.#lastKey;
+    if (last?.event === event && last.scope === scope && last.table === table) return last.command;
+    const command = commandForKey(table, event, isMac(), scope);
+    this.#lastKey = { event, scope, table, command };
+    return command;
   }
 
   /** True while this keydown is the chord of that one command. */
