@@ -58,6 +58,8 @@ export class ClaudeSession {
   private readonly prompts = new PromptQueue();
   private readonly timers = new Set<Timer>();
   private readonly waiting: ClaudeTurn[] = [];
+  /** Turns whose prompt was queued, or which adopted the CLI's own run. */
+  private readonly steerable = new WeakSet<ClaudeTurn>();
   /** What the CLI runs in the background, as its last `background_tasks_changed` said. */
   private background: BackgroundTask[] = [];
   private readonly backgroundFinishers = new Map<string, NonNullable<SessionContext['backgroundFinished']>[]>();
@@ -181,7 +183,10 @@ export class ClaudeSession {
         if (!adopted && message.type === 'result') continue;
         this.receive(message, true);
       }
-      if (adopted) return;
+      if (adopted) {
+        this.steerable.add(turn);
+        return;
+      }
       // The CLI's own run is still going: its result is not this turn's.
       if (!replay.some(message => message.type === 'result')) this.foreignResults += 1;
     } else {
@@ -200,6 +205,7 @@ export class ClaudeSession {
       // The options the query opens on are this turn's: nothing to apply yet.
       this.applied = liveSetup(turn.ctx.thread);
       this.prompts.push(turn.promptText(), turn.ctx.attachments);
+      this.steerable.add(turn);
       void this.run(turn);
       return;
     }
@@ -211,7 +217,7 @@ export class ClaudeSession {
 
   /** User follow-ups enter the active query's stream with its existing setup. */
   async steer(turn: ClaudeTurn, text: string, attachments: TurnContext['attachments'] = []): Promise<boolean> {
-    if (this.head() !== turn || turn.settled || turn.isStopped || !this.query || this.closing || this.ended) return false;
+    if (this.head() !== turn || !this.steerable.has(turn) || turn.settled || turn.isStopped || !this.query || this.closing || this.ended) return false;
     // The CLI reads this live stream while working, without interrupting its agent loop.
     this.prompts.push(text, attachments);
     return true;
@@ -312,6 +318,7 @@ export class ClaudeSession {
     if (!(await this.applyLive(turn))) return;
     if (turn.isStopped || this.closing || this.ended) return;
     this.prompts.push(turn.promptText(), turn.ctx.attachments);
+    this.steerable.add(turn);
   }
 
   /**
