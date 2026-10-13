@@ -35,6 +35,10 @@ failure rules. Codex's copied `config.toml` retargets reviewed `hooks.json`
 paths to the isolated directory. New hook trust must be reviewed in the user's
 own Codex profile; a later spawn copies it.
 
+A light Haiku child ([subagents](delegation.md#light-haiku-children)) still runs
+the user's Claude hooks, with `BOITE_LIGHT=1` in its environment. A hook that
+adds context at session start or on each prompt can check it and print nothing.
+
 ## What Boite reports
 
 Claude runs with the SDK's `includeHookEvents`, which sends a `hook_response`

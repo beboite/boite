@@ -1,6 +1,7 @@
 import type { EffortLevel, Options, Query, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { ImageAttachment, PermissionMode } from '@boite/contracts';
 import type { SessionContext } from '../types.ts';
+import { isLightChild } from '../../light-child.ts';
 
 export const STDERR_MAX = 400;
 
@@ -110,6 +111,8 @@ export function sessionKey(ctx: SessionContext): string {
     resumeAt: ctx.resumeAt ?? null,
     accountId: ctx.account.id,
     env: ctx.accountEnv,
+    // A model switch that makes a child light, or no longer light, needs a new process.
+    light: isLightChild(ctx.thread, ctx.provider),
   });
 }
 

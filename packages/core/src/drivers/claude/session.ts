@@ -11,11 +11,18 @@ import { childEnv, liveSetup, PROMPT_EFFORT, PromptQueue, STDERR_MAX } from './q
 import type { ClaudeDeps, LiveSetup } from './query.ts';
 import type { ClaudeTurn } from './turn.ts';
 import { SessionRetention } from '../session-retention.ts';
+import { isLightChild, LIGHT_CHILD_ENV } from '../../light-child.ts';
 import { noteClaudeMessage } from './diagnostics.ts';
 
 /** How long `stop()` lets the CLI end its turn before the abort signal takes it. */
 /** Claude Code's own subagent and workflow tools; `Task` is the older name of `Agent`. */
 export const NATIVE_SUBAGENT_TOOLS = ['Agent', 'Task', 'Workflow'] as const;
+/**
+ * What a light child keeps of Claude Code's tools: files, search and a shell.
+ * The rest costs about 10k of context on Windows before a brief is read.
+ * A name the platform lacks (PowerShell on Linux) is ignored by the CLI.
+ */
+export const LIGHT_CHILD_TOOLS = ['Bash', 'PowerShell', 'Read', 'Write', 'Edit', 'Glob', 'Grep'] as const;
 const STOP_GRACE_MS = 3_000;
 /** How long the CLI has to exit on its own once the prompt stream is over. */
 const FINISH_GRACE_MS = 5_000;
@@ -687,6 +694,7 @@ export class ClaudeSession {
     // The same values the setters carry later, so what the query opens on
     // and what the session records as applied can never say different things.
     const setup = liveSetup(ctx.thread);
+    const light = isLightChild(ctx.thread, ctx.provider);
     return {
       resume: ctx.sessionId ?? undefined,
       // A rewind or a fork: the transcript up to that entry, under a new
@@ -704,6 +712,8 @@ export class ClaudeSession {
       // Subagents in Boite are Boite conversations (`boite delegate spawn`), so the user
       // can follow, steer and stop them; the CLI's own subagent tools never reach the model.
       disallowedTools: [...NATIVE_SUBAGENT_TOOLS],
+      // A light child reads no CLAUDE.md or AGENTS.md and connects no MCP server; hooks still run.
+      ...(light ? { tools: [...LIGHT_CHILD_TOOLS], strictMcpConfig: true, mcpServers: {} } : {}),
       settings: {
         fastMode: setup.fastMode,
         ...(ctx.thread.permissionMode === 'yolo' ? { disableAllHooks: true } : {}),
@@ -712,7 +722,7 @@ export class ClaudeSession {
       // Every run of the user's own hooks, for the ledger Settings shows.
       includeHookEvents: true,
       abortController: this.abortController,
-      env: childEnv(ctx.accountEnv),
+      env: light ? { ...childEnv(ctx.accountEnv), CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1', [LIGHT_CHILD_ENV]: '1' } : childEnv(ctx.accountEnv),
       canUseTool: this.gate.canUseTool,
       hooks: {
         PreToolUse: [{ hooks: [this.gate.preToolUse] }],

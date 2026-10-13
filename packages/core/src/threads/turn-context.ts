@@ -17,6 +17,7 @@ import type {
 import { activityPrompt } from '../activity-prompt.ts';
 import { agentEnvOf } from '../agent.ts';
 import { agentGuide } from '../agent-guide.ts';
+import { isLightChild } from '../light-child.ts';
 import { prepareAttachments, fileReference } from '../attachments.ts';
 import { continuationInput } from '../continuation.ts';
 import type { Core } from '../core.ts';
@@ -271,12 +272,14 @@ export class TurnContexts {
     const deferred = carried.deferred;
     // The subagent guide comes with the Boite guide on a fresh session, and on any turn about delegation.
     // Core-woken turns (results, workflow summaries) bring no request of their own.
-    const tail = (fresh: boolean): string => operation === 'compact' ? '' : this.core.delegation.instructions(threadId, operation ? '' : prepared.prompt, fresh) + carried.letters;
+    // A light child gets its brief and the letters meant for it, without the brain, Boite or team guides.
+    const light = isLightChild(thread, provider);
+    const tail = (fresh: boolean): string => operation === 'compact' ? '' : (light ? '' : this.core.delegation.instructions(threadId, operation ? '' : prepared.prompt, fresh)) + carried.letters;
     const origin = input.sentFrom;
     const compose = (body: string, sessionId: string | null): string => {
       const inject = !((operation && sessionId !== null) || nativeCommandPrompt(body));
       // Echo treats "question" as a test directive, including in injected help.
-      const guideEnabled = this.core.brain.config().boiteGuide !== false;
+      const guideEnabled = !light && this.core.brain.config().boiteGuide !== false;
       // Said when a session starts and when the user changes app or computer, not on every turn.
       // Boite's own text, so the guide switch turns it off with the rest.
       const said = origin && inject && guideEnabled && (sessionId === null || !sameOrigin(origin, this.sentFromBefore(threadId, origin.messageId)))
@@ -284,7 +287,7 @@ export class TurnContexts {
       const coordinationGuide = inject && operation !== 'compact' && guideEnabled ? this.core.coordination.instructions(threadId) + this.core.stewards.instructions(threadId) + this.core.workforce.entrusted.instructions(threadId) : '';
       const guide = inject && sessionId === null && guideEnabled
         ? agentGuide(provider.protocol !== 'echo' && this.core.settings.get().asyncQuestions !== false, this.core.settings.get().agentLogAccess !== false, this.core.settings.get().agentLogAccess === false ? [] : builtinSkills(this.core.dataDir, message => { try { this.core.logs.warn(message, { source: 'skills', event: 'skills.write-failed' }); } catch { /* The guide is built without that skill. */ } })) : '';
-      const prefix = (inject ? this.core.brain.instructions(provider.id) : '') + guide;
+      const prefix = (inject && !light ? this.core.brain.instructions(provider.id) : '') + guide;
       return carried.memory + prefix + (prefix ? 'User request:\n' : '') + said + deferred + body + coordinationGuide + tail(inject && sessionId === null && guideEnabled) + this.threads.cards.askInstructions({ ...thread, sessionId }, provider, turn, body);
     };
     return {
