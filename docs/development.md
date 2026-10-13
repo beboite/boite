@@ -81,6 +81,9 @@ one per test process with `BOITE_E2E_PREBUILT_UI=1`, or falls back to Vite.
 Both modes expose the fixture workspace through `globalThis.__boiteTest`, so
 tests that only need the Store can use the prebuilt bundle. Close each scenario's
 browsers in `afterEach` to release their rendering resources before the next test.
+Give browser shutdown hooks an explicit 60-second budget: captured-process exit
+can take 30 seconds and profile removal retries for another 15 seconds. Close
+the fixture server in `finally` so a browser cleanup failure still releases it.
 Pages importing `/src/...` call `startDevUi` directly. That server warms their
 reachable modules before browser interactions. Fixture bundles enable the fake
 client separately from the production assets staged in installers.
