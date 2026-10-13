@@ -89,16 +89,24 @@
     observer?.observe(container);
     // A list also moves without a scroll or a resize: rows above it leave or grow. Its own size does not change, so
     // only its place in the viewport says the window is stale, and a list that slid into view would keep its blank spacer.
-    const placement = typeof IntersectionObserver === 'undefined' ? null
+    // A list taller than the viewport keeps the same visible share while it moves, so the drawn rows are watched too:
+    // the ones on screen change their share with any move.
+    placement = typeof IntersectionObserver === 'undefined' ? null
       : new IntersectionObserver(refresh, { root, threshold: Array.from({ length: 21 }, (_, step) => step / 20) });
     placement?.observe(container);
-    return () => { root.removeEventListener('scroll', refresh); window.removeEventListener('resize', refresh); window.removeEventListener('pointerdown', outsidePointer, true); observer?.disconnect(); placement?.disconnect(); };
+    for (const node of placed) placement?.observe(node);
+    return () => { root.removeEventListener('scroll', refresh); window.removeEventListener('resize', refresh); window.removeEventListener('pointerdown', outsidePointer, true); observer?.disconnect(); placement?.disconnect(); placement = null; };
   });
   $effect(() => {
     const present = new Set(keys);
     untrack(() => { for (const key of heights.keys()) if (!present.has(key)) heights.delete(key); });
   });
+  /** Watches where the list and its drawn rows sit in the viewport; drawn rows join it as they mount. */
+  let placement: IntersectionObserver | null = null;
+  const placed = new Set<Element>();
   function measure(element: HTMLDivElement, key: string) {
+    placed.add(element);
+    placement?.observe(element);
     const read = () => {
       const value = element.getBoundingClientRect().height;
       if (!(value > 0)) return;
@@ -113,7 +121,7 @@
     read();
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(read);
     observer?.observe(element);
-    return { destroy: () => observer?.disconnect() };
+    return { destroy: () => { observer?.disconnect(); placed.delete(element); placement?.unobserve(element); } };
   }
   function focusables(element: Element): HTMLElement[] {
     return [...element.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), a[href], [tabindex="0"]')]

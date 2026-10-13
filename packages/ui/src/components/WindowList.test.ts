@@ -97,31 +97,51 @@ test('many small project lists leave offscreen groups as spacers and remain reac
 
 
 test('a project list that rows above it pushed into view draws its rows instead of a blank spacer', async () => {
-  // Threads archived in the project above shrink it: nothing scrolls and this list keeps its size, it only moves.
-  const placements: { callback: IntersectionObserverCallback; nodes: Set<Element> }[] = [];
+  // Threads archived in the projects above shrink them: nothing scrolls and the list keeps its size, it only moves.
+  // The observer stand-in calls back only when a node's visible share changes, as the browser's does.
+  const placements: { callback: IntersectionObserverCallback; shares: Map<Element, number> }[] = [];
   globalThis.IntersectionObserver = class {
-    nodes = new Set<Element>();
-    constructor(callback: IntersectionObserverCallback) { placements.push({ callback, nodes: this.nodes }); }
-    observe(node: Element) { this.nodes.add(node); }
-    unobserve(node: Element) { this.nodes.delete(node); }
-    disconnect() { this.nodes.clear(); }
+    shares = new Map<Element, number>();
+    constructor(callback: IntersectionObserverCallback) { placements.push({ callback, shares: this.shares }); }
+    observe(node: Element) { this.shares.set(node, -1); }
+    unobserve(node: Element) { this.shares.delete(node); }
+    disconnect() { this.shares.clear(); }
     takeRecords() { return []; }
   } as unknown as typeof IntersectionObserver;
+  const share = (node: Element) => { const r = node.getBoundingClientRect(); return Math.max(0, Math.min(400, r.bottom) - Math.max(0, r.top)) / r.height; };
+  const move = async () => {
+    for (const observer of placements) {
+      let changed = false;
+      for (const [node, previous] of observer.shares) { const next = share(node); if (next !== previous) { changed = true; observer.shares.set(node, next); } }
+      if (changed) observer.callback([], {} as IntersectionObserver);
+    }
+    await settle();
+  };
+  const drawn = (root: HTMLElement) => [...root.querySelectorAll<HTMLElement>('[data-row-id]')].map(node => Number(node.dataset.rowId));
+  let listTop = 0, count = 0;
   const root = document.createElement('div'); document.body.append(root);
-  let listTop = 900;
   vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(400);
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-    return new DOMRect(0, this === root ? 0 : listTop, 280, this.dataset.windowKey ? 34 : 68);
+    if (this === root) return new DOMRect(0, 0, 280, 400);
+    if (this.dataset.windowKey) return new DOMRect(0, listTop + Number(this.dataset.windowKey) * 34, 280, 34);
+    return new DOMRect(0, listTop, 280, count * 34);
   });
-  const items = [{ id: 'quiet:0' }, { id: 'quiet:1' }];
-  const row = createRawSnippet<[typeof items[number]]>(item => ({ render: () => `<button data-row-id="${item().id}">${item().id}</button>` }));
-  mounted = mount(WindowList<typeof items[number]>, { target: root, props: { items, keyOf: item => item.id, row, scrollRoot: root, estimate: 34 } });
-  await settle();
-  expect(root.querySelectorAll('button')).toHaveLength(0);
-  listTop = 200;
-  for (const observer of placements) if (observer.nodes.size) observer.callback([], {} as IntersectionObserver);
-  await settle();
-  expect(root.querySelectorAll('button')).toHaveLength(2);
+  const row = createRawSnippet<[number]>(item => ({ render: () => `<button data-row-id="${item()}">${item()}</button>` }));
+  // Mounted, then the first notification every observed node gets, as in the browser.
+  const list = async (items: number[]) => { count = items.length; mounted = mount(WindowList<number>, { target: root, props: { items, keyOf: String, row, scrollRoot: root, estimate: 34 } }); await settle(); await move(); };
+
+  // A short list below the viewport slides into it.
+  listTop = 900; await list([0, 1]);
+  expect(drawn(root)).toEqual([]);
+  listTop = 200; await move();
+  expect(drawn(root)).toEqual([0, 1]);
+  await unmount(mounted!); mounted = undefined; root.innerHTML = '';
+
+  // A windowed list covering the whole viewport moves up: its visible share stays the same, the drawn rows' does not.
+  listTop = -3000; await list(Array.from({ length: 200 }, (_, index) => index));
+  expect(drawn(root)).toContain(90);
+  listTop = -1000; await move();
+  expect(drawn(root)).toEqual(expect.arrayContaining([30, 35, 40]));
 });
 
 test('reordering and filtering preserve keyed controls and update the full reachable model', async () => {
