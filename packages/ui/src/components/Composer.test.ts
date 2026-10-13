@@ -1339,6 +1339,9 @@ test('a draft shows its first prompt while the thread is still being created', a
   expect(store.openThread).toBeNull();
   expect(input().value).toBe('');
   expect(document.querySelector('[data-testid=draft-empty]')).toBeNull();
+  // Already the thread's composer, or it shrinks a second time when the thread opens.
+  expect(document.querySelector('[data-testid=chat]')!.classList.contains('drafting')).toBe(false);
+  expect(document.querySelector('.composer-wrap')!.classList.contains('centered')).toBe(false);
   release();
   await waitFor(() => store.openThread !== null && !store.busy && Object.keys(store.staged).length === 0);
   expect(shown().length).toBe(1);

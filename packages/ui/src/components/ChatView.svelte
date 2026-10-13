@@ -64,7 +64,10 @@
     <p class="muted">{strings.thread.noneBody}</p>
   </div>
 {:else}
-  <section class="chat" class:drafting={!thread} data-testid="chat">
+  <!-- The draft's roomier composer belongs to the middle of the column: once
+     the prompt is on its way the composer is at the bottom, at its thread size,
+     or it shrinks a second time when the thread opens. -->
+  <section class="chat" class:drafting={!thread && !sending} data-testid="chat">
     {#if thread?.forkOrigin}{#key thread.id}<ForkReturn {store} {thread} />{/key}{/if}
     {#if thread}
       <!-- One timeline per thread: the heights it measured and the ids that

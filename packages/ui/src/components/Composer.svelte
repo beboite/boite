@@ -58,6 +58,9 @@
   let inputScroll = $state(0);
   let toolbar = $state<ReturnType<typeof ComposerBar> | undefined>(undefined);
   let attachmentStrip = $state<ReturnType<typeof ComposerAttachments> | undefined>();
+  let wrap = $state<HTMLDivElement | undefined>(undefined);
+  /** Where the centred draft composer stood when its prompt went out, so it glides to the bottom instead of jumping. */
+  let glideFrom: number | null = null;
   let highlightedImage = $state<Attachment | null>(null);
   /** Where ArrowUp stands in this thread's sent prompts, or null outside recall. */
   let recall = $state<number | null>(null);
@@ -235,6 +238,20 @@
     slashAt = 0;
   });
 
+  // A draft's prompt leaves the middle of the column: the composer slides to
+  // the bottom from where it stood instead of appearing there.
+  $effect(() => {
+    const element = wrap;
+    if (centered || !element || glideFrom === null) return;
+    const delta = glideFrom - element.getBoundingClientRect().top;
+    glideFrom = null;
+    if (Math.abs(delta) < 1) return;
+    const style = getComputedStyle(element);
+    const token = style.getPropertyValue('--dur-3').trim();
+    const duration = parseFloat(token) * (token.endsWith('ms') ? 1 : 1000) || 0;
+    element.animate?.([{ transform: `translateY(${delta}px)` }, { transform: 'none' }], { duration, easing: style.getPropertyValue('--ease-out-quint').trim() || 'ease-out' });
+  });
+
   let grown = ''; // Last value measured.
   function grow() {
     if (!box) return;
@@ -385,6 +402,7 @@
       return;
     }
     state.sending = true;
+    glideFrom = centered && wrap ? wrap.getBoundingClientRect().top : null;
     const finishImageSend = trackImageSend(state, prompt, images);
     // The box empties and the prompt joins the timeline now; the core's answer only ticks its receipts. A `/goal` writes no message.
     const local = edited ? edited.local : inputStore.stageSend(inputKey, prompt, images, references);
@@ -401,6 +419,7 @@
       inputStore.startDraft(editedThread.projectId, { fresh: true });
       inputStore.draftChoice = { ...sendChoice };
     }
+    glideFrom = null;
     finishImageSend(accepted);
     // A command clears only what it went out with. A refused or lost prompt leaves the timeline for the box, or the head of the queue.
     if (accepted && !local) {
@@ -707,7 +726,7 @@
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="composer-wrap" class:centered onkeydowncapture={(event) => {
+<div class="composer-wrap" class:centered bind:this={wrap} onkeydowncapture={(event) => {
   if (!event.isComposing && event.key === 'Escape' && !mentionOpen && !slashOpen && attachmentStrip?.closePreview()) {
     event.preventDefault(); event.stopPropagation();
   }
