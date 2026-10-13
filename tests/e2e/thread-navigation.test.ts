@@ -20,10 +20,15 @@ async function capture(page: BrowserPage, name: string) {
 }
 
 async function drag(page: BrowserPage, selector: string) {
-  const box = await page.evaluate<{ x: number; y: number; width: number }>(`(() => {
+  // The list glides to its bottom while a closed viewer or a late picture changes its height: the text is measured
+  // once it has held still for three frames, or a loaded runner presses where it was a moment ago (2026-10-13).
+  const box = await page.evaluate<{ x: number; y: number; width: number }>(`(async () => {
     const e = document.querySelector(${JSON.stringify(selector)}); e.scrollIntoView({block:'nearest'});
-    const range = document.createRange(); range.selectNodeContents(e);
-    const r = e.matches('p') ? range.getClientRects()[0] : e.getBoundingClientRect(); return { x: r.left + 5, y: r.top + r.height / 2, width: r.width - 10 };
+    const rect = () => { const range = document.createRange(); range.selectNodeContents(e); return e.matches('p') ? range.getClientRects()[0] : e.getBoundingClientRect(); };
+    const frame = () => new Promise(done => requestAnimationFrame(done));
+    let last = rect(), still = 0;
+    for (let i = 0; i < 120 && still < 3; i++) { await frame(); const r = rect(); still = r.top === last.top && r.left === last.left ? still + 1 : 0; last = r; }
+    return { x: last.left + 5, y: last.top + last.height / 2, width: last.width - 10 };
   })()`);
   await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: box.x, y: box.y });
   await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: box.x, y: box.y, button: 'left', buttons: 1, clickCount: 1 });

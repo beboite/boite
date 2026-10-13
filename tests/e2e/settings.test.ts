@@ -18,7 +18,9 @@ beforeAll(async () => {
   server = await startDevUi(port);
   uiUrl = `http://127.0.0.1:${port}`;
   page = await BrowserPage.launch({ url: `${uiUrl}/?fake=1&open=recent` });
-  await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
+  // A loaded Windows runner kept the dev server's modules unanswered for 14 s, and the page sat on "Starting"
+  // past waitFor's default 15 s (2026-10-13): the first paint gets the hook's budget, not the default.
+  await page.waitFor(`document.querySelector('${id('nav-settings')}')`, 40_000);
 }, 60_000);
 afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
 
