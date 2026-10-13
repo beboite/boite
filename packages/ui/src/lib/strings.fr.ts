@@ -1846,6 +1846,7 @@ export const fr: Translation = {
     rates: 'Tarif API public de {model}, par million de jetons : entrée {input}, sortie {output}, lecture du cache {cacheRead}, écriture du cache {cacheWrite}.',
     reportedCost: "Aucun tarif public ne correspond à ce modèle : le coût est celui que son agent a rapporté.",
     noRates: "Aucun tarif public ne correspond à ce modèle et son agent n'a rapporté aucun coût.",
+    olderCore: "La machine qui a fait ces tours a une version de Boite antérieure aux tarifs publics des API : seul un coût rapporté par son agent apparaît ici. Mettez-la à jour dans Réglages, Machines et mises à jour pour les estimer.",
     noTokens: "L'agent n'a rapporté aucun jeton pour ces tours : ils n'ont pas de coût.",
     priceOf: 'prix de {model}',
     metrics: { tokens: 'Jetons', cost: 'Estimation API', turns: 'Tours' },

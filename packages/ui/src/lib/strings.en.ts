@@ -1951,6 +1951,7 @@ export const strings = {
     rates: 'Public API rates of {model}, per million tokens: input {input}, output {output}, cache read {cacheRead}, cache write {cacheWrite}.',
     reportedCost: 'No public rate matches this model, so the cost is the one its agent reported.',
     noRates: 'No public rate matches this model and its agent reported no cost.',
+    olderCore: 'The machine that ran these turns has a Boite older than public API rates, so only a cost its agent reported shows here. Update it in Settings, Machines and updates to price them.',
     noTokens: 'The agent reported no tokens for these turns, so they have no cost.',
     priceOf: 'the price of {model}',
     metrics: { tokens: 'Tokens', cost: 'API estimate', turns: 'Turns' },

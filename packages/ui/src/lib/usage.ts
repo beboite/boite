@@ -101,7 +101,7 @@ export function formatRate(value: number): string {
  * Where a model's cost comes from, for the "i" beside its name: the public
  * rates it was priced at, the agent's own figure, or nothing.
  */
-export function priceNote(row: { price: UsagePrice | null; priced: number; reported: number }): string {
+export function priceNote(row: { price: UsagePrice | null; priced: number; reported: number; olderCore?: boolean }): string {
   const price = row.price;
   // Rates price nothing without tokens: Grok reports none.
   if (row.reported === 0 && row.priced === 0) return strings.usage.noTokens;
@@ -115,6 +115,8 @@ export function priceNote(row: { price: UsagePrice | null; priced: number; repor
       cacheWrite: formatRate(cacheWrite),
     });
   }
+  // A core from before public prices knows no rate at all, whatever the model.
+  if (row.olderCore) return strings.usage.olderCore;
   return row.priced > 0 ? strings.usage.reportedCost : strings.usage.noRates;
 }
 
@@ -155,6 +157,8 @@ export interface ModelRow extends UsageTotals {
   value: number;
   /** The public rates the core priced this model at, null when it had none. */
   price: UsagePrice | null;
+  /** Some of its turns came from a core older than public prices, which sends no `price`. */
+  olderCore?: boolean;
 }
 
 export interface DayRow extends UsageTotals {
@@ -255,6 +259,7 @@ export function summarize(history: UsageHistory, metric: UsageMetric, providerId
     addTotals(model, row.turns, row.reported, row.priced, row.usage);
     model.value += value;
     model.price ??= row.price ?? null;
+    if (row.price === undefined) model.olderCore = true;
     models.set(modelKey, model);
     const day = days[row.bucket]!;
     addTotals(day, row.turns, row.reported, row.priced, row.usage);
