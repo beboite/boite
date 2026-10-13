@@ -2,7 +2,8 @@
  * Notifications: a toast when a thread finishes, fails, or asks something
  * while the user is looking elsewhere. "Elsewhere" is either another thread
  * in this window or another window altogether; the open thread on a focused
- * window says it on the screen already and gets no toast.
+ * window says routine news on the screen already. Questions and permissions
+ * still notify: an open window does not prove the user noticed the request.
  *
  * The decision is pure and tested; the delivery is the shell's `notify`
  * command (a Windows toast whose click comes back as `notification://open`),
@@ -30,9 +31,10 @@ export interface NotifyDecision {
   enabled: boolean;
 }
 
-/** A toast goes out when the switch is on and the user could not have seen it happen. */
+/** Requests for input notify wherever the user is; routine news only when looking elsewhere. */
 export function shouldNotify(input: NotifyDecision): boolean {
   if (!input.enabled) return false;
+  if (input.kind === 'needs-you') return true;
   if (!input.focused) return true;
   return input.openThreadId !== input.threadId;
 }
