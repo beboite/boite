@@ -151,7 +151,9 @@ unfinished turn and reads the team and coordination views again, since events
 sent while the socket was down reach no client.
 
 Stop all pauses the team and cancels queued and running children. Stopping or
-archiving the parent does the same, and so does a parent failure. A team with
+archiving the parent does the same. A parent turn that fails or that the system
+cuts (a provider error, an agent update) pauses nothing: the children keep
+working, and their results reach the parent at its next prompt. A team with
 no child is never paused that way: there is nothing to stop. A core restart
 pauses only a team with a message still to deliver or a child turn it cut
 short. Resume is an owner action. An unsuccessful child is not retried by Boite.
