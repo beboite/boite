@@ -93,7 +93,7 @@ export class PushStore {
       } else if (name === 'permission.requested' || name === 'question.asked') {
         const request = payload as RpcEvents['permission.requested'] | RpcEvents['question.asked'];
         const text = requestExcerpt(request);
-        this.notify(request.threadId, text ? { body: text } : { body: 'Needs your answer', label: 'needsYou' }, `request-${request.id}`);
+        this.notify(request.threadId, text ? { body: text } : { body: 'Needs your answer', label: 'needsYou' }, `request-${request.id}`, true);
       } else if (name === 'turn.finished') {
         const turn = payload as RpcEvents['turn.finished'];
         if (this.closed || this.core.journal.isClosed() || (turn.status !== 'done' && turn.status !== 'error')) return;
@@ -208,11 +208,12 @@ export class PushStore {
    * The thread is on a screen someone is looking at, on any of their devices:
    * push would only interrupt. It waits instead. Using that screen after the
    * news arrived shows it was seen and drops it; looking away, a page going
-   * quiet or a lease nobody renews sends it.
+   * quiet or a lease nobody renews sends it. Requests for input go immediately:
+   * an attended thread does not prove the user noticed its question or permission.
    */
-  private notify(threadId: string, text: Pick<PushPayload, 'body' | 'label'>, tag: string) {
+  private notify(threadId: string, text: Pick<PushPayload, 'body' | 'label'>, tag: string, needsInput = false) {
     if (this.closed) return;
-    if (this.core.threads.focus.attended(threadId)) {
+    if (!needsInput && this.core.threads.focus.attended(threadId)) {
       this.held.set(tag, { threadId, text, at: Date.now() });
       this.releaseHeld();
     } else this.deliverAll(threadId, text, tag);

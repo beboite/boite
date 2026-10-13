@@ -501,7 +501,10 @@ push switch, the granted permission and a live browser subscription. A device
 without push, and a page's notices about another machine, keep the local
 notification, through the service worker and the per-thread tag a push would use.
 
-No device gets a push about news someone saw on screen. A page reports its
+Routine turn notifications wait while someone watches their conversation.
+Questions and permission requests notify immediately, including asynchronous
+questions, even when their conversation is open and focused. The desktop
+notification switch still disables local toasts. A page reports its
 conversation `attentive` in `threads.focus` while it is visible, in front and
 used in the last 45 seconds (`lib/attention.ts`): the phone app in the
 foreground on that thread, or the desktop window in front with it open. The
@@ -513,8 +516,8 @@ the page. The page repeats its report every 10 seconds and the core believes it
 for 25, so a phone that iOS suspends before it can say so (`pagehide`,
 `freeze`) stops counting within that time.
 
-The core holds back a push about an attended thread, finished turns, questions
-and permission requests alike, rather than dropping it (`PushStore.notify`).
+The core holds back finished-turn pushes about an attended thread rather than
+dropping them (`PushStore.notify`). Requests for input bypass this hold.
 Each report carries `idleMs`, how long ago the page was last used while
 attentive; use after the news arrived means it was seen, and the held push is
 dropped. The page reports its first use after a quiet spell at once, at most

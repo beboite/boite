@@ -27,6 +27,11 @@ describe('shouldNotify', () => {
     expect(shouldNotify({ ...base, focused: false })).toBe(true);
   });
 
+  test('a request for user input notifies even in the focused open thread', () => {
+    expect(shouldNotify({ ...base, kind: 'needs-you' })).toBe(true);
+    expect(shouldNotify({ ...base, kind: 'needs-you', enabled: false })).toBe(false);
+  });
+
   test('the switch off wins over everything', () => {
     expect(shouldNotify({ ...base, focused: false, openThreadId: null, enabled: false })).toBe(false);
   });
