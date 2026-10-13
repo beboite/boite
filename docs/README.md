@@ -21,6 +21,7 @@
 - [Persistent agents](agents.md): the Agents page, robots, planned tasks, threads an agent runs, groups, missions, memory and background execution.
 - [Subagents](delegation.md): child conversations on by default, model profiles, live steering and usage.
 - [Workflows](workflows.md): JSON plans of delegated steps, fan-out, conditions, templates and the graph.
+- [Context modes](context-modes.md): starting a conversation without the user's instruction files, guides, MCP servers or hooks, with rules of its own.
 - [Usage](usage.md): tokens, API cost and limits per day, provider and model.
 - [Analytics](analytics.md): optional telemetry, consent, collected fields and data controls.
 - [Diagnostics](diagnostics.md): Boite's own logs, the Settings page, anonymized exports, issue reports and what a client reports.

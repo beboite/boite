@@ -296,13 +296,14 @@ test('the parent learns dynamic workflows and coordination within a compact prom
   await owner.call('turns.start', { threadId, prompt: 'Review the parser' });
   const prompt = runs.get(threadId)!.ctx.prompt;
   for (const command of ['boite agents list', 'boite agents send', 'boite agents reply', 'boite delegate spawn', 'boite delegate send', 'boite workflow help', 'boite workflow check', 'boite workflow run', 'boite workflow extend', 'forEach', 'when']) expect(prompt).toContain(command);
-  expect(prompt).toContain('boite delegate spawn "<brief>" [--model <provider/model>] [--effort <level>] [--speed <tier>]:');
+  expect(prompt).toContain('boite delegate spawn "<brief>" [--model <provider/model>] [--effort <level>] [--speed <tier>] [--context light|neutral]:');
   // 2600 before the line that names `boite view`, about 220 bytes, then 80 for `[--speed <tier>]` and its default,
   // then about 100 for the `boite settings` line.
   expect(prompt).toContain('standard speed without --speed (tiers: boite delegate models)');
   // Then about 130 for the line naming `boite logs problems` and the built-in skill's path. The
   // path starts with the data directory, whose length is the runner's, so it counts as `<data>`.
-  expect(Buffer.byteLength(prompt.replaceAll(h.dataDir, '<data>'))).toBeLessThan(3136);
+  // Then 26 for `[--context light|neutral]`; `boite help` holds the rest of the context flags.
+  expect(Buffer.byteLength(prompt.replaceAll(h.dataDir, '<data>'))).toBeLessThan(3162);
   runs.get(threadId)!.finish();
   await waitFor(() => h.core.threads.require(threadId).status === 'idle');
   await owner.call('turns.start', { threadId, prompt: 'Continue' });
@@ -853,6 +854,15 @@ test('a child runs on a speed tier only when the spawn names one, by id or by la
   expect(cliLong.code).not.toBe(0);
   expect(cliLong.err).toContain('--speed needs a tier of 1 to 64 characters');
   expect(cliLong.err).not.toContain('fffff');
+  // A context mode from the command line: the rules come from a file beside the caller, and the list says how the child started.
+  writeFileSync(join(h.dataDir, 'review-rules.md'), 'Judge the diff alone.\n');
+  await ok(['delegate', 'spawn', 'Review the diff', '--context', 'neutral', '--keep', 'mcp', '--rules-file', 'review-rules.md', '--title', 'Neutral review']);
+  expect(await ok(['delegate', 'list'])).toMatch(/thr_\S+ \w+ \d+s echo\/echo context=custom\+rules "Neutral review"/);
+  const neutral = h.core.threads.list({}).find(thread => thread.title === 'Neutral review')!;
+  expect(neutral.contextMode).toEqual({ label: 'custom', instructions: false, guides: false, mcp: true, hooks: false, tools: null, rules: 'Judge the diff alone.' });
+  const badPart = await call(['delegate', 'spawn', 'Review', '--drop', 'memory']);
+  expect(badPart.code).not.toBe(0);
+  expect(badPart.err).toContain('context.drop: expected a list of instructions, guides, mcp, hooks');
 });
 
 test('the models list and a child row name a tier by the id a child stores, with a label that differs in front', () => {

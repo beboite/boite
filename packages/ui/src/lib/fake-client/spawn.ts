@@ -55,7 +55,7 @@ export function spawnMethods(ctx: FakeContext, create: FakeMethods['threads.crea
       if (caller.archived) throw refuse('an archived thread cannot start threads', { threadId: caller.id, field: 'threadId', expected: 'a thread that is not archived' });
       const prompt = params.prompt.trim();
       if (!prompt || params.prompt.length > 12_000) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'agent.spawn.prompt: expected 1 to 12000 characters' });
-      const fingerprint = JSON.stringify([params.project, params.prompt, params.title ?? null, params.worktree === true]);
+      const fingerprint = JSON.stringify([params.project, params.prompt, params.title ?? null, params.worktree === true, ...(params.context === undefined ? [] : [params.context])]);
       const ledger = ledgers.get(caller.id) ?? [];
       const retried = ledger.find(entry => entry.requestId === params.requestId);
       if (retried) {
@@ -80,7 +80,7 @@ export function spawnMethods(ctx: FakeContext, create: FakeMethods['threads.crea
         const created = await create({
           projectId: target.id, providerId: caller.providerId, accountId: caller.accountId, title,
           ...(caller.model === null ? {} : { model: caller.model }), effort: caller.effort, permissionMode: caller.permissionMode,
-          ...(params.worktree ? { worktree: {} } : {}),
+          ...(params.worktree ? { worktree: {} } : {}), ...(params.context === undefined ? {} : { context: params.context }),
         });
         if (ctx.thread(caller.id).archived) throw refuse('an archived thread cannot start threads', { threadId: caller.id, field: 'threadId', expected: 'a thread that is not archived' });
         const thread = ctx.thread(created.id);
