@@ -2001,6 +2001,21 @@ test('account lifecycle newer cancellation beats a stale reload snapshot', async
   }
 });
 
+test('Add a device on a core older than the method says to update that machine, not "unknown method"', async ({ store, client }) => {
+  const call = client.call.bind(client);
+  const spy = vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    if (method === 'group.addDevice') throw new RpcFailure({ code: RpcErrorCode.MethodNotFound, message: 'unknown method group.addDevice' });
+    return call(method, params);
+  });
+  try {
+    await store.addDevice();
+    expect(store.deviceInvite).toBeNull();
+    expect(store.error).not.toContain('unknown method');
+    const hostname = store.core?.hostname;
+    expect(store.error).toBe(hostname ? strings.errors.olderCore.replace('{machine}', hostname) : strings.errors.olderCoreHere);
+  } finally { spy.mockRestore(); }
+});
+
 test('closing Add a device discards a pending replacement from the same core', async ({ store, client }) => {
   await store.addDevice();
   const call = client.call.bind(client);

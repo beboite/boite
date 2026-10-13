@@ -67,6 +67,21 @@ async function joined(existing?: Store): Promise<Store> {
   return second;
 }
 
+test('a core older than Add a device says to update it instead of failing once pressed', async () => {
+  const first = await machine('first', 'First');
+  // A core from before Add a device says no `deviceKeys` at hello.
+  first.core!.features = { ...first.core!.features, deviceKeys: false };
+  draw(first);
+  await settle();
+  const call = vi.spyOn(first.client!, 'call');
+  expect(one<HTMLButtonElement>('group-add-device')!.disabled).toBe(true);
+  expect(one('group-add-older')!.textContent).toBe(fill(strings.group.addOlder, { machine: first.core!.hostname ?? strings.machines.local }));
+  one<HTMLButtonElement>('group-add-device')!.click();
+  await settle();
+  expect(call).not.toHaveBeenCalledWith('group.addDevice', expect.anything());
+  expect(first.error).toBeNull();
+});
+
 /** A phone admitted by the fake core under its owner's key, as the real one does when the phone opens its link. */
 async function enroll(target: Store, publicKey: string): Promise<string> {
   const { id } = await target.client!.call('group.enrollDevice', { publicKey, name: 'phone', at: Date.now(), sig: 'fake-signature' });

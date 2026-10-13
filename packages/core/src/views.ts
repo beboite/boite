@@ -11,7 +11,7 @@ import { closeSync, constants, fstatSync, openSync, readFileSync } from 'node:fs
 import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
-  VIEW_DEFAULT_HEIGHT, VIEW_MAX_BYTES, VIEW_NARROW_WIDTH, VIEW_ROUTE, VIEW_TITLE_MAX, VIEW_WIDTH,
+  VIEW_BLEED, VIEW_DEFAULT_HEIGHT, VIEW_MAX_BYTES, VIEW_NARROW_WIDTH, VIEW_ROUTE, VIEW_TITLE_MAX, VIEW_WIDTH,
   clampViewHeight, viewDocument, viewTitleOf,
   type InlineView, type Message, type RpcParams, type RpcResult,
 } from '@boite/contracts';
@@ -232,9 +232,9 @@ export async function publishView(core: Core, params: RpcParams<'artifacts.view'
   let committed = false;
   try {
     const name = basename(found.absolute);
-    // The check loads the page exactly as a client will: from the view route, under its sandbox and policy.
+    // The check loads the page exactly as a client will: from the view route, under its sandbox and policy, in a frame as wide as the client's.
     const ticket = core.fileTickets.mint(destination, VIEW_MIME, Date.now(), name, undefined, true);
-    const probe = await core.browser.probe(`${core.baseUrl()}${VIEW_ROUTE}/${ticket}`, [VIEW_WIDTH, VIEW_NARROW_WIDTH]);
+    const probe = await core.browser.probe(`${core.baseUrl()}${VIEW_ROUTE}/${ticket}`, [VIEW_WIDTH, VIEW_NARROW_WIDTH].map(width => width + 2 * VIEW_BLEED));
     if (probe?.errors.length) throw notReady(probe.errors);
     const [height, narrowHeight] = probe?.heights ?? [];
     const view: InlineView = {

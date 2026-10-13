@@ -1,5 +1,6 @@
 import { DisplayImages } from './display-images';
 import { RpcFailure, type Client } from '../client';
+import { errorText } from '../errors';
 import type { Store } from '../store.svelte';
 import { Accounts } from './accounts.svelte';
 import { Composer } from './composer.svelte';
@@ -89,9 +90,7 @@ export class StoreContext {
    * do. It belongs in the console, which `fail` writes it to.
    */
   reason(error: unknown): string {
-    if (error instanceof RpcFailure) return error.message;
-    if (error instanceof Error) return error.message;
-    return String(error);
+    return errorText(error, this.store.core?.hostname);
   }
 
   fail(error: unknown): void {

@@ -507,10 +507,10 @@ export class Delegation {
   private finished(turn: Turn): void {
     const thread = this.core.journal.getThread(turn.threadId);
     if (!thread) return;
-    if (!thread.parentThreadId) {
-      if (turn.status !== 'done' && this.config(thread.id).enabled) this.stop(thread.id);
-      return;
-    }
+    // A parent's own turn ending badly (a provider error, an agent update, a restart) is no
+    // reason to stop its team: the children keep working and their results wake it again.
+    // Only the owner's Stop (`threads.stopTurn`, `delegation.stop`) pauses a team.
+    if (!thread.parentThreadId) return;
     // A workflow step's answer goes to its run, and a goal reviewer's to its goal, never to the parent as mail.
     if (this.stepOwned(thread.id)) return;
     const root = this.core.journal.getThread(thread.parentThreadId);

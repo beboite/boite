@@ -635,9 +635,8 @@ devices you intend to give that control.
   once is enough for every machine of its [group](groups.md).
 - The installed web app belongs to the origin it was installed from: it reaches
   the group of the machine serving it, and no other group.
-- There is no iOS package. The Android package that opened one fixed machine's
-  page is no longer published ([android.md](android.md)); the phone runs the
-  installed web app.
+- There is no iOS package. The Android package opens the app's own address
+  ([android.md](android.md)), as the installed web app does from there.
 - Push is a notification channel, not background execution. The core must stay
   running to run agents and send notifications; delivery is not guaranteed.
 - The core must be reachable. A different network, a VPN, or a firewall that

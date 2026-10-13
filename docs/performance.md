@@ -639,15 +639,16 @@ precompressed copies, as `bun scripts/ci/budgets.ts` does.
 
 ### Update everything
 
-On 2026-10-13, `bun run build:ui` with Bun 1.4.2 on Linux measured 4,835,131
-bytes for the complete UI and 565,487 bytes for its entry chunk; the same build
-of `main` at `b5d73b56` measured 4,816,583, matching its desktop CI. The
-sidebar's update card, its plan and the Update all button add 18,548 bytes:
-7,720 to the entry chunk, 3,677 of styles, about 3,500 of icon chunks split out
-now that the entry draws machine icons, and the translations. The total UI
-budget increases from 4,823,000 to 4,845,000 bytes, leaving 9,869 bytes of
-headroom; entry and core limits stay unchanged. Totals exclude precompressed
-copies, as `bun scripts/ci/budgets.ts` does.
+On 2026-10-13, after integrating `main` at `aa0ced74`, `bun run build:ui` with
+Bun 1.4.2 on Linux measured 4,842,311 bytes for the complete UI and 566,232
+bytes for its entry chunk. Main's desktop CI at `aa0ced74` reported 4,709.8 KiB
+(4,822,835 bytes), 165 bytes under its limit. The sidebar's update card, its
+plan, its two buttons and the Update all button in Machines add 19,476 bytes:
+about 7,700 in the entry chunk, 3,700 of styles, about 3,500 of icon chunks
+split out now that the entry draws machine icons, and the translations. The
+total UI budget increases from 4,823,000 to 4,855,000 bytes, leaving 12,689
+bytes of headroom; entry and core limits stay unchanged. Totals exclude
+precompressed copies, as `bun scripts/ci/budgets.ts` does.
 
 ## The desktop browser on a phone
 

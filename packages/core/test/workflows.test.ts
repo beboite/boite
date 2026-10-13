@@ -242,25 +242,25 @@ test('a workflow needs no team: a step without a profile runs on the conversatio
   } finally { agent.close(); }
 });
 
-test('a failed turn of a conversation without a team pauses its run until the owner resumes it', async () => {
+test('a failed turn of the conversation leaves its run going, and the result still reaches it', async () => {
   let fail = true;
-  const { held } = scripted(ctx => ctx.thread.parentThreadId ? { hold: true } : fail ? { status: 'error' } : 'parent acknowledged');
+  const { held, prompts } = scripted(ctx => ctx.thread.parentThreadId ? { hold: true } : fail ? { status: 'error' } : 'parent acknowledged');
   const h = await startTestCore(); cores.push(h);
   const owner = await h.connect();
   const { threadId } = await echoThread(h, owner, 'Parent');
   const run = await owner.call('workflows.start', { threadId, plan: { name: 'Two', steps: [{ id: 'a', task: 'a' }, { id: 'b', task: 'b {{a}}' }] }, requestId: 'two' });
   await waitFor(() => held.size === 1);
+  // A provider error on the conversation is not the owner's Stop: nothing pauses.
   await owner.call('turns.start', { threadId, prompt: 'Carry on' });
-  const paused = await settled(h, threadId, run.id, ['paused']);
-  expect(paused.error).toContain('failed');
+  await waitFor(() => h.core.threads.require(threadId).status === 'error');
+  expect(h.core.workflows.get(threadId, run.id).status).toBe('running');
+  expect(h.core.delegation.config(threadId).paused).toBe(false);
   fail = false;
   [...held.values()][0]!('A done');
-  await waitFor(() => h.core.workflows.get(threadId, run.id).nodes[0]!.status === 'done');
-  expect(h.core.workflows.get(threadId, run.id).nodes[1]!.instances).toHaveLength(0);
-  await owner.call('workflows.control', { threadId, runId: run.id, action: 'resume' });
-  await waitFor(() => held.size === 1);
+  await waitFor(() => held.size === 1 && h.core.workflows.get(threadId, run.id).nodes[1]!.instances.length === 1);
   [...held.values()][0]!('B done');
   expect((await settled(h, threadId, run.id)).status).toBe('done');
+  await waitFor(() => prompts.some(p => p.threadId === threadId && p.prompt.includes('B done')));
 });
 
 test('a paused team pauses the run until an owner resumes it', async () => {
