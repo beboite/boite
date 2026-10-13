@@ -42,9 +42,11 @@ once, naming the agents and the Boite release the card showed. Each core then
 orders its own work, so a remote machine needs nothing more from this window
 and no machine waits for another:
 
-1. Boite's own download starts first, being the longest step.
-2. Every agent's update starts beside it, pausing its running threads between
-   two tool calls ([agent updates](agent-updates.md#turns-in-flight)).
+1. Every agent's update starts, pausing its running threads between two tool
+   calls ([agent updates](agent-updates.md#turns-in-flight)).
+2. Boite's own download starts beside their updaters, once each agent counts
+   as updating: an update can first wait on a version check, and a quick
+   download must not reach the idle gate in that gap.
 3. The release installs through the idle gate, which counts an agent update as
    work under way, its pause and its registry reads included: the restart
    cannot replace the core under a half-written agent install.

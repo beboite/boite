@@ -13,24 +13,19 @@ function agentsOf(value: unknown): ProviderId[] {
 }
 
 /**
- * Starts every update of this machine the client listed, in the order that
- * costs the least wall time: Boite's own download first, since it is the
- * longest and touches nothing that runs, then every agent at once. The
- * server's installation itself waits for the agents through the idle gate
- * (`Core.requestIdleShutdown` counts an agent update as work), so the
- * restart can never replace the core under a half-written agent install.
+ * Starts every update of this machine the client listed: every agent at
+ * once, then Boite's own download beside their updaters. The agents go first
+ * because an update can wait on a version check before it counts as under
+ * way, and a quick download must not reach the idle gate in that gap. The
+ * installation then waits for them there (`Core.requestIdleShutdown` counts
+ * an agent update as work), so the restart never replaces the core under a
+ * half-written agent install.
  */
 export async function updateEverything(core: Core, params: { agents?: unknown; server?: unknown } | null): Promise<UpdateEverythingResult> {
   const agents = agentsOf(params?.agents);
   const server = params?.server ?? null;
   if (server !== null && (typeof server !== 'string' || server === '')) {
     throw refused('core.updateEverything.server must be the offered version or null', { field: 'server' });
-  }
-
-  let serverError: string | null = null;
-  if (server !== null) {
-    try { core.serverUpdates.install(server); }
-    catch (error) { serverError = messageOf(error); }
   }
 
   const started: ProviderId[] = [];
@@ -45,6 +40,11 @@ export async function updateEverything(core: Core, params: { agents?: unknown; s
       failed.push({ providerId: requested, message: messageOf(error) });
     }
   }));
+  let serverError: string | null = null;
+  if (server !== null) {
+    try { core.serverUpdates.install(server); }
+    catch (error) { serverError = messageOf(error); }
+  }
   // The order the client listed, not the order the updaters answered in.
   const order = (id: ProviderId) => agents.indexOf(id);
   started.sort((a, b) => order(a) - order(b));

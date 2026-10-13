@@ -30,12 +30,8 @@ export function serverUpdateMethods(ctx: FakeContext): Pick<FakeMethods, 'core.u
   return {
     'core.updateStatus': async ({ refresh }) => refresh ? move({ checkedAt: Date.now() }) : structuredClone(ctx.serverUpdate),
     'core.updateInstall': async ({ version }) => install(version),
-    // The real core's order, without its restart: the download starts first, the agents after it.
+    // The real core's order, without its restart: the agents first, then Boite's download.
     'core.updateEverything': async ({ agents, server }) => {
-      let serverError: string | null = null;
-      if (server !== null) {
-        try { install(server); } catch (error) { serverError = error instanceof Error ? error.message : String(error); }
-      }
       const started: ProviderId[] = [];
       const failed: { providerId: ProviderId; message: string }[] = [];
       for (const providerId of agents) {
@@ -43,6 +39,10 @@ export function serverUpdateMethods(ctx: FakeContext): Pick<FakeMethods, 'core.u
           if (ctx.harnessUpdates.find((entry) => entry.providerId === providerId)?.state !== 'updating') updateHarness(ctx, providerId);
           started.push(providerId);
         } catch (error) { failed.push({ providerId, message: error instanceof Error ? error.message : String(error) }); }
+      }
+      let serverError: string | null = null;
+      if (server !== null) {
+        try { install(server); } catch (error) { serverError = error instanceof Error ? error.message : String(error); }
       }
       return { agents: started, failed, server: structuredClone(ctx.serverUpdate), serverError };
     },
