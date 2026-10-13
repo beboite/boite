@@ -1,0 +1,232 @@
+import { expect, vi } from 'vitest';
+import { flushSync } from 'svelte';
+import { confirm } from '../lib/confirm.svelte';
+import { store } from '../lib/store.svelte';
+import { openWorkbench, query, test, treePaths, type, waitFor } from '../test/app';
+
+vi.mock('@tauri-apps/plugin-opener', () => import('../test/opener'));
+
+test('the file tree lists the root, expands a directory on click and opens a file on its own tab', async () => {
+  await openWorkbench();
+  store.panel.openFiles();
+  await waitFor(() => document.querySelectorAll('[data-testid=files-row]').length > 0);
+
+  // Directories first, then files, the order the core answers in.
+  expect(treePaths()).toEqual(['assets', 'docs', 'src', 'tests', 'package.json', 'README.md']);
+  // A size sits on a file and on nothing else.
+  expect(query('[data-testid=files-row][data-path="README.md"] [data-testid=files-size]')).not.toBeNull();
+  expect(query('[data-testid=files-row][data-path="docs"]').querySelector('[data-testid=files-size]')).toBeNull();
+
+  // Nothing under a directory is read before it opens.
+  expect(document.querySelector('[data-testid=files-row][data-path="docs/panel.md"]')).toBeNull();
+  query<HTMLButtonElement>('[data-testid=files-row][data-path="docs"]').click();
+  await waitFor(() => document.querySelector('[data-testid=files-row][data-path="docs/guide"]') !== null);
+  expect(treePaths().slice(0, 5)).toEqual(['assets', 'docs', 'docs/guide', 'docs/panel.md', 'docs/panel.svg']);
+  expect(query('[data-testid=files-row][data-path="docs/panel.md"]').getAttribute('data-depth')).toBe('1');
+  expect(query('[data-testid=files-row][data-path="docs"]').getAttribute('aria-expanded')).toBe('true');
+
+  // A third level, so the tree is a tree and not one nesting.
+  query<HTMLButtonElement>('[data-testid=files-row][data-path="docs/guide"]').click();
+  await waitFor(() => document.querySelector('[data-testid=files-row][data-path="docs/guide/editor.md"]') !== null);
+  expect(query('[data-testid=files-row][data-path="docs/guide/editor.md"]').getAttribute('data-depth')).toBe('2');
+
+  // The filter narrows the loaded rows and keeps the directories above a match.
+  const filter = query<HTMLInputElement>('[data-testid=files-filter]');
+  await type(filter, 'editor');
+  await waitFor(() => treePaths().length === 3);
+  expect(treePaths()).toEqual(['docs', 'docs/guide', 'docs/guide/editor.md']);
+  await type(filter, '');
+  await waitFor(() => treePaths().length > 3);
+
+  // A file click opens a tab of its own, named after the file.
+  query<HTMLButtonElement>('[data-testid=files-row][data-path="docs/panel.md"]').click();
+  await waitFor(() => store.panel.active?.kind === 'file');
+  expect(store.panel.active?.path).toBe('docs/panel.md');
+  await waitFor(() => document.querySelector('[data-testid=file-panel]') !== null);
+  expect(document.querySelectorAll('[data-testid=panel-tab]').length).toBe(2);
+});
+
+test('the tree of one thread is not shown for the next: a thread switch starts it over', async ({ app: _app }) => {
+  await waitFor(() => document.querySelector('[data-thread-id="t-bench"]') !== null);
+  // Both threads keep the tree as their active tab, so the surface is never
+  // remounted between them and only its own reset can empty it.
+  query<HTMLButtonElement>('[data-thread-id="t-trace"]').click();
+  await waitFor(() => store.openThread?.id === 't-trace');
+  store.panel.closeAll();
+  store.panel.openFiles();
+  await waitFor(() => treePaths().length > 0);
+
+  query<HTMLButtonElement>('[data-thread-id="t-bench"]').click();
+  await waitFor(() => store.openThread?.id === 't-bench');
+  store.panel.closeAll();
+  store.panel.openFiles();
+  await waitFor(() => treePaths().length > 0);
+  query<HTMLButtonElement>('[data-testid=files-row][data-path="docs"]').click();
+  await waitFor(() => treePaths().includes('docs/panel.md'));
+
+  query<HTMLButtonElement>('[data-thread-id="t-trace"]').click();
+  await waitFor(() => store.openThread?.id === 't-trace');
+  await waitFor(() => treePaths().length > 0 && !treePaths().includes('docs/panel.md'));
+  expect(query('[data-testid=files-row][data-path="docs"]').getAttribute('aria-expanded')).toBe('false');
+
+  store.panel.closeAll();
+  query<HTMLButtonElement>('[data-thread-id="t-bench"]').click();
+  await waitFor(() => store.openThread?.id === 't-bench');
+  store.panel.closeAll();
+});
+
+test('the editor shows the file, writes two spaces for a tab and saves what was typed', async () => {
+  await openWorkbench();
+  store.panel.openFile('src/lib/strings.ts');
+  await waitFor(() => document.querySelector('[data-testid=file-text]') !== null);
+  const area = query<HTMLTextAreaElement>('[data-testid=file-text]');
+  await waitFor(() => area.value.includes("save: 'Save'"));
+
+  // One gutter number per line, and the language the core named.
+  expect(document.querySelectorAll('[data-testid=file-line]').length).toBe(area.value.split('\n').length);
+  expect(query('[data-testid=file-language]').textContent).toBe('typescript');
+  expect(document.querySelector('[data-testid=file-dirty]')).toBeNull();
+
+  // Tab is two spaces in the text, not the next control.
+  area.focus();
+  area.setSelectionRange(0, 0);
+  const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+  area.dispatchEvent(tab);
+  expect(tab.defaultPrevented).toBe(true);
+  await waitFor(() => query<HTMLTextAreaElement>('[data-testid=file-text]').value.startsWith('  export'));
+  await waitFor(() => document.querySelector('[data-testid=file-dirty]') !== null);
+
+  const edited = `${query<HTMLTextAreaElement>('[data-testid=file-text]').value}export const ready = true;\n`;
+  area.value = edited;
+  area.dispatchEvent(new Event('input', { bubbles: true }));
+  await waitFor(() => query('[data-testid=file-save]').textContent?.includes('Save') === true);
+  query<HTMLButtonElement>('[data-testid=file-save]').click();
+  await waitFor(() => document.querySelector('[data-testid=file-dirty]') === null);
+
+  // The bytes reached the fixture: a fresh read answers what was saved.
+  const answer = await store.client!.call('files.read', { threadId: 't-trace', path: 'src/lib/strings.ts' });
+  expect(answer.kind).toBe('text');
+  expect(answer.kind === 'text' ? answer.text : '').toBe(edited);
+});
+
+test('an unsaved edit survives a tab switch, and closing its tab asks before it is lost', async () => {
+  await openWorkbench();
+  const file = store.panel.openFile('README.md');
+  await waitFor(() => document.querySelector<HTMLTextAreaElement>('[data-testid=file-text]')?.value.includes('# boite') === true);
+  const area = query<HTMLTextAreaElement>('[data-testid=file-text]');
+  const edited = `${area.value}An edit nobody saved.
+`;
+  area.value = edited;
+  area.dispatchEvent(new Event('input', { bubbles: true }));
+  await waitFor(() => document.querySelector('[data-testid=file-dirty]') !== null);
+
+  // Another tab unmounts the editor, and coming back used to read the disk again.
+  store.panel.openTasks();
+  await waitFor(() => document.querySelector('[data-testid=file-text]') === null);
+  store.panel.activate(file.id);
+  await waitFor(() => document.querySelector<HTMLTextAreaElement>('[data-testid=file-text]')?.value === edited);
+  expect(document.querySelector('[data-testid=file-dirty]')).not.toBeNull();
+
+  // Closing the tab asks first, and Cancel keeps the tab and the edit.
+  const closer = `[data-testid=panel-tab][data-surface-id="${file.id}"] [data-testid=panel-tab-close]`;
+  query<HTMLButtonElement>(closer).click();
+  await waitFor(() => document.querySelector('[data-testid=confirm-dialog]') !== null);
+  expect(query('#confirm-title').textContent).toBe('Close README.md without saving?');
+  query<HTMLButtonElement>('[data-testid=confirm-cancel]').click();
+  await waitFor(() => document.querySelector('[data-testid=confirm-dialog]') === null);
+  expect(store.panel.surfaces.some((surface) => surface.id === file.id)).toBe(true);
+  expect(store.panel.draft(file.id)).toBe(edited);
+
+  // Confirming closes it and drops the edit, so the file reopens on the disk's text.
+  query<HTMLButtonElement>(closer).click();
+  await waitFor(() => document.querySelector('[data-testid=confirm-dialog]') !== null);
+  query<HTMLButtonElement>('[data-testid=confirm-ok]').click();
+  await waitFor(() => !store.panel.surfaces.some((surface) => surface.id === file.id));
+  expect(store.panel.draft(file.id)).toBeUndefined();
+  store.panel.openFile('README.md');
+  await waitFor(() => document.querySelector<HTMLTextAreaElement>('[data-testid=file-text]')?.value.includes('# boite') === true);
+  expect(query<HTMLTextAreaElement>('[data-testid=file-text]').value).not.toContain('An edit nobody saved.');
+  expect(document.querySelector('[data-testid=file-dirty]')).toBeNull();
+  store.panel.closeAll();
+});
+
+test('a key typed while a save is out stays unsaved and survives a tab switch', async () => {
+  await openWorkbench();
+  const file = store.panel.openFile('docs/guide/tree.md');
+  await waitFor(() => document.querySelector<HTMLTextAreaElement>('[data-testid=file-text]')?.value.includes('# The tree') === true);
+  const area = query<HTMLTextAreaElement>('[data-testid=file-text]');
+  const sent = `${area.value}Saved.\n`;
+  area.value = sent;
+  area.dispatchEvent(new Event('input', { bubbles: true }));
+  await waitFor(() => document.querySelector<HTMLButtonElement>('[data-testid=file-save]')?.disabled === false);
+
+  // The click sends the text; the next key lands before the write answers.
+  query<HTMLButtonElement>('[data-testid=file-save]').click();
+  flushSync();
+  expect(query('[data-testid=file-save]').textContent).toContain('Saving');
+  const newer = `${sent}Typed during the save.\n`;
+  area.value = newer;
+  area.dispatchEvent(new Event('input', { bubbles: true }));
+  await waitFor(() => query('[data-testid=file-save]').textContent?.includes('Saving') === false);
+
+  // The disk has what was sent, and the newer key is still a draft with its dot.
+  const disk = await store.client!.call('files.read', { threadId: 't-trace', path: 'docs/guide/tree.md' });
+  expect(disk.kind === 'text' ? disk.text : '').toBe(sent);
+  expect(document.querySelector('[data-testid=file-dirty]')).not.toBeNull();
+  expect(store.panel.draft(file.id)).toBe(newer);
+  store.panel.openTasks();
+  await waitFor(() => document.querySelector('[data-testid=file-text]') === null);
+  store.panel.activate(file.id);
+  await waitFor(() => document.querySelector<HTMLTextAreaElement>('[data-testid=file-text]')?.value === newer);
+  store.panel.keepDraft(file.id, null);
+  store.panel.closeAll();
+});
+
+test('the image viewer measures the picture and the zoom buttons move the percentage', async () => {
+  await openWorkbench();
+  store.panel.openFile('assets/preview.png');
+  await waitFor(() => document.querySelector('[data-testid=file-image]') !== null);
+
+  // jsdom fetches no picture, so the size a browser would report is declared here.
+  const picture = query<HTMLImageElement>('[data-testid=file-image]');
+  Object.defineProperty(picture, 'naturalWidth', { value: 640, configurable: true });
+  Object.defineProperty(picture, 'naturalHeight', { value: 400, configurable: true });
+  picture.dispatchEvent(new Event('load'));
+  await waitFor(() => document.querySelector('[data-testid=file-natural]') !== null);
+  expect(query('[data-testid=file-natural]').textContent?.trim()).toBe('640 x 400');
+  // Nothing is laid out here, so the fit lands on the picture's own size.
+  expect(query('[data-testid=file-zoom]').textContent).toBe('100%');
+
+  query<HTMLButtonElement>('[data-testid=file-zoom-in]').click();
+  await waitFor(() => query('[data-testid=file-zoom]').textContent === '125%');
+  query<HTMLButtonElement>('[data-testid=file-zoom-in]').click();
+  await waitFor(() => query('[data-testid=file-zoom]').textContent === '156%');
+  query<HTMLButtonElement>('[data-testid=file-actual]').click();
+  await waitFor(() => query('[data-testid=file-zoom]').textContent === '100%');
+  // A picture is not text: it has no save and no gutter.
+  expect(document.querySelector('[data-testid=file-save]')).toBeNull();
+  expect(document.querySelector('[data-testid=file-text]')).toBeNull();
+});
+
+test('a file the agent opens at a line lands on that line, and asking again moves the same tab', async () => {
+  await openWorkbench();
+
+  // `panel.requested` is what the core emits for the `boite` CLI's `panel.open`.
+  await store.client!.call('panel.open', {
+    threadId: 't-trace',
+    surface: { kind: 'file', path: 'src/lib/store.svelte.ts', line: 42 }
+  });
+  await waitFor(() => document.querySelector('[data-testid=file-highlight]') !== null);
+  expect(query('[data-testid=file-highlight]').getAttribute('data-line')).toBe('42');
+  expect(query('[data-testid=file-line][data-line="42"]').classList.contains('on')).toBe(true);
+  expect(store.panel.surfaces.length).toBe(1);
+
+  // The same file again moves the tab it already has rather than opening a second.
+  await store.client!.call('panel.open', {
+    threadId: 't-trace',
+    surface: { kind: 'file', path: 'src/lib/store.svelte.ts', line: 7 }
+  });
+  await waitFor(() => query('[data-testid=file-highlight]').getAttribute('data-line') === '7');
+  expect(query('[data-testid=file-line][data-line="7"]').classList.contains('on')).toBe(true);
+  expect(store.panel.surfaces.length).toBe(1);
+});
