@@ -23,7 +23,7 @@ export function createPosixPlatform(
     applySettings() {},
     attach: () => false,
     terminate: () => false,
-    terminateProcess: (_threadId, pid) => load?.killTree?.(pid) ?? false,
+    terminateProcess: (threadId, pid, startedAt) => load?.killTree?.(pid, threadId, startedAt) ?? false,
     terminateUnassigned() {},
     sample: (threadId) => load?.sample(threadId) ?? null,
     watchResources: (active) => load?.watchResources?.(active),

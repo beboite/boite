@@ -345,6 +345,12 @@ for each direct child and reports CPU as zero. The automatic memory guard can
 stop the heaviest child tree when a thread exceeds its share. CPU job caps,
 focus guard and audio mute remain Windows-only.
 
+Before a Linux orphan or memory stop, procfs birth ticks must match the
+registered process or the last sampled descendant. An orphan stop also checks
+the registry's captured start time. Each tree member is checked again before
+its signal; a missing or changed birth is skipped. These procfs checks and
+PID signals are separate operations, rather than a held native process handle.
+
 Linux also reads the cgroup of each thread's root agent process on the same
 one-second sample: the `0::<path>` line of `/proc/<pid>/cgroup`, then
 `memory.events`, `memory.pressure`, `memory.high`, `memory.max` and

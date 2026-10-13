@@ -93,8 +93,8 @@ export interface ProcessPlatform {
   /** Normal priority during agent initialization; platform CPU and memory caps still apply. */
   startup?(threadId: string, active: boolean): void;
   terminate(threadId: string): boolean;
-  /** One process the thread's job reported, through the handle held since its start. */
-  terminateProcess(threadId: string, pid: number): boolean;
+  /** A held Windows handle, or a matching registered/sampled Linux birth. */
+  terminateProcess(threadId: string, pid: number, startedAt?: number | null): boolean;
   terminateUnassigned(pid: number): void;
   sample(threadId: string): ProcessSample | null;
   /** Toggle optional detailed counters without changing protection sampling. */

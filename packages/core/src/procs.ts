@@ -700,8 +700,8 @@ export class ProcRegistry {
       }
     }
     const stopped: number[] = [];
-    for (const { record } of stopping.values()) {
-      if (!this.platform.terminateProcess(threadId, record.pid)) continue;
+    for (const { record, identity } of stopping.values()) {
+      if (!this.platform.terminateProcess(threadId, record.pid, identity.startedAt)) continue;
       stopped.push(record.pid);
       this.bus.emit('core.log', {
         level: 'info',
