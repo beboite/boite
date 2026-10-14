@@ -61,13 +61,82 @@ function sessionLine(session: MobileDeviceSession): string {
   return `${session.deviceId} ${session.platform} ${session.state}${error} (${session.name}${session.input ? '' : ', view-only'})`;
 }
 
+function optional(rest: string[], count: number): string | undefined {
+  if (rest.length > count + 1) throw new Usage(DEVICE_HELP);
+  return rest[count];
+}
+
+async function listDevices(rest: string[], client: CoreClient, threadId: string): Promise<DeviceCliResult> {
+  if (rest.length > 0) throw new Usage(DEVICE_HELP);
+  const list = await client.call('devices.list', { threadId });
+  const lines: string[] = [];
+  for (const host of list.hosts) {
+    lines.push(`host ${host.id} (${host.name})`);
+    for (const p of host.platforms) lines.push(`  ${p.platform}: ${p.available ? 'available' : 'unavailable'}${p.reason ? ` - ${p.reason}` : ''}`);
+  }
+  if (list.devices.length === 0) lines.push('devices: none. No simulators or emulators were found on this machine.');
+  for (const d of list.devices) lines.push(`${d.id} ${d.platform} ${d.kind} ${d.state} (${d.name}${d.runtime ? `, ${d.runtime}` : ''})`);
+  lines.push(list.sessions.length === 0 ? 'open here: none' : `open here: ${list.sessions.map((s) => `${s.deviceId} (${s.state})`).join(', ')}`);
+  return { lines, value: list };
+}
+
+async function openDevice(rest: string[], client: CoreClient, threadId: string, timeoutS: number): Promise<DeviceCliResult> {
+  const platform = flag(rest, '--platform');
+  if (platform !== undefined && platform !== 'android' && platform !== 'ios') throw new Usage('device open --platform expects android or ios');
+  const deviceId = optional(rest, 0);
+  const { session } = await client.call('devices.open', {
+    threadId,
+    ...(deviceId === undefined ? {} : { deviceId }),
+    ...(platform === undefined ? {} : { platform: platform as MobilePlatform }),
+  });
+  const deadline = Date.now() + timeoutS * 1000;
+  let current = session;
+  let control: string[] | undefined;
+  while (current.state === 'booting') {
+    if (Date.now() > deadline) throw new Error(`${current.name} is still starting after ${timeoutS} seconds; boite device list shows its state`);
+    await Bun.sleep(1000);
+    const state = await client.call('devices.sessions', { threadId });
+    const found = state.sessions.find((s) => s.deviceId === session.deviceId);
+    if (!found) throw new Error(`${session.name} was closed while it started`);
+    current = found;
+    control = state.control?.[found.deviceId];
+  }
+  if (current.state === 'failed') throw new Error(`${current.name} failed to start: ${current.error ?? 'no reason given'}`);
+  if (!control) control = (await client.call('devices.sessions', { threadId })).control?.[current.deviceId];
+  const drive = control ? control.map(quote).join(' ') : undefined;
+  const lines = [sessionLine(current), 'shown: in the Device panel of this conversation'];
+  if (drive) {
+    lines.push(`control: ${drive}`);
+    lines.push(current.platform === 'android'
+      ? `  e.g. ${drive} shell uiautomator dump /dev/tty, ${drive} shell am start -n <package>/<activity>, ${drive} install <app.apk>`
+      : `  e.g. ${drive} launch ${current.deviceId} <bundle-id>, ${drive} openurl ${current.deviceId} <url>, ${drive} install ${current.deviceId} <app>`);
+  }
+  return { lines, value: { session: current, control } };
+}
+
+async function screenshotDevice(rest: string[], io: CliIo, client: CoreClient, threadId: string): Promise<DeviceCliResult> {
+  const output = flag(rest, '--output');
+  const deviceId = optional(rest, 0);
+  const shot = await client.call('devices.screenshot', { threadId, ...(deviceId === undefined ? {} : { deviceId }) });
+  const bytes = Buffer.from(shot.base64, 'base64');
+  if (!bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) throw new Error('the device returned a non-PNG screenshot');
+  const path = resolve(io.cwd, output ?? `boite-device-${crypto.randomUUID()}.png`);
+  writeFileSync(path, bytes, { flag: 'wx' });
+  const value = { deviceId: shot.deviceId, path, width: shot.width, height: shot.height, bytes: bytes.length };
+  return { lines: [`path: ${path}`, `size: ${shot.width}x${shot.height} pixels`], value };
+}
+
+function swipeInput(rest: string[]): { deviceId: string | undefined; value: MobileDeviceInput } {
+  const coords = [0, 1, 2, 3].map((i) => pixel(rest[i], 'swipe'));
+  const extra = rest.slice(4);
+  const duration = extra[0] !== undefined && /^\d+$/.test(extra[0]) ? Number(extra.shift()) : undefined;
+  if (extra.length > 1) throw new Usage(DEVICE_HELP);
+  return { deviceId: extra[0], value: { kind: 'swipe', from: { x: coords[0]!, y: coords[1]! }, to: { x: coords[2]!, y: coords[3]! }, ...(duration === undefined ? {} : { durationMs: duration }) } };
+}
+
 export async function deviceCommand(args: string[], io: CliIo, client: CoreClient, threadId: string, timeoutS = 200): Promise<DeviceCliResult> {
   const [command = 'list', ...rest] = args;
   if (command === 'help') return { lines: [DEVICE_HELP], value: { help: DEVICE_HELP } };
-  const optional = (count: number) => {
-    if (rest.length > count + 1) throw new Usage(DEVICE_HELP);
-    return rest[count];
-  };
   const input = async (deviceId: string | undefined, value: MobileDeviceInput) => {
     const problem = mobileDeviceInputError(value);
     if (problem) throw new Usage(problem);
@@ -82,84 +151,27 @@ export async function deviceCommand(args: string[], io: CliIo, client: CoreClien
   };
 
   switch (command) {
-    case 'list': {
-      if (rest.length > 0) throw new Usage(DEVICE_HELP);
-      const list = await client.call('devices.list', { threadId });
-      const lines: string[] = [];
-      for (const host of list.hosts) {
-        lines.push(`host ${host.id} (${host.name})`);
-        for (const p of host.platforms) lines.push(`  ${p.platform}: ${p.available ? 'available' : 'unavailable'}${p.reason ? ` - ${p.reason}` : ''}`);
-      }
-      if (list.devices.length === 0) lines.push('devices: none. No simulators or emulators were found on this machine.');
-      for (const d of list.devices) lines.push(`${d.id} ${d.platform} ${d.kind} ${d.state} (${d.name}${d.runtime ? `, ${d.runtime}` : ''})`);
-      lines.push(list.sessions.length === 0 ? 'open here: none' : `open here: ${list.sessions.map((s) => `${s.deviceId} (${s.state})`).join(', ')}`);
-      return { lines, value: list };
-    }
-    case 'open': {
-      const platform = flag(rest, '--platform');
-      if (platform !== undefined && platform !== 'android' && platform !== 'ios') throw new Usage('device open --platform expects android or ios');
-      const deviceId = optional(0);
-      const { session } = await client.call('devices.open', {
-        threadId,
-        ...(deviceId === undefined ? {} : { deviceId }),
-        ...(platform === undefined ? {} : { platform: platform as MobilePlatform }),
-      });
-      const deadline = Date.now() + timeoutS * 1000;
-      let current = session;
-      let control: string[] | undefined;
-      while (current.state === 'booting') {
-        if (Date.now() > deadline) throw new Error(`${current.name} is still starting after ${timeoutS} seconds; boite device list shows its state`);
-        await Bun.sleep(1000);
-        const state = await client.call('devices.sessions', { threadId });
-        const found = state.sessions.find((s) => s.deviceId === session.deviceId);
-        if (!found) throw new Error(`${session.name} was closed while it started`);
-        current = found;
-        control = state.control?.[found.deviceId];
-      }
-      if (current.state === 'failed') throw new Error(`${current.name} failed to start: ${current.error ?? 'no reason given'}`);
-      if (!control) control = (await client.call('devices.sessions', { threadId })).control?.[current.deviceId];
-      const drive = control ? control.map(quote).join(' ') : undefined;
-      const lines = [sessionLine(current), 'shown: in the Device panel of this conversation'];
-      if (drive) {
-        lines.push(`control: ${drive}`);
-        lines.push(current.platform === 'android'
-          ? `  e.g. ${drive} shell uiautomator dump /dev/tty, ${drive} shell am start -n <package>/<activity>, ${drive} install <app.apk>`
-          : `  e.g. ${drive} launch ${current.deviceId} <bundle-id>, ${drive} openurl ${current.deviceId} <url>, ${drive} install ${current.deviceId} <app>`);
-      }
-      return { lines, value: { session: current, control } };
-    }
-    case 'screenshot': {
-      const output = flag(rest, '--output');
-      const deviceId = optional(0);
-      const shot = await client.call('devices.screenshot', { threadId, ...(deviceId === undefined ? {} : { deviceId }) });
-      const bytes = Buffer.from(shot.base64, 'base64');
-      if (!bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) throw new Error('the device returned a non-PNG screenshot');
-      const path = resolve(io.cwd, output ?? `boite-device-${crypto.randomUUID()}.png`);
-      writeFileSync(path, bytes, { flag: 'wx' });
-      const value = { deviceId: shot.deviceId, path, width: shot.width, height: shot.height, bytes: bytes.length };
-      return { lines: [`path: ${path}`, `size: ${shot.width}x${shot.height} pixels`], value };
-    }
-    case 'tap': return input(optional(2), { kind: 'tap', x: pixel(rest[0], 'tap x'), y: pixel(rest[1], 'tap y') });
+    case 'list': return listDevices(rest, client, threadId);
+    case 'open': return openDevice(rest, client, threadId, timeoutS);
+    case 'screenshot': return screenshotDevice(rest, io, client, threadId);
+    case 'tap': return input(optional(rest, 2), { kind: 'tap', x: pixel(rest[0], 'tap x'), y: pixel(rest[1], 'tap y') });
     case 'swipe': {
-      const coords = [0, 1, 2, 3].map((i) => pixel(rest[i], 'swipe'));
-      const extra = rest.slice(4);
-      const duration = extra[0] !== undefined && /^\d+$/.test(extra[0]) ? Number(extra.shift()) : undefined;
-      if (extra.length > 1) throw new Usage(DEVICE_HELP);
-      return input(extra[0], { kind: 'swipe', from: { x: coords[0]!, y: coords[1]! }, to: { x: coords[2]!, y: coords[3]! }, ...(duration === undefined ? {} : { durationMs: duration }) });
+      const { deviceId, value } = swipeInput(rest);
+      return input(deviceId, value);
     }
     case 'type': {
       if (!rest[0]) throw new Usage('device type needs text');
-      return input(optional(1), { kind: 'text', text: rest[0] });
+      return input(optional(rest, 1), { kind: 'text', text: rest[0] });
     }
     case 'key': {
       if (!rest[0]) throw new Usage(`device key needs one of ${MOBILE_DEVICE_KEYS.join(', ')}`);
-      return input(optional(1), { kind: 'key', key: rest[0] as MobileDeviceKey });
+      return input(optional(rest, 1), { kind: 'key', key: rest[0] as MobileDeviceKey });
     }
     case 'close': {
       const at = rest.indexOf('--shutdown');
       const shutdown = at !== -1;
       if (shutdown) rest.splice(at, 1);
-      const deviceId = optional(0);
+      const deviceId = optional(rest, 0);
       const result = await client.call('devices.close', { threadId, ...(deviceId === undefined ? {} : { deviceId }), ...(shutdown ? { shutdown } : {}) });
       return { lines: [`closed: ${result.closed.join(', ')}${shutdown ? ' (powered off)' : ''}`], value: result };
     }

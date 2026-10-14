@@ -3,7 +3,7 @@
 ## Subscription proxy
 
 Settings, Providers offers an optional subscription proxy for Claude, Codex and
-OpenCode 2, and for Grok when the gateway is Douane.
+both OpenCode versions, and for Grok when the gateway is Douane.
 Choose Douane or CLIProxyAPI, enter the gateway's API URL and its limits dashboard
 URL, enable the switch and save. The API URL accepts an origin or a path ending
 in `/v1`. Model discovery runs on the machine hosting the core. The agent's own
@@ -19,7 +19,7 @@ and the one-hour prompt cache stay on (`_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL
 that needs a native login (`CLAUDE_CODE_SKIP_FAST_MODE_ORG_CHECK`). Codex already
 sends its service tier and prompt cache key to a custom provider.
 
-While the proxy is enabled, Claude, Codex and OpenCode 2 show one account named
+While the proxy is enabled, Claude, Codex and both OpenCode versions show one account named
 after the gateway, Douane or CLIProxyAPI, with the API URL's origin, and so
 does Grok behind Douane. It has no rename,
 check, remove or add actions, and the provider row reads Ready · via Douane.
@@ -44,7 +44,9 @@ because Antigravity, their own harness, cannot run through a gateway. Open
 models (`gpt-oss`, Kimi, Qwen, Llama, DeepSeek, Mistral, GLM) are offered to
 each harness whose API the gateway advertises for them, under any routing
 prefix. A name the rules do not recognize takes its vendor from the routing
-prefix (`codex/`, `claude/`, ...). A catalog without endpoint metadata keeps
+prefix (`codex/`, `claude/`, ...). OpenCode also accepts Antigravity Claude
+routes when the catalog explicitly advertises Chat Completions (`openai`);
+other proprietary routes keep their native-harness restriction. A catalog without endpoint metadata keeps
 the older rule, which matches the whole id against the harness's native model
 names. With Douane, the core reads `GET /v1/quotas` with the proxy key and
 Limits shows native bars, described in [usage](usage.md#gateway-quotas). With
@@ -61,8 +63,8 @@ that keep their own configuration; Show proxy dashboard returns to the gateway.
 
 Which agents the proxy serves is decided per provider, not per protocol
 (`subscriptionProxyServes` in the contract): the Claude and Codex protocols
-whole, and OpenCode 2 by its id, because ACP is also what Antigravity and
-OpenCode 1 speak, and those keep their own configuration. Grok is served by
+whole, and both OpenCode versions by their ids, because ACP is also what
+Antigravity and other agents speak, and those keep their own configuration. Grok is served by
 its id too, and by Douane alone (`SUBSCRIPTION_PROXY_KIND_PROVIDERS`): behind
 CLIProxyAPI it keeps its own sign-in.
 
@@ -86,24 +88,54 @@ key and would send that token to the gateway, so `GROK_AUTH_PATH` points it at
 finds no sign-in, and the account's own stays for when the proxy is off. This
 was measured on Grok CLI 1.0.46, where `GROK_AUTH_PATH` is not documented.
 
-OpenCode 2 does not move to the gateway, it gains it: the core adds one
-provider to OpenCode's inline configuration, named after the gateway's kind
-(`douane` or `cliproxyapi`), which calls the gateway's Chat Completions route
-(`@opencode/ai/providers/openai-compatible`, `settings.baseURL`, the key read
-from `BOITE_SUBSCRIPTION_PROXY_KEY`). OpenCode's own providers stay beside it.
+Both OpenCode versions gain the gateway as an additional provider, named after
+its kind (`douane` or `cliproxyapi`), calling its Chat Completions route.
+OpenCode 1 uses the singular `provider` configuration with
+`npm: @ai-sdk/openai-compatible` and `options.baseURL`; its `options.apiKey`
+references `{env:BOITE_SUBSCRIPTION_PROXY_KEY}`. OpenCode 2 keeps its plural
+`providers` configuration with `package: @opencode/ai/providers/openai-compatible`,
+`settings.baseURL` and `env: [BOITE_SUBSCRIPTION_PROXY_KEY]`. Existing inline
+permissions and other providers are preserved. The key is never embedded in
+that configuration, and disabling the proxy restores the descriptor's original
+environment and native account checks.
+
 The picker lists OpenCode's own models first, then the gateway's as
-`douane/<gateway id>`: every model but those with a harness of their own, so
-no Claude, GPT or Grok model, and Gemini, Muse and the open families. A custom
-provider only knows the models its configuration names, so the core keeps the
-last catalog it read (the journal setting `subscription-proxy-opencode-models`)
-and writes it into that block at every spawn; a restart starts a turn on a
-gateway model without probing first. While the proxy is on, the gateway is the
-login: an OpenCode 2 account reads `ok` with no sign-in of its own. OpenCode 2
-lists none of an injected provider's models in its ACP model option and still
-takes them, and for about half a second after `session/new` it refuses one it
-has not loaded yet: the driver sends a model under the injected prefix
+`douane/<gateway id>`: Gemini, Muse, the open families, and Antigravity Claude
+models whose catalog row explicitly includes `openai` in
+`supported_endpoint_types`. A Claude route with no endpoint metadata or only
+Messages support is not added; GPT, Grok and other Claude routes remain in
+their native harnesses. Older catalogs without endpoint metadata still offer
+Gemini, Muse and open models. Gateway model IDs retain their routing prefix in
+the provider configuration, so selecting `douane/antigravity/claude-opus-4-6-thinking`
+calls the gateway with `antigravity/claude-opus-4-6-thinking`.
+
+The injected models preserve positive integer `context_length` (or
+`context_window`) and `max_output_tokens` as their context and output limits.
+OpenCode 1 requires both values to emit a valid limit object; an incomplete
+pair is omitted. OpenCode 2 accepts either validated limit independently.
+Advertised thinking budgets, dynamic thinking or effort levels enable
+OpenCode 1's `reasoning` capability and its `reasoning_content` replay field;
+OpenCode 2 receives `compatibility.reasoningField` instead. Missing or malformed
+metadata adds no inferred limits or thinking capability. These values survive
+the persisted catalog, so later spawns keep them. OpenCode still applies its
+own output ceiling; the catalog does not override that runtime policy.
+
+OpenCode 1.19 sends `x-opencode-session-id` on every model request and
+`X-Session-Id` for custom providers, using its own conversation ID. A gateway
+can use that ID for signed-thinking replay between tool turns without a
+shared prompt hash or a process-wide session value.
+
+A custom provider only knows the models its configuration names, so the core
+keeps the last catalog it read (the journal setting
+`subscription-proxy-opencode-models`) and writes it into that block at every
+spawn; a restart starts a turn on a gateway model without probing first. While
+the proxy is on, either OpenCode account reads `ok` with no native sign-in.
+OpenCode 2 lists none of an injected provider's models in its ACP model option
+and still takes them, and for about half a second after `session/new` it refuses
+one it has not loaded yet: the driver sends a model under the injected prefix
 (`BOITE_SUBSCRIPTION_PROXY_PREFIX`) though it is not listed, and asks again
-after 250, 500, 1,000 and 1,500 ms before it warns.
+after 250, 500, 1,000 and 1,500 ms before it warns. Both versions receive that
+prefix; agents without it keep the normal model-option validation.
 
 An optional API key stays on the core and is supplied through the agent's
 environment, never a URL or process argument. Leave the key field empty to keep

@@ -463,6 +463,38 @@ uses contract `checkSettingsPatch`. Side-specific lifecycle and access cases
 live in `fake-client.parity.test.ts`. A fake path below a directory named
 `missing` represents an absent folder.
 
+### Adding an RPC method
+
+1. Add the method's `params` and `result` to `RpcMethods` in
+   `packages/contracts/src/index.ts`, beside its domain's entries.
+2. Register the core handler in the domain's `register*Methods` function.
+   For `threads.*`, use `registerThreadMethods` in
+   `packages/core/src/threads/rpc.ts`, called by `packages/core/src/modules.ts`.
+   `packages/core/src/router.ts` dispatches handlers; `drivers/*/rpc.ts` files
+   implement provider protocols.
+3. Add the fake handler in `packages/ui/src/lib/fake-client/<domain>.ts`.
+   `FakeMethods` in `fake-client/context.ts` types the complete handler map
+   assembled in `fake-client.ts`; agent, plugin and workflow classes handle
+   their own methods. A missing map entry fails `bun run check`.
+   `packages/ui/src/lib/client.ts` already has a generic `call` method.
+4. Keep owner-only methods out of `DEVICE_METHODS` in
+   `packages/contracts/src/access.ts` and `AGENT_METHODS` in
+   `packages/core/src/access.ts`. Document the reason beside any permission.
+5. Test the result and access boundary with a temporary core. Follow
+   `packages/core/test/thread-remove.test.ts` for a paired-device refusal.
+   The test client in `packages/core/src/client.ts` exposes `error.rpc.code`;
+   the UI client's `RpcFailure` exposes `error.code`. Match the caught error
+   with `{ rpc: { code: RpcErrorCode.Refused } }`. The core test records a
+   Windows crash in Bun's `rejects` matcher and uses `.catch(error => error)`.
+
+Run the affected core test, fake-client checks and type checks:
+
+```sh
+bun test packages/core/test/<name>.test.ts
+bun run --cwd packages/ui test src/lib/fake-client.contract.test.ts src/lib/fake-client.parity.test.ts
+bun run check
+```
+
 ## Rebuilding the shell executable
 
 ```sh
@@ -471,6 +503,11 @@ bun run build:shell
 bun run apps/shell/scripts/stage-sidecar.ts
 bun run e2e
 ```
+
+On Linux, `test:shell` and the shell builds need the WebKitGTK headers first;
+without them `glib-sys` stops at `pkg-config` and no test runs. CI installs the
+same list in `.github/workflows/desktop.yml`:
+`sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf`.
 
 Use Tauri to build the executable, including a no-bundle development build:
 `bun run --cwd apps/shell tauri build --no-bundle`. A plain Cargo build is useful
@@ -838,6 +875,13 @@ The shell resolves symlinks, checks thread containment and rejects browsed-webvi
 callers. Remote cores, browsers and phones retain preview/download behavior.
 Published snapshots from `boite attach` use the separate safe download/open rules
 in [CLI](cli.md); they do not authorize executing an uploaded file.
+
+Inline text previews use the conversation's vertical scroll, including when
+the pointer is over the file contents. Long lines scroll horizontally inside
+the preview; Preview folds it again. `bun test tests/e2e/artifacts.test.ts`
+checks wheel scrolling in both directions at desktop and phone widths and
+writes `text-preview-scroll-desktop.png` and `text-preview-scroll-phone.png`
+under `tests/e2e/.artifacts/`.
 
 ### File mentions
 

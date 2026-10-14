@@ -72,3 +72,9 @@ A conversation with a mode carries `BOITE_CONTEXT=<label>` in its environment,
 and `BOITE_GUIDES=0` when it drops guides: a hook that adds a guide of its own,
 such as a shared instruction set, can check it and print nothing
 ([hooks](hooks.md#isolated-accounts)).
+
+For Claude, a context mode's guides and instruction-file choices override
+`BOITE_GUIDES` and `CLAUDE_CODE_DISABLE_CLAUDE_MDS` from the provider profile.
+Keeping a feature unsets its flag; dropping it forces the disabling value.
+Conversations without a mode keep the profile values. A `full` request without
+rules resolves to no mode.

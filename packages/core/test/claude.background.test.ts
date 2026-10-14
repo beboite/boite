@@ -251,13 +251,36 @@ describe('claude driver: questions and background work', () => {
     const fake = queries[0]!;
     const threads = harness.core.threads.deferred;
     const wake = threads.wake.bind(threads);
-    threads.wake = () => {};
+    const woken = Promise.withResolvers<void>();
+    threads.wake = () => woken.resolve();
     fake.emit(assistant(sessionId, [{ type: 'text', text: 'ON ITS OWN' }]));
-    await Bun.sleep(50);
+    await woken.promise;
     threads.wake = wake;
+    await client.call('threads.update', { threadId, model: 'claude-opus-5' });
+    const control = Promise.withResolvers<void>();
+    const changing = Promise.withResolvers<void>();
+    const setModel = fake.setModel.bind(fake);
+    fake.setModel = async model => {
+      changing.resolve();
+      await control.promise;
+      await setModel(model);
+    };
     const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
-    await client.call('turns.start', { threadId, prompt: 'second' });
-    await Bun.sleep(100);
+    const turn = await client.call('turns.start', { threadId, prompt: 'second' });
+    await changing.promise;
+    try {
+      // A follow-up must not pass the initial prompt while its settings are pending.
+      expect(calls[0]!.prompts).toEqual(['first']);
+      expect(await client.call('turns.steer', { threadId, turnId: turn.id, prompt: 'follow-up', clientRequestId: 'claude_takeover_01' })).toEqual({ accepted: false });
+      expect(calls[0]!.prompts).toEqual(['first']);
+    } finally {
+      control.resolve();
+    }
+    await waitFor(() => calls[0]?.prompts.length === 2);
+    expect(calls[0]!.prompts).toEqual(['first', 'second']);
+    expect(await client.call('turns.steer', { threadId, turnId: turn.id, prompt: 'follow-up', clientRequestId: 'claude_takeover_01' })).toEqual({ accepted: true });
+    await waitFor(() => calls[0]?.prompts.length === 3);
+    expect(calls[0]!.prompts).toEqual(['first', 'second', 'follow-up']);
     // The CLI's own run ends: that result is not the user's.
     fake.emit(success(sessionId));
     await Bun.sleep(100);

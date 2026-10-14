@@ -2,7 +2,7 @@
  * Shells in a pseudo-terminal. A thread has up to `MAX_THREAD_TERMINALS`,
  * opened under the chat with Ctrl+J in the thread's working directory, and an
  * account whose CLI signs in through an interactive menu gets one with its
- * login command typed in. Each shell goes through `procs.spawnTerminal` under
+ * login command started in it. Each shell goes through `procs.spawnTerminal` under
  * its own trace id, never the thread's: stopping a turn must not take the
  * user's shell with it, and closing one tab must not take the others.
  */
@@ -157,7 +157,7 @@ export interface StartOptions {
   env: Record<string, string | undefined>;
   cols: number;
   rows: number;
-  /** A command typed into the shell once its prompt is up. */
+  /** A login command started before the POSIX shell, or typed at its Windows prompt. */
   type?: string[];
   onExit?: () => void;
   /** The thread a thread's shell belongs to, set on its log records. */
@@ -235,7 +235,14 @@ export class TerminalStore {
     const decoder = new TextDecoder();
     let session: Session | null = null;
     let sequence = 0;
-    let typed = options.type === undefined;
+    // POSIX logins run as startup argv before opening the user's shell. A
+    // quiet profile may still be reading stdin, so PTY keystrokes cannot start them safely.
+    const prepared = process.platform !== 'win32' && options.type !== undefined;
+    const launch = prepared ? {
+      exe: '/bin/sh',
+      args: ['-c', `"$@"\nexec ${commandLine('posix', [shell.exe, ...shell.args])}`, 'boite-login', ...(options.type ?? [])],
+    } : shell;
+    let typed = options.type === undefined || prepared;
     let quiet: ReturnType<typeof setTimeout> | null = null;
     const typeNow = () => {
       if (typed || session === null) return;
@@ -268,7 +275,7 @@ export class TerminalStore {
     };
     let spawned;
     try {
-      spawned = this.core.procs.spawnTerminal(id, shell.exe, shell.args, {
+      spawned = this.core.procs.spawnTerminal(id, launch.exe, launch.args, {
         cwd: options.cwd,
         env,
         cols: options.cols,
@@ -289,7 +296,7 @@ export class TerminalStore {
       });
     } catch (error) {
       clearTimeout(fallback);
-      throw refused(`the shell ${shell.exe} did not start: ${messageOf(error)}`, { id, shell: shell.exe });
+      throw refused(`the shell ${launch.exe} did not start: ${messageOf(error)}`, { id, shell: launch.exe });
     }
     const openedAt = Date.now();
     const shellName = shell.exe.split(/[\\/]/).pop() ?? 'shell';

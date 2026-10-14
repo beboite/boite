@@ -11,8 +11,8 @@ import { DEFAULT_SETTINGS } from '../src/settings.ts';
 import { waitFor } from './harness.ts';
 
 /** A stat line as the kernel writes it, with a command name that fights back. */
-function stat(pid: number, utime: number, stime: number, comm = 'node', parentPid = 1): string {
-  const after = ['S', String(parentPid), String(pid), String(pid), '0', '-1', '4194560', '100', '0', '0', '0', String(utime), String(stime), '0', '0', '20', '0', '1', '0', '100'];
+function stat(pid: number, utime: number, stime: number, comm = 'node', parentPid = 1, birth = 100): string {
+  const after = ['S', String(parentPid), String(pid), String(pid), '0', '-1', '4194560', '100', '0', '0', '0', String(utime), String(stime), '0', '0', '20', '0', '1', '0', String(birth)];
   return `${pid} (${comm}) ${after.join(' ')}\n`;
 }
 
@@ -228,6 +228,73 @@ describe('a thread load on Linux', () => {
     expect(load.sample('thr')).toMatchObject({ processes: 2, memoryBytes: 3000 * 1024 });
   });
 
+  test('termination refuses a reused registered pid and its unrelated children', () => {
+    const proc = new FakeProc();
+    proc.set(100, 10, 0, 1000);
+    const signalled: number[] = [];
+    const load = new LinuxLoad(2, proc.read, proc.now, pid => { signalled.push(pid); });
+    const platform = createPosixPlatform('linux', load);
+    platform.pidAdded('thr', 100, true);
+    proc.files.set('/proc', '100 101');
+    proc.files.set('/proc/100/stat', stat(100, 0, 0, 'unrelated', 1, 200));
+    proc.files.set('/proc/101/stat', stat(101, 0, 0, 'unrelated-child', 100, 201));
+
+    expect(platform.terminateProcess('thr', 100)).toBe(false);
+    expect(signalled).toEqual([]);
+  });
+
+  test('termination checks the registry birth even when registration read a later occupant', () => {
+    const proc = new FakeProc();
+    proc.files.set('/proc/stat', 'btime 1000\n');
+    proc.files.set('/proc/100/stat', stat(100, 0, 0, 'unrelated', 1, 200));
+    const signalled: number[] = [];
+    const load = new LinuxLoad(2, proc.read, proc.now, pid => { signalled.push(pid); });
+    const platform = createPosixPlatform('linux', load);
+    platform.pidAdded('thr', 100, true);
+
+    expect(platform.terminateProcess('thr', 100, 1_001_000)).toBe(false);
+    expect(platform.terminateProcess('thr', 100, null)).toBe(false);
+    expect(signalled).toEqual([]);
+    expect(platform.terminateProcess('thr', 100, 1_002_000)).toBe(true);
+    expect(signalled).toEqual([100]);
+  });
+
+  test('termination refuses a descendant whose pid was reused after the memory sample', () => {
+    const proc = new FakeProc();
+    proc.set(100, 10, 0, 1000);
+    proc.files.set('/proc', '100 101');
+    proc.files.set('/proc/101/stat', stat(101, 10, 0, 'cargo', 100));
+    proc.files.set('/proc/101/status', status(2000));
+    const signalled: number[] = [];
+    const load = new LinuxLoad(2, proc.read, proc.now, pid => { signalled.push(pid); });
+    const platform = createPosixPlatform('linux', load);
+    platform.pidAdded('thr', 100, true);
+    expect(platform.sample('thr')?.processes).toBe(2);
+    proc.files.set('/proc/101/stat', stat(101, 0, 0, 'unrelated', 1, 200));
+
+    expect(platform.terminateProcess('thr', 101)).toBe(false);
+    expect(signalled).toEqual([]);
+    expect(platform.terminateProcess('other-thread', 100)).toBe(false);
+    expect(signalled).toEqual([]);
+  });
+
+  test('termination rechecks each child before signalling after the parent scan', () => {
+    const proc = new FakeProc();
+    proc.set(100, 10, 0, 1000);
+    proc.files.set('/proc', '100 101');
+    proc.files.set('/proc/101/stat', stat(101, 10, 0, 'cargo', 100));
+    const signalled: number[] = [];
+    const load = new LinuxLoad(2, proc.read, proc.now, pid => {
+      signalled.push(pid);
+      if (pid === 100) proc.files.set('/proc/101/stat', stat(101, 0, 0, 'unrelated', 1, 200));
+    });
+    const platform = createPosixPlatform('linux', load);
+    platform.pidAdded('thr', 100, true);
+
+    expect(platform.terminateProcess('thr', 100)).toBe(true);
+    expect(signalled).toEqual([100]);
+  });
+
   test('killTree refreshes the parent scan and keeps children discovered only through another task', () => {
     const proc = new FakeProc();
     proc.files.set('/proc', '100');
@@ -240,8 +307,10 @@ describe('a thread load on Linux', () => {
     proc.files.set('/proc/101/stat', stat(101, 10, 0, 'child', 100));
     proc.files.set('/proc/100/task', '100 110');
     proc.files.set('/proc/100/task/110/children', '102');
+    proc.files.set('/proc/102/stat', stat(102, 10, 0, 'child', 100));
     proc.files.set('/proc/102/task/102/children', '103');
-    expect(load.killTree(100)).toBe(true);
+    proc.files.set('/proc/103/stat', stat(103, 10, 0, 'grandchild', 102));
+    expect(load.killTree(100, 'thr')).toBe(true);
     expect(signalled.sort()).toEqual([100, 101, 102, 103]);
   });
 
@@ -331,10 +400,15 @@ describe('a thread load on Linux', () => {
       if (pid === 7) throw new Error('ESRCH');
       signalled.push(pid);
     });
+    proc.set(100, 10, 0, 1000);
+    load.add('thr', 100);
+    load.sample('thr');
 
-    expect(load.killTree(42)).toBe(true);
+    expect(load.killTree(42, 'thr')).toBe(true);
     expect(signalled.sort()).toEqual([42, 43, 44]);
-    expect(load.killTree(7)).toBe(false);
+    proc.set(7, 10, 0, 1000);
+    load.add('thr', 7);
+    expect(load.killTree(7, 'thr')).toBe(false);
   });
 
   test('CPU is the ticks spent since the previous sample over the whole machine, memory is summed', () => {
@@ -409,7 +483,7 @@ describe('the registry on the Linux backend', () => {
     expect(procs.loadOf('busy')).toEqual({ processes: 1, cpuPercent: 0, memoryBytes: 64_000 * 1024 });
   });
 
-  test('the memory governor kills a sampled descendant alone and protects the registered root', () => {
+  test.each([false, true])('the memory governor protects the root and rejects a reused descendant: reused=%s', (reused) => {
     const child = procs.spawn('busy', process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { cwd: directory });
     const pid = child.record.pid;
     proc.set(pid, 10, 0, 900 * 1024);
@@ -419,14 +493,19 @@ describe('the registry on the Linux backend', () => {
     procs.applySettings({ ...DEFAULT_SETTINGS, threadMemoryCapMb: 1024 });
     const events: unknown[] = [];
     bus.onAny((name, payload) => {
-      if (name === 'resources.memory') events.push(payload);
+      if (name === 'resources.memory') {
+        events.push(payload);
+        if (reused && 'kind' in payload && payload.kind === 'pressure') proc.files.set('/proc/42/stat', stat(42, 0, 0, 'unrelated', 1, 200));
+      }
     });
     const kill = spyOn(process, 'kill').mockReturnValue(true);
     try {
       (procs as unknown as { sampleLoad(): void }).sampleLoad();
       expect(procs.memory.status().agentBytes).toBe(1700 * 1024 ** 2);
-      expect(kill.mock.calls).toEqual([[42, 'SIGKILL']]);
-      expect(events).toContainEqual(expect.objectContaining({ kind: 'killed', pid: 42, exe: 'cargo', reason: 'thread-quota' }));
+      expect(kill.mock.calls).toEqual(reused ? [] : [[42, 'SIGKILL']]);
+      const stopped = expect.objectContaining({ kind: 'killed', pid: 42, exe: 'cargo', reason: 'thread-quota' });
+      if (reused) expect(events).not.toContainEqual(stopped);
+      else expect(events).toContainEqual(stopped);
       expect(child.proc.exitCode).toBeNull();
       expect(procs.liveCount('busy')).toBe(1);
     } finally {

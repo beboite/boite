@@ -219,23 +219,34 @@ test('closing a manager removes its temporary bytes without touching another man
 });
 
 test('lazy expiry deletes old leases and reclaims the global budget before a new upload', async () => {
-  const uploads = store({ ttlMs: 100, cleanupIntervalMs: 60_000, globalMaxBytes: 1 });
-  const attachment = file('a');
-  const { id } = await uploads.upload('owner', attachment);
-  await Bun.sleep(150);
-  const replacement = await uploads.upload('other', attachment);
-  await expect(uploads.resolve('owner', [metadata(attachment)], [id])).rejects.toMatchObject(expiry);
-  expect(await bodies()).toHaveLength(1);
-  await uploads.release('other', [replacement.id]);
-  expect(await bodies()).toEqual([]);
+  const now = Date.now();
+  const clock = spyOn(Date, 'now').mockReturnValue(now);
+  try {
+    const uploads = store({ ttlMs: 100, cleanupIntervalMs: 60_000, globalMaxBytes: 1 });
+    const attachment = file('a');
+    const { id } = await uploads.upload('owner', attachment);
+    // Filesystem work must finish before the test spends the lease's TTL.
+    clock.mockReturnValue(now + 150);
+    const replacement = await uploads.upload('other', attachment);
+    await expect(uploads.resolve('owner', [metadata(attachment)], [id])).rejects.toMatchObject(expiry);
+    expect(await bodies()).toHaveLength(1);
+    await uploads.release('other', [replacement.id]);
+    expect(await bodies()).toEqual([]);
+  } finally { clock.mockRestore(); }
 });
 
 test('the cleanup timer removes expired bytes even without subsequent requests', async () => {
-  const uploads = store({ ttlMs: 100, cleanupIntervalMs: 10 });
-  await uploads.upload('owner', file());
-  const deadline = Date.now() + 1_000;
-  while ((await bodies()).length > 0 && Date.now() < deadline) await Bun.sleep(10);
-  expect(await bodies()).toEqual([]);
+  const now = Date.now();
+  const clock = spyOn(Date, 'now').mockReturnValue(now);
+  try {
+    const uploads = store({ ttlMs: 100, cleanupIntervalMs: 10 });
+    await uploads.upload('owner', file());
+    clock.mockReturnValue(now + 150);
+    // The real interval runs while a monotonic clock bounds this wait.
+    const deadline = performance.now() + 1_000;
+    while ((await bodies()).length > 0 && performance.now() < deadline) await Bun.sleep(10);
+    expect(await bodies()).toEqual([]);
+  } finally { clock.mockRestore(); }
 });
 
 test('filesystem upload failures are preserved and leave no reserved capacity or body', async () => {

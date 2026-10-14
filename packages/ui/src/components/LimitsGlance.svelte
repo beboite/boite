@@ -21,7 +21,7 @@
   const popover = new Closing();
   let trigger = $state<HTMLButtonElement>();
   let content = $state<HTMLDivElement>();
-  let reader = $derived(quotaReader(store.endpointUrl ?? 'here'));
+  let reader = $derived(quotaReader(store.endpointUrl ?? 'here', store.core));
   let gateway = $derived(gatewayReader(store.endpointUrl ?? 'here'));
   /** How long a press waits for the gateway's first answer before opening the glance anyway. */
   const KNOWN_WAIT_MS = 300;

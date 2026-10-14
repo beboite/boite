@@ -36,7 +36,14 @@ async function tapFrame(page: BrowserPage, touch: boolean) {
     await page.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   } else for (const type of ['mousePressed', 'mouseReleased'] as const) await page.send('Input.dispatchMouseEvent', { type, ...box, button: 'left', clickCount: 1 });
 }
-const frameShown = `document.querySelector('${id('remote-browser-frame')}')?.complete && document.querySelector('${id('remote-browser-frame')}').naturalWidth > 100`;
+// The first decoded image can precede the automatic viewport fit, which disables input.
+const frameShown = `(() => {
+  const image = document.querySelector('${id('remote-browser-frame')}');
+  const screen = image?.closest('button'), area = screen?.closest('.screen-area');
+  return image?.complete && image.naturalWidth > 100 && screen && area && !screen.disabled
+    && Math.abs(screen.offsetWidth - area.clientWidth) <= 2
+    && Math.abs(screen.offsetHeight - area.clientHeight) <= 2;
+})()`;
 
 real('the core runs the agent browser; desktop and phone show it covered, then live, and their taps reach the page', async () => {
   ensureProductionUi();

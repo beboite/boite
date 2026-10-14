@@ -165,14 +165,31 @@ export class LinuxLoad {
   /**
    * Stop one process and everything under it. Its children would be reparented
    * away from the thread's roots and drop out of the next sample while still
-   * holding their memory. False when the process itself could not be signalled.
+   * holding their memory. Only a registered or sampled birth can authorize a
+   * signal: a pid may have been given to an unrelated process in the meantime.
+   * False when the process itself could not be identified or signalled.
    */
-  killTree(pid: number): boolean {
+  killTree(pid: number, threadId: string, startedAt?: number | null): boolean {
+    const registered = this.#births.get(threadId);
+    const birth = registered?.has(pid) ? registered.get(pid) : this.#last.get(threadId)?.births.get(pid);
+    if (birth == null || !Number.isSafeInteger(birth)) return false;
+    if (startedAt !== undefined && (startedAt === null || linuxStartedAt(pid, this.read) !== startedAt)) return false;
     const scan = this.#snapshot(true);
-    const tree = new Set([pid]);
-    for (const member of tree) for (const child of this.#children(member, scan, true)) tree.add(child);
+    const root = scan.stats.get(pid) ?? this.read(`/proc/${pid}/stat`);
+    if (root === null || statField(root, 22) !== birth) return false;
+    const tree = new Map([[pid, birth]]);
+    for (const [member] of tree) {
+      for (const child of this.#children(member, scan, true)) {
+        const stat = scan.stats.get(child) ?? this.read(`/proc/${child}/stat`);
+        const childBirth = stat === null ? null : statField(stat, 22);
+        if (stat === null || childBirth === null || !Number.isSafeInteger(childBirth) || statField(stat, 4) !== member) continue;
+        if (!tree.has(child)) tree.set(child, childBirth);
+      }
+    }
     let stopped = false;
-    for (const member of tree) {
+    for (const [member, expectedBirth] of tree) {
+      const stat = this.read(`/proc/${member}/stat`);
+      if (stat === null || statField(stat, 22) !== expectedBirth) continue;
       try {
         this.signal(member);
         if (member === pid) stopped = true;

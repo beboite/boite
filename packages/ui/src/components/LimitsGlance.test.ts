@@ -144,3 +144,17 @@ test('a gateway that hangs does not hold the press: the glance opens within a fe
   expect(hanging.showSettings).not.toHaveBeenCalled();
   expect(document.querySelector('[data-testid="limits-glance"]')).not.toBeNull();
 });
+
+test('a replacement core at the same URL never shows the previous core quotas after a failed read', async () => {
+  const endpointUrl = 'glance-reused-address';
+  const first = { client: { call: async () => [quota], on: () => () => {} }, owner: true, endpointUrl, core: { dataDir: '/first' }, accounts: [] } as unknown as Store;
+  mounted = mount(LimitsGlance, { target: document.body, props: { store: first } });
+  press(); await settle();
+  expect(document.querySelectorAll('[data-testid="quota-provider"]')).toHaveLength(1);
+  await unmount(mounted); mounted = undefined; document.body.innerHTML = '';
+  const second = { ...first, core: { dataDir: '/second' }, client: { call: async () => { throw new Error('offline'); }, on: () => () => {} } } as unknown as Store;
+  mounted = mount(LimitsGlance, { target: document.body, props: { store: second } });
+  press(); await settle();
+  expect(document.querySelectorAll('[data-testid="quota-provider"]')).toHaveLength(0);
+  expect(document.querySelector('[data-testid="limits-glance-error"]')!.textContent).toContain('offline');
+});

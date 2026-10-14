@@ -1477,15 +1477,23 @@ describe('codex driver', () => {
     const client = await startCore({ warmProcessMinutes: 0 });
     const threadId = await codexThread(client);
     const thread = harness!.core.threads.require(threadId);
-    await client.call('threads.focus', { threadId });
-    await waitFor(() => fakeLog().includes('thread/start'));
-    const result = await client.call('providers.probe', { providerId: thread.providerId, accountId: thread.accountId, refresh: true });
-    expect(result.models.map(model => model.id)).toContain('fake-smart');
-    expect(countLines('initialize')).toBe(1);
-    expect(countLines('model/list')).toBe(1);
-    expect(harness!.core.procs.liveCount(threadId)).toBe(1);
-    expect(harness!.core.procs.liveCount(`probe:${thread.providerId}:${thread.accountId}`)).toBe(0);
-    expect(fakeLog()).not.toContain('turn/start');
+    process.env['CODEX_FAKE_SLOW_START'] = '200';
+    const diagnostics = spyOn(harness!.core.logs, 'record');
+    try {
+      await client.call('threads.focus', { threadId });
+      // The fake logs thread/start before answering it; the host becomes ready after that answer.
+      await waitFor(() => diagnostics.mock.calls.some(([, , context]) =>
+        context?.threadId === threadId && context.event === 'driver.session.ready'));
+      const result = await client.call('providers.probe', { providerId: thread.providerId, accountId: thread.accountId, refresh: true });
+      expect(result.models.map(model => model.id)).toContain('fake-smart');
+      expect(countLines('initialize')).toBe(1);
+      expect(countLines('model/list')).toBe(1);
+      expect(harness!.core.procs.liveCount(threadId)).toBe(1);
+      expect(harness!.core.procs.liveCount(`probe:${thread.providerId}:${thread.accountId}`)).toBe(0);
+      expect(fakeLog()).not.toContain('turn/start');
+    } finally {
+      diagnostics.mockRestore();
+    }
   });
 
   test('a refresh keeps the last catalog for model checks until the agent answers', async () => {
