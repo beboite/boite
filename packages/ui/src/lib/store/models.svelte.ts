@@ -1,5 +1,5 @@
-import type { ModelFavorites, ModelInfo, ProviderId, ProviderSummary } from '@boite/contracts';
-import { BUILT_IN_MODELS, DEFAULT_MODEL_NAMES, INITIAL_MODEL_DEFAULTS, writeModelDefaults, resolveModelDefault, fallbackModelDefault, type ModelDefaults } from '../model-defaults';
+import { nativeModelId, type ModelFavorites, type ModelInfo, type ProviderId, type ProviderSummary } from '@boite/contracts';
+import { BUILT_IN_MODELS, DEFAULT_MODEL_NAMES, INITIAL_MODEL_DEFAULTS, writeModelDefaults, resolveModelDefault, fallbackModelDefault, type ModelDefault, type ModelDefaults } from '../model-defaults';
 import { isNamedModel } from '../model-order';
 import { modelFavorites, resolveFavorites, type FavoritesTarget, type ResolvedFavorite } from '../model-favorites.svelte';
 import { defaultPrefs, writePrefs, type ComposerPrefs } from '../prefs';
@@ -115,14 +115,34 @@ export class Models {
   /** The model a choice runs on, out of what its own instance offers: what the chips read. */
   modelOf(choice: Choice | null): ModelInfo | null {
     if (!choice) return null;
-    const offered = this.ctx.store.modelsOf(choice.providerId, choice.accountId).find((m) => m.id === choice.model);
+    const models = this.ctx.store.modelsOf(choice.providerId, choice.accountId);
+    const offered = choice.model ? models.find((m) => m.id === this.#listedAs(choice.model!, models)) : undefined;
     if (offered) return offered;
-    const preferred = this.modelDefaults[choice.providerId] ?? INITIAL_MODEL_DEFAULTS[choice.providerId];
+    const preferred = this.#configured(choice.providerId, choice.accountId) ?? INITIAL_MODEL_DEFAULTS[choice.providerId];
     // Display the configured target before probing, with the built-in effort
     // scale when it is the built-in model. It never joins modelsOf's selectable list.
     if (!choice.model || choice.model !== preferred?.model) return null;
     const builtIn = BUILT_IN_MODELS[choice.providerId];
-    return builtIn?.id === choice.model ? builtIn : { id: choice.model, name: DEFAULT_MODEL_NAMES[choice.model] ?? choice.model };
+    return builtIn?.id === nativeModelId(choice.model) ? builtIn : { id: choice.model, name: DEFAULT_MODEL_NAMES[choice.model] ?? choice.model };
+  }
+
+  /**
+   * The id `models` gives `model`, or null when it is not listed. A gateway
+   * route named after the vendor (`claude/claude-opus-5-5`) is the same model
+   * as the native id the core lists in its place since it stopped listing both.
+   */
+  #listedAs(model: string, models: readonly ModelInfo[]): string | null {
+    if (models.some((m) => m.id === model)) return model;
+    const native = nativeModelId(model);
+    return models.find((m) => nativeModelId(m.id) === native)?.id ?? null;
+  }
+
+  /** The configured default, under the id this account's catalog lists it as. */
+  #configured(providerId: string, accountId?: string | null): ModelDefault | undefined {
+    const configured = this.modelDefaults[providerId];
+    if (!configured || !accountId) return configured;
+    const listed = this.#listedAs(configured.model, this.ctx.store.modelsOf(providerId, accountId));
+    return listed && listed !== configured.model ? { ...configured, model: listed } : configured;
   }
 
   /**
@@ -243,7 +263,7 @@ export class Models {
 
   defaultModelOf(provider: ProviderSummary, accountId?: string): string | null {
     const models = accountId ? this.ctx.store.modelsOf(provider.id, accountId) : provider.models;
-    const configured = this.modelDefaults[provider.id];
+    const configured = this.#configured(provider.id, accountId);
     if (configured) return configured.model;
     // The built-in default is a preference: once the account's own catalog is
     // read and does not list it, the catalog decides.
@@ -268,11 +288,12 @@ export class Models {
   defaultEffortOf(providerId: string, accountId: string, model: string | null): string | null {
     const s = this.ctx.store;
     const offered = s.modelsOf(providerId, accountId);
-    const configured = this.modelDefaults[providerId] ?? INITIAL_MODEL_DEFAULTS[providerId];
+    const own = this.#configured(providerId, accountId);
+    const configured = own ?? INITIAL_MODEL_DEFAULTS[providerId];
     if (configured?.model === model && (!offered.some((entry) => entry.id === model) ||
       (s.providerOf(providerId)?.protocol === 'claude-sdk' && !this.probedModels[probeKey(providerId, accountId)]))) return configured.effort;
-    const preferred = configured === this.modelDefaults[providerId] && configured
-      ? resolveModelDefault(providerId, offered, this.modelDefaults) : fallbackModelDefault(providerId, offered);
+    const preferred = own
+      ? resolveModelDefault(providerId, offered, { ...this.modelDefaults, [providerId]: own }) : fallbackModelDefault(providerId, offered);
     return preferred?.model === model ? preferred.effort : offered.find((m) => m.id === model)?.effort?.default ?? null;
   }
 
@@ -366,6 +387,9 @@ export class Models {
    * use. A default the user configured, or any other model, comes back as is.
    */
   #offered(choice: Choice, catalog?: ModelInfo[]): Choice {
+    // A choice saved under a vendor's route is that same model under the id the catalog lists.
+    const listed = choice.model ? this.#listedAs(choice.model, catalog ?? this.ctx.store.modelsOf(choice.providerId, choice.accountId)) : null;
+    if (listed && listed !== choice.model) return { ...choice, model: listed };
     if (this.modelDefaults[choice.providerId] || choice.model !== INITIAL_MODEL_DEFAULTS[choice.providerId]?.model) return choice;
     const offered = catalog ?? this.probedModels[probeKey(choice.providerId, choice.accountId)];
     if (!offered || offered.some((model) => model.id === choice.model)) return choice;

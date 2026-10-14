@@ -10,7 +10,11 @@ in `/v1`. Model discovery runs on the machine hosting the core. The agent's own
 discovery runs through the gateway first, so each model keeps the effort scale,
 speed tiers (Fast) and names a direct subscription shows. `GET /v1/models` then
 adds the models only the gateway routes, and stands alone when the agent's
-discovery fails. Paired phones use that same catalog.
+discovery fails. A route named after the vendor (`claude/claude-opus-5-5`) is
+the agent's own model and is listed once, under its native id
+(`nativeModelId` in contracts). A default model, draft or composer choice saved
+under the route id opens on that native id with its effort. Paired phones use
+that same catalog.
 
 Claude Code is told the gateway is first-party, because the gateway relays Messages
 unchanged to Anthropic on a subscription: tool search, first-party model aliases

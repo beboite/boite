@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { subscriptionProxyName, subscriptionProxyOf, type ModelInfo, type ProviderDescriptor, type ProviderId, type SubscriptionProxy } from '@boite/contracts';
+import { MODEL_ROUTE_FAMILIES, nativeModelId, subscriptionProxyName, subscriptionProxyOf, type ModelFamily, type ModelInfo, type ProviderDescriptor, type ProviderId, type SubscriptionProxy } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, unavailable, RpcFailure } from './errors.ts';
 import { isOpenCode, OPENCODE_V2 } from './providers/opencode.ts';
@@ -183,11 +183,7 @@ export function subscriptionProxyCodexArgs(args: string[], env: Record<string, s
 export function mergeProxyModels(native: ModelInfo[], proxy: ModelInfo[]): ModelInfo[] {
   if (!native.length) return proxy;
   const ids = new Set(native.map(model => model.id));
-  const listed = (id: string): boolean => {
-    if (ids.has(id)) return true;
-    const slash = id.indexOf('/');
-    return slash > 0 && ROUTE_FAMILIES[id.slice(0, slash).toLowerCase()] !== undefined && ids.has(id.slice(slash + 1));
-  };
+  const listed = (id: string): boolean => ids.has(id) || ids.has(nativeModelId(id));
   return [...native, ...proxy.filter(model => !listed(model.id)).map(model => ({ ...model, default: false }))];
 }
 
@@ -209,12 +205,6 @@ function proxyEffort(row: Record<string, unknown>): ModelInfo['effort'] | undefi
   return { levels, default: typeof wanted === 'string' && levels.some(level => level.id === wanted) ? wanted : levels[0]!.id };
 }
 
-type ModelFamily = 'anthropic' | 'openai' | 'google' | 'xai' | 'meta';
-
-const ROUTE_FAMILIES: Record<string, ModelFamily> = {
-  claude: 'anthropic', anthropic: 'anthropic', codex: 'openai', openai: 'openai', chatgpt: 'openai',
-  gemini: 'google', google: 'google', xai: 'xai', grok: 'xai', muse: 'meta',
-};
 
 /** Open-weight families: offered to every harness, whatever routing prefix the gateway gives them. */
 const OPEN_MODEL = /gpt-oss|kimi|qwen|llama|deepseek|mistral|mixtral|glm/i;
@@ -234,7 +224,8 @@ export function proprietaryFamily(id: string): ModelFamily | null {
   if (/gemini/i.test(name)) return 'google';
   if (/grok/i.test(name)) return 'xai';
   if (/muse/i.test(name)) return 'meta';
-  return slash > 0 ? ROUTE_FAMILIES[id.slice(0, slash).split('/').pop()!.toLowerCase()] ?? null : null;
+  const route = slash > 0 ? id.slice(0, slash).split('/').pop()!.toLowerCase() : '';
+  return Object.hasOwn(MODEL_ROUTE_FAMILIES, route) ? MODEL_ROUTE_FAMILIES[route]! : null;
 }
 
 /** Discovery is a bounded HTTP read on the core, so a phone uses its host's gateway. */

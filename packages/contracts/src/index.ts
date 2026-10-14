@@ -3159,6 +3159,25 @@ export const GROUP_MAX_CORES = 32;
  */
 export const GROUP_RELAY_ROUTE = '/group/relay';
 
+/** The vendor family of a proprietary model. */
+export type ModelFamily = 'anthropic' | 'openai' | 'google' | 'xai' | 'meta';
+
+/**
+ * Gateway route prefixes named after a vendor's own subscription. Behind one,
+ * `claude/claude-opus-5-5` is the agent's native `claude-opus-5-5`: the core
+ * lists it once, and a choice saved under the route still means that model.
+ */
+export const MODEL_ROUTE_FAMILIES: Readonly<Record<string, ModelFamily>> = {
+  claude: 'anthropic', anthropic: 'anthropic', codex: 'openai', openai: 'openai', chatgpt: 'openai',
+  gemini: 'google', google: 'google', xai: 'xai', grok: 'xai', muse: 'meta',
+};
+
+/** A model id without a vendor route prefix: `codex/gpt-6.1-sol` is `gpt-6.1-sol`, `antigravity/claude-sonnet-5` stays. */
+export function nativeModelId(id: string): string {
+  const slash = id.indexOf('/');
+  return slash > 0 && Object.hasOwn(MODEL_ROUTE_FAMILIES, id.slice(0, slash).toLowerCase()) ? id.slice(slash + 1) : id;
+}
+
 /** `url` without its trailing slashes; a loop, since `/\/+$/` backtracks quadratically on a long run of them. */
 export function withoutTrailingSlashes(url: string): string {
   let end = url.length;
