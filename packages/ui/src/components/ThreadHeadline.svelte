@@ -62,7 +62,7 @@
   <span class="title" class:ui-label={!wrap}>{thread.title}</span>
   {#if draft}<span class="draft" data-testid="thread-draft" title={strings.sidebar.unsentDraft} aria-label={strings.sidebar.unsentDraft}><PencilLine size={12} /></span>{/if}
   {#if thread.pinned}<span class="pin"><Pin size={12} /></span>{/if}
-  {#if now !== undefined}<ThreadState {thread} {now} subagents={owner.subagents(thread.id)} />{/if}
+  {#if now !== undefined}<ThreadState {thread} {now} subagents={owner.subagents(thread.id)} away={owner.connection !== 'ready'} />{/if}
 </span>
 
 <style>

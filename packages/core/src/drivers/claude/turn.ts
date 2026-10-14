@@ -32,6 +32,8 @@ interface ToolEntry {
   output: string | null;
   status: ToolStatus;
   documents: ToolDocument[];
+  /** What the CLI's `tool_use_summary` said of the batch this call ran in. */
+  summary: string | null;
 }
 
 type UserMessage = Extract<SDKMessage, { type: 'user' }>;
@@ -155,6 +157,9 @@ export class ClaudeTurn {
         break;
       case 'system':
         this.handleSystem(message);
+        break;
+      case 'tool_use_summary':
+        this.summarizeTools(message.preceding_tool_use_ids, message.summary);
         break;
       default:
         break;
@@ -429,6 +434,7 @@ export class ClaudeTurn {
       output: null,
       status: 'running',
       documents: [],
+      summary: null,
     };
   }
 
@@ -442,7 +448,25 @@ export class ClaudeTurn {
       output: entry.output,
       status: entry.status,
       ...(entry.documents.length > 0 ? { documents: entry.documents } : {}),
+      ...(entry.summary === null ? {} : { summary: entry.summary }),
     });
+  }
+
+  /**
+   * `tool_use_summary`: a line the CLI writes once a batch of calls finished
+   * (`CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES`), naming the calls it covers. Each
+   * card it names carries it; the timeline reads it as the batch's label. A call
+   * of an earlier turn on the same warm query is not this turn's to redraw.
+   */
+  private summarizeTools(toolIds: readonly string[], summary: string): void {
+    const text = summary.trim();
+    if (text.length === 0) return;
+    for (const toolId of toolIds) {
+      const entry = this.tools.get(toolId);
+      if (entry === undefined || entry.summary === text) continue;
+      entry.summary = text;
+      this.emitTool(toolId, entry);
+    }
   }
 
   fail(reason: string): void {

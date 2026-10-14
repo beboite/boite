@@ -799,8 +799,14 @@ minute while visible and exposes the exact date and time on hover.
 
 Calls and reasoning with no answer text between them fold into one line,
 "Ran 6 commands" with the run's duration, that opens on its steps in order.
-While a step runs the line names it ("Running git", "Thinking") and its clock
-ticks. Reasoning with no words that took under a second is not drawn. The core
+When every call of the run carries the agent's own `summary` (Claude's
+`tool_use_summary`), the line reads those instead: "Read rules.md and data.txt
+· Found N=2 with a prime search". While a step runs the line names it ("Running
+git", or the thought being written) and its clock ticks. A reasoning step reads
+as its last bold heading (Codex) or the first sentence of its last paragraph
+(Claude's summary, a raw chain of thought), and as "Thinking" while it has no
+words (`thoughtTitle` in `lib/tool-groups.ts`). Reasoning with no words that
+took under a second is not drawn. The core
 records each block's first appearance and the next part or message completion
 for every driver, so durations survive a reload. Older and imported blocks
 without timing metadata show no guessed duration.
@@ -854,7 +860,8 @@ The core validates bytes and writes sanitized, content-addressed copies under
 `<dataDir>/attachments/`. Copies survive resume and are currently not removed
 by archive or project removal. Timeline cards download those copies. Composer
 `[Image N]` references follow attachment order, preview inline and renumber after
-removal. Copying or cutting a reference carries its picture
+removal. A tile opens its picture large above the box; a second click on the
+tile, or a click on the large picture, puts it away. Copying or cutting a reference carries its picture
 (`lib/composer-clipboard.ts`): pasted where those numbers name other pictures, on
 any machine, the pictures join that prompt and the references take their numbers
 there; pasted where every number still names the same picture, only the text goes in. A new image accepted during send

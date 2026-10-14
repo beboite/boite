@@ -22,6 +22,10 @@ test('the switch counts the conversations at work on every machine, and says whe
   first.threads = first.threads.map(thread => thread.id === 't-scheduler' ? { ...thread, status: 'running' } : thread);
   second.threads = second.threads.map(thread => thread.id === 't-scheduler' ? { ...thread, status: 'queued' } : thread);
   expect(workingThreads([first, second])).toEqual({ count: 2, waiting: false });
+  // A machine that stopped answering keeps its last list, not its place in the count.
+  first.connection = 'closed';
+  expect(workingThreads([first, second])).toEqual({ count: 1, waiting: false });
+  first.connection = 'ready';
   second.threads = second.threads.map(thread => thread.id === 't-bench' ? { ...thread, status: 'waiting' } : thread);
   expect(workingThreads([first, second])).toEqual({ count: 3, waiting: true });
   // A thread in an archived project is out of the list, so out of the count.

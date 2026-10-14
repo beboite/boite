@@ -169,14 +169,17 @@ const PWSH = '"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command';
  * The timeline folds it under one sentence.
  */
 export async function toolBurst(ctx: FakeContext, thread: Thread, message: Message, record: { cancelled: boolean }): Promise<void> {
-  const calls: { name: string; input: unknown; output: string; status: 'done' | 'error'; exitCode?: number }[] = [
+  // `summary` closes a batch the way Claude's `tool_use_summary` does: once its
+  // last call finished, every call of the batch gets the line.
+  const calls: { name: string; input: unknown; output: string; status: 'done' | 'error'; exitCode?: number; summary?: string }[] = [
     { name: 'Bash', input: { command: `${PWSH} 'git status --short'`, description: 'Show the working tree' }, output: ' M packages/ui/src/app.css', status: 'done' },
     { name: 'Bash', input: { command: `${PWSH} 'Get-ChildItem packages/ui/src/components | Select-Object -First 5'` }, output: 'AppearancePage.svelte\nAssistantMessage.svelte', status: 'done' },
     { name: 'Read', input: { file_path: 'packages/ui/src/app.css' }, output: ':root { }', status: 'done' },
-    { name: 'Grep', input: { pattern: 'font-family', path: 'packages/ui/src' }, output: 'packages/ui/src/app.css:8', status: 'done' },
+    { name: 'Grep', input: { pattern: 'font-family', path: 'packages/ui/src' }, output: 'packages/ui/src/app.css:8', status: 'done', summary: 'Found where app.css sets the font' },
     { name: 'Bash', input: { command: `${PWSH} 'cd packages/ui; bun run check'` }, output: 'error TS2304: Cannot find name', status: 'error', exitCode: 1 },
-    { name: 'Bash', input: { command: `${PWSH} 'cd packages/ui; bun run check'` }, output: '0 errors', status: 'done' }
+    { name: 'Bash', input: { command: `${PWSH} 'cd packages/ui; bun run check'` }, output: '0 errors', status: 'done', summary: 'Fixed a type error until the check passed' }
   ];
+  let batchFrom = message.parts.length;
   for (const call of calls) {
     // Stopped mid-run: the call on its way finishes, no other starts.
     if (record.cancelled) break;
@@ -191,6 +194,14 @@ export async function toolBurst(ctx: FakeContext, thread: Thread, message: Messa
       ...(call.exitCode !== undefined ? { exitCode: call.exitCode } : {}) };
     message.parts[partIndex] = done;
     ctx.emitToThread(thread.id, 'message.part', { threadId: thread.id, messageId: message.id, partIndex, part: structuredClone(done) });
+    if (call.summary === undefined) continue;
+    for (let at = batchFrom; at <= partIndex; at++) {
+      const part = message.parts[at];
+      if (part?.type !== 'tool') continue;
+      message.parts[at] = { ...part, summary: call.summary };
+      ctx.emitToThread(thread.id, 'message.part', { threadId: thread.id, messageId: message.id, partIndex: at, part: structuredClone(message.parts[at]!) });
+    }
+    batchFrom = partIndex + 1;
   }
 }
 

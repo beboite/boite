@@ -10,7 +10,7 @@
    * right (the same words and colours as a thread: working with its time,
    * needs you, or when it last moved), and one muted line under it.
    */
-  let { title, open = false, unread = 0, live = null, waiting = false, at, now, detail = '', testid, onclick, picture, aside }: {
+  let { title, open = false, unread = 0, live = null, waiting = false, away = false, at, now, detail = '', testid, onclick, picture, aside }: {
     title: string;
     open?: boolean;
     unread?: number;
@@ -18,6 +18,8 @@
     live?: ThreadSummary | null;
     /** Something waits on the user here even with no turn running: a decision, a result to review. */
     waiting?: boolean;
+    /** Its machine is not connected: a turn it last saw running reads as unreachable. */
+    away?: boolean;
     /** The row's last activity, read when nothing runs. */
     at: number;
     now: number;
@@ -48,7 +50,7 @@
       {#if aside}{@render aside()}
       {:else}
         {#if unread > 0 && !waiting && !live}<span class="unread-count" role="img" aria-label={fill(strings.agents.unread, { count: String(unread) })}>{unread}</span>{/if}
-        <ThreadState thread={shown} {now} />
+        <ThreadState thread={shown} {now} {away} />
       {/if}
     </span>
     {#if detail}<span class="detail">{detail}</span>{/if}

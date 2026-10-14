@@ -133,6 +133,44 @@ describe('claude driver', () => {
     ]);
   });
 
+  test('the CLI is asked for summarized thinking and tool summaries, and a summary labels the calls it names', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+
+    scripted((fake) => {
+      fake.emit(init('sess-sum'));
+      fake.emit(assistant('sess-sum', [
+        { type: 'tool_use', id: 'toolu_a', name: 'Read', input: { file_path: 'rules.md' } },
+        { type: 'tool_use', id: 'toolu_b', name: 'Read', input: { file_path: 'data.txt' } },
+      ]));
+      fake.emit(toolResult('sess-sum', 'toolu_a', 'rules'));
+      fake.emit(toolResult('sess-sum', 'toolu_b', 'data'));
+      fake.emit(assistant('sess-sum', [{ type: 'tool_use', id: 'toolu_c', name: 'Bash', input: { command: 'wc -l data.txt' } }]));
+      // Written once the first batch finished; it names only that batch, and an
+      // id this turn never drew is skipped rather than drawn as an empty card.
+      fake.emit(sdk({ type: 'tool_use_summary', summary: ' Read rules.md and data.txt ', preceding_tool_use_ids: ['toolu_a', 'toolu_b', 'toolu_gone'], uuid: 'u1', session_id: 'sess-sum' }));
+      fake.emit(toolResult('sess-sum', 'toolu_c', '4 data.txt'));
+      fake.emit(success('sess-sum'));
+      fake.end();
+    });
+
+    expect(await runTurn(client, threadId, 'count')).toBe('done');
+
+    const options = calls.at(-1)!.options;
+    expect(options.extraArgs).toEqual({ 'thinking-display': 'summarized' });
+    expect(options.thinking).toBeUndefined();
+    expect(options.env?.CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES).toBe('1');
+
+    const thread = await client.call('threads.get', { threadId });
+    const tools = thread.messages.flatMap((message) => message.parts).filter((part) => part.type === 'tool');
+    expect(tools.map((part) => [part.toolId, part.summary ?? null])).toEqual([
+      ['toolu_a', 'Read rules.md and data.txt'],
+      ['toolu_b', 'Read rules.md and data.txt'],
+      ['toolu_c', null],
+    ]);
+    expect(tools.every((part) => part.status === 'done')).toBe(true);
+  });
+
   test('a tool input streams as partial json, then the assistant frame parses it', async () => {
     const client = await harness.connect();
     const threadId = await claudeThread(client);

@@ -99,7 +99,7 @@
         {@const key = chatKey(chat.kind, chat.id)}
         {@const thread = live.get(key) ?? null}
         {@const waiting = chat.attention > 0 || chat.status === 'waiting'}
-        <AgentRow title={chat.name} open={active === key} unread={chat.unread} live={thread} {waiting} at={chat.at} {now} detail={detail(chat)} testid="agent-entry-{chat.id}" onclick={() => onfocus({ kind: chat.kind, id: chat.id })}>
+        <AgentRow title={chat.name} open={active === key} unread={chat.unread} live={thread} {waiting} away={view.store.connection !== 'ready'} at={chat.at} {now} detail={detail(chat)} testid="agent-entry-{chat.id}" onclick={() => onfocus({ kind: chat.kind, id: chat.id })}>
           {#snippet picture()}<AgentAvatar kind={chat.kind} id={chat.id} name={chat.name} avatar={chat.avatar} members={memberList(chat)} status={waiting ? 'waiting' : thread ? 'running' : 'idle'} size={22} />{/snippet}
         </AgentRow>
       {/each}

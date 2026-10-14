@@ -14,12 +14,14 @@ export interface WorkCount {
  * The conversations the thread list draws that are at work: a turn under way,
  * queued, waiting on its delegated agents or on something it left running, or
  * asking the user. Archived projects and archived threads are out of the list,
- * so they are out of the count.
+ * so they are out of the count, and so is a machine that is not connected: a
+ * laptop gone to sleep mid-turn would otherwise count as at work for hours.
  */
 export function workingThreads(stores: readonly Store[]): WorkCount {
   let count = 0;
   let waiting = false;
   for (const store of stores) {
+    if (store.connection !== 'ready') continue;
     for (const project of store.projects) {
       if (project.archived) continue;
       for (const thread of store.threadsOf(project.id)) {
