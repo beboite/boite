@@ -625,6 +625,16 @@ export class Workspace {
     if (target) await this.select(target, threadId);
   }
 
+  /**
+   * The machine whose core has this id: by the id its hello gave, else by the
+   * one the group knows it by before it answered. A connected one wins over a
+   * twin still connecting under another address.
+   */
+  machineOf(coreId: string): Machine | null {
+    const matches = this.machines.filter((machine) => machine.store.core?.coreId === coreId || GroupLinks.coreOf(machine) === coreId);
+    return matches.find((machine) => machine.store.connection === 'ready') ?? matches[0] ?? null;
+  }
+
   /** Resolve the authenticated core identity before using a machine-scoped thread id. */
   async openAgentThread(owner: Store, self: AgentAddress, address: AgentAddress): Promise<void> {
     const generation = ++this.#generation;

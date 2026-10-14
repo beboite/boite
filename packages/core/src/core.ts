@@ -405,7 +405,7 @@ export class Core {
       version: this.version,
       ...(this.bundleHash ? { bundleHash: this.bundleHash } : {}),
       protocolVersion: PROTOCOL_VERSION,
-      features: { threadSnapshots: true, chunkedAnswers: true, readingPages: true, deferredToolParts: true, deviceKeys: true, draftPreparation: true, attachmentUploads: true },
+      features: { threadSnapshots: true, chunkedAnswers: true, readingPages: true, deferredToolParts: true, deviceKeys: true, draftPreparation: true, attachmentUploads: true, revealMachines: true },
       coreId: this.coordination.card().coreId,
       hostname: hostname(),
       os: currentOs(),

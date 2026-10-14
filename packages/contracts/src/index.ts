@@ -672,8 +672,14 @@ export interface PluginAppState {
 /**
  * What `ui.reveal` shows in the owner's desktop window: a thread, an agent's
  * page, or the app updates in Settings. `agentId` is 1 to 200 characters.
+ * `coreId` names the machine the thread or the agent lives on: another member
+ * of this core's group or a machine trusted for coordination. Missing, or this
+ * core's own id, means this core.
  */
-export type UiRevealTarget = { kind: 'thread'; threadId: ThreadId } | { kind: 'agent'; agentId: string } | { kind: 'update' };
+export type UiRevealTarget =
+  | { kind: 'thread'; threadId: ThreadId; coreId?: string }
+  | { kind: 'agent'; agentId: string; coreId?: string }
+  | { kind: 'update' };
 
 export interface PluginManifest {
   schema: 1;
@@ -2445,6 +2451,8 @@ export interface CoreInfo {
     draftPreparation?: boolean;
     /** Connection-owned attachment uploads resolved by turns.start. */
     attachmentUploads?: boolean;
+    /** `ui.reveal` takes `coreId` on a thread or an agent target and opens it on that machine. An older core drops the field and opens this core's. */
+    revealMachines?: boolean;
   };
   /** The fingerprint of this core's identity key: the id its group knows it by, and the one a device signs its hello for. */
   coreId?: string;

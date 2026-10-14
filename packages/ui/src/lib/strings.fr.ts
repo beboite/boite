@@ -2423,6 +2423,8 @@ export const fr: Translation = {
   },
   plugins: {
     heading: 'Extensions',
+    revealUnknownMachine: "Le fil ou l'agent qu'une application demande d'afficher est sur une machine à laquelle cette fenêtre n'est pas connectée. Ajoutez-la dans Réglages, Machines et mises à jour.",
+    revealMachineOffline: "Le fil ou l'agent qu'une application demande d'afficher est sur {machine}, qui n'est pas connectée pour l'instant.",
     intro: 'Une extension est un programme qui tourne sur la machine hébergeant votre cœur, vérifié contre le SHA-256 publié par son manifeste.',
     installedHeading: 'Installées',
     installedEmpty: "Aucune extension installée. Installez-en une recommandée, ou ajoutez-en une depuis une URL git.",

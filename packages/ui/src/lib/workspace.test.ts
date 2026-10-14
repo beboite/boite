@@ -1,5 +1,6 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { machineHealth, PRIMARY_PATIENCE_MS, Workspace } from './workspace.svelte';
+import { reveal } from './reveal';
 import { Store, store as primary } from './store.svelte';
 import { FakeClient } from './fake-client';
 import { upsertEnvironment } from './endpoint';
@@ -791,6 +792,24 @@ test('agent links resolve core identity despite identical thread ids and open bo
   await w.openAgentThread(a, { coreId: 'local', threadId: id }, { coreId: 'local', threadId: a.threads[1]!.id });
   expect(w.active).toBe(a);
   expect(a.openThread?.id).toBe(a.threads[1]!.id);
+});
+
+test('ui.reveal naming a machine opens its thread on that machine\'s Store, despite a coincident id here', async () => {
+  const { w, a, b } = await setup();
+  const id = a.threads[0]!.id;
+  await b.rename(id, 'Remote thread');
+  await w.select(a, id);
+  await reveal(w, a, { kind: 'thread', threadId: id, coreId: b.core!.coreId! }, async () => undefined);
+  expect(w.active).toBe(b);
+  expect(b.openThread?.title).toBe('Remote thread');
+  expect(a.openThread?.title).not.toBe('Remote thread');
+
+  // Found by its hello's id, or by the id the group brought it under before any hello; an unknown one is null.
+  expect(w.machineOf(b.core!.coreId!)?.store).toBe(b);
+  const twin = { id: 'twin', label: 'Remote', store: new Store(), coreId: 'brought-core' };
+  w.machines = [...w.machines, twin];
+  expect(w.machineOf('brought-core')?.store).toBe(twin.store);
+  expect(w.machineOf('nowhere')).toBeNull();
 });
 
 test('an unconnected core never opens a coincident local thread id', async () => {
