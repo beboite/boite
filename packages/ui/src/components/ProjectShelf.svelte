@@ -34,8 +34,8 @@
 
   let Rows = $state.raw<typeof import('./ProjectShelfRows.svelte').default>();
   let loading: Promise<void> | undefined;
-  function load(): void {
-    loading ??= import('./ProjectShelfRows.svelte').then((module) => { Rows = module.default; }).catch(() => { loading = undefined; });
+  function load(): Promise<void> {
+    return loading ??= import('./ProjectShelfRows.svelte').then((module) => { Rows = module.default; }).catch(() => { loading = undefined; });
   }
   // An opening loads them at once; a failed load tries again at the next one.
   $effect(() => { if (open) load(); });
@@ -48,7 +48,7 @@
 
 {#if total > 0}
   <section class="shelf" data-testid="project-shelf">
-    <FoldHeader {label} count={total} {open} controls={uid} testid="project-shelf-toggle" onclick={() => (projectThreadView.shelfOpen = !open)} />
+    <FoldHeader {label} count={total} {open} controls={uid} testid="project-shelf-toggle" beforeReveal={load} onclick={() => (projectThreadView.shelfOpen = !open)} />
     <div id={uid} class="disclosure-fold" class:open inert={!open}><div>
       {#if visited && Rows}<Rows {idle} {archived} {open} {multi} {now} {scrollRoot} {onopen} {onrows} />{/if}
     </div></div>

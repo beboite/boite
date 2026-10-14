@@ -58,6 +58,7 @@ export function createBrowserFixture() {
 
   let harness: TestCore, owner: CoreClient, agent: CoreClient, threadId: string;
   let opened: { harness?: TestCore; owner?: CoreClient; agent?: CoreClient } = {};
+  const hosts = new Set<() => Promise<void>>();
   beforeEach(async () => {
     later.release();
     later = laterGate();
@@ -67,7 +68,17 @@ export function createBrowserFixture() {
     ({ threadId } = await echoThread(harness, owner));
     opened.agent = agent = await connect(harness.url, harness.core.agents.tokenFor(threadId), { client: { name: 'boite-cli', version: 'test' } });
   });
-  afterEach(async () => { later.release(); opened.agent?.close(); opened.owner?.close(); await opened.harness?.stop(); });
+  afterEach(async () => {
+    later.release();
+    const errors: unknown[] = [];
+    for (const close of hosts) {
+      try { await close(); } catch (error) { errors.push(error); }
+    }
+    try { opened.agent?.close(); } catch (error) { errors.push(error); }
+    try { opened.owner?.close(); } catch (error) { errors.push(error); }
+    try { await opened.harness?.stop(); } catch (error) { errors.push(error); }
+    if (errors.length) throw new AggregateError(errors, 'browser fixture cleanup failed');
+  });
 
   const evaluate = async (expression: string, tabId?: string) =>
     (await agent.call('browser.command', { threadId, ...(tabId ? { tabId } : {}), action: { kind: 'evaluate', expression } })).value;
@@ -80,30 +91,65 @@ export function createBrowserFixture() {
    */
   async function fakeHost(name = 'shell') {
     const dir = mkdtempSync(join(tmpdir(), 'boite-host-'));
-    const args = chromiumArgs(dir, 'linux').filter(arg => arg !== '--remote-debugging-pipe');
-    const browser = Bun.spawn([findChromium().path!, ...args, '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1'], { stdout: 'ignore', stderr: 'ignore' });
-    const socket = new WebSocket(await waitForEndpoint(dir, browser.exited));
-    await new Promise(resolve => socket.addEventListener('open', resolve, { once: true }));
-    const app = await connect(harness.url, harness.token, { client: { name, version: 'test' } });
-    const relayed: string[] = [];
-    app.on('browser.hostMessage', ({ profile, message }) => { relayed.push(profile); socket.send(message); });
-    socket.addEventListener('message', event => void app.call('browser.hostReply', { profile: 'default', messages: [String(event.data)] }).catch(() => {}));
-    return {
-      app, relayed,
-      async close() {
-        app.close();
-        // A kill ends the browser process alone: on Windows its helpers keep the
-        // profile open a moment longer, and removing it then fails with EBUSY.
-        // Browser.close ends them first, as the core closes its own browsers.
-        const stuck = setTimeout(() => browser.kill(), 10_000);
-        if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 2 ** 31 - 1, method: 'Browser.close', params: {} }));
-        else browser.kill();
-        await browser.exited;
+    let browser: Bun.Subprocess | undefined, socket: WebSocket | undefined, app: CoreClient | undefined;
+    let closing: Promise<void> | undefined;
+    const close = () => closing ??= (async () => {
+      const errors: unknown[] = [];
+      const attempt = (action: () => void) => { try { action(); } catch (error) { errors.push(error); } };
+      let stuck: ReturnType<typeof setTimeout> | undefined;
+      try {
+        attempt(() => app?.close());
+        if (browser) {
+          if (browser.exitCode === null) {
+            // Browser.close lets Chromium's helpers release the profile before removal.
+            stuck = setTimeout(() => attempt(() => browser!.kill()), 10_000);
+            attempt(() => {
+              if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 2 ** 31 - 1, method: 'Browser.close', params: {} }));
+              else browser!.kill();
+            });
+          }
+          try { await browser.exited; } catch (error) { errors.push(error); }
+        }
+      } finally {
         clearTimeout(stuck);
-        socket.close();
-        rmSync(dir, { recursive: true, force: true });
-      },
-    };
+        attempt(() => socket?.close());
+        attempt(() => rmSync(dir, { recursive: true, force: true }));
+        hosts.delete(close);
+      }
+      if (errors.length) throw new AggregateError(errors, 'desktop browser host cleanup failed');
+    })();
+    // Register from the first allocation: setup and a caller failing before its try both own cleanup.
+    hosts.add(close);
+    try {
+      const args = chromiumArgs(dir, 'linux').filter(arg => arg !== '--remote-debugging-pipe');
+      browser = Bun.spawn([findChromium().path!, ...args, '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1'], { stdout: 'ignore', stderr: 'ignore' });
+      const connectedSocket = socket = new WebSocket(await waitForEndpoint(dir, browser.exited));
+      await new Promise<void>((resolve, reject) => {
+        const finish = (error?: Error) => {
+          clearTimeout(timer);
+          connectedSocket.removeEventListener('open', opened);
+          connectedSocket.removeEventListener('error', failed);
+          connectedSocket.removeEventListener('close', ended);
+          if (error) reject(error); else resolve();
+        };
+        const opened = () => finish();
+        const failed = () => finish(new Error('could not open the desktop browser DevTools socket'));
+        const ended = () => finish(new Error('the desktop browser DevTools socket closed before opening'));
+        const timer = setTimeout(() => finish(new Error('the desktop browser did not accept a DevTools connection within 10 seconds')), 10_000);
+        connectedSocket.addEventListener('open', opened);
+        connectedSocket.addEventListener('error', failed);
+        connectedSocket.addEventListener('close', ended);
+      });
+      const connectedApp = app = await connect(harness.url, harness.token, { client: { name, version: 'test' } });
+      const relayed: string[] = [];
+      connectedApp.on('browser.hostMessage', ({ profile, message }) => { relayed.push(profile); connectedSocket.send(message); });
+      connectedSocket.addEventListener('message', event => void connectedApp.call('browser.hostReply', { profile: 'default', messages: [String(event.data)] }).catch(() => {}));
+      return { app: connectedApp, relayed, close };
+    } catch (error) {
+      try { await close(); }
+      catch (cleanupError) { throw new AggregateError([error, cleanupError], 'desktop browser host setup and cleanup failed', { cause: error }); }
+      throw error;
+    }
   }
 
   return {

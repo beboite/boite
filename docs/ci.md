@@ -132,6 +132,13 @@ Real-core browser gestures wait for a decoded, enabled frame fitted to the view;
 an image can load before the automatic viewport resize has finished.
 Deferred-dialog fixtures release a loopback response after the agent's commands
 finish and observe the page's completion request before reading its title.
+Network-diagnostic assertions wait for the asynchronous response event, which
+DOM readiness does not include. Desktop-host fixtures close Chromium and remove
+their profiles when setup fails, and register cleanup before returning a host.
+The command/dialog scenario prints a bounded, content-free CDP timing trace only
+on failure, retaining the original error and restoring its observers afterward.
+Fold-reveal coverage includes lazy rows arriving after the opening animation;
+the follow period starts when content is ready, and user input still cancels it.
 
 The Windows job shares release-profile Rust dependencies, builds the installer
 once, and stages its existing core beside the shell for native E2E. Installer

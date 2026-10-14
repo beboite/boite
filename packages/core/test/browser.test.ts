@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { echoThread, startTestCore } from './harness.ts';
 import { createBrowserFixture } from './browser/fixture.ts';
+import { traceBrowserCommands } from './browser/dialog-trace.ts';
 
 const browserFixture = createBrowserFixture();
 const { real, url, evaluate } = browserFixture;
@@ -20,7 +21,14 @@ real('an agent opens, reads and drives a page in the browser of its own machine'
   const snapshot = (await agent.call('browser.command', { threadId, action: { kind: 'snapshot', interactive: true } })).value as { title: string; text: string };
   expect(snapshot.title).toBe('Fixture');
   expect(snapshot.text).toContain('- button "Go" [ref=e1]');
-  const diagnostics = (await agent.call('browser.command', { threadId, action: { kind: 'diagnostics' } })).value as { entries: Array<{ kind: string; text: string; url?: string }> };
+  const readDiagnostics = async () => (await agent.call('browser.command', { threadId, action: { kind: 'diagnostics' } })).value as { entries: Array<{ kind: string; text: string; url?: string }> };
+  let diagnostics = await readDiagnostics();
+  // DOM readiness does not include the asynchronous failed fetch's diagnostic.
+  const deadline = Date.now() + 5000;
+  while (!diagnostics.entries.some(entry => entry.kind === 'network' && entry.url === url('/missing')) && Date.now() < deadline) {
+    await Bun.sleep(50);
+    diagnostics = await readDiagnostics();
+  }
   expect(diagnostics.entries).toContainEqual(expect.objectContaining({ kind: 'console', text: 'boom' }));
   // The query string carried a token: diagnostics keep the address without it.
   expect(diagnostics.entries).toContainEqual(expect.objectContaining({ kind: 'network', url: url('/missing') }));
@@ -62,7 +70,7 @@ real('boite browse opens its page as a new tab of the conversation browser, not 
   expect(panels).toEqual([]);
 }, 150_000);
 
-real('an agent drives a page with agent-browser commands: refs, forms, dialogs and covered elements', async () => {
+real('an agent drives a page with agent-browser commands: refs, forms, dialogs and covered elements', () => traceBrowserCommands(async () => {
   const { agent, threadId } = browserFixture;
   const command = async (action: BrowserAction): Promise<unknown> => (await agent.call('browser.command', { threadId, action })).value;
   const opened = await agent.call('browser.command', { threadId, action: { kind: 'open', url: url('/shop'), reuse: true } });
@@ -110,7 +118,7 @@ real('an agent drives a page with agent-browser commands: refs, forms, dialogs a
   expect(again.tabId).toBe(opened.tabId);
   expect(await command({ kind: 'history', direction: 'back' })).toMatchObject({ navigated: true, title: 'Sent' });
   await expect(command({ kind: 'wait', selector: '#never', timeoutMs: 300 })).rejects.toThrow('wait timed out after 300 ms');
-}, 150_000);
+}), 150_000);
 
 real('a window a page opens joins the conversation as a tab of its own', async () => {
   const { agent, threadId } = browserFixture;

@@ -1,7 +1,9 @@
-import { expect } from 'bun:test';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { expect, spyOn } from 'bun:test';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { connect } from '../src/client.ts';
+import { Cdp } from '../src/browser/cdp.ts';
+import { waitForEndpoint } from '../src/browser/chromium.ts';
 import { createBrowserFixture, jpegSize } from './browser/fixture.ts';
 
 const browserFixture = createBrowserFixture();
@@ -66,12 +68,50 @@ real('the desktop app on this machine hosts the agent tabs: the core drives them
     expect(jpegSize(frame.base64)).toEqual({ width: frame.width, height: frame.height });
     // A reply from a connection that does not host is refused.
     await expect(owner.call('browser.hostReply', { profile: 'default', messages: ['{}'] })).rejects.toThrow('does not host');
-  } finally { await host.close(); }
+  } finally {
+    await Promise.all([host.close(), host.close()]);
+  }
   // The app is gone: its tabs went with it, and the next one opens in the core's own browser.
   for (let i = 0; i < 50 && (await owner.call('browser.remoteStatus', { threadId })).tabs.length; i++) await Bun.sleep(50);
   expect((await owner.call('browser.remoteStatus', { threadId })).tabs).toEqual([]);
   await agent.call('browser.command', { threadId, action: { kind: 'open', url: url() } });
   expect((await owner.call('browser.remoteStatus', { threadId })).tabs[0]!.view).toBeUndefined();
+}, 150_000);
+
+real('a desktop host that cannot connect to the core removes its browser and temporary profile', async () => {
+  await browserFixture.harness.server.stop();
+  let host: { process: Bun.Subprocess; dir: string } | undefined;
+  const spawn = Bun.spawn;
+  const capture = spyOn(Bun, 'spawn').mockImplementation(((...args: unknown[]) => {
+    const process = Reflect.apply(spawn, Bun, args) as Bun.Subprocess;
+    const command = args[0];
+    if (Array.isArray(command)) {
+      const profile = command.find((arg: unknown) => typeof arg === 'string' && arg.startsWith('--user-data-dir=') && arg.includes('boite-host-')) as string | undefined;
+      if (profile) host = { process, dir: profile.slice('--user-data-dir='.length) };
+    }
+    return process;
+  }) as typeof Bun.spawn);
+  try {
+    await expect(fakeHost()).rejects.toThrow();
+    expect(host).toBeDefined();
+    expect(host!.process.exitCode).not.toBeNull();
+    expect(existsSync(host!.dir)).toBe(false);
+  } finally {
+    capture.mockRestore();
+    // The regression also cleans up the browser when run against the leaking fixture.
+    if (host) {
+      let socket: Cdp | undefined;
+      const stuck = setTimeout(() => host!.process.kill(), 10_000);
+      try {
+        if (host.process.exitCode === null) {
+          socket = await Cdp.connect(await waitForEndpoint(host.dir, host.process.exited));
+          await socket.send('Browser.close').catch(() => {});
+        }
+      } catch { /* the captured process still has its kill fallback */ }
+      finally { await host.process.exited; clearTimeout(stuck); socket?.close(); }
+      rmSync(host.dir, { recursive: true, force: true });
+    }
+  }
 }, 150_000);
 
 real('a viewer on another device watches and drives the tab, and hears it come and go', async () => {
