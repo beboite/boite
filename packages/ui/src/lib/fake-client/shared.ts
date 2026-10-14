@@ -3,6 +3,7 @@ import {
   BRANCH_NAME_MAX,
   RpcErrorCode,
   TODO_TEXT_MAX,
+  backgroundWait,
   queueOrder,
   requestStarts,
   type AgentCommand,
@@ -94,12 +95,17 @@ export function toSummary(thread: Thread): ThreadSummary {
   const busy = thread.status === 'running' || thread.status === 'waiting';
   const started = thread.turns.filter(turn => turn.status === 'running' && turn.startedAt !== null).map(turn => turn.startedAt as number);
   const tasks = thread.background ?? [];
+  const lastTurn = thread.turns.at(-1) ?? null;
   return {
     ...rest,
     lastUserMessageAt: thread.messages.filter(m => m.role === 'user').at(-1)?.createdAt ?? null,
     runningSince: busy && started.length > 0 ? Math.min(...started) : null,
     requestSince: busy || tasks.length > 0 ? currentRequestSince(thread.turns) : null,
-    backgroundWork: tasks.length === 0 ? null : { kinds: tasks.map(task => task.kind), since: Math.min(...tasks.map(task => task.startedAt)) }
+    backgroundWork: tasks.length === 0 ? null : { kinds: tasks.map(task => task.kind), since: Math.min(...tasks.map(task => task.startedAt)) },
+    // As the core's `backgroundWaitOf`: a delegated agent at rest on its own background work, its last turn the truth.
+    backgroundWait: thread.parentThreadId && thread.status !== 'queued'
+      ? backgroundWait({ status: 'idle', lastTurn, live: tasks, history: thread.backgroundHistory ?? [], now: Date.now() })
+      : null
   };
 }
 

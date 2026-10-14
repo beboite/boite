@@ -1,5 +1,6 @@
 import { expect, test } from 'vitest';
 import { flushSync, mount, tick, unmount } from 'svelte';
+import { threadBusy } from '@boite/contracts';
 import { FakeClient } from '../lib/fake-client';
 import { Store } from '../lib/store.svelte';
 import DelegationSurface from './DelegationSurface.svelte';
@@ -70,11 +71,23 @@ test('one list holds the workflow runs and the subagents, and a run opens its gr
     expect(agents.length).toBeGreaterThan(0);
     // Working subagents and finished ones sit in separate groups, every one of them once.
     const ids = (group: string) => [...document.querySelectorAll<HTMLElement>(`[data-testid=${group}] [data-testid=delegation-member]`)].map(row => row.dataset.agentId);
-    const active = agents.filter(agent => ['queued', 'running', 'waiting'].includes(agent.thread.status)).map(agent => agent.thread.id);
+    const active = agents.filter(agent => threadBusy(agent.thread)).map(agent => agent.thread.id);
     expect(active.length).toBeGreaterThan(0);
     expect(ids('delegation-active')).toEqual(active);
     expect(ids('delegation-finished')).toContain('t-team-done');
     expect(ids('delegation-active').length + ids('delegation-finished').length).toBe(agents.length);
+    // A subagent whose turn ended on its own background work is still at work: it says what it waits for, and since when.
+    expect(ids('delegation-active')).toContain('t-team-waiting');
+    const waiting = document.querySelector<HTMLElement>('[data-agent-id=t-team-waiting]')!;
+    expect(waiting.dataset.status).toBe('background');
+    expect(waiting.querySelector('[data-testid=delegation-member-wait]')!.textContent).toMatch(/^Waiting on test_emotes\s*1m \d\ds$/);
+    // Work that ended without waking it leaves it interrupted, with the reason and a Resume.
+    expect(ids('delegation-finished')).toContain('t-team-interrupted');
+    const interrupted = document.querySelector<HTMLElement>('[data-agent-id=t-team-interrupted]')!;
+    expect(interrupted.dataset.status).toBe('interrupted');
+    expect(interrupted.querySelector('.outcome')!.textContent).toBe('Interrupted');
+    expect(interrupted.querySelector('[data-testid=delegation-member-wait]')!.textContent).toBe('release build ended without waking it: its agent process was ended');
+    expect(document.querySelectorAll('[data-testid=delegation-resume]')).toHaveLength(1);
     // A row leads with the model's mark and name; the task it was given is not repeated there.
     const done = document.querySelector<HTMLElement>('[data-agent-id=t-team-done]')!;
     expect(done.querySelector('[data-logo]')!.getAttribute('data-logo')).toBe('codex');

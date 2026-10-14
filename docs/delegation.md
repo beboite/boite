@@ -212,12 +212,31 @@ else: `speed=fast` for Claude, `speed=Fast (priority)` for that Codex tier.
 works.
 
 Every answer is a few plain lines. `delegate list` starts with one summary
-line (`subagents: on; 1 running, 2 done, 0 failed, 0 stopped`), then one row per
+line (`subagents: on; 1 running, 1 waiting, 2 done, 0 failed, 0 stopped`, with
+`, N interrupted` when there are some), then one row per
 child with its id, state, elapsed time, `provider/model effort=`, `speed=` when
 it has one, and title, and
 the first 300 characters of a finished result. Workflow runs follow as
 `<run-id> workflow <status> <elapsed> steps=<done>/<total>`. A spawn prints the
 child id, its route and a reminder that the result arrives as a message.
+
+A child can end its turn while work it started in the background still runs
+(a long test, a build). It is not done: its state reads `waiting`, its row adds
+`waiting for: <task> (<elapsed>)`, and the summary counts it with the active
+ones. What it said at the end of that turn reaches the parent marked as a
+checkpoint, and the row labels it `checkpoint:` rather than `result:`;
+`delegate wait` keeps waiting. When the task ends, the agent wakes on it,
+runs again, and its next answer is the final result. A permission request a
+child waits on reads `approval`.
+
+When that background work ends without waking the agent (the task failed and
+nothing answered it, or the agent process, Boite or the PC stopped), the child
+is `interrupted`: its row says what ended and why, the parent gets one message
+saying so, and `boite delegate send <thread-id> "<instruction>"` (or Resume in
+the Subagents panel) starts its next turn. A task that ends is given 30 seconds
+to wake the agent; after that a failed or vanished task counts as interrupted
+and a completed one as done. Work that ended with its agent process counts at
+once.
 
 A child can send a question or blocker to its parent with `delegate send`.
 Its final answer returns automatically, so it should not send a duplicate

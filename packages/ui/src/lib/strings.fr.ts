@@ -913,7 +913,17 @@ export const fr: Translation = {
       monitoring: 'Surveille',
       monitoringFor: 'Surveille depuis {elapsed}',
       background: 'En arrière-plan',
-      backgroundFor: 'En arrière-plan depuis {elapsed}'
+      backgroundFor: 'En arrière-plan depuis {elapsed}',
+      awaiting: 'Attend : {what}',
+      interrupted: 'Interrompu',
+      interruptedBy: '{what} s’est arrêté sans le réveiller : {reason}',
+      interruption: {
+        'error': 'la tâche a échoué',
+        'cancelled': 'la tâche a été annulée',
+        'no-longer-reported': 'son processus s’est arrêté',
+        'session-ended': 'le processus de l’agent a été arrêté',
+        'core-restarted': 'Boite ou le PC a redémarré'
+      }
     },
     rollupOne: '1 conversation : {state}',
     rollupMany: '{count} conversations : {state}',
@@ -1443,6 +1453,12 @@ export const fr: Translation = {
     showTeam: 'Voir les sous-agents',
     stoppedStatus: 'Arrêté',
     failedStatus: 'Échec',
+    waitingStatus: 'En attente',
+    interruptedStatus: 'Interrompu',
+    interrupted: '{count} interrompus',
+    resumeAgent: 'Reprendre',
+    resumeAgentHint: 'Demander à ce sous-agent de vérifier comment son travail en arrière-plan s’est terminé et de finir sa tâche',
+    resumeAgentText: 'Ton travail en arrière-plan ({what}) s’est arrêté sans te réveiller : {reason}. Vérifie comment il s’est terminé, puis finis ta tâche.',
     activeSection: 'En cours',
     finishedSection: 'Terminés'
   },

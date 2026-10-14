@@ -383,10 +383,13 @@ function finishDelegation(ctx: FakeContext, thread: Thread, turn: Turn, message:
     const root = thread.parentThreadId;
     const text = message.parts.filter(part => part.type === 'text').map(part => part.text).join('\n').trim().slice(0, 4000);
     const config = delegationConfig(ctx, root);
+    // As the core: a turn ended on its own background work leaves a checkpoint, its final result follows.
+    const live = turn.status === 'done' ? thread.background ?? [] : [];
     if (!record.cancelled && config.enabled && !config.paused) {
       const letter: AgentLetter = {
         id: `letter-${++ctx.seq}`,
         origin: 'result',
+        ...(live.length > 0 ? { checkpoint: true } : {}),
         from: { coreId: 'local', threadId: thread.id, title: thread.title, machine: 'Boite', resources: '', status: thread.status, mode: 'team' },
         to: { coreId: 'local', threadId: root },
         toTitle: ctx.thread(root).title,

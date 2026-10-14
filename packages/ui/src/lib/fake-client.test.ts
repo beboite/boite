@@ -620,7 +620,7 @@ test('fake agent.addProject registers a folder once, with a line in the caller, 
 test('paired fake clients can inspect, message and stop delegation but cannot configure or spawn', async ({ createClient }) => {
   const phone = await createClient({ delayMs: 0, principal: 'session', delegationDemo: true });
   const view = await phone.call('delegation.get', { threadId: 't-trace' });
-  expect(view.agents).toHaveLength(2);
+  expect(view.agents).toHaveLength(4);
   await expect(phone.call('delegation.configure', { threadId: 't-trace', config: view.config })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
   await expect(phone.call('delegation.spawn', { threadId: 't-trace', profileId: 'reviewer', task: 'No', requestId: 'phone-spawn' })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
   await expect(phone.call('delegation.send', { threadId: 't-trace', toThreadId: view.agents[0]!.thread.id, text: 'Status?', requestId: 'phone-send' })).resolves.toMatchObject({ origin: 'user' });

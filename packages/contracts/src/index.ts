@@ -1070,6 +1070,13 @@ export interface ThreadSummary {
    */
   backgroundWork?: { kinds: BackgroundTask['kind'][]; since: Timestamp } | null;
   /**
+   * A delegated agent whose turn ended on background work: still waiting for
+   * it to wake the agent, or interrupted because it ended without doing so
+   * (`backgroundWait`). Null otherwise and on threads that are not delegated
+   * agents; missing on older cores.
+   */
+  backgroundWait?: BackgroundWait | null;
+  /**
    * A move asked for while the thread's turn ran, applied when that turn
    * ends (`threads.move`, `agent.move`). In memory only: null after a core
    * restart, and missing on older cores.
@@ -1833,6 +1840,71 @@ export interface BackgroundTaskObservation extends BackgroundTask {
   observedAt: Timestamp;
   finishedAt: Timestamp | null;
   reason: 'provider-reported' | 'no-longer-reported' | 'session-ended' | 'core-restarted' | null;
+}
+
+/**
+ * How long a thread whose background work just ended still counts as waiting
+ * for it: the agent answers the task's notification by itself, usually within
+ * a second or two, and opens the turn that wakes it.
+ */
+export const BACKGROUND_WAKE_GRACE_MS = 30_000;
+
+/**
+ * Why background work a thread waited on ended without waking it. `error` and
+ * `cancelled` are what the agent reported for the task; `no-longer-reported`
+ * means the agent stopped listing it without a word (its process died);
+ * `session-ended` means the agent process was ended (a Stop, an archive, a
+ * switch); `core-restarted` means Boite or the PC restarted.
+ */
+export type BackgroundInterruption = 'error' | 'cancelled' | 'no-longer-reported' | 'session-ended' | 'core-restarted';
+
+/**
+ * A thread whose last turn ended while background work it started still ran.
+ * `waiting`: that work will wake it, so it is not finished; `for` names the
+ * tasks, `since` is when the oldest started, `until` is when a wake that has
+ * not come yet stops being expected (null while a task still runs).
+ * `interrupted`: the work ended without waking it; a new message resumes it.
+ */
+export type BackgroundWait =
+  | { state: 'waiting'; for: string; since: Timestamp; until: Timestamp | null }
+  | { state: 'interrupted'; for: string; reason: BackgroundInterruption; at: Timestamp };
+
+/**
+ * What a thread at rest still waits on, from its last turn, the background
+ * tasks its agent runs now and the observed history of those tasks. The core
+ * and the in-memory client derive it the same way. Null while a turn is
+ * under way, after a turn that did not finish (`done`), and once every task
+ * the turn left running completed: the thread is then simply done.
+ */
+export function backgroundWait(input: {
+  status: ThreadStatus;
+  lastTurn: Pick<Turn, 'status' | 'finishedAt'> | null;
+  live: readonly BackgroundTask[];
+  history: readonly BackgroundTaskObservation[];
+  now: Timestamp;
+}): BackgroundWait | null {
+  const { lastTurn } = input;
+  if (threadActive(input.status) || lastTurn?.status !== 'done' || lastTurn.finishedAt === null) return null;
+  const names = (tasks: readonly BackgroundTask[]) => [...new Set(tasks.map(task => task.description.trim() || task.kind))].join(', ');
+  if (input.live.length > 0) return { state: 'waiting', for: names(input.live), since: Math.min(...input.live.map(task => task.startedAt)), until: null };
+  // The tasks the turn left running: started before it ended, ended after.
+  const ended = input.history.filter(task => task.state !== 'running' && task.finishedAt !== null && task.finishedAt > lastTurn.finishedAt! && task.startedAt <= lastTurn.finishedAt!);
+  if (ended.length === 0) return null;
+  const failed = ended.filter(task => task.state !== 'completed');
+  const reasonOf = (task: BackgroundTaskObservation): BackgroundInterruption =>
+    task.reason === 'session-ended' || task.reason === 'core-restarted' || task.reason === 'no-longer-reported' ? task.reason : task.state === 'cancelled' ? 'cancelled' : 'error';
+  // Nothing is left to wake the thread once its agent process is gone.
+  const gone = failed.find(task => task.reason === 'session-ended' || task.reason === 'core-restarted');
+  const last = Math.max(...ended.map(task => task.finishedAt!));
+  if (gone) return { state: 'interrupted', for: names(failed), reason: reasonOf(gone), at: last };
+  if (input.now < last + BACKGROUND_WAKE_GRACE_MS) return { state: 'waiting', for: names(ended), since: Math.min(...ended.map(task => task.startedAt)), until: last + BACKGROUND_WAKE_GRACE_MS };
+  if (failed.length > 0) return { state: 'interrupted', for: names(failed), reason: reasonOf(failed[0]!), at: last };
+  return null;
+}
+
+/** A thread at work: a turn under way, or a turn ended on background work that will wake it. */
+export function threadBusy(thread: Pick<ThreadSummary, 'status' | 'backgroundWait'>): boolean {
+  return threadActive(thread.status) || thread.backgroundWait?.state === 'waiting';
 }
 
 // ---------------------------------------------------------------------------
@@ -2846,6 +2918,12 @@ export interface AgentLetter {
    * them is a message the user typed.
    */
   origin?: 'user' | 'agent' | 'result' | 'resident';
+  /**
+   * A `result` written when a delegated agent ended its turn to wait on its
+   * own background work: what it said so far, not its final result, which
+   * follows when that work wakes it. Missing otherwise and on older cores.
+   */
+  checkpoint?: boolean;
   id: string;
   from: AgentContact;
   to: AgentAddress;

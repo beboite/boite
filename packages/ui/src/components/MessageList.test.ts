@@ -82,8 +82,10 @@ test('the parent timeline retains one team row, updates completion counts and op
   running = mount(MessageList, { target: document.body, props: { store: owner, threadId: 't-trace', messages: owner.openThread!.messages } });
   flushSync();
   const row = document.querySelector<HTMLButtonElement>('[data-testid=delegation-activity]')!;
-  expect(row.textContent).toContain('Started 2 subagents');
-  expect(row.textContent).toContain('1/2 completed');
+  expect(row.textContent).toContain('Started 4 subagents');
+  // The one waiting on its own background work is not completed; the interrupted one says so.
+  expect(row.textContent).toContain('1/4 completed');
+  expect(row.textContent).toContain('1 interrupted');
   await owner.selectDelegatedAgent('t-team-running');
   // A workflow graph left open in the agents tab gives way to the team, the way the dock opens it.
   const graph = owner.panel.openWorkflow('run-left-open');
@@ -98,7 +100,7 @@ test('the parent timeline retains one team row, updates completion counts and op
   agent.lastTurn!.finishedAt = agent.thread.createdAt + 60_000;
   flushSync();
   expect(document.querySelectorAll('[data-testid=delegation-activity]')).toHaveLength(1);
-  expect(row.textContent).toContain('2/2 completed');
+  expect(row.textContent).toContain('2/4 completed');
   expect(row.querySelector('[data-testid=agent-elapsed]')?.textContent).toContain('1');
   // A child transcript must not claim that it launched its siblings.
   await unmount(running); running = null;

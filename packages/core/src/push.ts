@@ -6,6 +6,7 @@ import type { Core } from './core.ts';
 import { invalidParams, refused } from './errors.ts';
 import type { AttentionReport } from './threads/focus.ts';
 import { deviceElsewhere, ownDevice } from './group/devices.ts';
+import { backgroundWaitOf } from './threads/records.ts';
 
 type Subscription = RpcParams<'push.subscribe'>;
 type Keys = { publicKey: string; privateKey: string };
@@ -117,12 +118,18 @@ export class PushStore {
     return null;
   }
 
-  /** The parent's delegated agents with a turn still under way. */
+  /** The parent's delegated agents with a turn still under way, or at rest waiting on their own background work. */
   private activeChildren(threadId: string): number {
-    const row = this.core.journal.db
-      .query("SELECT COUNT(*) AS count FROM threads WHERE parent_thread_id = ? AND status IN ('queued', 'running', 'waiting')")
-      .get(threadId) as { count: number };
-    return row.count;
+    const rows = this.core.journal.db
+      .query('SELECT id, status FROM threads WHERE parent_thread_id = ?')
+      .all(threadId) as { id: string; status: string }[];
+    return rows.filter(row => {
+      if (row.status === 'queued' || row.status === 'running' || row.status === 'waiting') return true;
+      const live = this.core.threads.agentState.background.get(row.id) ?? [];
+      if (live.length > 0) return true;
+      const thread = this.core.journal.getThread(row.id);
+      return thread !== null && backgroundWaitOf(this.core, thread, live)?.state === 'waiting';
+    }).length;
   }
 
   private subscriptions(): Record<string, Subscription> {

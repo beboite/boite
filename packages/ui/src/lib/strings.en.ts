@@ -933,7 +933,19 @@ export const strings = {
       monitoringFor: 'Monitoring for {elapsed}',
       /** The turn ended, the agent still runs a shell, a subagent or a workflow. */
       background: 'In background',
-      backgroundFor: 'In background for {elapsed}'
+      backgroundFor: 'In background for {elapsed}',
+      /** A delegated agent's turn ended on its own background work, which wakes it: what it waits for. */
+      awaiting: 'Waiting on {what}',
+      /** That work ended without waking it: the agent stopped there, its result never came. */
+      interrupted: 'Interrupted',
+      interruptedBy: '{what} ended without waking it: {reason}',
+      interruption: {
+        'error': 'the task failed',
+        'cancelled': 'the task was cancelled',
+        'no-longer-reported': 'its process ended',
+        'session-ended': 'its agent process was ended',
+        'core-restarted': 'Boite or the PC restarted'
+      }
     },
     /** A folded project's mark for the threads it hides: `2 threads: Needs you`. */
     rollupOne: '1 thread: {state}',
@@ -1529,6 +1541,15 @@ export const strings = {
     showTeam: 'View subagents',
     stoppedStatus: 'Stopped',
     failedStatus: 'Failed',
+    /** Its turn ended on its own background work, which wakes it: not finished. */
+    waitingStatus: 'Waiting',
+    /** That work ended without waking it: its result never came. */
+    interruptedStatus: 'Interrupted',
+    interrupted: '{count} interrupted',
+    resumeAgent: 'Resume',
+    resumeAgentHint: 'Ask this subagent to check how its background work ended and finish its task',
+    /** What Resume sends the interrupted subagent. */
+    resumeAgentText: 'Your background work ({what}) ended without waking you: {reason}. Check how it ended, then finish your task.',
     activeSection: 'Active',
     finishedSection: 'Finished'
   },

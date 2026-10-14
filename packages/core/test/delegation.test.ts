@@ -494,10 +494,143 @@ test('CLI exposes approved profiles, launches one agent and sends/stops under th
   const free = await call(['delegate', 'spawn', 'Read', 'the', 'parser', '--model', 'echo/echo', '--effort', 'low', '--title', 'Parser read']);
   expect(free).toMatch(/^agent: thr_\S+\nmodel: echo\/echo effort=low\nstatus: \w+\n/);
   const list = await call(['delegate', 'list']);
-  expect(list.split('\n')[0]).toBe('subagents: on; 2 running, 0 done, 0 failed, 0 stopped');
+  expect(list.split('\n')[0]).toBe('subagents: on; 2 running, 0 waiting, 0 done, 0 failed, 0 stopped');
   expect(list).toMatch(/thr_\S+ running \d+s echo\/echo effort=low "Parser read"/);
   expect(list).toContain('Results arrive as messages');
   expect(await call(['delegate', 'stop'])).toContain('stopped: 2');
+});
+
+/** The parent's `boite delegate …`, as its agent runs it. */
+function parentCli(h: TestCore, threadId: string) {
+  return async (args: string[]) => {
+    let out = '', err = '';
+    const code = await runCli(args, { out: s => { out += s; }, err: s => { err += s; }, env: { BOITE_THREAD_ID: threadId, BOITE_CORE_URL: h.url, BOITE_AGENT_TOKEN: h.core.agents.tokenFor(threadId) }, cwd: h.dataDir });
+    expect(err).toBe(''); expect(code).toBe(0); return out;
+  };
+}
+const shellTask = (id: string, description: string) => ({ id, kind: 'shell' as const, description, toolId: null, startedAt: Date.now() });
+const agentOf = (h: TestCore, threadId: string, childId: string) => h.core.delegation.get(threadId).agents.find(agent => agent.thread.id === childId)!;
+const lettersFrom = (h: TestCore, threadId: string, childId: string) => h.core.delegation.get(threadId).messages.filter(letter => letter.from.threadId === childId);
+
+test('a child that ends its turn on background work waits, wakes on it, then finishes with its real result', async () => {
+  const runs = scripted(); const { h, owner, threadId, spawn } = await setup();
+  const cli = parentCli(h, threadId);
+  const child = await spawn(); const childId = child.thread.id;
+  const first = runs.get(childId)!;
+  first.ctx.background!([shellTask('bg-1', 'test_emotes')]);
+  first.finish('Started test_emotes in the background.');
+  await waitFor(() => h.core.threads.require(childId).status === 'idle');
+  // At rest, but not done: the views say what it waits for, and its message is a checkpoint.
+  expect(agentOf(h, threadId, childId).thread.backgroundWait).toMatchObject({ state: 'waiting', for: 'test_emotes', until: null });
+  expect(agentOf(h, threadId, childId).settlement).toBeUndefined();
+  const [checkpoint] = lettersFrom(h, threadId, childId);
+  expect(checkpoint).toMatchObject({ origin: 'result', checkpoint: true });
+  expect(checkpoint!.text).toContain('Checkpoint, not its final result');
+  const list = await cli(['delegate', 'list']);
+  expect(list.split('\n')[0]).toBe('subagents: on; 0 running, 1 waiting, 0 done, 0 failed, 0 stopped');
+  expect(list).toContain(`${childId} waiting `);
+  expect(list).toMatch(/waiting for: test_emotes \(\d+s\)/);
+  expect(list).toContain('checkpoint: Started test_emotes in the background.');
+  // A wait for the result never returns the checkpoint as the answer.
+  expect(await owner.call('delegation.wait', { threadId, agentId: childId, timeoutMs: 150 })).toMatchObject({ state: 'waiting_for_children', timedOut: true });
+  // The parent reads the checkpoint on its own turn; let that turn end.
+  await waitFor(() => runs.has(threadId), 5000);
+  runs.get(threadId)!.finish('Noted.');
+  await waitFor(() => h.core.threads.require(threadId).status === 'idle');
+
+  // The task ends and wakes it: waiting, then running, then done.
+  first.ctx.backgroundFinished!('bg-1', 'completed');
+  expect(agentOf(h, threadId, childId).thread.backgroundWait).toMatchObject({ state: 'waiting', for: 'test_emotes' });
+  const waited = owner.call('delegation.wait', { threadId, agentId: childId, timeoutMs: 5000 });
+  first.ctx.wake!('test_emotes finished: 12 passed.');
+  await waitFor(() => runs.get(childId) !== first, 5000);
+  expect(h.core.threads.require(childId).status).toBe('running');
+  expect(agentOf(h, threadId, childId).thread.backgroundWait ?? null).toBeNull();
+  expect(await cli(['delegate', 'list'])).toContain(`${childId} running `);
+  runs.get(childId)!.finish('All 12 emote tests passed.');
+  const result = await waited;
+  expect(result.state).toBe('result_available');
+  expect(result.agents[0]!.settlement).toBe('result_available');
+  expect(agentOf(h, threadId, childId).thread.backgroundWait ?? null).toBeNull();
+  const final = lettersFrom(h, threadId, childId).at(-1)!;
+  expect(final.text).toContain('All 12 emote tests passed.');
+  expect(final.checkpoint).toBeUndefined();
+  const after = await cli(['delegate', 'list']);
+  expect(after.split('\n')[0]).toBe('subagents: on; 0 running, 0 waiting, 1 done, 0 failed, 0 stopped');
+  expect(after).toContain('result: All 12 emote tests passed.');
+});
+
+test('a child whose background work dies without waking it is interrupted, tells its parent once, and resumes on a send', async () => {
+  const runs = scripted(); const { h, owner, threadId, spawn } = await setup();
+  const cli = parentCli(h, threadId);
+  const child = await spawn(); const childId = child.thread.id;
+  const first = runs.get(childId)!;
+  first.ctx.background!([shellTask('bg-1', 'release build')]);
+  first.finish('Started the release build.');
+  await waitFor(() => h.core.threads.require(childId).status === 'idle');
+  expect(agentOf(h, threadId, childId).thread.backgroundWait?.state).toBe('waiting');
+  // Its agent process goes away with the task: nothing is left to wake it.
+  h.core.threads.agentState.cancelBackground(childId);
+  await waitFor(() => lettersFrom(h, threadId, childId).some(letter => letter.text.includes(': interrupted')), 5000);
+  const agent = agentOf(h, threadId, childId);
+  expect(agent.thread.backgroundWait).toMatchObject({ state: 'interrupted', for: 'release build', reason: 'session-ended' });
+  expect(agent.settlement).toBe('settled');
+  const note = lettersFrom(h, threadId, childId).find(letter => letter.text.includes(': interrupted'))!;
+  expect(note.text).toContain('ended without waking it: its agent process was ended');
+  expect(note.text).toContain(`boite delegate send ${childId}`);
+  expect(await owner.call('delegation.wait', { threadId, agentId: childId, timeoutMs: 1000 })).toMatchObject({ state: 'settled', timedOut: false });
+  const list = await cli(['delegate', 'list']);
+  expect(list.split('\n')[0]).toBe('subagents: on; 0 running, 0 waiting, 0 done, 0 failed, 0 stopped, 1 interrupted');
+  expect(list).toContain(`${childId} interrupted `);
+  expect(list).toContain('interrupted: release build ended without waking it (its agent process was ended)');
+  // Another change on the thread does not repeat the news.
+  h.core.threads.agentState.noteBackground(childId, []);
+  await new Promise(resolve => setTimeout(resolve, 50));
+  expect(lettersFrom(h, threadId, childId).filter(letter => letter.text.includes(': interrupted'))).toHaveLength(1);
+
+  // `boite delegate send` resumes it, and its next turn ends like any other.
+  expect(await cli(['delegate', 'send', childId, 'Check how the build ended, then finish.'])).toContain('received');
+  await waitFor(() => runs.get(childId) !== first, 5000);
+  expect(runs.get(childId)!.ctx.prompt).toContain('Check how the build ended');
+  expect(agentOf(h, threadId, childId).thread.backgroundWait ?? null).toBeNull();
+  runs.get(childId)!.finish('The build had died; rebuilt it, all green.');
+  await waitFor(() => h.core.threads.require(childId).status === 'idle');
+  expect(agentOf(h, threadId, childId).thread.backgroundWait ?? null).toBeNull();
+  expect(agentOf(h, threadId, childId).settlement).toBe('result_available');
+});
+
+test('a task that ends without a wake leaves the child waiting for a moment, then the tick marks it interrupted', async () => {
+  const runs = scripted(); const { h, threadId, spawn } = await setup();
+  const child = await spawn(); const childId = child.thread.id;
+  const first = runs.get(childId)!;
+  first.ctx.background!([shellTask('bg-1', 'test_emotes')]);
+  first.finish('Started test_emotes.');
+  await waitFor(() => h.core.threads.require(childId).status === 'idle');
+  // The agent stops listing it with no report of how it ended.
+  first.ctx.background!([]);
+  const wait = agentOf(h, threadId, childId).thread.backgroundWait;
+  expect(wait).toMatchObject({ state: 'waiting', for: 'test_emotes' });
+  expect(wait?.state === 'waiting' ? wait.until : null).toBeGreaterThan(Date.now());
+  const later = Date.now() + 31_000;
+  const clock = spyOn(Date, 'now').mockImplementation(() => later);
+  restores.push(() => clock.mockRestore());
+  await waitFor(() => lettersFrom(h, threadId, childId).some(letter => letter.text.includes(': interrupted')), 4000);
+  expect(h.core.delegation.get(threadId).agents.find(agent => agent.thread.id === childId)!.thread.backgroundWait)
+    .toMatchObject({ state: 'interrupted', reason: 'no-longer-reported' });
+  clock.mockRestore();
+});
+
+test('a child that leaves nothing running goes straight to done', async () => {
+  const runs = scripted(); const { h, owner, threadId, spawn } = await setup();
+  const child = await spawn(); const childId = child.thread.id;
+  runs.get(childId)!.finish();
+  await waitFor(() => h.core.threads.require(childId).status === 'idle');
+  const agent = agentOf(h, threadId, childId);
+  expect(agent.thread.backgroundWait ?? null).toBeNull();
+  expect(agent.settlement).toBe('result_available');
+  expect(lettersFrom(h, threadId, childId)[0]!.checkpoint).toBeUndefined();
+  expect(await owner.call('delegation.wait', { threadId, agentId: childId, timeoutMs: 1000 })).toMatchObject({ state: 'result_available', timedOut: false });
+  expect((await parentCli(h, threadId)(['delegate', 'list'])).split('\n')[0]).toBe('subagents: on; 0 running, 0 waiting, 1 done, 0 failed, 0 stopped');
 });
 
 test('a parent failure leaves its team working, and the result reaches the next prompt', async () => {

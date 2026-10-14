@@ -6,6 +6,7 @@
 import { CONVERSATION_PROFILE_ID, speedName } from '@boite/contracts';
 import type { DelegatedAgent, DelegationModelChoice, DelegationView, RpcParams, WorkflowRun } from '@boite/contracts';
 import type { CoreClient } from './client.ts';
+import { INTERRUPTION_TEXT } from './delegation/interruption.ts';
 import { requiredText, Usage } from './cli-args.ts';
 
 type Print = (lines: string[], value: unknown) => void;
@@ -39,12 +40,21 @@ const oneLine = (text: string, max: number) => {
   return flat.length > max ? `${flat.slice(0, max - 3)}...` : flat;
 };
 
-/** Done, failed or stopped from the last turn; a child that never finished a turn is its thread status. */
+/**
+ * Done, failed or stopped from the last turn; a child that never finished a turn is its thread status.
+ * `approval`: a permission request waits for the user. `waiting`: the turn ended on background work
+ * that will wake it. `interrupted`: that work ended without waking it.
+ */
 function stateOf(agent: DelegatedAgent): string {
-  if (ACTIVE.has(agent.thread.status)) return agent.thread.status;
+  if (ACTIVE.has(agent.thread.status)) return agent.thread.status === 'waiting' ? 'approval' : agent.thread.status;
+  const wait = agent.thread.backgroundWait;
+  if (wait) return wait.state;
   const turn = agent.lastTurn?.status;
   return turn === 'error' ? 'failed' : turn ?? agent.thread.status;
 }
+
+/** A child at work, a turn under way or a wait on its own background work. */
+const busy = (agent: DelegatedAgent) => ACTIVE.has(agent.thread.status) || agent.thread.backgroundWait?.state === 'waiting';
 
 /** `codex/gpt-5.5 effort=high speed=priority`: what a child runs on, the speed as its stored tier id. */
 export function routeOf(agent: DelegatedAgent): string {
@@ -54,11 +64,16 @@ export function routeOf(agent: DelegatedAgent): string {
 
 function agentRow(agent: DelegatedAgent, now: number): string[] {
   const state = stateOf(agent);
-  const end = ACTIVE.has(agent.thread.status) ? now : agent.lastTurn?.finishedAt ?? now;
+  const wait = agent.thread.backgroundWait;
+  const end = busy(agent) ? now : wait?.state === 'interrupted' ? wait.at : agent.lastTurn?.finishedAt ?? now;
   const route = routeOf(agent);
   const head = `${agent.thread.id} ${state} ${elapsed(end - agent.thread.createdAt)} ${route} ${JSON.stringify(agent.thread.title)}`;
-  if (ACTIVE.has(agent.thread.status) || !agent.result) return [head];
-  return [head, `  result: ${oneLine(agent.result, 300)}${agent.result.length > 300 && agent.resultRef ? ` (full: boite delegate result ${agent.resultRef.agentId} ${agent.resultRef.turnId})` : ''}`];
+  const lines = [head];
+  if (wait?.state === 'waiting') lines.push(`  waiting for: ${oneLine(wait.for, 200)} (${elapsed(now - wait.since)})`);
+  if (wait?.state === 'interrupted') lines.push(`  interrupted: ${oneLine(wait.for, 200)} ended without waking it (${INTERRUPTION_TEXT[wait.reason]}); boite delegate send ${agent.thread.id} "<instruction>" resumes it`);
+  if (ACTIVE.has(agent.thread.status) || !agent.result) return lines;
+  // A turn ended on background work left a checkpoint, never the final result.
+  return [...lines, `  ${wait ? 'checkpoint' : 'result'}: ${oneLine(agent.result, 300)}${agent.result.length > 300 && agent.resultRef ? ` (full: boite delegate result ${agent.resultRef.agentId} ${agent.resultRef.turnId})` : ''}`];
 }
 
 function runRow(run: WorkflowRun, now: number): string {
@@ -72,9 +87,10 @@ function runRow(run: WorkflowRun, now: number): string {
 function teamLine(view: DelegationView, runs: WorkflowRun[]): string {
   const states = view.agents.map(stateOf);
   const count = (state: string) => states.filter(s => s === state).length;
-  const running = states.filter(s => ACTIVE.has(s)).length + runs.filter(r => r.status === 'running').length;
+  // `waiting` here is a wait on background work, counted apart; a permission request reads `approval`.
+  const running = states.filter(s => s === 'queued' || s === 'running' || s === 'approval').length + runs.filter(r => r.status === 'running').length;
   const delegation = !view.config.enabled ? 'off' : view.config.paused ? 'paused by the owner' : 'on';
-  return `subagents: ${delegation}; ${running} running, ${count('done')} done, ${count('failed')} failed, ${count('stopped')} stopped${runs.length ? `; ${runs.length} workflow${runs.length > 1 ? 's' : ''}` : ''}`;
+  return `subagents: ${delegation}; ${running} running, ${count('waiting')} waiting, ${count('done')} done, ${count('failed')} failed, ${count('stopped')} stopped${count('interrupted') ? `, ${count('interrupted')} interrupted` : ''}${runs.length ? `; ${runs.length} workflow${runs.length > 1 ? 's' : ''}` : ''}`;
 }
 
 export function choiceRow(choice: DelegationModelChoice): string {
@@ -121,13 +137,13 @@ export async function delegateCommand(client: CoreClient, threadId: string, rest
         client.call('workflows.list', { threadId }).catch(() => [] as WorkflowRun[]),
       ]);
       const now = Date.now();
-      const busy = view.agents.some(a => ACTIVE.has(a.thread.status)) || runs.some(r => r.status === 'running');
+      const busyTeam = view.agents.some(busy) || runs.some(r => r.status === 'running');
       print([
         teamLine(view, runs),
         ...view.agents.flatMap(agent => agentRow(agent, now)),
         ...runs.map(run => runRow(run, now)),
         ...(!view.agents.length && !runs.length ? ['No subagent yet: boite delegate spawn "<brief>" starts one.']
-          : busy ? ['Results arrive as messages: keep working or end your turn, do not poll.'] : []),
+          : busyTeam ? ['Results arrive as messages: keep working or end your turn, do not poll.'] : []),
       ], { ...view, workflows: runs });
       return;
     }
