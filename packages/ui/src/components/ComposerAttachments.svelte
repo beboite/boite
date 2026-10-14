@@ -57,6 +57,12 @@
     refocus();
   }
 
+  /** The tile toggles: a tap on the picture already shown puts it away again. */
+  function pick(attachment: Attachment) {
+    if (visible === attachment && preview.open) closePreview();
+    else open(attachment);
+  }
+
   export function closePreview(): boolean {
     if (!visible || !preview.shown) return false;
     preview.hide();
@@ -84,7 +90,10 @@
       <span class="preview-name">{visible.name ?? strings.composer.attachAlt}</span>
       <button type="button" class="ghost icon" data-testid="composer-image-close" title={strings.composer.imagePreviewClose} aria-label={strings.composer.imagePreviewClose} onmousedown={keepFocus} onclick={closePreview}><X size={16} /></button>
     </header>
-    <img src="data:{visible.mimeType};base64,{visible.data}" alt={visible.name ?? strings.composer.attachAlt} />
+    <!-- The enlarged picture closes on a click too, the way it opened. -->
+    <button type="button" class="preview-image" data-testid="composer-image-shrink" title={strings.composer.imagePreviewClose} aria-label={strings.composer.imagePreviewClose} onmousedown={keepFocus} onclick={closePreview}>
+      <img src="data:{visible.mimeType};base64,{visible.data}" alt={visible.name ?? strings.composer.attachAlt} />
+    </button>
   </section>
 {/if}
 
@@ -96,7 +105,7 @@
       {#if attachment.kind === 'image' && !pending}
         <button type="button" class="image-open" data-testid="composer-image-open"
           aria-label={fill(strings.composer.imagePreview, { image: imageLabel(images.indexOf(attachment) + 1) })}
-          aria-expanded={visible === attachment && preview.shown} onmousedown={keepFocus} onclick={() => open(attachment)}>
+          aria-expanded={visible === attachment && preview.shown} onmousedown={keepFocus} onclick={() => pick(attachment)}>
           <img src="data:{attachment.mimeType};base64,{attachment.data}" alt={label} />
         </button>
       {:else}
@@ -168,7 +177,9 @@
   .image-preview.highlighted { border-color: var(--color-accent); }
   .image-preview header { display: flex; align-items: center; gap: 10px; padding: 2px 4px 2px 12px; font-size: var(--text-xs); }
   .preview-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-muted-foreground); }
-  .image-preview > img { display: block; width: 100%; height: min(40vh, 420px); object-fit: contain; }
+  .preview-image { display: block; width: 100%; height: auto; padding: 0; border: none; border-radius: 0; background: transparent; box-shadow: none; cursor: zoom-out; }
+  .preview-image:hover:not(:disabled) { background: transparent; }
+  .preview-image img { display: block; width: 100%; height: min(40vh, 420px); object-fit: contain; }
 
   .attachment.document { display: flex; align-items: center; gap: 8px; padding: 0 24px 0 10px; color: var(--color-muted-foreground); }
   .file-info { min-width: 0; display: flex; flex-direction: column; gap: 1px; font-size: var(--text-xs); }
@@ -200,6 +211,6 @@
   .attachment .remove:hover:not(:disabled) { background: var(--color-danger); color: var(--color-on-danger); }
 
   @media (max-width: 720px) {
-    .image-preview > img { height: min(28dvh, 260px); }
+    .preview-image img { height: min(28dvh, 260px); }
   }
 </style>

@@ -72,7 +72,11 @@ the group: **Remove from the group** on the device's row does that, on every
 machine. The primary core stays attached.
 
 If a machine goes offline, its known rows remain visible and its machine badge
-shows the disconnected state. Other hosts remain usable. WebSocket reconnection
+shows the disconnected state. A turn those rows last saw at work is only a last
+known state: the row reads "Unreachable" with that state in its tooltip instead
+of spinning and counting time, a folded project drops its summary mark, its
+working counter loses its colour, and the Threads count leaves the machine out.
+Other hosts remain usable. WebSocket reconnection
 reloads the host's project and thread summaries. An initial connection whose
 handshake does not finish within twelve seconds can be retried from Machines.
 Once the machine has said hello, loading its lists is waited for however long

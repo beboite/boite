@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { CircleAlert, LoaderCircle, Radar } from '@lucide/svelte';
+  import { CircleAlert, CloudOff, LoaderCircle, Radar } from '@lucide/svelte';
   import type { ThreadSummary } from '@boite/contracts';
   import { backgroundLabel } from '../lib/background';
   import { secondClock } from '../lib/clock.svelte';
@@ -12,8 +12,10 @@
    * `subagents`: the thread's delegated agents still at work, from its store.
    * `countSubagents`: the row says how many beside the radar, where no hover
    * shows the title (a phone).
+   * `away`: its machine is not connected, so a turn it last saw at work may have
+   * ended long ago. The row says so instead of spinning and counting time.
    */
-  let { thread, now, subagents = null, countSubagents = false }: { thread: Pick<ThreadSummary, 'status' | 'unread' | 'runningSince' | 'requestSince' | 'backgroundWork' | 'openQuestions' | 'lastUserMessageAt' | 'createdAt'> & Partial<Pick<ThreadSummary, 'backgroundWait'>>; now: number; subagents?: WorkingChildren | null; countSubagents?: boolean } = $props();
+  let { thread, now, subagents = null, countSubagents = false, away = false }: { thread: Pick<ThreadSummary, 'status' | 'unread' | 'runningSince' | 'requestSince' | 'backgroundWork' | 'openQuestions' | 'lastUserMessageAt' | 'createdAt'> & Partial<Pick<ThreadSummary, 'backgroundWait'>>; now: number; subagents?: WorkingChildren | null; countSubagents?: boolean; away?: boolean } = $props();
 
   function earliest(a: number | null | undefined, b: number | null | undefined): number | null {
     return a == null ? b ?? null : b == null ? a : Math.min(a, b);
@@ -23,6 +25,8 @@
   let wait = $derived(thread.backgroundWait ?? null);
   /** The states that count time: the turn, its sub-agents, or the work it left running. */
   let live = $derived(kind === 'working' || kind === 'delegating' || kind === 'monitoring' || kind === 'background');
+  /** What was under way when the machine went away is only its last known state. */
+  let stale = $derived(away && (live || kind === 'queued'));
   /**
    * Working and monitoring count from the user's request, so a pause to watch
    * CI and the turn that resumes after it do not reset the clock. A shell left
@@ -30,7 +34,8 @@
    * never starts after the turn that carries it on.
    */
   let since = $derived(
-    kind === 'working' ? earliest(thread.requestSince, thread.runningSince)
+    stale ? null
+    : kind === 'working' ? earliest(thread.requestSince, thread.runningSince)
     : kind === 'monitoring' ? thread.requestSince ?? thread.backgroundWork?.since ?? null
     : kind === 'delegating' ? subagents?.since ?? null
     : live ? thread.backgroundWork?.since ?? (wait?.state === 'waiting' ? wait.since : null) : null);
@@ -63,7 +68,12 @@
   });
 </script>
 
-{#if kind === null}
+{#if stale && kind !== null}
+  {@const was = fill(strings.sidebar.state.unreachableWas, { state: strings.sidebar.state[kind] })}
+  <span class="when state unreachable" data-testid="thread-state" data-state="unreachable" title={was} aria-label={was}>
+    <CloudOff size={11} aria-hidden="true" /><span class="ui-label">{strings.sidebar.state.unreachable}</span>
+  </span>
+{:else if kind === null}
   <span class="when" title={exactTime(thread.lastUserMessageAt ?? thread.createdAt)}>{ago(thread.lastUserMessageAt ?? thread.createdAt, now)}</span>
 {:else}
   <span class="when state {kind}" data-testid="thread-state" data-state={kind} title={label} aria-label={label}>
@@ -106,7 +116,8 @@
   .done {
     color: var(--color-success);
   }
-  .queued {
+  .queued,
+  .unreachable {
     color: var(--color-muted-foreground);
   }
   /* The turn ended, the agent did not: same colour as working, a slower sign. */
