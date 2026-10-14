@@ -7,6 +7,54 @@ import { mintPairing, pairingUrlOf, startCore } from './lib/core.ts';
 import { mobileAction } from './lib/mobile.ts';
 import { ensureProductionUi } from './lib/prod-ui.ts';
 
+test('the conversation scrolls over an open text preview at both widths', async () => {
+  ensureProductionUi();
+  const core = await startCore();
+  const client = await connect(core.url, core.token);
+  let page: BrowserPage | undefined;
+  try {
+    await client.call('brain.configure', { path: null, enabled: false, boiteGuide: false });
+    const project = await client.call('projects.add', { path: core.dataDir, name: 'Text preview' });
+    const account = (await client.call('accounts.list', {})).find(account => account.providerId === 'echo')!;
+    const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account.id, title: 'Read the text' });
+    writeFileSync(join(core.dataDir, 'notes.txt'), Array.from({ length: 120 }, (_, i) => `Line ${i + 1}: ${i === 10 ? 'a long line '.repeat(80) : 'text to read'}`).join('\n'));
+    await client.call('threads.subscribe', { threadId: thread.id });
+    const done = client.next('turn.finished');
+    await client.call('turns.start', { threadId: thread.id, prompt: 'A paragraph around the preview.\n\n'.repeat(25) + '[Read the notes](notes.txt)' });
+    await done;
+    page = await BrowserPage.launch({ url: pairingUrlOf(core), windowSize: { width: 1280, height: 900 }, experiments: ['edge-scrollbars'] });
+    await page.waitFor('document.querySelector("[data-testid=status-connection]")?.dataset.state === "ready"');
+    await page.click(`[data-thread-id="${thread.id}"]`);
+    await page.waitFor(`document.querySelector('a[data-file-path="notes.txt"]')`);
+    await page.click('[data-role=assistant] a[data-file-path="notes.txt"]');
+    const pre = '[data-testid="artifact-content"] pre';
+    await page.waitFor(`document.querySelector('${pre}')?.textContent.includes('Line 120')`);
+    for (const narrow of [false, true]) {
+      await page.send('Emulation.setDeviceMetricsOverride', { width: narrow ? 390 : 1280, height: narrow ? 844 : 900, deviceScaleFactor: 1, mobile: narrow });
+      await page.evaluate(`(() => { const box = document.querySelector('[data-testid=timeline]'); box.dispatchEvent(new WheelEvent('wheel', { deltaY: -200, bubbles: true })); document.querySelector('${pre}').scrollIntoView({ block: 'start' }); })()`);
+      await page.settleAnimations();
+      const point = await page.evaluate<{ x: number; y: number }>(`(() => { const r = document.querySelector('${pre}').getBoundingClientRect(); const box = document.querySelector('[data-testid=timeline]').getBoundingClientRect(); return { x: r.left + r.width / 2, y: Math.max(r.top, box.top) + 100 }; })()`);
+      const timeline = '[data-testid="timeline"]';
+      const before = await page.evaluate<number>(`document.querySelector('${timeline}').scrollTop`);
+      await page.send('Input.dispatchMouseEvent', { type: 'mouseWheel', ...point, deltaX: 0, deltaY: 200 });
+      await page.waitFor(`document.querySelector('${timeline}').scrollTop > ${before + 100}`);
+      expect(await page.evaluate<number>(`document.querySelector('${pre}').scrollTop`)).toBe(0);
+      await page.screenshot(join(import.meta.dir, '.artifacts', `text-preview-scroll-${narrow ? 'phone' : 'desktop'}.png`));
+      const down = await page.evaluate<number>(`document.querySelector('${timeline}').scrollTop`);
+      await page.send('Input.dispatchMouseEvent', { type: 'mouseWheel', ...point, deltaX: 0, deltaY: -200 });
+      await page.waitFor(`document.querySelector('${timeline}').scrollTop < ${down - 100}`);
+      await page.send('Input.dispatchMouseEvent', { type: 'mouseWheel', ...point, deltaX: 200, deltaY: 0 });
+      await page.waitFor(`document.querySelector('${pre}').scrollLeft > 100`);
+      expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+      await page.click('[data-testid="artifact-preview"]');
+      await page.waitFor(`!document.querySelector('${pre}')`);
+      await page.click('[data-testid="artifact-preview"]');
+      await page.waitFor(`document.querySelector('${pre}')?.textContent.includes('Line 120')`);
+    }
+    expect(page.errors()).toEqual([]);
+  } finally { await page?.close(); client.close(); await core.stop(); }
+}, 90_000);
+
 test('live output after published files stays at the bottom on desktop and paired phone', async () => {
   ensureProductionUi();
   const core = await startCore();

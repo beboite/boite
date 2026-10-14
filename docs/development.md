@@ -839,6 +839,13 @@ callers. Remote cores, browsers and phones retain preview/download behavior.
 Published snapshots from `boite attach` use the separate safe download/open rules
 in [CLI](cli.md); they do not authorize executing an uploaded file.
 
+Inline text previews use the conversation's vertical scroll, including when
+the pointer is over the file contents. Long lines scroll horizontally inside
+the preview; Preview folds it again. `bun test tests/e2e/artifacts.test.ts`
+checks wheel scrolling in both directions at desktop and phone widths and
+writes `text-preview-scroll-desktop.png` and `text-preview-scroll-phone.png`
+under `tests/e2e/.artifacts/`.
+
 ### File mentions
 
 The composer's `@` menu ranks project-relative paths from `projects.files`.
