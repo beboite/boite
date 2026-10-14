@@ -32,16 +32,16 @@ export function revealDelta(section: DOMRect, scroller: DOMRect, paddingBottom =
   return Math.max(0, Math.min(below, room));
 }
 
-/** Follows the fold of `header` (its parent section) while it opens. Returns a function that stops early. */
-export function revealFold(header: Element, follow = FOLLOW_MS): () => void {
+/** Follows the opening after optional lazy content is ready. Returns a function that stops early. */
+export function revealFold(header: Element, follow = FOLLOW_MS, contentReady?: Promise<void>): () => void {
   const section = header.parentElement;
   const scroller = scrollerOf(header);
   if (!section || !scroller || typeof requestAnimationFrame !== 'function') return () => {};
-  const until = performance.now() + follow;
   const padding = parseFloat(getComputedStyle(scroller).paddingBottom) || 0;
-  let frame = 0;
+  let frame = 0, until = 0, stopped = false;
   const key = (event: KeyboardEvent) => { if (SCROLL_KEYS.has(event.key)) stop(); };
   const stop = () => {
+    stopped = true;
     cancelAnimationFrame(frame);
     scroller.removeEventListener('wheel', stop);
     scroller.removeEventListener('touchstart', stop);
@@ -60,6 +60,12 @@ export function revealFold(header: Element, follow = FOLLOW_MS): () => void {
     if (time < until) frame = requestAnimationFrame(step);
     else stop();
   };
-  frame = requestAnimationFrame(step);
+  const start = () => {
+    if (stopped) return;
+    until = performance.now() + follow;
+    frame = requestAnimationFrame(step);
+  };
+  if (contentReady) void contentReady.then(start, stop);
+  else start();
   return stop;
 }

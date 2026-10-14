@@ -132,6 +132,13 @@ Real-core browser gestures wait for a decoded, enabled frame fitted to the view;
 an image can load before the automatic viewport resize has finished.
 Deferred-dialog fixtures release a loopback response after the agent's commands
 finish and observe the page's completion request before reading its title.
+Network-diagnostic assertions wait for the asynchronous response event, which
+DOM readiness does not include. Desktop-host fixtures close Chromium and remove
+their profiles when setup fails, and register cleanup before returning a host.
+The command/dialog scenario prints a bounded, content-free CDP timing trace only
+on failure, retaining the original error and restoring its observers afterward.
+Fold-reveal coverage includes lazy rows arriving after the opening animation;
+the follow period starts when content is ready, and user input still cancels it.
 
 The Windows job shares release-profile Rust dependencies, builds the installer
 once, and stages its existing core beside the shell for native E2E. Installer
@@ -144,11 +151,22 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 593,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,898,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,902,000 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 4,110,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-13, the audit refactors and fixes measure 4,899,213 UI bytes,
+compared with 4,897,240 at `bc3244ef`: an increase of 1,973 bytes (0.04%).
+Fresh Linux builds match the Windows CI total. The existing workspace chunk
+adds 1,585 bytes from composer helpers and boot lifecycle arguments; the
+remaining changes include quota fixes and diagnostic labels. Both builds
+contain 135 JavaScript chunks, with unchanged public-asset sizes and no
+duplicate rendered module IDs. The UI total limit becomes 4,902,000, leaving
+2,787 bytes; the entry and core limits stay unchanged. Reproduce with
+`bun run build:ui` and compare files excluding compression sidecars, or run
+`bun scripts/ci/budgets.ts` after building both UI and core.
 
 On 2026-10-13, prompt-free draft preparation, attachment uploads and crash
 recovery measured 4,853,814 UI bytes and 4,092,165 core JavaScript bytes after
