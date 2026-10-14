@@ -393,8 +393,8 @@
       };
     }
 
-    // A folder dragged from the Explorer: the shell reports it, the core
-    // refuses anything that is not a directory, the toast repeats why.
+    // A drag from the Explorer: the shell says what each path is, a folder
+    // becomes a project and a file goes to the message being written.
     let unlisten: (() => void) | undefined;
     let disposed = false;
     let stopTray: (() => void) | undefined;
@@ -412,18 +412,9 @@
       const stop = () => stops.forEach((off) => off());
       if (disposed) stop(); else stopTray = stop;
     });
-    void import('@tauri-apps/api/webview').then(async ({ getCurrentWebview }) => {
-      const stop = await getCurrentWebview().onDragDropEvent((event) => {
-        const payload = event.payload;
-        if (payload.type === 'enter') store.dropping = true;
-        else if (payload.type === 'leave') store.dropping = false;
-        else if (payload.type === 'drop') {
-          store.dropping = false;
-          void workspace.addLocalProjects(payload.paths);
-        }
-      });
-      if (disposed) stop();
-      else unlisten = stop;
+    void import('./lib/native-drop').then(async ({ listenNativeDrop }) => {
+      const stop = await listenNativeDrop(workspace);
+      if (disposed) stop(); else unlisten = stop;
     });
     return () => {
       disposed = true;
@@ -565,7 +556,7 @@
   </div>
 
   {#if store.dropping}
-    <DropOverlay />
+    <DropOverlay kind={store.dropping} />
   {/if}
 
   {#if quitHint.shown}

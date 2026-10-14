@@ -51,7 +51,8 @@ beforeEach(async () => {
   await page.waitFor(`globalThis.__boiteTest?.workspace.machines.length === 2 && document.querySelectorAll('${id('thread-row')}').length === 8`);
   [main, remote] = await page.evaluate<[string, string]>('globalThis.__boiteTest.workspace.machines.map(machine => machine.id)');
   await showThreadView(page, 'recent');
-});
+  // A reload and two waits: bun's 5 s hook default expires on a slow Windows runner before the test's own budget.
+}, 30_000);
 afterAll(async () => {
   try {
     await page?.close();

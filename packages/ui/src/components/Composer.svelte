@@ -4,7 +4,7 @@
   import { restorePreviewMentions } from '../lib/preview-mentions';
   import { AGENT_PREFIX, isAgentCommand, runCommand } from '../lib/commands.svelte';
   import { agentSlashItems, boiteSlashItems, listKey, mentionQueryOf, slashQueryOf, type ChipCommand } from '../lib/composer-menus';
-  import { attachFiles } from '../lib/composer-attachments';
+  import { attachFiles, receiveDroppedFiles } from '../lib/composer-attachments';
   import { rewindComposerEdit } from '../lib/composer-edit';
   import { fitHeight, selfSizing } from '../lib/composer-size';
   import { editComposerInput, insertImageReference, removeImageReferences, touchesImageReference, trackImageSend } from '../lib/composer-images';
@@ -450,7 +450,7 @@
     void take(files);
   }
 
-  /** File drops belong to the composer. */
+  $effect(() => receiveDroppedFiles(take)); // File drops belong to the composer, in the shell too (`lib/native-drop.ts`).
   function ondragover(event: DragEvent) {
     if (!Array.from(event.dataTransfer?.items ?? []).some((item) => item.kind === 'file')) return;
     event.preventDefault();
