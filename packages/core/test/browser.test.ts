@@ -94,7 +94,8 @@ real('an agent drives a page with agent-browser commands: refs, forms, dialogs a
   const later = await command({ kind: 'click', selector: '@e7' }) as { dialogs?: unknown };
   expect(later.dialogs).toBeUndefined();
   await command({ kind: 'wait', text: 'Free', timeoutMs: 1000 });
-  await Bun.sleep(700);
+  browserFixture.releaseLaterDialog();
+  await browserFixture.laterDialogDone();
   expect(await command({ kind: 'get', what: 'title' })).toBe('later no');
   // A covered element is reached through the DOM, and the agent hears what covered it.
   expect(await command({ kind: 'click', selector: '@e8' })).toMatchObject({ note: expect.stringContaining('covered by div#cover') });

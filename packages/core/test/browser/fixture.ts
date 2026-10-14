@@ -21,7 +21,7 @@ const SHOP = `<!doctype html><title>Shop</title>
 <select id="size"><option>Small</option><option value="l">Large</option></select>
 <label><input type="checkbox" id="gift" checked> Gift</label>
 <button id="ask" onclick="this.textContent = confirm('Sure?') ? 'yes' : 'no'">Ask</button>
-<button id="later" onclick="setTimeout(() => { document.title = confirm('Later?') ? 'later yes' : 'later no' }, 400)">Later</button>
+<button id="later" onclick="fetch('/later').then(() => { document.title = confirm('Later?') ? 'later yes' : 'later no'; return fetch('/later/done') })">Later</button>
 <button id="hidden-under" style="position:absolute;left:0;top:400px;width:120px;height:40px">Under</button>
 <div id="cover" style="position:absolute;left:0;top:400px;width:200px;height:60px;background:#ccc">Cover</div>
 <p id="note">Free delivery</p>`;
@@ -30,6 +30,13 @@ const SHOP = `<!doctype html><title>Shop</title>
 export function createBrowserFixture() {
   const real = findChromium().path ? test : test.skip;
   let site: ReturnType<typeof Bun.serve>;
+  const laterGate = () => {
+    let release!: () => void, complete!: () => void;
+    const response = new Promise<void>(resolve => { release = resolve; });
+    const done = new Promise<void>(resolve => { complete = resolve; });
+    return { response, done, release, complete };
+  };
+  let later = laterGate();
   /** The user agent of the last request for each path: what a site sees. */
   const agents = new Map<string, string | null>();
   beforeAll(() => {
@@ -38,6 +45,8 @@ export function createBrowserFixture() {
       agents.set(path, request.headers.get('user-agent'));
       if (path === '/') return new Response(PAGE, { headers: { 'content-type': 'text/html' } });
       if (path === '/shop') return new Response(SHOP, { headers: { 'content-type': 'text/html' } });
+      if (path === '/later') return later.response.then(() => new Response('released'));
+      if (path === '/later/done') { later.complete(); return new Response('done'); }
       if (path === '/sent') return new Response(`<title>Sent</title><h1>Thanks ${new URL(request.url).searchParams.get('name')}</h1>`, { headers: { 'content-type': 'text/html' } });
       if (path === '/popup') return new Response('<title>Popup</title>popup', { headers: { 'content-type': 'text/html' } });
       if (path === '/moving') return new Response('<title>Moving</title><div id=box style="width:80px;height:80px;background:red;position:absolute"></div><script>let x=0;setInterval(()=>{x=(x+7)%600;box.style.left=x+"px"},16)</script>', { headers: { 'content-type': 'text/html' } });
@@ -50,13 +59,15 @@ export function createBrowserFixture() {
   let harness: TestCore, owner: CoreClient, agent: CoreClient, threadId: string;
   let opened: { harness?: TestCore; owner?: CoreClient; agent?: CoreClient } = {};
   beforeEach(async () => {
+    later.release();
+    later = laterGate();
     opened = {};
     opened.harness = harness = await startTestCore();
     opened.owner = owner = await harness.connect();
     ({ threadId } = await echoThread(harness, owner));
     opened.agent = agent = await connect(harness.url, harness.core.agents.tokenFor(threadId), { client: { name: 'boite-cli', version: 'test' } });
   });
-  afterEach(async () => { opened.agent?.close(); opened.owner?.close(); await opened.harness?.stop(); });
+  afterEach(async () => { later.release(); opened.agent?.close(); opened.owner?.close(); await opened.harness?.stop(); });
 
   const evaluate = async (expression: string, tabId?: string) =>
     (await agent.call('browser.command', { threadId, ...(tabId ? { tabId } : {}), action: { kind: 'evaluate', expression } })).value;
@@ -97,6 +108,8 @@ export function createBrowserFixture() {
 
   return {
     real, url, evaluate, fakeHost, agents,
+    releaseLaterDialog() { later.release(); },
+    laterDialogDone() { return later.done; },
     get harness() { return harness; },
     get owner() { return owner; },
     get agent() { return agent; },
