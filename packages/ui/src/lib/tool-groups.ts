@@ -232,6 +232,41 @@ export function liveLabel(part: ToolPart): string {
   return subject ? fill(strings.chat.toolLive[family], { subject }) : strings.chat.toolBare[family];
 }
 
+/**
+ * The agent's own words for a finished run: the distinct `summary` lines its
+ * calls carry, in the order they came. Null as soon as one call has none, so a
+ * run never reads as a description of only part of what it did.
+ */
+export function agentSummary(parts: readonly ToolPart[]): string | null {
+  const lines: string[] = [];
+  for (const part of parts) {
+    const line = part.summary?.trim();
+    if (!line) return null;
+    if (!lines.includes(line)) lines.push(line);
+  }
+  return lines.length === 0 ? null : lines.join(' · ');
+}
+
+/** A line that is only a bold run: the heading Codex opens each reasoning section with. */
+const THOUGHT_HEADING = /^[\t ]*\*\*([^*\r\n]+)\*\*[\t ]*\r?$/gm;
+
+/**
+ * What a reasoning step is about, in one line: the last heading Codex wrote
+ * ("Inspecting the driver"), else the first sentence of the last paragraph,
+ * which is where a Claude summary or a raw chain of thought stands now. Null
+ * while the step has no words, so the caller falls back to "Thinking".
+ */
+export function thoughtTitle(text: string): string | null {
+  const heading = [...text.matchAll(THOUGHT_HEADING)].at(-1)?.[1]?.trim();
+  if (heading) return heading;
+  const paragraph = text.split(/\n[\t ]*\n/).map((block) => block.trim()).filter(Boolean).at(-1);
+  if (!paragraph) return null;
+  const line = (paragraph.split('\n')[0] ?? '').replace(/\*\*|__|`/g, '').replace(/^[#>*\-\s]+/, '').trim();
+  const end = line.search(/[.!?](\s|$)/);
+  const sentence = (end === -1 ? line : line.slice(0, end + 1)).replace(/\.$/, '').trim();
+  return sentence || null;
+}
+
 type SummaryKind = Exclude<ToolFamily, 'write'> | 'attempt';
 
 /**

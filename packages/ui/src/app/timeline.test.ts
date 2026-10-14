@@ -14,7 +14,8 @@ test('a thinking part is folded, opens on its toggle, and a new turn shows it be
 
   const toggle = query<HTMLButtonElement>('[data-testid=thinking-toggle]');
   expect(toggle.getAttribute('aria-expanded')).toBe('false');
-  expect(toggle.textContent).toContain('Thinking');
+  // The folded row names the thought: its first sentence, not the bare word.
+  expect(query('[data-testid=thinking-label]').textContent).toContain(SEEDED_THINKING);
   expect(document.querySelector('[data-testid=thinking-text]')).toBeNull();
 
   toggle.click();

@@ -128,3 +128,19 @@ export function childEnv(accountEnv: Record<string, string>): Record<string, str
   }
   return { ...env, ...accountEnv };
 }
+
+/** The CLI flag that picks what the API returns of the model's reasoning: `summarized` or `omitted`. */
+export const THINKING_DISPLAY_FLAG = 'thinking-display';
+
+/**
+ * What makes the CLI write a `tool_use_summary` line after each batch of tool
+ * calls ("Read rules.md and data.txt"). Off by default in a CLI driven through
+ * the SDK. Each line is one small request to Haiku (`source=tool_use_summary_generation`
+ * in the CLI's debug log, 2.1.299), billed to the account the session runs on.
+ */
+export const TOOL_SUMMARIES_ENV = 'CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES';
+
+/** The environment of a conversation's CLI: `childEnv`, plus the tool summaries the timeline labels its calls with. */
+export function agentEnv(accountEnv: Record<string, string>): Record<string, string | undefined> {
+  return { ...childEnv(accountEnv), [TOOL_SUMMARIES_ENV]: '1' };
+}

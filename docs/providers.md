@@ -936,6 +936,36 @@ agent reads them with its own tools (Read, `view_image`). The journalled answer
 and the card keep only each file's kind, type, name and size, never its bytes
 or path. ACP and Antigravity questions offer options only, so they take no files.
 
+## Reasoning and tool summaries
+
+What a thread shows of an agent's reasoning is what its protocol sends. Measured
+on 2026-10-14 with Claude Code 2.1.299 and Codex 0.162.1:
+
+| Provider | Reasoning text | Batch summaries |
+| --- | --- | --- |
+| Claude | A summary per thinking block: the driver passes `--thinking-display summarized` through `extraArgs` | `tool_use_summary` with `CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES=1`, kept as each call's `summary` |
+| Codex | Summary deltas, a bold heading then a paragraph; `auto` and `detailed` gave the same shape | none |
+| ACP (Grok, OpenCode), pi | What the agent streams as thought chunks | none |
+
+A CLI the SDK drives is non-interactive, and for that case Claude Code asks the
+API to leave reasoning out (`omitted`): the blocks arrive with empty text, which
+is what left a thread with "Thinking" rows and nothing in them. The display only
+moves what comes back; the model thinks, and is billed, the same. Whether and how
+much it thinks stays with the CLI (effort, `alwaysThinkingEnabled`), which is why
+the driver sets the flag rather than the SDK's `thinking` option. The API
+refuses `highlights` (one title per stretch of thinking) for a subscription
+login: `thinking.adaptive.display: Input should be 'summarized', 'omitted'`, and
+the CLI falls back to `omitted` for the rest of the process.
+
+Each tool summary is one request the CLI sends to Haiku after a batch of calls
+finished (`source=tool_use_summary_generation` in its debug log), on the
+thread's account. It names the calls it covers, so it can arrive while the next
+batch already runs; a call of an earlier turn is not redrawn. The other
+progress messages the CLI sends (`thinking_tokens`, `api_retry`, `status`,
+`task_progress`) feed the turn's footer (`drivers/claude/progress.ts`, see
+[trace](trace.md)); `prompt_suggestion` and `rate_limit_event` stay unused by
+the timeline.
+
 ## Stdio transport failures
 
 Codex, Muse and pi use `drivers/stdio.ts` for request lifetime and newline
