@@ -116,7 +116,7 @@ impl Logger {
     }
 }
 
-fn unix_ms() -> u64 {
+pub(crate) fn unix_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|elapsed| elapsed.as_millis() as u64).unwrap_or(0)
 }
 
@@ -307,6 +307,7 @@ fn write_dropped(shared: &Shared, writer: &mut Writer) {
 }
 
 static LOGGER: OnceLock<Logger> = OnceLock::new();
+static DIRECTORY: OnceLock<PathBuf> = OnceLock::new();
 
 /// Starts the writer for `<dataDir>/logs`. Called once, as early as the data
 /// directory is known; records before it, and in a process that could not
@@ -318,8 +319,14 @@ pub(crate) fn init(data_dir: &Path) {
     let started = std::thread::Builder::new().name("shell-log".into()).spawn(move || {
         serve(receiver, Writer::open(directory, MAX_FILE_BYTES), shared);
     });
-    if started.is_ok() { let _ = LOGGER.set(logger); }
+    if started.is_ok() {
+        let _ = DIRECTORY.set(data_dir.join("logs"));
+        let _ = LOGGER.set(logger);
+    }
 }
+
+/// `<dataDir>/logs` once the writer runs, where the watchdog also leaves its hang dumps.
+pub(crate) fn directory() -> Option<&'static Path> { DIRECTORY.get().map(PathBuf::as_path) }
 
 /// Writes what is queued, for `patience` at most. Used on exit and in the panic hook.
 pub(crate) fn flush(patience: Duration) -> bool { LOGGER.get().is_some_and(|logger| logger.flush(patience)) }

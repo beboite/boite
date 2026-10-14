@@ -111,6 +111,8 @@ fn shell_context<R: tauri::Runtime>() -> tauri::Context<R> {
 
 pub fn run() {
     let launched = std::time::Instant::now();
+    // `run` is on the main thread: the watchdog names it in a hang dump.
+    platform::watch::remember_main_thread();
     platform::before_webview();
     // The channel is read here and nowhere else: the compiled bundle identifier
     // is the only thing that says which install this executable is. Nothing
@@ -294,7 +296,7 @@ pub fn run() {
             phase("main-window", building);
             platform::watch::remember_main_window(&window);
             platform::watch::watch_webview(&window);
-            watchdog::start(handle.clone(), platform::watch::main_window_hung);
+            watchdog::start(handle.clone());
             if !hidden() {
                 let tray = std::time::Instant::now();
                 // The window works without a tray: closing it then quits.

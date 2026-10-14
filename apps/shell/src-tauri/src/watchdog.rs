@@ -4,14 +4,21 @@
 //! a shared slot while it runs; window and WebView events leave their name in
 //! another. When the main thread goes quiet, the watchdog reads both: the
 //! window going "Not responding" then has a cause in `shell.N.ndjson`.
+//!
+//! An episode that does not end writes `still-blocked` lines on a widening
+//! schedule, so a shell Windows kills at shutdown still leaves how long it hung.
+//! On Windows, past 30 s with the window reported hung, the watchdog also
+//! writes a minidump of the process for the main thread's stack.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use serde_json::json;
 use tauri::{AppHandle, Runtime};
 
+use crate::platform;
 use crate::shell_log::{self, seconds, Level};
 
 /// A command this long on the main thread is worth a `debug` line.
@@ -22,6 +29,14 @@ const STALLED_COMMAND: Duration = Duration::from_secs(2);
 const PING_EVERY: Duration = Duration::from_secs(1);
 /// How long the main thread may leave a ping unanswered before it counts as blocked.
 const BLOCKED_AFTER: Duration = Duration::from_secs(5);
+/// When an open episode writes its first `still-blocked` lines, from its start;
+/// after the last one, every [`STILL_BLOCKED_EVERY`].
+const STILL_BLOCKED_AT: [Duration; 3] = [Duration::from_secs(30), Duration::from_secs(120), Duration::from_secs(600)];
+const STILL_BLOCKED_EVERY: Duration = Duration::from_secs(30 * 60);
+/// Hang dumps kept in the log directory, the one just written included.
+const KEEP_DUMPS: usize = 2;
+const DUMP_PREFIX: &str = "shell-hang-";
+const DUMP_SUFFIX: &str = ".dmp";
 
 static START: OnceLock<Instant> = OnceLock::new();
 static COMMANDS: OnceLock<Vec<&'static str>> = OnceLock::new();
@@ -153,25 +168,37 @@ fn blame(now: u64) -> Blame {
     Blame { command, event }
 }
 
-fn blocked_message(blocked: Duration, blame: &Blame) -> String {
+/// `lead` is "main thread blocked for" on the first line of an episode and
+/// "main thread still blocked after" on the later ones.
+fn blocked_message(lead: &str, blocked: Duration, blame: &Blame) -> String {
     let ms = |value: u64| seconds(Duration::from_millis(value));
     match (blame.command, blame.event) {
         (Some((command, running)), _) => format!(
-            "main thread blocked for {}, command {command} started {} ago and has not returned", seconds(blocked), ms(running)),
+            "{lead} {}, command {command} started {} ago and has not returned", seconds(blocked), ms(running)),
         (None, Some((event, ago))) => format!(
-            "main thread blocked for {} with no command running; the last window event was {event} {} ago", seconds(blocked), ms(ago)),
-        (None, None) => format!("main thread blocked for {} with no command running and no window event seen yet", seconds(blocked)),
+            "{lead} {} with no command running; the last window event was {event} {} ago", seconds(blocked), ms(ago)),
+        (None, None) => format!("{lead} {} with no command running and no window event seen yet", seconds(blocked)),
+    }
+}
+
+/// How long after an episode began its `line`th `still-blocked` record is due,
+/// counting from 0: 30 s, 2 min, 10 min, then every 30 min.
+fn still_blocked_due(line: u32) -> Duration {
+    match STILL_BLOCKED_AT.get(line as usize) {
+        Some(due) => *due,
+        None => STILL_BLOCKED_AT[STILL_BLOCKED_AT.len() - 1]
+            + STILL_BLOCKED_EVERY * (line - STILL_BLOCKED_AT.len() as u32 + 1),
     }
 }
 
 /// One episode of a main thread that stopped answering.
-struct Episode { since: Instant, command: &'static str }
+struct Episode { since: Instant, command: &'static str, still_blocked_lines: u32 }
 
 /// The watchdog's state between ticks, apart from the thread, so a test can
 /// drive it with made-up instants.
 struct Watch { seq: u64, posted: Option<(u64, Instant)>, episode: Option<Episode> }
 
-enum Verdict { Nothing, Blocked(Duration, Blame), Recovered(Duration, &'static str) }
+enum Verdict { Nothing, Blocked(Duration, Blame), StillBlocked(Duration, Blame), Recovered(Duration, &'static str) }
 
 impl Watch {
     fn new() -> Self { Self { seq: 0, posted: None, episode: None } }
@@ -190,10 +217,19 @@ impl Watch {
                 None => Verdict::Nothing,
             };
         }
+        if let Some(episode) = self.episode.as_mut() {
+            let blocked = now.saturating_duration_since(episode.since);
+            if blocked < still_blocked_due(episode.still_blocked_lines) { return Verdict::Nothing; }
+            // A late tick can pass several marks at once: one line, and the next mark is ahead.
+            while still_blocked_due(episode.still_blocked_lines) <= blocked { episode.still_blocked_lines += 1; }
+            return Verdict::StillBlocked(blocked, read_blame());
+        }
         let waited = now.saturating_duration_since(posted);
-        if waited < BLOCKED_AFTER || self.episode.is_some() { return Verdict::Nothing; }
+        if waited < BLOCKED_AFTER { return Verdict::Nothing; }
         let blame = read_blame();
-        self.episode = Some(Episode { since: posted, command: blame.command.map(|(name, _)| name).unwrap_or("no command") });
+        self.episode = Some(Episode {
+            since: posted, command: blame.command.map(|(name, _)| name).unwrap_or("no command"), still_blocked_lines: 0,
+        });
         Verdict::Blocked(waited, blame)
     }
 
@@ -218,9 +254,150 @@ impl Watch {
     }
 }
 
-/// Starts the watchdog thread. `hung` asks Windows whether it considers the
-/// main window hung; it answers `None` elsewhere.
-pub(crate) fn start<R: Runtime>(app: AppHandle<R>, hung: fn() -> Option<bool>) {
+/// The child windows of other processes under one process's window: on
+/// Windows, WebView2's browser process owns the page's window inside the shell's.
+#[derive(Debug, PartialEq, Eq)]
+struct ForeignChild { pid: u32, windows: u32, hung: u32 }
+
+/// `(pid, hung)` per child window, grouped by process in the order first seen.
+fn group_children(windows: &[(u32, bool)]) -> Vec<ForeignChild> {
+    let mut grouped: Vec<ForeignChild> = Vec::new();
+    for &(pid, hung) in windows {
+        let at = match grouped.iter().position(|child| child.pid == pid) {
+            Some(at) => at,
+            None => { grouped.push(ForeignChild { pid, windows: 0, hung: 0 }); grouped.len() - 1 }
+        };
+        grouped[at].windows += 1;
+        grouped[at].hung += u32::from(hung);
+    }
+    grouped
+}
+
+/// `8812 not responding, 9020 responding`: a process counts as not responding
+/// when one of its windows is.
+fn describe_children(children: &[ForeignChild]) -> String {
+    children.iter()
+        .map(|child| format!("{} {}", child.pid, if child.hung > 0 { "not responding" } else { "responding" }))
+        .collect::<Vec<_>>().join(", ")
+}
+
+/// The fields and message every blocked and still-blocked line carries.
+fn describe(lead: &str, blocked: Duration, blame: &Blame, hung: Option<bool>) -> (String, serde_json::Value) {
+    let mut data = json!({
+        "blockedMs": blocked.as_millis() as u64,
+        "command": blame.command.map(|(name, _)| name).unwrap_or("no command"),
+    });
+    if let Some((_, running)) = blame.command { data["commandRunningMs"] = json!(running); }
+    if let Some((event, ago)) = blame.event { data["lastEvent"] = json!(event); data["lastEventAgoMs"] = json!(ago); }
+    if let Some(hung) = hung { data["windowsReportsHung"] = json!(hung); }
+    if let Some(thread) = platform::watch::main_thread_id() { data["mainThreadId"] = json!(thread); }
+    let mut message = blocked_message(lead, blocked, blame);
+    if hung == Some(true) { message.push_str("; Windows reports the window as not responding"); }
+    (message, data)
+}
+
+/// `shell-hang-20261014T153012Z.dmp`, UTC to the second: fixed width, so names
+/// sort in time order.
+fn dump_name(unix_ms: u64) -> String {
+    let secs = unix_ms / 1000;
+    let (days, rest) = ((secs / 86_400) as i64, secs % 86_400);
+    // Howard Hinnant's days-to-civil conversion.
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let day_of_era = z.rem_euclid(146_097);
+    let year_of_era = (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let shifted_month = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * shifted_month + 2) / 5 + 1;
+    let month = if shifted_month < 10 { shifted_month + 3 } else { shifted_month - 9 };
+    let year = year_of_era + era * 400 + i64::from(month <= 2);
+    format!("{DUMP_PREFIX}{year:04}{month:02}{day:02}T{:02}{:02}{:02}Z{DUMP_SUFFIX}", rest / 3600, rest % 3600 / 60, rest % 60)
+}
+
+/// The hang dumps among `names` beyond the `keep` newest, which go.
+fn dumps_to_delete(names: impl IntoIterator<Item = String>, keep: usize) -> Vec<String> {
+    let mut dumps: Vec<String> = names.into_iter()
+        .filter(|name| name.starts_with(DUMP_PREFIX) && name.ends_with(DUMP_SUFFIX)).collect();
+    dumps.sort_unstable_by(|a, b| b.cmp(a));
+    dumps.split_off(keep.min(dumps.len()))
+}
+
+fn prune_dumps(directory: &Path) {
+    let Ok(entries) = std::fs::read_dir(directory) else { return };
+    let names = entries.filter_map(|entry| entry.ok()?.file_name().into_string().ok());
+    for name in dumps_to_delete(names, KEEP_DUMPS) { let _ = std::fs::remove_file(directory.join(name)); }
+}
+
+/// One dump per run.
+static DUMPED: AtomicBool = AtomicBool::new(false);
+
+/// Writes a minidump of this process from a thread of its own, so a dump that
+/// stalls never stops the still-blocked lines. Returns the path it writes to.
+fn start_dump() -> Option<PathBuf> {
+    let directory = shell_log::directory()?;
+    if DUMPED.swap(true, Ordering::AcqRel) { return None; }
+    let path = directory.join(dump_name(shell_log::unix_ms()));
+    let target = path.clone();
+    let spawned = std::thread::Builder::new().name("shell-hang-dump".into()).spawn(move || {
+        let started = Instant::now();
+        let thread = platform::watch::main_thread_id();
+        match platform::watch::write_dump(&target) {
+            Ok(bytes) => {
+                prune_dumps(directory);
+                let mut data = json!({ "path": target.display().to_string(), "bytes": bytes });
+                if let Some(thread) = thread { data["mainThreadId"] = json!(thread); }
+                shell_log::timed(Level::Warn, "main-thread", "shell.main-thread.dumped",
+                    format!("wrote a dump of the hung shell to {} ({} MB); the main thread is thread {}",
+                        target.display(), bytes / (1024 * 1024), thread.map(|id| id.to_string()).unwrap_or_else(|| "unknown".into())),
+                    started.elapsed(), data);
+            }
+            Err(error) => {
+                let _ = std::fs::remove_file(&target);
+                shell_log::warn("main-thread", "shell.main-thread.dump-failed",
+                    format!("the hang dump could not be written: {error}"), json!({ "path": target.display().to_string() }));
+            }
+        }
+        shell_log::flush(Duration::from_millis(500));
+    });
+    match spawned {
+        Ok(_) => Some(path),
+        Err(error) => {
+            shell_log::warn("main-thread", "shell.main-thread.dump-failed",
+                format!("the hang dump thread could not start: {error}"), json!({}));
+            None
+        }
+    }
+}
+
+/// A still-blocked line: the episode's duration, the same blame, the windows
+/// of other processes inside the main window and, once Windows calls the
+/// window hung, the dump's path.
+fn still_blocked(blocked: Duration, blame: &Blame) {
+    let hung = platform::watch::main_window_hung();
+    let (mut message, mut data) = describe("main thread still blocked after", blocked, blame, hung);
+    if let Some(windows) = platform::watch::foreign_child_windows() {
+        let children = group_children(&windows);
+        data["foreignWindows"] = json!(windows.len());
+        data["foreignHungWindows"] = json!(windows.iter().filter(|(_, hung)| *hung).count());
+        if !children.is_empty() {
+            let described = describe_children(&children);
+            message.push_str(&format!("; processes with windows inside it: {described}"));
+            data["foreignProcesses"] = json!(described);
+        }
+    }
+    if hung == Some(true) {
+        if let Some(path) = start_dump() {
+            message.push_str(&format!("; writing a dump to {}", path.display()));
+            data["dumpPath"] = json!(path.display().to_string());
+        }
+    }
+    shell_log::error("main-thread", "shell.main-thread.still-blocked", message, data);
+    shell_log::flush(Duration::from_millis(500));
+}
+
+/// Starts the watchdog thread. On Windows it also asks whether Windows
+/// considers the main window hung; elsewhere that answer is absent.
+pub(crate) fn start<R: Runtime>(app: AppHandle<R>) {
     let start = *START.get_or_init(Instant::now);
     let spawned = std::thread::Builder::new().name("shell-watchdog".into()).spawn(move || {
         let mut watch = Watch::new();
@@ -237,19 +414,11 @@ pub(crate) fn start<R: Runtime>(app: AppHandle<R>, hung: fn() -> Option<bool>) {
             match watch.tick(now, answered, || blame(since_start())) {
                 Verdict::Nothing => {}
                 Verdict::Blocked(waited, blame) => {
-                    let hung = hung();
-                    let mut data = json!({
-                        "blockedMs": waited.as_millis() as u64,
-                        "command": blame.command.map(|(name, _)| name).unwrap_or("no command"),
-                    });
-                    if let Some((_, running)) = blame.command { data["commandRunningMs"] = json!(running); }
-                    if let Some((event, ago)) = blame.event { data["lastEvent"] = json!(event); data["lastEventAgoMs"] = json!(ago); }
-                    if let Some(hung) = hung { data["windowsReportsHung"] = json!(hung); }
-                    let mut message = blocked_message(waited, &blame);
-                    if hung == Some(true) { message.push_str("; Windows reports the window as not responding"); }
+                    let (message, data) = describe("main thread blocked for", waited, &blame, platform::watch::main_window_hung());
                     shell_log::error("main-thread", "shell.main-thread.blocked", message, data);
                     shell_log::flush(Duration::from_millis(500));
                 }
+                Verdict::StillBlocked(blocked, blame) => still_blocked(blocked, &blame),
                 Verdict::Recovered(total, command) => {
                     shell_log::timed(Level::Warn, "main-thread", "shell.main-thread.recovered",
                         format!("main thread answered again after being blocked for {} (command: {command})", seconds(total)),
@@ -302,6 +471,52 @@ mod tests {
     }
 
     #[test]
+    fn an_open_episode_writes_still_blocked_lines_at_30_s_2_min_10_min_then_every_30_min() {
+        let due: Vec<u64> = (0..6).map(|line| still_blocked_due(line).as_secs()).collect();
+        assert_eq!(due, [30, 120, 600, 2400, 4200, 6000]);
+        let mut watch = Watch::new();
+        let t0 = Instant::now();
+        let at = |seconds: u64| t0 + Duration::from_secs(seconds);
+        assert_eq!(watch.next_ping(t0), Some(1));
+        assert!(matches!(watch.tick(at(5), (0, None), idle), Verdict::Blocked(..)));
+        let mut lines = Vec::new();
+        for second in 6..=2400 {
+            if let Verdict::StillBlocked(blocked, blame) = watch.tick(at(second), (0, None), idle) {
+                assert_eq!(blame, idle());
+                lines.push(blocked.as_secs());
+            }
+        }
+        assert_eq!(lines, [30, 120, 600, 2400]);
+        // A tick that jumps past two marks writes one line, and the next mark is still ahead.
+        assert!(matches!(watch.tick(at(6100), (0, None), idle), Verdict::StillBlocked(..)));
+        assert!(matches!(watch.tick(at(7700), (0, None), idle), Verdict::Nothing));
+        assert!(matches!(watch.tick(at(7800), (0, None), idle), Verdict::StillBlocked(..)));
+        match watch.tick(at(7801), (1, Some(at(7800) + Duration::from_millis(500))), idle) {
+            Verdict::Recovered(total, command) => { assert_eq!(total, Duration::from_millis(7_800_500)); assert_eq!(command, "no command"); }
+            _ => panic!("expected a recovery"),
+        }
+    }
+
+    #[test]
+    fn dumps_are_named_by_utc_time_and_only_the_two_newest_stay() {
+        assert_eq!(dump_name(0), "shell-hang-19700101T000000Z.dmp");
+        assert_eq!(dump_name(951_782_400_000), "shell-hang-20000229T000000Z.dmp");
+        assert_eq!(dump_name(1_791_991_812_345), "shell-hang-20261014T153012Z.dmp");
+        let names = ["shell-hang-20261012T080000Z.dmp", "shell.0.ndjson", "shell-hang-20261014T153012Z.dmp",
+            "shell-hang-20261001T000000Z.dmp", "shell-hang-notes.txt", "shell-hang-20261013T235959Z.dmp"];
+        let gone = dumps_to_delete(names.iter().map(|name| name.to_string()), KEEP_DUMPS);
+        assert_eq!(gone, ["shell-hang-20261012T080000Z.dmp", "shell-hang-20261001T000000Z.dmp"]);
+        assert!(dumps_to_delete(["shell-hang-20261014T153012Z.dmp".to_string()], KEEP_DUMPS).is_empty());
+    }
+
+    #[test]
+    fn child_windows_group_by_process_and_a_process_with_one_hung_window_is_not_responding() {
+        let children = group_children(&[(8812, false), (9020, false), (8812, true)]);
+        assert_eq!(children, [ForeignChild { pid: 8812, windows: 2, hung: 1 }, ForeignChild { pid: 9020, windows: 1, hung: 0 }]);
+        assert_eq!(describe_children(&children), "8812 not responding, 9020 responding");
+    }
+
+    #[test]
     fn a_suspend_with_a_ping_in_flight_is_not_a_blocked_main_thread() {
         let mut watch = Watch::new();
         let t0 = Instant::now();
@@ -323,9 +538,9 @@ mod tests {
     #[test]
     fn the_message_names_the_running_command_or_the_last_event() {
         let busy = Blame { command: Some(("browser_create", 6400)), event: Some(("window.focused", 9000)) };
-        assert_eq!(blocked_message(Duration::from_millis(6200), &busy),
+        assert_eq!(blocked_message("main thread blocked for", Duration::from_millis(6200), &busy),
             "main thread blocked for 6.2 s, command browser_create started 6.4 s ago and has not returned");
-        assert_eq!(blocked_message(Duration::from_secs(5), &idle()),
+        assert_eq!(blocked_message("main thread blocked for", Duration::from_secs(5), &idle()),
             "main thread blocked for 5.0 s with no command running; the last window event was window.resized 7.2 s ago");
     }
 

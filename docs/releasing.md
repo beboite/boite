@@ -323,8 +323,21 @@ command that holds the main thread over 250 ms is a `debug` line, over 2 s a
 `warn`. A watchdog posts a no-op to the main thread every second
 (`src/watchdog.rs`). When 5 s pass without an answer it writes one
 `shell.main-thread.blocked` error naming the running command or the last
-window event, plus `IsHungAppWindow` on Windows, then one
-`shell.main-thread.recovered` warning with the total blocked time.
+window event, plus `IsHungAppWindow` on Windows and the main thread's id. While
+the thread stays blocked it writes `shell.main-thread.still-blocked` errors at
+30 s, 2 min, 10 min and then every 30 min, with `blockedMs` counted from the
+episode's start and the same fields, so a shell Windows kills at shutdown still
+leaves how long it hung. On Windows each of these lines also lists the
+processes that own windows inside the main window (WebView2's browser process
+hosts the page there) and whether each one is hung: `foreignProcesses`,
+`foreignWindows`, `foreignHungWindows`. The first still-blocked line with the
+window reported hung starts a minidump of the shell, written from a thread of
+its own as `logs/shell-hang-<UTC time>.dmp` (thread info, handles, unloaded
+modules); the line names it in `dumpPath`, and `shell.main-thread.dumped` or
+`shell.main-thread.dump-failed` follows. One dump per run, and the two newest
+are kept. The stack of `mainThreadId` needs the PDB of the same build to show names.
+When the thread answers, one `shell.main-thread.recovered` warning gives the
+total blocked time.
 
 Resident cores append to `core-output.log`, truncated at startup above 8 MiB.
 `BOITE_CORE_RESIDENT=0` makes a Windows shell own its core through a
