@@ -2095,10 +2095,10 @@ export interface SubscriptionProxy {
 export const SUBSCRIPTION_PROXY_PROTOCOLS: readonly Protocol[] = ['claude-sdk', 'codex-appserver'];
 /**
  * The providers a subscription proxy serves by id, where the protocol cannot
- * say: ACP is shared by OpenCode 2, which takes the gateway as one more model
- * provider, and by agents that keep their own configuration.
+ * say: both OpenCode versions take the gateway as one more model provider,
+ * while other ACP agents keep their own configuration.
  */
-export const SUBSCRIPTION_PROXY_PROVIDERS: readonly ProviderId[] = ['opencode-v2'];
+export const SUBSCRIPTION_PROXY_PROVIDERS: readonly ProviderId[] = ['opencode', 'opencode-v2'];
 /**
  * The providers only one kind of gateway serves. Grok's CLI takes its models
  * from the gateway's own list, and Douane writes that list the way the CLI

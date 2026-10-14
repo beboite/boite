@@ -32,6 +32,25 @@ const gatewayRow = 'document.querySelector("[data-testid=account-gateway][data-p
 const showGatewayRow = `${gatewayRow} || document.querySelector("[data-testid=provider-settings][data-provider-id=claude] [data-testid=provider-details-toggle]").click()`;
 const grokRow = 'document.querySelector("[data-testid=provider-settings][data-provider-id=grok]")';
 
+async function expectOpenCodeGateways(name: 'Douane' | 'CLIProxyAPI') {
+  for (const provider of ['opencode', 'opencode-v2']) {
+    const row = `document.querySelector("[data-testid=provider-settings][data-provider-id=${provider}]")`;
+    const gateway = `[data-testid=account-gateway][data-provider=${provider}]`;
+    await page.waitFor(row);
+    await page.evaluate(`document.querySelector(${JSON.stringify(gateway)}) || ${row}.querySelector("[data-testid=provider-details-toggle]").click()`);
+    await page.waitFor(`document.querySelector(${JSON.stringify(gateway)})?.textContent.includes(${JSON.stringify(name)})`);
+    expect(await page.evaluate(`document.querySelectorAll(${JSON.stringify(gateway)}).length`)).toBe(1);
+    expect(await page.text(gateway)).toContain(dashboard);
+    expect(await page.evaluate(`${row}.querySelectorAll("[data-testid=account-row], [data-testid=account-add], [data-testid=account-gateway] button").length`)).toBe(0);
+    await page.evaluate(`${row}.scrollIntoView({ block: 'center' })`);
+    await capture(`boite-proxy-${provider}-${name.toLowerCase()}-desktop.png`);
+  }
+}
+
+async function expectNoNativeOpenCode() {
+  expect(await page.evaluate('document.querySelectorAll("[data-testid=quota-monitor][aria-label^=OpenCode]").length')).toBe(0);
+}
+
 test('disabled mode retains the native glance; Douane brings its quota bars and one gateway account', async () => {
   await page.waitFor('document.querySelector("[data-testid=nav-limits]")');
   await page.click('[data-testid="nav-limits"]');
@@ -39,6 +58,10 @@ test('disabled mode retains the native glance; Douane brings its quota bars and 
   await page.click('[data-testid="nav-settings"]');
   await page.click('[data-testid="settings-tab-accounts"]');
   await page.waitFor('document.querySelector("[data-testid=subscription-proxy-settings]")');
+  // The experimental OpenCode member is off in the fixture until enabled here.
+  await page.click('[data-testid="provider-settings"][data-provider-id="opencode"] [data-testid="provider-details-toggle"]');
+  await page.click('[data-testid="provider-enabled"][data-provider-id="opencode-v2"]');
+  await page.waitFor('document.querySelector("[data-testid=provider-enabled][data-provider-id=opencode-v2]")?.checked === true');
   expect(await page.evaluate('document.querySelector("[data-testid=subscription-proxy-url]").value')).toBe('http://127.0.0.1:8787');
   await page.click('[data-testid="subscription-proxy-enabled"]');
   await page.type('[data-testid="subscription-proxy-url"]', dashboard);
@@ -56,6 +79,7 @@ test('disabled mode retains the native glance; Douane brings its quota bars and 
   expect(await page.evaluate('document.querySelector("[data-testid=provider-settings][data-provider-id=claude]").querySelectorAll("[data-testid=account-row], [data-testid=account-add], [data-testid=account-gateway] button").length')).toBe(0);
   await page.evaluate(`${gatewayRow}.scrollIntoView({ block: 'center' })`);
   await capture('boite-proxy-gateway-account-desktop.png');
+  await expectOpenCodeGateways('Douane');
 
   // Douane serves Grok too, by its id: its row reads ready through the gateway.
   await page.waitFor(`${grokRow}?.textContent.includes("Ready · via Douane")`);
@@ -65,6 +89,7 @@ test('disabled mode retains the native glance; Douane brings its quota bars and 
   // Limits shows Douane's own entries, grouped by provider, instead of its dashboard.
   await page.click('[data-testid="settings-tab-limits"]');
   await page.waitFor('document.querySelectorAll("[data-testid=gateway-quotas]").length === 3');
+  await expectNoNativeOpenCode();
   expect(await page.evaluate('document.querySelector("iframe[data-browser-id]") === null')).toBe(true);
   expect(await page.text('[data-testid=gateway-quotas][data-provider=antigravity]')).toContain('Antigravity · 10 accounts');
   await capture('boite-proxy-gateway-quotas-desktop.png');
@@ -95,6 +120,7 @@ test('disabled mode retains the native glance; Douane brings its quota bars and 
   // CLIProxyAPI does not serve Grok: its row is back on its own sign-in while Claude stays on the gateway.
   await page.waitFor('document.querySelector("[data-testid=provider-settings][data-provider-id=claude]")?.textContent.includes("via CLIProxyAPI")');
   expect(await page.evaluate(`${grokRow}.textContent.includes("via CLIProxyAPI")`)).toBe(false);
+  await expectOpenCodeGateways('CLIProxyAPI');
   await page.click('[data-testid="settings-back"]');
   await page.click('[data-testid="nav-limits"]');
   await page.waitFor('document.querySelector("[data-testid=subscription-proxy-dashboard-page]")');
@@ -103,13 +129,14 @@ test('disabled mode retains the native glance; Douane brings its quota bars and 
   await capture('boite-proxy-dashboard-desktop.png');
   expect(await page.evaluate('document.querySelector("iframe[data-browser-id]").getBoundingClientRect().width > 600')).toBe(true);
   await page.click('[data-testid="subscription-proxy-native"]');
-  await page.waitFor('document.querySelector("[data-testid=quota-monitor][data-account-id=a-opencode]")');
+  await page.waitFor('document.querySelector("[data-testid=quota-monitor][data-account-id=a-grok]")');
+  await expectNoNativeOpenCode();
   expect(await page.evaluate('document.querySelector("[data-testid=quota-monitor][data-account-id=a-claude-main]") === null')).toBe(true);
   expect(await page.evaluate('document.querySelector("iframe[data-browser-id]") === null')).toBe(true);
-  await page.click('[data-testid="quota-monitor"][data-account-id="a-opencode"]');
-  await page.waitFor('document.querySelector("[data-testid=quota-monitor][data-account-id=a-opencode]")?.checked === false');
-  await page.click('[data-testid="quota-monitor"][data-account-id="a-opencode"]');
-  await page.waitFor('document.querySelector("[data-testid=quota-monitor][data-account-id=a-opencode]")?.checked === true');
+  await page.click('[data-testid="quota-monitor"][data-account-id="a-grok"]');
+  await page.waitFor('document.querySelector("[data-testid=quota-monitor][data-account-id=a-grok]")?.checked === false');
+  await page.click('[data-testid="quota-monitor"][data-account-id="a-grok"]');
+  await page.waitFor('document.querySelector("[data-testid=quota-monitor][data-account-id=a-grok]")?.checked === true');
   await capture('boite-proxy-native-limits-desktop.png');
   await page.click('[data-testid="subscription-proxy-show-dashboard"]');
   await page.waitFor(`document.querySelector('iframe[data-browser-id]')?.src === ${JSON.stringify(`${dashboard}/management.html#/quota`)}`);
@@ -129,7 +156,8 @@ test('phone Limits opens the same gateway and disabling it restores the native p
   expect(await page.evaluate('document.querySelector("iframe[data-browser-id]").getBoundingClientRect().width <= 390')).toBe(true);
   await capture('boite-proxy-dashboard-phone.png');
   await page.click('[data-testid="subscription-proxy-native"]');
-  await page.waitFor('document.querySelector("[data-testid=quota-monitor][data-account-id=a-opencode]")');
+  await page.waitFor('document.querySelector("[data-testid=quota-monitor][data-account-id=a-grok]")');
+  await expectNoNativeOpenCode();
   expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
   expect(await page.evaluate('document.querySelector("[data-testid=subscription-proxy-show-dashboard]").getBoundingClientRect().top >= document.querySelector("[data-testid=settings] > header").getBoundingClientRect().bottom')).toBe(true);
   await capture('boite-proxy-native-limits-phone.png');
@@ -143,6 +171,16 @@ test('phone Limits opens the same gateway and disabling it restores the native p
   await page.waitFor('document.querySelector("[data-testid=subscription-proxy-dashboard-page]") === null');
   expect(await page.evaluate('document.querySelector("iframe[data-browser-id]") === null')).toBe(true);
   expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+  await page.click('[data-testid="mobile-settings-back"]');
+  await page.waitFor('document.querySelector("[data-testid=mobile-settings-home]")');
+  await page.click('[data-testid="settings-tab-limits"]');
+  await page.waitFor('document.querySelector("[data-testid=quota-monitor][data-account-id=a-opencode]")?.checked === true');
+  await page.waitFor('document.querySelector("[data-testid=quota-monitor][data-account-id=a-grok]")?.checked === true');
+  expect(await page.evaluate('document.querySelectorAll("[data-testid=quota-monitor][aria-label^=OpenCode]").length')).toBe(2);
+  expect(await page.evaluate('document.querySelector("[data-testid=subscription-proxy-dashboard-page]") === null')).toBe(true);
+  expect(await page.evaluate('document.querySelector("iframe[data-browser-id]") === null')).toBe(true);
+  expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+  await capture('boite-proxy-disabled-native-limits-phone.png');
   expect(page.errors()).toEqual([]);
 }, 30_000);
 

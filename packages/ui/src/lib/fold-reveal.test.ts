@@ -12,12 +12,13 @@ function opening() {
   const scroller = document.querySelector<HTMLElement>('.list')!;
   const section = document.querySelector('section')!;
   const header = document.querySelector<HTMLElement>('.header')!;
+  let height = 220;
   scroller.getBoundingClientRect = () => new DOMRect(0, 0, 300, 300);
   // The fold's bottom sits past the edge by what the list has not scrolled yet.
-  section.getBoundingClientRect = () => new DOMRect(0, 200 - scroller.scrollTop, 300, 220);
+  section.getBoundingClientRect = () => new DOMRect(0, 200 - scroller.scrollTop, 300, height);
   scroller.scrollTo = ((options: ScrollToOptions) => { scroller.scrollTop = options.top ?? 0; }) as typeof scroller.scrollTo;
-  const frame = () => { const pending = frames.splice(0); for (const callback of pending) callback(performance.now()); };
-  return { scroller, header, frame };
+  const frame = (time = performance.now()) => { const pending = frames.splice(0); for (const callback of pending) callback(time); };
+  return { scroller, header, frame, setHeight: (value: number) => { height = value; } };
 }
 
 test('a scrolling key or a press on the list hands it back to the user', () => {
@@ -40,4 +41,25 @@ test('a scrolling key or a press on the list hands it back to the user', () => {
   header.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
   frame();
   expect(scroller.scrollTop).toBe(120);
+});
+
+test('rows loaded after opening become visible unless the user takes over or closes the fold', async () => {
+  for (const cancel of ['none', 'pointer', 'close']) {
+    const { scroller, header, frame, setHeight } = opening();
+    setHeight(20);
+    let loaded!: () => void;
+    const ready = new Promise<void>(resolve => { loaded = resolve; });
+    const stop = revealFold(header, 700, ready);
+    // The rows arrive after the opening animation would already have ended.
+    frame(performance.now() + 1000);
+    expect(scroller.scrollTop).toBe(0);
+    if (cancel === 'pointer') header.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    if (cancel === 'close') stop();
+    setHeight(220);
+    loaded();
+    await ready;
+    frame();
+    expect(scroller.scrollTop).toBe(cancel === 'none' ? 120 : 0);
+    stop();
+  }
 });
