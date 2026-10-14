@@ -90,6 +90,12 @@ test('pasted images have linked references and a preview that leaves the compose
     await page.waitFor('document.querySelector("[data-testid=composer-image-preview]").textContent.includes("[Image 2]")');
     expect(await page.evaluate('document.querySelector("[data-testid=composer-image-preview] img").src')).not.toBe(firstImage);
     await page.click('[data-testid=composer-image-open]');
+    const tab = page;
+    const pointIn = (selector: string) => tab.evaluate<{ x: number; y: number }>(`(() => { const r = document.querySelector('${selector}').getBoundingClientRect(); return { x: r.x + 10, y: r.y + 10 }; })()`);
+    const press = async (point: { x: number; y: number }) => {
+      await tab.send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...point });
+      await tab.send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...point });
+    };
     for (const mobile of [false, true]) {
       if (mobile) await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
       await page.waitFor('document.querySelector("[data-testid=composer-input]").scrollHeight <= document.querySelector("[data-testid=composer-input]").clientHeight');
@@ -100,13 +106,9 @@ test('pasted images have linked references and a preview that leaves the compose
       expect(await page.evaluate('document.querySelectorAll("[data-testid=composer-attachment].highlighted").length')).toBe(1);
       expect(await page.evaluate('(() => { const preview = document.querySelector("[data-testid=composer-image-preview]").getBoundingClientRect(); const input = document.querySelector("[data-testid=composer-input]").getBoundingClientRect(); return preview.bottom <= input.top && input.bottom < innerHeight && preview.width <= innerWidth; })()')).toBe(true);
       await capture(`composer-images-${mobile ? 'phone' : 'desktop'}.png`);
-      const insidePoints = await page.evaluate<Array<{ x: number; y: number }>>(`Array.from(document.querySelectorAll('[data-testid=composer-input], [data-testid=composer-image-preview] img'), el => { const r = el.getBoundingClientRect(); return { x: r.x + 10, y: r.y + 10 }; })`);
-      expect(insidePoints).toHaveLength(2);
-      for (const inside of insidePoints) {
-        await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...inside });
-        await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...inside });
-        expect(await page.evaluate('document.querySelector("[data-testid=composer-image-preview]") !== null')).toBe(true);
-      }
+      // Typing room keeps the preview open.
+      await press(await pointIn('[data-testid=composer-input]'));
+      expect(await page.evaluate('document.querySelector("[data-testid=composer-image-preview]") !== null')).toBe(true);
       await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, x: mobile ? 190 : 800, y: 160 });
       await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, x: mobile ? 190 : 800, y: 160 });
       await page.waitFor('!document.querySelector("[data-testid=composer-image-preview]")');
@@ -114,6 +116,11 @@ test('pasted images have linked references and a preview that leaves the compose
       await page.click('[data-testid=composer-image-open]');
       await page.waitFor('document.querySelector("[data-testid=composer-image-preview]")');
     }
+    // The enlarged picture puts itself away on a click, the way its tile opened it.
+    await press(await pointIn('[data-testid=composer-image-preview] img'));
+    await page.waitFor('!document.querySelector("[data-testid=composer-image-preview]")');
+    await page.click('[data-testid=composer-image-open]');
+    await page.waitFor('document.querySelector("[data-testid=composer-image-preview]")');
     await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' });
     await page.waitFor('!document.querySelector("[data-testid=composer-image-preview]")');
     const point = await page.evaluate<{ x: number; y: number }>('(() => { const r = document.querySelector("[data-testid=composer-image-reference]").getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()');
