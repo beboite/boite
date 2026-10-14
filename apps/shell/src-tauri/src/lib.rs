@@ -13,6 +13,7 @@ mod browser;
 mod browser_control;
 mod channel;
 mod closing;
+mod dropped;
 mod failure;
 mod instance;
 mod local_core;
@@ -200,6 +201,8 @@ pub fn run() {
         local_files::open_local_file,
         local_files::open_chat_file,
         attachments::save_attachment,
+        dropped::dropped_entries,
+        dropped::dropped_file,
         attachment_download::save_attachment_url,
         window::shell_ready,
         window::show_window,
@@ -245,6 +248,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(app_updater)
         .manage(Reveal::default())
+        .manage(dropped::Dropped::default())
         .manage(whip::WhipState::default())
         .manage(quota_window::HoverState::default())
         .manage(CloseBehavior { enabled: AtomicBool::new(close_to_tray), path: preferences_path })
@@ -363,6 +367,11 @@ pub fn run() {
                         json!({ "scale": scale_factor, "width": new_inner_size.width, "height": new_inner_size.height }));
                 }
                 WindowEvent::ThemeChanged(_) => watchdog::saw(Seen::ThemeChanged),
+                // Kept before the page hears of the drag: only these paths can be read back.
+                WindowEvent::DragDrop(tauri::DragDropEvent::Enter { paths, .. } | tauri::DragDropEvent::Drop { paths, .. }) => {
+                    watchdog::saw(Seen::Other);
+                    closing.state::<dropped::Dropped>().remember(paths);
+                }
                 _ => watchdog::saw(Seen::Other),
             });
             phase("setup", setup);

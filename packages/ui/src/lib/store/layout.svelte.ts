@@ -10,6 +10,7 @@ import {
   type NotifyKind
 } from '../notify';
 import { experimentOn } from '../experiments.svelte';
+import type { DropKind } from '../native-drop';
 import { clampSidebar, SIDEBAR_DEFAULT, writeLayout } from '../prefs';
 import { rightPanel, type BoundPanel } from '../right-panel.svelte';
 import { strings } from '../strings';
@@ -38,8 +39,8 @@ export class Layout {
   /** The desktop sidebar's remembered folded state. */
   sidebarCollapsed = $state(false);
   sidebarWidth = $state(SIDEBAR_DEFAULT);
-  /** A folder is being dragged over the window. */
-  dropping = $state(false);
+  /** What a drag from the system over the window would do: add a project or attach files. */
+  dropping = $state<DropKind | false>(false);
   search = $state('');
   /** The agent an outside link asked the Agents page to open, with a fresh key for repeated asks; the page takes it once. */
   agentsTarget = $state<{ agentId: string; request: number; pane?: 'settings' } | null>(null);

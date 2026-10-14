@@ -6,6 +6,8 @@ commands.allow = [
   "open_local_file",
   "open_chat_file",
   "save_attachment",
+  "dropped_entries",
+  "dropped_file",
   "save_attachment_url",
   "shell_ready",
   "show_window",
