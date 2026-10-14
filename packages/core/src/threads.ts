@@ -388,7 +388,7 @@ export class ThreadStore {
 
   archive(threadId: ThreadId, archived: boolean, onlyIfIdle = false): ThreadSummary {
     this.require(threadId);
-    if (archived && onlyIfIdle) assertIdleFamily(this.core, threadId);
+    if (archived && onlyIfIdle) assertIdleFamily(this.core, threadId, 'explicit');
     if (archived) {
       // Temporary inference belongs to the visible family, including retained descendants.
       const family = this.core.journal.db.query('WITH RECURSIVE family(id) AS (SELECT ? UNION SELECT child.id FROM threads child JOIN family ON child.parent_thread_id = family.id) SELECT id FROM family').all(threadId) as { id: ThreadId }[];
