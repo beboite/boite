@@ -1,6 +1,7 @@
 import { startDiagnosticsReport } from './diagnostics-report';
 import type { Message, PermissionMode, ProjectId, ProviderId, ThreadId } from '@boite/contracts';
 import type { Client } from './client';
+import { wasClosed } from './rpc-error';
 import { readModelDefaults } from './model-defaults';
 import { modelFavorites } from './model-favorites.svelte';
 import { readLayout, readPrefs } from './prefs';
@@ -101,19 +102,21 @@ export class Store {
   readonly #ctx = new StoreContext(this);
   machineId = '';
   visible = $state(true);
-  #error = $state<{ message: string; severity: 'minor' | 'major' } | null>(null);
+  #error = $state<{ message: string; severity: 'minor' | 'major'; offline: boolean } | null>(null);
   errorThreadId = $state<string | null>(null);
 
   get error(): string | null { return this.#error?.message ?? null; }
   get errorSeverity(): 'minor' | 'major' { return this.#error?.severity ?? 'major'; }
+  /** The error only says the call found the machine not connected, which its status already shows. */
+  get errorOffline(): boolean { return this.#error?.offline ?? false; }
   set error(value: string | null) {
-    this.#error = value === null ? null : { message: value, severity: 'major' };
+    this.#error = value === null ? null : { message: value, severity: 'major', offline: false };
     this.errorThreadId = null;
   }
 
   /** Only explicitly minor action failures expire; unknown failures remain visible. */
   reportError(error: unknown, severity: 'minor' | 'major' = 'major'): void {
-    this.#error = { message: this.#ctx.reason(error), severity };
+    this.#error = { message: this.#ctx.reason(error), severity, offline: wasClosed(error) };
     this.errorThreadId = null;
   }
 

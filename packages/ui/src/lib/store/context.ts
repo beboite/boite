@@ -99,7 +99,7 @@ export class StoreContext {
   fail(error: unknown): void {
     if (error instanceof RpcFailure) console.error(`rpc ${error.code}: ${error.message}`, error);
     else console.error(error);
-    this.store.error = this.reason(error);
+    this.store.reportError(error);
   }
 
   currentNavigation(client: Client, generation: number): boolean {

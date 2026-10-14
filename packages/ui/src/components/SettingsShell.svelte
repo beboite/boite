@@ -312,7 +312,7 @@ import { workspace } from '../lib/workspace.svelte';
       {:else if tab === 'general'}
         <GeneralSettings {store} />
       {:else if tab === 'machines'}
-        <MachinesPage />
+        <MachinesPage {onopenthread} />
       {:else if tab === 'advanced'}
         <AdvancedSettings {store} />
       {:else if tab === 'appearance'}

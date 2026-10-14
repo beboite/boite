@@ -583,6 +583,7 @@ export const fr: Translation = {
     syncStages: { settings: 'les réglages', keybindings: 'les raccourcis clavier', brain: 'les options du brain' },
     syncProviders: "À connecter sur cette machine : {providers}. Une connexion ne quitte jamais la machine où elle a été faite.",
     syncOpenProviders: 'Ouvrir ses fournisseurs',
+    threadFailed: 'Une conversation a échoué ici : {thread}',
     agentLinkAddressRequired: 'Mettez les deux machines à jour pour utiliser le relais de l’app, ou définissez une adresse HTTPS joignable pour {machine} dans les réglages généraux.',
   },
   group: {
@@ -2520,6 +2521,8 @@ export const fr: Translation = {
     unpaired: "Cet appareil n'est pas encore dans le groupe de cette machine. Ajoutez-le avec le code d'Ajouter un appareil.",
     olderCore: "Boite sur {machine} est trop ancien pour cette action. Mettez-le à jour dans Réglages, Machines et mises à jour, puis réessayez.",
     olderCoreHere: "Cette machine a une version de Boite trop ancienne pour cette action. Mettez-la à jour dans Réglages, Machines et mises à jour, puis réessayez.",
+    notConnected: "{machine} n'est pas connectée. Boite se reconnecte tout seul dès qu'elle répond.",
+    notConnectedHere: "Cette machine n'est pas connectée. Boite se reconnecte tout seul dès qu'elle répond.",
     pairingLink: "Ce n'est pas un lien pour ajouter un appareil. Copiez le lien affiché par Ajouter un appareil sur l'autre machine ; il commence par http et contient ?grant=."
   },
 

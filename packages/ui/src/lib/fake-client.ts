@@ -16,6 +16,7 @@ import {
   type ThreadId,
 } from '@boite/contracts';
 import { RpcFailure, type CallOptions, type ClientState, type EventHandler, type ObservableClient } from './client';
+import { closedFailure } from './rpc-error';
 import { accountMethods } from './fake-client/accounts';
 import { activityMethods, pauseActivity } from './fake-client/activity';
 import { brainMethods } from './fake-client/brain';
@@ -249,7 +250,7 @@ export class FakeClient implements ObservableClient {
     const { bus } = this.#ctx;
     const generation = this.#transportGeneration;
     if (bus.state !== 'ready' && method !== 'hello') {
-      throw new RpcFailure({ code: RpcErrorCode.Internal, message: 'not connected' });
+      throw closedFailure();
     }
     await this.#ctx.tick();
     if (this.#ctx.rttMs > 0) await this.#ctx.leg();

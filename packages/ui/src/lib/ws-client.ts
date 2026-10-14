@@ -8,7 +8,7 @@ import {
   type RpcEventName, type RpcMethodName, type RpcParams, type RpcResult, type ThreadId
 } from '@boite/contracts';
 import type { CallOptions, ClientState, EventHandler, ObservableClient, Session, SocketLike, WsClientOptions } from './client';
-import { RpcFailure, droppedFailure, transportFailure, unansweredFailure } from './rpc-error';
+import { RpcFailure, closedFailure, droppedFailure, transportFailure, unansweredFailure } from './rpc-error';
 import { receiveFrame, type Pending } from './ws-client-frames';
 import {
   IDLE_PROBE_MS, PROBE_DEADLINE_MS, RESUME_PROBE_MS, MESSAGE_TOO_BIG,
@@ -180,7 +180,7 @@ export class WsClient implements ObservableClient {
     if (method === 'threads.unsubscribe') this.#subscribed.delete((params as RpcParams<'threads.unsubscribe'>).threadId);
     const socket = this.#socket;
     if (!socket || this.#state !== 'ready') {
-      return Promise.reject(transportFailure('not connected'));
+      return Promise.reject(closedFailure());
     }
     return this.#send(socket, method, params, options.onProgress).then((value) => {
       if (method === 'threads.subscribe') {

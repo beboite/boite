@@ -584,6 +584,7 @@ export const strings = {
     syncStages: { settings: 'the settings', keybindings: 'the keybindings', brain: 'the brain switches' },
     syncProviders: 'Still to sign in on this machine: {providers}. Sign-ins never leave the machine they were made on.',
     syncOpenProviders: 'Open its providers',
+    threadFailed: 'A thread failed here: {thread}',
     agentLinkAddressRequired: 'Update both machines to relay through the app, or set a reachable HTTPS address for {machine} in General settings.',
   },
   group: {
@@ -2645,6 +2646,8 @@ export const strings = {
     unpaired: 'This device is not in this machine\'s group yet. Add it with the code from Add a device.',
     olderCore: 'Boite on {machine} is too old for this. Update it in Settings, Machines and updates, then try again.',
     olderCoreHere: 'This machine runs a Boite too old for this. Update it in Settings, Machines and updates, then try again.',
+    notConnected: '{machine} is not connected. Boite reconnects by itself once it answers again.',
+    notConnectedHere: 'This machine is not connected. Boite reconnects by itself once it answers again.',
     pairingLink: 'That is not a link to add a device. Copy the link shown by Add a device on the other machine; it starts with http and contains ?grant=.'
   },
 
