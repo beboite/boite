@@ -322,7 +322,8 @@
   .media-fallback { min-height: 150px; max-width: 360px; display: flex; align-items: center; justify-content: center; flex-direction: column; padding: 20px; text-align: center; color: var(--color-muted-foreground); }
   .error { order: 2; padding: 0 12px 10px; }
   p { margin: 12px; font-size: var(--text-sm); overflow-wrap: anywhere; }
-  pre { margin: 0; padding: 12px; max-height: 420px; overflow: auto; font-family: var(--font-mono); font-size: var(--text-sm); }
+  /* Text belongs to the conversation's vertical scroll; long lines still scroll sideways. */
+  pre { margin: 0; padding: 12px; overflow-x: auto; font-family: var(--font-mono); font-size: var(--text-sm); }
   img, video { display: block; width: auto; height: auto; max-width: 100%; max-height: min(480px, 65vh); margin: auto; object-fit: contain; }
   img { min-height: 80px; }
   video { min-width: min(320px, 100%); }
