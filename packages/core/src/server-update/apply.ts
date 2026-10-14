@@ -1,7 +1,8 @@
-import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { unzipSync } from 'fflate';
+import { assertBackupSpace, pruneUpdateLeftovers } from './space.ts';
 import type { ServerUpdatePlan, ServerUpdatePlatform } from './types.ts';
 
 const pause = (ms: number) => new Promise<void>(done => setTimeout(done, ms));
@@ -43,6 +44,8 @@ export interface ApplyOptions {
   health?: (url: string) => Promise<{ ok: boolean; version: string; pid: number } | null>;
   pollMs?: number;
   healthTimeoutMs?: number;
+  /** Replaces the disk measurement; tests use it to simulate a full disk. */
+  checkSpace?: (dataDir: string, backupParent: string) => void;
 }
 
 /** Runs in a separate user-service cgroup after the core has closed admission and finished its work. */
@@ -65,6 +68,7 @@ export async function applyServerUpdate(file: string, platform: ServerUpdatePlat
   let installed = false;
   let previousSaved = false;
   let dataSaved = false;
+  let backupMade = false;
   let failed = false;
   const result = (error: string | null) => writeFileSync(join(plan.dataDir, 'server-update-result.json'), JSON.stringify({ version: plan.version, error, at: Date.now() }), { mode: 0o600 });
   try {
@@ -73,8 +77,11 @@ export async function applyServerUpdate(file: string, platform: ServerUpdatePlat
     await platform.control(plan.installation.service, 'stop');
     stopped = true;
     if (await platform.mainPid(plan.installation.service) !== 0) throw new Error('The server service did not stop');
+    // The core checked before admission, but the data may have grown while it waited for idle.
+    (options.checkSpace ?? assertBackupSpace)(plan.dataDir, dirname(root));
     // Never copy a live SQLite directory. The whole snapshot also keeps account and pairing state.
     mkdirSync(backup, { mode: 0o700 });
+    backupMade = true;
     cpSync(plan.dataDir, join(backup, 'data'), { recursive: true, dereference: false, errorOnExist: true, force: false });
     dataSaved = true;
     verifyStage(directory, plan);
@@ -98,9 +105,13 @@ export async function applyServerUpdate(file: string, platform: ServerUpdatePlat
     }
     if (!healthy) throw new Error('The updated server did not become healthy within 30 seconds');
     result(null);
+    // Cleanup never turns a healthy update into a rollback.
+    try { pruneUpdateLeftovers(dirname(root), plan.id, statSync(file).mtimeMs); } catch { /* retried after the next update */ }
   } catch (error) {
     failed = true;
     const reason = error instanceof Error ? error.message : String(error);
+    // A copy that stopped halfway restores nothing and would only hold the disk full.
+    if (backupMade && !dataSaved && !previousSaved) rmSync(backup, { recursive: true, force: true });
     if (stopped) {
       await platform.control(plan.installation.service, 'stop');
       if (installed) renameSync(root, join(directory, 'failed-installation'));
