@@ -275,6 +275,9 @@ jobs:
             # The Intel shell and its sidecar, run under Rosetta by the smoke test below.
             lipo -archs "$RUNNER_TEMP/Boite.app/Contents/MacOS/boite-shell" | grep -qx x86_64
             lipo -archs "$RUNNER_TEMP/Boite.app/Contents/MacOS/boite-core" | grep -qx x86_64
+            # Rosetta translates both on first start on a fresh runner; the
+            # 30 s native budget expired on about half of the 2026-10-13 runs.
+            export BOITE_SMOKE_STARTUP_SECONDS=90
           fi
           bun scripts/ci/desktop-smoke.ts "$RUNNER_TEMP/Boite.app/Contents/MacOS/boite-shell"
       - name: Collect release bundles

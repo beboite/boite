@@ -8,7 +8,15 @@ export interface CoreEndpoint {
 
 export interface EndpointWaitOptions {
   deadline: number;
+  /** The budget the deadline was built from, named in the timeout. */
+  seconds: number;
   exitCode: () => number | null;
+}
+
+/** The startup budget: `BOITE_SMOKE_STARTUP_SECONDS` when it is a positive number, else 30. */
+export function startupSeconds(value: string | undefined): number {
+  const seconds = Number(value);
+  return Number.isFinite(seconds) && seconds > 0 ? seconds : 30;
 }
 
 function isCoreEndpoint(value: unknown): value is CoreEndpoint {
@@ -27,7 +35,7 @@ export async function waitForCoreEndpoint(file: string, options: EndpointWaitOpt
   while (true) {
     const exitCode = options.exitCode();
     if (exitCode !== null) throw new Error(`Shell exited with ${exitCode}`);
-    if (Date.now() > options.deadline) throw new Error('Installed shell did not start its core within 30 seconds');
+    if (Date.now() > options.deadline) throw new Error(`Installed shell did not start its core within ${options.seconds} seconds`);
     try {
       const endpoint: unknown = JSON.parse(readFileSync(file, 'utf8'));
       if (isCoreEndpoint(endpoint)) return endpoint;
