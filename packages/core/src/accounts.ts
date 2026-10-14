@@ -466,7 +466,7 @@ export class AccountStore {
   }
 
   /**
-   * The login command typed into a shell the user drives, for a CLI whose
+   * The login command in a terminal the user drives, for a CLI whose
    * sign-in is a menu a pipe cannot answer. The shell runs with the account's
    * environment, in its directory. The default account is allowed here: it is
    * the user's own CLI in a terminal they see and type into, which is what the

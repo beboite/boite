@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import {
-  WORKFLOW_LIMITS, WorkflowPlanError, checkPlan, checkSteps, conditionHolds, extractJson, itemLabel, renderTask,
+  WORKFLOW_LIMITS, checkPlan, checkSteps, conditionHolds, extractJson, itemLabel, renderTask,
   resolvePath, shapeMismatch, workflowLevels,
 } from '@boite/contracts';
 import type {
@@ -12,10 +12,12 @@ import { invalidParams, messageOf, refused } from './errors.ts';
 import { checkContext } from './context-mode.ts';
 import { newId } from './ids.ts';
 import { assertDriverRunnable } from './drivers/index.ts';
-import type { RpcContext } from './router.ts';
-import type { ProviderProbe } from './providers/probe.ts';
 import type { ChildRoute } from './delegation/routes.ts';
 import { WorkflowLog } from './workflow-log.ts';
+import { listTemplates, removeTemplate, saveTemplate } from './workflows/templates.ts';
+import { planError, text } from './workflows/validation.ts';
+
+export { registerWorkflowMethods } from './workflows/register.ts';
 
 interface DataRow { data: string }
 interface StepRow { thread_id: string; run_id: string; step_key: string }
@@ -30,11 +32,6 @@ const ended = (status: WorkflowStepStatus) => status === 'done' || status === 'f
 const broken = (status: WorkflowStepStatus) => status === 'failed' || status === 'stopped';
 const NOT_STARTED = 'Not started: another step of the run failed';
 
-function text(value: unknown, field: string, max: number): string {
-  if (typeof value !== 'string' || !value.trim() || value.length > max) throw invalidParams(`${field}: expected 1 to ${max} characters`);
-  return value;
-}
-
 function clip(value: string, max: number): string {
   return value.length > max ? `${value.slice(0, Math.max(0, max - 40))}\n[Truncated; the step's conversation has the rest.]` : value;
 }
@@ -43,15 +40,6 @@ function describe(value: unknown): string {
   if (value === null || value === undefined) return 'empty';
   if (typeof value === 'string') return `the text ${JSON.stringify(clip(value, 40))}`;
   return typeof value === 'object' ? 'an object' : `the ${typeof value} ${String(value)}`;
-}
-
-function planError<T>(run: () => T): T {
-  try {
-    return run();
-  } catch (error) {
-    if (error instanceof WorkflowPlanError) throw invalidParams(error.message);
-    throw error;
-  }
 }
 
 /**
@@ -744,62 +732,19 @@ export class Workflows {
   // -- templates -----------------------------------------------------------------
 
   templates(threadId: string): WorkflowTemplate[] {
-    const root = this.rootOf(threadId);
-    return (this.core.journal.db.query('SELECT data FROM workflow_templates WHERE project_id IS ? ORDER BY name').all(root.projectId) as DataRow[]).map(row => JSON.parse(row.data) as WorkflowTemplate);
+    return listTemplates(this.core, this.rootOf(threadId));
   }
 
   saveTemplate(params: RpcParams<'workflows.templates.save'>, principal: Principal): WorkflowTemplate {
-    const root = this.rootOf(params.threadId);
-    const name = text(params.name, 'name', 80).trim();
-    // Profiles are checked when a run starts: a template outlives today's routes.
-    const named = Array.isArray((params.plan as { steps?: unknown } | null)?.steps) ? (params.plan.steps as { profile?: unknown }[]).map(s => String(s?.profile ?? '')) : [];
-    const { plan } = planError(() => checkPlan(params.plan, { profiles: named }));
-    const now = Date.now();
-    const byId = params.templateId === undefined ? null : this.core.journal.db.query('SELECT data FROM workflow_templates WHERE id = ? AND project_id IS ?').get(params.templateId, root.projectId) as DataRow | null;
-    if (params.templateId !== undefined && !byId) throw invalidParams(`templateId: no template ${params.templateId} in this project`);
-    const byName = byId ?? this.core.journal.db.query('SELECT data FROM workflow_templates WHERE name = ? AND project_id IS ?').get(name, root.projectId) as DataRow | null;
-    const previous = byName ? JSON.parse(byName.data) as WorkflowTemplate : null;
-    // The owner runs a template by its name: an agent adds plans, it never swaps one under that name.
-    if (previous && principal === 'agent') throw refused(`a template named "${previous.name}" already exists in this project; save the plan under a new name`);
-    const template: WorkflowTemplate = { id: previous?.id ?? newId('wft_'), projectId: root.projectId, name, plan: { ...plan, name }, createdAt: previous?.createdAt ?? now, updatedAt: now };
-    this.core.journal.append({ type: 'workflow.template', threadId: root.id, version: 1, payload: { id: template.id, name } }, db => {
-      db.query('INSERT OR REPLACE INTO workflow_templates VALUES (?, ?, ?, ?, ?, ?)').run(template.id, template.projectId, template.name, template.createdAt, template.updatedAt, JSON.stringify(template));
-    });
-    this.core.bus.emit('workflows.changed', { threadId: root.id, runId: '' });
-    return template;
+    return saveTemplate(this.core, this.rootOf(params.threadId), params, principal);
   }
 
   removeTemplate(threadId: string, templateId: string): { removed: boolean } {
-    const root = this.rootOf(threadId);
-    const removed = this.core.journal.append({ type: 'workflow.template.removed', threadId: root.id, version: 1, payload: { id: templateId } }, db =>
-      db.query('DELETE FROM workflow_templates WHERE id = ? AND project_id IS ?').run(templateId, root.projectId).changes > 0);
-    this.core.bus.emit('workflows.changed', { threadId: root.id, runId: '' });
-    return { removed };
+    return removeTemplate(this.core, this.rootOf(threadId), templateId);
   }
 
   beginClose(): void {
     this.closed = true;
     this.off();
   }
-}
-
-/** Registered beside delegation: the same principals, the core checks the thread. */
-/** The model names a plan's steps carry, so their providers' lists are read before the checks. */
-function stepModels(steps: unknown): (string | undefined)[] {
-  return Array.isArray(steps) ? steps.map(step => typeof (step as { model?: unknown } | null)?.model === 'string' ? (step as { model: string }).model : undefined) : [];
-}
-
-export function registerWorkflowMethods(core: Core, probe: ProviderProbe): void {
-  const principal = (ctx: RpcContext) => ctx.connection.identity.principal;
-  const routes = (threadId: string, steps: unknown) => core.delegation.prepareRoutes(threadId, probe, stepModels(steps));
-  core.router.register('workflows.list', params => core.workflows.list(params.threadId));
-  core.router.register('workflows.get', params => core.workflows.get(params.threadId, params.runId));
-  core.router.register('workflows.check', async params => { await routes(params.threadId, params.plan?.steps); return core.workflows.check(params.threadId, params.plan); });
-  core.router.register('workflows.start', async (params, ctx) => { await routes(params.threadId, params.plan?.steps); return core.workflows.start(params, principal(ctx) === 'agent' ? 'agent' : 'user'); });
-  core.router.register('workflows.extend', async (params, ctx) => { await routes(params.threadId, params.steps); return core.workflows.extend(params, principal(ctx)); });
-  core.router.register('workflows.control', (params, ctx) => core.workflows.control(params, principal(ctx)));
-  core.router.register('workflows.output', params => core.workflows.output(params.threadId, params.value));
-  core.router.register('workflows.templates.list', params => core.workflows.templates(params.threadId));
-  core.router.register('workflows.templates.save', (params, ctx) => core.workflows.saveTemplate(params, principal(ctx)));
-  core.router.register('workflows.templates.remove', params => core.workflows.removeTemplate(params.threadId, params.templateId));
 }

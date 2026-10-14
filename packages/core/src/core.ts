@@ -84,6 +84,8 @@ export interface CoreOptions {
   onShutdown?: () => void;
   /** Whether the data directory is the channel's default or one a flag or BOITE_DATA_DIR named; the log never holds the path. */
   dataDirKind?: 'default' | 'custom';
+  /** How often a resident core runs its retention passes; a test shortens the minute. */
+  retentionPassMs?: number;
 }
 
 /**
@@ -342,7 +344,7 @@ export class Core {
     this.procs.applySettings(this.settings.get());
     this.accounts.ensureDefaults();
     this.accounts.recheckSignedOut();
-    this.#stopDeletionRetention = scheduleThreadDeletionRetention(this);
+    this.#stopDeletionRetention = scheduleThreadDeletionRetention(this, options.retentionPassMs);
     this.#stopDoneRetention = scheduleDoneRetention(this);
     // The journal is open and no socket is accepted yet: whatever a dead core
     // left running or queued is closed here, or nothing ever would.

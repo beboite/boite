@@ -1,6 +1,6 @@
 import { secureId } from './secure-id';
 import { errorText } from './errors';
-import { RpcErrorCode, providerEnabled, type Account, type AccountQuota, type ProviderSummary, type SubscriptionProxyQuotas } from '@boite/contracts';
+import { RpcErrorCode, providerEnabled, type Account, type AccountQuota, type CoreInfo, type ProviderSummary, type SubscriptionProxyQuotas } from '@boite/contracts';
 import { RpcFailure, type Client } from './client';
 import { fill, strings } from './strings';
 
@@ -240,7 +240,10 @@ export function gatewayReader(key: string): GatewayReader {
 const readers = new Map<string, QuotaReader>();
 
 /** One reader per core, so a page opened again starts from what the last one saw. */
-export function quotaReader(key: string): QuotaReader {
+export function quotaReader(endpointUrl: string, core?: Pick<CoreInfo, 'dataDir' | 'coreId'> | null): QuotaReader {
+  // An address can belong to a different installation after reconnecting.
+  // URL-only rows from older clients have no core identity, so leave them unread.
+  const key = JSON.stringify([endpointUrl, core?.dataDir, core?.coreId]);
   let reader = readers.get(key);
   if (!reader) {
     reader = new QuotaReader(key);

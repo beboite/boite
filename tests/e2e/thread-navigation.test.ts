@@ -20,19 +20,71 @@ async function capture(page: BrowserPage, name: string) {
 }
 
 async function drag(page: BrowserPage, selector: string) {
-  const box = await page.evaluate<{ x: number; y: number; width: number }>(`(() => {
-    const e = document.querySelector(${JSON.stringify(selector)}); e.scrollIntoView({block:'nearest'});
-    const range = document.createRange(); range.selectNodeContents(e);
-    const r = e.matches('p') ? range.getClientRects()[0] : e.getBoundingClientRect(); return { x: r.left + 5, y: r.top + r.height / 2, width: r.width - 10 };
+  await page.evaluate(`(() => {
+    const events = [], listeners = [];
+    const target = element => element instanceof Element ? { tag: element.tagName, testId: element.getAttribute('data-testid') } : null;
+    const record = event => {
+      if (events.length === 64) events.shift();
+      events.push({ type: event.type, at: performance.now(), x: event.clientX, y: event.clientY, buttons: event.buttons,
+        target: target(event.target), focus: document.hasFocus(), active: target(document.activeElement),
+        selectionLength: window.getSelection()?.toString().length ?? 0 });
+    };
+    for (const type of ['mousedown', 'mousemove', 'mouseup', 'focus', 'blur', 'focusin', 'focusout', 'selectionchange']) {
+      window.addEventListener(type, record, true); listeners.push(type);
+    }
+    window.__boiteDragTrace = { events, cleanup: () => listeners.forEach(type => window.removeEventListener(type, record, true)) };
   })()`);
-  await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: box.x, y: box.y });
-  // The first native move activates the headless page asynchronously.
-  await page.waitFor('document.hasFocus()');
-  await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: box.x, y: box.y, button: 'left', buttons: 1, clickCount: 1 });
-  for (let step = 1; step <= 5; step++) {
-    await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: box.x + Math.min(100, box.width) * step / 5, y: box.y, button: 'left', buttons: 1 });
+  let held = false;
+  let geometry: { x: number; y: number; endX: number; paragraph: boolean } | undefined;
+  try {
+    const initial = await page.evaluate<{ x: number; y: number }>(`(() => {
+      const element = document.querySelector(${JSON.stringify(selector)});
+      element.scrollIntoView({ block: 'nearest' });
+      const box = element.getBoundingClientRect();
+      return { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+    })()`);
+    await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...initial });
+    // Native activation and rendering finish before the gesture's final hitboxes are measured.
+    await page.waitFor('document.hasFocus()');
+    await page.evaluate('document.fonts.ready.then(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))');
+    geometry = await page.evaluate<typeof geometry>(`(() => {
+      const element = document.querySelector(${JSON.stringify(selector)});
+      const text = element.querySelector('.ui-label') ?? element;
+      const box = text.getBoundingClientRect(), paragraph = element.matches('p');
+      const lineHeight = parseFloat(getComputedStyle(text).lineHeight);
+      const x = box.left + 5, y = box.top + (paragraph ? Math.min(box.height / 2, lineHeight / 2) : box.height / 2);
+      const endX = Math.min(x + 100, box.right - 5);
+      const hit = at => {
+        const target = document.elementFromPoint(at, y), caret = document.caretRangeFromPoint(at, y);
+        return { intended: target === element || element.contains(target), text: caret?.startContainer.nodeType === Node.TEXT_NODE && element.contains(caret.startContainer),
+          tag: target?.tagName, testId: target?.getAttribute('data-testid'), caretOffset: caret?.startOffset };
+      };
+      const points = { start: hit(x), end: hit(endX) };
+      window.__boiteDragTrace.geometry = { x, y, endX, width: box.width, height: box.height, lineHeight, points };
+      if (!Number.isFinite(y) || endX <= x || !points.start.intended || !points.end.intended || !points.start.text || !points.end.text)
+        throw new Error('native drag points do not hit the intended text');
+      return { x, y, endX, paragraph };
+    })()`);
+    if (!geometry) throw new Error('native drag geometry is missing');
+    const { x, y, endX, paragraph } = geometry;
+    await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+    await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
+    held = true;
+    for (let step = 1; step <= 5; step++) {
+      await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: x + (endX - x) * step / 5, y, button: 'left', buttons: 1 });
+    }
+    if (paragraph) await page.waitFor('window.getSelection().toString().length > 0');
+    await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: endX, y, button: 'left', buttons: 0, clickCount: 1 });
+    held = false;
+    console.info('Native drag:', JSON.stringify(await page.evaluate(`({ selector: ${JSON.stringify(selector)}, geometry: window.__boiteDragTrace.geometry, selectionLength: window.getSelection()?.toString().length ?? 0 })`)));
+  } catch (error) {
+    const trace = await page.evaluate('({ geometry: window.__boiteDragTrace?.geometry, events: window.__boiteDragTrace?.events })').catch(() => 'drag diagnostics unavailable');
+    console.error('Native drag failure:', JSON.stringify({ selector, trace }));
+    throw error;
+  } finally {
+    if (held && geometry) await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: geometry.endX, y: geometry.y, button: 'left', buttons: 0, clickCount: 1 }).catch(() => {});
+    await page.evaluate('window.__boiteDragTrace?.cleanup(); delete window.__boiteDragTrace').catch(() => {});
   }
-  await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: box.x + Math.min(100, box.width), y: box.y, button: 'left', buttons: 0, clickCount: 1 });
 }
 
 test('closing an image and dragging chat text or a thread link preserves the conversation', async () => {

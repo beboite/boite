@@ -38,6 +38,48 @@ export class ConnectionGroup {
     void this.merge();
   }
 
+  #adoptMember(group: Group | null, target: Machine, groupId: string, alreadyGrouped = false): boolean {
+    const member = group?.cores.find(core => core.coreId === group.self);
+    if (!member) return false;
+    if (!alreadyGrouped || target.coreId !== member.coreId || target.groupId !== groupId || target.epoch !== member.epoch) {
+      this.workspace.markGrouped(target, groupId, member);
+    }
+    this.#remember(target);
+    return true;
+  }
+
+  async #inviteOne(target: Machine, remote: Client, source: Machine, client: Client, groupId: string,
+    current: (machine: Machine, connection: Client) => boolean): Promise<boolean> {
+    this.#attempted.add(remote);
+    try {
+      const { invite } = await client.call('group.invite', {});
+      if (!current(source, client) || !current(target, remote) || source.store.group?.id !== groupId) return false;
+      const joined = await remote.call('group.join', { invite });
+      if (!current(source, client) || !current(target, remote)) return false;
+      await Promise.all([source.store.loadGroup(), target.store.loadGroup()]);
+      const group = groupOf(target);
+      if (group?.id === groupId && joined.id === groupId && source.store.group?.id === groupId && current(source, client) && current(target, remote)
+        && this.#adoptMember(group, target, groupId)) {
+        this.errors = this.errors.filter(error => !error.startsWith(`${target.label}:`));
+      }
+    } catch (error) {
+      // A lost join reply may already have admitted the target. Ask before allowing another attempt.
+      try {
+        const group = await remote.call('group.get', {});
+        if (!current(source, client) || !current(target, remote) || source.store.group?.id !== groupId) return false;
+        target.store.group = group;
+        target.store.groupKnown = true;
+        if (group === null) this.#attempted.delete(remote);
+        if (group?.id === groupId && this.#adoptMember(group, target, groupId)) {
+          this.errors = this.errors.filter(error => !error.startsWith(`${target.label}:`));
+          return true;
+        }
+      } catch { /* Unknown outcome: keep duplicate-join protection until an explicit retry. */ }
+      this.errors = [...this.errors, `${target.label}: ${errorText(error)}`];
+    }
+    return true;
+  }
+
   async merge(): Promise<void> {
     if (this.#stopped) return;
     if (this.busy) { this.#pending = true; return; }
@@ -72,14 +114,7 @@ export class ConnectionGroup {
         if (target === source || !remote || !current(source, client) || !current(target, remote)) continue;
         if (target.store.group?.id === groupId) {
           // Admission may have completed before this page recorded it.
-          const group = groupOf(target);
-          const member = group?.cores.find(core => core.coreId === group.self);
-          if (member) {
-            if (target.coreId !== member.coreId || target.groupId !== groupId || target.epoch !== member.epoch) {
-              this.workspace.markGrouped(target, groupId, member);
-            }
-            this.#remember(target);
-          }
+          this.#adoptMember(groupOf(target), target, groupId, true);
           continue;
         }
         if (target.store.group !== null) {
@@ -88,38 +123,7 @@ export class ConnectionGroup {
           continue;
         }
         if (this.#attempted.has(remote) || this.#completed.has(target.id)) continue;
-        this.#attempted.add(remote);
-        try {
-          const { invite } = await client.call('group.invite', {});
-          if (!current(source, client) || !current(target, remote) || source.store.group?.id !== groupId) return;
-          const joined = await remote.call('group.join', { invite });
-          if (!current(source, client) || !current(target, remote)) return;
-          await Promise.all([source.store.loadGroup(), target.store.loadGroup()]);
-          const group = groupOf(target);
-          const member = group?.cores.find(core => core.coreId === group.self);
-          if (group?.id === groupId && joined.id === groupId && member && source.store.group?.id === groupId && current(source, client) && current(target, remote)) {
-            this.workspace.markGrouped(target, groupId, member);
-            this.#remember(target);
-            this.errors = this.errors.filter(error => !error.startsWith(`${target.label}:`));
-          }
-        } catch (error) {
-          // A lost join reply may already have admitted the target. Ask before allowing another attempt.
-          try {
-            const group = await remote.call('group.get', {});
-            if (!current(source, client) || !current(target, remote) || source.store.group?.id !== groupId) return;
-            target.store.group = group;
-            target.store.groupKnown = true;
-            if (group === null) this.#attempted.delete(remote);
-            const member = group?.cores.find(core => core.coreId === group.self);
-            if (group?.id === groupId && member) {
-              this.workspace.markGrouped(target, groupId, member);
-              this.#remember(target);
-              this.errors = this.errors.filter(error => !error.startsWith(`${target.label}:`));
-              continue;
-            }
-          } catch { /* Unknown outcome: keep duplicate-join protection until an explicit retry. */ }
-          this.errors = [...this.errors, `${target.label}: ${errorText(error)}`];
-        }
+        if (!await this.#inviteOne(target, remote, source, client, groupId, current)) return;
       }
     } catch (error) {
       this.errors = [...this.errors, `${source.label}: ${errorText(error)}`];

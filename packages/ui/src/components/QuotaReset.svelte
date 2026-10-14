@@ -36,7 +36,7 @@
     if (busy || disabled || !available || !client || !store.owner || store.connection !== 'ready') return;
     const accountId = row.accountId;
     const identity = store.accounts?.find(account => account.id === accountId)?.identity;
-    const reader = quotaReader(store.endpointUrl ?? 'here');
+    const reader = quotaReader(store.endpointUrl ?? 'here', store.core);
     busy = true;
     try {
       const accepted = confirm.ask({

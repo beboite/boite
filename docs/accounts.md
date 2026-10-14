@@ -248,8 +248,11 @@ the same one as the thread terminal ([terminal.md](terminal.md)):
    `login:<accountId>`, with the account's environment and the isolation
    directory (or the home directory for the default account) as its working
    directory. Calling it again attaches to the running one.
-2. Once the prompt goes quiet, the core types the login command into it, as the
-   user would have: `& 'C:\path\opencode.exe' auth login` in PowerShell.
+2. On Windows, once the prompt goes quiet, the core types the login command
+   into it, as the user would have: `& 'C:\path\opencode.exe' auth login` in
+   PowerShell. On Linux and macOS, `/bin/sh -c` runs the command with its
+   arguments as given, then `exec`s the user's shell: a profile still reading
+   its input cannot swallow typed keys.
 3. The Providers page draws the shell under the provider's row. The user
    answers the CLI there and closes the terminal once signed in, or types `exit`.
 4. When the shell exits, the core rechecks the account and `accounts.updated`

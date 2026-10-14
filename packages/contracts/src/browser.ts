@@ -215,70 +215,117 @@ export function browserCookiesError(cookies: unknown): string | null {
   return null;
 }
 
+type BrowserActionChecks = { [Kind in BrowserAction['kind']]: (action: BrowserAction & { kind: Kind }) => string | null };
+const text = (value: unknown, max: number) => typeof value === 'string' && value.length > 0 && value.length <= max;
+
+function checkRecordingStart(action: BrowserAction & { kind: 'recording-start' }): string | null {
+  if (action.indicators !== undefined && typeof action.indicators !== 'boolean') return 'recording indicators must be a boolean';
+  if (action.frameRate !== undefined && !BROWSER_RECORDING_FRAME_RATES.includes(action.frameRate)) return `recording frameRate must be ${BROWSER_RECORDING_FRAME_RATES.join(' or ')}`;
+  return action.codec === undefined || BROWSER_RECORDING_CODECS.includes(action.codec) ? null : `recording codec must be ${BROWSER_RECORDING_CODECS.join(', ')}`;
+}
+
+function checkRecording(action: BrowserAction & { kind: 'recording-discard' | 'recording-read' }): string | null {
+  if (!text(action.recordingId, 80) || !/^[a-zA-Z0-9-]+$/.test(action.recordingId)) return 'recordingId must come from recording-stop';
+  if (action.kind === 'recording-discard') return null;
+  if (!Number.isSafeInteger(action.offset) || action.offset < 0 || action.offset > BROWSER_RECORDING_MAX_BYTES) return `recording offset must be an integer within ${BROWSER_RECORDING_MAX_BYTES / 1024 / 1024} MB`;
+  return action.maxBytes === undefined || (Number.isSafeInteger(action.maxBytes) && action.maxBytes > 0 && action.maxBytes <= BROWSER_RECORDING_CHUNK_BYTES) ? null : `recording maxBytes must be an integer from 1 to ${BROWSER_RECORDING_CHUNK_BYTES}`;
+}
+
+function checkNoInput(): string | null {
+  return null;
+}
+
+function checkSnapshot(action: BrowserAction & { kind: 'snapshot' }): string | null {
+  if (action.depth !== undefined && !(Number.isInteger(action.depth) && action.depth >= 1 && action.depth <= 50)) return 'snapshot depth must be an integer from 1 to 50';
+  if (action.selector !== undefined && !text(action.selector, 4000)) return 'snapshot selector must contain 1 to 4000 characters';
+  return [action.interactive, action.compact, action.urls].every(flag => flag === undefined || typeof flag === 'boolean') ? null : 'snapshot flags must be booleans';
+}
+
+function checkOpenUrl(action: BrowserAction & { kind: 'open' | 'navigate' }): string | null {
+  if (action.kind === 'open' && action.profile !== undefined && !text(action.profile, BROWSER_PROFILE_NAME_MAX)) return `browser profile must be a profile name or id of 1 to ${BROWSER_PROFILE_NAME_MAX} characters, default or private`;
+  if (action.kind === 'open' && action.reuse !== undefined && typeof action.reuse !== 'boolean') return 'browser open reuse must be a boolean';
+  if (text(action.url, 16384) && /^https?:\/\/[^\s/?#]+(?:[/?#][^\s]*)?$/i.test(action.url)) return null;
+  return 'browser url must be an absolute HTTP or HTTPS address';
+}
+
+function checkSelector(action: BrowserAction & { kind: 'hover' | 'focus' | 'check' | 'uncheck' | 'scrollintoview' }): string | null {
+  return text(action.selector, 4000) ? null : 'browser selector must contain 1 to 4000 characters';
+}
+
+function checkText(action: BrowserAction & { kind: 'fill' | 'type' }): string | null {
+  return text(action.selector, 4000) && typeof action.text === 'string' && action.text.length <= 20000 ? null : `browser ${action.kind} needs a selector and at most 20000 text characters`;
+}
+
+function checkGet(action: BrowserAction & { kind: 'get' }): string | null {
+  if (!BROWSER_GET_PROPERTIES.includes(action.what)) return `browser get reads ${BROWSER_GET_PROPERTIES.join(', ')}`;
+  if (action.selector !== undefined && !text(action.selector, 4000)) return 'browser selector must contain 1 to 4000 characters';
+  if ((action.what === 'count' || action.what === 'visible' || action.what === 'enabled' || action.what === 'checked' || action.what === 'box') && action.selector === undefined) return `browser get ${action.what} needs a selector`;
+  if (action.what === 'attr' && !text(action.name, 200)) return 'browser get attr needs a selector and an attribute name';
+  return null;
+}
+
+function checkWait(action: BrowserAction & { kind: 'wait' }): string | null {
+  const conditions = [action.selector, action.text, action.url, action.fn, action.load].filter(value => value !== undefined);
+  if (action.timeoutMs !== undefined && !(Number.isInteger(action.timeoutMs) && action.timeoutMs >= 100 && action.timeoutMs <= BROWSER_WAIT_MAX_MS)) return `browser wait timeout must be an integer from 100 to ${BROWSER_WAIT_MAX_MS} ms`;
+  if (action.ms !== undefined) return conditions.length === 0 && Number.isInteger(action.ms) && action.ms >= 0 && action.ms <= BROWSER_WAIT_MAX_MS ? null : `browser wait takes a delay from 0 to ${BROWSER_WAIT_MAX_MS} ms, or one condition`;
+  if (conditions.length !== 1) return 'browser wait needs exactly one condition: a selector, --text, --url, --fn or --load';
+  if (action.load !== undefined && !['load', 'domcontentloaded', 'networkidle'].includes(action.load)) return 'browser wait --load must be load, domcontentloaded or networkidle';
+  if (action.fn !== undefined) return text(action.fn, 32000) ? null : 'browser wait --fn must contain 1 to 32000 characters';
+  return [action.selector, action.text, action.url].every(value => value === undefined || text(value, 4000)) ? null : 'browser wait condition must contain 1 to 4000 characters';
+}
+
+const ACTION_CHECKS: BrowserActionChecks = {
+  'diagnostics': action => action.clear === undefined || typeof action.clear === 'boolean' ? null : 'diagnostics clear must be a boolean',
+  'preset': action => Object.hasOwn(BROWSER_PRESETS, action.preset) && (action.orientation === undefined || ['portrait', 'landscape'].includes(action.orientation)) ? null : 'unknown browser preset or orientation',
+  'appearance': action => ['light', 'dark', 'system'].includes(action.colorScheme) ? null : 'appearance must be light, dark or system',
+  'recording-start': checkRecordingStart,
+  'recording-stop': checkNoInput,
+  'recording-discard': checkRecording,
+  'recording-read': checkRecording,
+  'status': checkNoInput,
+  'profiles': checkNoInput,
+  'screenshot': checkNoInput,
+  'close': checkNoInput,
+  'reset-viewport': checkNoInput,
+  'activate': checkNoInput,
+  'snapshot': checkSnapshot,
+  'history': action => ['back', 'forward', 'reload'].includes(action.direction) ? null : 'history direction must be back, forward or reload',
+  'open': checkOpenUrl,
+  'navigate': checkOpenUrl,
+  'click': action => {
+    if (action.count !== undefined && action.count !== 1 && action.count !== 2) return 'browser click count must be 1 or 2';
+    return text(action.selector, 4000) ? null : 'browser selector must contain 1 to 4000 characters';
+  },
+  'hover': checkSelector,
+  'focus': checkSelector,
+  'check': checkSelector,
+  'uncheck': checkSelector,
+  'scrollintoview': checkSelector,
+  'fill': checkText,
+  'type': checkText,
+  'select': action => text(action.selector, 4000) && Array.isArray(action.values) && action.values.length >= 1 && action.values.length <= 50 && action.values.every(value => typeof value === 'string' && value.length <= 1000) ? null : 'browser select needs a selector and 1 to 50 values',
+  'evaluate': action => text(action.expression, 32000) ? null : 'browser expression must contain 1 to 32000 characters',
+  'press': action => typeof action.key === 'string' && KEY_PATTERN.test(action.key) ? null : `unsupported browser key ${JSON.stringify(action.key)}: a character, F1 to F12 or ${BROWSER_KEYS.join(', ')}, after optional Control+, Alt+, Shift+ or Meta+`,
+  'scroll': action => {
+    if (action.selector !== undefined && !text(action.selector, 4000)) return 'browser selector must contain 1 to 4000 characters';
+    return [action.x, action.y].every(n => Number.isFinite(n) && Math.abs(n) <= 100000) ? null : 'browser scroll coordinates must be finite and within 100000 pixels';
+  },
+  'get': checkGet,
+  'wait': checkWait,
+  'dialog': action => {
+    if (!['accept', 'dismiss', 'status'].includes(action.decision)) return 'browser dialog must be accept, dismiss or status';
+    return action.text === undefined || (action.decision === 'accept' && typeof action.text === 'string' && action.text.length <= 20000) ? null : 'browser dialog text goes with accept and holds at most 20000 characters';
+  },
+  'resize': action => [action.width, action.height].every(n => Number.isInteger(n) && n >= 240 && n <= 3840) ? null : 'browser dimensions must be integers between 240 and 3840',
+};
+
 /** Shared by the real core, fake transport and desktop before executing input. */
 export function browserActionError(action: BrowserAction): string | null {
   if (!action || typeof action !== 'object') return 'browser action must be an object';
-  const text = (value: unknown, max: number) => typeof value === 'string' && value.length > 0 && value.length <= max;
-  switch (action.kind) {
-    case 'diagnostics': return action.clear === undefined || typeof action.clear === 'boolean' ? null : 'diagnostics clear must be a boolean';
-    case 'preset': return Object.hasOwn(BROWSER_PRESETS, action.preset) && (action.orientation === undefined || ['portrait', 'landscape'].includes(action.orientation)) ? null : 'unknown browser preset or orientation';
-    case 'appearance': return ['light', 'dark', 'system'].includes(action.colorScheme) ? null : 'appearance must be light, dark or system';
-    case 'recording-start':
-      if (action.indicators !== undefined && typeof action.indicators !== 'boolean') return 'recording indicators must be a boolean';
-      if (action.frameRate !== undefined && !BROWSER_RECORDING_FRAME_RATES.includes(action.frameRate)) return `recording frameRate must be ${BROWSER_RECORDING_FRAME_RATES.join(' or ')}`;
-      return action.codec === undefined || BROWSER_RECORDING_CODECS.includes(action.codec) ? null : `recording codec must be ${BROWSER_RECORDING_CODECS.join(', ')}`;
-    case 'recording-stop': return null;
-    case 'recording-discard': case 'recording-read':
-      if (!text(action.recordingId, 80) || !/^[a-zA-Z0-9-]+$/.test(action.recordingId)) return 'recordingId must come from recording-stop';
-      if (action.kind === 'recording-discard') return null;
-      if (!Number.isSafeInteger(action.offset) || action.offset < 0 || action.offset > BROWSER_RECORDING_MAX_BYTES) return `recording offset must be an integer within ${BROWSER_RECORDING_MAX_BYTES / 1024 / 1024} MB`;
-      return action.maxBytes === undefined || (Number.isSafeInteger(action.maxBytes) && action.maxBytes > 0 && action.maxBytes <= BROWSER_RECORDING_CHUNK_BYTES) ? null : `recording maxBytes must be an integer from 1 to ${BROWSER_RECORDING_CHUNK_BYTES}`;
-    case 'status': case 'profiles': case 'screenshot': case 'close': case 'reset-viewport': case 'activate': return null;
-    case 'snapshot':
-      if (action.depth !== undefined && !(Number.isInteger(action.depth) && action.depth >= 1 && action.depth <= 50)) return 'snapshot depth must be an integer from 1 to 50';
-      if (action.selector !== undefined && !text(action.selector, 4000)) return 'snapshot selector must contain 1 to 4000 characters';
-      return [action.interactive, action.compact, action.urls].every(flag => flag === undefined || typeof flag === 'boolean') ? null : 'snapshot flags must be booleans';
-    case 'history': return ['back', 'forward', 'reload'].includes(action.direction) ? null : 'history direction must be back, forward or reload';
-    case 'open': case 'navigate': {
-      if (action.kind === 'open' && action.profile !== undefined && !text(action.profile, BROWSER_PROFILE_NAME_MAX)) return `browser profile must be a profile name or id of 1 to ${BROWSER_PROFILE_NAME_MAX} characters, default or private`;
-      if (action.kind === 'open' && action.reuse !== undefined && typeof action.reuse !== 'boolean') return 'browser open reuse must be a boolean';
-      if (text(action.url, 16384) && /^https?:\/\/[^\s/?#]+(?:[/?#][^\s]*)?$/i.test(action.url)) return null;
-      return 'browser url must be an absolute HTTP or HTTPS address';
-    }
-    case 'click':
-      if (action.count !== undefined && action.count !== 1 && action.count !== 2) return 'browser click count must be 1 or 2';
-      return text(action.selector, 4000) ? null : 'browser selector must contain 1 to 4000 characters';
-    case 'hover': case 'focus': case 'check': case 'uncheck': case 'scrollintoview':
-      return text(action.selector, 4000) ? null : 'browser selector must contain 1 to 4000 characters';
-    case 'fill': case 'type': return text(action.selector, 4000) && typeof action.text === 'string' && action.text.length <= 20000 ? null : `browser ${action.kind} needs a selector and at most 20000 text characters`;
-    case 'select': return text(action.selector, 4000) && Array.isArray(action.values) && action.values.length >= 1 && action.values.length <= 50 && action.values.every(value => typeof value === 'string' && value.length <= 1000) ? null : 'browser select needs a selector and 1 to 50 values';
-    case 'evaluate': return text(action.expression, 32000) ? null : 'browser expression must contain 1 to 32000 characters';
-    case 'press': return typeof action.key === 'string' && KEY_PATTERN.test(action.key) ? null : `unsupported browser key ${JSON.stringify(action.key)}: a character, F1 to F12 or ${BROWSER_KEYS.join(', ')}, after optional Control+, Alt+, Shift+ or Meta+`;
-    case 'scroll':
-      if (action.selector !== undefined && !text(action.selector, 4000)) return 'browser selector must contain 1 to 4000 characters';
-      return [action.x, action.y].every(n => Number.isFinite(n) && Math.abs(n) <= 100000) ? null : 'browser scroll coordinates must be finite and within 100000 pixels';
-    case 'get': {
-      if (!BROWSER_GET_PROPERTIES.includes(action.what)) return `browser get reads ${BROWSER_GET_PROPERTIES.join(', ')}`;
-      if (action.selector !== undefined && !text(action.selector, 4000)) return 'browser selector must contain 1 to 4000 characters';
-      if ((action.what === 'count' || action.what === 'visible' || action.what === 'enabled' || action.what === 'checked' || action.what === 'box') && action.selector === undefined) return `browser get ${action.what} needs a selector`;
-      if (action.what === 'attr' && !text(action.name, 200)) return 'browser get attr needs a selector and an attribute name';
-      return null;
-    }
-    case 'wait': {
-      const conditions = [action.selector, action.text, action.url, action.fn, action.load].filter(value => value !== undefined);
-      if (action.timeoutMs !== undefined && !(Number.isInteger(action.timeoutMs) && action.timeoutMs >= 100 && action.timeoutMs <= BROWSER_WAIT_MAX_MS)) return `browser wait timeout must be an integer from 100 to ${BROWSER_WAIT_MAX_MS} ms`;
-      if (action.ms !== undefined) return conditions.length === 0 && Number.isInteger(action.ms) && action.ms >= 0 && action.ms <= BROWSER_WAIT_MAX_MS ? null : `browser wait takes a delay from 0 to ${BROWSER_WAIT_MAX_MS} ms, or one condition`;
-      if (conditions.length !== 1) return 'browser wait needs exactly one condition: a selector, --text, --url, --fn or --load';
-      if (action.load !== undefined && !['load', 'domcontentloaded', 'networkidle'].includes(action.load)) return 'browser wait --load must be load, domcontentloaded or networkidle';
-      if (action.fn !== undefined) return text(action.fn, 32000) ? null : 'browser wait --fn must contain 1 to 32000 characters';
-      return [action.selector, action.text, action.url].every(value => value === undefined || text(value, 4000)) ? null : 'browser wait condition must contain 1 to 4000 characters';
-    }
-    case 'dialog':
-      if (!['accept', 'dismiss', 'status'].includes(action.decision)) return 'browser dialog must be accept, dismiss or status';
-      return action.text === undefined || (action.decision === 'accept' && typeof action.text === 'string' && action.text.length <= 20000) ? null : 'browser dialog text goes with accept and holds at most 20000 characters';
-    case 'resize': return [action.width, action.height].every(n => Number.isInteger(n) && n >= 240 && n <= 3840) ? null : 'browser dimensions must be integers between 240 and 3840';
-    default: return 'unknown browser action';
-  }
+  if (typeof action.kind !== 'string' || !Object.hasOwn(ACTION_CHECKS, action.kind)) return 'unknown browser action';
+  // The kind selects the checker for this member of the action union.
+  const check = ACTION_CHECKS[action.kind] as (action: BrowserAction) => string | null;
+  return check(action);
 }
 
 /**

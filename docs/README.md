@@ -44,6 +44,7 @@
 
 - [Contributing](../CONTRIBUTING.md): setup and checks before a pull request.
 - [Development](development.md): local runs, test fixtures and captures.
+- [Adding an RPC method](development.md#adding-an-rpc-method): contract, domain handlers, permissions and refusal tests.
 - [Architecture](architecture.md): the core, clients, journal and drivers.
 - [Providers](providers.md): descriptors, protocols and supported capabilities.
 - [Process tracing](trace.md): resource use and platform limits.

@@ -51,8 +51,10 @@ xterm.js. xterm loads the first time a terminal opens, never at startup.
   shells, oldest first. A core without it runs a single shell per thread, and
   the drawer then offers no tab or split.
 - `terminals.close` stops the shell and waits for it to exit.
-  `terminal.exited` follows, and the drawer closes. Descendant termination
-  follows the platform limits below.
+  `terminal.exited` follows, and the drawer closes. On Linux the core first
+  signals the shell's descendants, checked by birth time, because a job started
+  in the background has its own process group and outlives the shell's hang-up.
+  Other descendant termination follows the platform limits below.
 - Archiving the thread and stopping the core close its shells too.
 
 A shell runs under the trace id `terminal:<threadId>`, or
