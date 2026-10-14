@@ -122,7 +122,9 @@ test('startup and periodic pulls fetch without publishing and stop when disabled
     expect(pending!.ms).toBe(5 * 60_000);
   } finally { await brain.close(); }
   expect(pending).toBeNull();
-}, 30_000);
+  // About twenty git processes: 10 to 15 s on a Windows runner, past 30 s when its parallel workers load it
+  // (three PR runs on 2026-10-14), and the harness then stops the core under the last fetch.
+}, 90_000);
 
 test('automatic pulls wait for completion and shutdown drains the active attempt', async () => {
   await h.core.brain.configure({ path: root, enabled: true, autoPull: { onStartup: true, intervalMinutes: 1 } });
