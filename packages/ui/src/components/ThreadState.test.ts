@@ -5,7 +5,7 @@ import ThreadState from './ThreadState.svelte';
 import { projectRollup, threadState, threadTone, workflowTone } from '../lib/thread-state';
 import { workingChildren, type WorkingChildren } from '../lib/thread-rows';
 
-type Shown = Pick<ThreadSummary, 'status' | 'unread' | 'runningSince' | 'requestSince' | 'backgroundWork' | 'lastUserMessageAt' | 'createdAt'>;
+type Shown = Pick<ThreadSummary, 'status' | 'unread' | 'runningSince' | 'requestSince' | 'backgroundWork' | 'lastUserMessageAt' | 'createdAt' | 'backgroundWait'>;
 
 const NOW = Date.UTC(2026, 8, 28, 10, 0, 0);
 let running: Record<string, unknown> | null = null;
@@ -72,6 +72,34 @@ test('a finished turn whose agent still runs something is not at rest, read or n
   expect(threadState({ status: 'idle', unread: true, backgroundWork: { kinds: [], since: NOW } })).toBe('done');
   // A running turn says working whatever it left in the background.
   expect(threadState({ status: 'running', unread: false, backgroundWork: monitor })).toBe('working');
+});
+
+test('a delegated agent waiting on its own background work says what and since when; work that never woke it reads interrupted', () => {
+  vi.useFakeTimers({ now: NOW });
+  const since = NOW - 12 * 60_000;
+  const waiting = draw({ backgroundWork: { kinds: ['shell'], since }, backgroundWait: { state: 'waiting', for: 'test_emotes', since, until: null } });
+  expect(waiting.dataset['state']).toBe('background');
+  expect(waiting.textContent?.trim()).toBe('12m 00s');
+  expect(waiting.getAttribute('title')).toBe('In background for 12m 00s\nWaiting on test_emotes');
+  // The task just ended and the wake turn has not started: still at work, not done.
+  expect(threadState({ status: 'idle', unread: true, backgroundWait: { state: 'waiting', for: 'test_emotes', since, until: NOW + 30_000 } })).toBe('background');
+  unmount(running!, { outro: false });
+  running = null;
+  const interrupted = draw({ unread: true, backgroundWait: { state: 'interrupted', for: 'test_emotes', reason: 'core-restarted', at: NOW } });
+  expect(interrupted.dataset['state']).toBe('interrupted');
+  expect(interrupted.textContent?.trim()).toBe('Interrupted');
+  expect(interrupted.getAttribute('title')).toBe('Interrupted\ntest_emotes ended without waking it: Boite or the PC restarted');
+  expect(projectRollup([{ status: 'idle', unread: true }, { status: 'idle', unread: false, backgroundWait: { state: 'interrupted', for: 'x', reason: 'error', at: NOW } }])).toEqual({ kind: 'interrupted', count: 1 });
+});
+
+test('a parent counts a child waiting on its background work among its working sub-agents', () => {
+  const child = (id: string, fields: Partial<ThreadSummary>) => ({ id: id as ThreadId, parentThreadId: 'p' as ThreadId, archived: false, status: 'idle', runningSince: null, ...fields }) as ThreadSummary;
+  const working = workingChildren([
+    child('a', { backgroundWait: { state: 'waiting', for: 'test_emotes', since: NOW - 60_000, until: null } }),
+    child('b', { backgroundWait: { state: 'interrupted', for: 'build', reason: 'error', at: NOW } }),
+    child('c', {}),
+  ]);
+  expect(working.get('p' as ThreadId)).toEqual({ count: 1, since: NOW - 60_000 });
 });
 
 test('a monitoring thread counts from its oldest task and says what still runs', () => {

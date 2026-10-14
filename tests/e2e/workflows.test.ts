@@ -28,7 +28,8 @@ test('the chat card opens the run top to bottom, an arrow per dependency, in the
   await page.waitFor(`document.querySelector('${id('workflow-activity')}')`);
   expect(await page.text(id('workflow-activity'))).toContain('1/5 steps');
   await page.waitFor(`document.querySelector('${id('active-subagents')}')?.textContent.includes('1 workflow')`);
-  expect(await page.text(id('active-subagents'))).toContain('1 active subagent');
+  // The running subagent, and the one at rest on its own background work.
+  expect(await page.text(id('active-subagents'))).toContain('2 active subagents');
   await capture('workflow-card.png');
   await page.click(id('workflow-activity'));
   await page.waitFor(`document.querySelector('${id('workflow-graph')}')?.dataset.layout === 'rows'`);

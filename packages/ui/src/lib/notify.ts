@@ -14,7 +14,7 @@
  * of it.
  */
 
-import { notifiesOnFinish, threadActive, type NotificationLabel, type ThreadSummary, type Turn } from '@boite/contracts';
+import { notifiesOnFinish, threadBusy, type NotificationLabel, type ThreadSummary, type Turn } from '@boite/contracts';
 import { PUSH_ENABLED_KEY } from './pwa';
 import { strings } from './strings';
 
@@ -47,7 +47,8 @@ export function shouldNotify(input: NotifyDecision): boolean {
 export function finishNotifies(threads: readonly ThreadSummary[], turn: Pick<Turn, 'threadId' | 'status' | 'execution'>): boolean {
   const thread = threads.find((t) => t.id === turn.threadId);
   if (thread === undefined) return turn.status === 'done' || turn.status === 'error';
-  const activeChildren = threads.filter((t) => t.parentThreadId === thread.id && threadActive(t.status)).length;
+  // A child waiting on its own background work is still at work: its result has not come back.
+  const activeChildren = threads.filter((t) => t.parentThreadId === thread.id && threadBusy(t)).length;
   return notifiesOnFinish(thread, turn, activeChildren);
 }
 

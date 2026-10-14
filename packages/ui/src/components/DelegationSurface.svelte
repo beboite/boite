@@ -1,8 +1,8 @@
 <script lang="ts">
   import ContextModeBadge from './ContextModeBadge.svelte';
-  import { ArrowLeft, Pause, Play, Plus, Settings, Square, Trash2, UsersRound, Workflow } from '@lucide/svelte';
+  import { ArrowLeft, Pause, Play, Plus, RotateCcw, Settings, Square, Trash2, UsersRound, Workflow } from '@lucide/svelte';
   import { onDestroy } from 'svelte';
-  import { DEFAULT_DELEGATION_CONFIG, threadActive, type DelegationConfig, type DelegationProfile } from '@boite/contracts';
+  import { DEFAULT_DELEGATION_CONFIG, threadActive, threadBusy, type DelegationConfig, type DelegationProfile } from '@boite/contracts';
   import type { BoundPanel, Surface } from '../lib/right-panel.svelte';
   import { fill, strings } from '../lib/strings';
   import type { Choice, PickPatch, Store } from '../lib/store.svelte';
@@ -43,7 +43,9 @@
   let doneAgents = $derived(agents.filter(agent => !agentProgress(agent).active).sort((a, b) => endOf(b) - endOf(a)));
   let liveRuns = $derived(runs.filter(isLive));
   let doneRuns = $derived(runs.filter(entry => !isLive(entry)));
-  let busy = $derived(agents.some(agent => threadActive(agent.thread.status)) || runs.some(isLive));
+  let busy = $derived(agents.some(agent => threadBusy(agent.thread)) || runs.some(isLive));
+  /** The interrupted subagents a Resume was just sent to: the button stays off until the core answers. */
+  let resuming = $state(new Set<string>());
 
   $effect(() => {
     const threadId = openThreadId;
@@ -121,10 +123,28 @@
     return usage ? totalTokens(usage) : null;
   }
 
-  /** Completed goes without saying under Finished; a stop or a failure does not. */
+  /** Completed goes without saying under Finished; a stop, a failure or an interruption does not. */
   function outcomeOf(agent: Agent): string | null {
     const status = agentProgress(agent).status;
-    return status === 'stopped' ? strings.delegation.stoppedStatus : status === 'error' ? strings.delegation.failedStatus : null;
+    return status === 'stopped' ? strings.delegation.stoppedStatus : status === 'error' ? strings.delegation.failedStatus
+      : status === 'interrupted' ? strings.delegation.interruptedStatus : status === 'background' ? strings.delegation.waitingStatus : null;
+  }
+
+  /** At work in its turn, or waiting on its own background work: the mark shows it running either way. */
+  function markOf(agent: Agent) {
+    return threadActive(agent.thread.status) ? threadTone(agent.thread.status) : { tone: 'running' as const, label: strings.delegation.waitingStatus };
+  }
+
+  /** Sends an interrupted subagent the note that wakes it, once: its next turn clears the interruption. */
+  async function resume(agent: Agent): Promise<void> {
+    const wait = agent.thread.backgroundWait;
+    if (wait?.state !== 'interrupted' || resuming.has(agent.thread.id)) return;
+    resuming = new Set([...resuming, agent.thread.id]);
+    try {
+      await store.messageDelegatedAgent(agent.thread.id, fill(strings.delegation.resumeAgentText, { what: wait.for, reason: strings.sidebar.state.interruption[wait.reason] }));
+    } finally {
+      resuming = new Set([...resuming].filter(id => id !== agent.thread.id));
+    }
   }
 
   async function openChild(): Promise<void> {
@@ -155,10 +175,11 @@
   {@const route = routeOf(agent)}
   {@const tokens = tokensOf(agent)}
   {@const outcome = outcomeOf(agent)}
-  <button type="button" class="member" class:selected={selected?.thread.id === agent.thread.id} data-testid="delegation-member" data-agent-id={agent.thread.id} onclick={() => void store.selectDelegatedAgent(agent.thread.id)}>
+  {@const wait = agent.thread.backgroundWait ?? null}
+  <button type="button" class="member" class:selected={selected?.thread.id === agent.thread.id} data-testid="delegation-member" data-agent-id={agent.thread.id} data-status={progress.status} onclick={() => void store.selectDelegatedAgent(agent.thread.id)}>
     <span class="avatar" role="img" aria-label={route.maker} title={route.maker}>
       <ProviderLogo providerId={route.logo} size={20} />
-      {#if progress.active}<StatusMark {...threadTone(agent.thread.status)} corner />{/if}
+      {#if progress.active}<StatusMark {...markOf(agent)} corner />{/if}
     </span>
     <span class="member-main">
       <strong class="title"><span class="ui-label">{agent.thread.title}</span></strong>
@@ -172,8 +193,18 @@
       <Elapsed startedAt={progress.startedAt} finishedAt={progress.finishedAt} active={progress.active} />
       {#if tokens !== null}<span class="tokens ui-label">{formatTokens(tokens)} {strings.units.tokens}</span>{/if}
     </span>
+    {#if wait?.state === 'waiting'}
+      <span class="note" data-testid="delegation-member-wait"><span class="ui-label">{fill(strings.sidebar.state.awaiting, { what: wait.for })}</span><Elapsed startedAt={wait.since} finishedAt={null} active /></span>
+    {:else if wait?.state === 'interrupted'}
+      <span class="note interrupted" data-testid="delegation-member-wait"><span class="ui-label">{fill(strings.sidebar.state.interruptedBy, { what: wait.for, reason: strings.sidebar.state.interruption[wait.reason] })}</span></span>
+    {/if}
     {#if agent.result}<span class="result"><span>{agent.result}</span></span>{/if}
   </button>
+  {#if wait?.state === 'interrupted'}
+    <div class="resume-row">
+      <button type="button" class="quiet small" data-testid="delegation-resume" title={strings.delegation.resumeAgentHint} disabled={resuming.has(agent.thread.id)} onclick={() => void resume(agent)}><RotateCcw size={12} /><span class="ui-label">{strings.delegation.resumeAgent}</span></button>
+    </div>
+  {/if}
 {/snippet}
 
 <section class="delegation" data-testid="delegation-surface">
@@ -255,7 +286,8 @@
               <button type="button" class="ghost small icon back" aria-label={strings.delegation.backToTeam} onclick={() => void store.selectDelegatedAgent(null)}><ArrowLeft size={15} /></button>
               <div><strong>{selected.thread.title}</strong><small>{routeOf(selected).label}</small></div>
               <button type="button" class="quiet small" data-testid="delegation-open-thread" data-preload-thread={selected.thread.id} onclick={() => void openChild()}><span class="ui-label">{strings.delegation.openThread}</span></button>
-              {#if threadActive(selected.thread.status)}<button type="button" class="danger small" onclick={() => void store.stopDelegatedAgent(selected.thread.id)}><Square size={11} fill="currentColor" /><span class="ui-label">{strings.delegation.stop}</span></button>{/if}
+              {#if threadBusy(selected.thread)}<button type="button" class="danger small" onclick={() => void store.stopDelegatedAgent(selected.thread.id)}><Square size={11} fill="currentColor" /><span class="ui-label">{strings.delegation.stop}</span></button>{/if}
+              {#if selected.thread.backgroundWait?.state === 'interrupted'}<button type="button" class="quiet small resume" title={strings.delegation.resumeAgentHint} disabled={resuming.has(selected.thread.id)} onclick={() => void resume(selected)}><RotateCcw size={12} /><span class="ui-label">{strings.delegation.resumeAgent}</span></button>{/if}
             </header>
             {#if store.delegationThread}
               <div class="transcript"><DelegationTranscript messages={store.delegationThread.messages} /></div>
@@ -312,10 +344,17 @@
   .effort { flex: none; padding: 3px 6px; border-radius: var(--radius-sm); background: var(--color-surface-3); color: var(--color-muted-foreground); }
   .meta { display: grid; justify-items: end; gap: 6px; padding-top: 2px; color: var(--color-muted-foreground); font-size: var(--text-xs); font-variant-numeric: tabular-nums; white-space: nowrap; }
   .outcome { font-weight: 500; }
-  .outcome[data-status='error'], .outcome[data-status='failed'] { color: var(--color-danger); }
+  .outcome[data-status='error'], .outcome[data-status='failed'], .outcome[data-status='interrupted'] { color: var(--color-danger); }
+  .outcome[data-status='background'] { color: var(--color-accent); }
+  /* What a subagent at rest waits on, or what ended without waking it. */
+  .note { grid-column: 2 / -1; margin-top: 8px; display: flex; align-items: baseline; gap: 6px; min-width: 0; color: var(--color-accent); font-size: var(--text-xs); }
+  .note > .ui-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .note.interrupted { color: var(--color-danger); }
+  .note.interrupted > .ui-label { white-space: normal; }
+  .resume-row { padding: 0 9px 6px 49px; }
   .result { grid-column: 2 / -1; margin-top: 8px; padding: 6px 9px; border-radius: var(--radius-sm); background: var(--color-surface-2); color: color-mix(in srgb, var(--color-foreground) 82%, transparent); font-size: var(--text-xs); line-height: 1.45; }
   .result > span { display: -webkit-box; -webkit-box-orient: vertical; line-clamp: 3; -webkit-line-clamp: 3; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
-  .team.detail .result, .team.detail .meta { display: none; }
+  .team.detail .result, .team.detail .meta, .team.detail .note, .team.detail .resume-row { display: none; }
   .team.detail .member { grid-template-columns: auto minmax(0, 1fr); }
   .detail-pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
   .detail-pane > header { flex: none; min-height: 48px; padding: 7px 9px; display: flex; align-items: center; gap: 7px; border-bottom: 1px solid var(--color-border); }
@@ -333,6 +372,6 @@
     .detail-pane > header { display: grid; grid-template-columns: var(--control-sm) minmax(0, 1fr) auto; }
     .detail-pane > header > div { grid-column: 2 / -1; }
     .detail-pane > header > .quiet:not(.back) { grid-column: 2; justify-self: start; }
-    .detail-pane > header > .danger { grid-column: 3; }
+    .detail-pane > header > .danger, .detail-pane > header > .quiet.resume { grid-column: 3; }
   }
 </style>

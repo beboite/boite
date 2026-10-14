@@ -32,6 +32,13 @@ export class BackgroundHistory {
     return rows.map(row => parseJson<BackgroundTaskObservation>(row.payload, 'background_observations.payload'));
   }
 
+  /** Observations that ended after `at`, any owner: what a turn ending at `at` left running and has since stopped. */
+  endedAfter(threadId: ThreadId, at: number): BackgroundTaskObservation[] {
+    const rows = this.journal.db.query(`SELECT payload FROM background_observations WHERE thread_id = ?
+      AND json_extract(payload, '$.finishedAt') > ?`).all(threadId, at) as { payload: string }[];
+    return rows.map(row => parseJson<BackgroundTaskObservation>(row.payload, 'background_observations.payload'));
+  }
+
   private task(threadId: ThreadId, taskId: string, owner: BackgroundOwner): BackgroundTaskObservation | null {
     const row = this.journal.db.query(`SELECT payload FROM background_observations WHERE thread_id = ?
       AND provider_id = ? AND session_generation = ? AND parent_turn_id = ? AND task_id = ?`)

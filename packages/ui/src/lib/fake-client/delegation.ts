@@ -77,12 +77,26 @@ function pickModel(ctx: FakeContext, parent: Thread, config: DelegationConfig, w
 
 function delegatedAgent(ctx: FakeContext, row: { threadId: ThreadId; profileId: string; task: string }): DelegatedAgent {
   const thread = ctx.thread(row.threadId);
+  const summary = toSummary(thread);
   const lastTurn = thread.turns.at(-1) ?? null;
-  const result = lastTurn && !['queued', 'running'].includes(lastTurn.status)
+  const terminal = lastTurn !== null && !['queued', 'running'].includes(lastTurn.status);
+  const result = terminal
     ? thread.messages.filter(message => message.turnId === lastTurn.id && message.role === 'assistant').at(-1)?.parts
         .filter(part => part.type === 'text').map(part => part.text).join('\n').trim().slice(0, 4000) || lastTurn.error
     : null;
-  return { thread: structuredClone(toSummary(thread)), profileId: row.profileId, task: row.task, lastTurn: structuredClone(lastTurn), result: result || null, ...(lastTurn && !['queued', 'running'].includes(lastTurn.status) ? { resultRef: { agentId: thread.id, turnId: lastTurn.id }, settlement: 'result_available' as const } : lastTurn === null ? { settlement: 'settled' as const } : {}) };
+  // As the core: a turn ended on its own background work left a checkpoint, no result is available yet.
+  const wait = summary.backgroundWait?.state ?? null;
+  const settled = terminal && wait !== 'waiting'
+    ? { resultRef: { agentId: thread.id, turnId: lastTurn.id }, settlement: wait === 'interrupted' ? 'settled' as const : 'result_available' as const }
+    : lastTurn === null ? { settlement: 'settled' as const } : {};
+  return { thread: structuredClone(summary), profileId: row.profileId, task: row.task, lastTurn: structuredClone(lastTurn), result: result || null, ...settled };
+}
+
+/** A child still owes its parent a result: a turn under way, or a wait on its own background work. */
+function owesResult(ctx: FakeContext, threadId: ThreadId): boolean {
+  const thread = ctx.thread(threadId);
+  const turn = thread.turns.at(-1);
+  return (turn !== undefined && ['queued', 'running'].includes(turn.status)) || toSummary(thread).backgroundWait?.state === 'waiting';
 }
 
 function delegationView(ctx: FakeContext, rootId: ThreadId, callerId = rootId): DelegationView {
@@ -92,7 +106,7 @@ function delegationView(ctx: FakeContext, rootId: ThreadId, callerId = rootId): 
   for (const row of rows) for (const turn of ctx.thread(row.threadId).turns) if (turn.usage) usage = addUsage(usage, turn.usage);
   return {
     rootThreadId: rootId,
-    settlement: rows.some(row => { const turn = ctx.thread(row.threadId).turns.at(-1); return turn && ['queued', 'running'].includes(turn.status); }) ? 'waiting_for_children' : 'settled',
+    settlement: rows.some(row => owesResult(ctx, row.threadId)) ? 'waiting_for_children' : 'settled',
     config: delegationConfig(ctx, rootId),
     agents: rows.map(row => delegatedAgent(ctx, row)),
     nativeAgents: [...collectNativeAgents(ctx.thread(callerId).messages.flatMap(message => message.role === 'assistant' ? message.parts.map(part => ({ part, at: message.createdAt, turnId: message.turnId, turnStatus: ctx.thread(callerId).turns.find(turn => turn.id === message.turnId)?.status })) : []), ctx.thread(callerId).background), ...collectProcessAgents(ctx.processes.filter(record => record.threadId === callerId), ctx.processes.filter(record => record.threadId === callerId && record.exitedAt === null))],
@@ -107,11 +121,13 @@ export async function stopDelegation(ctx: FakeContext, rootId: ThreadId, agentId
   const selected = agentId ? rows.filter(row => row.threadId === agentId) : rows;
   if (agentId && selected.length === 0) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'agentId must name a direct child' });
   // Nothing unfinished, nothing to stop: the team stays usable. Finished children are history.
-  if (!agentId && rows.some(row => threadActive(ctx.thread(row.threadId).status))) ctx.delegationConfigs.set(rootId, { ...delegationConfig(ctx, rootId), paused: true });
+  if (!agentId && rows.some(row => threadActive(ctx.thread(row.threadId).status) || owesResult(ctx, row.threadId))) ctx.delegationConfigs.set(rootId, { ...delegationConfig(ctx, rootId), paused: true });
   let stopped = 0;
   for (const row of selected) {
     const thread = ctx.thread(row.threadId);
-    if (threadActive(thread.status)) stopped += 1;
+    if (threadActive(thread.status) || owesResult(ctx, thread.id)) stopped += 1;
+    // Stopping ends its agent process, and the background work with it.
+    if (thread.background?.length) ctx.setBackground(thread, [], 'session-ended');
     const queued = thread.turns.at(-1);
     if (queued?.status === 'queued') {
       queued.status = 'stopped';
@@ -148,7 +164,7 @@ export function seedDelegationDemo(ctx: FakeContext): void {
       ...root, id, parentThreadId: root.id, title, titleSource: 'user', status, unread: false, archived: false, pinned: false,
       providerId: profile.providerId, accountId: profile.accountId, model: profile.model, effort: profile.effort,
       sessionId: `session-${id}`, sessionGeneration: 0, selectionVersion: 0, load: status === 'running' ? { processes: 1, cpuPercent: 8, memoryBytes: 64 * 1024 * 1024 } : null,
-      createdAt: demoAt, updatedAt: demoAt + 30_000, messagesBefore: null, commands: [], turns: [turn],
+      createdAt: demoAt, updatedAt: demoAt + 30_000, messagesBefore: null, commands: [], turns: [turn], background: [], backgroundHistory: [],
       messages: [
         { id: `m-${id}-1`, threadId: id, turnId: turn.id, role: 'user', parts: [{ type: 'text', text: task }], state: 'complete', createdAt: demoAt },
         { id: `m-${id}-2`, threadId: id, turnId: turn.id, role: 'assistant', parts: [{ type: 'text', text: answer }], state: status === 'running' ? 'streaming' : 'complete', createdAt: demoAt + 10_000 }
@@ -157,13 +173,24 @@ export function seedDelegationDemo(ctx: FakeContext): void {
   };
   const running = make('t-team-running', 'Audit subscription flow', 'Check selection races and own the store tests.', 'running', 'I found the subscription boundary and am checking stale responses.', reviewer);
   const done = make('t-team-done', 'Review panel copy', 'Review the panel wording and report confusing states.', 'idle', 'The queued delivery label now matches the core state.', implementer);
-  ctx.threads.set(running.id, running);
-  ctx.threads.set(done.id, done);
+  // Its turn ended on a test run it left in the background: that run wakes it, it is not done.
+  const waiting = make('t-team-waiting', 'Run the emote tests', 'Run test_emotes and fix what fails.', 'idle', 'test_emotes runs in the background; I report once it finishes.', reviewer);
+  // Started just before its turn ended, as the launch card groups the team by when each child started.
+  const startedAt = waiting.turns[0]!.finishedAt! - 20_000;
+  waiting.background = [{ id: 'bg-emotes', kind: 'shell', description: 'test_emotes', toolId: null, startedAt }];
+  waiting.backgroundHistory = [{ ...waiting.background[0]!, threadId: waiting.id, providerId: waiting.providerId, sessionGeneration: 0, parentTurnId: waiting.turns[0]!.id, state: 'running', observedAt: startedAt, finishedAt: null, reason: null }];
+  // Its background build died with its agent process: it never woke, its result never came.
+  const interrupted = make('t-team-interrupted', 'Build the release', 'Build the release and report the artifact sizes.', 'idle', 'The release build runs in the background; I report the sizes once it finishes.', implementer);
+  const built = interrupted.turns[0]!;
+  interrupted.backgroundHistory = [{ id: 'bg-build', kind: 'shell', description: 'release build', toolId: null, startedAt: built.finishedAt! - 2_000, threadId: interrupted.id, providerId: interrupted.providerId, sessionGeneration: 0, parentTurnId: built.id, state: 'ended', observedAt: built.finishedAt! - 2_000, finishedAt: built.finishedAt! + 20_000, reason: 'session-ended' }];
+  for (const thread of [running, done, waiting, interrupted]) ctx.threads.set(thread.id, thread);
   ctx.delegationAgents.set(root.id, [
     { threadId: running.id, profileId: reviewer.id, task: 'Check selection races and own the store tests.' },
-    { threadId: done.id, profileId: implementer.id, task: 'Review the panel wording and report confusing states.' }
+    { threadId: done.id, profileId: implementer.id, task: 'Review the panel wording and report confusing states.' },
+    { threadId: waiting.id, profileId: reviewer.id, task: 'Run test_emotes and fix what fails.' },
+    { threadId: interrupted.id, profileId: implementer.id, task: 'Build the release and report the artifact sizes.' }
   ]);
-  ctx.delegationTurns.set(root.id, 2);
+  ctx.delegationTurns.set(root.id, 4);
   seedWorkflowDemo(ctx, root.id);
 }
 
@@ -267,13 +294,14 @@ function waitDelegation(ctx: FakeContext, params: RpcParams<'delegation.wait'>):
       try {
         directChildren(ctx, params.threadId, params.agentId);
         const agents = delegationView(ctx, params.threadId).agents.filter(agent => params.agentId === undefined || agent.thread.id === params.agentId);
-        const waiting = agents.some(agent => agent.lastTurn !== null && ['queued', 'running'].includes(agent.lastTurn.status));
+        // A child that ended its turn to wait on its background work has not answered yet.
+        const waiting = agents.some(agent => (agent.lastTurn !== null && ['queued', 'running'].includes(agent.lastTurn.status)) || agent.thread.backgroundWait?.state === 'waiting');
         if (waiting && !timedOut) return;
         cleanup();
-        resolve({ state: waiting ? 'waiting_for_children' : params.agentId && agents.some(agent => agent.resultRef) ? 'result_available' : 'settled', timedOut, agents });
+        resolve({ state: waiting ? 'waiting_for_children' : params.agentId && agents.some(agent => agent.settlement === 'result_available') ? 'result_available' : 'settled', timedOut, agents });
       } catch (error) { cleanup(); reject(error); }
     };
-    subscriptions.push(ctx.bus.on('turn.finished', () => inspect()), ctx.bus.on('delegation.changed', () => inspect()), ctx.bus.on('thread.removed', () => inspect()));
+    subscriptions.push(ctx.bus.on('turn.finished', () => inspect()), ctx.bus.on('delegation.changed', () => inspect()), ctx.bus.on('thread.removed', () => inspect()), ctx.bus.on('thread.background', () => inspect()));
     subscriptions.push(ctx.bus.onState(state => {
       if (state !== 'ready') { cleanup(); reject(new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation.wait: connection closed' })); }
     }));

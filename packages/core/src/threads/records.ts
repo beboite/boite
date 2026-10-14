@@ -1,5 +1,6 @@
 import { archiveState } from '../merged-pr-archive-state.ts';
-import type { MessageId, MessagePart, MoveNotice, RpcParams, ThreadId, ThreadStatus, ThreadSummary } from '@boite/contracts';
+import { backgroundWait } from '@boite/contracts';
+import type { BackgroundTask, BackgroundWait, MessageId, MessagePart, MoveNotice, RpcParams, ThreadId, ThreadStatus, ThreadSummary } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { notFound } from '../errors.ts';
 
@@ -62,9 +63,24 @@ export function withLoad(core: Core, thread: ThreadSummary): ThreadSummary {
     requestSince: busy || tasks.length > 0 ? core.journal.requestSince(thread.id) : null,
     progress: busy ? core.threads?.progress?.get(thread.id) ?? null : null,
     backgroundWork: tasks.length === 0 ? null : { kinds: tasks.map(task => task.kind), since: Math.min(...tasks.map(task => task.startedAt)) },
+    backgroundWait: thread.parentThreadId ? backgroundWaitOf(core, thread, tasks) : null,
     pendingMove: core.threads?.moves?.pendingOf(thread.id) ?? null,
     moveNote: thread.agentSessionId ? null : pendingMoveNote(core, thread.id),
     pendingAnswers: [...(core.threads?.deferred?.deferredAnswers.get(thread.id) ?? [])],
     openQuestions: core.threads?.cards?.openAsyncCount(thread.id) ?? 0,
   };
+}
+
+/**
+ * A delegated agent at rest that its own background work will wake, or that
+ * this work left behind (`backgroundWait`). Two indexed reads per idle child.
+ */
+export function backgroundWaitOf(core: Core, thread: ThreadSummary, live: BackgroundTask[]): BackgroundWait | null {
+  if (thread.status === 'queued' || !core.threads) return null;
+  const row = core.journal.db.query('SELECT id FROM turns WHERE thread_id = ? ORDER BY rowid DESC LIMIT 1').get(thread.id) as { id: string } | null;
+  const lastTurn = row ? core.journal.getTurn(row.id) : null;
+  if (lastTurn?.status !== 'done' || lastTurn.finishedAt === null) return null;
+  const history = live.length > 0 ? [] : core.threads.agentState.backgroundHistory.endedAfter(thread.id, lastTurn.finishedAt);
+  // The last turn is the truth: `turn.finished` is heard before the row's status turns idle.
+  return backgroundWait({ status: 'idle', lastTurn, live, history, now: Date.now() });
 }

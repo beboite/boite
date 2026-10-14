@@ -911,7 +911,7 @@ test('launching from a child refreshes its team and returns the sibling without 
   expect(agent).not.toBeNull();
   expect(agent?.thread.parentThreadId).toBe('t-trace');
   expect(store.openThread?.id).toBe('t-team-done');
-  expect(store.delegation?.agents).toHaveLength(3);
+  expect(store.delegation?.agents).toHaveLength(5);
   expect(store.delegation?.agents.some(entry => entry.thread.id === agent?.thread.id)).toBe(true);
   const call = client.call.bind(client);
   vi.spyOn(client, 'call').mockImplementation((async (method, params) => {
