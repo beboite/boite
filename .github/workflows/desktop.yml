@@ -216,8 +216,17 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.sign-updates && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
         run: |
           export TAURI_SIGNING_PRIVATE_KEY="${TAURI_SIGNING_PRIVATE_KEY:-${THROWAWAY_UPDATER_KEY:-}}"
-          # shellcheck disable=SC2086 # BUNDLE_CONFIGS holds several arguments.
-          bun apps/shell/scripts/tauri.ts bundle $BUNDLE_CONFIGS --bundles appimage --verbose
+          # The bundler downloads AppRun and linuxdeploy from GitHub releases on
+          # every run. A 5xx there is retried; any other failure stops the job.
+          set -o pipefail
+          log="$RUNNER_TEMP/appimage-bundle.log"
+          for attempt in 1 2 3; do
+            # shellcheck disable=SC2086 # BUNDLE_CONFIGS holds several arguments.
+            if bun apps/shell/scripts/tauri.ts bundle $BUNDLE_CONFIGS --bundles appimage --verbose 2>&1 | tee "$log"; then break; fi
+            if [ "$attempt" = 3 ] || ! grep -q 'failed to bundle project: `http status: 5[0-9][0-9]`' "$log"; then exit 1; fi
+            echo "::warning::AppImage tool download failed with a server error (attempt $attempt of 3); retrying in $((attempt * 30)) s"
+            sleep $((attempt * 30))
+          done
           mkdir "$RUNNER_TEMP/appimage"
           appimage=$(realpath "$BUNDLE_DIR"/appimage/*.AppImage)
           (cd "$RUNNER_TEMP/appimage" && "$appimage" --appimage-extract > /dev/null)
