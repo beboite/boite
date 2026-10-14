@@ -916,6 +916,8 @@ export const fr: Translation = {
       backgroundFor: 'En arrière-plan depuis {elapsed}',
       awaiting: 'Attend : {what}',
       interrupted: 'Interrompu',
+      unreachable: 'Injoignable',
+      unreachableWas: 'Machine injoignable. Dernier état connu : {state}',
       interruptedBy: '{what} s’est arrêté sans le réveiller : {reason}',
       interruption: {
         'error': 'la tâche a échoué',

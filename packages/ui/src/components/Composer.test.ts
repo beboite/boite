@@ -1027,6 +1027,16 @@ test('a pasted image becomes a chip, comes off again, and rides the prompt', asy
   expect(document.activeElement).toBe(outside);
   expect(input().value).toBe('Keep writing while looking');
   outside.remove();
+  // A second click on the tile, or one on the enlarged picture, puts it away.
+  query<HTMLButtonElement>('[data-testid=composer-image-open]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-image-preview]') !== null);
+  query<HTMLButtonElement>('[data-testid=composer-image-open]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-image-preview]') === null);
+  query<HTMLButtonElement>('[data-testid=composer-image-open]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-image-preview]') !== null);
+  query<HTMLButtonElement>('[data-testid=composer-image-shrink]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-image-preview]') === null);
+  expect(input().value).toBe('Keep writing while looking');
   query<HTMLButtonElement>('[data-testid=composer-image-open]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-image-preview]') !== null);
 

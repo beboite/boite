@@ -93,3 +93,24 @@ test('a reconnect keeps the PR line on screen while the core is asked again', as
   expect(document.querySelector('[data-testid=thread-pr]')?.textContent).toContain('#181');
   expect(document.querySelector('.metadata')).not.toBeNull();
 });
+
+test('a turn left running on a machine that went away stops spinning until the machine is back', async () => {
+  client = new FakeClient({ delayMs: 0 });
+  store = new Store(); store.attach(client); await store.connect();
+  vi.spyOn(client, 'call').mockResolvedValue(null);
+  const thread = store.threads.find(thread => thread.status === 'idle')!;
+  thread.status = 'running';
+  thread.runningSince = Date.now() - 3 * 3_600_000;
+  const project = store.projects.find(project => project.id === thread.projectId)!;
+  mounted = mount(ThreadCard, { target: document.body, props: { machine: { id: 'laptop', label: 'Laptop', store }, project, thread, now: Date.now(), showProject: false } });
+  await settle();
+  const state = () => document.querySelector<HTMLElement>('[data-testid=thread-state]');
+  expect(state()?.dataset.state).toBe('working');
+  expect(state()?.querySelector('.spinner')).not.toBeNull();
+  store.connection = 'connecting'; await settle();
+  expect(state()?.dataset.state).toBe('unreachable');
+  expect(state()?.querySelector('.spinner')).toBeNull();
+  expect(state()?.getAttribute('title')).toBe('Machine unreachable. Last known state: Working');
+  store.connection = 'ready'; await settle();
+  expect(state()?.dataset.state).toBe('working');
+});

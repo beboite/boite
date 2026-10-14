@@ -183,7 +183,8 @@
         {@const lists = projectThreadLists(entry, owner.threadsOf(project.id), workingOpen)}
         {@const controls = `sidebar-project-${encodeURIComponent(projectKey(entry))}`}
         {@const collapsed = owner.isCollapsed(project.id)}
-        {@const rollup = collapsed ? projectRollup(owner.threadsOf(project.id), thread => owner.subagents(thread.id)?.count ?? 0) : null}
+        {@const away = owner.connection !== 'ready'}
+        {@const rollup = collapsed && !away ? projectRollup(owner.threadsOf(project.id), thread => owner.subagents(thread.id)?.count ?? 0) : null}
         {@const draftsHere = owner.draftEntries.filter(entry => entry.projectId === project.id)}
         {@const dropKey = threadDropKey(machine.id, project.id)}
         {@const key = projectKey(entry)}
@@ -231,7 +232,7 @@
                 <AgentAvatar kind="profile" id={resident.id} name={resident.name} avatar={resident.avatar} size={18} />
               </button>
             {/each}
-            <ProjectThreadCounters {entry} working={lists.working.length} {controls} {collapsed} />
+            <ProjectThreadCounters {entry} working={lists.working.length} {controls} {collapsed} {away} />
             <button
               class="ghost small icon project-actions"
               data-testid="project-menu"

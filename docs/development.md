@@ -854,7 +854,8 @@ The core validates bytes and writes sanitized, content-addressed copies under
 `<dataDir>/attachments/`. Copies survive resume and are currently not removed
 by archive or project removal. Timeline cards download those copies. Composer
 `[Image N]` references follow attachment order, preview inline and renumber after
-removal. Copying or cutting a reference carries its picture
+removal. A tile opens its picture large above the box; a second click on the
+tile, or a click on the large picture, puts it away. Copying or cutting a reference carries its picture
 (`lib/composer-clipboard.ts`): pasted where those numbers name other pictures, on
 any machine, the pictures join that prompt and the references take their numbers
 there; pasted where every number still names the same picture, only the text goes in. A new image accepted during send
