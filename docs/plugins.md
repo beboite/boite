@@ -223,11 +223,26 @@ agent id is 1 to 200 characters. The core sends the `ui.reveal` event to every
 owner connection except desktop-app plugins, the caller included, and answers
 `{delivered}`, the number of connections it reached.
 
+A thread or an agent on another machine of the user's Boite takes that
+machine's core id as `coreId`, on a thread target as on an agent one:
+`{ "kind": "thread", "threadId", "coreId" }`. The id is the 64 hex character
+fingerprint `collaboration.peers` and `group.get` list. The core accepts it
+when it is a member of its group or a machine trusted for coordination, and
+refuses any other with `target.coreId`; it cannot see that machine's journal,
+so the thread id there is only checked for length (1 to 200). The core's own
+id means the core itself and is dropped from the event, so a target on this
+core reads the same with or without it. A core that understands `coreId` says
+so in its `hello` answer, `core.features.revealMachines`. An older core drops
+the field, refuses a thread it does not have and opens its own agent page, so
+an app checks the flag before it names a machine.
+
 The desktop shell connected to the core it started on the same computer
 answers it: it unminimizes and focuses its window, then opens the thread, the
 Agents page on that agent (switching the Resident agents experiment on if it was
-off), or the app updates in Settings, Machines. Browser tabs, paired devices and
-windows following another machine do
+off), or the app updates in Settings, Machines. A target with `coreId` opens on
+the window's machine whose core has that id; when the window has no such
+machine, or has it but not connected, it says so on the page it shows and opens
+nothing. Browser tabs, paired devices and windows following another machine do
 nothing.
 
 `ui.reveal` is owner-only, as is the event: a paired device or an agent that

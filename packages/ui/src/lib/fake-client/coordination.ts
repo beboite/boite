@@ -31,7 +31,7 @@ function trusted(ctx: FakeContext): CoordinationPeer[] {
       readThreads: grant?.groupId === group?.id && grant?.epoch === core.epoch };
   })];
 }
-const trusts = (ctx: FakeContext, coreId: string) => trusted(ctx).some(peer => peer.coreId === coreId);
+export const trusts = (ctx: FakeContext, coreId: string) => trusted(ctx).some(peer => peer.coreId === coreId);
 const reads = (ctx: FakeContext, coreId: string) => trusted(ctx).some(peer => peer.coreId === coreId && peer.readThreads === true);
 
 export function migratePeer(ctx: FakeContext, coreId: string): void {

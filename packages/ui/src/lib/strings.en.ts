@@ -2525,6 +2525,9 @@ export const strings = {
   },
   plugins: {
     heading: 'Plugins',
+    /** A desktop app asked to show a thread or an agent on a machine this window does not have. */
+    revealUnknownMachine: 'The thread or agent an app asked to show is on a machine this window is not connected to. Add it in Settings, Machines and updates.',
+    revealMachineOffline: 'The thread or agent an app asked to show is on {machine}, which is not connected right now.',
     intro: 'A plugin is a program that runs on the machine hosting your core, checked against the SHA-256 its manifest publishes.',
     installedHeading: 'Installed',
     installedEmpty: 'No plugin installed yet. Install a recommended one or add one from a git URL.',

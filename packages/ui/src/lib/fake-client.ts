@@ -22,7 +22,7 @@ import { brainMethods } from './fake-client/brain';
 import { FakeContext, type FakeClientOptions, type FakeMethods } from './fake-client/context';
 import { hookMethods, recordHookRun } from './fake-client/hooks';
 import { logMethods, seedDiagnostics } from './fake-client/logs';
-import { coordinationMethods, registerCore, unregisterCore } from './fake-client/coordination';
+import { coordinationMethods, registerCore, trusts, unregisterCore } from './fake-client/coordination';
 import { delegationMethods, seedDelegationDemo } from './fake-client/delegation';
 import { seedAgentsDemo } from './fake-client/agents-demo';
 import { agentSettingMethods } from './fake-client/agent-settings';
@@ -425,7 +425,18 @@ export class FakeClient implements ObservableClient {
       'ui.reveal': async (params) => {
         const { target } = params;
         if (target.kind === 'agent' && (target.agentId.length === 0 || target.agentId.length > 200)) {
-          throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'ui.reveal target must be { kind: "thread", threadId }, { kind: "agent", agentId } or { kind: "update" }' });
+          throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'ui.reveal target must be { kind: "thread", threadId, coreId? }, { kind: "agent", agentId, coreId? } or { kind: "update" }' });
+        }
+        if (target.kind !== 'update' && target.coreId !== undefined) {
+          // This core's own id is this core; another machine must be one it knows, as the real core checks.
+          if (target.coreId === ctx.identity.coreId) {
+            const { coreId: _self, ...local } = target;
+            ctx.emit('ui.reveal', { target: local });
+            return { delivered: 1 };
+          }
+          if (!trusts(ctx, target.coreId)) {
+            throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `ui.reveal target.coreId ${target.coreId} is not this core's id, a machine of its group or a machine trusted for coordination` });
+          }
         }
         ctx.emit('ui.reveal', { target });
         return { delivered: 1 };
