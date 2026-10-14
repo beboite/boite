@@ -133,11 +133,17 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 593,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,898,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,904,000 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 4,110,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-14, files dropped on the desktop window going to the composer
+(`lib/native-drop.ts`, the attach overlay and its English and French strings)
+measured 4,900,488 UI bytes after `bun run build:ui` on Linux, 2,488 bytes over
+4,898,000; the entry chunk is 525,733 bytes, under its unchanged limit. The UI
+total limit rises to 4,904,000.
 
 On 2026-10-13, prompt-free draft preparation, attachment uploads and crash
 recovery measured 4,853,814 UI bytes and 4,092,165 core JavaScript bytes after
