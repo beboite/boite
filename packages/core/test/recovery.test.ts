@@ -55,7 +55,7 @@ describe('crash recovery', () => {
       expect(next.journal.getTurn(turn.id)).toEqual(held);
       expect(next.scheduler.state().queued.map(entry => entry.turnId)).toEqual([turn.id, discarded.id]);
       expect(next.scheduler.state().running).toEqual([]);
-      await expect(reader.call('threads.archive', { threadId: first.threadId, onlyIfIdle: true })).rejects.toThrow('pending');
+      await expect(reader.call('threads.archive', { threadId: first.threadId, onlyIfIdle: true })).rejects.toThrow('expected an idle conversation family');
       expect(next.journal.getTurn(turn.id)).toEqual(held);
       expect((await reader.call('turns.start', input)).id).toBe(turn.id);
       expect(next.threads.get(first.threadId).messages).toHaveLength(1);
