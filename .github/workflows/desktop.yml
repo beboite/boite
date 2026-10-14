@@ -216,8 +216,17 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.sign-updates && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
         run: |
           export TAURI_SIGNING_PRIVATE_KEY="${TAURI_SIGNING_PRIVATE_KEY:-${THROWAWAY_UPDATER_KEY:-}}"
-          # shellcheck disable=SC2086 # BUNDLE_CONFIGS holds several arguments.
-          bun apps/shell/scripts/tauri.ts bundle $BUNDLE_CONFIGS --bundles appimage --verbose
+          # The bundler downloads AppRun and linuxdeploy from GitHub releases on
+          # every run. A 5xx there is retried; any other failure stops the job.
+          set -o pipefail
+          log="$RUNNER_TEMP/appimage-bundle.log"
+          for attempt in 1 2 3; do
+            # shellcheck disable=SC2086 # BUNDLE_CONFIGS holds several arguments.
+            if bun apps/shell/scripts/tauri.ts bundle $BUNDLE_CONFIGS --bundles appimage --verbose 2>&1 | tee "$log"; then break; fi
+            if [ "$attempt" = 3 ] || ! grep -qE 'failed to bundle project: .http status: 5[0-9]{2}' "$log"; then exit 1; fi
+            echo "::warning::AppImage tool download failed with a server error (attempt $attempt of 3); retrying in $((attempt * 30)) s"
+            sleep $((attempt * 30))
+          done
           mkdir "$RUNNER_TEMP/appimage"
           appimage=$(realpath "$BUNDLE_DIR"/appimage/*.AppImage)
           (cd "$RUNNER_TEMP/appimage" && "$appimage" --appimage-extract > /dev/null)
@@ -266,6 +275,9 @@ jobs:
             # The Intel shell and its sidecar, run under Rosetta by the smoke test below.
             lipo -archs "$RUNNER_TEMP/Boite.app/Contents/MacOS/boite-shell" | grep -qx x86_64
             lipo -archs "$RUNNER_TEMP/Boite.app/Contents/MacOS/boite-core" | grep -qx x86_64
+            # Rosetta translates both on first start on a fresh runner; the
+            # 30 s native budget expired on about half of the 2026-10-13 runs.
+            export BOITE_SMOKE_STARTUP_SECONDS=90
           fi
           bun scripts/ci/desktop-smoke.ts "$RUNNER_TEMP/Boite.app/Contents/MacOS/boite-shell"
       - name: Collect release bundles

@@ -93,6 +93,9 @@ Install `patchelf` too. The shell build wrapper selects it from PATH for
 linuxdeploy. On ARM64 it preserves the compiled Bun sidecar, whose ELF load
 segments break after an RPATH rewrite. The exception checks that the sidecar
 only needs glibc libraries; CI compares the packaged core with the original.
+The AppImage bundler downloads AppRun and linuxdeploy from GitHub releases on
+every run. CI retries the bundle up to three times when that download answers a
+5xx (a 500 failed the 2026-10-14 nightly); any other bundling error fails at once.
 
 Portable CI runs `scripts/ci/desktop-smoke.ts <installed-shell>` against the
 Debian package, extracted AppImage and macOS application bundle. Signing, notarization and testing
