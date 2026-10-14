@@ -2,7 +2,7 @@ import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, r
 import { createHash } from 'node:crypto';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { unzipSync } from 'fflate';
-import { assertBackupSpace, pruneUpdateLeftovers } from './space.ts';
+import { BACKUP_OWNER, assertBackupSpace, pruneUpdateLeftovers } from './space.ts';
 import type { ServerUpdatePlan, ServerUpdatePlatform } from './types.ts';
 
 const pause = (ms: number) => new Promise<void>(done => setTimeout(done, ms));
@@ -82,6 +82,8 @@ export async function applyServerUpdate(file: string, platform: ServerUpdatePlat
     // Never copy a live SQLite directory. The whole snapshot also keeps account and pairing state.
     mkdirSync(backup, { mode: 0o700 });
     backupMade = true;
+    // Installations can share a parent folder; the marker keeps pruning to this one's backups.
+    writeFileSync(join(backup, BACKUP_OWNER), root, { mode: 0o600 });
     cpSync(plan.dataDir, join(backup, 'data'), { recursive: true, dereference: false, errorOnExist: true, force: false });
     dataSaved = true;
     verifyStage(directory, plan);
@@ -106,7 +108,7 @@ export async function applyServerUpdate(file: string, platform: ServerUpdatePlat
     if (!healthy) throw new Error('The updated server did not become healthy within 30 seconds');
     result(null);
     // Cleanup never turns a healthy update into a rollback.
-    try { pruneUpdateLeftovers(dirname(root), plan.id, statSync(file).mtimeMs); } catch { /* retried after the next update */ }
+    try { pruneUpdateLeftovers(dirname(root), root, plan.id, statSync(file).mtimeMs); } catch { /* retried after the next update */ }
   } catch (error) {
     failed = true;
     const reason = error instanceof Error ? error.message : String(error);
@@ -117,11 +119,20 @@ export async function applyServerUpdate(file: string, platform: ServerUpdatePlat
       if (installed) renameSync(root, join(directory, 'failed-installation'));
       if (previousSaved) renameSync(join(backup, 'installation'), root);
       if (installed && dataSaved) {
-        // Preserve both the failed data and the snapshot if restoration itself fails.
-        const restored = `${plan.dataDir}.restore-${plan.id}`;
-        cpSync(join(backup, 'data'), restored, { recursive: true, dereference: false, errorOnExist: true, force: false });
-        renameSync(plan.dataDir, `${plan.dataDir}.failed-${plan.id}`);
-        renameSync(restored, plan.dataDir);
+        const snapshot = join(backup, 'data');
+        const failedData = `${plan.dataDir}.failed-${plan.id}`;
+        if (statSync(snapshot).dev === statSync(dirname(plan.dataDir)).dev) {
+          // Same disk: swap by rename, so a rollback needs no second copy on a disk the backup just filled.
+          renameSync(plan.dataDir, failedData);
+          try { renameSync(snapshot, plan.dataDir); }
+          catch (restoreError) { renameSync(failedData, plan.dataDir); throw restoreError; }
+        } else {
+          // Preserve both the failed data and the snapshot if restoration itself fails.
+          const restored = `${plan.dataDir}.restore-${plan.id}`;
+          cpSync(snapshot, restored, { recursive: true, dereference: false, errorOnExist: true, force: false });
+          renameSync(plan.dataDir, failedData);
+          renameSync(restored, plan.dataDir);
+        }
       }
       result(`Server update failed; the previous version was restored. ${reason}`);
       await platform.control(plan.installation.service, 'start');

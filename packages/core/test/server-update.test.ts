@@ -7,7 +7,7 @@ import { zipSync } from 'fflate';
 import { Database } from 'bun:sqlite';
 import { verifyPayload, unpackPayload } from '../src/server-update/release.ts';
 import { applyServerUpdate } from '../src/server-update/apply.ts';
-import { SPACE_MARGIN, spaceShortage, treeBytes, treeBytesAsync } from '../src/server-update/space.ts';
+import { BACKUP_OWNER, SPACE_MARGIN, spaceShortage, treeBytes, treeBytesAsync } from '../src/server-update/space.ts';
 import type { ServerUpdatePlan, ServerUpdatePlatform } from '../src/server-update/types.ts';
 import { echoThread, holdAccountTurns, startTestCore, waitFor } from './harness.ts';
 
@@ -152,6 +152,9 @@ for (const fails of [false, true]) test(`update helper ${fails ? 'restores the p
       expect(readFileSync(join(data, 'pairing.json'), 'utf8')).toBe('test pairing survives');
       const restored = new Database(join(data, 'journal.db'));
       expect(restored.query('SELECT * FROM saved').all()).toEqual([{ message: 'conversation' }]); restored.close();
+      // One disk: the snapshot is renamed back, no second copy of the data is written.
+      expect(readFileSync(join(`${data}.failed-${id}`, 'pairing.json'), 'utf8')).toBe('new run changed pairing');
+      expect(existsSync(`${data}.restore-${id}`)).toBe(false);
       expect(controls).toEqual(['stop', 'start', 'stop', 'start']);
     } else {
       await run;
@@ -251,8 +254,13 @@ test('a healthy update keeps only its own backup and removes the folders of atte
   const olderBackup = join(f.root, '.boite-backup-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb');
   const endedAttempt = join(f.root, '.boite-update-cccccccc-cccc-cccc-cccc-cccccccccccc');
   const laterAttempt = join(f.root, '.boite-update-dddddddd-dddd-dddd-dddd-dddddddddddd');
+  const siblingBackup = join(f.root, '.boite-backup-eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee');
+  const unmarkedBackup = join(f.root, '.boite-backup-ffffffff-ffff-ffff-ffff-ffffffffffff');
   const unrelated = join(f.root, '.boite-backup-kept-by-hand');
-  for (const folder of [olderBackup, endedAttempt, laterAttempt, unrelated]) { mkdirSync(folder); writeFileSync(join(folder, 'file'), 'x'); }
+  for (const folder of [olderBackup, endedAttempt, laterAttempt, siblingBackup, unmarkedBackup, unrelated]) { mkdirSync(folder); writeFileSync(join(folder, 'file'), 'x'); }
+  writeFileSync(join(olderBackup, BACKUP_OWNER), f.install);
+  writeFileSync(join(siblingBackup, BACKUP_OWNER), join(f.root, 'other-install'));
+  for (const attempt of [endedAttempt, laterAttempt]) writeFileSync(join(attempt, 'plan.json'), JSON.stringify({ installation: { directory: f.install } }));
   const past = new Date('2026-01-01T00:00:00Z');
   utimesSync(endedAttempt, past, past);
   const future = new Date(Date.now() + 3_600_000);
@@ -261,9 +269,12 @@ test('a healthy update keeps only its own backup and removes the folders of atte
     await applyServerUpdate(f.plan, f.platform, { pollMs: 5, healthTimeoutMs: 35, health: async () => ({ ok: true, version: '2.1.0', pid: 456 }) });
     expect(readFileSync(join(f.install, 'boite-core'), 'utf8')).toBe('new executable');
     expect(readFileSync(join(f.root, `.boite-backup-${f.id}`, 'installation', 'boite-core'), 'utf8')).toBe('old executable');
+    expect(readFileSync(join(f.root, `.boite-backup-${f.id}`, BACKUP_OWNER), 'utf8')).toBe(f.install);
     expect(existsSync(olderBackup)).toBe(false);
     expect(existsSync(endedAttempt)).toBe(false);
     expect(existsSync(laterAttempt)).toBe(true);
+    expect(existsSync(siblingBackup)).toBe(true);
+    expect(existsSync(unmarkedBackup)).toBe(true);
     expect(existsSync(unrelated)).toBe(true);
     expect(existsSync(f.operation)).toBe(false);
   } finally { rmSync(f.root, { recursive: true, force: true }); }

@@ -1,6 +1,6 @@
-import { lstatSync, readdirSync, rmSync, statSync, statfsSync } from 'node:fs';
-import { lstat, readdir, statfs } from 'node:fs/promises';
-import { join } from 'node:path';
+import { lstatSync, readFileSync, readdirSync, rmSync, statSync, statfsSync } from 'node:fs';
+import { lstat, readdir, stat, statfs } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 
 /** Room left after the data copy, so the restarted core can still write its journal. */
 export const SPACE_MARGIN = 512 * 1024 * 1024;
@@ -48,16 +48,36 @@ export function spaceShortage(dataBytes: number, freeBytes: number, backupParent
 
 /** The worker's check, once the core has stopped and nothing else needs the event loop. */
 export function assertBackupSpace(dataDir: string, backupParent: string): void {
-  const info = statfsSync(backupParent);
-  const shortage = spaceShortage(treeBytes(dataDir), Number(info.bavail) * Number(info.bsize), backupParent);
-  if (shortage) throw new Error(shortage);
+  const dataBytes = treeBytes(dataDir);
+  // A rollback swaps folders by rename on one disk; across disks it copies the snapshot back beside the data.
+  const folders = statSync(backupParent).dev === statSync(dirname(dataDir)).dev ? [backupParent] : [backupParent, dirname(dataDir)];
+  for (const folder of folders) {
+    const info = statfsSync(folder);
+    const shortage = spaceShortage(dataBytes, Number(info.bavail) * Number(info.bsize), folder);
+    if (shortage) throw new Error(shortage);
+  }
 }
 
 /** The core's check before it downloads anything or closes admission. */
 export async function checkBackupSpace(dataDir: string, backupParent: string): Promise<void> {
-  const info = await statfs(backupParent);
-  const shortage = spaceShortage(await treeBytesAsync(dataDir), Number(info.bavail) * Number(info.bsize), backupParent);
-  if (shortage) throw new Error(shortage);
+  const dataBytes = await treeBytesAsync(dataDir);
+  const folders = (await stat(backupParent)).dev === (await stat(dirname(dataDir))).dev ? [backupParent] : [backupParent, dirname(dataDir)];
+  for (const folder of folders) {
+    const info = await statfs(folder);
+    const shortage = spaceShortage(dataBytes, Number(info.bavail) * Number(info.bsize), folder);
+    if (shortage) throw new Error(shortage);
+  }
+}
+
+/** The file inside a backup that names the installation it belongs to. */
+export const BACKUP_OWNER = 'installation-path';
+
+function ownerOf(path: string, kind: string): string | null {
+  try {
+    if (kind === 'backup') return readFileSync(join(path, BACKUP_OWNER), 'utf8');
+    const plan = JSON.parse(readFileSync(join(path, 'plan.json'), 'utf8')) as { installation?: { directory?: unknown } };
+    return typeof plan.installation?.directory === 'string' ? plan.installation.directory : null;
+  } catch { return null; }
 }
 
 /**
@@ -65,15 +85,17 @@ export async function checkBackupSpace(dataDir: string, backupParent: string): P
  * `.boite-backup-*` folders roll back to versions already replaced twice, and
  * `.boite-update-*` folders older than the current one belong to attempts that
  * ended. Each backup is a full data copy, so keeping them all fills the disk
- * within a few nightlies.
+ * within a few nightlies. Only folders that name this installation go; one
+ * without a marker or plan, or naming a sibling installation, stays.
  */
-export function pruneUpdateLeftovers(parent: string, currentId: string, startedAt: number): string[] {
+export function pruneUpdateLeftovers(parent: string, installation: string, currentId: string, startedAt: number): string[] {
   const removed: string[] = [];
   for (const name of readdirSync(parent)) {
     const match = /^\.boite-(backup|update)-([a-f0-9-]{36})$/.exec(name);
     if (!match || match[2] === currentId) continue;
     const path = join(parent, name);
     try {
+      if (ownerOf(path, match[1]!) !== installation) continue;
       // An update folder newer than this one is someone else's attempt in flight.
       if (match[1] === 'update' && statSync(path).mtimeMs >= startedAt) continue;
       rmSync(path, { recursive: true, force: true });
