@@ -5,6 +5,7 @@
   import { ParagraphScan } from '../lib/message-display';
   import { strings } from '../lib/strings';
   import { elapsed } from '../lib/format';
+  import { thoughtTitle } from '../lib/tool-groups';
 
   let { text, live = false, startedAt = null, finishedAt = null }: { text: string; live?: boolean; startedAt?: number | null; finishedAt?: number | null } = $props();
 
@@ -13,6 +14,8 @@
   // Folded by default, and the fold belongs to this part alone.
   let open = $state(false);
   const empty = $derived(text.trim().length === 0);
+  // What the step is about ("Inspecting the driver"), the plain word while it has none.
+  const label = $derived(thoughtTitle(text) ?? strings.chat.thinking);
   const shown = $derived(open && !empty);
 
   // Built on the first open, then folded rather than thrown away: that is what
@@ -42,7 +45,7 @@
     onclick={() => (open = !open)}
   >
     <span class="glyph"><Brain size={15} strokeWidth={1.75} /></span>
-    <span class="label ui-label">{strings.chat.thinking}</span>
+    <span class="label ui-label" data-testid="thinking-label" title={empty ? undefined : label}>{label}</span>
     {#if took}<span class="took ui-label" data-testid="thinking-elapsed">{took}</span>{/if}
     {#if live}
       <span class="dot" aria-label={strings.chat.streaming}></span>
@@ -87,6 +90,9 @@
   }
 
   .label {
+    /* A thought's title can be a whole sentence: it shrinks to an ellipsis, the time and caret stay. */
+    flex: 0 1 auto;
+    min-width: 0;
     font-weight: 400;
     text-align: left;
     overflow: hidden;

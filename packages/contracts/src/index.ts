@@ -1473,6 +1473,12 @@ export type MessagePart =
       status: ToolStatus;
       /** A command's exit code when the provider reports it. Absent on older rows and other tools. */
       exitCode?: number | null;
+      /**
+       * The agent's own one-line account of the calls this one ran with ("Read
+       * rules.md and data.txt"), written after they finished. Claude's
+       * `tool_use_summary`; absent for other agents and on older rows.
+       */
+      summary?: string;
       /** Provider-reported child activity. These are not Boite thread IDs or team budget entries. */
       nativeAgents?: NativeAgentUpdate[];
       /** What the call produced or changed, under the input and the output. Absent on a journal row written before documents existed. */

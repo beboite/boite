@@ -99,7 +99,8 @@ test('live paragraphs stay visible and preserve completed nodes; reasoning steps
   await page.waitFor(`document.querySelectorAll('${id('paragraph')}').length === 2`);
   expect(await page.evaluate(`document.querySelector('${id('paragraph')}') === window.__firstParagraph`)).toBe(true);
   expect(await page.evaluate(`document.querySelectorAll('${id('thinking-part')}').length`)).toBe(2);
-  expect(await page.evaluate(`document.querySelector('${id('thinking-toggle')}').textContent`)).toContain('Thinking');
+  // A step reads as what it was about: its heading, not the bare word.
+  expect(await page.text(id('thinking-label'))).toBe('Inspecting files');
   expect(await page.text(id('thinking-elapsed'))).toBe('4s');
   await page.click(`[data-kind='thinking']:last-child ${id('thinking-toggle')}`);
   await page.waitFor(`document.querySelector('${id('thinking-text')}')?.textContent.includes('Checking results')`);
@@ -360,3 +361,25 @@ test('hidden reasoning and protocol text leave no extra gap before tools on desk
   }
   await page.send('Emulation.setDeviceMetricsOverride', {width:1300,height:850,deviceScaleFactor:1,mobile:false});
 }, 30_000);
+
+test('a run of calls reads as the agent\'s own summaries, and a step of reasoning as where it stands', async () => {
+  await update(`const turn = thread.turns[0]; turn.status = 'done'; turn.finishedAt = Date.now(); thread.status = 'idle'; const m = thread.messages.at(-1); m.state = 'complete'; const now = Date.now(); m.parts = [
+    {type:'tool',toolId:'sum-a',name:'Read',input:{file_path:'rules.md'},output:'A row counts when its number is prime.',status:'done',startedAt:now-9000,finishedAt:now-8600,summary:'Read rules.md and data.txt'},
+    {type:'tool',toolId:'sum-b',name:'Read',input:{file_path:'data.txt'},output:'alpha 3\\nbeta 7',status:'done',startedAt:now-8500,finishedAt:now-8100,summary:'Read rules.md and data.txt'},
+    {type:'thinking',text:'Testing N=2 gives shifted values 5, 9, 14 and 7, so exactly two are prime and their sum, 12, divides by 4. I will check it with one command before answering.\\n\\n',startedAt:now-8000,finishedAt:now-3700},
+    {type:'tool',toolId:'sum-c',name:'Bash',input:{command:'python3 -c "print(2)"'},output:'2',status:'done',startedAt:now-3600,finishedAt:now-3000,summary:'Found N=2 with a prime search'},
+    {type:'text',text:'N = 2: only 5 and 7 are prime, and 12 divides by 4.'}];`);
+  const label = `document.querySelector('${id('tool-group-label')}')?.textContent`;
+  await page.waitFor(`${label} === 'Read rules.md and data.txt · Found N=2 with a prime search'`);
+  await page.click(id('tool-group-toggle'));
+  await page.waitFor(`document.querySelector('${id('thinking-label')}')?.textContent === 'Testing N=2 gives shifted values 5, 9, 14 and 7, so exactly two are prime and their sum, 12, divides by 4'`);
+  await capture('agent-summaries-desktop');
+  await page.send('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
+  await capture('agent-summaries-phone');
+  expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+  await page.send('Emulation.setDeviceMetricsOverride',{width:1300,height:850,deviceScaleFactor:1,mobile:false});
+  await page.click(id('tool-group-toggle'));
+  // One call of the run without a line yet: the counted sentence, never half a description.
+  await update(`delete thread.messages.at(-1).parts[3].summary;`);
+  await page.waitFor(`${label} === 'Read 2 files and ran 1 command'`);
+});

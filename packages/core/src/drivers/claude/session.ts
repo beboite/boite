@@ -7,7 +7,7 @@ import type { LiveTurnSettings, SessionContext, TurnContext } from '../types.ts'
 import { hookReport } from './hooks.ts';
 import { authenticationFailureOf, backgroundKind, commandsOf, isAuthenticationFailure, restoredCost, subagentOf } from './mapping.ts';
 import { toolGate } from './permissions.ts';
-import { childEnv, liveSetup, PROMPT_EFFORT, PromptQueue, STDERR_MAX } from './query.ts';
+import { agentEnv, liveSetup, PROMPT_EFFORT, PromptQueue, STDERR_MAX, THINKING_DISPLAY_FLAG } from './query.ts';
 import type { ClaudeDeps, LiveSetup } from './query.ts';
 import type { ClaudeTurn } from './turn.ts';
 import { SessionRetention } from '../session-retention.ts';
@@ -733,9 +733,14 @@ export class ClaudeSession {
       includePartialMessages: true,
       // Every run of the user's own hooks, for the ledger Settings shows.
       includeHookEvents: true,
+      // A CLI driven through the SDK asks the API to leave its reasoning out
+      // ("omitted"): the thinking blocks arrive empty. A summary of it costs the
+      // same thinking tokens. Only the display moves: whether and how much the
+      // model thinks stays the CLI's call (effort, `alwaysThinkingEnabled`).
+      extraArgs: { [THINKING_DISPLAY_FLAG]: 'summarized' },
       abortController: this.abortController,
-      env: mode === null ? childEnv(ctx.accountEnv) : {
-        ...childEnv(ctx.accountEnv),
+      env: mode === null ? agentEnv(ctx.accountEnv) : {
+        ...agentEnv(ctx.accountEnv),
         [CONTEXT_ENV]: mode.label,
         [CONTEXT_GUIDES_ENV]: mode.guides ? undefined : '0',
         CLAUDE_CODE_DISABLE_CLAUDE_MDS: mode.instructions ? undefined : '1',

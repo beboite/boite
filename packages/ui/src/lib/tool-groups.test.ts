@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 import type { MessagePart } from '@boite/contracts';
-import { activityShown, liveLabel, partRuns, programOf, runSpan, runSummary, thinkingShown, toolLine, unwrapCommand, type ToolPart } from './tool-groups';
+import { activityShown, agentSummary, liveLabel, partRuns, programOf, runSpan, runSummary, thinkingShown, thoughtTitle, toolLine, unwrapCommand, type ToolPart } from './tool-groups';
 
 function tool(name: string, input: unknown, extra: Partial<ToolPart> = {}): ToolPart {
   return { type: 'tool', toolId: `${name}-${JSON.stringify(input)}`, name, input, output: 'ok', status: 'done', ...extra };
@@ -40,6 +40,27 @@ test('a run of calls reads as one sentence, edits counted by file', () => {
     tool('Edit', { file_path: 'x', old_string: 'a', new_string: 'b' }, { status: 'error' }),
     tool('Bash', { command: 'git status' }, { status: 'denied' })
   ])).toBe('Attempted 2 calls');
+});
+
+test('a run reads as the agent\'s own summaries only when every call has one', () => {
+  const read = tool('Read', { file_path: 'rules.md' }, { summary: 'Read rules.md and data.txt' });
+  const again = tool('Read', { file_path: 'data.txt' }, { summary: ' Read rules.md and data.txt ' });
+  const count = tool('Bash', { command: 'wc -l data.txt' }, { summary: 'Counted the rows' });
+  expect(agentSummary([read, again])).toBe('Read rules.md and data.txt');
+  expect(agentSummary([read, again, count])).toBe('Read rules.md and data.txt · Counted the rows');
+  // The last batch's line not in yet, or an agent that writes none: the counted sentence.
+  expect(agentSummary([read, tool('Bash', { command: 'ls' })])).toBeNull();
+  expect(agentSummary([])).toBeNull();
+});
+
+test('a thought reads as its latest heading, else the first sentence of where it stands', () => {
+  expect(thoughtTitle('**Inspecting the driver**\n\nThe session reads options.\n\n**Checking the tests**\n\nThere are three.')).toBe('Checking the tests');
+  expect(thoughtTitle('Testing N=1 gives one prime, so that fails. Trying N=2 next.')).toBe('Testing N=1 gives one prime, so that fails');
+  expect(thoughtTitle('First idea.\n\nThe rows live in data.txt and rules.md hold the rule? Probably')).toBe('The rows live in data.txt and rules.md hold the rule?');
+  // Still streaming: the words so far, markdown taken off.
+  expect(thoughtTitle('- Reading `turn.ts` for the **thinking** path')).toBe('Reading turn.ts for the thinking path');
+  expect(thoughtTitle('')).toBeNull();
+  expect(thoughtTitle('  \n\n ')).toBeNull();
 });
 
 test('a call reads as its command, or as a sentence in the tense it is in', () => {

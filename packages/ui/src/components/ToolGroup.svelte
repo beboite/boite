@@ -3,17 +3,19 @@
   import { Bot, Brain, ChevronRight, FilePen, FileText, Globe, Search, SquareTerminal, TriangleAlert, Wrench } from '@lucide/svelte';
   import { fill, strings } from '../lib/strings';
   import { elapsed } from '../lib/format';
-  import { familyOf, liveLabel, runSpan, runSummary, thinkingShown, type ActivityPart, type ToolPart } from '../lib/tool-groups';
+  import { agentSummary, familyOf, liveLabel, runSpan, runSummary, thinkingShown, thoughtTitle, type ActivityPart, type ThinkingStep, type ToolPart } from '../lib/tool-groups';
   import ThinkingPart from './ThinkingPart.svelte';
   import ToolCard from './ToolCard.svelte';
 
   /*
    * A run of activity with no answer between it: calls and the reasoning around
    * them. One visible step is drawn as itself; more fold under one line, "Ran 3
-   * commands and read 2 files" with the time the run took once it is done, the
-   * running step's own words ("Running git", "Thinking") while one runs. The
-   * fold opens on the steps, each one the same line it would be alone. Reasoning
-   * with no words that took under a second is not drawn at all.
+   * commands and read 2 files" with the time the run took once it is done, or
+   * the agent's own summary of those calls when it wrote one ("Read rules.md and
+   * data.txt"); the running step's own words ("Running git", the thought it is
+   * on) while one runs. The fold opens on the steps, each one the same line it
+   * would be alone. Reasoning with no words that took under a second is not
+   * drawn at all.
    */
   let {
     parts,
@@ -41,7 +43,9 @@
   let live = $derived(running !== undefined || thinking);
   let issues = $derived(tools.filter(part => part.status === 'error' || part.status === 'denied').length);
   let issueLabel = $derived(fill(issues === 1 ? strings.chat.toolIssueOne : strings.chat.toolIssueMany, { count: String(issues) }));
-  let label = $derived(running ? liveLabel(running) : thinking || tools.length === 0 ? strings.chat.thinking : runSummary(tools));
+  // Live, the thought being written; otherwise the last one that has words.
+  let thought = $derived(thinking ? parts.at(-1) as ThinkingStep : parts.findLast((part): part is ThinkingStep => part.type === 'thinking' && part.text.trim() !== ''));
+  let label = $derived(running ? liveLabel(running) : thinking || tools.length === 0 ? thoughtTitle(thought?.text ?? '') ?? strings.chat.thinking : agentSummary(tools) ?? runSummary(tools));
   let Glyph = $derived(running ? ICONS[familyOf(running)] : thinking || tools.length === 0 ? Brain : ICONS[familyOf(tools.at(-1)!)]);
   let busy = $derived(tools.some((part) => isBackground(part.toolId)));
 
@@ -100,7 +104,7 @@
       onclick={() => (open = !open)}
     >
       <span class="glyph"><Glyph size={15} strokeWidth={1.75} /></span>
-      <span class="label ui-label" class:shimmer={live} data-testid="tool-group-label">{label}</span>
+      <span class="label ui-label" class:shimmer={live} data-testid="tool-group-label" title={label}>{label}</span>
       {#if took}<span class="took ui-label" data-testid="tool-group-elapsed">{took}</span>{/if}
       {#if busy}
         <span class="pulse" aria-hidden="true"></span>
