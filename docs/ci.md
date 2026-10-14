@@ -130,6 +130,8 @@ Crash-recovery fixtures disarm resident delegation, coordination, workflow and
 group readers before closing the journal, without draining interrupted work.
 Real-core browser gestures wait for a decoded, enabled frame fitted to the view;
 an image can load before the automatic viewport resize has finished.
+Deferred-dialog fixtures release a loopback response after the agent's commands
+finish and observe the page's completion request before reading its title.
 
 The Windows job shares release-profile Rust dependencies, builds the installer
 once, and stages its existing core beside the shell for native E2E. Installer
