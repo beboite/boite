@@ -12,6 +12,8 @@ export interface ServerUpdateOptions {
   platform?: ServerUpdatePlatform;
   findOffer?: (current: string, arch: string, signal: AbortSignal) => Promise<ServerOffer | null>;
   prepare?: (offer: ServerOffer, directory: string, signal: AbortSignal, progress: (received: number, total: number | null) => void) => Promise<string>;
+  /** Replaces the disk measurement before an install; tests use it to simulate a full disk. */
+  checkSpace?: (dataDir: string, backupParent: string) => Promise<void>;
   pollMs?: number;
 }
 
@@ -122,6 +124,10 @@ export class ServerUpdates {
     const directory = join(dirname(installation.directory), `.boite-update-${id}`);
     this.directory = directory;
     mkdirSync(directory, { mode: 0o700 });
+    // Refuse while the core still runs: a full disk found by the worker means a stop and a rollback.
+    const checkSpace = this.options.checkSpace ?? (await import('./server-update/space.ts')).checkBackupSpace;
+    await checkSpace(this.core.dataDir, dirname(installation.directory));
+    if (abort.signal.aborted || this.closed) return;
     const progress = (received: number, total: number | null) => {
       if (this.abort === abort) this.move({ received, total });
     };

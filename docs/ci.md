@@ -153,9 +153,16 @@ The tested installer becomes the release artifact.
 | UI entry chunk | 593,000 |
 | UI files, excluding `.br` and `.gz` copies | 4,906,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,110,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,122,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-14, the server update disk-space check and backup pruning
+(`server-update/space.ts` and its callers) measured 4,119,478 core JavaScript
+bytes on Windows CI, 478 bytes over the 4,119,000 limit. Fresh local
+`bun run build:core` runs measure 4,114,568 bytes at `origin/main` and
+4,118,534 with the change, an increase of 3,966 bytes. The core JavaScript
+limit becomes 4,122,000.
 
 On 2026-10-14, files dropped on the desktop window going to the composer
 (`lib/native-drop.ts`, the attach overlay and its English and French strings)
