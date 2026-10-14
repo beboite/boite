@@ -19,6 +19,19 @@ export function transportFailure(message: string): RpcFailure {
 }
 
 /**
+ * A call made while the machine was not connected: it never left this client.
+ * Its own marker lets a surface say so in words, or stay quiet where the
+ * machine's status already reads offline.
+ */
+export function closedFailure(): RpcFailure {
+  return new RpcFailure({ code: RpcErrorCode.Internal, message: 'not connected', data: { transport: 'closed' } });
+}
+
+export function wasClosed(error: unknown): boolean {
+  return error instanceof RpcFailure && (error.data as { transport?: unknown } | undefined)?.transport === 'closed';
+}
+
+/**
  * A call the connection lost before its answer came back: the core may or may
  * not have run it. A caller whose method the core deduplicates can ask again.
  */

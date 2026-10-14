@@ -21,7 +21,16 @@
   import { machineUpdateState, type MachineUpdateState } from '../lib/machine-updates';
   import PairMachine from './PairMachine.svelte';
   import type { Store } from '../lib/store.svelte';
-  let { mobile = false }: { mobile?: boolean } = $props();
+  let { mobile = false, onopenthread }: { mobile?: boolean; onopenthread?: () => void } = $props();
+  /** The thread a failure on that machine was about: opening it shows the cause in its chat, and clears the line. */
+  function openFailedThread(machine: Machine) {
+    const owner = machine.store;
+    const threadId = owner.errorThreadId;
+    if (!threadId) return;
+    owner.error = null;
+    onopenthread?.();
+    void workspace.select(owner, threadId);
+  }
   const uid = $props.id();
   const migration = new ConnectionGroup(workspace);
   onDestroy(() => migration.stop());
@@ -276,8 +285,14 @@
           {/if}
           {#if mobile && machine.store.pairingRequired && (machine.store.error === strings.errors.unpaired || machine.store.error === strings.errors.revoked)}
             <p class="pair-hint">{strings.mobile.pairInstalled}</p>
-          <!-- A remote machine switched off has nothing to explain; this PC's own core failing to start does. -->
-          {:else if machine.store.error && away(machine) !== 'offline'}<p class="error">{machine.store.error}</p>{/if}
+          <!-- A thread's failure carries the thread's title, never its cause: say it is a thread, and open it. -->
+          {:else if machine.store.error && machine.store.errorThreadId}
+            <div class="error thread-failed" data-testid="machine-thread-failed">
+              <p>{fill(strings.machines.threadFailed, { thread: machine.store.error })}</p>
+              <button class="ghost small" data-testid="machine-thread-failed-open" onclick={() => openFailedThread(machine)}><span class="ui-label">{strings.notify.openThread}</span><ArrowUpRight size={13} /></button>
+            </div>
+          <!-- A remote machine switched off has nothing to explain; this PC's own core failing to start does. A call that found it away repeats its status. -->
+          {:else if machine.store.error && away(machine) !== 'offline' && !(away(machine) === 'lost' && machine.store.errorOffline)}<p class="error">{machine.store.error}</p>{/if}
         </section>
       {/each}
     </div>
@@ -464,6 +479,14 @@
     overflow-wrap: anywhere;
     margin-top: 8px;
   }
+  .thread-failed {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .thread-failed p { margin: 0; min-width: 0; }
+  .thread-failed button { flex: none; }
   .pair-hint { color: var(--color-muted-foreground); font-size: var(--text-sm); line-height: 1.6; margin: 12px 0 0; }
   @media (prefers-reduced-motion: reduce) {
     .fold :global(svg) {

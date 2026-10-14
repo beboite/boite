@@ -3,7 +3,8 @@ import { flushSync, mount, unmount } from 'svelte';
 import { FakeClient } from '../lib/fake-client';
 import { Store, store as primary } from '../lib/store.svelte';
 import { workspace, type Machine } from '../lib/workspace.svelte';
-import { strings } from '../lib/strings';
+import { fill, strings } from '../lib/strings';
+import { closedFailure } from '../lib/rpc-error';
 import { confirm } from '../lib/confirm.svelte';
 import MachinesPage from './MachinesPage.svelte';
 
@@ -188,10 +189,25 @@ test('a machine that does not answer is grey and offers only its name, its icon 
   flushSync();
   expect([card().dataset.away, card().querySelector('.error')?.textContent]).toEqual(['lost', 'connection did not answer within 10 seconds']);
   expect([has('machine-open'), has('machine-remove')]).toEqual([false, true]);
+  // A call that found it away only repeats "Offline": the card stays quiet, and anywhere else it names the machine.
+  target.store.reportError(closedFailure());
+  flushSync();
+  expect([card().dataset.away, card().querySelector('.error'), target.store.error]).toEqual(['lost', null, target.store.core?.hostname ? fill(strings.errors.notConnected, { machine: target.store.core.hostname }) : strings.errors.notConnectedHere]);
   // Back online, the card is whole again without a click.
   target.store.connection = 'ready';
   flushSync();
   expect([has('machine-open'), has('machine-details-toggle'), card().dataset.away]).toEqual([true, true, undefined]);
+});
+
+test('a thread that failed on a machine reads as that thread, and its button opens it', async () => {
+  const { target } = await setup();
+  const thread = target.store.threads[0]!;
+  (target.store.client as FakeClient).emitCoreLog('error', 'turn failed: the context refilled to the limit', { threadId: thread.id });
+  await vi.waitFor(() => { flushSync(); expect(query('[data-machine-id="target"] [data-testid="machine-thread-failed"] p').textContent).toBe(fill(strings.machines.threadFailed, { thread: thread.title })); });
+  query<HTMLButtonElement>('[data-machine-id="target"] [data-testid="machine-thread-failed-open"]').click();
+  await vi.waitFor(() => expect([workspace.active, target.store.openThread?.id]).toEqual([target.store, thread.id]));
+  flushSync();
+  expect([target.store.error, document.querySelector('[data-testid="machine-thread-failed"]')]).toEqual([null, null]);
 });
 
 test('removing a connected row removes the group member and keeps the current conversation on its owner', async () => {
