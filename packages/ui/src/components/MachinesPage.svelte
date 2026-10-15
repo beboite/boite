@@ -88,7 +88,8 @@
     if (store.connection !== 'ready') return null;
     return machineUpdateState({
       server: store.localCore ? null : store.serverUpdater.busy ? { phase: 'checking' } : store.serverUpdater.snapshot,
-      app: store.localCore && showAppUpdateUi() ? appUpdater.snapshot : null,
+      // Another machine's desktop app counts once its window reports it, where it can be updated from here.
+      app: store.localCore ? (showAppUpdateUi() ? appUpdater.snapshot : null) : store.core?.os === 'windows' ? (store.serverUpdater.desktopFailure ? { phase: 'error' } : store.serverUpdater.desktop) : null,
       agents: store.owner ? store.harnessUpdates : []
     });
   }
@@ -108,7 +109,7 @@
       if (showAppUpdateUi()) appUpdater.check();
       await Promise.all(workspace.machines.filter(machine => machine.store.connection === 'ready' && machine.store.owner).flatMap(machine => [
         machine.store.loadHarnessUpdates(true),
-        ...(machine.store.localCore ? [] : [machine.store.serverUpdater.load(true)])
+        ...(machine.store.localCore ? [] : [machine.store.serverUpdater.load(true), machine.store.serverUpdater.loadDesktop()])
       ]));
     } finally {
       checking = false;
