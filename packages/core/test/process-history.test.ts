@@ -4,6 +4,7 @@ import { Bus } from '../src/bus.ts';
 import { createPosixPlatform } from '../src/platform/posix.ts';
 import type { GuardEventSink, NativeProcessInfo, ProcessEventSink, ProcessPlatform } from '../src/platform/types.ts';
 import { ProcRegistry } from '../src/procs.ts';
+import { nativeAgents } from '../src/native-agents.ts';
 import { DEFAULT_SETTINGS } from '../src/settings.ts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
@@ -219,4 +220,31 @@ test('a thread that never goes idle forgets the pids that exited past the forget
   await Bun.sleep(FORGET_MS * 2 + 100);
   expect(procs.liveOf(threadId).map(record => record.pid)).toEqual([500]);
   expect(procs.knownCount(threadId)).toBe(1);
+});
+
+test('a thread keeps its newest 2,000 trace rows, its live rows and the rows its agent cards read', async () => {
+  const client = await harness.connect();
+  const { threadId } = await echoThread(harness, client);
+  const run = (pid: number, exe: string, commandLine: string | null, parentPid: number | null, exit = true) => {
+    sink.started(threadId, pid, { exe, commandLine, parentPid, startedAt: pid, incarnation: String(pid) });
+    if (exit) sink.exited(threadId, pid, { ...EXIT, startedAt: pid, incarnation: String(pid) });
+  };
+  run(1, 'shell', null, null, false);
+  run(2, 'bash', 'bash -c claude', 1);
+  run(3, 'claude', 'claude -p "Review parsing" --model opus', 2);
+  for (let pid = 10; pid < 2110; pid++) run(pid, 'rustc', 'rustc --edition 2024', 1);
+  const rows = () => harness.core.journal.db.query('SELECT pid FROM processes WHERE thread_id = ? ORDER BY started_at').all(threadId).map(row => (row as { pid: number }).pid);
+  expect(rows()).toHaveLength(2103);
+  // The exit wrote its columns into the start's row.
+  expect(harness.core.journal.listProcesses(threadId, 1)).toMatchObject([{ pid: 2109, exitCode: 0, cpuMs: 5, commandLine: 'rustc --edition 2024' }]);
+
+  expect(harness.core.journal.pruneProcesses(threadId)).toBe(100);
+  expect(rows().slice(0, 4)).toEqual([1, 2, 3, 110]);
+  expect(rows()).toHaveLength(2003);
+  expect(nativeAgents(harness.core.journal, threadId).map(agent => [agent.name, agent.status])).toEqual([['Claude Code', 'done']]);
+
+  // The thread going idle prunes again: the root's row is no longer live.
+  sink.exited(threadId, 1, { ...EXIT, startedAt: 1, incarnation: '1' });
+  await waitFor(() => rows().length === 2002, 2000);
+  expect(rows().slice(0, 3)).toEqual([2, 3, 110]);
 });

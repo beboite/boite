@@ -51,3 +51,22 @@ One load sample for an echo fixture thread, as a JSON-RPC frame
 
 A client whose hello accepts `thread.load` gets the second frame; real rows
 with pull requests, a model and activity are larger than the fixture's.
+
+## Trace rows
+
+`bun bench/process-rows.ts`: a temporary journal, a 2,241-character rustc
+command line per row. The exit write of 5,000 started rows, then one thread
+that starts and exits 10,000 processes and goes idle once. Before is
+`3e535df3` through `--root` on a detached checkout of it; after is
+`boite/perf-processes`. `nice -n 10`, three runs each, back to back, medians.
+
+| | exit write per row (runs) | median | exit CPU ms (5,000) | rows kept | table and index bytes |
+| --- | --- | ---: | ---: | ---: | ---: |
+| before | 194.4, 195.2, 556.5 µs | 195.2 µs | 650 | 10,000 | 41,684,992 |
+| after | 71.8, 79.7, 82.5 µs | 79.7 µs | 338 | 2,000 | 8,339,456 |
+
+The exit is an `UPDATE` of five columns instead of an `INSERT OR REPLACE` that
+deletes and writes the row with its command line again. The after figures
+include the prune that runs every 500 exits of a thread. A thread's rows stop
+at its newest 2,000, plus its live rows and the rows its process agent cards
+read.

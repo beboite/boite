@@ -25,11 +25,16 @@ than importing OS backends. Unsupported protections remain off even if saved
 settings enable them.
 
 The registry owns spawn, exit, journal process rows and thread events. A process
-row is written at start and exit, without copying it into the operational event
-journal. Thread rows remain until thread/project removal. Synthetic operations
-without a real thread lose their rows when the registry forgets them, 30 seconds
-after the last process exits. Existing rows from older cores are not retroactively
-cleaned by that rule.
+row is written whole at start; the exit updates its exit columns only, without
+copying it into the operational event journal. A thread keeps its newest 2,000
+rows, every live row and the rows a process agent card reads (the agent CLI and
+its parent, `native-agents.ts`). Older rows are deleted when a finished turn's
+sweep runs, when the registry forgets an idle thread, and every 500 exits of a
+thread that never goes idle (`journal/processes.ts`). The rest stays until
+thread/project removal. Synthetic operations without a real thread lose their
+rows when the registry forgets them, 30 seconds after the last process exits.
+Existing rows from older cores are pruned the first time their thread runs a
+process again.
 
 The shell has a separate native boundary under
 `apps/shell/src-tauri/src/platform/` for core ownership, launch flags, data paths,

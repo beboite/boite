@@ -17,6 +17,7 @@ import { isNativeAgentPart } from './journal/native-agent-parts.ts';
 import { TRAIL_ONLY, trailOf } from './journal/trail.ts';
 import { copyBlobs, hydrate, hydratePart, storeParts } from './journal/part-blobs.ts';
 import { migrate } from './journal/schema.ts';
+import { ProcessRows } from './journal/processes.ts';
 import { toAccount, toMessage, toProcess, toProject, toThread, toTurn, parseJson } from './journal/rows.ts';
 import type { AccountRow, MessageRow, ProcessRow, ProjectIconRow, ProjectRow, ThreadRow, TurnRow } from './journal/rows.ts';
 import type { DetectedIcon as StoredProjectIcon } from './project-icons.ts';
@@ -68,6 +69,7 @@ export class Journal {
   readonly db: Database;
   /** The streaming write path: deltas and the parts of messages still streaming. */
   private readonly stream: StreamBuffer;
+  private readonly processes: ProcessRows;
   private readonly onError: (message: string) => void;
   private closed = false;
   /** The schema version found on disk and the one after migration, for the startup log. */
@@ -77,6 +79,7 @@ export class Journal {
     this.onError = options.onError ?? ((message) => console.error(message));
     this.db = new Database(file, { create: true });
     this.stream = new StreamBuffer(this.db, this, this.onError);
+    this.processes = new ProcessRows(this.db);
     try {
       this.db.exec('PRAGMA journal_mode = WAL');
       this.db.exec('PRAGMA synchronous = NORMAL');
@@ -800,27 +803,13 @@ export class Journal {
 
   // -- processes ------------------------------------------------------------
 
-  putProcess(record: ProcessRecord): void {
-    this.db
-      .query(
-        `INSERT OR REPLACE INTO processes
-         (thread_id, pid, parent_pid, exe, command_line, started_at, exited_at, exit_code, cpu_ms, peak_memory_bytes, io_bytes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        record.threadId,
-        record.pid,
-        record.parentPid,
-        record.exe,
-        record.commandLine,
-        record.startedAt,
-        record.exitedAt,
-        record.exitCode,
-        record.cpuMs,
-        record.peakMemoryBytes,
-        record.ioBytes,
-      );
-  }
+  putProcess(record: ProcessRecord): void { this.processes.put(record); }
+
+  /** The exit of a process whose start wrote its row: the exit columns only. */
+  finishProcess(record: ProcessRecord): void { this.processes.finish(record); }
+
+  /** Keeps a thread's newest rows, its live rows and the rows its agent cards read. */
+  pruneProcesses(threadId: string, keep?: number): number { return this.processes.prune(threadId, keep); }
 
   listProcesses(threadId: string, limit: number): ProcessRecord[] {
     const rows = this.db
