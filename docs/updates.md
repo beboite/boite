@@ -72,6 +72,41 @@ puts itself away after a few seconds, or on "Boite is ready: restart it to
 finish." with Restart. A core released before this request receives the same
 updates one call each, without that ordering.
 
+### The desktop app of another PC
+
+Another Windows PC of the group shows its desktop app as a Boite row under
+its name, and Settings, Machines and updates shows a Desktop app block with an
+Update button on that machine's details instead of the manual server guide.
+Only that PC's own window can run its installer, so the request goes through
+its core:
+
+1. The window reports its updater to the core its shell started, on every
+   change (`core.desktopUpdateReport`). The core accepts the report only from
+   that window: the core token on loopback with client `shell`. A member of
+   the group, a phone, a browser tab or a plugin is refused by field. The core
+   keeps the last report until that window's socket closes, and relays it to
+   owner connections (`core.desktopUpdateChanged`, `core.desktopUpdateStatus`).
+2. Update all, or Update on the block, sends `core.updateEverything` with
+   `app`, the version the report offered. The core starts the agents named,
+   waits until none of them is updating, then sends `ui.appUpdate` to that
+   window alone. Meanwhile the row reads Waits for work to finish.
+3. The window checks the version against its own offer, downloads it if
+   needed and installs it with no dialog there: the owner's click on the other
+   machine is the consent. It shows a short notice first. The shell then does
+   the restart handoff below and relaunches on the new version.
+
+The row follows the window's download, then Restarting while that PC is out of
+reach. A window that closes to install keeps its last report on the core, so
+the row never reads as done before that PC answers on the new version.
+
+With no window open on that PC (its shell quit, the core left resident), the
+answer carries `appError`, "Boite is not open on <machine>", and the row shows
+Failed with that reason. A window hidden in the tray still counts as open.
+Only Windows PCs get the row and the button: a .deb asks for the administrator
+password through `pkexec` and the macOS installer can ask too, with nobody at
+that machine to answer. A core without `features.desktopUpdates` in its hello
+shows no desktop row, as before.
+
 ## Boite and Boite Nightly
 
 Choose Boite for regular releases or Boite Nightly for checked daily builds
@@ -131,7 +166,9 @@ it for an update. No installer runs if the request is refused or the exit
 cannot be confirmed. The shell holds reconnects until installation takes over,
 so the window cannot relaunch the old executable. An installation failure
 releases that hold; the core then starts again and resumes the threads as it
-would after the update. Remote cores are not touched by the desktop updater.
+would after the update. The desktop updater never installs on another
+machine by itself: another PC's app installs through that PC's own window
+([the desktop app of another PC](#the-desktop-app-of-another-pc)).
 
 A core released before the handoff answers 404 to that request. The shell then
 falls back to the earlier rule, once, for that update: it polls
@@ -219,7 +256,7 @@ which asks for the administrator password; an AppImage replaces its own file,
 which must stay writable. The macOS update replaces the application bundle in
 place, so a copy still running from the mounted DMG cannot update. Debug builds, Boite Dev, hidden test shells and browser clients cannot install
 an update. The updater belongs to the local desktop, even while the UI displays
-a remote machine. [Agent updates](agent-updates.md) are separate, as are
+a remote machine; another machine asks it through its core, never directly. [Agent updates](agent-updates.md) are separate, as are
 [server image updates](server.md).
 
 The first version containing this updater must be installed manually. It only
