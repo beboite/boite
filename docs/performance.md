@@ -590,8 +590,14 @@ The core lists its providers twice before it listens (the registry loads, then
 the default accounts ask which ones are available), and again for every client
 that boots. Each listing looks up every candidate program on the PATH, with
 every PATHEXT extension on Windows. `packages/core/src/providers/which.ts`
-keeps each answer for two seconds, so a burst of listings scans the PATH once,
+keeps each answer for 30 seconds, so a burst of listings scans the PATH once,
 and forgets them all on a providers reload, an install or an agent update.
+An `npm` candidate's script and a managed install's release record are kept
+the same way: on 2026-10-15 a listing took 378 us instead of 486, and a
+listing plus pi's and OpenCode's summaries 40 file syscalls instead of 95
+(`bench/provider-list.ts`,
+[results](../bench/results/2026-10-15-perf-drivers.md)). Focusing a thread
+and preparing a draft resolve their one provider, not the list.
 `packages/core/test/providers-which.test.ts` counts the lookups.
 
 ## Shell startup
@@ -868,6 +874,7 @@ bun bench/ui-frames.ts --gpu --only "heavy thread scroll"          # composited 
 bun bench/rpc-actions.ts --journal <journal.db> --runs 6   # latency, core CPU, bytes and RSS per RPC (Linux)
 bun bench/claude-turn-heap.ts                  # heap a scripted Claude turn leaves; STEER=1 IMAGE_MIB=0 for a follow-up cut
 bun bench/codex-live-output.ts                 # redraws and characters of one running Codex command's live output
+bun bench/provider-list.ts                     # time per providers list() and summary(); ONLY=1 under strace -c
 ```
 
 `bench/bandwidth.ts` puts a TCP relay between the client and the core, counts

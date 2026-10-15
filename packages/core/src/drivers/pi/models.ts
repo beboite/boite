@@ -1,7 +1,7 @@
 import { withLogDiagnostic } from '../../log-errors.ts';
 import type { EffortLevel, ModelInfo, ProviderDescriptor } from '@boite/contracts';
 import { messageOf, unavailable } from '../../errors.ts';
-import { launchPrefix, profileFor, resolveExecutable } from '../../providers/resolve.ts';
+import { profileFor, resolveLaunch } from '../../providers/resolve.ts';
 import type { ProbeContext } from '../types.ts';
 import { agentEnv, textOf } from './mapping.ts';
 import { AGENT_OWN_MODEL, PROBE_TIMEOUT_MS, STDERR_MAX, THINKING_LEVELS } from './protocol.ts';
@@ -119,13 +119,13 @@ function modelsFrom(provider: ProviderDescriptor, listing: PiListing): ModelInfo
  */
 export async function readModels(ctx: ProbeContext): Promise<ModelInfo[]> {
   const profile = profileFor(ctx.provider);
-  const executable = profile === undefined ? null : resolveExecutable(profile);
-  if (executable === null) {
+  const launch = resolveLaunch(profile);
+  if (launch === null) {
     throw unavailable(`no ${ctx.provider.id} executable on this machine`, { providerId: ctx.provider.id });
   }
 
   let lastStderr = '';
-  const child = ctx.spawnChild(executable, [...launchPrefix(profile), ...(profile?.launch?.args ?? []), '--no-session'], {
+  const child = ctx.spawnChild(launch.executable, [...launch.prefix, ...(profile?.launch?.args ?? []), '--no-session'], {
     cwd: ctx.cwd,
     env: agentEnv(ctx.accountEnv),
   });

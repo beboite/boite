@@ -11,6 +11,7 @@ import { createAcpDriver } from '../src/drivers/acp.ts';
 import { runAcpLogin } from '../src/drivers/acp/login.ts';
 import type { AcpSdk } from '../src/drivers/acp/protocol.ts';
 import { toolOutputText } from '../src/drivers/acp/turn.ts';
+import { sessionNotificationOf } from '../src/drivers/acp/updates.ts';
 import { stderrLines } from '../src/drivers/lines.ts';
 import { getDriver, setDriver } from '../src/drivers/index.ts';
 import { startTestCore, waitFor } from './harness.ts';
@@ -94,15 +95,20 @@ afterEach(async () => {
  */
 async function sdkWithUpdateSeam(): Promise<{ sdk: AcpSdk; send: (notification: SessionNotification) => void }> {
   const real = await import('@agentclientprotocol/sdk');
-  let handler: ((context: { params: SessionNotification }) => void) | null = null;
+  let handler: ((context: { params: unknown }) => void) | null = null;
+  let parse: (params: unknown) => unknown = (params) => params;
   const sdk = {
     ...real,
     client: (options?: Parameters<typeof real.client>[0]) => {
       const app = real.client(options);
       const register = app.onNotification.bind(app);
-      app.onNotification = ((method: string, given: unknown) => {
-        if (method === 'session/update') handler = given as (context: { params: SessionNotification }) => void;
-        return register(method as never, given as never);
+      app.onNotification = ((method: string, ...given: unknown[]) => {
+        if (method === 'session/update') {
+          // `(method, handler)`, or `(method, params parser, handler)`.
+          handler = given.at(-1) as (context: { params: unknown }) => void;
+          if (given.length > 1) parse = given[0] as (params: unknown) => unknown;
+        }
+        return (register as (...args: unknown[]) => typeof app)(method, ...given);
       }) as typeof app.onNotification;
       return app;
     },
@@ -111,7 +117,7 @@ async function sdkWithUpdateSeam(): Promise<{ sdk: AcpSdk; send: (notification: 
     sdk,
     send: (notification) => {
       if (handler === null) throw new Error('the driver registered no session/update handler');
-      handler({ params: notification });
+      handler({ params: parse(notification) });
     },
   };
 }
@@ -1035,6 +1041,28 @@ describe('acp driver', () => {
     expect(toolOutputText({ output: 'done', metadata: { exit: 0 } })).toBe('done');
     // Anything else stays readable JSON rather than vanishing.
     expect(toolOutputText({ other: 1 })).toContain('"other"');
+  });
+
+  test('an update with a missing or mistyped field is dropped, a bad optional field or list entry is left out', () => {
+    const of = (update: unknown): unknown => sessionNotificationOf({ sessionId: 's', update })?.update ?? null;
+    expect(sessionNotificationOf(null)).toBeNull();
+    expect(sessionNotificationOf({ update: { sessionUpdate: 'plan', entries: [] } })).toBeNull();
+    expect(of({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 7 } })).toBeNull();
+    expect(of({ sessionUpdate: 'usage_update', used: '9', size: 10 })).toBeNull();
+    expect(of({ sessionUpdate: 'tool_call', toolCallId: 't' })).toBeNull();
+    expect(of({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'hi' } })).toEqual({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'hi' } });
+    expect(of({
+      sessionUpdate: 'tool_call_update', toolCallId: 't', title: 3, status: 'exploded',
+      content: [{ type: 'diff', path: 'a', newText: 'b', oldText: 4 }, { type: 'diff', path: 'a' }, { type: 'content', content: { type: 'image', data: 'x' } }, 'junk'],
+    })).toEqual({ sessionUpdate: 'tool_call_update', toolCallId: 't', title: undefined, name: undefined, status: undefined, content: [{ type: 'diff', path: 'a', newText: 'b', oldText: undefined }] });
+    expect(of({ sessionUpdate: 'usage_update', used: 9, size: 10, cost: { amount: '1', currency: 'USD' } })).toEqual({ sessionUpdate: 'usage_update', used: 9, size: 10, cost: undefined });
+    expect((of({
+      sessionUpdate: 'config_option_update',
+      configOptions: [
+        { id: 'mode', name: 'Mode', type: 'select', category: 'mode', currentValue: 'a', options: [{ value: 'a', name: 'A' }] },
+        { id: 'broken', name: 'Broken', type: 'select', currentValue: 'a', options: [{ value: 'a', name: 'A' }, { value: 2 }] },
+      ],
+    }) as { configOptions: { id: string }[] }).configOptions.map((option) => option.id)).toEqual(['mode']);
   });
 
   test('two probes of one account asked together both answer, one after the other', async () => {

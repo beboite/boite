@@ -1,5 +1,5 @@
 import { currentOs } from '../src/paths.ts';
-import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import type { Account } from '@boite/contracts';
 import { assertDriverRunnable } from '../src/drivers/index.ts';
 import { resolveCommand } from '../src/providers/resolve.ts';
@@ -66,6 +66,39 @@ describe('providers', () => {
       { kind: 'file', value: directory },
       { kind: 'file', value: process.execPath },
     ], isolation: {} })?.executable).toBe(process.execPath);
+  });
+
+  test.skipIf(process.platform === 'win32' || !['x64', 'arm64'].includes(process.arch))('codex on PATH as npm\'s Node launcher runs the binary beside it, a wrapper in front of it still runs', () => {
+    const prefix = join(harness.dataDir, 'codex-prefix');
+    const pkg = join(prefix, 'lib', 'node_modules', '@openai', 'codex');
+    const launcher = join(pkg, 'bin', 'codex.js');
+    const platform = `codex-${currentOs() === 'macos' ? 'darwin' : 'linux'}-${process.arch}`;
+    const triple = `${process.arch === 'x64' ? 'x86_64' : 'aarch64'}-${currentOs() === 'macos' ? 'apple-darwin' : 'unknown-linux-musl'}`;
+    const vendor = join(pkg, 'node_modules', '@openai', platform, 'vendor', triple, 'bin', 'codex');
+    const wrappers = join(harness.dataDir, 'codex-wrappers');
+    for (const dir of [join(launcher, '..'), join(vendor, '..'), join(prefix, 'bin'), wrappers]) mkdirSync(dir, { recursive: true });
+    writeFileSync(launcher, '#!/usr/bin/env node\n');
+    writeFileSync(vendor, '#!/bin/sh\n');
+    writeFileSync(join(wrappers, 'codex'), '#!/bin/sh\nexec codex "$@"\n');
+    for (const file of [launcher, vendor, join(wrappers, 'codex')]) chmodSync(file, 0o755);
+    const shim = join(prefix, 'bin', 'codex');
+    symlinkSync('../lib/node_modules/@openai/codex/bin/codex.js', shim);
+    const profile = { detect: {}, executable: [{ kind: 'path' as const, value: 'codex' }], isolation: {} };
+    const saved = process.env['PATH'];
+    try {
+      process.env['PATH'] = join(prefix, 'bin');
+      expect(resolveCommand(profile)).toEqual({ executable: vendor, prefix: [], shown: shim, updateEnv: { CODEX_MANAGED_BY_NPM: '1' } });
+
+      process.env['PATH'] = [wrappers, join(prefix, 'bin')].join(delimiter);
+      expect(resolveCommand(profile)?.executable).toBe(join(wrappers, 'codex'));
+
+      // A layout with no binary where npm puts it: the launcher finds its own way.
+      rmSync(vendor);
+      process.env['PATH'] = join(prefix, 'bin');
+      expect(resolveCommand(profile)).toEqual({ executable: shim, prefix: [], shown: shim, updateEnv: {} });
+    } finally {
+      process.env['PATH'] = saved;
+    }
   });
 
   test.skipIf(process.platform !== 'win32')('an npm launcher script on PATH is not an agent to start, but a program behind it is', () => {

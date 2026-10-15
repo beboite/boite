@@ -1,7 +1,7 @@
 import { accessSync, constants, existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { currentOs, homePath } from '../paths.ts';
-import { which } from './which.ts';
+import { Remembered, which } from './which.ts';
 
 /**
  * A CLI published on npm, found where a global install really put it. npm
@@ -122,8 +122,22 @@ export function scriptRuntime(root: string): string | null {
   return which('bun');
 }
 
-/** The command an `npm` candidate resolves to, or null when the package or a runtime for it is missing. */
+const resolved = new Remembered<NpmCommand | null>();
+
+/**
+ * The command an `npm` candidate resolves to, or null when the package or a
+ * runtime for it is missing. Every provider list resolves the same specs, and
+ * each walk stats about ten roots, so an answer is kept as long as a PATH
+ * lookup and dropped with them by `forgetWhich` (a reload, an install, an
+ * update). A kept answer whose script or runtime is gone is resolved again.
+ */
 export function resolveNpm(spec: string): NpmCommand | null {
+  const env = process.env;
+  const key = [spec, env['PATH'], env['npm_config_prefix'], env['NPM_CONFIG_PREFIX'], env['APPDATA'], env['LOCALAPPDATA'], env['PNPM_HOME'], env['BUN_INSTALL'], homePath()].join('\0');
+  return resolved.get(key, () => walkRoots(spec), (found) => found === null || (existsSync(found.script) && existsSync(found.executable)));
+}
+
+function walkRoots(spec: string): NpmCommand | null {
   const { name, bin } = splitSpec(spec);
   for (const root of globalRoots(bin)) {
     const script = scriptIn(root, name, bin);

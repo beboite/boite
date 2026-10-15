@@ -98,3 +98,66 @@ The CPU line leaves out the one join per redraw, which now runs in the timer.
   removed, not timed.
 - Rolling rate-limit updates reach the quota store; the probe processes they
   save need the store change of the network pull request.
+
+# Provider detection and the Codex launcher
+
+Measured on 2026-10-15 in the Linux container (Bun 1.4.2), `nice -n 10`.
+Before is the core at 2adac07b (the providers code `origin/main` had then),
+extracted beside the branch with the same bench file; after is
+`boite/perf-drivers`. Runs alternate.
+
+## Listing the providers
+
+```sh
+nice -n 10 bun bench/provider-list.ts
+ONLY=1 LOOPS=1000 nice -n 10 strace -f -c -e trace=%file bun bench/provider-list.ts
+```
+
+500 calls each after 20 warm-up calls, fresh temporary data directory, this
+machine's PATH. Medians of five runs, microseconds per call:
+
+| Call | Before | After |
+| --- | ---: | ---: |
+| `list()` | 486.0 | 377.8 |
+| `summary('pi')` | 144.1 | 12.4 |
+| `summary('opencode')` | 15.1 | 15.3 |
+
+File syscalls over 1,020 calls of each (three runs, identical):
+
+| Syscall | Before | After |
+| --- | ---: | ---: |
+| `access` | 54,122 | 13,322 |
+| `statx` | 16,351 | 17,373 |
+| `openat` | 13,469 | 5,308 |
+| `readlink` | 13,281 | 5,122 |
+| total | 97,336 | 41,237 |
+
+pi's two `npm` candidates no longer walk the global npm roots on each call,
+and a managed install's release record costs one `stat` instead of a read
+and a parse. Thread focus and draft preparation now resolve the one provider
+they need instead of listing all of them.
+
+## Codex behind npm's Node launcher
+
+When PATH resolves `codex` to npm's `@openai/codex/bin/codex.js`, the core now
+starts the vendor binary beside it. Five alternating runs of `codex --version`
+(codex-cli from `~/.local/lib/node_modules`, first launcher run cold at 823 ms
+and left out of the median):
+
+| Start | Median |
+| --- | ---: |
+| through the launcher | 107 ms |
+| the vendor binary | 24 ms |
+
+An idle `codex app-server` with a temporary `CODEX_HOME`, `ps -o rss` after
+4 s, three runs each: the Node launcher held 46,592 to 46,636 KB on top of the
+82,616 to 84,508 KB binary, which the binary alone keeps. On this machine the
+`codex` first on PATH is a cgroup wrapper script, which the core keeps running,
+so the saving applies to installs where PATH reaches the launcher itself.
+
+## Not measured
+
+- `resolveLaunch` resolves the program and its prefix once per spawn instead
+  of twice: one `resolveCommand` removed per agent start, probe and login.
+- ACP `session/update` is no longer parsed by the SDK's schema in the handler;
+  the SDK's own session router still parses it once.

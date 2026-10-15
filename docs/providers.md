@@ -328,10 +328,18 @@ session protocol either.
   value.
 - A PATH lookup, for a candidate, a `detect.command` or the npm roots, is
   remembered for 30 seconds per name and PATH, so the provider list and each
-  turn start do not walk PATH again. A remembered program that is gone is looked
-  up again. A reload, a managed install or uninstall and an update forget every
-  lookup; a program installed outside Boite shows up within 30 seconds, or at
-  once on a reload.
+  turn start do not walk PATH again. What an `npm` candidate resolves to is
+  remembered the same way, per spec, PATH and npm prefix variables. A
+  remembered program or script that is gone is looked up again. A reload, a
+  managed install or uninstall and an update forget every lookup; a program
+  installed outside Boite shows up within 30 seconds, or at once on a reload.
+- On Linux and macOS, a `codex` that PATH resolves to npm's
+  `@openai/codex/bin/codex.js` launcher is replaced by the executable vendor
+  binary the launcher would start (the platform package beside it, or the
+  launcher's own `vendor/`), with `CODEX_MANAGED_BY_NPM=1` for the updater as on
+  Windows. The launcher is a Node process that otherwise stays up beside each
+  Codex process. A wrapper script in front of it, which may set limits of its
+  own, is still what runs (`packages/core/src/providers/codex-launcher.ts`).
 - `launch.args` put the agent into the mode Boite speaks to. The `agy` driver
   adds its print-mode flags itself, because the same binary also answers
   `agy models` for the probe, so the Antigravity CLI declares none; anything a
@@ -1023,7 +1031,9 @@ process here goes through `procs.spawnChild`. The driver refuses a host whose
   `turn/start`, so an item that arrives before the answer still finds its turn.
 - An item notification carries the whole item so far. Text already written from
   `item/delta` is remembered per item and field, and a snapshot only adds what
-  lies past it, so an answer is drawn once whichever way it arrived.
+  lies past it, so an answer is drawn once whichever way it arrived. Only the
+  running turn's items are recorded, and the record is emptied when the turn
+  ends: a delta of another turn's item (a queued one, a replay) is dropped.
 - Text sent while a turn runs, an asynchronous answer or a coordination
   message, goes out as `turn/steer` naming that turn in `expectedTurnId`. A
   host whose turn already ended refuses it, and the text waits for the next turn.

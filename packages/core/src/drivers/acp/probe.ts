@@ -4,7 +4,7 @@ import type { ClientConnection, SessionConfigOption } from '@agentclientprotocol
 import type { AccountId, ModelInfo, ProviderId } from '@boite/contracts';
 import pkg from '../../../package.json';
 import { messageOf, unavailable } from '../../errors.ts';
-import { agentEnv, launchPrefix, profileFor, resolveExecutable } from '../../providers/resolve.ts';
+import { agentEnv, profileFor, resolveLaunch } from '../../providers/resolve.ts';
 import { stderrDrained, stderrLines } from '../lines.ts';
 import type { ProbeContext, ProbeResult } from '../types.ts';
 import { agentModelsOf, categoryOption, effortFrom, modelsFrom, selectValues, type AgentModels } from './models.ts';
@@ -29,15 +29,15 @@ export interface ProbeReading {
 export async function readModels(ctx: ProbeContext, deps: AcpDeps, noteOptions: (options: SessionConfigOption[]) => void): Promise<ProbeReading> {
   const sdk = await deps.loadSdk();
   const profile = profileFor(ctx.provider);
-  const executable = profile === undefined ? null : resolveExecutable(profile);
-  if (executable === null) {
+  const launch = resolveLaunch(profile);
+  if (launch === null) {
     throw unavailable(`no ${ctx.provider.id} executable on this machine`, { providerId: ctx.provider.id });
   }
 
   let lastStderr = '';
   // No thread here, so no permission mode either: the probe launches the line
   // the descriptor declares and reads the agent on its own defaults.
-  const child = ctx.spawnChild(executable, [...launchPrefix(profile), ...(profile?.launch?.args ?? [])], {
+  const child = ctx.spawnChild(launch.executable, [...launch.prefix, ...(profile?.launch?.args ?? [])], {
     cwd: ctx.cwd,
     env: agentEnv(ctx.provider, ctx.accountEnv),
   });

@@ -169,7 +169,7 @@ export class ThreadFocus {
     // A removed account leaves nothing to warm until the user picks another.
     if (this.core.journal.getAccount(thread.accountId) === null) return;
     const account = this.core.accounts.require(thread.accountId);
-    assertDriverRunnable(provider.protocol, this.core.providers.list().loaded.find(item => item.id === provider.id), account);
+    assertDriverRunnable(provider.protocol, this.core.providers.summary(provider.id), account);
     if (!await stat(thread.cwd).then(value => value.isDirectory(), () => false)) return;
     if (this.closed || this.core.stopping || !this.viewed(threadId)) return;
     const latest = this.core.threads.require(threadId);

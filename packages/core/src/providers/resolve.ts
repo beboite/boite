@@ -2,6 +2,7 @@ import { accessSync, constants, existsSync, statSync } from 'node:fs';
 import { delimiter, normalize } from 'node:path';
 import type { ExecutableCandidate, Os, OsProfile, ProviderDescriptor } from '@boite/contracts';
 import { currentOs } from '../paths.ts';
+import { CODEX_NPM_ENV, codexBehindLauncher } from './codex-launcher.ts';
 import { substituteHome } from './expand.ts';
 import { globalRoots, resolveNpm } from './npm.ts';
 import { majorAt } from './versions.ts';
@@ -110,10 +111,12 @@ export function resolveCommand(profile: OsProfile, ask = true): ResolvedCommand 
     if (candidate.kind === 'path') {
       const found = whichProgram(candidate.value, scripts);
       if (found === null) continue;
-      const fits = atMajor(candidate, found, profile, ask);
+      const native = candidate.value === 'codex' ? codexBehindLauncher(found) : null;
+      const program = native ?? found;
+      const fits = atMajor(candidate, program, profile, ask);
       // Not known yet: a later candidate must not stand in for the one that may well be right.
       if (fits === undefined) return null;
-      if (fits) return { executable: found, prefix: [], shown: found, updateEnv };
+      if (fits) return { executable: program, prefix: [], shown: found, updateEnv: native === null ? updateEnv : { ...CODEX_NPM_ENV, ...updateEnv } };
     } else if (candidate.kind === 'file') {
       for (const path of filePaths(candidate.value, profile)) {
         if (!runnableFile(path)) continue;
@@ -185,14 +188,25 @@ export function launcherScriptOnly(profile: OsProfile): string | null {
   return null;
 }
 
-/** The program to spawn, for a driver that needs the path. Its arguments start with `launchPrefix`. */
+/** The program to spawn, for a driver that passes no prefix (its profile has no `npm` candidate). */
 export function resolveExecutable(profile: OsProfile): string | null {
   return resolveCommand(profile)?.executable ?? null;
 }
 
-/** The descriptor's launch arguments behind whatever the resolved program needs first. */
-export function launchPrefix(profile: OsProfile | undefined): string[] {
-  return profile === undefined ? [] : (resolveCommand(profile)?.prefix ?? []);
+/** What a spawn needs: the program and the arguments it takes before the descriptor's own. */
+export interface Launch {
+  executable: string;
+  prefix: string[];
+}
+
+/**
+ * The program and its prefix from one resolution, so both come from the same
+ * candidate: two resolutions could straddle a PATH answer expiring, and a
+ * native program would then get an npm script as its first argument.
+ */
+export function resolveLaunch(profile: OsProfile | undefined): Launch | null {
+  const found = profile === undefined ? null : resolveCommand(profile);
+  return found === null ? null : { executable: found.executable, prefix: found.prefix };
 }
 
 export function detectResolves(profile: OsProfile, agentsDir: string, dataDir: string): boolean {
