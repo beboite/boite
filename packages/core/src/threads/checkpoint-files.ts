@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { constants, type BigIntStats } from 'node:fs';
-import { chmod, lstat, mkdir, open, readdir, readFile, readlink, realpath, rename, rm, rmdir, symlink, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, link, lstat, mkdir, open, readdir, readFile, readlink, realpath, rename, rm, rmdir, symlink, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { Core } from '../core.ts';
 import { refused } from '../errors.ts';
@@ -17,7 +17,8 @@ const SKIP = new Set(['.git', '.boite', '.agents', 'node_modules']);
  */
 export interface FileEntry { hash: string; mode: number; link?: string; unbacked?: true }
 export type FileSnapshot = Record<string, FileEntry>;
-interface CachedFile { entry: FileEntry; metadata: string; size: number }
+/** `objects`: the folder that already holds this entry's blob, when known. */
+interface CachedFile { entry: FileEntry; metadata: string; size: number; objects?: string }
 export type SnapshotCache = Map<string, CachedFile>;
 
 function metadataOf(info: BigIntStats): string {
@@ -33,15 +34,21 @@ export function same(a: FileEntry | undefined, b: FileEntry | undefined): boolea
   return a?.hash === b?.hash && a?.mode === b?.mode && a?.link === b?.link && a?.unbacked === b?.unbacked;
 }
 
-/** Resolve parents without following a symlink out of the checkpoint's workspace. */
-export async function checkedPath(root: string, name: string): Promise<string> {
+/**
+ * Resolve parents without following a symlink out of the checkpoint's workspace.
+ * `verified` holds parents already checked during one snapshot; restores pass
+ * none, so each write checks its parents just before it happens.
+ */
+export async function checkedPath(root: string, name: string, verified?: Set<string>): Promise<string> {
   if (!name || isAbsolute(name) || name.split(/[\\/]/).includes('..') || !contains(root, join(root, name))) {
     throw refused(`file checkpoint path ${name}: expected a relative path inside ${root}`, { field: 'path', path: name });
   }
   let parent = dirname(join(root, name));
   while (parent !== root) {
+    if (verified?.has(parent)) break;
     try {
       if ((await lstat(parent)).isSymbolicLink()) throw refused(`file checkpoint path ${name}: parent ${parent} is a symlink`, { field: 'path', path: name });
+      verified?.add(parent);
     } catch (error) { if (!['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error; }
     parent = dirname(parent);
   }
@@ -102,7 +109,12 @@ async function plainFiles(root: string): Promise<string[]> {
   return files;
 }
 
-export async function snapshot(core: Core, threadId: string, root: string, objects: string, previous?: SnapshotCache): Promise<FileSnapshot> {
+/**
+ * `shared` is the store every thread's blobs come from. A thread's `objects`
+ * folder then holds hard links to it, so each folder stays enough for a
+ * rewind on its own. Without `shared`, blobs are written into `objects`.
+ */
+export async function snapshot(core: Core, threadId: string, root: string, objects: string, previous?: SnapshotCache, shared?: string): Promise<FileSnapshot> {
   if (contains(root, core.dataDir)) throw new Error('workspace contains the core data directory');
   const listed = await git(core, threadId, root, ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], 5000);
   const names = listed.code === 0 ? [...new Set(listed.stdout.split('\0').filter(Boolean))] : await plainFiles(root);
@@ -110,18 +122,119 @@ export async function snapshot(core: Core, threadId: string, root: string, objec
   await mkdir(objects, { recursive: true, mode: 0o700 });
   const result: FileSnapshot = Object.create(null) as FileSnapshot;
   const next: SnapshotCache = new Map();
+  const verified = new Set<string>();
+  const folders = new Set<string>();
   let bytes = 0;
   for (const name of names) {
-    const saved = await readEntry(await checkedPath(root, name), previous?.get(name));
+    const path = await checkedPath(root, name, verified);
+    const cached = previous?.get(name);
+    // Without a shared store, a hash cached for another folder has no blob here.
+    let saved = await readEntry(path, shared || cached?.objects === objects ? cached : undefined);
     if (!saved) continue;
+    if (shared && !saved.bytes && needsBlob(saved.entry) && saved.objects !== objects && !await linkBlob(shared, objects, saved.entry.hash)) {
+      // The shared blob is gone: read the file again.
+      saved = await readEntry(path);
+      if (!saved) continue;
+    }
     bytes += saved.size;
     if (bytes > BYTE_LIMIT) throw new Error('workspace exceeds the 128 MiB checkpoint limit');
     result[name] = saved.entry;
-    next.set(name, { entry: saved.entry, metadata: saved.metadata, size: saved.size });
-    if (saved.bytes) await writeCheckpointBlob(join(objects, saved.entry.hash), saved.entry.hash, saved.bytes);
+    if (saved.bytes) {
+      if (shared) await storeBlob(shared, objects, saved.entry.hash, saved.bytes, folders);
+      else await writeCheckpointBlob(join(objects, saved.entry.hash), saved.entry.hash, saved.bytes);
+    }
+    next.set(name, { entry: saved.entry, metadata: saved.metadata, size: saved.size, objects });
   }
   if (previous) { previous.clear(); for (const [name, entry] of next) previous.set(name, entry); }
   return result;
+}
+
+function needsBlob(entry: FileEntry): boolean { return entry.link === undefined && !entry.unbacked; }
+
+/** `<shared>/<first two hex digits>/<hash>`, so no folder holds every blob. */
+export function sharedBlob(shared: string, hash: string): string { return join(shared, hash.slice(0, 2), hash); }
+
+const NO_LINK = new Set(['EXDEV', 'EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS', 'EMLINK', 'EINVAL']);
+const errno = (error: unknown) => (error as NodeJS.ErrnoException).code ?? '';
+
+/**
+ * Put the shared blob at `objects/<hash>`. Returns false when the shared blob
+ * is missing. A file the folder already holds stays when it is that same
+ * blob, or when the shared one is gone; an older private copy is replaced by
+ * the link. A file system without hard links gets a private copy, as before
+ * the shared store existed.
+ */
+async function linkBlob(shared: string, objects: string, hash: string): Promise<boolean> {
+  const source = sharedBlob(shared, hash);
+  const dest = join(objects, hash);
+  try { await link(source, dest); return true; } catch (error) {
+    const code = errno(error);
+    const want = await lstat(source, { bigint: true }).catch(() => null);
+    if (!want) return code === 'EEXIST';
+    if (code === 'EEXIST') {
+      const have = await lstat(dest, { bigint: true });
+      if (have.ino === want.ino && have.dev === want.dev) return true;
+    } else if (!NO_LINK.has(code)) throw error;
+    await replaceBlob(source, dest, code === 'EEXIST');
+    return true;
+  }
+}
+
+/** Swap `dest` for a link to `source`, or a copy of it, in one rename. */
+async function replaceBlob(source: string, dest: string, tryLink: boolean): Promise<void> {
+  const temporary = `${dest}.tmp-${randomUUID()}`;
+  try {
+    const linked = tryLink && await link(source, temporary).then(() => true, (error: unknown) => {
+      if (!NO_LINK.has(errno(error))) throw error;
+      return false;
+    });
+    if (!linked) await copyFile(source, temporary);
+    await rename(temporary, dest);
+  } catch (error) { await rm(temporary, { force: true }); throw error; }
+}
+
+/**
+ * Keep a blob in `objects` and in the shared store. Known content is only
+ * linked: a shared name of the right size is trusted without reading it
+ * back. New content is written into `objects` first and gets its shared
+ * name once complete, so the store never names a partial file. A short
+ * shared blob, left by a crash before its data reached the disk, is replaced.
+ */
+async function storeBlob(shared: string, objects: string, hash: string, bytes: Buffer, folders: Set<string>): Promise<void> {
+  const source = sharedBlob(shared, hash);
+  const info = await lstat(source).catch(() => null);
+  if (info?.isFile() && info.size === bytes.length && await linkBlob(shared, objects, hash)) return;
+  const dest = join(objects, hash);
+  await writeCheckpointBlob(dest, hash, bytes);
+  const folder = dirname(source);
+  if (!folders.has(folder)) { await mkdir(folder, { recursive: true, mode: 0o700 }); folders.add(folder); }
+  if (info) await rm(source, { force: true });
+  try { await link(dest, source); }
+  catch (error) { if (errno(error) !== 'EEXIST' && !NO_LINK.has(errno(error))) throw error; }
+}
+
+/**
+ * Remove shared blobs no thread folder links to any more. A blob changed in
+ * the last `graceMs` stays: a snapshot may be about to link it. Unfinished
+ * writes older than that are removed too. Returns the count removed.
+ */
+export async function collectSharedBlobs(shared: string, graceMs: number): Promise<number> {
+  let folders;
+  try { folders = await readdir(shared, { withFileTypes: true }); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0; throw error; }
+  const before = Date.now() - graceMs;
+  let removed = 0;
+  for (const folder of folders) {
+    if (!folder.isDirectory()) continue;
+    for (const name of await readdir(join(shared, folder.name)).catch(() => [])) {
+      const path = join(shared, folder.name, name);
+      const info = await lstat(path).catch(() => null);
+      if (!info?.isFile() || info.nlink !== 1 || Math.max(info.ctimeMs, info.mtimeMs) > before) continue;
+      await rm(path, { force: true });
+      removed += 1;
+    }
+  }
+  return removed;
 }
 
 /**

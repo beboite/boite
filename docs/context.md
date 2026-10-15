@@ -270,15 +270,22 @@ replacement to the original thread on its owning machine.
 
 The core saves private file checkpoints before and after each conversation
 turn, for every driver. Unchanged files reuse their saved hashes after checking
-size, mode, inode and nanosecond modification/change timestamps, with metadata
-retained for at most four thread folders. Editing restores the changes made by the removed
+size, mode, inode and nanosecond modification/change timestamps. That metadata
+is kept per workspace folder, shared by the threads working in it, for at most
+100000 files in total; the least recently used folder goes first. Editing restores the changes made by the removed
 turns before truncating their messages. It preserves unrelated files and
 refuses a conflict with outside edits before changing either files or history.
 Git projects include tracked files and non-ignored untracked files; HEAD and
 the index stay unchanged. Other projects use a bounded file walk, excluding
 `.git`, `.boite`, `.agents`, `node_modules`, `AGENTS.md` and `.env` files.
 Backups include binary content, deletions, creations, permissions and symlinks,
-stored under the core data directory with content deduplicated per thread.
+stored under the core data directory. Each content is stored once in
+`checkpoints/objects/<first two hex digits>/<sha256>` and hard-linked into the
+folder of every thread that saved it, so each thread folder can rewind on its
+own. A file system without hard links gets a private copy per thread, and
+folders saved before the shared store keep working. A background pass at
+startup, and after a thread's checkpoints leave, deletes the shared files no
+thread links to any more.
 They survive restarts and leave with a permanently removed project or thread.
 
 Each snapshot is limited to 20000 files and 128 MiB of saved content. A file
