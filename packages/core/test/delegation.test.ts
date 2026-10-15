@@ -855,6 +855,24 @@ test('a finished child wakes an idle parent at once, without waiting for the tic
   expect(runs.get(threadId)?.ctx.prompt).toContain('Checked src/example.ts');
 });
 
+test('a paused team keeps its results until the owner resumes it, then they wake the parent at once', async () => {
+  const runs = scripted(); const { h, owner, threadId, spawn, config } = await setup();
+  const child = await spawn();
+  runs.get(child.thread.id)!.finish();
+  await waitFor(() => runs.has(threadId));
+  runs.get(threadId)!.finish();
+  await waitFor(() => h.core.threads.require(threadId).status === 'idle');
+  // What a restart leaves: the result still to deliver, and the team paused until its owner resumes it.
+  h.core.journal.db.query("UPDATE delegation_messages SET status = 'received', data = json_set(data, '$.status', 'received') WHERE root_id = ?").run(threadId);
+  h.core.journal.setSetting(`delegation:${threadId}`, { ...config, paused: true });
+  runs.delete(threadId);
+  await owner.call('delegation.configure', { threadId, config });
+  // The tick runs every second: 100 ms leaves it a 10 % chance to be the one that delivered.
+  await new Promise(resolve => setTimeout(resolve, 100));
+  expect(h.core.journal.listTurns(threadId).map(turn => turn.execution?.operation)).toEqual(['delegation', 'delegation']);
+  expect(runs.get(threadId)?.ctx.prompt).toContain('Checked src/example.ts');
+});
+
 test('an agent picks any installed model and reasoning level for a child, never a fast tier, unless the owner holds it to the profiles', async () => {
   const running = scripted();
   const { h, owner, threadId } = await setup();

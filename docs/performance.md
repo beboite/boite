@@ -67,6 +67,14 @@ On 2026-10-15, `bench/continuation.ts` took 345 ms to 29 ms with 100 tool
 outputs of 1 MiB and 25 files of 1.1 MB, and 83 ms to 4.6 ms with 200 of
 200 KiB ([results](../bench/results/2026-10-15-perf-runtime.md)).
 
+Held turns cost one pass over the queue each time a turn ends anywhere. The
+scheduler keeps each queued turn's parent from enqueue and reads a team's
+setting once per pass, so the pass reads no thread row: on 2026-10-15
+`bench/queue-admission.ts` took one pass from 46 ms to 2.0 ms at 1,024 held
+turns. A team event looks for held workflow summaries only in a conversation
+the core knows has one, and the delegation tick neither parses result letters,
+which never expire, nor tries to deliver mail of a paused or disabled team.
+
 ## Concurrent agent stress
 
 ```sh
@@ -857,6 +865,7 @@ bun bench/ui-frames.ts --runs 5 --only "heavy thread scroll,heavy thread flick,h
 bun bench/ui-frames.ts --gpu --only "heavy thread scroll"          # composited on the machine's GPU, never a software renderer
 bun bench/rpc-actions.ts --journal <journal.db> --runs 6   # latency, core CPU, bytes and RSS per RPC (Linux)
 bun run bench/continuation.ts 100 1024 25 1100            # history a fresh session carries: messages, tool KiB, files, file KiB
+bun run bench/queue-admission.ts 1024 16                  # one scheduler pass over held child turns: turns, teams
 ```
 
 `bench/bandwidth.ts` puts a TCP relay between the client and the core, counts

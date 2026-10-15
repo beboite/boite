@@ -222,6 +222,8 @@ export class Delegation {
     const config = this.validateConfig(value);
     this.saveConfig(threadId, config);
     if (!config.enabled || config.paused) this.stop(threadId);
+    // The tick skips a held team's mail, so a resume hands over its backlog now.
+    else for (const row of this.core.journal.db.query("SELECT DISTINCT recipient_id FROM delegation_messages WHERE root_id = ? AND status = 'received'").all(threadId) as { recipient_id: string }[]) this.kick(row.recipient_id);
     this.changed(threadId);
     this.core.scheduler.onSettingsChanged();
     return this.get(threadId);
@@ -390,10 +392,20 @@ export class Delegation {
   private stepOwned(threadId: string): boolean {
     return this.core.workflows.owns(threadId) || this.core.activity.ownsReviewer(threadId) || this.core.workforce.memory.owns(threadId);
   }
-  canRun(threadId: string): boolean {
-    const thread = this.core.journal.getThread(threadId);
-    if (!thread?.parentThreadId) return true;
-    return !this.held(this.config(thread.parentThreadId), this.stepOwned(threadId));
+  /**
+   * Whether a child's team lets its turn start. The scheduler passes the parent it
+   * stored at enqueue and one config map per pump, so held turns read no thread row
+   * and each team's setting once.
+   */
+  canRun(threadId: string, parentThreadId?: string | null, configs?: Map<string, DelegationConfig>): boolean {
+    const parentId = parentThreadId === undefined ? this.core.journal.getThread(threadId)?.parentThreadId : parentThreadId;
+    if (!parentId) return true;
+    let config = configs?.get(parentId);
+    if (config === undefined) {
+      config = this.config(parentId);
+      configs?.set(parentId, config);
+    }
+    return !this.held(config, this.stepOwned(threadId));
   }
   prepareTurn(turn: Turn): boolean {
     const thread = this.core.threads.require(turn.threadId);
@@ -658,12 +670,18 @@ export class Delegation {
   }
   private tick(): void {
     if (this.closed) return;
-    const rows = this.core.journal.db.query("SELECT data FROM delegation_messages WHERE status = 'received'").all() as LetterRow[];
-    const recipients = new Set<string>();
+    // A result never expires, so only other letters are parsed. A paused or off team takes no
+    // mail; its letters wait for the owner, whose resume kicks them (`configure`).
+    const rows = this.core.journal.db.query(`SELECT root_id, recipient_id, CASE WHEN request_id GLOB 'result:*' THEN NULL ELSE data END AS data
+      FROM delegation_messages WHERE status = 'received'`).all() as { root_id: string; recipient_id: string; data: string | null }[];
+    const recipients = new Set<string>(), configs = new Map<string, DelegationConfig>();
     for (const row of rows) {
-      const letter = JSON.parse(row.data) as AgentLetter;
-      if (letter.expiresAt <= Date.now()) this.update(letter, 'expired', 'Message expired before delivery');
-      else recipients.add(letter.to.threadId);
+      const letter = row.data === null ? null : JSON.parse(row.data) as AgentLetter;
+      if (letter && letter.expiresAt <= Date.now()) { this.update(letter, 'expired', 'Message expired before delivery'); continue; }
+      if (recipients.has(row.recipient_id)) continue;
+      let config = configs.get(row.root_id);
+      if (config === undefined) configs.set(row.root_id, config = this.config(row.root_id));
+      if (config.enabled && !config.paused) recipients.add(row.recipient_id);
     }
     for (const threadId of recipients) this.track(this.deliver(threadId));
     // A wake that did not come in time: the child is done, or interrupted, and its row says so.

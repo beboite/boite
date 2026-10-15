@@ -52,6 +52,12 @@ function describe(value: unknown): string {
  */
 export class Workflows {
   private readonly stepOf = new Map<string, { runId: string; key: string }>();
+  /**
+   * Runs that ended or paused with their result not handed over yet, by root. A team
+   * event or a root's own turn end looks for held results only in a root listed here,
+   * instead of parsing every finished run of the conversation.
+   */
+  private readonly undelivered = new Map<string, Set<string>>();
   private readonly log: WorkflowLog;
   private readonly advancing = new Set<string>();
   private readonly again = new Set<string>();
@@ -61,6 +67,7 @@ export class Workflows {
   constructor(private readonly core: Core) {
     this.log = new WorkflowLog(core);
     for (const row of core.journal.db.query('SELECT * FROM workflow_steps').all() as StepRow[]) this.stepOf.set(row.thread_id, { runId: row.run_id, key: row.step_key });
+    for (const run of this.runsWhere("status IN ('done', 'failed', 'paused') AND json_extract(data, '$.delivered') = 0")) this.trackDelivery(run);
     // A restart never resumes paid work by itself; the turns it interrupted fail on their own.
     // An interrupted step waits on its own thread, so a resume runs it again with the interruption in its prompt.
     for (const run of this.runsWhere("status IN ('running', 'paused')")) {
@@ -103,7 +110,17 @@ export class Workflows {
     const held: WorkflowRun[] = [];
     this.heldLogs = held;
     try { this.core.bus.afterCommit(() => this.core.journal.db.transaction(write)()); } finally { this.heldLogs = null; }
-    for (const run of held) try { this.log.saved(run); } catch { /* as in save */ }
+    for (const run of held) {
+      this.trackDelivery(run);
+      try { this.log.saved(run); } catch { /* as in save */ }
+    }
+  }
+  private trackDelivery(run: WorkflowRun): void {
+    const ids = this.undelivered.get(run.rootThreadId);
+    if (run.delivered === false && (run.status === 'done' || run.status === 'failed' || run.status === 'paused')) {
+      if (ids) ids.add(run.id);
+      else this.undelivered.set(run.rootThreadId, new Set([run.id]));
+    } else if (ids?.delete(run.id) && !ids.size) this.undelivered.delete(run.rootThreadId);
   }
   private save(run: WorkflowRun): void {
     run.updatedAt = Date.now();
@@ -113,7 +130,10 @@ export class Workflows {
     // After the write: a failed append leaves no record of a transition that did not persist,
     // and inside `committed` the record waits for the outer transaction.
     if (this.heldLogs !== null) this.heldLogs.push(run);
-    else try { this.log.saved(run); } catch { /* A diagnostic storage failure must not break workflows. */ }
+    else {
+      this.trackDelivery(run);
+      try { this.log.saved(run); } catch { /* A diagnostic storage failure must not break workflows. */ }
+    }
     this.core.bus.emit('workflows.changed', { threadId: run.rootThreadId, runId: run.id });
     // A step's conversation shows its parent's runs, and a client reading it subscribes to that thread alone.
     for (const node of run.nodes) for (const inst of node.instances) {
@@ -484,6 +504,7 @@ export class Workflows {
       // A failed turn of the conversation leaves its runs going: their steps run in threads of
       // their own, and the result waits for the conversation's next turn. Only a Stop holds them.
       // The root finished a turn of its own: an undelivered result may go now.
+      if (!this.undelivered.has(turn.threadId)) return;
       const pending = this.runsWhere("root_id = ? AND status IN ('done', 'failed') AND json_extract(data, '$.delivered') = 0", turn.threadId);
       if (pending.length) setTimeout(() => { for (const run of pending) this.deliver(run.id); }, 0).unref?.();
       return;
@@ -595,6 +616,7 @@ export class Workflows {
 
   /** A held summary goes again once the owner resumes the team. */
   private redeliver(rootId: string): void {
+    if (!this.undelivered.has(rootId)) return;
     const config = this.core.delegation.config(rootId);
     if (config.enabled && config.paused) return;
     const held = this.runsWhere("root_id = ? AND status IN ('done', 'failed', 'paused') AND json_extract(data, '$.delivered') = 0", rootId)
@@ -713,6 +735,7 @@ export class Workflows {
   }
 
   private forget(threadId: string): void {
+    this.undelivered.delete(threadId);
     if (this.stepOf.delete(threadId)) {
       this.core.journal.db.query('DELETE FROM workflow_steps WHERE thread_id = ?').run(threadId);
       return;

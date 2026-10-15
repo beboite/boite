@@ -164,7 +164,8 @@ cuts (a provider error, an agent update) pauses nothing: the children keep
 working, and their results reach the parent at its next prompt. A team with
 no child is never paused that way: there is nothing to stop. A core restart
 pauses only a team with a message still to deliver or a child turn it cut
-short. Resume is an owner action. An unsuccessful child is not retried by Boite.
+short. Resume is an owner action, and it hands over the mail the team held at
+once. An unsuccessful child is not retried by Boite.
 
 ## Workflows
 
