@@ -59,7 +59,7 @@ export function withLoad(core: Core, thread: ThreadSummary): ThreadSummary {
   return {
     ...thread,
     archiveReason: thread.archived ? archiveState(core.journal, thread.id).reason : undefined,
-    worktreeRemoved: thread.branch === null ? null : worktreeRemovalOf(core.journal, thread),
+    worktreeRemoved: thread.branch === null ? undefined : worktreeRemovalOf(core.journal, thread) ?? undefined,
     load: core.procs.loadOf(thread.id),
     runningSince: busy ? core.journal.runningSince(thread.id) : null,
     requestSince: busy || tasks.length > 0 ? core.journal.requestSince(thread.id) : null,
