@@ -254,7 +254,16 @@ which writes the index back: an agent's own `git add` or `git commit` never
 meets an `index.lock` the panel took. Each of those reads has 30 seconds. A git
 that has not answered by then is stopped by its own process id and the read
 fails with the command and the directory; the thread's other processes are
-left alone.
+left alone. A core runs at most eight such reads at once; the others wait for
+a slot before their git starts, and the wait does not count against the 30
+seconds.
+
+`git.diff` reads the side at the ref with one `git cat-file --batch -z`, which
+gives the object's size before its bytes, so a side over 16 MB is refused
+without being read; a git older than 2.36 reads it in three steps instead. The
+Changes tab sends `oldPath`, the rename origin its list gave (null for none),
+and the core then skips a status walk of its own. When a refreshed list moves
+that origin, the tab reads the diff once more.
 
 `files.read` answers text inline, cut at `FILE_MAX_BYTES`. A picture, a video,
 a sound or another binary comes as a url on the core's HTTP server,

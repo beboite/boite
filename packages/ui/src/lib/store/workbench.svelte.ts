@@ -130,12 +130,13 @@ export class Workbench {
     }
   }
 
-  async gitDiff(threadId: ThreadId, path: string, ref?: string): Promise<GitDiff | null> {
+  /** `oldPath` is the origin `git.status` gave the path, null for none; undefined lets the core ask git. */
+  async gitDiff(threadId: ThreadId, path: string, ref?: string, oldPath?: string | null): Promise<GitDiff | null> {
     const client = this.ctx.client;
     const clientGeneration = this.ctx.clientGeneration;
     if (!client) return null;
     try {
-      const result = await client.call('git.diff', { threadId, path, ...(ref === undefined ? {} : { ref }) });
+      const result = await client.call('git.diff', { threadId, path, ...(ref === undefined ? {} : { ref }), ...(oldPath === undefined ? {} : { oldPath }) });
       return this.ctx.currentClient(client, clientGeneration) ? result : null;
     } catch (error) {
       if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);

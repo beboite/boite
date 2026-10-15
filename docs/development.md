@@ -126,7 +126,9 @@ the phone's options sheet. This device preference preserves the draft's choice
 and the project's default.
 
 With `worktree: {}`, `threads.create` runs `git worktree add -b` before writing
-the thread. The temporary branch is `boite/wt-<id>`, unless explicitly named;
+the thread, with `-c checkout.workers=0` (one checkout worker per core) unless
+the repository's or the user's git config sets `checkout.workers`; the core
+reads that once per repository. The temporary branch is `boite/wt-<id>`, unless explicitly named;
 the directory is `<project>/.boite/worktrees/wt-<id>` by default. A missing Git
 executable, a non-repository project or an existing branch is refused by name
 without writing a thread. Git calls appear in the thread's trace. The header
@@ -166,7 +168,11 @@ thread, even with `force`. Without `force`, it also refuses dirty or unmerged
 worktrees. Removal uses `git worktree remove`, branch deletion and
 `git worktree prune --expire 1.hour.ago`. A missing directory loses its
 registration only; `branchDeleted: false` records when Git keeps the branch.
-Both RPCs trace Git under `worktrees:<projectId>`.
+Both RPCs trace Git under `worktrees:<projectId>`. The list describes four
+worktrees at once and keeps git's order. Its reads go through the Changes
+panel's reader (deadline, shared read slots, no index lock, no fsmonitor hook).
+A thread counts as a holder only when it belongs to the project or its folder,
+as written, lies in the project, its worktree folder or a listed worktree.
 
 Settings > Worktrees and Manage project offer the same controls. Removing clean
 worktrees requires no force; ignored dependencies and build output leave with
