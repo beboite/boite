@@ -16,7 +16,7 @@ import type {
 } from '@boite/contracts';
 import { activityPrompt } from '../activity-prompt.ts';
 import { agentEnvOf } from '../agent.ts';
-import { agentGuide } from '../agent-guide.ts';
+import { agentGuide, SHORT_ANSWERS } from '../agent-guide.ts';
 import { contextRulesBlock } from '@boite/contracts';
 import { prepareAttachments, fileReference } from '../attachments.ts';
 import { continuationInput } from '../continuation.ts';
@@ -289,10 +289,12 @@ export class TurnContexts {
         ? sentFromNote(origin.from) : '';
       const coordinationGuide = inject && operation !== 'compact' && guideEnabled ? this.core.coordination.instructions(threadId) + this.core.workforce.entrusted.instructions(threadId) : '';
       const guide = inject && sessionId === null && guideEnabled
-        ? agentGuide(provider.protocol !== 'echo' && this.core.settings.get().asyncQuestions !== false, this.core.settings.get().agentLogAccess !== false, this.core.settings.get().agentLogAccess === false ? [] : builtinSkills(this.core.dataDir, message => { try { this.core.logs.warn(message, { source: 'skills', event: 'skills.write-failed' }); } catch { /* The guide is built without that skill. */ } })) : '';
+        ? agentGuide(provider.protocol !== 'echo' && this.core.settings.get().asyncQuestions !== false, this.core.settings.get().agentLogAccess !== false, builtinSkills(this.core.dataDir, message => { try { this.core.logs.warn(message, { source: 'skills', event: 'skills.write-failed' }); } catch { /* The guide is built without that skill. */ } })) : '';
       // Custom rules lead every fresh session, whatever the guides, on every provider.
       const rules = inject && sessionId === null && mode?.rules ? `${contextRulesBlock(mode.rules)}\n\n` : '';
-      const prefix = rules + (inject && !noGuides ? this.core.brain.instructions(provider.id) : '') + guide;
+      // Every turn, not once a session: a style said once fades after a few answers.
+      const style = inject && !noGuides && operation !== 'compact' && this.core.settings.get().shortAnswers !== false ? `${SHORT_ANSWERS}\n\n` : '';
+      const prefix = rules + (inject && !noGuides ? this.core.brain.instructions(provider.id) : '') + guide + style;
       return carried.memory + prefix + (prefix ? 'User request:\n' : '') + said + deferred + body + coordinationGuide + tail(inject && sessionId === null && guideEnabled) + this.threads.cards.askInstructions({ ...thread, sessionId }, provider, turn, body);
     };
     return {

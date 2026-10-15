@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import { mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { SHORT_ANSWERS } from '../src/agent-guide.ts';
 import { scanBrain } from '../src/brain.ts';
 import { BrainStore } from '../src/brain.ts';
 import { connect } from '../src/client.ts';
@@ -291,6 +292,36 @@ test('the Boite guide switch persists, and echo never receives the ask command',
   // Leaving the field out keeps the switch where it was.
   expect((await owner.call('brain.configure', { path: root, enabled: true })).config.boiteGuide).toBe(false);
   await expect(owner.call('brain.configure', { path: root, enabled: true, boiteGuide: 'yes' as never })).rejects.toThrow('boiteGuide');
+});
+
+test('short answers ride every turn until switched off, and the first lists the built-in skills', async () => {
+  const owner = await h.connect();
+  const { threadId } = await echoThread(h, owner);
+  const prompts: string[] = [];
+  const restore = setDriver('echo', { ...echoDriver, startTurn(ctx) {
+    prompts.push(ctx.prompt);
+    return echoDriver.startTurn({ ...ctx, prompt: 'Hello' });
+  } });
+  const run = async (prompt: string) => {
+    const turn = await owner.call('turns.start', { threadId, prompt });
+    await waitFor(() => h.core.journal.listTurns(threadId).find(t => t.id === turn.id)?.status === 'done');
+    return prompts.at(-1)!;
+  };
+  try {
+    h.core.settings.set({ shortAnswers: true });
+    const first = await run('Hello');
+    // Said once a session, the style would fade: the warm second turn carries it as well.
+    const second = await run('Again');
+    expect(second).not.toContain('boite where');
+    for (const prompt of [first, second]) {
+      expect(prompt).toContain(SHORT_ANSWERS);
+      expect(prompt.indexOf(SHORT_ANSWERS)).toBeLessThan(prompt.indexOf('User request:'));
+    }
+    expect(first).toContain('boite-prove-it: ');
+    expect(first).toContain(join(h.dataDir, 'skills', 'boite-visual', 'SKILL.md'));
+    h.core.settings.set({ shortAnswers: false });
+    expect(await run('Third')).not.toContain('Answer style');
+  } finally { restore(); }
 });
 
 test('echo with the default guide and asynchronous questions finishes without asking', async () => {

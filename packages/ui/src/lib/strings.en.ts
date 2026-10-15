@@ -55,6 +55,7 @@ export const strings = {
     compactAny: 'At any size',
     keys: {
       asyncQuestions: 'Let agents ask without stopping',
+      shortAnswers: 'Short answers',
       titleModel: 'Title model',
       threadDoneRetentionDays: 'Delete done threads after',
       threadDeletionRetentionDays: 'Purge deleted threads after',
@@ -2255,6 +2256,8 @@ export const strings = {
     reapOrphansHint: 'Ten seconds after a turn, a process whose parent has exited is stopped. Windows only.',
     asyncQuestions: 'Let agents ask without stopping',
     asyncQuestionsHint: 'Teaches agents the boite ask command when a session starts. Codex already asks this way.',
+    shortAnswers: 'Short answers',
+    shortAnswersHint: 'Asks every agent, on every message, for the result first in a few plain sentences, without preamble, recap or running commentary. Facts, numbers and commands stay.',
     titleModel: 'Title model',
     titleModelHint: 'Names a thread after its first answer. Automatic uses the thread\'s own agent on its small model.',
     titleModelAuto: 'Automatic',
