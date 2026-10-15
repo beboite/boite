@@ -52,9 +52,10 @@ export class Coordination {
   /** When the sweep last pruned the wake log and old letters; both are hourly bookkeeping. */
   private swept = 0;
 
-  constructor(private readonly core: Core) {
+  /** `threadJsonChecked`: the core already validated visible thread JSON at this start. */
+  constructor(private readonly core: Core, threadJsonChecked = false) {
     // A restart keeps idle contacts reachable, but never replays pending work automatically.
-    core.journal.validateVisibleThreadJson();
+    if (!threadJsonChecked) core.journal.validateVisibleThreadJson();
     const candidates = core.journal.db.query(`SELECT settings.key, settings.value, threads.rowid FROM settings JOIN threads ON settings.key = 'coordination:' || threads.id
       WHERE threads.id NOT IN (SELECT thread_id FROM thread_deletions) AND (typeof(settings.value) <> 'text' OR NOT json_valid(settings.value))
       ORDER BY threads.rowid`).all() as { key: string; value: string; rowid: number }[];

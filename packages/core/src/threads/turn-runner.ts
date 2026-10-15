@@ -34,7 +34,7 @@ export class TurnRunner {
 
   /** Mail is a timeline boundary even when the provider has not accepted it yet. */
   noteMail(threadId: ThreadId, at: number): void {
-    const turn = this.core.journal.listTurns(threadId).findLast(turn => turn.status === 'running');
+    const turn = this.core.journal.runningTurn(threadId);
     if (turn) this.answerAfter.set(turn.id, Math.max(at, this.answerAfter.get(turn.id) ?? 0));
   }
 

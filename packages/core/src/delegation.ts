@@ -80,9 +80,10 @@ export class Delegation {
     // A team with nothing pending has nothing to restart and stays usable.
     const pending = new Set((core.journal.db.query(`SELECT root_id FROM delegation_messages WHERE status = 'received'
       UNION SELECT a.root_id FROM delegated_agents a JOIN turns t ON t.thread_id = a.thread_id WHERE t.status IN ('queued', 'running')`).all() as { root_id: string }[]).map(row => row.root_id));
-    for (const thread of core.journal.listThreads()) {
-      if (thread.parentThreadId) { this.summaries.set(thread.id, teamState(thread)); continue; }
-      if (!pending.has(thread.id)) continue;
+    // Only children carry a team summary, and only pending roots get paused: the other threads are not read.
+    for (const thread of core.journal.listChildThreads()) this.summaries.set(thread.id, teamState(thread));
+    for (const thread of core.journal.listThreadsIn(pending)) {
+      if (thread.parentThreadId) continue;
       const config = this.config(thread.id);
       if (config.enabled && !config.paused) this.saveConfig(thread.id, { ...config, paused: true });
     }

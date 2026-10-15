@@ -20,6 +20,8 @@ import { migrate } from './journal/schema.ts';
 import { runWrite } from './journal/statements.ts';
 import { WAL_LIMIT_BYTES, WalCheckpoints, type WalCheckpointOptions } from './journal/wal-checkpoints.ts';
 import { toAccount, toMessage, toProcess, toProject, toThread, toTurn, parseJson } from './journal/rows.ts';
+import { threadsWhere, VISIBLE_THREADS, writeThread } from './journal/thread-rows.ts';
+import { oneTurn, sumSessionUsage, writeTurn } from './journal/turn-rows.ts';
 import type { AccountRow, MessageRow, ProcessRow, ProjectIconRow, ProjectRow, ThreadRow, TurnRow } from './journal/rows.ts';
 import type { DetectedIcon as StoredProjectIcon } from './project-icons.ts';
 import { copyStoredParts, foldStreamingParts, messageOfError, StreamBuffer } from './journal/stream-buffer.ts';
@@ -72,6 +74,7 @@ export class Journal {
   readonly db: Database;
   /** The streaming write path: deltas and the parts of messages still streaming. */
   private readonly stream: StreamBuffer;
+  private readonly turnListeners = new Set<(turn: Turn) => void>();
   private readonly onError: (message: string) => void;
   private closed = false;
   /** Checkpoints the WAL off the event loop; null for a database without a WAL file. */
@@ -247,61 +250,23 @@ export class Journal {
 
   // -- threads --------------------------------------------------------------
 
-  putThread(thread: ThreadSummary): void {
-    this.db
-      .query(
-        `INSERT OR REPLACE INTO threads
-         (id, project_id, title, title_source, provider_id, account_id, model, effort, cwd, branch, permission_mode, status, unread, archived, pinned, session_id, context, created_at, updated_at, session_generation, selection_version, speed, parent_thread_id, prompt_cache, agent_session_id, session_resume_at, title_state, branch_naming_pending, fork_origin, done_at, incognito, archived_at, context_mode)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        thread.id,
-        thread.projectId,
-        thread.title,
-        thread.titleSource,
-        thread.providerId,
-        thread.accountId,
-        thread.model,
-        thread.effort,
-        thread.cwd,
-        thread.branch,
-        thread.permissionMode,
-        thread.status,
-        thread.unread ? 1 : 0,
-        thread.archived ? 1 : 0,
-        thread.pinned ? 1 : 0,
-        thread.sessionId,
-        thread.context === null ? null : JSON.stringify(thread.context),
-        thread.createdAt,
-        thread.updatedAt,
-        thread.sessionGeneration ?? 0,
-        thread.selectionVersion ?? 0,
-        thread.speed ?? null,
-        thread.parentThreadId ?? null,
-        thread.promptCache ? JSON.stringify(thread.promptCache) : null,
-        thread.agentSessionId ?? null,
-        thread.sessionResumeAt ?? null,
-        thread.titleState ? JSON.stringify(thread.titleState) : null,
-        thread.branchNamingPending === true ? 1 : 0,
-        thread.forkOrigin ? JSON.stringify(thread.forkOrigin) : null,
-        thread.doneAt ?? null,
-        thread.incognito ? 1 : 0,
-        thread.archived ? (thread.archivedAt ?? null) : null, thread.contextMode ? JSON.stringify(thread.contextMode) : null,
-      );
-  }
+  putThread(thread: ThreadSummary): void { writeThread(this.db, thread); }
 
   getThread(threadId: string): ThreadSummary | null {
-    const row = this.db.query("SELECT *, (SELECT MAX(created_at) FROM messages WHERE thread_id = threads.id AND role = 'user') AS last_user_message_at FROM threads WHERE id = ? AND id NOT IN (SELECT thread_id FROM thread_deletions)").get(threadId) as ThreadRow | null;
+    const row = this.db.query(`${VISIBLE_THREADS} AND id = ?`).get(threadId) as ThreadRow | null;
     return row === null ? null : toThread(row);
   }
 
   listThreads(projectId?: string): ThreadSummary[] {
-    const rows =
-      projectId === undefined
-        ? (this.db.query("SELECT *, (SELECT MAX(created_at) FROM messages WHERE thread_id = threads.id AND role = 'user') AS last_user_message_at FROM threads WHERE id NOT IN (SELECT thread_id FROM thread_deletions) ORDER BY rowid").all() as ThreadRow[])
-        : (this.db.query("SELECT *, (SELECT MAX(created_at) FROM messages WHERE thread_id = threads.id AND role = 'user') AS last_user_message_at FROM threads WHERE project_id = ? AND id NOT IN (SELECT thread_id FROM thread_deletions) ORDER BY rowid").all(projectId) as ThreadRow[]);
-    return rows.map(toThread);
+    return projectId === undefined ? threadsWhere(this.db, '') : threadsWhere(this.db, 'AND project_id = ?', projectId);
   }
+
+  /** Startup reads: only the threads each recovery acts on, not every thread's JSON. */
+  listChildThreads(): ThreadSummary[] { return threadsWhere(this.db, "AND parent_thread_id IS NOT NULL AND parent_thread_id <> ''"); }
+  listThreadsIn(ids: Iterable<string>): ThreadSummary[] { return threadsWhere(this.db, 'AND id IN (SELECT value FROM json_each(?))', JSON.stringify([...ids])); }
+  listThreadsWithStatus(statuses: readonly ThreadSummary['status'][]): ThreadSummary[] { return threadsWhere(this.db, 'AND status IN (SELECT value FROM json_each(?))', JSON.stringify(statuses)); }
+  /** Threads whose title state may ask for a refinement; the caller reads the flag. */
+  listThreadsWithTitleState(): ThreadSummary[] { return threadsWhere(this.db, "AND title_state LIKE '%needsRefinement%'"); }
 
   /** Keep full hydration's corruption errors before startup recovery writes. */
   validateVisibleThreadJson(): void {
@@ -431,25 +396,15 @@ export class Journal {
 
   // -- turns ----------------------------------------------------------------
 
+  /** Hear every turn `putTurn` writes, inside the write: a rolled-back write is not taken back. */
+  onTurnWritten(listener: (turn: Turn) => void): () => void {
+    this.turnListeners.add(listener);
+    return () => { this.turnListeners.delete(listener); };
+  }
+
   putTurn(turn: Turn): void {
-    this.db
-      .query(
-        `INSERT OR REPLACE INTO turns (id, thread_id, status, queued_at, started_at, finished_at, usage, error, execution, checkpoint, queue_hold)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        turn.id,
-        turn.threadId,
-        turn.status,
-        turn.queuedAt,
-        turn.startedAt,
-        turn.finishedAt,
-        turn.usage === null ? null : JSON.stringify(turn.usage),
-        turn.error,
-        turn.execution === undefined ? null : JSON.stringify(turn.execution),
-        turn.checkpoint ? JSON.stringify(turn.checkpoint) : null,
-        turn.queueHold ? JSON.stringify(turn.queueHold) : null,
-      );
+    writeTurn(this.db, turn);
+    for (const listener of this.turnListeners) listener(turn);
   }
 
   getTurn(turnId: string): Turn | null {
@@ -472,6 +427,15 @@ export class Journal {
         : (this.db.query('SELECT * FROM turns WHERE thread_id = ? ORDER BY rowid').all(threadId) as TurnRow[]);
     return rows.map(toTurn);
   }
+
+  /** One turn read without the thread's history (`journal/turn-rows.ts`). */
+  runningTurn(threadId: string): Turn | null { return oneTurn(this.db, 'running', threadId); }
+  lastTurn(threadId: string): Turn | null { return oneTurn(this.db, 'last', threadId); }
+  /** The newest turn that is neither queued nor running. */
+  lastEndedTurn(threadId: string): Turn | null { return oneTurn(this.db, 'ended', threadId); }
+  /** The oldest queued turn that runs `operation`. */
+  queuedTurn(threadId: string, operation: string): Turn | null { return oneTurn(this.db, 'queued', threadId, operation); }
+  sessionUsage(threadId: string, generation: number, exceptTurnId: string): { costUsd: number; tokens: number } { return sumSessionUsage(this.db, threadId, generation, exceptTurnId); }
 
   /** A coordination contact needs one completion timestamp, without loading its turn history. */
   lastCompletedAt(threadId: string): number | null {
@@ -611,11 +575,19 @@ export class Journal {
     } finally { statement.finalize(); }
   }
 
-  *walkTurnMessages(threadId: string, turnId: string): Iterable<Message> {
+  /**
+   * The messages of one turn. With `blobs: false`, values kept in `part_blobs`
+   * (tool output and input, file and image data of 32 KiB or more) are not read
+   * back: they read as '' beside a `$blob` marker. Use it only to read text,
+   * ids, roles or states, and never write such a part back.
+   */
+  *walkTurnMessages(threadId: string, turnId: string, options: { blobs?: boolean } = {}): Iterable<Message> {
     this.flushDeltas();
     const statement = this.db.prepare('SELECT * FROM messages WHERE thread_id = ? AND turn_id = ? ORDER BY rowid');
     try {
-      for (const row of statement.iterate(threadId, turnId)) yield this.currentMessage(row as MessageRow);
+      for (const row of statement.iterate(threadId, turnId)) {
+        yield options.blobs === false ? this.stream.openCopy((row as MessageRow).id) ?? toMessage(row as MessageRow) : this.currentMessage(row as MessageRow);
+      }
     } finally { statement.finalize(); }
   }
 

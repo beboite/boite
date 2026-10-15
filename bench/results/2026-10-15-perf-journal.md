@@ -96,3 +96,38 @@ GC, three runs each:
 
 The branch runs a write that binds more than 64 KiB on a statement finalized
 after use (`journal/statements.ts`).
+
+# Turn reads, text-only walks and startup filters, 2026-10-15
+
+`nice -n 10 bun bench/journal-reads.ts --runs 3`, against base 3e535df3 with
+`--root <base checkout>`, two invocations each, run alternately. Each value is
+the median of the run medians; the two invocations are shown as `a / b`.
+
+| measure | base | branch |
+| --- | ---: | ---: |
+| `noteMail`, 2,000-turn thread | 4.42 / 4.34 ms | 0.013 / 0.011 ms |
+| `sessionBefore`, 2,000-turn thread | 4.55 / 4.86 ms | 1.81 / 2.81 ms |
+| `stopQueuedCoordination`, 2,000-turn thread | 4.83 / 4.48 ms | 0.006 / 0.007 ms |
+| `progress.report` per delta | 9.4 / 9.2 us | 3.3 / 3.4 us |
+| activity answer, 30 messages with 35 MiB of tool output | 31.9 / 33.2 ms | 0.13 / 0.15 ms |
+| same, first read | 51.6 / 39.9 ms, +14.5 / +14.9 MiB RSS | 0.40 / 0.53 ms, +0 MiB |
+| `new Core`, 3,000 threads x 40 messages | 50.7 / 44.1 ms | 18.5 / 23.4 ms |
+| `startup.stores-ready` | 25 / 22 ms | 11 / 16 ms |
+| `startup.recovered` | 23 / 19 ms | 5 / 5 ms |
+| title recovery | 12.9 / 12.5 ms | 0.29 / 0.30 ms |
+
+`sessionBefore` is now one SQL sum, still a pass over the thread's turns in
+SQLite. The startup rows include parts 1 and 2 of this branch.
+
+Turn reads in `bench/rpc-actions.ts --runs 6`, counted with a preload that
+wraps `Database.prototype.query` and `prepare` and counts calls per SQL text:
+
+| measure | base | branch |
+| --- | ---: | ---: |
+| `SELECT * FROM turns WHERE id = ?` (`getTurn`) | 896 | 28 |
+| `SELECT * FROM turns WHERE thread_id = ? ORDER BY rowid` (`listTurns`) | 12 | 7 |
+| all queries | 2,553 | 1,727 |
+
+The echo turns' deltas made most `getTurn` calls: `ProgressState` read the turn
+row on every report. It now keeps the running flag in memory, set and cleared
+by every `putTurn`.

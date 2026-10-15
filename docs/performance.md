@@ -556,8 +556,12 @@ port refusal, the compiled binary and graceful lock release.
 
 Activity restoration selects threads with saved activities. Coordination
 recovery selects active threads and threads with potentially pending letters.
-Both validate visible thread JSON before recovery and retain the original
-error order, archived-thread handling and recovery writes.
+The core validates visible thread JSON once, where activity's own check ran,
+so both keep the original error order, archived-thread handling and recovery
+writes; each still validates when built on its own. Delegation reads child
+threads and pending roots, turn recovery the queued, running and waiting
+threads, and title recovery the threads with a title state, not every thread
+(`bench/journal-reads.ts`).
 
 Claude and ACP join the other native drivers behind a lazy factory. Listing
 providers, capabilities or cached models does not load their protocol runtime.

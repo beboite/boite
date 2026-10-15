@@ -400,15 +400,8 @@ export class TurnContexts {
 
   /** What the agent session this turn resumes already used, summed over its recorded turns. */
   private sessionBefore(thread: ThreadSummary, turnId: TurnId): { costUsd: number; tokens: number } {
-    const before = { costUsd: 0, tokens: 0 };
-    if (thread.sessionId === null) return before;
-    for (const earlier of this.core.journal.listTurns(thread.id)) {
-      if (earlier.id === turnId || earlier.usage === null) continue;
-      if (earlier.execution?.sessionGeneration !== (thread.sessionGeneration ?? 0)) continue;
-      before.costUsd += earlier.usage.costUsdEquivalent ?? 0;
-      before.tokens += earlier.usage.inputTokens + earlier.usage.outputTokens + earlier.usage.cacheReadTokens + earlier.usage.cacheWriteTokens;
-    }
-    return before;
+    if (thread.sessionId === null) return { costUsd: 0, tokens: 0 };
+    return this.core.journal.sessionUsage(thread.id, thread.sessionGeneration ?? 0, turnId);
   }
 
   /**
