@@ -412,7 +412,12 @@ export class BrowserPage {
       }
     }
     // A cold Vite dependency build on the Windows runner can outlast the normal DOM wait.
-    await this.waitFor("document.readyState === 'complete'", 60_000);
+    const slow = setTimeout(() => probeLog(`page ${this.#proc?.pid} still loading ${url.split('?')[0]} after 15 s; in flight: ${JSON.stringify(this.#inFlight())}`), 15_000);
+    try {
+      await this.waitFor("document.readyState === 'complete'", 60_000);
+    } finally {
+      clearTimeout(slow);
+    }
   }
 
   /** Boots the same page again and returns once the new document has loaded. */

@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { probeLog } from './probe.ts';
+import { probeLog, probeServer, probeServerClosed } from './probe.ts';
 
 const root = join(import.meta.dir, '../../../packages/ui');
 const requireUi = createRequire(join(root, 'package.json'));
@@ -46,7 +46,7 @@ export async function startUi(port: number, options: { development?: boolean } =
  * hook gets.
  */
 export async function startDevUi(port: number): Promise<{ close(): Promise<void> }> {
-  const server = await createServer({ root, plugins: [fixtureBridge], server: { host: '127.0.0.1', port, strictPort: true }, clearScreen: false });
+  const server = await createServer({ root, plugins: [fixtureBridge, probeServer(port)], server: { host: '127.0.0.1', port, strictPort: true }, clearScreen: false });
   try {
     const at = performance.now();
     await server.listen();
@@ -57,7 +57,7 @@ export async function startDevUi(port: number): Promise<{ close(): Promise<void>
     await server.close();
     throw error;
   }
-  return server;
+  return { close: async () => { probeServerClosed(port); await server.close(); } };
 }
 
 /**

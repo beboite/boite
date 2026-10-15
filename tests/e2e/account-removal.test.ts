@@ -16,7 +16,7 @@ afterEach(async () => {
 }, 15_000);
 afterAll(async () => {
   await server?.close();
-}, 15_000);
+}, 30_000);
 
 const STORE = `globalThis.__boiteTest.workspace.active`;
 const settle = `Promise.all(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {})))`;

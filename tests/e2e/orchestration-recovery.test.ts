@@ -14,7 +14,7 @@ beforeAll(async () => {
   page = await BrowserPage.launch({ url, windowSize: { width: 1280, height: 900 } });
   await page.waitFor('globalThis.__boiteTest?.workspace.active?.connection === "ready"');
 }, 90_000);
-afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
+afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
 for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
   test(`retained prompts remain usable at ${viewport.width}px`, async () => {

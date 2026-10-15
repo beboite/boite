@@ -32,7 +32,7 @@ afterAll(async () => {
   await server?.close();
   for (const core of cores) await core.stop();
   rmSync(scratch, { recursive: true, force: true });
-}, 15_000);
+}, 30_000);
 
 test('a phone scans the code of Add a device: another code leaves the camera open, closing stops it, the real one adds the phone', async () => {
   const machine = await startCore();

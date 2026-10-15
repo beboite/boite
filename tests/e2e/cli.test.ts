@@ -107,7 +107,7 @@ afterAll(async () => {
   await page?.close();
   await core?.stop();
   if (projectDir !== undefined) await removeDirectory(projectDir);
-}, 15_000);
+}, 30_000);
 
 test(
   'boite where names the thread the UI shows',

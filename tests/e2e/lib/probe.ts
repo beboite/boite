@@ -80,3 +80,52 @@ export function startProbe(): void {
   }, 5_000);
   machine.unref();
 }
+
+interface Tracked { url: string; at: number; }
+const servers = new Map<number, { inFlight: Set<Tracked>; sockets: number; received: number; reported: Set<Tracked> }>();
+
+/** A Vite plugin that records what the dev server on `port` received and has not answered. */
+export function probeServer(port: number): { name: string; configureServer(server: { middlewares: { use(fn: (req: { url?: string }, res: { once(event: string, fn: () => void): void }, next: () => void) => void): void }; httpServer: { on(event: string, fn: (socket: { once(event: string, fn: () => void): void }) => void): void } | null }): void } {
+  const state = { inFlight: new Set<Tracked>(), sockets: 0, received: 0, reported: new Set<Tracked>() };
+  servers.set(port, state);
+  return {
+    name: 'boite-e2e-probe',
+    configureServer(server) {
+      if (!probing) return;
+      server.httpServer?.on('connection', (socket) => {
+        state.sockets += 1;
+        socket.once('close', () => { state.sockets -= 1; });
+      });
+      server.middlewares.use((req, res, next) => {
+        const entry = { url: req.url ?? '', at: Date.now() };
+        state.received += 1;
+        state.inFlight.add(entry);
+        const done = () => state.inFlight.delete(entry);
+        res.once('finish', done);
+        res.once('close', done);
+        next();
+      });
+    },
+  };
+}
+
+export function probeServerClosed(port: number): void {
+  servers.delete(port);
+}
+
+function checkServers(): void {
+  const now = Date.now();
+  for (const [port, state] of servers) {
+    const stuck = [...state.inFlight].filter((entry) => now - entry.at > 5_000);
+    const fresh = stuck.filter((entry) => !state.reported.has(entry));
+    if (fresh.length === 0) continue;
+    for (const entry of stuck) state.reported.add(entry);
+    probeLog(`dev server ${port}: ${stuck.length} of ${state.inFlight.size} in flight over 5 s, ${state.sockets} sockets, ${state.received} received: ${stuck.slice(0, 6).map((entry) => `${entry.url} ${now - entry.at}ms`).join(', ')}`);
+    const url = `http://127.0.0.1:${port}${stuck[0]?.url ?? '/'}`;
+    const curl = process.platform === 'win32' ? 'curl.exe' : 'curl';
+    void run([curl, '-s', '-o', process.platform === 'win32' ? 'NUL' : '/dev/null', '-w', '%{http_code} %{time_total}s', '--max-time', '8', url])
+      .then((answer) => probeLog(`dev server ${port}: curl from another process ${stuck[0]?.url}: ${answer || 'no answer'}`));
+  }
+}
+
+if (probing) setInterval(checkServers, 1_000).unref();
