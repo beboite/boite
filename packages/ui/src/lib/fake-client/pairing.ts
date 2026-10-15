@@ -1,5 +1,5 @@
 /** Pairing grants, paired sessions, the Tailscale switch and the Web Push the fake refuses. */
-import { PAIRING_CODE_TTL_MS, RpcErrorCode, type FirewallStatus, type TailscaleStatus } from '@boite/contracts';
+import { GRANT_TTL_MS, RpcErrorCode, type FirewallStatus, type TailscaleStatus } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import type { FakeContext, FakeMethods } from './context';
 
@@ -36,8 +36,7 @@ export function pairingMethods(ctx: FakeContext) {
       const seq = ++ctx.seq;
       const grant = `fake-grant-${seq}`;
       const role = params?.role ?? 'device';
-      const short = role === 'owner' && params?.short === true;
-      const expiresAt = ctx.now() + (short ? PAIRING_CODE_TTL_MS : 10 * 60 * 1000);
+      const expiresAt = ctx.now() + GRANT_TTL_MS;
       // `?lan=off` is a fresh install: the core listens on itself until the setting is on.
       const lanOff = typeof location !== 'undefined' && new URLSearchParams(location.search).get('lan') === 'off' && !ctx.settings.listenOnLan;
       const origin = ctx.settings.publicUrl ?? (lanOff ? 'http://127.0.0.1:8777' : 'http://192.168.1.20:8777');
@@ -45,8 +44,7 @@ export function pairingMethods(ctx: FakeContext) {
         url: `${origin}/?grant=${grant}`,
         grant,
         role,
-        expiresAt,
-        ...(role === 'device' || short ? { code: `K7QM-${String(seq).padStart(4, '2')}`, codeExpiresAt: Math.min(expiresAt, ctx.now() + PAIRING_CODE_TTL_MS) } : {})
+        expiresAt
       };
     },
     'tailscale.status': async () => ({ ...tailscale, publicUrlMatches: ctx.settings.publicUrl === tailscale.url }),

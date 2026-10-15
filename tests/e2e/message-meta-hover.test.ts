@@ -16,7 +16,7 @@ beforeAll(async () => {
   server = await startUi(port);
   url = `http://127.0.0.1:${port}/?fake=1&open=recent`;
 }, 60_000);
-afterAll(async () => { await server?.close(); });
+afterAll(async () => { await server?.close(); }, 30_000);
 
 /** Points the mouse at the middle of the last element the selector matches. */
 async function hover(page: BrowserPage, selector: string): Promise<void> {

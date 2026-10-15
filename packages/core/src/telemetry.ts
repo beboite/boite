@@ -1,9 +1,10 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { release, version as osName } from 'node:os';
 import { join } from 'node:path';
 import type { TelemetryState, Turn } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams as invalid } from './errors.ts';
-import { enhancedDetails, type EnhancedDetails } from '../../contracts/src/telemetry.ts';
+import { enhancedDetails, publicOsVersion, type EnhancedDetails } from '../../contracts/src/telemetry.ts';
 
 const EVENTS = ['ping', 'first_run', 'app_launched', 'session_ended', 'project_added', 'thread_spawned', 'turn_finished'] as const;
 type EventName = typeof EVENTS[number];
@@ -23,6 +24,49 @@ export const RELAY = 'https://boite-v2-telemetry.nefreex.workers.dev';
 export function relayFor(release: boolean, override: string | undefined): string {
   return override ?? (release ? RELAY : '');
 }
+/**
+ * Windows names its product in the registry and keeps "Windows 10" there on
+ * Windows 11, so the build number decides: 22000 and later is Windows 11.
+ */
+export function windowsVersion(product: string, kernel: string): string {
+  const build = Number(kernel.split('.')[2]);
+  const name = /^Windows [\w .-]{1,32}$/.test(product.trim()) ? product.trim() : 'Windows';
+  const fixed = build >= 22000 ? name.replace(/^Windows 10\b/, 'Windows 11') : name;
+  return Number.isInteger(build) && build > 0 ? `${fixed} ${build}` : fixed;
+}
+
+/**
+ * `ID` and `VERSION_ID` from os-release: lowercase identifiers by
+ * specification, unlike `PRETTY_NAME`, which a distribution writes freely.
+ * A rolling distribution has no `VERSION_ID` and reports its ID alone.
+ */
+export function linuxVersion(osRelease: string): string {
+  const field = (key: string) => osRelease.match(new RegExp(`^${key}=["']?([a-z0-9._-]{1,24})["']?\\s*$`, 'm'))?.[1];
+  const id = field('ID');
+  if (!id) return 'linux';
+  const version = field('VERSION_ID');
+  return version ? `${id} ${version}` : id;
+}
+
+/** `ProductVersion` from SystemVersion.plist, whose layout has not moved in twenty years. */
+export function macosVersion(plist: string): string {
+  const version = plist.match(/<key>ProductVersion<\/key>\s*<string>(\d+(?:\.\d+){0,2})<\/string>/)?.[1];
+  return version ? `macOS ${version}` : 'macOS';
+}
+
+let detectedOsVersion: string | undefined;
+
+/** Read once per process: the release cannot change under a running host. */
+export function osVersion(): string {
+  if (detectedOsVersion) return detectedOsVersion;
+  const read = (file: string) => { try { return readFileSync(file, 'utf8'); } catch { return ''; } };
+  const value = process.platform === 'win32' ? windowsVersion(osName(), release())
+    : process.platform === 'darwin' ? macosVersion(read('/System/Library/CoreServices/SystemVersion.plist'))
+    : linuxVersion(read('/etc/os-release') || read('/usr/lib/os-release'));
+  detectedOsVersion = publicOsVersion(value) ?? 'other';
+  return detectedOsVersion;
+}
+
 interface Consent {
   mode: TelemetryState['mode'];
   anonymousId: string;
@@ -36,6 +80,7 @@ export interface TelemetryEvent extends EnhancedDetails {
   uuid: string;
   app_version: string;
   os: string;
+  os_version: string;
   arch: string;
   client_ts: string;
   provider?: string;
@@ -48,6 +93,7 @@ export function telemetryEvent(name: EventName, version: string, fields: Record<
   const event: TelemetryEvent = {
     name, uuid: crypto.randomUUID(), app_version: /^[\w.+-]{1,32}$/.test(version) ? version : 'other',
     os: process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'macos' : 'linux',
+    os_version: osVersion(),
     arch: ['x64', 'arm64', 'ia32'].includes(process.arch) ? process.arch : 'other',
     client_ts: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
   };

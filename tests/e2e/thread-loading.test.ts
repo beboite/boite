@@ -193,7 +193,7 @@ describe('deferred pictures on a real core', () => {
     await page.navigate(pairingUrlOf(core));
   }, 180_000);
 
-  afterAll(async () => { await page?.close(); client?.close(); await core?.stop(); }, 15_000);
+  afterAll(async () => { await page?.close(); client?.close(); await core?.stop(); }, 30_000);
 
   test('a thread of screenshots opens on a light page and fetches only the pictures near the screen', async () => {
     const plain = JSON.stringify(await client.call('threads.get', { threadId })).length;

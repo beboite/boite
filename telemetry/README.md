@@ -16,6 +16,11 @@ per location, not as a monthly billing ceiling.
 bunx wrangler deploy --config telemetry/wrangler.toml
 ```
 
+Deploy whenever `telemetry/` or `packages/contracts/src/telemetry.ts` changes:
+the relay re-normalizes every field, so a stale relay turns values a current
+host sends into `other`. `bunx wrangler deployments list --name
+boite-v2-telemetry` shows when it last changed.
+
 Provision `HASH_SECRET`, `POSTHOG_PROJECT_API_KEY` and
 `POSTHOG_PERSONAL_API_KEY` with Wrangler secret storage. The personal key needs
 `person:read`, `person:write` and `query:read`, restricted to the configured

@@ -27,7 +27,7 @@ returns to that list. Theme and accent belong to the current device; the
 notification screen names the connected machine that will send its alerts.
 Machines shows the group: its machines, which the phone switches to or
 reconnects, and its devices, this phone marked as such. A phone that reaches no
-machine shows **Scan the code** and **Type the code** there, as on its first
+machine shows **Scan the code** and **Paste the link** there, as on its first
 screen ([adding a phone](#adding-a-phone)). Chrome uses `BarcodeDetector` when
 available; the fallback loads jsQR on the first scan. Decoding stays on the
 device. Other QR content leaves the scanner open. The camera requires HTTPS and
@@ -70,7 +70,7 @@ the switch restarts the core itself through `core.restart`, owner only: the
 restart an update makes, where each running turn ends its tool call and the next
 core resumes it ([restart handoff](restart-handoff.md)), and the shell starts
 that core again. A link to add a device that names a loopback address gets no QR
-code and no code: on a phone it would name the phone. The Add a device panel says
+code: on a phone it would name the phone. The Add a device panel says
 so instead and offers Make it reachable on the local network, which saves the
 setting, asks for the firewall rule on Windows, restarts and shows the new link. A core the
 desktop app did not start keeps a sentence asking for a restart of Boite there
@@ -124,36 +124,32 @@ with the core's own origin, and the second with its device signature.
 ## Adding a phone
 
 On any machine of the group, Settings, Machines, **Add a device** draws a QR
-code with a code under it, `XXXX-XXXX` in Crockford base32:
+code of this link:
 
 ```
 https://boite.example.com/?grant=<32 random bytes, hex>
 ```
 
 The phone's app opens on a screen with two buttons and nothing else: **Scan the
-code** reads the QR code through the camera, **Type the code** takes the eight
-letters, in any case, with or without the dash, `O` and `I`/`L` read as `0` and
-`1`. Either way the app makes its device key if it has none and is admitted to
-the group with it ([groups](groups.md#devices)): it then lists every machine of
-the group and opens on the one that served its page. A scanned QR code goes to
-the machine that drew it. A typed code goes to the machine that serves the page,
-which passes it, sealed, to the machine that drew it, twenty codes a minute at
-most, a wrong one counted on the machine it was typed at. The installed iPhone app needs the scanner or the code because the Camera app
+code** reads the QR code through the camera, and **Paste the link** takes the
+same link, copied on the machine and sent to the phone, for a camera that cannot
+read it. Either way the app makes its device key if it has none and is admitted
+to the group with it ([groups](groups.md#devices)): it then lists every machine
+of the group and opens on the one the link names. The link names the machine
+that drew it, so it works from the app's own address as from a page a machine
+serves. The installed iPhone app needs its own scanner because the Camera app
 hands a link to Safari, whose storage the home-screen app does not share.
 
-The owner must ask for a code, and startup logs contain neither grant nor key.
-The grant inside the link is not the core token: it is a one-time id the core
-remembers for ten minutes, and the code names it for five. The device's `hello`
-carries the grant with the device's public key and its signature over that
-grant; the core spends the grant, writes the device in the group, and forgets
-the grant on the spot. A link or a code used twice, or after its time, is
-refused by name; the same device asking again after a lost answer gets the same
-answer. Eight letters are 40 bits; ten wrong codes in a row drop every live code
-(the links keep working, a new link brings a new code), so guessing one is out
-of reach. The refusal never says whether a code existed. The core token itself
-stays in `<dataDir>/core.json`, where the shell reads it, and travels nowhere.
+The owner must ask for a link, and startup logs contain neither grant nor key.
+The grant inside the link is not the core token: it is 32 random bytes the core
+remembers for ten minutes. The device's `hello` carries the grant with the
+device's public key and its signature over that grant; the core spends the
+grant, writes the device in the group, and forgets the grant on the spot. A link
+used twice, or after its time, is refused by name; the same device asking again
+after a lost answer gets the same answer. The core token itself stays in
+`<dataDir>/core.json`, where the shell reads it, and travels nowhere.
 
-Close hides the code; the link stays valid until it is used or expires. The
+Close hides the QR code; the link stays valid until it is used or expires. The
 devices of the group are listed in the same card as its machines, each with the
 machine it was added on; **Remove from the group** takes one out on every
 machine. A computer copies the same link and pastes it under **Join**: its own
@@ -167,14 +163,59 @@ it does the desktop shell's, so nothing is set on any machine for it. A fork
 that serves its own names it in `BOITE_APP_ORIGIN` on its cores, an `https`
 origin or the core does not start, and in `VITE_BOITE_APP_ORIGIN` when it builds
 its UI, which otherwise takes its own page for a machine's. There the app opens on its way
-in alone. A scanned code names the machine that drew it. A typed code goes with
-the machine's address, typed beside it (`boite.example.com`), since the page's
-own address is no machine's; that machine passes the code on when another one
-drew it. The page is HTTPS, so the machine's address has to be too: a browser
-blocks a plain `http://` socket from it, the device's own loopback excepted, and
-the app turns such an address, typed or scanned, down with a message instead of
-failing on the socket. The first machine added becomes
-the one the app shows and opens on next time; the group brings the others.
+in alone. A scanned or pasted link names the machine that drew it. The page is
+HTTPS, so the machine's address has to be too: a browser blocks a plain `http://`
+socket from it, the device's own loopback excepted, and the app turns such a
+link down with a message instead of failing on the socket. The first machine
+added becomes the one the app shows and opens on next time; the group brings the
+others.
+
+#### Chrome's local network permission
+
+That address is public and the machines are not: a LAN address, a tailnet
+address or a name only the home DNS resolves are all private. Chrome 142 and
+later block a public page's requests to a private address until the user allows
+it, WebSockets included since Chrome 147. The socket fails at once with
+`net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS` in the console and a bare
+socket error in the page, and the machine never sees it, so its log has no line
+for that phone. A page a machine serves is on the private side already and is
+not concerned. Every Chromium on Android does the same, including the browser
+the installed app runs in when it is not Chrome (Titanium and Vanadium enforce it
+on WebSockets too).
+
+Android adds a second lock: the browser app itself needs Android's local network
+permission, shown as Nearby devices in its app settings, before any of its pages
+reaches the local network. Android 17 makes it a runtime permission
+(`ACCESS_LOCAL_NETWORK`); a Titanium install on Android 16 needed it too
+(2026-10-15), with Local network already allowed. No page can read it.
+
+The permission is `local-network` since Chrome 145, "Local network" in site
+settings; Chrome 142 to 144 named it `local-network-access`. Chrome asks the
+first time a socket goes out. On the app's page, `lib/local-network.svelte.ts`
+reads its state with `navigator.permissions.query` and follows its changes:
+
+- `prompt`: the first screen and the waiting screen say what to answer before
+  Chrome asks.
+- `denied`: the waiting screen becomes **Allow the local network** and gives the
+  way back: in the browser that runs the app, Settings, Site settings, Local
+  network, then the app's own host; on Android, Nearby devices for that browser
+  too. The app icon's Site settings shortcut is no way there: it opens
+  the browser's list of linked sites and their storage, without permissions. The
+  bare "socket error" is not shown over it.
+- `granted`: every machine is tried at once, through the same `resume()` as the
+  `online` event, rather than at its next retry.
+
+Under the buttons, **Troubleshoot** (`ConnectTroubleshoot.svelte`) unfolds the
+checks one by one: Local network with its live state, on the app's page only;
+Nearby devices, on Android only; and the machine's own address to open in a
+tab, where a page that does not load means the phone cannot reach it at all
+(Tailscale, VPN, Wi-Fi), whatever the permissions say.
+
+A browser that knows neither name (Safari, Firefox, an older Chrome) blocks
+nothing and the app says nothing. `tests/e2e/app-origin.test.ts` passes
+`--ip-address-space-overrides` so that Chromium sees the app public and the
+cores private, the way a phone does; without it every address there is loopback
+and nothing is checked.
 
 That address serves files and nothing else: `.github/workflows/app.yml`
 publishes the UI build there with GitHub Pages on every change of the UI, the
@@ -245,7 +286,7 @@ listed them), the page first asks whether to connect to that host. Anyone can
 send a link that points at a core they run, and that core would see every prompt
 typed afterwards. Cancel opens the stored core as before. A `core=` link to a
 core the device already knows, or to a machine of its group, asks nothing. A
-code scanned or typed in the app asks nothing either: the owner just showed it.
+link scanned or pasted in the app asks nothing either: the owner just showed it.
 
 ## The app on the phone
 
@@ -406,15 +447,15 @@ Home Screen. On Android, use Install Boite in Phone app or the browser's
 installation menu ([android.md](android.md)). Open the installed icon and add it
 from inside Boite. On iPhone, installation does not copy the browser's
 localStorage, where Boite keeps its device key, so the installed app is added on
-its own even if Safari was. Its first screen offers **Scan the code** and **Type
-the code**, nothing else. Show a fresh code on any machine of the group and scan
-it with that button, or type the letters under it; the iPhone Camera app opens
-the browser instead, which the installed app's screen says.
+its own even if Safari was. Its first screen offers **Scan the code** and **Paste
+the link**, nothing else. Show a fresh QR code on any machine of the group and
+scan it with that button, or copy its link there and paste it; the iPhone Camera
+app opens the browser instead, which the installed app's screen says.
 
 A missing or revoked key opens that recovery screen, narrow or wide (an iPhone
 on its side), instead of a stale page. A network outage offers
-reconnection without discarding the saved key. The scan and code buttons stay
-while a replacement key is being exchanged, and a rejected code can be replaced
+reconnection without discarding the saved key. The scan and paste buttons stay
+while a replacement key is being exchanged, and a rejected link can be replaced
 without leaving the screen. After pairing, the saved device key is reused on
 subsequent opens. Installing a PWA and using Web Push require no Apple Developer
 account.
@@ -633,8 +674,8 @@ devices you intend to give that control.
   written in a thread that was open before the connection went wait in the
   device's outbox (`docs/machines.md`), and go out once it is back, even after
   the PWA was closed in between; a new thread still needs the core.
-- A phone is added with a code somebody shows it, within ten minutes for the QR
-  code and five for the letters. There is no discovery on the network. Adding it
+- A phone is added with a QR code or a link somebody shows it, within ten
+  minutes. There is no discovery on the network. Adding it
   once is enough for every machine of its [group](groups.md).
 - The installed web app belongs to the origin it was installed from: it reaches
   the group of the machine serving it, and no other group.
