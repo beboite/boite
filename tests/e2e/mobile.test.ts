@@ -14,7 +14,9 @@ async function newMobileThread() {
 }
 async function capture(name: string) {
   const settled = await page.evaluate<{ timedOut: boolean; fonts: FontFaceSetLoadStatus; animations: Array<{ playState: AnimationPlayState; currentTime: number | null; endTime: number }> }>(`(async () => {
-    const animations = document.getAnimations().filter(animation => animation.effect?.getTiming().iterations !== Infinity);
+    // Skipped content (the chat behind the list) advances no animation until it shows again: nothing of it is on screen.
+    const animations = document.getAnimations().filter(animation => animation.effect?.getTiming().iterations !== Infinity
+      && (!(animation.effect instanceof KeyframeEffect) || animation.effect.target?.checkVisibility?.({ contentVisibilityAuto: true }) !== false));
     const ready = Promise.all([document.fonts.ready, ...animations.map(animation => animation.finished.catch(() => {}))]);
     return Promise.race([
       ready.then(() => ({ timedOut: false, fonts: document.fonts.status, animations: [] })),
@@ -223,7 +225,7 @@ test('leaving a long conversation right after a scroll returns to that scroll', 
   try { await page.navigate(`${origin}/?fake=1&open=recent&long=1`); }
   finally { await page.send('Page.removeScriptToEvaluateOnNewDocument', { identifier }); }
   await page.waitFor(`document.querySelector('[data-testid=thread-title]')?.textContent.includes('Four hundred')`);
-  await page.evaluate(`Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])`);
+  await page.settleAnimations();
   await page.evaluate('new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))');
   await page.evaluate(`(() => { globalThis.__holdMeasurements = true; const t=document.querySelector('[data-testid=timeline]'); t.scrollTop = t.scrollHeight - t.clientHeight - 1200; t.dispatchEvent(new Event('scroll')); })()`);
   await page.evaluate('new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))');

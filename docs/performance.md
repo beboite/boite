@@ -412,6 +412,18 @@ when the core advertises `chunkedAnswers`.
 - A streamed delta, part or turn looks up its message or turn from the end of
   the loaded timeline, where the item being written sits.
 - The trace is read when the trace surface is on screen, not on every open.
+- Sidebar cards ask for their pull request when they mount or change branch,
+  then on one timer per connection: every 15 seconds while the thread works,
+  every 60 seconds at rest, above the core's 15-second cache of a repository's
+  list, so a round of idle cards runs `gh` at most once per repository. A
+  hidden page skips its rounds; back in view, it runs one if a round is due. A
+  merged pull request is not asked about again, except by Refresh PR
+  (`watchPullRequests` in `pull-request.ts`).
+- An open Done or Archived fold reads the archive again only when a project's
+  archive count, the listed projects or a connection change, not when a prompt
+  re-sorts the list, and keeps its rows on screen while it reads.
+- The sidebar sorts each project's rows once, for its section and for
+  Alt+1 to Alt+9, and a change in one project sorts that project alone.
 - A project names its icon by version or stack id only. The image, up to
   256 KB, is a `projects.icon` call made once per project and version, when a
   tile first draws it; a list never carries it ([project icons](project-icons.md)).
@@ -616,6 +628,12 @@ limits expensive work while streaming, typing and scrolling:
 - The composer uses `field-sizing: content` where supported; IndexedDB draft
   writes wait for a typing pause. Bottom following runs after layout and before
   paint through `ResizeObserver`.
+- On a phone, the chat behind the thread or activity list gets
+  `content-visibility: hidden` once the exits the cover started have ended
+  (`--dur-whip`): a stream keeps writing to it without layout or paint, and it
+  comes back at the same position. Skipped content advances no animation, so
+  E2E captures wait through `settleAnimations()`, which ignores it. The "phone
+  streaming behind list" scenario measures it.
 
 ### A long turn is many rows
 

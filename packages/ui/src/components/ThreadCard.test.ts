@@ -16,34 +16,91 @@ afterEach(async () => {
   vi.restoreAllMocks(); document.body.innerHTML = ''; localStorage.clear();
 });
 
-test('a PR opened during a turn appears without remounting and refresh failures keep its link', async () => {
+test('a card asks every minute at rest and every 15 s at work, and a merged PR is not asked about again until a manual refresh', async () => {
   client = new FakeClient({ delayMs: 0 });
   store = new Store(); store.attach(client); await store.connect();
   const thread = store.threads.find(thread => thread.branch)!;
-  thread.status = 'running';
+  // Its own checkout: the page keeps the merged answer for it, which later tests must not start from.
+  thread.branch = 'merged-topic';
+  thread.status = 'idle';
   const project = store.projects.find(project => project.id === thread.projectId)!;
   const pr = { number: 181, url: 'https://github.com/example/repo/pull/181', state: 'OPEN' as const };
-  const call = vi.spyOn(client, 'call').mockResolvedValueOnce(null).mockResolvedValueOnce(pr).mockRejectedValueOnce(new Error('offline')).mockResolvedValue({ ...pr, state: 'MERGED' });
+  const call = vi.spyOn(client, 'call').mockResolvedValueOnce(null).mockResolvedValueOnce(pr).mockRejectedValueOnce(new Error('offline'))
+    .mockResolvedValueOnce(pr).mockResolvedValue({ ...pr, state: 'MERGED' });
   vi.useFakeTimers();
   mounted = mount(ThreadCard, { target: document.body, props: { machine: { id: 'local', label: 'Local', store }, project, thread, now: Date.now(), showProject: false } });
   await settle();
+  expect(call).toHaveBeenCalledTimes(1);
   expect(document.querySelector('[data-testid=thread-pr]')).toBeNull();
+  // The core keeps a repository's list for 15 s: asking that often about a thread at rest ran `gh` at every round.
   await vi.advanceTimersByTimeAsync(15_000); await settle();
+  expect(call).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(45_000); await settle();
+  expect(call).toHaveBeenCalledTimes(2);
   expect(document.querySelector('[data-testid=thread-pr]')?.textContent).toContain('#181');
-  await vi.advanceTimersByTimeAsync(15_000); await settle();
+  await vi.advanceTimersByTimeAsync(60_000); await settle();
+  expect(call).toHaveBeenCalledTimes(3);
   expect(document.querySelector('[data-testid=thread-pr]')?.textContent).toContain('#181');
   expect(store.error).toBeNull();
-  thread.status = 'idle'; await settle();
+  // A turn starts: it asks at once, then every 15 s while the thread works.
+  thread.status = 'running'; await settle();
   expect(call).toHaveBeenCalledTimes(4);
   const visibility = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
-  await vi.advanceTimersByTimeAsync(30_000); await settle();
+  document.dispatchEvent(new Event('visibilitychange'));
+  await vi.advanceTimersByTimeAsync(120_000); await settle();
   expect(call).toHaveBeenCalledTimes(4);
   visibility.mockReturnValue(false);
   document.dispatchEvent(new Event('visibilitychange')); await settle();
   expect(call).toHaveBeenCalledTimes(5);
-  await unmount(mounted); mounted = undefined;
-  await vi.advanceTimersByTimeAsync(30_000); await settle();
+  // Merged stays merged: neither the rounds nor a finished turn ask again.
+  await vi.advanceTimersByTimeAsync(120_000); await settle();
+  thread.status = 'idle'; await settle();
+  await vi.advanceTimersByTimeAsync(120_000); await settle();
   expect(call).toHaveBeenCalledTimes(5);
+  // The user's own refresh still does.
+  const { contextMenu } = await import('../lib/context-menu.svelte');
+  document.querySelector('[data-testid=thread-row]')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 4, clientY: 4 }));
+  contextMenu.current!.onpick('pr'); contextMenu.close(); await settle();
+  expect(call).toHaveBeenCalledTimes(6);
+  expect(call).toHaveBeenLastCalledWith('threads.pullRequest', { threadId: thread.id, refresh: true });
+  await unmount(mounted); mounted = undefined;
+  await vi.advanceTimersByTimeAsync(120_000); await settle();
+  expect(call).toHaveBeenCalledTimes(6);
+});
+
+test('cards on screen share one round a minute, none while the page is hidden, and one on return', async () => {
+  client = new FakeClient({ delayMs: 0 });
+  store = new Store(); store.attach(client); await store.connect();
+  const source = store.threads.find(thread => thread.branch)!;
+  const project = store.projects.find(project => project.id === source.projectId)!;
+  const call = vi.spyOn(client, 'call').mockResolvedValue(null);
+  const lookups = () => call.mock.calls.filter(([method]) => method === 'threads.pullRequest').length;
+  vi.useFakeTimers();
+  const cards = Array.from({ length: 10 }, (_, index) => mount(ThreadCard, { target: document.body,
+    props: { machine: { id: 'local', label: 'Local', store }, project, thread: { ...source, id: `t-card-${index}`, branch: `topic-${index}`, status: 'idle' as const }, now: Date.now(), showProject: false } }));
+  try {
+    await settle();
+    expect(lookups()).toBe(10);
+    call.mockClear();
+    await vi.advanceTimersByTimeAsync(120_000); await settle();
+    expect(lookups()).toBe(20);
+    call.mockClear();
+    const visibility = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+    document.dispatchEvent(new Event('visibilitychange'));
+    await vi.advanceTimersByTimeAsync(120_000); await settle();
+    expect(lookups()).toBe(0);
+    visibility.mockReturnValue(false);
+    document.dispatchEvent(new Event('visibilitychange')); await settle();
+    expect(lookups()).toBe(10);
+    // Back again before a round is due: nothing more until it is.
+    visibility.mockReturnValue(true); document.dispatchEvent(new Event('visibilitychange'));
+    visibility.mockReturnValue(false); document.dispatchEvent(new Event('visibilitychange')); await settle();
+    expect(lookups()).toBe(10);
+    await vi.advanceTimersByTimeAsync(60_000); await settle();
+    expect(lookups()).toBe(20);
+  } finally {
+    for (const card of cards) await unmount(card);
+  }
 });
 
 test('moving a thread clears its PR and ignores the previous checkout lookup', async () => {

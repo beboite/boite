@@ -2,7 +2,7 @@
   import { errorText } from '../lib/errors';
   import { tick, untrack } from 'svelte';
   import { Check, Ellipsis, Folder, FolderInput, GitBranch, GitPullRequest } from '@lucide/svelte';
-  import type { Project, ThreadSummary } from '@boite/contracts';
+  import { threadActive, type Project, type ThreadSummary } from '@boite/contracts';
   import type { Machine } from '../lib/workspace.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import { contextMenu } from '../lib/context-menu.svelte';
@@ -11,7 +11,7 @@
   import { focusOnMount } from '../lib/actions';
   import { strings } from '../lib/strings';
   import ThreadHeadline from './ThreadHeadline.svelte';
-  import { knownPullRequest, lookupPullRequest, rememberPullRequest } from '../lib/pull-request';
+  import { knownPullRequest, lookupPullRequest, PULL_REQUEST_POLL_MS, rememberPullRequest, watchPullRequests, WORKING_PULL_REQUEST_POLL_MS } from '../lib/pull-request';
   import { projectName } from '../lib/format';
   import { canMarkDone, markDone } from '../lib/recent.svelte';
   let {
@@ -72,37 +72,35 @@
       if (revision === prRevision) prLoading = false;
     }
   }
+  /** A merged pull request stays merged: only the user's own refresh asks about it again. A closed one can reopen. */
+  function pollPr() {
+    if (pullRequest?.state !== 'MERGED') void refreshPr();
+  }
   $effect(() => {
     // A move or a different owning connection invalidates the old checkout's answer.
     const identity = { client: owner.client, id: thread.id, cwd: thread.cwd, branch: thread.branch };
     const ready = owner.connection === 'ready' && !hidden;
-    let stopped = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    async function poll() {
-      await refreshPr();
-      if (!stopped) timer = setTimeout(() => void poll(), 15_000);
-    }
-    const visible = () => { if (!document.hidden) void refreshPr(); };
     const key = owner.threadKey(identity.id) + JSON.stringify([identity.cwd, identity.branch]);
     untrack(() => {
       // A reconnect or a remount keeps the line this checkout last had; only a
       // moved thread or another branch starts from nothing.
       pullRequest = knownPullRequest(key);
       prLoading = false;
-      if (ready && identity.client && identity.branch && identity.branch !== 'HEAD') void poll();
+      if (ready && identity.client && identity.branch && identity.branch !== 'HEAD') pollPr();
     });
-    document.addEventListener('visibilitychange', visible);
-    return () => {
-      stopped = true;
-      clearTimeout(timer);
-      document.removeEventListener('visibilitychange', visible);
-      prRevision++;
-    };
+    return () => { prRevision++; };
+  });
+  $effect(() => {
+    // Later rounds come from the connection's shared timer, paused while the page is hidden:
+    // every 15 s while the thread works and may open its PR, every minute at rest.
+    const client = owner.client;
+    if (!client || owner.connection !== 'ready' || hidden || !thread.branch || thread.branch === 'HEAD') return;
+    return watchPullRequests(client, pollPr, threadActive(thread.status) ? WORKING_PULL_REQUEST_POLL_MS : PULL_REQUEST_POLL_MS);
   });
   $effect(() => {
     // A finished turn can have opened or merged a PR since its row first mounted.
     const status = thread.status;
-    untrack(() => { void status; void refreshPr(); });
+    untrack(() => { void status; pollPr(); });
   });
   function rename() {
     title = thread.title;

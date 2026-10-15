@@ -778,7 +778,10 @@
     .app:not(.shell) .body { grid-row: 2; grid-column: 1; }
     /* The header owns the top safe area; pages keep clear of the home indicator. */
     .app.off-chat .body { padding-bottom: env(safe-area-inset-bottom, 0px); box-sizing: border-box; }
-    .body.mobile-covered { visibility: hidden; pointer-events: none; }
+    /* Skips layout and paint of the chat streaming behind the list; its DOM, state and scroll stay as they were.
+       Skipped content does not advance its animations, so the switch waits for the exits the cover started
+       (a menu closing) to end, and lifts at once on return. */
+    .body.mobile-covered { visibility: hidden; pointer-events: none; content-visibility: hidden; transition: content-visibility 0s var(--dur-whip) allow-discrete; }
     .scrim {
       display: block;
       position: fixed;

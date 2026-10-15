@@ -283,10 +283,13 @@ metadata comes from the execution machine's `gh pr list`, using the branch
 associated with the thread. A shared checkout's current branch alone does not
 identify a thread's PR. Non-repositories and detached checkouts have no PR.
 Lookups share the common Git directory across worktrees: `git remote -v` is
-cached for five minutes and the newest 200 PRs for one minute, errors included.
+cached for five minutes and the newest 200 PRs for 15 seconds, errors included.
 A missing branch gets its own lookup only when that list was full. At most two
 commands run at once, each with a ten-second deadline through `procs` as
-`pull-request:<threadId>`. Folded projects defer lookups until opened.
+`pull-request:<threadId>`. Folded projects defer lookups until opened. A client
+asks again every 15 seconds while the thread works and once a minute at rest,
+not while its page is hidden, and never about a merged PR unless the user picks
+Refresh PR.
 
 When a machine drops, its cards stay listed, greyed, and still open. The client
 asks nothing of the core then: it shows the timeline it last read for that
