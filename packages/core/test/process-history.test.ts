@@ -48,7 +48,7 @@ beforeEach(async () => {
     machineMemory: () => ({ totalBytes: 32 * 1024 ** 3, availableBytes: 24 * 1024 ** 3 }),
     terminateProcess: (_threadId, pid) => { stopped.push(pid); return true; },
   };
-  procs = new ProcRegistry(harness.core.journal, bus, platform, { forgetDelayMs: FORGET_MS });
+  procs = new ProcRegistry(harness.core.journal, bus, platform, { forgetDelayMs: FORGET_MS, loadIntervalMs: 20, idleLoadIntervalMs: 20 });
 });
 
 afterEach(async () => {
@@ -205,4 +205,18 @@ test('an id with no thread behind it leaves no rows once it is forgotten, a thre
 
   await waitFor(() => harness.core.journal.listProcesses('plugin:fetch:2', 10).length === 0, 2000);
   expect(harness.core.journal.listProcesses(threadId, 10)).toHaveLength(1);
+});
+
+test('a thread that never goes idle forgets the pids that exited past the forget delay', async () => {
+  const threadId = 'terminal:watcher';
+  sink.started(threadId, 500, { exe: 'shell', commandLine: null, parentPid: null, startedAt: 1, incarnation: '1' });
+  for (let pid = 1000; pid < 2000; pid++) {
+    sink.started(threadId, pid, { exe: 'rustc', commandLine: null, parentPid: 500, startedAt: pid, incarnation: String(pid) });
+    sink.exited(threadId, pid, { ...EXIT, startedAt: pid, incarnation: String(pid) });
+  }
+  expect(procs.knownCount(threadId)).toBe(1001);
+  // Twice the delay: a sweep runs at most once per delay, after the entries aged past it.
+  await Bun.sleep(FORGET_MS * 2 + 100);
+  expect(procs.liveOf(threadId).map(record => record.pid)).toEqual([500]);
+  expect(procs.knownCount(threadId)).toBe(1);
 });

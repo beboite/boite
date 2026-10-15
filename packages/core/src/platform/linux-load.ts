@@ -59,6 +59,26 @@ export function cpuTicks(stat: string): number | null {
   return user + system;
 }
 
+/** The command name, field 2 of a stat line: from the first `(` to the last `)`. */
+function statComm(stat: string): string {
+  return stat.slice(stat.indexOf('(') + 1, stat.lastIndexOf(')'));
+}
+
+/**
+ * The boot time, per reader: fixed until reboot, and `/proc/stat` is several
+ * KB on a machine with many cores, read at every spawn otherwise.
+ */
+const boots = new WeakMap<ProcRead, number>();
+
+function bootSeconds(read: ProcRead): number | null {
+  const known = boots.get(read);
+  if (known !== undefined) return known;
+  const boot = /^btime\s+(\d+)$/m.exec(read('/proc/stat') ?? '');
+  if (boot === null) return null;
+  boots.set(read, Number(boot[1]));
+  return Number(boot[1]);
+}
+
 /**
  * When the process that holds `pid` started, in ms since the epoch: its stat
  * line's field 22, in clock ticks after boot, plus the boot time `/proc/stat`
@@ -68,9 +88,10 @@ export function linuxStartedAt(pid: number, read: ProcRead = readProc): number |
   if (!Number.isInteger(pid) || pid <= 0) return null;
   const stat = read(`/proc/${pid}/stat`);
   const ticks = stat === null ? null : statField(stat, 22);
-  const boot = /^btime\s+(\d+)$/m.exec(read('/proc/stat') ?? '');
-  if (ticks === null || boot === null) return null;
-  return Number(boot[1]) * 1000 + Math.round((ticks * 1000) / USER_HZ);
+  if (ticks === null) return null;
+  const boot = bootSeconds(read);
+  if (boot === null) return null;
+  return boot * 1000 + Math.round((ticks * 1000) / USER_HZ);
 }
 
 /**
@@ -129,6 +150,12 @@ export class LinuxLoad {
   readonly #last = new Map<string, { ticks: Map<number, number>; births: Map<number, number | null>; at: number }>();
   /** One parent scan serves every thread sampled in the same tick. */
   #scan: ProcSnapshot | null = null;
+  /**
+   * Each sampled process's name, per thread, while it stays in the sample.
+   * `/proc/<pid>/comm` is read again only for a new birth or when the stat
+   * line's own name changes, as an `exec` does.
+   */
+  readonly #names = new Map<string, Map<number, { birth: number | null; comm: string; exe: string | undefined }>>();
   readonly #resources: LinuxResources;
 
   constructor(
@@ -144,7 +171,7 @@ export class LinuxLoad {
 
   closeResources(): Promise<void> { return this.#resources.close(); }
 
-  forget(threadId: string): void { this.#resources.forget(threadId); }
+  forget(threadId: string): void { this.#resources.forget(threadId); this.#names.delete(threadId); }
 
   #snapshot(fresh = false): ProcSnapshot {
     const at = this.now();
@@ -225,6 +252,7 @@ export class LinuxLoad {
     this.#pids.delete(threadId);
     this.#births.delete(threadId);
     this.#last.delete(threadId);
+    this.#names.delete(threadId);
     this.#resources.forget(threadId);
   }
 
@@ -251,6 +279,8 @@ export class LinuxLoad {
       this.#owners = owners;
     }
     const members: LinuxResourceProcess[] = [];
+    const names = this.#names.get(threadId);
+    const sampledNames = new Map<number, { birth: number | null; comm: string; exe: string | undefined }>();
     for (const pid of pending) {
       const status = this.read(`/proc/${pid}/status`);
       // Topology can be shared for 500 ms, but CPU ticks must describe this
@@ -269,13 +299,17 @@ export class LinuxLoad {
       ticks.set(pid, used);
       sampledBirths.set(pid, birth);
       const bytes = status === null ? null : residentBytes(status);
-      const exe = this.read(`/proc/${pid}/comm`)?.trim();
+      const comm = stat === null ? '' : statComm(stat);
+      const named = names?.get(pid);
+      const exe = named !== undefined && named.birth === birth && named.comm === comm ? named.exe : this.read(`/proc/${pid}/comm`)?.trim();
+      sampledNames.set(pid, { birth, comm, exe });
       if (bytes !== null) workingSets.push({ pid, bytes, ...(exe ? { exe } : {}) });
       memoryBytes += bytes ?? 0;
       // A separately registered agent owns its own subtree, even when nested.
       for (const child of this.#children(pid, scan)) if (!owners.has(child) || owners.get(child) === threadId) pending.add(child);
     }
-    if (processes === 0) { this.#resources.forget(threadId); return null; }
+    if (processes === 0) { this.#resources.forget(threadId); this.#names.delete(threadId); return null; }
+    this.#names.set(threadId, sampledNames);
 
     const previous = this.#last.get(threadId);
     this.#last.set(threadId, { ticks, births: sampledBirths, at });

@@ -399,7 +399,8 @@ when the core advertises `chunkedAnswers`.
   so the missed text does not wait for the slowest of them. The fresh
   `threads.list` is laid over the rows already held: a row keeps its object and
   only the fields that changed are written, so the sidebar redraws the rows that
-  moved and no others. A `thread.updated` load tick patches its row the same way.
+  moved and no others. A `thread.load` sample patches the row's `load` alone,
+  about 4x fewer bytes than the whole row an older client still gets.
 - A streamed delta, part or turn looks up its message or turn from the end of
   the loaded timeline, where the item being written sits.
 - The trace is read when the trace surface is on screen, not on every open.

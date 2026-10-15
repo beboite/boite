@@ -25,7 +25,6 @@ import { currentOs } from './paths.ts';
 import { lanAddress } from './server/lan.ts';
 import { ProcRegistry } from './procs.ts';
 import { attachResourceLog } from './resource-log.ts';
-import { withLoad } from './threads/records.ts';
 import { ProjectStore } from './projects.ts';
 import { PROVIDER_SWITCHES, ProviderRegistry } from './providers/loader.ts';
 import { Router } from './router.ts';
@@ -299,7 +298,6 @@ export class Core {
     this.accounts = new AccountStore(this);
     this.projects = new ProjectStore(this);
     this.procs = new ProcRegistry(this.journal, this.bus, undefined, {
-      summarize: (thread) => withLoad(this, thread),
       diagnostic: (message, context) => this.logs.warn(message, { source: 'guards', ...context }),
     });
     attachResourceLog(this);
@@ -405,7 +403,7 @@ export class Core {
       version: this.version,
       ...(this.bundleHash ? { bundleHash: this.bundleHash } : {}),
       protocolVersion: PROTOCOL_VERSION,
-      features: { threadSnapshots: true, chunkedAnswers: true, readingPages: true, deferredToolParts: true, deviceKeys: true, draftPreparation: true, attachmentUploads: true, revealMachines: true },
+      features: { threadSnapshots: true, chunkedAnswers: true, readingPages: true, deferredToolParts: true, deviceKeys: true, draftPreparation: true, attachmentUploads: true, revealMachines: true, loadEvents: true },
       coreId: this.coordination.card().coreId,
       hostname: hostname(),
       os: currentOs(),

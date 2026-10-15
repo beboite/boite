@@ -10,12 +10,13 @@ import type {
   DelegationView,
   Thread,
   ThreadId,
+  ThreadLoad,
   ThreadSummary
 } from '@boite/contracts';
 import type { Client } from '../client';
 import { untrack } from 'svelte';
 import { strings } from '../strings';
-import { mergeResumed, patchRow, resumeRequest } from '../thread-rows';
+import { mergeResumed, patchLoad, patchRow, resumeRequest } from '../thread-rows';
 import type { StoreContext } from './context';
 import { lightPage } from './reading-pages.svelte';
 import { INITIAL_MESSAGE_PAGE, INITIAL_PAGE_BYTES } from '@boite/contracts';
@@ -90,7 +91,7 @@ export class Delegation {
   delegationSubscribedThreadId: ThreadId | null = null;
   private readonly coordinationRefresh = new ViewRefresh();
   private readonly delegationRefresh = new ViewRefresh();
-  private teamRead: { client: Client; threadId: ThreadId; updates: Map<ThreadId, ThreadSummary> } | null = null;
+  private teamRead: { client: Client; threadId: ThreadId; updates: Map<ThreadId, ThreadSummary>; loads: Map<ThreadId, ThreadLoad> } | null = null;
 
   constructor(private readonly ctx: StoreContext) {}
 
@@ -160,7 +161,7 @@ export class Delegation {
     await this.delegationRefresh.request(client, threadId, `${epoch}:${generation}`, false, current, async (_directory, latest) => {
       this.delegationLoading = true;
       this.delegationError = null;
-      const pending = { client, threadId, updates: new Map<ThreadId, ThreadSummary>() };
+      const pending = { client, threadId, updates: new Map<ThreadId, ThreadSummary>(), loads: new Map<ThreadId, ThreadLoad>() };
       this.teamRead = pending;
       try {
         const view = await client.call('delegation.get', { threadId });
@@ -168,6 +169,8 @@ export class Delegation {
         for (const agent of view.agents) {
           const summary = pending.updates.get(agent.thread.id);
           if (summary) patchRow(agent.thread, summary);
+          const load = pending.loads.get(agent.thread.id);
+          if (load) patchLoad(agent.thread, load);
         }
         this.delegation = view;
         const selected = this.delegationSelectedAgentId;
@@ -187,6 +190,14 @@ export class Delegation {
     });
   }
 
+  /** A `thread.load` on a team row, kept for a team read in flight like a whole row. */
+  patchLoad(threadId: ThreadId, load: ThreadLoad): void {
+    const agent = this.delegation?.agents.find(agent => agent.thread.id === threadId);
+    if (agent) patchLoad(agent.thread, load);
+    const pending = this.teamRead;
+    if (pending?.client === this.ctx.client) pending.loads.set(threadId, load);
+  }
+
   /** Load-only changes update team rows without fetching the team's messages again. */
   patchThread(summary: ThreadSummary): void {
     const agent = this.delegation?.agents.find(agent => agent.thread.id === summary.id);
@@ -194,7 +205,7 @@ export class Delegation {
     const pending = this.teamRead;
     const open = this.ctx.store.openThread;
     if (pending?.client === this.ctx.client && pending?.threadId === open?.id &&
-      summary.parentThreadId === (open?.parentThreadId ?? open?.id)) pending.updates.set(summary.id, summary);
+      summary.parentThreadId === (open?.parentThreadId ?? open?.id)) { pending.updates.set(summary.id, summary); pending.loads.delete(summary.id); }
   }
 
   #delegationRootId(): ThreadId | null {

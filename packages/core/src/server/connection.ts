@@ -1,4 +1,4 @@
-import { RPC_CHUNK_BYTES, RPC_CHUNK_MARK, RPC_MAX_FRAME_BYTES, RpcErrorCode, previewToolPart, type MessagePart, type RpcError, type RpcEventName, type RpcEvents, type SentFrom, type ThreadId, type TransportOptions } from '@boite/contracts';
+import { RPC_CHUNK_BYTES, RPC_CHUNK_MARK, RPC_MAX_FRAME_BYTES, RpcErrorCode, previewToolPart, type MessagePart, type HelloAccepted, type RpcError, type RpcEventName, type RpcEvents, type SentFrom, type ThreadId, type TransportOptions } from '@boite/contracts';
 import type { ServerWebSocket } from 'bun';
 import type { Core } from '../core.ts';
 import { newId } from '../ids.ts';
@@ -36,6 +36,8 @@ export class ServerConnection implements Connection {
   /** For the log: when the socket opened, the client name hello gave and the close the core asked for. */
   readonly openedAt = Date.now();
   clientName = 'unknown';
+  /** The newer events this client's hello said it handles (`hello` `accepts`). */
+  accepts: ReadonlySet<HelloAccepted> = new Set();
   closedBy: { code: number; reason: string } | null = null;
   /** A hello is being answered. */
   greeting = false;

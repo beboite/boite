@@ -8,6 +8,7 @@ import { dirname, join, normalize, resolve, sep } from 'node:path';
 import { eventThreadId, type EventPayload } from './bus.ts';
 import { mayReceiveEvent } from './access.ts';
 import type { Core } from './core.ts';
+import { withLoad } from './threads/records.ts';
 import { messageOf } from './errors.ts';
 import { JOIN_ROUTE } from './group.ts';
 import { parseRelayPath, RelayHub, type RelaySocketData } from './group/relay.ts';
@@ -725,6 +726,14 @@ export function startServer(options: ServerOptions): RunningServer {
       // trace panel reads it.
       name.startsWith('process.');
     const threadId = eventThreadId(payload);
+    // A load sample is the whole row for a client that does not take `thread.load`, built once for all of them.
+    let legacyRow: RpcEvents['thread.updated'] | null | undefined;
+    const legacyLoad = (): RpcEvents['thread.updated'] | null => {
+      if (legacyRow !== undefined) return legacyRow;
+      const { threadId: id, load } = payload as RpcEvents['thread.load'];
+      const thread = core.journal.getThread(id);
+      return legacyRow = thread === null ? null : { ...withLoad(core, thread), load };
+    };
     for (const connection of connections) {
       if (!connection.authenticated) continue;
       if (!mayReceiveEvent(name, connection)) continue;
@@ -735,6 +744,11 @@ export function startServer(options: ServerOptions): RunningServer {
       // that thread open; an agent socket still gets its own thread's.
       if (name === 'thread.activity' && connection.identity.principal !== 'agent' && (threadId === null || !connection.subscriptions.has(threadId))) continue;
       if (name === 'todos.updated' && !mayReadTodos(core, connection, (payload as RpcEvents['todos.updated']).projectId)) continue;
+      if (name === 'thread.load' && !connection.accepts.has('thread.load')) {
+        const row = legacyLoad();
+        if (row !== null && mayReceiveEvent('thread.updated', connection)) connection.sendEvent('thread.updated', row);
+        continue;
+      }
       connection.sendEvent(name, payload);
     }
   };

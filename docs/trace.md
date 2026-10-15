@@ -75,6 +75,18 @@ executable, command line, timestamps, exit code, CPU time, peak memory and I/O.
 | `resources.usage` | Agent identity and cached CPU, memory, storage and TCP readings, without process arguments or paths |
 | `resources.killTree` | Stops the registered thread tree or groups; wait for live count zero before treating exits as observed |
 | `ThreadLoad` | Sampled process count, CPU percentage and memory on each thread summary |
+| `thread.load` | A thread's new `ThreadLoad` alone, sent to a connection whose `hello` `accepts` it; any other connection gets the whole row as `thread.updated` |
+
+The load tick samples every live scope once a second while a turn runs, a
+`resources.usage` lease is held, memory is under pressure, a startup boost is
+pending or the previous tick saw a thread at 2% CPU or more or a changed process
+count. Otherwise it waits four seconds. A `turn.started` or a new lease brings
+the next tick forward to one second. A tick with no live process and memory
+`ok` reads nothing. A load is sent when it moved by more than 1% CPU, 1 MiB or a
+process; a scope with no thread behind it (a terminal, the devices) asks the
+thread table again only then. A thread whose processes never all exit forgets
+each exited pid 30 seconds after its exit, so late job events are still
+recognized while its history stays bounded.
 
 Manual archive also cancels temporary side questions throughout the retained
 family. Their retired requests cannot publish answers after restoration.
@@ -337,10 +349,12 @@ without grandchild events. Bun provides exit usage for its subprocesses; the
 Node path supplies no POSIX exit usage. `TraceCapability.mode: 'poll'` names
 this fallback, not complete process-tree event tracking.
 
-Linux samples procfs every second for registered processes and their descendants.
+Linux samples procfs on each load tick for registered processes and their descendants.
 CPU uses `/proc/<pid>/stat`; memory uses `RssAnon + RssShmem`, falling back to
 `VmRSS` on older kernels. The latter includes shared library mappings and can
-overcount a parallel workload. macOS uses `proc_pid_rusage` physical footprint
+overcount a parallel workload. A process name is read from `/proc/<pid>/comm`
+once per birth and again only when the stat line's name changes, as after an
+`exec`; the boot time from `/proc/stat` is read once. macOS uses `proc_pid_rusage` physical footprint
 for each direct child and reports CPU as zero. The automatic memory guard can
 stop the heaviest child tree when a thread exceeds its share. CPU job caps,
 focus guard and audio mute remain Windows-only.
@@ -355,9 +369,11 @@ its signal; a missing or changed birth is skipped. These procfs checks and
 PID signals are separate operations, rather than a held native process handle.
 
 Linux also reads the cgroup of each thread's root agent process on the same
-one-second sample: the `0::<path>` line of `/proc/<pid>/cgroup`, then
+sample: the `0::<path>` line of `/proc/<pid>/cgroup`, then
 `memory.events`, `memory.pressure`, `memory.high`, `memory.max` and
-`memory.current` under `/sys/fs/cgroup<path>`. Past `memory.high` the kernel
+`memory.current` under `/sys/fs/cgroup<path>`. The path, `memory.high` and
+`memory.max` are kept per process for 30 seconds, so a limit an admin changes
+lands within that; a tick reads the three counters. Past `memory.high` the kernel
 fails nothing; every process of the group stalls near 0% CPU while the `high`
 count of `memory.events` climbs. That count alone proves no stall: a group
 whose charge is mostly clean page cache reaches the limit during any large
