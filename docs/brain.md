@@ -48,7 +48,11 @@ core started ([hooks.md](hooks.md)).
 When sharing is enabled, the core prepends the contents of the two `AGENTS.md`
 entrypoints and the valid skill names, descriptions and absolute paths to
 normal turns. Claude additionally gets `CLAUDE.md`; Antigravity gets `GEMINI.md`.
-Skill bodies stay on disk for the agent to read when needed. Project instruction
+Claude Code already names every skill in `<config>/skills/<name>/SKILL.md` to
+its model, so the catalog leaves out a brain skill whose file, resolved through
+links, is one of those; other agents get the whole catalog. A context mode
+without the Skill tool also gets it whole. Skill bodies stay on disk for the agent
+to read when needed. Project instruction
 files still follow each agent's native discovery rules.
 
 The shared driver context carries the prefix, including on warm sessions.
@@ -67,6 +71,9 @@ dropping their content. The combined prefix is limited to 128 KiB.
 
 Boite injects its environment guide before the first request of every native
 agent session, including when no brain is connected or sharing is disabled.
+Claude takes it in its system prompt instead, appended to Claude Code's own
+([providers](providers.md#claudes-system-prompt)): it then survives compaction
+and no message carries it.
 The guide covers the CLI, panel, attachments, tasks and project todos. It lives
 in `packages/core/src/agent-guide.ts`; no instruction file is created. A resumed
 session keeps the guide; a replacement session receives it again. The brain's

@@ -550,6 +550,11 @@ both languages, and about 16,900 core bytes for the cards, their shared checks,
 the CLI command and two MCP tools. The UI limit becomes 4,860,000 and the core
 total limit 4,070,000; the entry chunk (518,508 bytes) and `main.js` limits are
 unchanged.
+On 2026-10-15 on Linux with Bun 1.4.2, Claude's preset system prompt on top of
+`origin/main` at `3b16d436` measured 4,118,552 emitted core JavaScript bytes
+with the Claude Agent SDK at 0.3.296 and 4,140,117 at 0.3.300: the SDK's lazy
+chunk grows by 21,565 bytes and never loads at startup. The core total limit
+becomes 4,142,000; the UI, entry and `main.js` limits are unchanged.
 Explain measured growth when changing a limit. Shared-runner timings are not gated. Earlier sizes and
 runner observations remain in the [dated report](../bench/results/2026-09-29-resources.md#historical-ci-measurements).
 

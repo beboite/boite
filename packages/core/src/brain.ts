@@ -1,10 +1,11 @@
 /// <reference path="./text.d.ts" />
 import { lstatSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import type { BrainConfig, BrainEntry, BrainStatus } from '@boite/contracts';
+import type { BrainConfig, BrainEntry, BrainStatus, Protocol } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused } from './errors.ts';
 import { BrainLinks, type BrainProfiles, type OwnedBrainLink } from './brain-links.ts';
+import { homePath } from './paths.ts';
 
 const FILE_LIMIT = 64 * 1024;
 const ENTRY_LIMIT = 500;
@@ -265,7 +266,12 @@ export class BrainStore {
   }
 
   /** Included in normal turns across all drivers, including already warm sessions. */
-  instructions(providerId?: string): string {
+  /**
+   * `listed` holds the SKILL.md files, resolved through links, that the agent's
+   * harness already lists to its model (`nativeSkillFiles`): the catalog leaves
+   * them out so no skill reaches the model twice.
+   */
+  instructions(providerId?: string, listed: ReadonlySet<string> = NONE): string {
     const { path, enabled } = this.config();
     if (!enabled || !path) return '';
     const { entries, texts } = this.current(path);
@@ -274,7 +280,7 @@ export class BrainStore {
       if (entry.error) throw refused(entry.error);
       blocks.push(`Instructions from ${entry.path}:\n${texts.get(entry.path) ?? read(path, join(path, entry.path))}`);
     }
-    const skills = entries.filter(entry => entry.kind === 'skill' && !entry.error);
+    const skills = entries.filter(entry => entry.kind === 'skill' && !entry.error && !listedSkill(listed, join(path, entry.path)));
     if (skills.length) blocks.push('Available skills. Read the named SKILL.md before using a skill.\n' + skills.map(entry => `${entry.name}: ${entry.description}\nFile: ${join(path, entry.path)}`).join('\n'));
     const text = blocks.join('\n\n');
     if (Buffer.byteLength(text) > INSTRUCTIONS_LIMIT) throw refused(`Brain instructions and skill catalog exceed ${INSTRUCTIONS_LIMIT} bytes; reduce the entry files or catalog`);
@@ -383,4 +389,31 @@ export class BrainStore {
     await Promise.all(this.processes.values());
     await this.automatic;
   }
+}
+
+const NONE: ReadonlySet<string> = new Set();
+
+function listedSkill(listed: ReadonlySet<string>, file: string): boolean {
+  if (listed.size === 0) return false;
+  try { return listed.has(realpathSync(file)); } catch { return false; }
+}
+
+/**
+ * The skills a harness lists to its model by itself, as resolved SKILL.md
+ * paths. Claude Code reads `<config>/skills/<name>/SKILL.md` and names each one
+ * in its own context; a brain skill linked there would otherwise arrive twice,
+ * once from the CLI and once in the catalog of every request. Other harnesses
+ * get the whole catalog. `skillTool` is false when a context mode removed the
+ * Skill tool, and with it the CLI's list.
+ */
+export function nativeSkillFiles(protocol: Protocol, env: Record<string, string>, skillTool = true): ReadonlySet<string> {
+  if (protocol !== 'claude-sdk' || !skillTool) return NONE;
+  const root = join(env['CLAUDE_CONFIG_DIR'] ?? process.env['CLAUDE_CONFIG_DIR'] ?? join(homePath(), '.claude'), 'skills');
+  let names: string[];
+  try { names = readdirSync(root); } catch { return NONE; }
+  const files = new Set<string>();
+  for (const name of names) {
+    try { files.add(realpathSync(join(root, name, 'SKILL.md'))); } catch { /* Not a skill folder. */ }
+  }
+  return files;
 }

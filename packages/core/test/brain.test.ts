@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import { mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { scanBrain } from '../src/brain.ts';
+import { nativeSkillFiles, scanBrain } from '../src/brain.ts';
 import { BrainStore } from '../src/brain.ts';
 import { connect } from '../src/client.ts';
 import { setDriver } from '../src/drivers/index.ts';
@@ -227,6 +227,27 @@ test('normal turns receive current instructions and skill paths without changing
   expect(h.core.brain.instructions()).not.toContain('Skill body stays on disk');
   file(join(root, 'AGENTS.md'), 'Shared convention two');
   expect(h.core.brain.instructions()).toContain('Shared convention two');
+});
+
+test('Claude gets no skill twice: the catalog leaves out what its own skills folder lists', async () => {
+  const owner = await h.connect();
+  file(join(root, 'skills/review/SKILL.md'), '---\nname: review\ndescription: Review changes.\n---\nBody');
+  file(join(root, 'skills/ship/SKILL.md'), '---\nname: ship\ndescription: Ship a release.\n---\nBody');
+  await owner.call('brain.configure', { path: root, enabled: true });
+  const config = join(h.dataDir, 'claude-config');
+  mkdirSync(join(config, 'skills'), { recursive: true });
+  // How a brain's setup shares a skill with Claude Code: one link per skill.
+  symlinkSync(join(root, 'skills/review'), join(config, 'skills/review'), 'junction');
+  file(join(config, 'skills/own/SKILL.md'), '---\nname: own\ndescription: Outside the brain.\n---\n');
+  const listed = nativeSkillFiles('claude-sdk', { CLAUDE_CONFIG_DIR: config });
+  expect([...listed].sort()).toEqual([realpathSync(join(root, 'skills/review/SKILL.md')), realpathSync(join(config, 'skills/own/SKILL.md'))].sort());
+  const claude = h.core.brain.instructions('claude', listed);
+  expect(claude).not.toContain(join(root, 'skills/review/SKILL.md'));
+  expect(claude).toContain(join(root, 'skills/ship/SKILL.md'));
+  // Another harness, or a Claude context mode without the Skill tool, keeps the whole catalog.
+  expect(nativeSkillFiles('codex-appserver', { CLAUDE_CONFIG_DIR: config }).size).toBe(0);
+  expect(nativeSkillFiles('claude-sdk', { CLAUDE_CONFIG_DIR: config }, false).size).toBe(0);
+  expect(h.core.brain.instructions('codex')).toContain(join(root, 'skills/review/SKILL.md'));
 });
 
 test.each(['connected', 'disabled', 'disconnected'] as const)('Boite guide reaches the first session turn with a %s brain', async state => {
