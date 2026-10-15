@@ -15,12 +15,12 @@ import type {
 } from '@boite/contracts';
 import { isNativeAgentPart } from './journal/native-agent-parts.ts';
 import { TRAIL_ONLY, trailOf } from './journal/trail.ts';
-import { copyBlobs, hydrate, hydratePart, storeParts } from './journal/part-blobs.ts';
+import { hydrate, hydratePart } from './journal/part-blobs.ts';
 import { migrate } from './journal/schema.ts';
 import { toAccount, toMessage, toProcess, toProject, toThread, toTurn, parseJson } from './journal/rows.ts';
 import type { AccountRow, MessageRow, ProcessRow, ProjectIconRow, ProjectRow, ThreadRow, TurnRow } from './journal/rows.ts';
 import type { DetectedIcon as StoredProjectIcon } from './project-icons.ts';
-import { messageOfError, StreamBuffer } from './journal/stream-buffer.ts';
+import { copyStoredParts, foldStreamingParts, messageOfError, StreamBuffer } from './journal/stream-buffer.ts';
 import { requestSince } from './journal/request-since.ts';
 import { usageByBucket, usageByThread, type UsageSumRow, type UsageThreadRow } from './journal/usage-sums.ts';
 import { sent, type Projection } from './journal/sent.ts';
@@ -84,6 +84,7 @@ export class Journal {
       // A large transaction grows the WAL file; this lets it shrink back at the next checkpoint.
       this.db.exec('PRAGMA journal_size_limit = 33554432');
       this.schema = this.db.transaction(() => migrate(this.db, file))();
+      foldStreamingParts(this.db); // What a stream left beside its row when the last core stopped without closing.
       // An incognito conversation never outlives the core that held it.
       this.purgeIncognitoThreads();
     } catch (error) {
@@ -160,7 +161,7 @@ export class Journal {
     if (this.closed) return;
     try {
       this.flushDeltas();
-      this.persistMessages();
+      this.stream.writeRows();
       this.purgeIncognitoThreads();
     } finally {
       this.stream.clear();
@@ -312,7 +313,7 @@ export class Journal {
   /** Hide the stopped family while keeping its rows and deletion time across restarts. */
   stageThreadDeletion(rootId: string, threads: ThreadSummary[]): void {
     this.flushDeltas();
-    this.persistMessages();
+    this.stream.writeRows(new Set(threads.map(t => t.id))); // Forgotten below: a restore needs whole rows.
     const now = Date.now();
     this.db.transaction(() => {
       for (const thread of threads) {
@@ -367,7 +368,7 @@ export class Journal {
     // table keyed by thread is cleared here, events included, so a removed
     // project's prompts and tool output leave the disk.
     this.db.transaction(() => {
-      for (const table of ['background_observations', 'turn_requests', 'turns', 'messages', 'native_agent_messages', 'part_blobs', 'media_previews', 'media_displays', 'processes', 'coordination_letters', 'coordination_wakes', 'events']) {
+      for (const table of ['background_observations', 'turn_requests', 'turns', 'messages', 'native_agent_messages', 'part_blobs', 'streaming_parts', 'media_previews', 'media_displays', 'processes', 'coordination_letters', 'coordination_wakes', 'events']) {
         const query = this.db.query(`DELETE FROM ${table} WHERE thread_id = ?`);
         for (const id of threadIds) query.run(id);
       }
@@ -534,7 +535,7 @@ export class Journal {
   // -- messages -------------------------------------------------------------
 
   putMessage(message: Message): void {
-    this.stream.track(message);
+    const parts = this.stream.track(message);
     this.db
       .query(
         `INSERT OR REPLACE INTO messages (id, thread_id, turn_id, role, parts, state, created_at)
@@ -545,7 +546,7 @@ export class Journal {
         message.threadId,
         message.turnId,
         message.role,
-        storeParts(this.db, message),
+        parts,
         message.state,
         message.createdAt,
       );
@@ -570,7 +571,7 @@ export class Journal {
       SELECT ?, ?, ?, role, parts, ?, created_at FROM messages WHERE id = ?`).run(copy.id, copy.threadId, copy.turnId, copy.state, sourceId);
     this.db.query('INSERT OR IGNORE INTO native_agent_messages (message_id, thread_id) SELECT ?, ? FROM native_agent_messages WHERE message_id = ?')
       .run(copy.id, copy.threadId, sourceId);
-    copyBlobs(this.db, sourceId, copy);
+    copyStoredParts(this.db, sourceId, copy);
   }
 
   getMessage(messageId: string): Message | null {
@@ -751,8 +752,7 @@ export class Journal {
     const removed = this.messageIdsFrom(threadId, fromRowid);
     this.db.query('DELETE FROM turn_requests WHERE thread_id = ? AND message_id IN (SELECT id FROM messages WHERE thread_id = ? AND rowid >= ?)').run(threadId, threadId, fromRowid);
     this.db.query('DELETE FROM native_agent_messages WHERE message_id IN (SELECT id FROM messages WHERE thread_id = ? AND rowid >= ?)').run(threadId, fromRowid);
-    this.db.query('DELETE FROM part_blobs WHERE message_id IN (SELECT id FROM messages WHERE thread_id = ? AND rowid >= ?)').run(threadId, fromRowid);
-    for (const table of ['media_previews', 'media_displays']) this.db.query(`DELETE FROM ${table} WHERE message_id IN (SELECT id FROM messages WHERE thread_id = ? AND rowid >= ?)`).run(threadId, fromRowid);
+    for (const table of ['part_blobs', 'streaming_parts', 'media_previews', 'media_displays']) this.db.query(`DELETE FROM ${table} WHERE message_id IN (SELECT id FROM messages WHERE thread_id = ? AND rowid >= ?)`).run(threadId, fromRowid);
     this.db.query('DELETE FROM messages WHERE thread_id = ? AND rowid >= ?').run(threadId, fromRowid);
     for (const turnId of removed.turnIds) {
       // An unknown accepted follow-up might be the removed input. Never acknowledge it again.

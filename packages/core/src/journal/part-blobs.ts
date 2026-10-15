@@ -33,30 +33,39 @@ export function createPartBlobs(db: Database): void {
 
 /**
  * The JSON stored for part `index`, after writing its large values to
- * `part_blobs`. Earlier values of that part go first, so a value that shrank
- * leaves nothing behind.
+ * `part_blobs`. Earlier values of that part that are gone or changed are
+ * deleted, so a value that shrank leaves nothing behind; a value whose digest
+ * matches the stored one is left as it is, not deleted and written again.
  */
 export function storePart(db: Database, message: Pick<Message, 'id' | 'threadId'>, index: number, part: MessagePart | undefined): string {
-  db.query('DELETE FROM part_blobs WHERE message_id = ? AND part_index = ?').run(message.id, index);
-  if (part === undefined || part === null) return 'null';
-  const fields = FIELDS[part.type] ?? [];
-  const values = part as unknown as Record<string, unknown>;
+  const fields = part === undefined || part === null ? [] : FIELDS[part.type] ?? [];
+  const values = (part ?? {}) as unknown as Record<string, unknown>;
   const moved = fields.filter(field => typeof values[field] === 'string' && (values[field] as string).length >= BLOB_MIN_CHARS);
-  if (moved.length === 0) return JSON.stringify(part);
-  const insert = db.query('INSERT INTO part_blobs (message_id, part_index, field, thread_id, data, digest) VALUES (?, ?, ?, ?, ?, ?)');
+  if (moved.length === 0) {
+    db.query('DELETE FROM part_blobs WHERE message_id = ? AND part_index = ?').run(message.id, index);
+    return part === undefined || part === null ? 'null' : JSON.stringify(part);
+  }
+  // A value is kept only under the same digest and thread: deleting a thread must still find it.
+  const kept = new Map((db.query('SELECT field, digest, thread_id AS threadId FROM part_blobs WHERE message_id = ? AND part_index = ?')
+    .all(message.id, index) as { field: string; digest: string; threadId: string }[]).map(row => [row.field, `${row.threadId}:${row.digest}`]));
+  const remove = db.query('DELETE FROM part_blobs WHERE message_id = ? AND part_index = ? AND field = ?');
+  for (const field of kept.keys()) if (!moved.includes(field)) remove.run(message.id, index, field);
+  const insert = db.query('INSERT OR REPLACE INTO part_blobs (message_id, part_index, field, thread_id, data, digest) VALUES (?, ?, ?, ?, ?, ?)');
   const stored: Record<string, unknown> = { ...values, [MARK]: moved };
   for (const field of moved) {
     const value = values[field] as string;
-    insert.run(message.id, index, field, message.threadId, value, Bun.hash(value).toString(36));
+    const digest = Bun.hash(value).toString(36);
+    if (kept.get(field) !== `${message.threadId}:${digest}`) insert.run(message.id, index, field, message.threadId, value, digest);
     stored[field] = '';
   }
   return JSON.stringify(stored);
 }
 
-/** Every part's stored JSON, in order, as `JSON.stringify(parts)` would place them. */
-export function storeParts(db: Database, message: Pick<Message, 'id' | 'threadId' | 'parts'>): string {
-  db.query('DELETE FROM part_blobs WHERE message_id = ?').run(message.id);
-  return `[${message.parts.map((part, index) => storePart(db, message, index, part)).join(',')}]`;
+/** Every part's stored JSON, in order. */
+export function storeParts(db: Database, message: Pick<Message, 'id' | 'threadId' | 'parts'>): string[] {
+  // Parts past the end go; storePart replaces or keeps the values of the others.
+  db.query('DELETE FROM part_blobs WHERE message_id = ? AND part_index >= ?').run(message.id, message.parts.length);
+  return message.parts.map((part, index) => storePart(db, message, index, part));
 }
 
 /** True when a stored `parts` text names moved values; a plain substring test, no parse. */

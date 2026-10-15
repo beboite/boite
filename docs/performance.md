@@ -49,7 +49,10 @@ that reads screenshots back keeps each PNG as base64 in its tool output; one
 message held 33.5 MiB. Large values now live in `part_blobs`
 ([architecture](architecture.md)), so a streaming message rewrites only the
 parts that changed: 20 s of text on top of 93 stored screenshots spent 396 ms
-in writes instead of 3,838 ms. `delegation.get` reads the messages that
+in writes instead of 3,838 ms. Between whole-row writes, a streaming message
+writes only its changed parts to `streaming_parts`: 60 s of text on a row of
+100 tool parts wrote 4.2 MiB of WAL instead of 95.7 MiB
+([results](../bench/results/2026-10-15-perf-journal.md)). `delegation.get` reads the messages that
 `native_agent_messages` names instead of every part of the thread: 30 ms
 instead of 1,051 ms on a 115 MiB thread. Partial indexes on the events read
 back took the core's start on that journal from 1.9 s to 0.38 s once settled,

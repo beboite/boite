@@ -2,7 +2,7 @@ import type { Database } from 'bun:sqlite';
 import type { Message, MessagePart } from '@boite/contracts';
 import type { Journal } from '../journal.ts';
 import { isNativeAgentPart } from './native-agent-parts.ts';
-import { hydratePart, storePart } from './part-blobs.ts';
+import { copyBlobs, hydratePart, storePart, storeParts } from './part-blobs.ts';
 
 const DELTA_WINDOW_MS = 16;
 /** The shortest wait before a streaming message's parts are written to its row. */
@@ -10,6 +10,15 @@ const PERSIST_MS = 500;
 /** A slow write stretches the wait so that writing takes at most 1/PERSIST_SHARE of the time. */
 const PERSIST_SHARE = 20;
 const PERSIST_MAX_MS = 5_000;
+/**
+ * Between whole-row writes, a streaming message's changed parts go to
+ * `streaming_parts`; its row is written whole at least this often, so a raw
+ * SQL reader of `messages.parts` lags by at most this much.
+ */
+const ROW_WRITE_MS = 30_000;
+const EMPTY_TEXT = JSON.stringify({ type: 'text', text: '' });
+const UPSERT_SIDE = `INSERT INTO streaming_parts (message_id, part_index, thread_id, json) VALUES (?, ?, ?, ?)
+  ON CONFLICT (message_id, part_index) DO UPDATE SET json = excluded.json`;
 /** A delta whose write keeps failing is dropped after this many tries, and the loss reported. */
 const DELTA_ATTEMPTS = 3;
 
@@ -30,17 +39,26 @@ interface OpenMessage {
   message: Message;
   dirty: boolean;
   /**
-   * Each part's stored JSON as last committed, cleared when that part changes,
-   * so a write stores only the parts that changed: their large values go to
-   * `part_blobs` once, not on every write while one text part grows.
+   * Each part's stored JSON as last committed, to the row or to
+   * `streaming_parts`, cleared when that part changes, so a write stores only
+   * the parts that changed: their large values go to `part_blobs` once, not on
+   * every write while one text part grows.
    */
   json: (string | undefined)[];
+  /** True once `streaming_parts` holds committed parts the row lacks. */
+  side: boolean;
+  /** When the row was last written whole, from `Date.now()`. */
+  rowAt: number;
 }
 
 /**
  * The streaming write path: text deltas coalesced for 16 ms, and the parts of
- * each message still streaming held in memory and written to its row on a
- * timer. Reads overlay held messages onto their selected rows without writing.
+ * each message still streaming held in memory. A timer writes the parts that
+ * changed to `streaming_parts`, one row per part, and the message row is
+ * written whole when the message is let go, every 30 seconds while it streams,
+ * and at close. A long turn's row of hundreds of KiB is no longer rewritten
+ * twice a second to add a few words. Reads overlay held messages onto their
+ * selected rows without writing.
  */
 export class StreamBuffer {
   private readonly deltas = new Map<string, PendingDelta>();
@@ -100,13 +118,23 @@ export class StreamBuffer {
     // and the timer writes them again on their own.
     const nested = this.db.inTransaction;
     const started = performance.now();
-    const write = this.db.query('UPDATE messages SET parts = ? WHERE id = ?');
-    const written: [OpenMessage, string[]][] = [];
+    const now = Date.now();
+    const side = this.db.query(UPSERT_SIDE);
+    const written: [OpenMessage, (string | undefined)[], boolean][] = [];
     this.db.transaction(() => {
       for (const entry of dirty) {
-        const parts = this.stored(entry);
-        write.run(`[${parts.join(',')}]`, entry.message.id);
-        written.push([entry, parts]);
+        if (now - entry.rowAt >= ROW_WRITE_MS) {
+          written.push([entry, this.writeRow(entry), true]);
+          continue;
+        }
+        const json = [...entry.json];
+        const { id, threadId } = entry.message;
+        entry.message.parts.forEach((part, index) => {
+          if (json[index] !== undefined) return;
+          json[index] = storePart(this.db, entry.message, index, part);
+          side.run(id, index, threadId, json[index]);
+        });
+        written.push([entry, json, false]);
       }
     })();
     if (nested) {
@@ -114,9 +142,11 @@ export class StreamBuffer {
       return;
     }
     // Clean only once committed: a rolled-back write stays dirty for the next try.
-    for (const [entry, parts] of written) {
+    for (const [entry, json, whole] of written) {
       entry.dirty = false;
-      entry.json = parts;
+      entry.json = json;
+      entry.side = !whole;
+      if (whole) entry.rowAt = now;
     }
     const elapsed = performance.now() - started;
     this.persistDelay = Math.min(PERSIST_MAX_MS, Math.max(PERSIST_MS, Math.round(elapsed * PERSIST_SHARE)));
@@ -133,10 +163,28 @@ export class StreamBuffer {
     }
   }
 
-  /** A streaming message is held from here on; any other state lets it go. */
-  track(message: Message): void {
-    if (message.state === 'streaming') this.open.set(message.id, { message: { ...message, parts: [...message.parts] }, dirty: false, json: [] });
+  /**
+   * Stores the parts of a message whose row the caller writes whole, and
+   * returns the row's `parts` text. A streaming message is held from here on;
+   * any other state lets it go. Its old `streaming_parts` rows go.
+   */
+  track(message: Message): string {
+    this.db.query('DELETE FROM streaming_parts WHERE message_id = ?').run(message.id);
+    const json = storeParts(this.db, message);
+    if (message.state === 'streaming') this.open.set(message.id, { message: { ...message, parts: [...message.parts] }, dirty: false, json, side: false, rowAt: Date.now() });
     else this.open.delete(message.id);
+    return `[${json.join(',')}]`;
+  }
+
+  /**
+   * Writes the whole row of every held message of these threads that is
+   * behind, or of every held message without `threadIds`; they stay held.
+   */
+  writeRows(threadIds?: Set<string>): void {
+    for (const entry of this.open.values()) {
+      if (threadIds !== undefined && !threadIds.has(entry.message.threadId)) continue;
+      if (entry.dirty || entry.side) this.writeParts(entry);
+    }
   }
 
   /** A copy of a message still streaming, or undefined once it is not held. */
@@ -163,6 +211,9 @@ export class StreamBuffer {
   setMessagePart(messageId: string, partIndex: number, part: MessagePart): void {
     const open = this.open.get(messageId);
     if (open !== undefined) {
+      // A provider that sends the same part again changes nothing to write.
+      const current = open.message.parts[partIndex];
+      if (current !== undefined && (current === part || JSON.stringify(current) === JSON.stringify(part))) return;
       padInPlace(open.message.parts, partIndex);
       open.message.parts[partIndex] = part;
       open.json[partIndex] = undefined;
@@ -207,13 +258,18 @@ export class StreamBuffer {
    * and only the changed part's values are read and written.
    */
   private rewritePart(messageId: string, partIndex: number, change: (part: MessagePart | undefined) => MessagePart): void {
+    // Parts a message left in `streaming_parts` belong to its row first.
+    foldStreamingParts(this.db, messageId);
     const row = this.db.query('SELECT thread_id AS threadId, parts FROM messages WHERE id = ?').get(messageId) as { threadId: string; parts: string } | null;
     if (row === null) return;
     const stored = JSON.parse(row.parts) as MessagePart[];
+    const current = stored[partIndex] == null ? undefined : hydratePart(this.db, messageId, partIndex, stored[partIndex]);
+    const next = change(current);
+    // An unchanged part leaves the row and its blobs as they are.
+    if (current !== undefined && JSON.stringify(current) === JSON.stringify(next)) return;
     padInPlace(stored, partIndex);
-    const current = stored[partIndex] === undefined ? undefined : hydratePart(this.db, messageId, partIndex, stored[partIndex]);
     const texts = stored.map(part => JSON.stringify(part ?? null));
-    texts[partIndex] = storePart(this.db, { id: messageId, threadId: row.threadId }, partIndex, change(current));
+    texts[partIndex] = storePart(this.db, { id: messageId, threadId: row.threadId }, partIndex, next);
     this.db.query('UPDATE messages SET parts = ? WHERE id = ?').run(`[${texts.join(',')}]`, messageId);
   }
 
@@ -245,13 +301,27 @@ export class StreamBuffer {
     this.persistTimer.unref?.();
   }
 
-  private writeParts(entry: OpenMessage): void {
+  /**
+   * Writes the whole row and drops its `streaming_parts` rows, together: a
+   * side row left beside a newer row would be folded over it at startup.
+   */
+  private writeRow(entry: OpenMessage): string[] {
     const parts = this.stored(entry);
-    this.db.query('UPDATE messages SET parts = ? WHERE id = ?').run(`[${parts.join(',')}]`, entry.message.id);
+    this.db.transaction(() => {
+      this.db.query('UPDATE messages SET parts = ? WHERE id = ?').run(`[${parts.join(',')}]`, entry.message.id);
+      this.db.query('DELETE FROM streaming_parts WHERE message_id = ?').run(entry.message.id);
+    })();
+    return parts;
+  }
+
+  private writeParts(entry: OpenMessage): void {
+    const parts = this.writeRow(entry);
     // A write inside a caller's transaction is not committed yet: it stays dirty.
     if (!this.db.inTransaction) {
       entry.dirty = false;
       entry.json = parts;
+      entry.side = false;
+      entry.rowAt = Date.now();
     }
   }
 
@@ -287,6 +357,46 @@ export class StreamBuffer {
       } else this.deltas.set(key, { ...item, attempts });
     }
   }
+}
+
+/**
+ * Writes the parts left in `streaming_parts` into their message rows and drops
+ * them: at startup, after a crash or a kill mid-stream, so every reader sees
+ * whole rows again, or for one message before its row is changed. Returns the
+ * number of messages written.
+ */
+export function foldStreamingParts(db: Database, messageId?: string): number {
+  const rows = (messageId === undefined
+    ? db.query('SELECT message_id AS id, part_index AS partIndex, json FROM streaming_parts ORDER BY message_id, part_index').all()
+    : db.query('SELECT message_id AS id, part_index AS partIndex, json FROM streaming_parts WHERE message_id = ? ORDER BY part_index').all(messageId)) as { id: string; partIndex: number; json: string }[];
+  if (rows.length === 0) return 0;
+  const byMessage = new Map<string, typeof rows>();
+  for (const row of rows) byMessage.set(row.id, [...byMessage.get(row.id) ?? [], row]);
+  db.transaction(() => {
+    const read = db.query('SELECT parts FROM messages WHERE id = ?');
+    const write = db.query('UPDATE messages SET parts = ? WHERE id = ?');
+    for (const [id, parts] of byMessage) {
+      // A message removed while it streamed has no row left to write.
+      const row = read.get(id) as { parts: string } | null;
+      if (row === null) continue;
+      const texts = (JSON.parse(row.parts) as unknown[]).map(part => JSON.stringify(part ?? null));
+      for (const { partIndex, json } of parts) {
+        while (texts.length < partIndex) texts.push(EMPTY_TEXT);
+        texts[partIndex] = json;
+      }
+      write.run(`[${texts.join(',')}]`, id);
+    }
+    if (messageId === undefined) db.exec('DELETE FROM streaming_parts');
+    else db.query('DELETE FROM streaming_parts WHERE message_id = ?').run(messageId);
+  })();
+  return byMessage.size;
+}
+
+/** The moved values and the streamed parts of `sourceId`, written again for its copy. */
+export function copyStoredParts(db: Database, sourceId: string, copy: Pick<Message, 'id' | 'threadId'>): void {
+  copyBlobs(db, sourceId, copy);
+  db.query('INSERT INTO streaming_parts (message_id, part_index, thread_id, json) SELECT ?, part_index, ?, json FROM streaming_parts WHERE message_id = ?')
+    .run(copy.id, copy.threadId, sourceId);
 }
 
 export function messageOfError(error: unknown): string {
