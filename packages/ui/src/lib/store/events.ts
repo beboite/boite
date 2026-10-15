@@ -5,6 +5,7 @@ import { noteQuestionAsked } from '../question-reply.svelte';
 import { finishNotifies } from '../notify';
 import { resetPullRequestSupport } from '../pull-request';
 import { revealRequested } from '../reveal';
+import { appUpdateRequested } from '../desktop-update.svelte';
 import { rightPanel } from '../right-panel.svelte';
 import { undo } from '../undo.svelte';
 import { lastIndexById } from '../thread-rows';
@@ -58,7 +59,7 @@ export function listen(ctx: StoreContext, client: Client): void {
           // first load, and what refreshes it after a reconnect.
           s.principal = client.principal;
           ctx.serverUpdater.reset();
-          if (s.owner && !s.localCore) void ctx.serverUpdater.load();
+          if (s.owner && !s.localCore) { void ctx.serverUpdater.load(); void ctx.serverUpdater.loadDesktop(); }
           void s.reload();
           ctx.terminals.reconnected(client);
         }
@@ -67,6 +68,8 @@ export function listen(ctx: StoreContext, client: Client): void {
   }
 
   on('core.updateChanged', snapshot => ctx.serverUpdater.apply(snapshot));
+  on('core.desktopUpdateChanged', ({ status }) => { if (!s.localCore) ctx.serverUpdater.applyDesktop(status); });
+  on('ui.appUpdate', ({ version }) => appUpdateRequested(s, version));
 
   // Rows are patched in place: a load tick on one running thread must not
   // hand the sidebar a new array and re-render every other row.

@@ -38,6 +38,7 @@
   import { prefetchAllowed, prefetchNames, warmPages, whenIdle } from './lib/prefetch';
   import { startTheme } from './lib/theme';
   import { appName, appUpdater } from './lib/app-update.svelte';
+  import { reportDesktopUpdates } from './lib/desktop-update.svelte';
   import MobileNavigation from './components/MobileNavigation.svelte';
   import MobileConnect from './components/MobileConnect.svelte';
   import { attentionCount, syncAppBadge } from './lib/badge';
@@ -186,6 +187,8 @@
     const stopViewport = startViewport();
     const stopInstall = listenForInstall();
     const stopAutoLink = agentAutoLink.start();
+    // Another machine of the group reads this computer's app updates from its core.
+    const stopDesktopReport = reportDesktopUpdates(() => workspace.machines.map((machine) => machine.store));
     let stopAppUpdater: () => void = () => undefined;
     let updateDelay: number | undefined;
     const updateFrame = typeof requestAnimationFrame === 'function'
@@ -220,6 +223,7 @@
     return () => {
       stopViewport();
       stopAutoLink();
+      stopDesktopReport();
       stopInstall();
       if (updateFrame !== undefined) cancelAnimationFrame(updateFrame);
       if (updateDelay !== undefined) clearTimeout(updateDelay);

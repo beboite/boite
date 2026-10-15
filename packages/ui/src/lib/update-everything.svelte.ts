@@ -1,4 +1,4 @@
-import type { HarnessUpdate, ProviderId, ServerUpdateStatus } from '@boite/contracts';
+import type { DesktopUpdateStatus, HarnessUpdate, Os, ProviderId, ServerUpdateStatus } from '@boite/contracts';
 import { appUpdater, showAppUpdateUi, type UpdateChannel, type UpdatePhase } from './app-update.svelte';
 import { harnessOffered } from './machine-updates';
 import { strings } from './strings';
@@ -14,6 +14,14 @@ export interface MachineReading {
   ready: boolean;
   server: Pick<ServerUpdateStatus, 'mode' | 'phase' | 'currentVersion' | 'version' | 'received' | 'total' | 'error'> | null;
   agents: readonly HarnessUpdate[];
+  /** The desktop app on another machine, as its window reports it to its core; null on this computer. */
+  desktop?: DesktopUpdateStatus | null;
+  /** The release last asked of that desktop app, and why it did not reach its window. */
+  desktopFailure?: { version: string; message: string } | null;
+  /** The release that machine's core took and holds until its agents are done. */
+  desktopRequested?: string | null;
+  /** That machine's system: only the Windows installer runs with nobody there to answer it. */
+  os?: Os | null;
 }
 
 /** The desktop app's own updater, read on the computer it runs on. */
@@ -31,7 +39,7 @@ export interface AppReading {
 export type PartState = 'offered' | 'downloading' | 'ready' | 'waiting' | 'installing' | 'updating' | 'failed';
 
 export interface PlannedPart {
-  /** `app`, `boite` or the agent's provider id. */
+  /** `app` (this computer's desktop app), `desktop` (another machine's), `boite` or the agent's provider id. */
   id: string;
   name: string;
   /** What runs now, when it is known. */
@@ -80,12 +88,41 @@ function serverPart(server: NonNullable<MachineReading['server']>): PlannedPart 
     message: server.phase === 'error' ? server.error : null, startable: server.phase === 'available' || server.phase === 'error' };
 }
 
+/**
+ * The desktop app of another machine. Its own window installs it, so a
+ * downloaded release is still an offer from here, and a request that found no
+ * window open shows as failed with that reason until the window answers.
+ */
+export function desktopPart(desktop: DesktopUpdateStatus | null, failure: { version: string; message: string } | null, requested: string | null = null): PlannedPart | null {
+  const version = desktop?.version ?? failure?.version ?? null;
+  if (version === null) return null;
+  const phase = desktop?.version === version ? desktop.phase : null;
+  if (failure?.version === version && (phase === null || ['available', 'ready', 'error', 'idle', 'current', 'checking'].includes(phase))) {
+    return { id: 'desktop', name: 'Boite', from: desktop?.currentVersion || null, version, state: 'failed', percent: null, waitingFor: 0, message: failure.message, startable: true };
+  }
+  if (desktop === null || phase === null) return null;
+  const state: Partial<Record<DesktopUpdateStatus['phase'], PartState>> = {
+    available: 'offered', ready: 'offered', downloading: 'downloading', waiting: 'installing', installing: 'installing', error: 'failed'
+  };
+  const mapped = state[phase];
+  if (mapped === undefined) return null;
+  // Taken by that machine's core: its window installs once the agents there are done.
+  if (requested === version && mapped !== 'downloading' && mapped !== 'installing') {
+    return { id: 'desktop', name: 'Boite', from: desktop.currentVersion || null, version, state: 'waiting', percent: null, waitingFor: 0, message: null, startable: false };
+  }
+  return { id: 'desktop', name: 'Boite', from: desktop.currentVersion || null, version, state: mapped, percent: percentOf(desktop.received, desktop.total), waitingFor: 0,
+    message: phase === 'error' ? desktop.error : null, startable: ['available', 'ready', 'error'].includes(phase) };
+}
+
 function agentPart(update: HarnessUpdate): PlannedPart | null {
   const updating = update.state === 'updating';
   if (!updating && !harnessOffered(update)) return null;
   return { id: update.providerId, name: update.name, from: update.current, version: update.latest ?? '', state: updating ? 'updating' : update.state === 'failed' ? 'failed' : 'offered',
     percent: null, waitingFor: update.waitingFor ?? 0, message: update.state === 'failed' ? update.message : null, startable: !updating };
 }
+
+/** The parts that are Boite itself rather than an agent. */
+export const BOITE_PARTS: readonly string[] = ['app', 'desktop', 'boite'];
 
 /** The entry the app's own release stands under when this computer's core is not among the machines. */
 export const APP_MACHINE = 'app';
@@ -104,6 +141,9 @@ export function planOf(machines: readonly MachineReading[], app: AppReading | nu
     const parts: PlannedPart[] = [];
     const boite = machine.local ? own : machine.server ? serverPart(machine.server) : null;
     if (boite) parts.push(boite);
+    // Another machine's desktop app installs from here only where its installer asks nothing of anyone there.
+    const desktop = !machine.local && machine.os === 'windows' ? desktopPart(machine.desktop ?? null, machine.desktopFailure ?? null, machine.desktopRequested ?? null) : null;
+    if (desktop) parts.push(desktop);
     for (const update of machine.agents) {
       const part = agentPart(update);
       if (part) parts.push(part);
@@ -196,7 +236,11 @@ function readingOf(machine: Machine): MachineReading {
     local: isLocal(machine),
     ready: store.connection === 'ready' && store.owner,
     server: store.localCore ? null : store.serverUpdater.snapshot,
-    agents: store.owner ? store.harnessUpdates : []
+    agents: store.owner ? store.harnessUpdates : [],
+    desktop: store.localCore ? null : store.serverUpdater.desktop,
+    desktopFailure: store.localCore ? null : store.serverUpdater.desktopFailure,
+    desktopRequested: store.localCore ? null : store.serverUpdater.desktopRequested,
+    os: store.core?.os ?? null
   };
 }
 
@@ -281,9 +325,11 @@ export class UpdateEverything {
       const app = local ? appUpdater.prepare() : Promise.resolve(false);
       await Promise.all(plan.map((machine) => {
         const store = machines.get(machine.id)?.store;
-        const agents = machine.parts.filter((part) => part.startable && part.id !== 'app' && part.id !== 'boite').map((part) => part.id as ProviderId);
+        const agents = machine.parts.filter((part) => part.startable && !BOITE_PARTS.includes(part.id)).map((part) => part.id as ProviderId);
         const server = machine.parts.find((part) => part.id === 'boite' && part.startable)?.version ?? null;
-        return store && (agents.length > 0 || server !== null) ? store.serverUpdater.everything(agents, server) : null;
+        // That machine's core hands its desktop app's release to its window once these agents are done.
+        const desktop = machine.local ? null : machine.parts.find((part) => part.id === 'desktop' && part.startable)?.version ?? null;
+        return store && (agents.length > 0 || server !== null || desktop !== null) ? store.serverUpdater.everything(agents, server, desktop) : null;
       }));
       await app;
     } finally {

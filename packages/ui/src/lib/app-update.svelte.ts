@@ -316,6 +316,20 @@ export class AppUpdater {
     return this.ready;
   }
 
+  /**
+   * Installs `version` without asking here: the owner asked from another
+   * machine of the group, where nobody here can answer a dialog. Nothing
+   * happens unless it is the release this window offers. Resolves whether the
+   * install started.
+   */
+  async installRequested(version: string): Promise<boolean> {
+    if (!this.snapshot.supported || this.snapshot.version !== version) return false;
+    if (['waiting', 'installing'].includes(this.snapshot.phase)) return true;
+    if (!await this.prepare() || this.snapshot.version !== version) return false;
+    this.install();
+    return true;
+  }
+
   /** Cancellation must reach native code while the install invocation is pending. */
   async cancelInstall(): Promise<boolean> {
     if (this.snapshot.phase !== 'waiting' || this.cancelling || !this.#backend.cancelInstall) return false;

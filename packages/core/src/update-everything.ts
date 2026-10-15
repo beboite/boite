@@ -20,12 +20,20 @@ function agentsOf(value: unknown): ProviderId[] {
  * installation then waits for them there (`Core.requestIdleShutdown` counts
  * an agent update as work), so the restart never replaces the core under a
  * half-written agent install.
+ *
+ * `app` is the desktop app's release on this machine. Only its own window can
+ * install it, and the install restarts this core, so it is handed to that
+ * window once every agent started here has finished (`DesktopUpdates`).
  */
-export async function updateEverything(core: Core, params: { agents?: unknown; server?: unknown } | null): Promise<UpdateEverythingResult> {
+export async function updateEverything(core: Core, params: { agents?: unknown; server?: unknown; app?: unknown } | null): Promise<UpdateEverythingResult> {
   const agents = agentsOf(params?.agents);
   const server = params?.server ?? null;
   if (server !== null && (typeof server !== 'string' || server === '')) {
     throw refused('core.updateEverything.server must be the offered version or null', { field: 'server' });
+  }
+  const app = params?.app ?? null;
+  if (app !== null && (typeof app !== 'string' || app === '' || app.length > 80)) {
+    throw refused('core.updateEverything.app must be the desktop app\'s offered version or null', { field: 'app' });
   }
 
   const started: ProviderId[] = [];
@@ -45,13 +53,16 @@ export async function updateEverything(core: Core, params: { agents?: unknown; s
     try { core.serverUpdates.install(server); }
     catch (error) { serverError = messageOf(error); }
   }
+  // Checked now so the click hears at once that no window is open; handed over once the agents are done.
+  const appError = app === null ? null : core.desktopUpdates.refusal(app);
+  if (app !== null && appError === null) void core.desktopUpdates.requestAfter([...started], app);
   // The order the client listed, not the order the updaters answered in.
   const order = (id: ProviderId) => agents.indexOf(id);
   started.sort((a, b) => order(a) - order(b));
   failed.sort((a, b) => order(a.providerId) - order(b.providerId));
-  core.logs.info(`Update everything: ${started.length} agents started, ${failed.length} refused, Boite ${server === null ? 'not asked' : serverError === null ? `to ${server}` : 'refused'}`, {
+  core.logs.info(`Update everything: ${started.length} agents started, ${failed.length} refused, Boite ${server === null ? 'not asked' : serverError === null ? `to ${server}` : 'refused'}, desktop app ${app === null ? 'not asked' : appError === null ? `to ${app}` : 'refused'}`, {
     source: 'updates', event: 'update-everything.started',
-    data: { agents: started.join(','), failed: failed.map((entry) => entry.providerId).join(','), server, serverError },
+    data: { agents: started.join(','), failed: failed.map((entry) => entry.providerId).join(','), server, serverError, app, appError },
   });
-  return { agents: started, failed, server: core.serverUpdates.snapshot(), serverError };
+  return { agents: started, failed, server: core.serverUpdates.snapshot(), serverError, app: core.desktopUpdates.snapshot(), appError };
 }
