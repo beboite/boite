@@ -460,7 +460,9 @@ test('two checkouts exchange existing commits; dirty and diverged histories rema
   await expect(h.core.brain.sync()).rejects.toThrow('diverging');
   expect(await git(root, ['rev-parse', 'HEAD'])).toBe(before);
   expect((await h.core.brain.status()).git).toMatchObject({ ahead: 1, behind: 1, dirty: false });
-}, 30_000);
+  // About thirty git processes: 17 to 24 s on a Windows runner, past 30 s under parallel load
+  // (PR #503 on 2026-10-15), and the harness then stops the core under the last sync.
+}, 90_000);
 
 test.each(['fetch', 'push'] as const)('switching branches during %s cannot publish the newly selected branch', async phase => {
   const remote = join(h.dataDir, 'remote.git');
