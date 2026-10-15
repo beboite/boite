@@ -942,6 +942,34 @@ agent reads them with its own tools (Read, `view_image`). The journalled answer
 and the card keep only each file's kind, type, name and size, never its bytes
 or path. ACP and Antigravity questions offer options only, so they take no files.
 
+## Claude's system prompt
+
+Without a `systemPrompt` option the Agent SDK sends an empty one, and the CLI
+then gives the model one identity line. The driver asks for Claude Code's own
+prompt instead (`preset: 'claude_code'`), the one Anthropic tunes per model, and
+appends Boite's guide to it. Measured on 2026-10-15 with Claude Code 2.1.300
+against a local fake API server, with memory off and the dynamic sections moved
+out, the preset adds these characters to the system prompt:
+
+| Model | Characters | What it adds |
+| --- | --- | --- |
+| Opus 5.5, Sonnet 5.5 | 3,260 | Harness rules, safety, code style, confirmation of hard-to-reverse actions, honest reports, context management |
+| Haiku 5.5 | 6,052 | The same, plus a section on finishing a turn's work before asking |
+| Fable 5.1 | 9,332 | The same, plus rules for scope and for the final message |
+
+`excludeDynamicSections` moves the working directory and memory path to the
+first message, so threads in different worktrees share one cached system
+prompt. `autoMemoryEnabled: false` keeps the preset's file-based memory out:
+memory belongs to the user's brain and Boite's own notes. A context mode keeps
+the preset, which carries Haiku's section, and drops only Boite's guide when it
+drops guides.
+
+The CLI records a session's system prompt on its first request and sends that
+record until compaction, even when a later launch passes different text. A
+thread started before this change keeps its empty prompt until it compacts or
+starts a new session; a change to the guide reaches a running session the same
+way.
+
 ## Reasoning and tool summaries
 
 What a thread shows of an agent's reasoning is what its protocol sends. Measured

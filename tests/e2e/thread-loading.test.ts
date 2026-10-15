@@ -256,9 +256,15 @@ describe('deferred pictures on a real core', () => {
   test('on a phone the pictures fit the column at their proportions', async () => {
     await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
     await page.evaluate('window.__media.hold = true');
-    // The oldest screenshots were never fetched: the top of the thread shows them blurred.
-    await page.evaluate(`document.querySelector('${timeline}').scrollTop = 0`);
-    await page.waitFor(`(${visible}).some((node) => node.dataset.state === 'waiting' && node.querySelector('[data-testid=image-preview]'))`);
+    // The oldest screenshots were never fetched: the top of the thread shows them blurred. Reaching
+    // the top loads older pages above the reader, so keep scrolling until the first prompt is there;
+    // stopping at the first scroll left the view wherever the phone reflow anchored it.
+    await page.waitFor(`(() => {
+      const list = document.querySelector('${timeline}');
+      list.scrollTop = 0;
+      const first = Array.from(list.querySelectorAll('[data-testid=text-part]')).some((node) => node.textContent.includes('Screenshot 1:'));
+      return first && list.scrollTop === 0 && (${visible}).some((node) => node.dataset.state === 'waiting' && node.querySelector('[data-testid=image-preview]'));
+    })()`);
     await settled();
     await page.screenshot(join(artifacts, 'media-phone-blur.png'));
     await page.evaluate('window.__media.release()');
