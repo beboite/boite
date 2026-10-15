@@ -534,16 +534,22 @@ describe('acp driver', () => {
     const exited = client.next('process.exited', (record) => record.threadId === threadId, 20000);
     const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
     await client.call('turns.start', { threadId, prompt: '[slow]' });
-    await started;
+    const agent = await started;
 
     expect(await client.call('turns.stop', { threadId })).toEqual({ stopped: true });
     expect((await finished).status).toBe('stopped');
     await exited;
 
     await waitFor(() => harness?.core.procs.liveCount(threadId) === 0);
-    const trace = await client.call('trace.get', { threadId });
-    expect(trace).toHaveLength(1);
-    expect(trace[0]?.exitedAt).not.toBeNull();
+    // Windows traces exact process events, so a short-lived descendant of the
+    // agent can sit beside it (CI saw two records): every one must have exited.
+    let trace = await client.call('trace.get', { threadId });
+    for (let i = 0; i < 100 && trace.some(record => record.exitedAt === null); i++) {
+      await Bun.sleep(50);
+      trace = await client.call('trace.get', { threadId });
+    }
+    expect(trace.map(record => record.pid)).toContain(agent.pid);
+    expect(trace.filter(record => record.exitedAt === null)).toEqual([]);
   });
 
   test('a stop while the agent is still starting ends the turn at once, and the next turn runs', async () => {

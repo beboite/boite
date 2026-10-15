@@ -10,7 +10,7 @@
   import { floating } from '../lib/floating';
   import { tourRequested, tourSeen } from '../lib/onboarding.svelte';
   import { strings } from '../lib/strings';
-  import { APP_MACHINE, DONE_LINGER_MS, reconcileRows, updateEverything, type PlannedPart, type UpdateRow } from '../lib/update-everything.svelte';
+  import { APP_MACHINE, BOITE_PARTS, DONE_LINGER_MS, reconcileRows, updateEverything, type PlannedPart, type UpdateRow } from '../lib/update-everything.svelte';
   import { workspace } from '../lib/workspace.svelte';
 
   /**
@@ -209,7 +209,7 @@
                 <li class="part {row.doneAt === null ? part.state : 'done'}" data-testid="updates-part" data-part={part.id} data-done={row.doneAt !== null || undefined}
                   title={part.message ?? undefined} transition:slide={{ duration: fold() }}>
                   <span class="mark" aria-hidden="true">
-                    {#if part.id === 'app' || part.id === 'boite'}<img src={mark} alt="" width="16" height="16" />{:else}<ProviderLogo providerId={part.id} size={16} />{/if}
+                    {#if BOITE_PARTS.includes(part.id)}<img src={mark} alt="" width="16" height="16" />{:else}<ProviderLogo providerId={part.id} size={16} />{/if}
                   </span>
                   <span class="name">{part.name}</span>
                   <span class="versions">

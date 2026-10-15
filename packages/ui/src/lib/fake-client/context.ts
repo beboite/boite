@@ -46,6 +46,7 @@ import {
   type SchedulerState,
   type Settings,
   type ServerUpdateStatus,
+  type DesktopUpdateStatus,
   type SpeechConfig,
   type SpeechStatus,
   type TelemetryState,
@@ -72,7 +73,7 @@ import { fakeSpeechModels } from './speech';
 import { createAgentSession } from './threads';
 import { startTurn, stopTurn } from './turns';
 import { FakeWorkflows } from './workflows';
-import { initialServerUpdate } from './server-update';
+import { initialDesktopUpdate, initialServerUpdate } from './server-update';
 import { observeLog } from './logs';
 import type { FakeWorktree } from './worktrees';
 
@@ -120,6 +121,12 @@ export interface FakeClientOptions {
   coreId?: string;
   coreName?: string;
   publicUrl?: string;
+  /**
+   * A desktop app's core: its server updates by hand and its window reports
+   * the app's updater, offered at `?desktopUpdate=<phase>`. The second fake
+   * machine is one when that parameter is set.
+   */
+  desktopApp?: boolean;
 }
 
 function roundTrip(): number {
@@ -147,6 +154,8 @@ export class FakeContext {
   readonly logTurns = new Map<string, string>();
   readonly logProcesses = new Map<string, string>();
   serverUpdate: ServerUpdateStatus = initialServerUpdate();
+  /** The desktop app's updater as this machine's window reported it; null with no window, or on a server. */
+  desktopUpdate: DesktopUpdateStatus | null = null;
   readonly bus: FakeBus;
   readonly agents: FakeAgents;
   /** A settle of the agent setting cards is queued after the current change. */
@@ -315,6 +324,10 @@ export class FakeContext {
     this.long = options.long ?? false;
     this.heavy = options.heavy ?? false;
     const coreId = options.coreId ?? `fake-core-${secureId()}`;
+    if (options.desktopApp) {
+      this.serverUpdate = { ...this.serverUpdate, mode: 'manual', phase: 'idle', version: null, publishedAt: null, received: 0, total: null, error: null };
+      this.desktopUpdate = initialDesktopUpdate();
+    }
     this.identity = {
       coreId,
       name: options.coreName ?? 'This PC',
@@ -341,7 +354,7 @@ export class FakeContext {
       version: '2.0.0-beta.1',
       coreId,
       protocolVersion: PROTOCOL_VERSION,
-      features: { draftPreparation: true, attachmentUploads: true, threadSnapshots: true, chunkedAnswers: true, readingPages: true, deferredToolParts: true, deviceKeys: true, revealMachines: true, loadEvents: true },
+      features: { draftPreparation: true, attachmentUploads: true, threadSnapshots: true, chunkedAnswers: true, readingPages: true, deferredToolParts: true, deviceKeys: true, revealMachines: true, loadEvents: true, desktopUpdates: true },
       os: 'windows',
       channel: 'stable',
       pid: 4242,
