@@ -54,7 +54,10 @@ and no machine waits for another:
    download must not reach the idle gate in that gap.
 3. The release installs through the idle gate, which counts an agent update as
    work under way, its pause and its registry reads included: the restart
-   cannot replace the core under a half-written agent install.
+   cannot replace the core under a half-written agent install. Past two
+   minutes of other work the running turns pause and resume after the restart
+   instead ([server](server.md#updating-from-the-app)); an agent install still
+   holds it.
 
 This computer's app downloads at the same moment and never restarts by
 itself. Once its release is verified, the card offers Restart, disabled while

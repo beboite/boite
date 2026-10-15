@@ -82,6 +82,39 @@ test('server updates wait for running and queued work, cancel without stopping i
   } finally { release?.(); await h.stop(); rmSync(root, { recursive: true, force: true }); }
 });
 
+test('a server that stays busy past the idle wait hands its running turn to the next core and installs', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'boite-server-handoff-'));
+  let stops = 0;
+  let planFile = '';
+  const platform: ServerUpdatePlatform = {
+    inspect: async () => ({ directory: join(root, 'install'), executable: join(root, 'install', 'boite-core'), service: 'test.service' }),
+    launch: async (_run, _executable, plan) => { planFile = plan; writeFileSync(join(dirname(plan), 'ready'), ''); },
+    control: async () => undefined,
+    mainPid: async () => process.pid,
+  };
+  const h = await startTestCore({ onShutdown: () => { stops++; }, serverUpdates: { platform, pollMs: 5, idleWaitMs: 150,
+    findOffer: async () => ({ version: '2.0.0-beta.2', publishedAt: '2026-10-01T00:00:00Z', url: 'https://example.test/signed.zip', signature: 'signed' }),
+    prepare: async () => 'a'.repeat(64) } });
+  try {
+    const client = await h.connect();
+    await client.call('core.updateStatus', { refresh: true });
+    const busy = await echoThread(h, client, 'hours of work');
+    await client.call('turns.start', { threadId: busy.threadId, prompt: '[sleep:60000] work for hours' });
+    await client.call('core.updateInstall', { version: '2.0.0-beta.2' });
+    await waitFor(() => h.core.serverUpdates.snapshot().phase === 'waiting');
+    const waiting = h.core.serverUpdates.snapshot();
+    expect(typeof waiting.handoffAt).toBe('number');
+    expect(h.core.stopping).toBe(false);
+    await waitFor(() => h.core.serverUpdates.snapshot().phase === 'installing');
+    expect(h.core.serverUpdates.snapshot().handoffAt).toBeNull();
+    expect(readFileSync(join(dirname(planFile), 'admitted'), 'utf8')).toBe(JSON.parse(readFileSync(planFile, 'utf8')).id);
+    // The record the next core resumes from names the cut turn.
+    const record = h.core.journal.getSetting('restart-handoff') as { turns: { threadId: string; was: string }[] };
+    expect(record.turns).toContainEqual(expect.objectContaining({ threadId: busy.threadId, was: 'running' }));
+    await waitFor(() => stops === 1, 15_000);
+  } finally { await h.stop(); rmSync(root, { recursive: true, force: true }); }
+});
+
 test('a failed update admission write leaves the server running and reports the error', async () => {
   const root = mkdtempSync(join(tmpdir(), 'boite-server-admission-'));
   let stops = 0;

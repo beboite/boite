@@ -46,6 +46,8 @@ test('a confirmed update stays with its owning machine, shows waiting and can be
   expect(call).toHaveBeenCalledWith('core.updateInstall', { version: '2.0.0-beta.2' });
   expect(otherCall).not.toHaveBeenCalledWith('core.updateInstall', expect.anything());
   expect(document.querySelector('[data-testid=server-update-install]')).toBeNull();
+  // The wait has an end: past it the running work pauses and resumes after the restart.
+  expect(document.querySelector('[data-testid=server-update-status]')?.textContent).toMatch(/^Waiting for work to finish\. At .+, agents still working pause/);
   expect(document.querySelector('[data-testid=server-update-cancel]')).not.toBeNull();
   document.querySelector<HTMLButtonElement>('[data-testid=server-update-cancel]')!.click();
   await vi.waitFor(() => expect(store.serverUpdater.snapshot?.phase).toBe('available'));

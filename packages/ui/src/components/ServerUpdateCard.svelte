@@ -16,7 +16,7 @@
       case 'checking': return strings.appUpdate.checking;
       case 'available': return fill(strings.appUpdate.available, { version: state.version ?? '' });
       case 'downloading': return state.total ? fill(strings.appUpdate.downloading, { received: bytes(state.received), total: bytes(state.total) }) : fill(strings.appUpdate.downloaded, { received: bytes(state.received) });
-      case 'waiting': return strings.serverUpdate.waiting;
+      case 'waiting': return state.handoffAt ? fill(strings.serverUpdate.waitingUntil, { time: time(state.handoffAt) }) : strings.serverUpdate.waiting;
       case 'installing': return connected ? strings.serverUpdate.installing : strings.serverUpdate.reconnecting;
       case 'current': return strings.serverUpdate.current;
       case 'error': return state.error ?? strings.appUpdate.failed;

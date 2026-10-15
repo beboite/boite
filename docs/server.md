@@ -163,10 +163,16 @@ link to this guide. A core predating this feature needs one manual update first.
 The server checks eight seconds after startup, then every six hours. It follows
 its installed stable or nightly channel, downloads an immutable release's
 signed server archive, and verifies the publisher signature and embedded
-version before staging the complete core, CLI and UI. No update stops a running
-turn. The download and idle wait can be cancelled. Running and queued turns,
-terminals, warm sessions, background tasks and authenticated requests must
-finish before the existing idle-shutdown gate admits installation.
+version before staging the complete core, CLI and UI. The download and idle
+wait can be cancelled. Installation first waits two minutes for the idle gate:
+running and queued turns, terminals, warm sessions, background tasks and
+authenticated requests finishing there install without cutting anything. A
+server that is still busy then hands its running turns to the next core
+([restart handoff](restart-handoff.md)): each ends its tool call, 30 seconds
+at most, and resumes after the restart. The status names the time the wait
+ends. Only an agent install under way still holds it, since the restart would
+replace the core under a half-written agent. Before this limit, a machine with
+an agent working for hours never installed its release.
 
 An independent systemd user job survives the core's shutdown. After the core
 stops, it backs up the complete data directory and installation, switches the

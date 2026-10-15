@@ -12,7 +12,7 @@ export interface MachineReading {
   local: boolean;
   /** Connected with full control: only then can it be asked to update. */
   ready: boolean;
-  server: Pick<ServerUpdateStatus, 'mode' | 'phase' | 'currentVersion' | 'version' | 'received' | 'total' | 'error'> | null;
+  server: Pick<ServerUpdateStatus, 'mode' | 'phase' | 'currentVersion' | 'version' | 'received' | 'total' | 'error' | 'handoffAt'> | null;
   agents: readonly HarnessUpdate[];
 }
 
@@ -42,6 +42,8 @@ export interface PlannedPart {
   percent: number | null;
   /** Threads an agent update waits for to pause. */
   waitingFor: number;
+  /** While Boite waits for idle on a server: when it stops waiting and pauses the running turns instead. */
+  handoffAt: number | null;
   message: string | null;
   /** What the button starts: an offer, or a failure it retries. */
   startable: boolean;
@@ -64,7 +66,7 @@ function appPart(app: AppReading): PlannedPart | null {
   };
   const mapped = state[app.phase];
   if (mapped === undefined) return null;
-  return { id: 'app', name: 'Boite', from: app.currentVersion || null, version: app.version, state: mapped, percent: percentOf(app.received, app.total), waitingFor: 0,
+  return { id: 'app', name: 'Boite', from: app.currentVersion || null, version: app.version, state: mapped, percent: percentOf(app.received, app.total), waitingFor: 0, handoffAt: null,
     message: app.phase === 'error' ? app.error : null, startable: ['available', 'ready', 'error'].includes(app.phase) };
 }
 
@@ -77,6 +79,7 @@ function serverPart(server: NonNullable<MachineReading['server']>): PlannedPart 
   const mapped = state[server.phase];
   if (mapped === undefined) return null;
   return { id: 'boite', name: 'Boite', from: server.currentVersion || null, version: server.version, state: mapped, percent: percentOf(server.received, server.total), waitingFor: 0,
+    handoffAt: server.phase === 'waiting' ? server.handoffAt ?? null : null,
     message: server.phase === 'error' ? server.error : null, startable: server.phase === 'available' || server.phase === 'error' };
 }
 
@@ -84,7 +87,7 @@ function agentPart(update: HarnessUpdate): PlannedPart | null {
   const updating = update.state === 'updating';
   if (!updating && !harnessOffered(update)) return null;
   return { id: update.providerId, name: update.name, from: update.current, version: update.latest ?? '', state: updating ? 'updating' : update.state === 'failed' ? 'failed' : 'offered',
-    percent: null, waitingFor: update.waitingFor ?? 0, message: update.state === 'failed' ? update.message : null, startable: !updating };
+    percent: null, waitingFor: update.waitingFor ?? 0, handoffAt: null, message: update.state === 'failed' ? update.message : null, startable: !updating };
 }
 
 /** The entry the app's own release stands under when this computer's core is not among the machines. */
