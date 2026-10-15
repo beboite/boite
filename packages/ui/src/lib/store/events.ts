@@ -7,7 +7,7 @@ import { revealRequested } from '../reveal';
 import { appUpdateRequested } from '../desktop-update.svelte';
 import { rightPanel } from '../right-panel.svelte';
 import { undo } from '../undo.svelte';
-import { lastIndexById } from '../thread-rows';
+import { lastIndexById, patchFields } from '../thread-rows';
 import { strings } from '../strings';
 import { installStatesOf } from './accounts.svelte';
 import { observable } from './connection.svelte';
@@ -79,10 +79,10 @@ export function listen(ctx: StoreContext, client: Client): void {
     threads.upsertThread(summary);
     ctx.delegation.patchThread(summary);
     const open = s.openThread;
-    if (open && open.id === summary.id) Object.assign(open, summary);
+    if (open && open.id === summary.id) patchFields(open, summary);
     // Archived from another client: nothing here can show it again.
     else if (summary.archived) threads.forgetThread(summary.id, summary.archiveReason?.type === 'pr-merged');
-    if (s.delegationThread?.id === summary.id) Object.assign(s.delegationThread, summary);
+    if (s.delegationThread?.id === summary.id) patchFields(s.delegationThread, summary);
   });
   // The agent's `/name` list is the whole list each time, and it lives on the
   // open thread only: a summary in the sidebar carries none.

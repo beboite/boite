@@ -260,7 +260,14 @@ when the core advertises `chunkedAnswers`.
   subscription, unread acknowledgement and fresh snapshot run in the background.
   Unchanged messages and turns keep their identities through revalidation.
   The cache retains up to 16 visits, at most 4 MiB of text per thread and
-  16 MiB in total, with a 2,000-message bound per thread.
+  16 MiB in total, with a 2,000-message bound per thread. A leave counts the
+  thread it leaves and keeps that size beside the entry, so it never measures
+  the other visits again (`ReadingCache` in `reading-cache.ts`). Once the page
+  is idle, a plain copy replaces the deep `$state` proxy the timeline drew,
+  which weighed several times its data.
+- A summary written over the open thread (`thread.updated`, a load tick)
+  writes only the fields that changed (`patchFields`), so a tick that moves
+  `load` alone wakes only what reads `load`.
 - Cores advertising `threadSnapshots` receive one `threads.get` for an open.
   Its receipt includes pending cards, subscribes this socket, replaces the
   previous subscription and acknowledges unread content after a successful read.
@@ -332,7 +339,9 @@ when the core advertises `chunkedAnswers`.
   smaller, but Bun's Linux build cannot encode it. A GIF, a copy that would not
   be lighter and any other file come as they are. A click opens the original
   in the viewer, and a download or an edit also fetches the original
-  (`store/display-images.ts`).
+  (`store/display-images.ts`). The client keeps 120 copies and 24 M characters
+  of them at most, since a GIF or an original can weigh several MB, and drops
+  them when the Store switches to another machine.
 - A light read first makes the blurs of the messages around its page that no
   read looked at before, waiting 1.5 s at most. It does this before the page is
   read, never between the read and the answer, so the answer still holds every
@@ -417,7 +426,9 @@ Phone navigation reveals the conversation immediately after selection.
 `bun bench/thread-switch.ts --delay 300 --runs 7` measures an optimized fixture
 bundle with 400 messages and delayed thread RPC replies. Use `--phone --cpu 4`
 for a 390 px viewport and slower CPU, or `--ui <checkout>/packages/ui` for a
-baseline checkout. The [2026-10-02 measurements](../bench/results/2026-10-02-thread-switching.md)
+baseline checkout. `--cached 16` first reads 16 more threads of 400 messages
+to the top, then reports the synchronous leave time of each click and the JS
+heap after a forced collection. The [2026-10-02 measurements](../bench/results/2026-10-02-thread-switching.md)
 record samples, reading-position drift and the subsequent t3code comparison.
 `tests/e2e/thread-switch.test.ts` separately exercises the production UI with
 a real temporary core, a 750 ms snapshot delay and a large folded tool output.

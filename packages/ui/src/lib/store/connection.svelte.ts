@@ -150,13 +150,14 @@ export class Connection {
         this.paired = false;
         const { FakeClient } = await import('../fake-client');
         // `&long=1` adds the four-hundred-message thread the windowed list is
-        // looked at on, `&heavy=1` the forty messages and 11.5 MiB of tool calls
+        // looked at on (`&copies=<n>` n more for the reading cache), `&heavy=1` the forty messages and 11.5 MiB of tool calls
         // a long agent session leaves, `&principal=session` answers as a paired
         // phone, so the screens a device is refused can be walked without pairing one,
         // and `&missing=<method>,...` answers those methods like an older machine.
         s.attach(
           new FakeClient({
             long: params.get('long') === '1',
+            ...(params.get('copies') ? { longCopies: Number(params.get('copies')) } : {}),
             heavy: params.get('heavy') === '1',
             delegationDemo: params.get('team') === '1',
             agentsDemo: params.get('agents') === '1',

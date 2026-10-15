@@ -468,6 +468,9 @@ describe('server', () => {
       expect(body.bundleHash).toBe('loaded-bundle');
       const client = await bundled.connect();
       expect(client.core.bundleHash).toBe('loaded-bundle');
+      // The UI's liveness probe: a hello with no credential on an authenticated socket.
+      const probe = await client.call('hello', { protocolVersion: PROTOCOL_VERSION, client: { name: 'shell', version: '0' } });
+      expect(probe.core.bundleHash).toBe('loaded-bundle');
     } finally { await bundled.stop(); }
   });
 

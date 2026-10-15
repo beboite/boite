@@ -40,7 +40,7 @@ export interface Opener {
   readonly subscribedThreadId: ThreadId | null;
   readonly openThread: Thread | null;
   readonly openTarget: ThreadId | null;
-  readonly readingThreads: Map<string, Thread>;
+  readonly readingThreads: { get(threadId: string): Thread | undefined };
   readonly readingPositions: Map<string, ReadingPosition>;
   loadingThreadId: ThreadId | null;
   loadingBytes: { threadId: ThreadId; received: number; total: number } | null;

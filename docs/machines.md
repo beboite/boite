@@ -85,7 +85,9 @@ it takes on a slow link; the connection is never dropped for it.
 The client detects silent remote sockets (`packages/ui/src/lib/client.ts`).
 On a remote host, 25 seconds without any
 frame while no call waits for its answer sends a `hello`, which the core
-answers on an open connection with its info and nothing else. If no frame of
+answers on an open connection with its info and nothing else. That `hello`
+carries no token and no device signature, since the core reads none of its
+params once the socket is authenticated. If no frame of
 any kind arrives within 15 seconds, the socket is replaced and the calls it
 carried fail with "connection lost; check the conversation before resending".
 While a call waits, silence may be its answer still downloading, one frame of

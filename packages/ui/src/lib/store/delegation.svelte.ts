@@ -15,7 +15,7 @@ import type {
 import type { Client } from '../client';
 import { untrack } from 'svelte';
 import { strings } from '../strings';
-import { mergeResumed, patchRow, resumeRequest } from '../thread-rows';
+import { mergeResumed, patchFields, patchRow, resumeRequest } from '../thread-rows';
 import type { StoreContext } from './context';
 import { lightPage } from './reading-pages.svelte';
 import { INITIAL_MESSAGE_PAGE, INITIAL_PAGE_BYTES } from '@boite/contracts';
@@ -176,7 +176,7 @@ export class Delegation {
           await s.selectDelegatedAgent(null);
         } else if (selected && this.delegationThread?.id === selected) {
           const summary = view.agents.find(agent => agent.thread.id === selected)?.thread;
-          if (summary) Object.assign(this.delegationThread, summary);
+          if (summary) patchFields(this.delegationThread, summary);
         }
       } catch (error) {
         if (current()) this.delegationError = this.ctx.reason(error);
