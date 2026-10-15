@@ -12,7 +12,7 @@ import { messageOf } from './errors.ts';
 import { JOIN_ROUTE } from './group.ts';
 import { parseRelayPath, RelayHub, type RelaySocketData } from './group/relay.ts';
 import type { Connection } from './router.ts';
-import type { SocketData } from './server/connection.ts';
+import type { EventFrames, SocketData } from './server/connection.ts';
 import { ServerConnection } from './server/connection.ts';
 import { clientField, logConnectionClosed } from './server/connection-log.ts';
 import { handleFrame } from './server/frame.ts';
@@ -725,6 +725,8 @@ export function startServer(options: ServerOptions): RunningServer {
       // trace panel reads it.
       name.startsWith('process.');
     const threadId = eventThreadId(payload);
+    // Serialized once per projection, not once per socket.
+    const frames: EventFrames = new Map();
     for (const connection of connections) {
       if (!connection.authenticated) continue;
       if (!mayReceiveEvent(name, connection)) continue;
@@ -735,7 +737,7 @@ export function startServer(options: ServerOptions): RunningServer {
       // that thread open; an agent socket still gets its own thread's.
       if (name === 'thread.activity' && connection.identity.principal !== 'agent' && (threadId === null || !connection.subscriptions.has(threadId))) continue;
       if (name === 'todos.updated' && !mayReadTodos(core, connection, (payload as RpcEvents['todos.updated']).projectId)) continue;
-      connection.sendEvent(name, payload);
+      connection.sendEvent(name, payload, frames);
     }
   };
   let pendingScheduler: RpcEvents['scheduler.updated'] | null = null;

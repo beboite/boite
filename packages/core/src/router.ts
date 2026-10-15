@@ -10,7 +10,7 @@ export interface Connection {
   readonly subscriptions: Set<ThreadId>;
   /** Who said hello: the owner, or a paired session by id. */
   readonly identity: Identity;
-  /** What the client's last opened page left on the core: live tool parts follow the same rule. */
+  /** What the client's last opened page left on the core: live tool parts, files and pictures follow the same rule. */
   transport?: TransportOptions;
   /** The app behind the socket, set by hello; null for an agent, the CLI and tests. */
   readonly sentFrom?: SentFrom | null;
