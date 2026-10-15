@@ -53,12 +53,13 @@ export interface Env {
 }
 
 // ─── Payload types ───────────────────────────────────────────────
-import { enhancedDetails, type EnhancedDetails } from '../../packages/contracts/src/telemetry.ts';
+import { enhancedDetails, publicOsVersion, type EnhancedDetails } from '../../packages/contracts/src/telemetry.ts';
 
 export interface TelemetryEvent extends EnhancedDetails {
   name: string;
   app_version: string;
   os?: string;
+  os_version?: string;
   arch?: string;
   uuid?: string;
   outcome?: string;
@@ -415,6 +416,9 @@ export function buildBatch(
       os: ["windows", "macos", "linux"].includes(ev.os ?? "") ? ev.os : "other",
       arch: ["x64", "arm64", "ia32"].includes(ev.arch ?? "") ? ev.arch : "other",
     };
+    // Hosts older than the field send none; leave it absent rather than "other".
+    const osVersion = publicOsVersion(ev.os_version);
+    if (osVersion) properties.os_version = osVersion;
     if (ev.name === "thread_spawned" || ev.name === "turn_finished") {
       properties.provider = providers.includes(ev.provider ?? "") ? ev.provider : "other";
     }

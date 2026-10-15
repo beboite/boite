@@ -13,6 +13,32 @@ export const CLIENT_NAME = 'boite';
 export const LIVE_TURN_SETTINGS = ['--config', 'features.step_model_switching=true'] as const;
 export const NO_NATIVE_SUBAGENTS = ['--config', 'features.multi_agent=false', '--config', 'features.multi_agent_v2=false'] as const;
 
+/**
+ * Config overrides every `thread/start`, `thread/resume` and `thread/fork` of a
+ * conversation sends, layered by Codex above the user's and the project's
+ * `config.toml`.
+ *
+ * - Codex 0.152 made the `update_plan` checklist tool opt-in; Boite draws it as
+ *   the thread's tasks.
+ * - Codex waits `mcp_optional_startup_grace_ms` for the MCP servers before the
+ *   first model request and leaves out any still starting, so a cold `npx` or
+ *   `uvx` server, or a slow bridge, has no tools on the first turn of a new
+ *   process. 10 s covers most slow starts; a server that hangs delays only that
+ *   first turn by 10 s. The key is read by codex 0.162.1.
+ */
+export const THREAD_CONFIG = {
+  'tools.update_plan.enabled': true,
+  mcp_optional_startup_grace_ms: 10_000,
+} as const;
+
+/**
+ * A title call needs the prompt and nothing else: plugins and apps bring MCP
+ * servers of their own, so both stay off for its app-server. These follow the
+ * launch args, so they also win over a `features.plugins=true` there. The user's
+ * own MCP servers are turned off by name at `thread/start` (`titleTurn`).
+ */
+export const NO_PLUGINS = ['--config', 'features.plugins=false', '--config', 'features.apps=false'] as const;
+
 export const STDERR_MAX = 400;
 
 /**

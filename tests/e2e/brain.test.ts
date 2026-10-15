@@ -16,7 +16,7 @@ beforeAll(async () => {
   page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&open=recent` });
   await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
 }, 30_000);
-afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
+afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
 test('configure, inspect, synchronize and disconnect a brain at desktop and phone widths', async () => {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1100, deviceScaleFactor: 1, mobile: false });

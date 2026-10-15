@@ -31,6 +31,13 @@ with the desktop updater key and release version. Both stable and nightly
 publication require those signatures, include the archives in the checksums,
 and add separate server targets to `latest.json`. Docker images remain separate.
 
+The nightly also attaches the signed Android app as
+`boite-android-<MAJOR.MINOR.PATCH>.apk`. That version belongs to the app, not
+to the release: `apps/android/VERSION` holds `MAJOR.MINOR`, raised by hand, and
+the patch grows by one only when the APK is rebuilt. A release with no change
+to the app attaches the previous APK under its original name.
+[Android](android.md#the-app-version) has the full rule.
+
 - `build:ui` writes `packages/ui/dist`. That directory is what the core serves at
   `/` and what the shell bundles as its frontend. The Tauri config also runs it
   as its own before-build command, so a shell build never ships a UI older than

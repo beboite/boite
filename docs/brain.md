@@ -48,7 +48,11 @@ core started ([hooks.md](hooks.md)).
 When sharing is enabled, the core prepends the contents of the two `AGENTS.md`
 entrypoints and the valid skill names, descriptions and absolute paths to
 normal turns. Claude additionally gets `CLAUDE.md`; Antigravity gets `GEMINI.md`.
-Skill bodies stay on disk for the agent to read when needed. Project instruction
+Claude Code already names every skill in `<config>/skills/<name>/SKILL.md` and
+in the thread folder's `.claude/skills` to its model, so the catalog leaves out a
+brain skill whose file, resolved through links, is one of those; other agents get the whole catalog. A context mode
+without the Skill tool also gets it whole. Skill bodies stay on disk for the agent
+to read when needed. Project instruction
 files still follow each agent's native discovery rules.
 
 The shared driver context carries the prefix, including on warm sessions.
@@ -67,6 +71,9 @@ dropping their content. The combined prefix is limited to 128 KiB.
 
 Boite injects its environment guide before the first request of every native
 agent session, including when no brain is connected or sharing is disabled.
+Claude takes it in its system prompt instead, appended to Claude Code's own
+([providers](providers.md#claudes-system-prompt)): it then survives compaction
+and no message carries it.
 The guide covers the CLI, panel, attachments, tasks and project todos. It lives
 in `packages/core/src/agent-guide.ts`; no instruction file is created. A resumed
 session keeps the guide; a replacement session receives it again. The brain's
@@ -74,15 +81,19 @@ own instructions still go every normal turn while sharing is enabled.
 Coordination and delegation add compact feature instructions. Full command
 formats stay behind `boite help` and `boite workflow help`.
 
-While agents may read diagnostics (`agentLogAccess`, on unless the owner turns
-it off), the guide also points at `boite logs problems` and lists Boite's
-built-in skills with their path. Built-in skills live in
-`packages/core/src/builtin-skills.ts` and are written to
-`<dataDir>/skills/<name>/SKILL.md` the first time a guide names them, and
-again when a new core ships a different text. Today there is one,
-`boite-report-issue`: read the app's anonymized logs, explain what failed,
-then draft a GitHub issue and submit it only on the user's yes
-([trace](trace.md#structured-diagnostics)).
+The guide lists Boite's built-in skills, name, description and path, in the
+same shape as a brain's skills. They live in `packages/core/src/builtin-skills.ts`
+and are written to `<dataDir>/skills/<name>/SKILL.md` each time a guide names
+them, so an agent's edit is undone by the next session.
+
+| Skill | What it teaches |
+|---|---|
+| `boite-prove-it` | Check a change in proportion to its size, then put the proof in the answer: the deciding line, an attached capture or clip, or a `boite view` page. |
+| `boite-visual` | Pick the drawing from the reader's question, draw it with `boite view`, and send a standalone HTML file with `boite attach` when the user wants one to keep. |
+| `boite-report-issue` | Read the app's anonymized logs, explain what failed, then draft a GitHub issue the user publishes ([trace](trace.md#structured-diagnostics)). Listed with the `boite logs problems` line only while agents may read diagnostics (`agentLogAccess`, on unless the owner turns it off). |
+
+Boite writes these texts itself rather than adapting another project's skills.
+
 The Boite guide switch retains its saved preference independently of sharing.
 With the guide on, the separate `boite ask` note is not added, and with
 "Asynchronous questions" off, the guide leaves its `boite ask` line out. The
@@ -106,6 +117,18 @@ authorized contacts and
 profiles, messaging commands, shared-checkout rules and current limits.
 Delegation also teaches dynamic workflows: `after`, `forEach`, `when` and
 `boite workflow extend`, with `boite workflow help` for the full format.
+
+### Short answers
+
+Settings > General > Short answers, on by default, puts one line before every
+normal turn: the result first in short plain sentences, without preamble,
+recap, hedging or commentary between tool calls, and every fact, number, path
+and command kept. It goes every turn rather than once a session because
+harnesses ask for progress notes and a style said once fades within a few
+answers. It is `SHORT_ANSWERS` in `packages/core/src/agent-guide.ts`, about
+300 bytes. Context modes without guides, compaction and native slash commands
+do not receive it, and turning the Boite guide off removes it with the rest of
+Boite's own text.
 
 ## Global instructions
 

@@ -138,7 +138,9 @@ agents. The default deletion retention is 30 days; `threadDeletionRetentionDays`
 accepts 0 to 3650, with 0 disabling automatic purge. Startup and minute passes
 purge expired families transactionally. Reads and restoration also check expiry.
 Project removal purges its pending deletions. Files, worktrees, branches and
-native provider transcripts stay on disk. See
+native provider transcripts stay on disk; the
+[settled worktree cleanup](development.md#settled-worktree-cleanup) later removes
+a deleted thread's worktree when nothing in it would be lost. See
 [thread lifecycle](development.md#thread-lifecycle).
 
 The journal does not replace a provider's native transcript. A turn resumes the

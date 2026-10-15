@@ -321,7 +321,7 @@
             <div class="agent-row-value">
               <div class="agent-inline">
                 {#key host}<ModelPicker store={host} choice={selection} onpick={patch => { selection = { ...selection, effort: null, ...patch }; }} />{/key}
-                {#if effort?.levels.length}<EffortSlider levels={effort.levels} active={selection.effort ?? effort.default} onpick={id => { selection.effort = id; }} />{/if}
+                {#if effort?.levels.length}<EffortSlider levels={effort.levels} active={selection.effort ?? effort.default ?? null} onpick={id => { selection.effort = id; }} />{/if}
               </div>
               <span class="hint">{labels.identityHint}</span>
             </div>

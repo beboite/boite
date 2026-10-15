@@ -253,7 +253,7 @@ boite answer <id> <question-id> <option|text ...> [--skip]
 boite permissions [<id>]         pending tool permissions
 boite allow|deny <id> <request-id>
 boite attach <file>               publish a file snapshot in chat, at most 512 MB
-boite view <file.html>            draw the page at the end of the answer (--title <text>)
+boite view <file.html>            draw the page where a line ![title](file.html) of the answer places it, else at its end (--title <text>)
 boite view help                   the rules of a page: layout, the app's look, theme, motion, checks
 boite view example                a complete page in the app's look, to start from
 boite preview <file.html>          open a local HTML artifact and its neighbouring assets

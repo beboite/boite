@@ -360,8 +360,14 @@ export interface ModelInfo {
   legacy?: boolean;
   /** A small mark next to the name in the picker. */
   badge?: 'new';
-  /** Reasoning effort this model offers. A model without it has no effort control. */
-  effort?: { levels: EffortLevel[]; default: string };
+  /**
+   * Reasoning effort this model offers. A model without it has no effort control.
+   * `default` is the level the agent runs this model on when none is picked;
+   * absent when the agent decides it itself and the core cannot read it (pi
+   * knows only the level of the model its session is on), so a thread on that
+   * model sends no level until the user picks one.
+   */
+  effort?: { levels: EffortLevel[]; default?: string };
   /** Native service tiers advertised for this model; absent means no speed control. */
   speeds?: SpeedTier[];
 }
@@ -815,6 +821,13 @@ export interface Project {
   /** Automatically hide a quiescent worktree conversation after its exact PR merges. Missing means enabled. */
   autoArchiveMergedPr?: boolean;
   /**
+   * Remove a worktree the core created once every thread in it is archived or
+   * done and its work is settled: the exact head merged in a PR, or nothing
+   * missing from every other branch. Absent from a core older than this field;
+   * otherwise true unless the owner turned it off.
+   */
+  autoRemoveWorktrees?: boolean;
+  /**
    * The folder holds a `.git`, read on every answer rather than stored: the
    * test `threads.create.worktree` applies. Absent before the core's first
    * check of the folder answers, and from a core older than this field: a
@@ -969,6 +982,24 @@ export interface ThreadArchiveReason {
   archivedAt: Timestamp;
 }
 
+/**
+ * The core removed the worktree this thread worked in while it was archived.
+ * `cwd` still names the folder, which no longer exists: the thread can be read
+ * and restored but not continued there.
+ */
+export interface ThreadWorktreeRemoval {
+  /** The folder that was removed, the thread's `cwd` at the time. */
+  path: string;
+  /** The branch checked out there, null on a detached HEAD. */
+  branch: string | null;
+  /** The local branch went too. A kept branch can be checked out again by hand. */
+  branchDeleted: boolean;
+  /** `pr-merged`: the checkout's exact tip was a merged PR's head. `clean`: no change and no commit missing from every other branch. */
+  reason: 'pr-merged' | 'clean';
+  pullRequest?: { number: number; url: string };
+  removedAt: Timestamp;
+}
+
 /** Provenance of a copied conversation; native history and seeded history remain distinct. */
 export const JOURNAL_INSPECTION_TABLES = ['threads', 'turns', 'messages', 'turn_requests', 'background_observations', 'coordination_letters'] as const;
 export type JournalInspectionTable = typeof JOURNAL_INSPECTION_TABLES[number];
@@ -1012,6 +1043,8 @@ export interface ThreadSummary {
 
   /** Durable explanation for an automatic archive; absent for manual archives and restored conversations. */
   archiveReason?: ThreadArchiveReason;
+  /** Set once the core removed this thread's worktree, kept after a restore while `cwd` still names it. */
+  worktreeRemoved?: ThreadWorktreeRemoval | null;
   /** Core-owned delegation relationship. Absent on ordinary conversations. */
   parentThreadId?: ThreadId | null;
   /** What the conversation starts without, fixed at creation. Absent: the whole setup. */
@@ -1358,7 +1391,7 @@ export type ToolDocument =
   /** `data` is base64 with no `data:` prefix. The core caps it before it is journalled. */
   | { kind: 'image'; mimeType: string; data: string; alt: string | null };
 
-export { IMAGE_MIME_TYPES, ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_TURN, ATTACHMENTS_TOTAL_MAX_BYTES, RPC_MAX_FRAME_BYTES } from './attachment-limits.ts';
+export { IMAGE_MIME_TYPES, IMAGE_MAX_EDGE, ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_TURN, ATTACHMENTS_TOTAL_MAX_BYTES, RPC_MAX_FRAME_BYTES } from './attachment-limits.ts';
 import type { ImageMimeType } from './attachment-limits.ts';
 export type { ImageMimeType } from './attachment-limits.ts';
 
@@ -2154,6 +2187,11 @@ export interface Settings {
    */
   asyncQuestions?: boolean;
   /**
+   * Every normal turn asks the agent for short answers: result first, no
+   * preamble, recap or commentary between tool calls. Missing reads as on.
+   */
+  shortAnswers?: boolean;
+  /**
    * Agents may read this machine's anonymized diagnostics and draft an issue
    * from them (`boite logs`, `boite issue`). Missing reads as on.
    */
@@ -2776,13 +2814,6 @@ export interface PairingGrant {
   grant: string;
   role: PairingRole;
   expiresAt: Timestamp;
-  /**
-   * The same grant as a short code to type, `XXXX-XXXX`, for an installed
-   * iPhone app that cannot open the link (the camera hands it to Safari, which
-   * keeps its own storage). Valid until `codeExpiresAt`, once, like the grant.
-   */
-  code?: string;
-  codeExpiresAt?: Timestamp;
 }
 
 /**
@@ -3112,18 +3143,14 @@ export interface Group {
 }
 
 /**
- * What "Add a device" shows: one link, drawn as a QR code, and a short code
- * under it. A phone scans the link or types the code: it is admitted to the
- * group with its device key and reaches every member. A computer pastes the
- * link: its core joins the group with the invitation the link carries after
- * `#`. Both secrets are one-time and expire.
+ * What "Add a device" shows: one link, drawn as a QR code. A phone scans it:
+ * it is admitted to the group with its device key and reaches every member. A
+ * computer pastes it: its core joins the group with the invitation the link
+ * carries after `#`. Both secrets are one-time and expire.
  */
 export interface DeviceInvite {
   url: string;
-  /** `XXXX-XXXX`, the same admission for a phone, typed. */
-  code: string;
   expiresAt: Timestamp;
-  codeExpiresAt: Timestamp;
 }
 
 /**
@@ -3146,7 +3173,7 @@ export function deviceHelloInput(coreId: string, at: number, nonce: string): str
   return `boite-device-hello\n${coreId}\n${at}\n${nonce}`;
 }
 
-/** What a device signs when it is admitted: the grant or code it redeems, so its key is proven held by the one who scanned. */
+/** What a device signs when it is admitted: the grant it redeems, so its key is proven held by the one who scanned. */
 export function deviceAdmitInput(grant: string, publicKey: string): string {
   return `boite-device-admit\n${grant}\n${publicKey}`;
 }
@@ -3603,6 +3630,8 @@ export interface UpdateEverythingResult {
 export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, BrowserRpcMethods, PullRequestsRpcMethods, MobileDevicesRpcMethods, DiagnosticsRpcMethods {
   /** Owner-only merged-PR visibility policy; absent defaults to enabled. Disabling reveals automatically hidden roots, retaining manual archives. */
   'projects.setAutoArchiveMergedPr': { params: { projectId: ProjectId; enabled: boolean }; result: Project };
+  /** Owner-only automatic worktree removal policy; absent defaults to enabled. Turning it off stops future removals only. */
+  'projects.setAutoRemoveWorktrees': { params: { projectId: ProjectId; enabled: boolean }; result: Project };
   /** Owner-only, private bounded diagnostic history, including earlier runs. */
   'journal.inspect': { params: { cursor?: JournalInspectionCursor | null; limit?: number }; result: JournalInspection };
   'core.logs': { params: CoreLogsQuery; result: CoreLogRecord[] };
@@ -3961,7 +3990,7 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'files.write': { params: { threadId: ThreadId; path: string; text: string }; result: { bytes: number; modifiedAt: Timestamp } };
 
   /** A fresh one-time pairing link, `device` unless the role says otherwise. Owner only. */
-  'pairing.grant': { params: { role?: PairingRole; short?: boolean }; result: PairingGrant };
+  'pairing.grant': { params: { role?: PairingRole }; result: PairingGrant };
   /** Tailscale CLI and `tailscale serve` state for this core. Owner only. */
   'tailscale.status': { params: Record<string, never>; result: TailscaleStatus };
   /** Serve this core on https://<MagicDNS name> and make it the public URL. `replace` takes 443 from another target. Owner only. */
@@ -4831,22 +4860,6 @@ export const GRANT_QUERY_PARAM = 'grant';
 export const GRANT_TTL_MS = 10 * 60 * 1000;
 /** Every role `pairing.grant` takes; anything else is refused by name. */
 export const PAIRING_ROLES: readonly PairingRole[] = ['device', 'owner'];
-/** How long a typed pairing code and a short owner grant stay valid. */
-export const PAIRING_CODE_TTL_MS = 5 * 60 * 1000;
-/** Letters of a pairing code: Crockford base32, no I, L, O or U to misread. */
-export const PAIRING_CODE_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
-
-/**
- * A typed or pasted pairing code in its canonical 8-letter form, or null when
- * it cannot be one. Case, spaces and dashes are ignored; O reads as 0, I and L as 1.
- */
-export function normalizePairingCode(text: string): string | null {
-  const code = text.toUpperCase().replace(/[\s-]+/g, '').replace(/O/g, '0').replace(/[IL]/g, '1');
-  if (code.length !== 8) return null;
-  for (const letter of code) if (!PAIRING_CODE_ALPHABET.includes(letter)) return null;
-  return code;
-}
-
 /**
  * What a client says it is in its `hello`. `plugin` is a desktop-app plugin
  * (`provides.desktopApp`) talking to the core that started it: it signs in

@@ -1,10 +1,12 @@
 /*
- * The worktrees a project's repository carries, and their removal. Nothing
- * here runs on its own: a person reads the list and removes one at a time.
+ * The worktrees a project's repository carries, and their removal. A person
+ * reads the list and removes one at a time; `worktree-cleanup.ts` removes the
+ * settled ones on its own through `removeSettled`, under the same refusals.
  * The list is what `git worktree list` reports, not what threads remember, so
  * a worktree whose thread was deleted, or one the user added by hand, shows
- * too. A removal refuses what would lose work unless the caller says `force`,
- * and never touches a worktree a live thread stands in.
+ * too. A removal refuses what would lose work unless the caller says `force`
+ * or a merged pull request names the exact head, and never touches a worktree
+ * a live thread stands in.
  */
 
 import { realpath, stat } from 'node:fs/promises';
@@ -27,7 +29,7 @@ interface GitRun {
   stderr: string;
 }
 
-interface Listed {
+export interface Listed {
   path: string;
   head: string | null;
   branch: string | null;
@@ -43,7 +45,7 @@ function traceId(projectId: ProjectId): string {
  * A path as it compares: absolute, native separators, no trailing separator,
  * and without case on Windows, where `D:\Dev` and `d:/dev` are one folder.
  */
-function keyOf(path: string): string {
+export function keyOf(path: string): string {
   const full = resolve(path).replace(/[\\/]+$/, '');
   return process.platform === 'win32' ? full.toLowerCase() : full;
 }
@@ -53,7 +55,7 @@ function keyOf(path: string): string {
  * A folder already deleted resolves through its nearest parent that exists:
  * `/var/...` still meets git's `/private/var/...` on macOS.
  */
-async function realKey(path: string): Promise<string> {
+export async function realKey(path: string): Promise<string> {
   let head = resolve(path);
   const tail: string[] = [];
   for (;;) {
@@ -68,7 +70,7 @@ async function realKey(path: string): Promise<string> {
   }
 }
 
-function inside(root: string, target: string): boolean {
+export function inside(root: string, target: string): boolean {
   return target === root || target.startsWith(root.endsWith(sep) ? root : `${root}${sep}`);
 }
 
@@ -153,12 +155,7 @@ export class WorktreeSweep {
       });
     }
     const entry = await this.describe(project, target, await this.holders());
-    if (entry.threadId !== null && !entry.threadArchived) {
-      throw refused(`thread "${entry.threadTitle}" (${entry.threadId}) works in ${path}: archive it first`, {
-        projectId, path, threadId: entry.threadId, threadTitle: entry.threadTitle,
-        field: 'path', expected: 'a worktree no live thread uses',
-      });
-    }
+    this.refuseLive(project, path, entry);
     if (force !== true && (entry.dirty || entry.unmerged)) {
       const reasons = [
         ...(entry.dirty ? ['This worktree has uncommitted changes.'] : []),
@@ -169,23 +166,75 @@ export class WorktreeSweep {
         field: 'force', expected: 'force: true, or a worktree with nothing to lose',
       });
     }
+    const branchDeleted = await this.detach(project, path, target, force === true ? 'force' : 'merged-only');
+    return { ok: true, branchDeleted };
+  }
 
+  /**
+   * The automatic removal of `worktree-cleanup.ts`: `remove` without force,
+   * read again at this moment. An unmerged head passes only when `merged`
+   * names it, the head of a pull request GitHub says was merged (a squash or
+   * rebase merge leaves those commits on no local branch). The branch then
+   * goes only if it still points at that head and no other worktree has it.
+   */
+  async removeSettled(project: Project, path: string, merged: { sha: string; branch: string | null } | null): Promise<{ branch: string | null; branchDeleted: boolean }> {
+    const listed = await this.listed(project);
+    const wanted = await realKey(path);
+    let target: Listed | undefined;
+    for (const worktree of listed) if ((await realKey(worktree.path)) === wanted) target = worktree;
+    if (target === undefined || target.main || wanted === (await realKey(project.path))) {
+      throw refused(`${path} is not a linked worktree of ${project.name}`, { projectId: project.id, path });
+    }
+    const entry = await this.describe(project, target, await this.holders());
+    this.refuseLive(project, path, entry);
+    if (entry.missing) throw refused(`${path} is already gone`, { projectId: project.id, path });
+    if (entry.dirty) throw refused('This worktree has uncommitted changes.', { projectId: project.id, path, dirty: true });
+    const proof = merged !== null && target.head === merged.sha ? merged : null;
+    if (entry.unmerged && proof === null) throw refused('This worktree has commits on no other branch.', { projectId: project.id, path, unmerged: true });
+    const branchDeleted = await this.detach(project, path, target, proof ?? 'merged-only');
+    return { branch: target.branch, branchDeleted };
+  }
+
+  private refuseLive(project: Project, path: string, entry: WorktreeEntry): void {
+    if (entry.threadId === null || entry.threadArchived) return;
+    throw refused(`thread "${entry.threadTitle}" (${entry.threadId}) works in ${path}: archive it first`, {
+      projectId: project.id, path, threadId: entry.threadId, threadTitle: entry.threadTitle,
+      field: 'path', expected: 'a worktree no live thread uses',
+    });
+  }
+
+  /**
+   * `git worktree remove`, the branch, then a prune. `merged-only` lets git
+   * keep a branch it does not see merged (`branch -d`); `force` deletes it
+   * (`branch -D`); a proof deletes it only while it still points at the
+   * proved head (`update-ref -d` compares first) and no worktree has it.
+   */
+  private async detach(project: Project, path: string, target: Listed, branchRule: 'force' | 'merged-only' | { sha: string; branch: string | null }): Promise<boolean> {
     // A vanished directory loses its registration to the same unforced
     // `remove` (git 2.55 exits 0 on it); `prune --expire` would keep it for an hour.
-    const removal = ['worktree', 'remove', ...(force === true ? ['--force'] : []), target.path];
+    const removal = ['worktree', 'remove', ...(branchRule === 'force' ? ['--force'] : []), target.path];
     const removed = await this.git(project, project.path, removal);
     if (removed.code !== 0) {
-      throw refused(`git worktree remove failed for ${path}: ${removed.stderr.trim() || `exit ${removed.code}`}`, { projectId, path });
+      throw refused(`git worktree remove failed for ${path}: ${removed.stderr.trim() || `exit ${removed.code}`}`, { projectId: project.id, path });
     }
     let branchDeleted = false;
     if (target.branch !== null) {
-      const deleted = await this.git(project, project.path, ['branch', force === true ? '-D' : '-d', target.branch]);
+      const deleted = typeof branchRule === 'string'
+        ? await this.git(project, project.path, ['branch', branchRule === 'force' ? '-D' : '-d', target.branch])
+        : await this.deleteProvedBranch(project, target.branch, branchRule);
       branchDeleted = deleted.code === 0;
       if (!branchDeleted) this.core.log('info', `kept the branch ${target.branch} after removing ${path}: ${deleted.stderr.trim() || `exit ${deleted.code}`}`);
     }
     const pruned = await this.git(project, project.path, ['worktree', 'prune', '--expire', PRUNE_EXPIRE]);
     if (pruned.code !== 0) this.core.log('warn', `git worktree prune failed in ${project.path}: ${pruned.stderr.trim() || `exit ${pruned.code}`}`);
-    return { ok: true, branchDeleted };
+    return branchDeleted;
+  }
+
+  private async deleteProvedBranch(project: Project, branch: string, proof: { sha: string; branch: string | null }): Promise<GitRun> {
+    if (proof.branch !== branch) return { code: 1, stdout: '', stderr: `the merged pull request proved ${proof.branch ?? 'a detached head'}, not ${branch}` };
+    const holder = (await this.listed(project)).find((worktree) => worktree.branch === branch);
+    if (holder !== undefined) return { code: 1, stdout: '', stderr: `${branch} is checked out at ${holder.path}` };
+    return this.git(project, project.path, ['update-ref', '-d', `refs/heads/${branch}`, proof.sha]);
   }
 
   private project(projectId: ProjectId): Project {
@@ -193,7 +242,7 @@ export class WorktreeSweep {
     return this.core.projects.require(projectId);
   }
 
-  private async listed(project: Project): Promise<Listed[]> {
+  async listed(project: Project): Promise<Listed[]> {
     // A `.git` folder, or the file a linked worktree has: the test `Worktrees.add` refuses on.
     if (!(await present(project.path))) throw folderGone(project.path, { field: 'projectId', projectId: project.id, project: project.name });
     if (!(await present(resolve(project.path, '.git')))) {
@@ -207,12 +256,12 @@ export class WorktreeSweep {
   }
 
   /** Every thread by the real key of its folder, archived ones included. */
-  private async holders(): Promise<{ key: string; thread: ThreadSummary }[]> {
+  async holders(): Promise<{ key: string; thread: ThreadSummary }[]> {
     const threads = this.core.threads.list({ includeArchived: true });
     return Promise.all(threads.map(async (thread) => ({ key: await realKey(thread.cwd), thread })));
   }
 
-  private async describe(project: Project, worktree: Listed, holders: { key: string; thread: ThreadSummary }[]): Promise<WorktreeEntry> {
+  async describe(project: Project, worktree: Listed, holders: { key: string; thread: ThreadSummary }[]): Promise<WorktreeEntry> {
     const missing = !(await exists(worktree.path));
     const key = await realKey(worktree.path);
     const standing = holders.filter((holder) => inside(key, holder.key)).map((holder) => holder.thread);
@@ -233,14 +282,14 @@ export class WorktreeSweep {
     };
   }
 
-  private async dirty(project: Project, path: string): Promise<boolean> {
+  async dirty(project: Project, path: string): Promise<boolean> {
     const status = await this.git(project, path, ['status', '--porcelain=v1', '-z', '--untracked-files=normal'], GIT_READ_TIMEOUT_MS);
     if (status.code !== 0) throw refused(`git status failed in ${path}: ${status.stderr.trim() || `exit ${status.code}`}`, { projectId: project.id, path });
     return status.stdout.length > 0;
   }
 
   /** HEAD on no ref but the worktree's own branch. A worktree on an unborn branch has nothing to lose. */
-  private async unmerged(project: Project, worktree: Listed): Promise<boolean> {
+  async unmerged(project: Project, worktree: Listed): Promise<boolean> {
     if (worktree.head === null) return false;
     const refs = await this.git(project, project.path, ['for-each-ref', '--format=%(refname)', '--contains', worktree.head, 'refs/heads/', 'refs/remotes/'], GIT_READ_TIMEOUT_MS);
     if (refs.code !== 0) throw refused(`git for-each-ref failed in ${project.path}: ${refs.stderr.trim() || `exit ${refs.code}`}`, { projectId: project.id });
@@ -278,8 +327,7 @@ export class WorktreeSweep {
   }
 }
 
-export function registerWorktreeMethods(core: Core): void {
-  const sweep = new WorktreeSweep(core);
+export function registerWorktreeMethods(core: Core, sweep: WorktreeSweep = new WorktreeSweep(core)): void {
   // Owner only, absent from DEVICE_METHODS: both name paths on the host, and a removal deletes a folder.
   core.router.register('worktrees.list', (params) => sweep.list(params.projectId));
   core.router.register('worktrees.remove', (params) => sweep.remove(params));

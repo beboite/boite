@@ -11,6 +11,7 @@ import { documentsDir } from './platform/folders.ts';
 import type { FilesPage } from './files.ts';
 import type { ProjectIconRow } from './journal/rows.ts';
 import { detectProjectIcon, type DetectedIcon } from './project-icons.ts';
+import { autoRemoveWorktreesKey } from './worktree-cleanup-state.ts';
 
 /** How long a `.git` check may take before the last known answer stands. */
 export const GIT_PROBE_TIMEOUT_MS = 2_000;
@@ -395,6 +396,16 @@ export class ProjectStore {
     })());
   }
 
+  /** Turning it off stops future removals; what was removed stays removed. */
+  setAutoRemoveWorktrees(projectId: ProjectId, enabled: boolean): Project {
+    this.require(projectId);
+    if (typeof enabled !== 'boolean') throw refused('projects.setAutoRemoveWorktrees.enabled must be a boolean', { field: 'enabled', expected: 'true or false' });
+    return this.core.bus.afterCommit(() => this.core.journal.db.transaction(() => {
+      this.core.journal.append({ type: 'project.autoRemoveWorktreesChanged', threadId: null, version: 1, payload: { projectId, enabled } }, () => this.core.journal.setSetting(autoRemoveWorktreesKey(projectId), enabled));
+      return this.announce(projectId);
+    })());
+  }
+
   async setWorktreeDefault(projectId: ProjectId, enabled: boolean): Promise<Project> {
     const project = this.require(projectId);
     if (typeof enabled !== 'boolean') throw refused('projects.setWorktreeDefault.enabled must be a boolean', { field: 'enabled', expected: 'true or false' });
@@ -482,6 +493,7 @@ export class ProjectStore {
     return {
       ...project,
       autoArchiveMergedPr: this.core.journal.getSetting(`project-auto-archive-merged-pr:${project.id}`) !== false,
+      autoRemoveWorktrees: this.core.journal.getSetting(autoRemoveWorktreesKey(project.id)) !== false,
       ...(archivedThreads > 0 ? { archivedThreads } : {}),
       ...(doneThreads > 0 ? { doneThreads } : {}),
       ...(icon === undefined ? {} : { icon }),
@@ -539,6 +551,8 @@ export function registerProjectMethods(core: Core): void {
   core.router.register('projects.icon', (params) => core.projects.iconImage(params.projectId));
   core.router.register('projects.refreshIcon', (params) => core.projects.refreshIcon(params.projectId));
   core.router.register('projects.setAutoArchiveMergedPr', params => core.projects.setAutoArchiveMergedPr(params.projectId, params.enabled));
+  // Owner only, absent from DEVICE_METHODS like the merged-PR policy: it decides when folders on the host are deleted.
+  core.router.register('projects.setAutoRemoveWorktrees', params => core.projects.setAutoRemoveWorktrees(params.projectId, params.enabled));
   core.router.register('projects.setWorktreeDefault', (params) => core.projects.setWorktreeDefault(params.projectId, params.enabled));
   core.router.register('projects.archive', (params) => core.projects.archive(params.projectId, params.archived ?? true));
   core.router.register('projects.remove', async (params) => {
