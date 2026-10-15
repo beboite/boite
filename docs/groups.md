@@ -45,17 +45,17 @@ a machine is not: it is as private as its transport ([the network](#the-network)
 ## Using it
 
 On any machine, in Settings, Machines, **Add a device**. A machine in no group
-starts one named after itself first. The card shows a QR code, a short code
-under it and **Copy link**:
+starts one named after itself first. The card shows a QR code and **Copy
+link**:
 
-- a phone scans the QR code from its Boite app, or types the code there
-  ([phone](phone.md#adding-a-phone));
+- a phone scans the QR code from its Boite app, or pastes the link there when
+  its camera cannot ([phone](phone.md#adding-a-phone));
 - a computer pastes the copied link under **Join** in its own Settings,
   Machines: its core joins the group. A computer alone in a group of its own,
   the one its phone brought, joins all the same and brings that phone along.
 
-The QR code and the code work once, for ten and five minutes. Whoever holds
-them gets in: treat them as credentials. The QR code carries the phone's part
+The QR code and the link work once, for ten minutes. Whoever holds them gets
+in: treat them as credentials. The QR code carries the phone's part
 alone, so it stays sparse enough for a camera across a room; the copied link
 carries the machine invitation after `#join=` as well.
 
@@ -170,19 +170,17 @@ kept in its storage (`lib/device-key.ts`, `@noble/ed25519`, since a page served
 over plain HTTP has no WebCrypto). Its id is the SHA-256 of the public key. The
 desktop app is no device: it is its machine's own.
 
-**Admission.** "Add a device" mints a one-time grant, drawn as a QR code and as a
-code `XXXX-XXXX` ([phone](phone.md#adding-a-phone)). The device says `hello`
-with that grant and `device: { publicKey, name, sig }`, where `sig` signs the
+**Admission.** "Add a device" mints a one-time grant, drawn as a QR code and
+carried by the copied link ([phone](phone.md#adding-a-phone)). The device says
+`hello` with that grant and `device: { publicKey, name, sig }`, where `sig` signs the
 grant itself with the key, so whoever reads the grant on the way cannot have
 another key admitted with it. The member spends the grant, writes the device in
 the roster under its own signature over the group, the device id and its role,
 and the socket is the device's from then on. The same key asking again with the
 same grant, after an answer lost on a weak link, gets the same answer; any other
-is refused as for a used link. A well-formed code typed on the page of a member
-that did not draw it is sent, sealed, to the other members (`group.redeem`),
-twenty a minute at most; the one that drew it admits the device and answers with
-the roster. A wrong code counts toward dropping the live codes only on the
-member it was typed at, so guesses typed there drop no other member's codes.
+is refused as for a used link. The link names the machine that drew it, so a
+device always says `hello` with the grant to that machine, whichever page it
+was opened from.
 
 **Hello.** From then on the device says `hello` with `device: { id, at, nonce,
 sig }` on any member, `sig` signing `boite-device-hello`, the id of that member,
@@ -557,10 +555,9 @@ address, where it is worth nothing once the member has given that address up.
 - A page served by a machine outside the device's group reaches nothing of that
   group: its origin is none of theirs. The Android app that opened one fixed
   machine's page was this case for anybody else's phone.
-- A typed code reaches the machine that drew it through the machine serving the
-  page, or, on the app's own address, through the machine whose address is
-  typed beside it. A page served by a machine outside the group reaches neither
-  way in, its origin being none of theirs: open the app's own address, or the
+- A scanned or pasted link reaches the machine that drew it, which it names.
+  A page served by a machine outside the group still holds none of the group's
+  keys, its origin being none of theirs: open the app's own address, or the
   drawing machine's, and scan there.
 - A machine that runs a version from before device keys drops them from the
   roster it keeps and lets no device key in. Update every member.
@@ -619,12 +616,12 @@ there, named in Settings, and again after a reload with the key it kept.
 `packages/core/test/group-devices.test.ts` runs real cores for device keys: a
 phone added on one member says hello on another with its signature and none
 made for a third machine, twice, or two minutes off; one revocation shuts it out
-of both; a code drawn on one member typed on another; a phone paired the older
+of both; a phone retrying its grant after a lost answer; a phone paired the older
 way handing over its key, kept when the machine that admitted it is removed; a
 machine alone with its phone joining a group and bringing it; a member learning
 where another is served from the first page socket, before any hello.
 `tests/e2e/group-devices.test.ts` puts two real cores behind two HTTPS reverse
 proxies, installs the phone app from the first one's address at phone width,
-scans the code the second one drew through Chromium's fake camera, lists and
+scans the QR code the second one drew through Chromium's fake camera, lists and
 answers conversations on both with no origin set by hand, then removes the phone
 on one machine and shows every machine refusing it.

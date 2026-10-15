@@ -45,6 +45,8 @@
   import { startViewport } from './lib/viewport';
   import { WsClient } from './lib/client';
   import { listenForInstall } from './lib/pwa';
+  import { appPage } from './lib/app-origin';
+  import { localNetwork } from './lib/local-network.svelte';
   import { mobileOverlay } from './lib/mobile-history';
   import { startViewHistory } from './lib/view-history.svelte';
   import { agentAutoLink } from './lib/agent-links.svelte';
@@ -210,6 +212,8 @@
     };
     const pageshow = (event: PageTransitionEvent) => { if (event.persisted) resume(); };
     const offline = () => { for (const machine of workspace.machines) if (machine.store.client instanceof WsClient) machine.store.client.offline(); };
+    // The app's page is public and every machine is on a private address: Chrome lets its sockets through once "Local network" is allowed.
+    const stopLocalNetwork = appPage() ? localNetwork.start(resume) : () => undefined;
     document.addEventListener('visibilitychange', visibility);
     window.addEventListener('online', resume);
     window.addEventListener('offline', offline);
@@ -228,6 +232,7 @@
       if (updateFrame !== undefined) cancelAnimationFrame(updateFrame);
       if (updateDelay !== undefined) clearTimeout(updateDelay);
       stopAppUpdater();
+      stopLocalNetwork();
       document.removeEventListener('visibilitychange', visibility);
       window.removeEventListener('online', resume);
       window.removeEventListener('offline', offline);
@@ -287,7 +292,9 @@
       && (error === strings.errors.unpaired || error === strings.errors.revoked);
     // A machine that may still give way to one that answers has nothing to report yet.
     const held = workspace.waiting && owner === workspace.primary;
-    if (!error || pairingNotice || held) {
+    // Chrome refuses every socket until "Local network" is allowed: the recovery screen says so, and "socket error" says nothing more.
+    const blocked = mobileRecovery && localNetwork.state === 'denied';
+    if (!error || pairingNotice || held || blocked) {
       toast.hide();
       return;
     }

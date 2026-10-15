@@ -11,8 +11,18 @@
   import { glides } from '../lib/motion';
   import TypingIndicator from './TypingIndicator.svelte';
   import { selectionClicks } from '../lib/selection-clicks';
+  import type { Message } from '@boite/contracts';
+  import { answerPieces, viewAt, viewPart, type AnswerPiece } from '../lib/inline-view';
+  import InlineView from './InlineView.svelte';
 
-  let { text, live = false, typing = false, bubble = false, store, threadId }: { text: string; live?: boolean; typing?: boolean; bubble?: boolean; store?: Store; threadId?: string } = $props();
+  /**
+   * `views` are the pages the answer's turn published (`turnViews`): a line
+   * of the answer that names one (`answerPieces`) draws it there, and the
+   * text around it becomes a bubble above it and another under it.
+   */
+  let { text, live = false, typing = false, bubble = false, store, threadId, views }: {
+    text: string; live?: boolean; typing?: boolean; bubble?: boolean; store?: Store; threadId?: string; views?: readonly Message[];
+  } = $props();
   let selected = $state<{ path: string; line?: number } | null>(null);
   const directLinks = $derived(experimentOn('open-chat-links'));
   const rich = $derived(featureOn('chat-artifacts') || directLinks);
@@ -48,6 +58,31 @@
   // Completed blocks keep their DOM; only the unfinished paragraph changes on a delta.
   // It stays plain text until complete, so partial Markdown cannot rebuild earlier blocks.
   let pending = $derived.by(() => { void blocks; return live ? scan.pending(answerText(text, live)) : ''; });
+
+  type Group = { kind: 'text'; key: string; blocks: Array<{ key: string; block: string }> } | { kind: 'view'; key: string; message: Message };
+  /**
+   * The answer cut at the pages it places: runs of text, each its own bubble,
+   * and the views between them. A line naming no view of the turn stays text.
+   * Null when the turn published no page. Otherwise the answer is drawn this
+   * way from its first word, so the line that places a page, once written,
+   * adds the page and a bubble under it without drawing again what is above.
+   */
+  const groups = $derived.by((): Group[] | null => {
+    if (!views?.length || !store || !threadId) return null;
+    const pieces = answerPieces(blocks) ?? blocks.map((block, index): AnswerPiece => ({ kind: 'text', key: String(index), block }));
+    const out: Group[] = [];
+    for (const piece of pieces) {
+      const message = piece.kind === 'view' ? viewAt(views, piece.path) : null;
+      if (message) { out.push({ kind: 'view', key: `${piece.key}:${message.id}`, message }); continue; }
+      const block = piece.kind === 'text' ? piece.block : piece.line;
+      const last = out.at(-1);
+      if (last?.kind === 'text') last.blocks.push({ key: piece.key, block });
+      else out.push({ kind: 'text', key: piece.key, blocks: [{ key: piece.key, block }] });
+    }
+    return out;
+  });
+  /** A line being written that may yet place a page is not shown as its raw link: the page or the paragraph replaces it once complete. */
+  const tail = $derived(views?.length && /^ {0,3}!\[[^\n]*$/.test(pending) ? '' : pending);
 
   let host = $state<HTMLDivElement>();
 
@@ -100,13 +135,36 @@
   }
 </script>
 
-<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-<div class="prose" class:live class:answer-bubble={bubble && (blocks.length > 0 || pending.length > 0)} data-testid="text-part" bind:this={host} use:selectionClicks onclick={follow}>
-  {#each blocks as block, index (index)}
-    <!-- Completed Markdown blocks stay mounted while the pending paragraph changes. -->
-    <div class="paragraph" data-testid="paragraph">{@html renderBlock(block, rich)}</div>
-  {/each}{#if pending}<p class="pending" data-testid="paragraph-pending">{pending}</p>{/if}{#if typing && text.trim().length > 0}<TypingIndicator />{/if}
-</div>
+{#snippet writing()}{#if tail}<p class="pending" data-testid="paragraph-pending">{tail}</p>{/if}{#if typing && text.trim().length > 0}<TypingIndicator />{/if}{/snippet}
+
+{#if groups && store && threadId}
+  {@const end = groups.at(-1)}
+  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+  <div class="flow" data-testid="text-part" bind:this={host} use:selectionClicks onclick={follow}>
+    {#each groups as group (group.key)}
+      {#if group.kind === 'view'}
+        <InlineView part={viewPart(group.message)!} {store} {threadId} messageId={group.message.id} partIndex={0} />
+      {:else}
+        <div class="prose" class:live class:answer-bubble={bubble} data-testid="text-run">
+          {#each group.blocks as piece (piece.key)}
+            <div class="paragraph" data-testid="paragraph">{@html renderBlock(piece.block, rich)}</div>
+          {/each}{#if group === end}{@render writing()}{/if}
+        </div>
+      {/if}
+    {/each}
+    {#if end?.kind !== 'text' && (tail || (typing && text.trim().length > 0))}
+      <div class="prose" class:live class:answer-bubble={bubble && tail.length > 0} data-testid="text-run">{@render writing()}</div>
+    {/if}
+  </div>
+{:else}
+  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+  <div class="prose" class:live class:answer-bubble={bubble && (blocks.length > 0 || tail.length > 0)} data-testid="text-part" bind:this={host} use:selectionClicks onclick={follow}>
+    {#each blocks as block, index (index)}
+      <!-- Completed Markdown blocks stay mounted while the pending paragraph changes. -->
+      <div class="paragraph" data-testid="paragraph">{@html renderBlock(block, rich)}</div>
+    {/each}{@render writing()}
+  </div>
+{/if}
 {#if selected && rich}
   {#key `${threadId}:${selected.path}:${selected.line}`}
     <ChatFile {store} {threadId} path={selected.path} line={selected.line} onclose={() => selected = null} />
@@ -119,6 +177,17 @@
     font-size: var(--text-reading);
     line-height: var(--leading-reading);
   }
+
+  /* An answer cut by the pages it places: its text keeps the reading measure,
+     each page takes the whole column, as far from the text as two messages are. */
+  .flow {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--chat-message-gap);
+  }
+
+  .flow > .prose { max-width: min(100%, var(--prose)); }
 
   /* `pretty` keeps a paragraph from ending on one stranded word. */
   .prose :global(p) {

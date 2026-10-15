@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { GRANT_QUERY_PARAM, PAIR_QUERY_PARAM } from '../../../packages/contracts/src/index.ts';
 import { connect } from '../../../packages/core/src/client.ts';
-import { E2E_DIR_PREFIX, killProcessTree, removeDirectory } from './cleanup.ts';
+import { E2E_DIR_PREFIX, killProcessTreeAsync, removeDirectory } from './cleanup.ts';
 
 export { E2E_DIR_PREFIX, killProcessTree, killProcessTreeAsync, removeDirectory, sweepStaleDirectories } from './cleanup.ts';
 
@@ -76,7 +76,7 @@ export async function startCore(options: StartCoreOptions = {}): Promise<Running
   let timedOut = false;
   const guard = setTimeout(() => {
     timedOut = true;
-    killProcessTree(proc.pid);
+    void killProcessTreeAsync(proc.pid);
   }, READY_TIMEOUT_MS);
 
   let match: RegExpMatchArray | null = null;
@@ -84,7 +84,7 @@ export async function startCore(options: StartCoreOptions = {}): Promise<Running
     const chunk = await reader.read();
     if (chunk.done) {
       clearTimeout(guard);
-      killProcessTree(proc.pid);
+      await killProcessTreeAsync(proc.pid);
       await removeDirectory(dataDir);
       const why = timedOut ? 'never printed its ready line' : 'exited before it was ready';
       throw new Error(`the core ${why}. Output:\n${text}`);
@@ -116,7 +116,8 @@ export async function startCore(options: StartCoreOptions = {}): Promise<Running
     exited: proc.exited,
     output: () => text,
     async stop(stopOptions: { keepDataDir?: boolean } = {}): Promise<void> {
-      killProcessTree(proc.pid);
+      // Asynchronous: a synchronous taskkill held every server of the test process.
+      await killProcessTreeAsync(proc.pid);
       await proc.exited;
       if (stopOptions.keepDataDir !== true) await removeDirectory(dataDir);
     },

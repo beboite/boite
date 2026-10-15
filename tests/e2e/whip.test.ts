@@ -157,7 +157,7 @@ beforeEach(async () => {
 }, 60_000);
 
 afterEach(async () => { await page?.close(); }, 15_000);
-afterAll(async () => { await server?.close(); }, 15_000);
+afterAll(async () => { await server?.close(); }, 30_000);
 
 async function enableWhip() {
   expect(await page.evaluate(`document.querySelector('${button}') === null`)).toBe(true);

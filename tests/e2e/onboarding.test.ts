@@ -30,7 +30,7 @@ beforeAll(async () => {
   // The one profile in the suite that has never seen the tour.
   page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1`, showTour: true });
 }, 60_000);
-afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
+afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 test('a new device gets the tour on its own, holds the app keys under it, and never again once closed', async () => {
   // The app loads the tour on demand: this proves the loader, not the component.
   await page.waitFor(`document.querySelector('[data-testid=onboarding-step]')?.dataset.step === 'welcome'`);
