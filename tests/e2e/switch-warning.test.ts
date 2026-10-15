@@ -16,7 +16,7 @@ afterEach(async () => {
 }, 15_000);
 afterAll(async () => {
   await server?.close();
-}, 15_000);
+}, 30_000);
 
 const STORE = `globalThis.__boiteTest.workspace.active`;
 

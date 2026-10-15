@@ -180,7 +180,7 @@ describe('claude driver', () => {
     expect(queries).toHaveLength(1);
     expect(queries[0]!.setters).toContain('effortLevel high');
     expect(queries[0]!.setters).toContain('fastMode true');
-    expect(calls[0]!.options.settings).toEqual({ fastMode: false });
+    expect(calls[0]!.options.settings).toEqual({ fastMode: false, autoMemoryEnabled: false });
     expect(calls[0]!.prompts).toHaveLength(1);
   });
 
@@ -378,7 +378,7 @@ describe('claude driver', () => {
     expect(queries).toHaveLength(1);
     expect(calls[0]!.options.allowDangerouslySkipPermissions).toBe(true);
     expect(calls[0]!.options.permissionMode).toBe('default');
-    expect(calls[0]!.options.settings).toEqual({ fastMode: false });
+    expect(calls[0]!.options.settings).toEqual({ fastMode: false, autoMemoryEnabled: false });
     expect(queries[0]!.setters).toEqual([
       'setPermissionMode bypassPermissions', 'disableAllHooks true',
       'disableAllHooks the default', 'setPermissionMode default',
@@ -442,7 +442,7 @@ describe('claude driver', () => {
     expect(queries).toHaveLength(2);
     expect(calls[0]?.options.model).toBe('claude-sonnet-5');
     expect(calls[1]?.options.model).toBe('claude-opus-5');
-    expect(calls[1]?.options.settings).toEqual({ fastMode: setter === 'fastMode' });
+    expect(calls[1]?.options.settings).toEqual({ fastMode: setter === 'fastMode', autoMemoryEnabled: false });
     expect(calls[1]?.options.resume).toBe('sess-refused');
     expect(calls[0]?.prompts).toEqual(['first']);
     expect(calls[1]?.prompts).toEqual(['second']);
@@ -545,7 +545,7 @@ test('Claude discovery reports only its model capabilities, caches and refreshes
   } finally { phone.close(); }
   await client.call('threads.update', { threadId: id, model: 'claude-opus-5', speed: 'fast' });
   expect(await runTurn(client, id, 'fast turn')).toBe('done');
-  expect(calls.at(-1)?.options.settings).toEqual({ fastMode: true });
+  expect(calls.at(-1)?.options.settings).toEqual({ fastMode: true, autoMemoryEnabled: false });
   const native = queries.at(-1)!;
   const queryCount = queries.length;
   await client.call('threads.update', { threadId: id, speed: null });
@@ -580,7 +580,7 @@ test('a new Claude session learns `boite ask` once, and the setting turns it off
   expect(calls.at(-1)!.prompts[0]).toBe('third');
 });
 
-test('with a brain, a new Claude session reads the Boite guide once and learns `boite ask` from it alone', async () => {
+test('with a brain, a new Claude session reads the Boite guide in its system prompt and learns `boite ask` from it alone', async () => {
   harness.core.settings.set({ asyncQuestions: true, warmProcessMinutes: 5 });
   const brain = join(harness.dataDir, 'brain');
   mkdirSync(brain);
@@ -592,16 +592,26 @@ test('with a brain, a new Claude session reads the Boite guide once and learns `
   expect(await runTurn(client, threadId, 'first')).toBe('done');
   expect(await runTurn(client, threadId, 'second')).toBe('done');
   const [first, second] = calls[0]!.prompts;
-  expect(first).toContain('boite where');
-  expect(first!.split('boite ask').length).toBe(2);
-  expect(second).toContain('Shared convention');
-  expect(second).not.toContain('boite where');
+  const guide = appendedPrompt(calls[0]!.options);
+  expect(guide).toContain('boite where');
+  expect(guide.split('boite ask').length).toBe(2);
+  // The messages carry the brain, and no second `boite ask` note.
+  for (const prompt of [first, second]) {
+    expect(prompt).toContain('Shared convention');
+    expect(prompt).not.toContain('boite where');
+    expect(prompt).not.toContain('boite ask');
+  }
   harness.core.settings.set({ asyncQuestions: false });
   const other = await claudeThread(client);
   expect(await runTurn(client, other, 'third')).toBe('done');
-  expect(calls.at(-1)!.prompts[0]).toContain('boite where');
-  expect(calls.at(-1)!.prompts[0]).not.toContain('boite ask');
+  expect(appendedPrompt(calls.at(-1)!.options)).toContain('boite where');
+  expect(appendedPrompt(calls.at(-1)!.options)).not.toContain('boite ask');
 });
+
+function appendedPrompt(options: Options): string {
+  const prompt = options.systemPrompt;
+  return typeof prompt === 'object' && prompt !== null && !Array.isArray(prompt) && 'append' in prompt ? prompt.append ?? '' : '';
+}
 
 
 test('user follow-ups enter the running Claude prompt stream without a second turn or interrupt', async () => {

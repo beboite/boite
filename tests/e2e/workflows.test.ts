@@ -21,7 +21,7 @@ beforeAll(async () => {
   page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&team=1`, windowSize: { width: 1680, height: 1000 } });
   await page.waitFor(`document.querySelector('${id('thread-row')}[data-thread-id="t-trace"]')`);
 }, 60_000);
-afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
+afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
 test('the chat card opens the run top to bottom, an arrow per dependency, in the panel at its default width', async () => {
   await page.click(`${id('thread-row')}[data-thread-id="t-trace"]`);

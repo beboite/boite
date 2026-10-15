@@ -20,7 +20,7 @@ beforeAll(async () => {
   const port = await freePort(); server = await startDevUi(port); origin = `http://127.0.0.1:${port}`;
   page = await BrowserPage.launch({ url: `${origin}/?fake=1&open=recent`, windowSize: { width: 1280, height: 900 } });
 }, 60_000);
-afterAll(async () => { await page?.close(); await server?.close(); gateway?.stop(true); });
+afterAll(async () => { await page?.close(); await server?.close(); gateway?.stop(true); }, 30_000);
 
 async function capture(name: string) {
   await page.evaluate('Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])');

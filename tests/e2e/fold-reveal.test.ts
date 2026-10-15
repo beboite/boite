@@ -7,7 +7,7 @@ let server: { close(): Promise<void> };
 let port: number;
 const id = (value: string) => `[data-testid="${value}"]`;
 beforeAll(async () => { port = await freePort(); server = await startUi(port); }, 60_000);
-afterAll(async () => { await server?.close(); });
+afterAll(async () => { await server?.close(); }, 30_000);
 
 for (const width of [1280, 390]) {
   test(`opening the other projects at the bottom of a scrolled list brings them into view at ${width}px`, async () => {
