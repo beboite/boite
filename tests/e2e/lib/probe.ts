@@ -7,6 +7,9 @@ import { cpus, freemem, totalmem } from 'node:os';
  */
 export const probing = process.env.BOITE_E2E_PROBE === '1';
 
+interface Tracked { url: string; at: number; }
+const servers = new Map<number, { inFlight: Set<Tracked>; sockets: number; received: number; reported: Set<Tracked> }>();
+
 const started = Date.now();
 const stamp = () => `${((Date.now() - started) / 1000).toFixed(1)}s`;
 
@@ -57,7 +60,8 @@ async function snapshot(previous: { idle: number; total: number }): Promise<{ id
     procs = [...images].map(([name, count]) => `${name}=${count}`).join(' ');
   }
   const rss = Math.round(process.memoryUsage().rss / 1e6);
-  probeLog(`cpu=${busy.toFixed(0)}% free=${Math.round(freemem() / 1e6)}/${Math.round(totalmem() / 1e6)}MB rss=${rss}MB ${tcp} ${procs}`);
+  const dev = [...servers].map(([port, state]) => ` dev${port}=${state.sockets}sock/${state.received}req/${state.inFlight.size}open`).join('');
+  probeLog(`${dev} cpu=${busy.toFixed(0)}% free=${Math.round(freemem() / 1e6)}/${Math.round(totalmem() / 1e6)}MB rss=${rss}MB ${tcp} ${procs}`);
   return now;
 }
 
@@ -81,8 +85,6 @@ export function startProbe(): void {
   machine.unref();
 }
 
-interface Tracked { url: string; at: number; }
-const servers = new Map<number, { inFlight: Set<Tracked>; sockets: number; received: number; reported: Set<Tracked> }>();
 
 /** A Vite plugin that records what the dev server on `port` received and has not answered. */
 export function probeServer(port: number): { name: string; configureServer(server: { middlewares: { use(fn: (req: { url?: string }, res: { once(event: string, fn: () => void): void }, next: () => void) => void): void }; httpServer: { on(event: string, fn: (socket: { once(event: string, fn: () => void): void }) => void): void } | null }): void } {
@@ -129,3 +131,18 @@ function checkServers(): void {
 }
 
 if (probing) setInterval(checkServers, 1_000).unref();
+
+/** Called when a page has waited on `url` too long: is the server answering a fresh connection? */
+export function probeStall(url: string | undefined): void {
+  if (!probing || url === undefined) return;
+  const port = Number(new URL(url).port);
+  const state = servers.get(port);
+  probeLog(`stall on ${url}: server ${state ? `${state.sockets} sockets, ${state.received} received, ${state.inFlight.size} in flight` : 'not a probed dev server'}`);
+  const curl = process.platform === 'win32' ? 'curl.exe' : 'curl';
+  const curlAt = Date.now();
+  void run([curl, '-s', '-o', process.platform === 'win32' ? 'NUL' : '/dev/null', '-w', '%{http_code}', '--max-time', '8', url])
+    .then((answer) => probeLog(`stall on ${url}: curl from another process answered ${answer || 'nothing'} in ${Date.now() - curlAt} ms`));
+  const fetchAt = Date.now();
+  void fetch(url, { signal: AbortSignal.timeout(8_000) }).then(async (response) => { await response.arrayBuffer(); return String(response.status); }, (error) => String(error))
+    .then((answer) => probeLog(`stall on ${url}: in-process fetch answered ${answer} in ${Date.now() - fetchAt} ms`));
+}

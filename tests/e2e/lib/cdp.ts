@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { ONBOARDING_STORAGE_KEY, ONBOARDING_VERSION } from '../../../packages/ui/src/lib/onboarding.ts';
 import type { Subprocess } from 'bun';
 import { E2E_DIR_PREFIX, killProcessTreeAsync, removeDirectory, watchParentDeath, type ParentDeathWatch } from './cleanup.ts';
-import { probeLog, probePhase } from './probe.ts';
+import { probeLog, probePhase, probeStall } from './probe.ts';
 
 /**
  * Marks the tour seen before any script of the page runs, and only where no
@@ -391,6 +391,7 @@ export class BrowserPage {
       await Bun.sleep(Math.min(POLL_MS, Math.max(0, deadline - Date.now())));
     }
     if (this.#closed || this.#socket.readyState !== WebSocket.OPEN) throw new Error('the browser is closed');
+    if (this.#inFlight().length > 0) probeStall(this.#stalledUrl());
     // A separate, bounded grace preserves useful diagnostics after the condition consumes its budget.
     const state = await this.evaluate(`({ location: location.origin + location.pathname, ready: document.readyState, title: document.title, text: document.body?.innerText.slice(0, 500) })`, WAIT_DIAGNOSTIC_TIMEOUT_MS).catch(() => 'page diagnostic timed out');
     throw new Error(`waitFor timed out on ${expression}: ${last}\nPage: ${JSON.stringify(state)}\nErrors: ${JSON.stringify(this.#pageErrors)}\nIn flight: ${JSON.stringify(this.#inFlight())}\nFailed requests: ${JSON.stringify(this.#networkFailures)}`);
@@ -412,7 +413,10 @@ export class BrowserPage {
       }
     }
     // A cold Vite dependency build on the Windows runner can outlast the normal DOM wait.
-    const slow = setTimeout(() => probeLog(`page ${this.#proc?.pid} still loading ${url.split('?')[0]} after 15 s; in flight: ${JSON.stringify(this.#inFlight())}`), 15_000);
+    const slow = setTimeout(() => {
+      probeLog(`page ${this.#proc?.pid} still loading ${url.split('?')[0]} after 15 s; in flight: ${JSON.stringify(this.#inFlight())}`);
+      probeStall(this.#stalledUrl());
+    }, 15_000);
     try {
       await this.waitFor("document.readyState === 'complete'", 60_000);
     } finally {
@@ -526,6 +530,11 @@ export class BrowserPage {
     if (this.#proc !== null) await stopBrowser(this.#proc, this.#userDataDir, this.#watch);
     else if (this.#userDataDir !== null) await removeDirectory(this.#userDataDir);
     probePhase(`browser ${this.#proc?.pid} close`, closeAt, 2_000);
+  }
+
+  /** The oldest request still without a response, for the stall probe. */
+  #stalledUrl(): string | undefined {
+    return [...this.#requests.values()].filter((request) => !request.answered).sort((a, b) => a.at - b.at)[0]?.url;
   }
 
   /** What a stalled page is still waiting on: whether the server never answered or the body never arrived. */
