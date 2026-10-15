@@ -3531,12 +3531,6 @@ export interface ServerUpdateStatus {
   received: number;
   total: number | null;
   error: string | null;
-  /**
-   * While `waiting`: when the install stops waiting for idle and hands the
-   * running turns to the next core, which resumes them. Absent from cores
-   * that wait for idle without a limit.
-   */
-  handoffAt?: Timestamp | null;
 }
 
 /** What `core.updateEverything` started on its machine. */

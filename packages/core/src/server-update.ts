@@ -13,17 +13,7 @@ export interface ServerUpdateOptions {
   findOffer?: (current: string, arch: string, signal: AbortSignal) => Promise<ServerOffer | null>;
   prepare?: (offer: ServerOffer, directory: string, signal: AbortSignal, progress: (received: number, total: number | null) => void) => Promise<string>;
   pollMs?: number;
-  /** How long an install waits for the machine to go idle before it hands running turns to the next core. */
-  idleWaitMs?: number;
 }
-
-/**
- * A server that is never idle (an agent working for hours, a resident agent)
- * held its update on "Waiting for work to finish" for good. Two minutes lets a
- * turn about to end finish cleanly; past them the running turns end their tool
- * call and resume after the restart, as a desktop update does.
- */
-export const SERVER_UPDATE_IDLE_WAIT_MS = 120_000;
 
 /** One updater per core, shared by all its owner clients; a desktop update remains the shell's. */
 export class ServerUpdates {
@@ -44,7 +34,7 @@ export class ServerUpdates {
   constructor(private readonly core: Core, private readonly options: ServerUpdateOptions = {}) {
     this.state = { mode: existsSync('/.dockerenv') ? 'docker' : 'manual', phase: 'idle', currentVersion: core.version,
       version: null, channel: core.version.includes('-nightly.') ? 'nightly' : 'stable', publishedAt: null,
-      checkedAt: null, received: 0, total: null, error: null, handoffAt: null };
+      checkedAt: null, received: 0, total: null, error: null };
     try {
       const result = JSON.parse(readFileSync(join(core.dataDir, 'server-update-result.json'), 'utf8')) as { error?: string };
       if (typeof result.error === 'string') this.state = { ...this.state, phase: 'error', error: result.error };
@@ -121,7 +111,7 @@ export class ServerUpdates {
       if (this.abort !== abort || this.closed) return;
       this.cancelFiles();
       this.abort = null;
-      this.move({ phase: 'error', error: messageOf(error), handoffAt: null });
+      this.move({ phase: 'error', error: messageOf(error) });
     });
     return this.snapshot();
   }
@@ -153,35 +143,37 @@ export class ServerUpdates {
     try { await this.platform!.launch((cmd, args) => this.run(cmd, args), installation.executable, file); }
     catch (error) { if (this.abort === abort) this.workerLaunched = false; throw error; }
     if (abort.signal.aborted || this.closed) return;
-    const handoffAt = Date.now() + (this.options.idleWaitMs ?? SERVER_UPDATE_IDLE_WAIT_MS);
-    this.move({ phase: 'waiting', handoffAt });
+    this.move({ phase: 'waiting' });
     const readyDeadline = Date.now() + 15_000;
     const poll = () => {
       if (this.closed || abort.signal.aborted) return;
       if (!existsSync(join(directory, 'ready'))) {
         if (Date.now() > readyDeadline) {
           this.cancelFiles(); this.abort = null;
-          this.move({ phase: 'error', error: 'The update worker did not start; the server was left running', handoffAt: null });
+          this.move({ phase: 'error', error: 'The update worker did not start; the server was left running' });
           return;
         }
       } else {
         let admission: 'accepted' | 'busy' | 'unsupported';
         const admit = () => writeFileSync(join(directory, 'admitted'), id, { mode: 0o600 });
         try {
+          // Idle installs at once; busy work ends its tool call, 30 s at most, and resumes
+          // after the restart, as a desktop update does. Waiting for idle held a server
+          // with an agent working for hours on "Waiting for work to finish" for good.
           admission = this.core.requestIdleShutdown(admit);
-          if (admission === 'busy' && Date.now() >= handoffAt) admission = this.core.requestUpdateHandoff(admit);
+          if (admission === 'busy') admission = this.core.requestUpdateHandoff(admit);
         } catch (error) {
           this.cancelFiles(); this.abort = null; this.poll = null;
-          this.move({ phase: 'error', error: messageOf(error), handoffAt: null });
+          this.move({ phase: 'error', error: messageOf(error) });
           return;
         }
         if (admission === 'unsupported') {
           this.cancelFiles(); this.abort = null;
-          this.move({ phase: 'error', error: 'This core does not support an idle restart', handoffAt: null });
+          this.move({ phase: 'error', error: 'This core does not support an idle restart' });
           return;
         }
         if (admission === 'accepted') {
-          this.move({ phase: 'installing', handoffAt: null });
+          this.move({ phase: 'installing' });
           this.poll = null;
           return;
         }
@@ -200,7 +192,7 @@ export class ServerUpdates {
     if (this.poll) clearTimeout(this.poll);
     this.poll = null;
     this.cancelFiles();
-    return this.move({ phase: 'available', received: 0, total: null, error: null, handoffAt: null });
+    return this.move({ phase: 'available', received: 0, total: null, error: null });
   }
   private cancelFiles(): void {
     if (!this.directory) return;

@@ -44,75 +44,70 @@ test('signed server archives cannot escape staging or disagree with their offere
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('server updates wait for running and queued work, cancel without stopping it, and reject stale versions', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'boite-server-controller-'));
-  let stops = 0;
+/** A test core whose updater stages instantly; `agentUpdating` stands in for an agent install under way. */
+async function updatingCore(prefix: string) {
+  const root = mkdtempSync(join(tmpdir(), prefix));
+  const state = { stops: 0, planFile: '', agentUpdating: false };
   const platform: ServerUpdatePlatform = {
     inspect: async () => ({ directory: join(root, 'install'), executable: join(root, 'install', 'boite-core'), service: 'test.service' }),
-    launch: async (_run, _executable, plan) => { writeFileSync(join(dirname(plan), 'ready'), ''); },
+    launch: async (_run, _executable, plan) => { state.planFile = plan; writeFileSync(join(dirname(plan), 'ready'), ''); },
     control: async () => undefined,
     mainPid: async () => process.pid,
   };
-  const h = await startTestCore({ onShutdown: () => { stops++; }, serverUpdates: { platform, pollMs: 5,
+  const h = await startTestCore({ onShutdown: () => { state.stops++; }, serverUpdates: { platform, pollMs: 5,
     findOffer: async () => ({ version: '2.0.0-beta.2', publishedAt: '2026-10-01T00:00:00Z', url: 'https://example.test/signed.zip', signature: 'signed' }),
     prepare: async () => 'a'.repeat(64) } });
+  Object.defineProperty(h.core.updates, 'busy', { get: () => state.agentUpdating, configurable: true });
+  const admitted = () => { try { return readFileSync(join(dirname(state.planFile), 'admitted'), 'utf8'); } catch { return null; } };
+  return { root, state, h, admitted, stop: async () => { await h.stop(); rmSync(root, { recursive: true, force: true }); } };
+}
+
+test('a busy server hands running and queued turns to the next core at once; only an agent install holds it, and cancel stops nothing', async () => {
+  const { state, h, admitted, stop } = await updatingCore('boite-server-controller-');
   let release: (() => void) | undefined;
   try {
     const client = await h.connect();
     expect((await client.call('core.updateStatus', { refresh: true })).phase).toBe('available');
     await expect(client.call('core.updateInstall', { version: '2.0.0-beta.3' })).rejects.toThrow('version');
-    const first = await echoThread(h, client, 'running');
+    const first = await echoThread(h, client, 'first');
     const second = await echoThread(h, client, 'queued');
     release = holdAccountTurns(h, second.accountId);
-    await client.call('turns.start', { threadId: first.threadId, prompt: '[sleep:300] finish my work' });
+    await client.call('turns.start', { threadId: first.threadId, prompt: '[sleep:60000] work for hours' });
     expect((await client.call('turns.start', { threadId: second.threadId, prompt: 'queued work' })).status).toBe('queued');
+    // A half-written agent install holds the restart, and the wait can be cancelled.
+    state.agentUpdating = true;
     await client.call('core.updateInstall', { version: '2.0.0-beta.2' });
     await waitFor(() => h.core.serverUpdates.snapshot().phase === 'waiting');
-    expect(stops).toBe(0);
+    await Bun.sleep(50);
+    expect(h.core.serverUpdates.snapshot().phase).toBe('waiting');
+    expect(state.stops).toBe(0);
     expect(h.core.stopping).toBe(false);
     expect((await client.call('core.updateCancel', {})).phase).toBe('available');
     expect(h.core.stopping).toBe(false);
     await client.call('core.updateInstall', { version: '2.0.0-beta.2' });
     await waitFor(() => h.core.serverUpdates.snapshot().phase === 'waiting');
-    release(); release = undefined;
+    // The install done, a busy server no longer waits for its work to end.
+    state.agentUpdating = false;
     await waitFor(() => h.core.serverUpdates.snapshot().phase === 'installing');
-    await waitFor(() => stops === 1);
-    expect(h.core.journal.listTurns(first.threadId)[0]?.status).toBe('done');
-    expect(h.core.journal.listTurns(second.threadId)[0]?.status).toBe('done');
-  } finally { release?.(); await h.stop(); rmSync(root, { recursive: true, force: true }); }
+    expect(admitted()).toBe(JSON.parse(readFileSync(state.planFile, 'utf8')).id);
+    const record = h.core.journal.getSetting('restart-handoff') as { turns: { threadId: string; was: string }[] };
+    // Both turns wait on the held account; the next core puts them back in line.
+    expect(record.turns.map(turn => turn.threadId).sort()).toEqual([first.threadId, second.threadId].sort());
+    await waitFor(() => state.stops === 1, 15_000);
+  } finally { release?.(); await stop(); }
 });
 
-test('a server that stays busy past the idle wait hands its running turn to the next core and installs', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'boite-server-handoff-'));
-  let stops = 0;
-  let planFile = '';
-  const platform: ServerUpdatePlatform = {
-    inspect: async () => ({ directory: join(root, 'install'), executable: join(root, 'install', 'boite-core'), service: 'test.service' }),
-    launch: async (_run, _executable, plan) => { planFile = plan; writeFileSync(join(dirname(plan), 'ready'), ''); },
-    control: async () => undefined,
-    mainPid: async () => process.pid,
-  };
-  const h = await startTestCore({ onShutdown: () => { stops++; }, serverUpdates: { platform, pollMs: 5, idleWaitMs: 150,
-    findOffer: async () => ({ version: '2.0.0-beta.2', publishedAt: '2026-10-01T00:00:00Z', url: 'https://example.test/signed.zip', signature: 'signed' }),
-    prepare: async () => 'a'.repeat(64) } });
+test('an idle server installs through the idle gate and hands nothing over', async () => {
+  const { state, h, admitted, stop } = await updatingCore('boite-server-idle-');
   try {
     const client = await h.connect();
     await client.call('core.updateStatus', { refresh: true });
-    const busy = await echoThread(h, client, 'hours of work');
-    await client.call('turns.start', { threadId: busy.threadId, prompt: '[sleep:60000] work for hours' });
     await client.call('core.updateInstall', { version: '2.0.0-beta.2' });
-    await waitFor(() => h.core.serverUpdates.snapshot().phase === 'waiting');
-    const waiting = h.core.serverUpdates.snapshot();
-    expect(typeof waiting.handoffAt).toBe('number');
-    expect(h.core.stopping).toBe(false);
     await waitFor(() => h.core.serverUpdates.snapshot().phase === 'installing');
-    expect(h.core.serverUpdates.snapshot().handoffAt).toBeNull();
-    expect(readFileSync(join(dirname(planFile), 'admitted'), 'utf8')).toBe(JSON.parse(readFileSync(planFile, 'utf8')).id);
-    // The record the next core resumes from names the cut turn.
-    const record = h.core.journal.getSetting('restart-handoff') as { turns: { threadId: string; was: string }[] };
-    expect(record.turns).toContainEqual(expect.objectContaining({ threadId: busy.threadId, was: 'running' }));
-    await waitFor(() => stops === 1, 15_000);
-  } finally { await h.stop(); rmSync(root, { recursive: true, force: true }); }
+    expect(admitted()).not.toBeNull();
+    expect(h.core.journal.getSetting('restart-handoff')).toBeUndefined();
+    await waitFor(() => state.stops === 1);
+  } finally { await stop(); }
 });
 
 test('a failed update admission write leaves the server running and reports the error', async () => {

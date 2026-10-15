@@ -8,7 +8,6 @@
   import { appUpdater } from '../lib/app-update.svelte';
   import { Closing } from '../lib/closing.svelte';
   import { floating } from '../lib/floating';
-  import { dayClock } from '../lib/format';
   import { tourRequested, tourSeen } from '../lib/onboarding.svelte';
   import { strings } from '../lib/strings';
   import { APP_MACHINE, DONE_LINGER_MS, reconcileRows, updateEverything, type PlannedPart, type UpdateRow } from '../lib/update-everything.svelte';
@@ -163,7 +162,7 @@
       case 'downloading': return strings.updateAll.downloading(part.percent);
       // Downloaded: the restart waits for this computer's agents, then for the user.
       case 'ready': return localBusy ? strings.updateAll.restartsNext : strings.updateAll.ready;
-      case 'waiting': return part.handoffAt === null ? strings.updateAll.waiting : strings.updateAll.waitingUntil(dayClock(part.handoffAt));
+      case 'waiting': return strings.updateAll.waiting;
       case 'installing': return strings.updateAll.installing;
       case 'updating': return part.waitingFor > 0 ? strings.updateAll.waitingFor(part.waitingFor) : strings.updateAll.updating;
       case 'failed': return strings.updateAll.failed;

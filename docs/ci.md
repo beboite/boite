@@ -157,8 +157,8 @@ The tested installer becomes the release artifact.
 
 The total JavaScript measure excludes native binaries and source maps.
 
-On 2026-10-15, the server update's two-minute idle wait, its handoff time in
-the update cards and the slimmer backup (PR #494) measure 4,917,711 UI bytes
+On 2026-10-15, the server update's handoff and the slimmer backup (PR #494),
+with a handoff time in the update cards since removed, measured 4,917,711 UI bytes
 and 4,119,340 core JavaScript bytes after fresh `bun run build:ui` and
 `bun run build:core` on Linux, 711 and 340 bytes over the limits of that day;
 Windows CI measured 4,119,299 core bytes. The limits become 4,919,000 and
