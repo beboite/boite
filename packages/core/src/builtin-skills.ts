@@ -122,7 +122,7 @@ Three commands, three jobs:
 
 | Command | For |
 |---|---|
-| \`boite view <page.html>\` | A page drawn under your answer in the app's look. The default for explaining. |
+| \`boite view <page.html>\` | A page drawn in your answer, after the paragraph it explains, in the app's look. The default for explaining. |
 | \`boite attach <file>\` | A file the user keeps or opens elsewhere: a capture, a clip, a PDF, a standalone HTML page. |
 | \`boite preview <file.html>\` | The project's own HTML, opened in the panel to try. |
 
