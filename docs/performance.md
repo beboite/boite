@@ -408,6 +408,9 @@ when the core advertises `chunkedAnswers`.
   and a thread keeps its newest 2,000 rows (`bun bench/process-rows.ts`).
 - A spawn of a bare name (`git`, `gh`) reuses the remembered PATH lookup, and
   on Windows git skips Git for Windows' launcher process (`bun bench/spawn-lookup.ts`).
+- On Windows the guard pump wakes once a second instead of ten times while a
+  traced process lives, new processes inside 100 ms share one audio-session
+  walk, and the jobs Worker drops the global job's copy of every start and exit.
 - A project names its icon by version or stack id only. The image, up to
   256 KB, is a `projects.icon` call made once per project and version, when a
   tile first draws it; a list never carries it ([project icons](project-icons.md)).

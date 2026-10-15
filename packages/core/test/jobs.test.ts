@@ -4,6 +4,7 @@ import type { Pointer } from 'bun:ffi';
 import { RpcErrorCode } from '@boite/contracts';
 import type { ProcessRecord, ThreadSummary } from '@boite/contracts';
 import { cpuRateOfGlobalJob, memoryLimitOfJob, releaseThreadJob, sampleThreadJob } from '../src/platform/windows/jobs.ts';
+import { jobPacketAction, MSG_JOB_MEMORY_LIMIT, MSG_NEW_PROCESS } from '../src/platform/windows/jobs-packets.ts';
 import { resolveMemoryLimits } from '../src/memory-limits.ts';
 import { processPlatform } from '../src/platform/index.ts';
 import { STARTUP_PRIORITY } from '../src/procs.ts';
@@ -268,6 +269,23 @@ describeWindows('windows job objects', () => {
     harness.core.procs.killTree(threadId);
     await child.exited;
   }, 30000);
+});
+
+describe('the jobs Worker packet filter', () => {
+  const GLOBAL = 1;
+  const THREAD = 2;
+  const EXIT_PROCESS = 7;
+
+  test("a process start reaches the core once, through its thread's job, and the global budget alert still does", () => {
+    expect(jobPacketAction(MSG_NEW_PROCESS, THREAD, 4242, GLOBAL)).toBe('open');
+    expect(jobPacketAction(MSG_NEW_PROCESS, GLOBAL, 4242, GLOBAL)).toBe('drop');
+    expect(jobPacketAction(EXIT_PROCESS, THREAD, 4242, GLOBAL)).toBe('post');
+    expect(jobPacketAction(EXIT_PROCESS, GLOBAL, 4242, GLOBAL)).toBe('drop');
+    expect(jobPacketAction(MSG_JOB_MEMORY_LIMIT, GLOBAL, 4242, GLOBAL)).toBe('post');
+    expect(jobPacketAction(MSG_JOB_MEMORY_LIMIT, THREAD, 4242, GLOBAL)).toBe('post');
+    // A start with no pid has nothing to open.
+    expect(jobPacketAction(MSG_NEW_PROCESS, THREAD, 0, GLOBAL)).toBe('post');
+  });
 });
 
 describe('job settings', () => {

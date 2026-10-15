@@ -89,3 +89,18 @@ On Linux the saving, about 8 µs a spawn, sits inside the spawn's noise. The
 lookup grows with PATH times PATHEXT on Windows, where it was not measured.
 Running Git for Windows' real `git.exe` instead of its launcher removes one
 process per git call there; no Windows host was available to measure it.
+
+## Windows guard and jobs Workers
+
+Unmeasured: these run only on Windows and no Windows host was available. The
+counts below come from the fake-backed tests, not from timing.
+
+- Audio-session walks for a burst of 50 new pids inside one 100 ms gap:
+  50 before, 1 after plus one shared walk at the end of the gap
+  (`bun test test/guard.test.ts -t burst`; the old `MuteLogic` fails it with
+  50 walks).
+- Guard pump wakeups while a traced process lives and nothing happens:
+  10 a second before (100 ms wait), 1 a second after once the pump reported
+  its thread (1,000 ms wait, ended early by a `WM_NULL` after each command).
+- Jobs Worker messages per agent process start or exit: 2 before (thread job
+  and global job), 1 after; `OpenProcess` calls per start: 2 before, 1 after.

@@ -6,6 +6,7 @@
  * less than one interval.
  */
 import { dlopen, FFIType, ptr } from 'bun:ffi';
+import { jobPacketAction } from './jobs-packets.ts';
 
 export interface JobsWorkerStart {
   /** The completion port handle. Handles are process wide, so a Worker thread shares them. */
@@ -19,6 +20,8 @@ export interface JobsWorkerStart {
   waitMs: number;
   /** The access the core inspects a process with; a new process is opened with it here, at once. */
   inspectAccess: number;
+  /** The global job's key: of its packets only the budget alert is posted. */
+  globalKey: number;
 }
 
 export type JobsWorkerMessage =
@@ -27,9 +30,6 @@ export type JobsWorkerMessage =
   | { kind: 'stopped' }
   /** `handle`: for a new process, a handle opened on arrival (the core owns and closes it), else 0. */
   | { kind: 'packet'; message: number; key: number; pid: number; handle: number };
-
-/** JOB_OBJECT_MSG_NEW_PROCESS. */
-const MSG_NEW_PROCESS = 6;
 
 const scope = globalThis as unknown as {
   onmessage: ((event: { data: unknown }) => void) | null;
@@ -77,9 +77,12 @@ scope.onmessage = (event: { data: unknown }): void => {
     // pointer carries the pid rather than an address.
     const message = view.getUint32(0, true);
     const pid = Number(view.getBigUint64(16, true));
+    const action = jobPacketAction(message, key, pid, start.globalKey);
+    // The global job's copy of a start or exit: the thread job's copy is the one traced.
+    if (action === 'drop') continue;
     // Opened here, microseconds after the kernel queued the packet: the core's
     // own thread may read it much later, when a short-lived process is gone.
-    const handle = message === MSG_NEW_PROCESS && pid > 0 ? Number(symbols.OpenProcess(start.inspectAccess, 0, pid) ?? 0) : 0;
+    const handle = action === 'open' ? Number(symbols.OpenProcess(start.inspectAccess, 0, pid) ?? 0) : 0;
     send({ kind: 'packet', message, key, pid, handle });
   }
   // Removing the message listener lets Bun end this Worker naturally, after

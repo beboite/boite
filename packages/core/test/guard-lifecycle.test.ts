@@ -16,6 +16,7 @@ import {
 } from '../src/platform/windows/guard.ts';
 import type { GuardWorkerHandle } from '../src/platform/windows/guard.ts';
 import type { GuardWorkerCommand, GuardWorkerMessage } from '../src/platform/windows/guard-worker.ts';
+import { PUMP_POSTED, PUMP_WAKEABLE } from '../src/platform/windows/guard-pump.ts';
 import { waitFor } from './harness.ts';
 
 const IDLE_MS = 20;
@@ -43,7 +44,7 @@ class FakeWorker implements GuardWorkerHandle {
   stopAsked(): boolean {
     const start = this.posted.find((command) => command.kind === 'start');
     if (start?.kind !== 'start') return false;
-    return Atomics.load(new Int32Array(start.stop), 0) === 1;
+    return Atomics.load(new Int32Array(start.control), 0) === 1;
   }
 
   pidsAdded(): number[] {
@@ -56,16 +57,27 @@ describe('the guard Worker lifecycle', () => {
   let notes: string[];
   let muted: number[];
   let pump: ReturnType<typeof setInterval>;
+  let wakes: number[];
+  let wakeWorks: boolean;
 
   beforeEach(() => {
     workers = [];
     notes = [];
     muted = [];
-    setGuardWorkerForTests(() => {
-      const worker = new FakeWorker();
-      workers.push(worker);
-      return worker;
-    }, IDLE_MS);
+    wakes = [];
+    wakeWorks = true;
+    setGuardWorkerForTests(
+      () => {
+        const worker = new FakeWorker();
+        workers.push(worker);
+        return worker;
+      },
+      IDLE_MS,
+      (threadId) => {
+        wakes.push(threadId);
+        return wakeWorks;
+      },
+    );
     retainGuard({
       pushed: () => undefined,
       muted: (_threadId, pid) => muted.push(pid),
@@ -87,6 +99,46 @@ describe('the guard Worker lifecycle', () => {
     setGuardWorkerForTests(null);
     setGuardEnabled(true);
     setGuardMute(true);
+  });
+
+  test('once the pump says where it runs, every command and the stop wake it, and a failed wake puts it back on the short wait', async () => {
+    guardPidAdded('thr_one', 11);
+    const worker = workers[0] as FakeWorker;
+    const start = worker.posted[0];
+    if (start?.kind !== 'start') throw new Error('no start');
+    const control = new Int32Array(start.control);
+    // The pid told with the start is counted, and nothing can wake the pump yet.
+    expect(Atomics.load(control, PUMP_POSTED)).toBe(1);
+    guardPidAdded('thr_one', 12);
+    expect(wakes).toEqual([]);
+    expect(Atomics.load(control, PUMP_WAKEABLE)).toBe(0);
+
+    worker.emit({ kind: 'pump', threadId: 77 });
+    expect(Atomics.load(control, PUMP_WAKEABLE)).toBe(1);
+    guardPidAdded('thr_one', 13);
+    guardPidRemoved('thr_one', 12);
+    setGuardMute(true);
+    expect(wakes).toEqual([77, 77, 77]);
+    expect(Atomics.load(control, PUMP_POSTED)).toBe(5);
+
+    // A wake that does not reach the pump: it goes back to polling for commands.
+    wakeWorks = false;
+    guardPidAdded('thr_one', 14);
+    expect(Atomics.load(control, PUMP_WAKEABLE)).toBe(0);
+    guardPidAdded('thr_one', 15);
+    expect(wakes).toEqual([77, 77, 77, 77]);
+
+    // The next Worker announces itself again, and its stop wakes it.
+    await releaseGuard();
+    retainGuard({ pushed: () => undefined, muted: () => undefined, note: () => undefined });
+    wakeWorks = true;
+    guardPidAdded('thr_two', 21);
+    const next = workers[1] as FakeWorker;
+    next.emit({ kind: 'pump', threadId: 88 });
+    guardPidRemoved('thr_two', 21);
+    await waitFor(() => next.terminated);
+    expect(next.stopAsked()).toBe(true);
+    expect(wakes.slice(4)).toEqual([88, 88]);
   });
 
   test('a refused focus hook keeps the Worker, and the audio mute with it', () => {

@@ -80,7 +80,9 @@ boost. Other threads and POSIX scheduling retain their existing behavior.
 A completion-port Worker reads tree membership events, grandchildren included.
 It starts on a turn or the first traced PID and sleeps until a packet arrives.
 After 30 seconds with no occupied jobs it stops; the port remains open for the
-next Worker. Process handles are opened when packets arrive. A process that
+next Worker. Process handles are opened when packets arrive. Each process also
+belongs to the global job on the same port; the Worker drops that job's copy of
+every start and exit and posts only its memory budget alert. A process that
 already exited may have no readable identity and stay outside the trace while
 its CPU remains in job totals. Console hosts are similarly excluded from trace
 rows and load while remaining in totals. Terminating a job requires explicit
@@ -333,13 +335,22 @@ The shared guard/audio Worker starts with a turn or traced process, stops after
 failures log once per core run; a refused focus hook can leave audio protection
 running and exposes its failure through `guardStatus()`.
 
+The pump waits on its message queue 100 ms at a time until it sends its native
+thread id. From then on the core posts a `WM_NULL` to that thread after every
+command and after the stop flag, and the pump waits up to one second, so a
+running Worker wakes about once a second instead of ten times. The pump never
+blocks while a command it was sent is still unhandled. A `PostThreadMessageW`
+that fails puts that Worker back on 100 ms waits.
+
 Logic tests use fake Win32 calls. `BOITE_E2E_GUARD=1` is the opt-in real-window
 case and briefly takes focus; ordinary automation must not enable it.
 
 ## The audio mute
 
 The same Windows Worker initializes COM and polls the default render endpoint
-once per second and after a new PID. It mutes unmuted sessions belonging to
+once per second and after a new PID. A PID that comes less than 100 ms after
+the last walk waits for one shared walk at the end of those 100 ms, so a build
+that starts hundreds of processes walks at most ten times a second. It mutes unmuted sessions belonging to
 traced processes and holds their volume interfaces. Unreadable sessions are
 reported once; a failed or changed endpoint is reopened. With no endpoint it
 retries every 30 seconds. A COM startup refusal disables this half for that
@@ -347,7 +358,8 @@ Worker's lifetime.
 
 On process exit, setting disable or Worker shutdown, it restores only mutes it
 applied and releases interfaces. User-muted sessions remain muted. Core shutdown
-waits up to one second for release so Windows' persistent session mute does not
+waits up to one second for release (two when the wake failed and the pump may
+be in a one-second wait) so Windows' persistent session mute does not
 carry into a later launch. `process.muted` identifies the thread and PID.
 Logic tests use a fake endpoint; the native audio test opens a session with two
 seconds of zeroed PCM, without audible content.

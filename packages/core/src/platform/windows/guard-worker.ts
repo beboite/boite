@@ -7,8 +7,9 @@
  * The audio mute rides the same thread and the same pid set. There is no
  * notification to hook for it: registering `IAudioSessionNotification` would
  * need an MTA thread and a JS COM object, so the sessions of the default render
- * endpoint are polled every second and right after every pid, and a session of
- * a traced pid is muted until that pid exits.
+ * endpoint are polled every second and right after a new pid (one walk per
+ * 100 ms burst of them), and a session of a traced pid is muted until that pid
+ * exits.
  *
  * It lives in a Worker because the hook is delivered on the thread that
  * installed it and only while that thread pumps messages: the main thread must
@@ -24,13 +25,15 @@ import { GuardLogic } from './guard-logic.ts';
 import type { ForegroundPushed, GuardWin32 } from './guard-logic.ts';
 import { MuteLogic } from './mute-logic.ts';
 import type { MuteEvent } from './mute-logic.ts';
+import { PUMP_POSTED, PUMP_STOP, PUMP_WAKEABLE, pumpWaitMs } from './guard-pump.ts';
 
 export interface GuardWorkerStart {
   kind: 'start';
-  /** One Int32: the main thread writes 1 to ask the pump to stop. */
-  stop: SharedArrayBuffer;
-  /** Milliseconds one bounded wait on the message queue lasts. */
-  waitMs: number;
+  /**
+   * `PUMP_SLOTS` Int32s (guard-pump.ts): the stop flag the main thread sets to
+   * 1, the count of commands it posted, and whether it wakes the pump.
+   */
+  control: SharedArrayBuffer;
   /** The focus guard's own setting. `mute` is the audio one. */
   enabled: boolean;
   mute: boolean;
@@ -45,6 +48,8 @@ export type GuardWorkerCommand =
 export type GuardWorkerMessage =
   /** `hook` is the `HWINEVENTHOOK` in decimal, never "0" once the hook is in. */
   | { kind: 'ready'; hook: string }
+  /** The pump's native thread, which now has a queue a `WM_NULL` can wake. */
+  | { kind: 'pump'; threadId: number }
   /** Nothing native can run: the Worker does nothing more and waits to be stopped. */
   | { kind: 'failed'; reason: string }
   /** The focus hook was refused; the pump and the audio mute run without it. */
@@ -157,6 +162,8 @@ const endpoint = new AudioEndpoint(openSessions);
 let comFailed = false;
 /** True between a `CoInitializeEx` that took and its matching `CoUninitialize`. */
 let comReady = false;
+/** Commands handled since `start`, against the count the main thread posted. */
+let handled = 0;
 
 function listSessions(skipped: (message: string) => void): AudioSession[] {
   return endpoint.list(skipped);
@@ -164,6 +171,7 @@ function listSessions(skipped: (message: string) => void): AudioSession[] {
 scope.onmessage = (event: { data: unknown }): void => {
   const command = event.data as GuardWorkerCommand;
   if (command.kind !== 'start') {
+    handled += 1;
     onCommand(command);
     return;
   }
@@ -233,7 +241,7 @@ scope.onmessage = (event: { data: unknown }): void => {
     send({ kind: 'audio-failed', message: error instanceof Error ? error.message : String(error) });
   }
 
-  const stop = new Int32Array(command.stop);
+  const control = new Int32Array(command.control);
   const message = new Uint8Array(MSG_SIZE);
   const messagePtr = ptr(message);
 
@@ -243,8 +251,9 @@ scope.onmessage = (event: { data: unknown }): void => {
    * `pid-add`, `pid-remove` and `set` would never reach this thread.
    */
   let nextWalk = 0;
+  let announced = false;
   const tick = (): void => {
-    if (Atomics.load(stop, 0) !== 0) {
+    if (Atomics.load(control, PUMP_STOP) !== 0) {
       if (hook !== 0n) {
         u32.UnhookWinEvent(hook);
         callback.close();
@@ -254,15 +263,29 @@ scope.onmessage = (event: { data: unknown }): void => {
       send({ kind: 'stopped' });
       return;
     }
-    u32.MsgWaitForMultipleObjects(0, null, 0, command.waitMs, QS_ALLINPUT);
+    const wait = pumpWaitMs({
+      posted: Atomics.load(control, PUMP_POSTED),
+      handled,
+      wakeable: Atomics.load(control, PUMP_WAKEABLE) === 1,
+      walkIn: audio.pendingWalkIn(),
+      pollIn: nextWalk - Date.now(),
+    });
+    u32.MsgWaitForMultipleObjects(0, null, 0, wait, QS_ALLINPUT);
     while (u32.PeekMessageW(messagePtr, 0n, 0, 0, PM_REMOVE) !== 0) {
       u32.TranslateMessage(messagePtr);
       u32.DispatchMessageW(messagePtr);
     }
+    // The queue exists once it was read: from here a thread message wakes the
+    // wait, so the main thread can stop polling for commands.
+    if (!announced) {
+      announced = true;
+      send({ kind: 'pump', threadId: k32.GetCurrentThreadId() });
+    }
     // The wait above returns early on any message, so the walk is on the clock
-    // rather than on a count of turns.
+    // rather than on a count of turns. A pid that came inside a burst gets its
+    // walk at the end of the burst's gap.
     const now = Date.now();
-    if (now >= nextWalk) {
+    if (now >= nextWalk || audio.pendingWalkIn() === 0) {
       nextWalk = now + AUDIO_INTERVAL_MS;
       audio.tick();
     }
@@ -306,7 +329,7 @@ function onCommand(command: Exclude<GuardWorkerCommand, GuardWorkerStart>): void
     default:
       return;
   }
-  // `addPid` walks the sessions on the spot, so its events are here already and
-  // waiting for the next pump tick would delay them by a whole wait.
+  // `addPid` walks the sessions on the spot outside a burst, so its events are
+  // here already and waiting for the next pump tick would delay them.
   if (mute !== null) for (const muted of mute.takeEvents()) send(muted);
 }
