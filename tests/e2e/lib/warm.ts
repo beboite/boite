@@ -27,17 +27,17 @@ async function preparationStep<T>(label: string, run: () => Promise<T>): Promise
 
 async function prepare(): Promise<void> {
   const root = join(import.meta.dir, '../../../packages/ui');
-  const { build } = await preparationStep('load Vite', () =>
+  const { build, createServer } = await preparationStep('load Vite', () =>
     import(createRequire(join(root, 'package.json')).resolve('vite')));
-  const { fixtureBridge, startDevUi } = await preparationStep('load fixture bridge', () => import('./ui.ts'));
+  const { fixtureBridge } = await preparationStep('load fixture bridge', () => import('./ui.ts'));
 
-  // The tests' own dev server, in the runtime that serves them (`ui.ts`): Vite
-  // hashes its plugins and NODE_ENV into the optimized-dependency cache, so a
-  // cache written any other way would be optimized again by the first test.
-  const port = await freePort();
-  const server = await preparationStep('start dev server', () => startDevUi(port));
+  // Match startDevUi's plugins: Vite hashes them into the optimized-dependency cache.
+  const server = await preparationStep('create dev server', async () =>
+    createServer({ root, plugins: [fixtureBridge], server: { host: '127.0.0.1', port: await freePort(), strictPort: true }, clearScreen: false }));
   try {
-    const base = `http://127.0.0.1:${port}`;
+    await preparationStep('listen', () => server.listen());
+    const base = server.resolvedUrls?.local[0]?.replace(/\/$/, '');
+    if (!base) throw new Error('the warm-up dev server reported no local URL');
     const entry = await preparationStep('transform entry', async () => {
       const response = await fetch(`${base}/src/main.ts`);
       if (!response.ok) throw new Error(`the dev server answered ${response.status} for /src/main.ts`);
