@@ -169,6 +169,14 @@ and 4,119,340 core JavaScript bytes after fresh `bun run build:ui` and
 Windows CI measured 4,119,299 core bytes. The limits become 4,919,000 and
 4,121,000; the entry limits stay unchanged.
 
+On 2026-10-15, the timeline rendering work (turn file and diff caches, the
+resumable thought title scan and the linear link scanner) measured 4,932,448
+UI bytes after `bun run build:ui` on Linux, the same as the Windows CI job;
+`main` at `2adac07b` measured about 4,926,200 there, so the change adds about
+6,300 bytes (0.13%). `main` at `2adac07b` also measured 4,127,200 core
+JavaScript bytes on Windows CI, 200 over its limit. The UI total limit becomes
+4,936,000 and the core total limit 4,130,000; the entry limits stay unchanged.
+
 On 2026-10-14, files dropped on the desktop window going to the composer
 (`lib/native-drop.ts`, the attach overlay and its English and French strings)
 measured 4,900,488 UI bytes on Linux, 2,488 bytes over the 4,898,000 limit of
