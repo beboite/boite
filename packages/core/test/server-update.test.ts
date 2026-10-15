@@ -145,7 +145,13 @@ test('a failed update admission write leaves the server running and reports the 
   } finally { await h.stop(); rmSync(root, { recursive: true, force: true }); }
 });
 
-for (const fails of [false, true]) test(`update helper ${fails ? 'restores the previous binary, SQLite journal and pairing on a failed restart' : 'installs the complete bundle and checks the new process health'}`, async () => {
+const APPLY_CASES = {
+  installs: 'installs the complete bundle and checks the new process health',
+  fails: 'restores the previous binary, SQLite journal and pairing on a failed restart',
+  full: 'leaves the server running when the disk cannot hold the backup',
+} as const;
+for (const mode of ['installs', 'fails', 'full'] as const) test(`update helper ${APPLY_CASES[mode]}`, async () => {
+  const fails = mode === 'fails';
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'boite-server-apply-')));
   const install = join(root, 'install');
   const data = join(root, 'data');
@@ -187,8 +193,15 @@ for (const fails of [false, true]) test(`update helper ${fails ? 'restores the p
     } };
   try {
     const run = applyServerUpdate(join(operation, 'plan.json'), platform, { pollMs: 5, healthTimeoutMs: 35,
+      spareBytes: mode === 'full' ? Number.MAX_SAFE_INTEGER : 0,
       health: async () => fails ? null : { ok: true, version: '2.1.0', pid: 456 } });
-    if (fails) {
+    if (mode === 'full') {
+      await expect(run).rejects.toThrow('Not enough disk space');
+      expect(controls).toEqual([]);
+      expect(existsSync(join(root, `.boite-backup-${id}`))).toBe(false);
+      expect(readFileSync(join(install, 'boite-core'), 'utf8')).toBe('old executable');
+      expect(JSON.parse(readFileSync(join(data, 'server-update-result.json'), 'utf8')).error).toContain('Server update was not installed. Not enough disk space');
+    } else if (fails) {
       await expect(run).rejects.toThrow('healthy');
       expect(readFileSync(join(install, 'boite-core'), 'utf8')).toBe('old executable');
       expect(readFileSync(join(data, 'pairing.json'), 'utf8')).toBe('test pairing survives');

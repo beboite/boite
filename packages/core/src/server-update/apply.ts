@@ -1,4 +1,4 @@
-import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statfsSync, statSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { unzipSync } from 'fflate';
@@ -17,6 +17,21 @@ export const UNSAVED_DATA = new Set(['checkpoints', 'browser', 'attachments', 'a
 
 /** Snapshots kept beside the installation; each still holds a whole journal. */
 export const KEPT_BACKUPS = 2;
+
+/** Bytes the data snapshot copies: everything but `UNSAVED_DATA`, symlinks not followed. */
+function snapshotBytes(dataDir: string): number {
+  let total = 0;
+  const walk = (path: string): void => {
+    const info = lstatSync(path);
+    if (info.isDirectory()) for (const name of readdirSync(path)) walk(join(path, name));
+    else if (info.isFile()) total += info.size;
+  };
+  for (const name of readdirSync(dataDir)) if (!UNSAVED_DATA.has(name)) walk(join(dataDir, name));
+  return total;
+}
+
+/** Room left once the snapshot is written, so the restarted server can still write its journal. */
+const SPARE_BYTES = 1024 ** 3;
 
 /** Drops all but the newest `KEPT_BACKUPS` snapshots; a failure here never fails an installed update. */
 function pruneBackups(parent: string): void {
@@ -66,6 +81,8 @@ export interface ApplyOptions {
   health?: (url: string) => Promise<{ ok: boolean; version: string; pid: number } | null>;
   pollMs?: number;
   healthTimeoutMs?: number;
+  /** Free space required beyond the snapshot itself. */
+  spareBytes?: number;
 }
 
 /** Runs in a separate user-service cgroup after the core has closed admission and finished its work. */
@@ -93,6 +110,11 @@ export async function applyServerUpdate(file: string, platform: ServerUpdatePlat
   try {
     const pid = await platform.mainPid(plan.installation.service);
     if (pid !== 0 && pid !== plan.originalPid) throw new Error('The service restarted before the update; its new process was left untouched');
+    // Checked while the server still runs: a full disk once stopped it halfway through the copy.
+    const need = snapshotBytes(plan.dataDir) + (options.spareBytes ?? SPARE_BYTES);
+    const disk = statfsSync(dirname(root));
+    const free = disk.bavail * disk.bsize;
+    if (free < need) throw new Error(`Not enough disk space beside ${root} for the backup: ${Math.ceil(need / 1024 ** 2)} MB needed, ${Math.floor(free / 1024 ** 2)} MB free`);
     await platform.control(plan.installation.service, 'stop');
     stopped = true;
     if (await platform.mainPid(plan.installation.service) !== 0) throw new Error('The server service did not stop');
@@ -139,6 +161,8 @@ export async function applyServerUpdate(file: string, platform: ServerUpdatePlat
         renameSync(plan.dataDir, `${plan.dataDir}.failed-${plan.id}`);
         renameSync(restored, plan.dataDir);
       }
+      // A copy cut short (a full disk) frees its space; a complete one stays with the failure.
+      if (!dataSaved) rmSync(backup, { recursive: true, force: true });
       result(`Server update failed; the previous version was restored. ${reason}`);
       await platform.control(plan.installation.service, 'start');
     } else result(`Server update was not installed. ${reason}`);

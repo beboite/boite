@@ -180,7 +180,10 @@ staged installation into place, and restarts the same service. The data
 snapshot holds the journal and the state files beside it; checkpoints,
 browser profiles, attachments, artifacts, logs and dictation models stay out,
 since a release does not rewrite them. Copying them kept a server with 1,300
-threads down 2 min 25 s for 8.9 GB; a rollback keeps the live ones. Health must
+threads down 2 min 25 s for 8.9 GB, and filled its disk once mid-copy; a
+rollback keeps the live ones. Before stopping the service, the job checks that
+the disk holds the snapshot plus 1 GB and otherwise leaves the server running
+with the reason in its status. A copy cut short is deleted. Health must
 report the target version and that service's new PID within 30 seconds.
 Failure restores both the previous installation and its data snapshot before
 restarting. Pairings and conversations survive; clients reconnect normally.
