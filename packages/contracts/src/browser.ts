@@ -1,5 +1,5 @@
 import { RPC_MAX_FRAME_BYTES } from './attachment-limits';
-import type { RemoteBrowserFrame, RemoteBrowserInput, RemoteBrowserSelection, RemoteFrameOptions } from './browser-remote';
+import type { RemoteBrowserFrame, RemoteBrowserInput, RemoteBrowserSelection, RemoteBrowserUnchanged, RemoteFrameOptions } from './browser-remote';
 /**
  * The agent's browser runs on the machine that runs its conversation: the core
  * starts a headless Chromium there and drives it over the DevTools protocol.
@@ -139,7 +139,7 @@ export interface BrowserRpcMethods {
    * A frame of one of the conversation's agent tabs, the active one without
    * `tabId`. Any client subscribed to the conversation may watch it.
    */
-  'browser.remoteFrame': { params: { threadId: string; tabId?: string } & RemoteFrameOptions; result: RemoteBrowserFrame };
+  'browser.remoteFrame': { params: { threadId: string; tabId?: string } & RemoteFrameOptions; result: RemoteBrowserFrame | RemoteBrowserUnchanged };
   /** Whether the conversation's agent has a browser open on this machine, and its tabs. */
   'browser.remoteStatus': { params: { threadId: string }; result: AgentBrowserStatus };
   /** Input on the tab a frame showed, from a viewer: never a script. */

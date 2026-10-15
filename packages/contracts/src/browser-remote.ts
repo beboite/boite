@@ -32,10 +32,22 @@ export interface RemoteBrowserFrame {
   at: number;
   /** The page address shown in the viewer's address bar. */
   url?: string;
+  /** Milliseconds the core held the request until the page showed something new; not part of the link's round trip. */
+  waitedMs?: number;
 }
 
-/** What a viewer asks of the next frame: no more pixels than it can show, and a lighter JPEG on a slow link. */
-export interface RemoteFrameOptions { maxWidth?: number; quality?: number }
+/**
+ * The answer to a request naming `after` when the page drew nothing new within
+ * a second: the viewer keeps showing that frame, and input aimed at it stays valid.
+ */
+export interface RemoteBrowserUnchanged { unchanged: true; id: string; tabId: string; at: number; waitedMs?: number }
+
+/**
+ * What a viewer asks of the next frame: no more pixels than it can show, and a
+ * lighter JPEG on a slow link. `after` is the id of the frame it shows: the core
+ * answers with a newer one, or `unchanged` once a second passes without one.
+ */
+export interface RemoteFrameOptions { maxWidth?: number; quality?: number; after?: string }
 
 export const REMOTE_URL_MAX = 4096;
 /** One typed or pasted text. */
@@ -55,6 +67,7 @@ export const remoteBrowserUrl = (url: unknown): url is string =>
 export function remoteFrameOptionsError(options: RemoteFrameOptions): string | null {
   if (options.maxWidth !== undefined && !(Number.isInteger(options.maxWidth) && options.maxWidth >= 160 && options.maxWidth <= 3840)) return 'remote frame maxWidth must be an integer from 160 to 3840';
   if (options.quality !== undefined && !(Number.isInteger(options.quality) && options.quality >= 20 && options.quality <= 80)) return 'remote frame quality must be an integer from 20 to 80';
+  if (options.after !== undefined && !(typeof options.after === 'string' && options.after.length > 0 && options.after.length <= 100)) return 'remote frame after must be the id of a frame, 1 to 100 characters';
   return null;
 }
 

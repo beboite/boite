@@ -24,6 +24,7 @@ import {
   type BrowserAction,
   type BrowserReply,
   type RemoteBrowserFrame,
+  type RemoteBrowserUnchanged,
   type RemoteBrowserSelection,
   type RpcParams,
   type Settings,
@@ -181,7 +182,7 @@ export class AgentBrowser {
     const on = (method: string, listener: (params: Record<string, unknown>) => void) =>
       tab.off.push(engine.cdp.on(method, (params, session) => { if (session === sessionId) listener(params); }));
     watchPage(tab, on, (accept, promptText) => void engine.cdp.send('Page.handleJavaScriptDialog', { accept, ...(promptText === undefined ? {} : { promptText }) }, sessionId).catch(() => {}),
-      url => { tab.url = url; tab.frame = null; this.#changed(threadId); this.#engines.saveCookiesSoon(engine); });
+      url => { tab.url = url; this.#remote.stale(tab); this.#changed(threadId); this.#engines.saveCookiesSoon(engine); });
     // Before its first request: the page, its workers and its requests say what a browser with a window says.
     if (engine.identity) await engine.cdp.send('Emulation.setUserAgentOverride', { userAgent: engine.identity.userAgent, userAgentMetadata: engine.identity.metadata }, sessionId).catch(() => {});
     await Promise.all(['Page.enable', 'Runtime.enable', 'Network.enable'].map(method => engine.cdp.send(method, {}, sessionId)));
@@ -382,20 +383,20 @@ export class AgentBrowser {
       // The page takes a few frames to reach a new size: the next command meets it laid out.
       case 'resize':
         await this.#screen(tab, () => this.#send(tab, 'Emulation.setDeviceMetricsOverride', { width: action.width, height: action.height, deviceScaleFactor: 1, mobile: false }));
-        tab.preset = null; tab.frame = null; await this.#settle(tab); return done();
+        tab.preset = null; this.#remote.stale(tab); await this.#settle(tab); return done();
       case 'reset-viewport':
         await this.#screen(tab, () => this.#send(tab, 'Emulation.clearDeviceMetricsOverride'));
-        tab.preset = null; tab.frame = null; await this.#settle(tab); return done();
+        tab.preset = null; this.#remote.stale(tab); await this.#settle(tab); return done();
       case 'preset': {
         const size = browserPresetSize(action.preset, action.orientation);
         await this.#screen(tab, () => this.#send(tab, 'Emulation.setDeviceMetricsOverride', { ...size, deviceScaleFactor: 1, mobile: false }));
-        tab.preset = action.preset; tab.orientation = size.width > size.height ? 'landscape' : 'portrait'; tab.frame = null;
+        tab.preset = action.preset; tab.orientation = size.width > size.height ? 'landscape' : 'portrait'; this.#remote.stale(tab);
         await this.#settle(tab);
         return done(size);
       }
       case 'appearance':
         await this.#send(tab, 'Emulation.setEmulatedMedia', { features: action.colorScheme === 'system' ? [] : [{ name: 'prefers-color-scheme', value: action.colorScheme }] });
-        tab.colorScheme = action.colorScheme; tab.frame = null; return done();
+        tab.colorScheme = action.colorScheme; this.#remote.stale(tab); return done();
       case 'screenshot': {
         const shot = await this.#screen(tab, () => this.#send(tab, 'Page.captureScreenshot', { format: 'png', captureBeyondViewport: false })) as { data?: string };
         if (typeof shot.data !== 'string') throw refused('the browser did not return a PNG screenshot');
@@ -517,7 +518,7 @@ export class AgentBrowser {
     return next;
   }
 
-  remoteFrame(params: RpcParams<'browser.remoteFrame'>, connection: Connection): Promise<RemoteBrowserFrame> {
+  remoteFrame(params: RpcParams<'browser.remoteFrame'>, connection: Connection): Promise<RemoteBrowserFrame | RemoteBrowserUnchanged> {
     return this.#remote.remoteFrame(params, connection);
   }
 
@@ -565,6 +566,7 @@ export class AgentBrowser {
     for (const off of this.#off) off();
     for (const timer of this.#announce.values()) clearTimeout(timer);
     this.#probes.close();
+    this.#remote.close();
     const engines = await Promise.all([...this.#engines.pending.values()].map(pending => pending.catch(() => null)));
     await Promise.all(engines.map(engine => engine ? this.#engines.shut(engine) : undefined));
   }

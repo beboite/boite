@@ -228,8 +228,21 @@ another by hand, which holds until **Fit this screen**.
 The live view asks for one JPEG at a time (`browser.remoteFrame`), the next as
 soon as the last has arrived, sized to what the view shows and lighter on a
 slow link; [phone](phone.md#the-agents-browser-on-a-phone) has the schedule.
-Every viewer that asks within 150 ms gets the same capture, so a desktop and a
-phone watching one tab cost one. Input names the frame it was aimed at; a tap
+The frames come from a screencast of the tab on a DevTools session of its own,
+started by the first viewer and stopped 3 s after the last one asked, when the
+tab closes or its viewers disconnect (`browser/frames.ts`). Chrome sends a
+picture only when the page draws, so a still page sends nothing. The core keeps
+the newest picture and acknowledges it when a viewer takes it, so Chrome draws
+no faster than the fastest viewer. Every viewer of a tab shares one screencast,
+as wide as the widest of them asked and at the lowest quality one asked. A
+viewer names the frame it shows (`after`): the core answers with a newer one,
+or with `unchanged` once a second passes without one, and the frame it shows
+stays valid for input. Chrome sends nothing for the last size of a quick run
+of resizes, and skips paints while two pictures wait for an acknowledgement:
+when no picture follows within 300 ms, the screencast restarts, which always
+sends the page as it is. A tab the desktop app hosts has one DevTools session,
+the agent's, so its viewers still get one capture per request, shared within
+150 ms. Input names the frame it was aimed at; a tap
 on a frame of another page or another viewport size is refused, and the
 address bar accepts only http and https.
 

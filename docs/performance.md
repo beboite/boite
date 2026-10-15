@@ -740,6 +740,14 @@ latency, 3.4 with 80 ms and 2.5 with 200 ms; the capture in the core's browser
 takes about 200 ms a frame for that page
 ([results](../bench/results/2026-10-05-remote-browser-frames.md)).
 
+Since 2026-10-15 the frames come from a screencast of the tab on its own
+DevTools session ([the agent's browser](browser.md#watching-it)). Chrome sends a picture
+only when the page draws, and a viewer naming the frame it shows gets
+`unchanged` on a still page. On a still page a viewer went from 163 to 15 KiB/s
+of base64 and the core's Chrome from 8 % to 0 % of a core; on a moving page the
+trip lost about 72 ms at the same four frames a second and the same Chrome CPU
+([results](../bench/results/2026-10-15-perf-browser.md)).
+
 ## Browser recordings
 
 A recording used to ask the tab for a screenshot every 125 ms and wait for

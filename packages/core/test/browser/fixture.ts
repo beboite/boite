@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:te
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { RemoteBrowserFrame, RemoteBrowserUnchanged } from '@boite/contracts';
 import { connect, type CoreClient } from '../../src/client.ts';
 import { chromiumArgs, findChromium, waitForEndpoint } from '../../src/browser/chromium.ts';
 import { echoThread, startTestCore, type TestCore } from '../harness.ts';
@@ -164,6 +165,13 @@ export function createBrowserFixture() {
 }
 
 /** The pixel size a JPEG declares in its start-of-frame segment. */
+/** A frame answer that carries a picture: a request without `after` never gets `unchanged`. */
+export async function picture(answer: Promise<RemoteBrowserFrame | RemoteBrowserUnchanged>): Promise<RemoteBrowserFrame> {
+  const frame = await answer;
+  if ('unchanged' in frame) throw new Error(`expected a frame, got unchanged ${frame.id}`);
+  return frame;
+}
+
 export function jpegSize(base64: string): { width: number; height: number } {
   const bytes = Buffer.from(base64, 'base64');
   expect([bytes[0], bytes[1]]).toEqual([0xff, 0xd8]);

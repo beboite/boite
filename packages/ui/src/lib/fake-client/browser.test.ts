@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import type { RpcEvents } from '@boite/contracts';
+import type { RemoteBrowserFrame, RpcEvents } from '@boite/contracts';
 import { FakeClient } from '../fake-client';
 
 test('the agent opens, drives and closes its tabs; subscribed viewers hear each change and watch any tab', async () => {
@@ -25,9 +25,12 @@ test('the agent opens, drives and closes its tabs; subscribed viewers hear each 
     // The active tab without a tabId, any tab with one.
     expect((await client.call('browser.remoteFrame', { threadId, maxWidth: 780, quality: 40 })).tabId).toBe(shop.tabId);
     await new Promise(resolve => setTimeout(resolve, 230));
-    const frame = await client.call('browser.remoteFrame', { threadId, tabId: docs.tabId });
+    const frame = await client.call('browser.remoteFrame', { threadId, tabId: docs.tabId }) as RemoteBrowserFrame;
     expect(frame).toMatchObject({ tabId: docs.tabId, url: 'https://example.com/docs', width: 1280, height: 800 });
     await expect(client.call('browser.remoteFrame', { threadId })).rejects.toThrow('wait before');
+    // A viewer naming the frame it shows hears that the page did not change.
+    await new Promise(resolve => setTimeout(resolve, 230));
+    expect(await client.call('browser.remoteFrame', { threadId, tabId: docs.tabId, after: frame.id })).toMatchObject({ unchanged: true, id: frame.id, tabId: docs.tabId });
     await expect(client.call('browser.remoteFrame', { threadId, maxWidth: 99 })).rejects.toThrow('maxWidth');
 
     await client.call('browser.remoteInput', { threadId, frameId: frame.id, input: { kind: 'tap', x: 0.5, y: 0.2, width: frame.width, height: frame.height } });

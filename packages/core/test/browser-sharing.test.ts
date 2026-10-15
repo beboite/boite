@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { connect } from '../src/client.ts';
 import { Cdp } from '../src/browser/cdp.ts';
 import { waitForEndpoint } from '../src/browser/chromium.ts';
-import { createBrowserFixture, jpegSize } from './browser/fixture.ts';
+import { createBrowserFixture, jpegSize, picture } from './browser/fixture.ts';
 
 const browserFixture = createBrowserFixture();
 const { real, url, evaluate, fakeHost } = browserFixture;
@@ -29,8 +29,9 @@ real('a viewer watching while the agent changes the page size never puts the old
       expect(await evaluate('[innerWidth, innerHeight]', tabId)).toEqual([852, 393]);
     }
   } finally { watching = false; await watch; }
-  // The race needs frames actually taken while the sizes changed.
-  expect(frames).toBeGreaterThan(5);
+  // The race needs frames actually taken while the sizes changed. The screencast
+  // sends a picture when Chrome draws one, and it draws few during quick resizes.
+  expect(frames).toBeGreaterThan(2);
 }, 150_000);
 
 real('the desktop app on this machine hosts the agent tabs: the core drives them through it, and they close with it', async () => {
@@ -64,7 +65,7 @@ real('the desktop app on this machine hosts the agent tabs: the core drives them
     await agent.call('browser.command', { threadId, action: { kind: 'click', selector: '#go' } });
     expect(await evaluate('document.title')).toBe('clicked');
     // A viewer elsewhere still gets frames, taken through the host.
-    const frame = await owner.call('browser.remoteFrame', { threadId });
+    const frame = await picture(owner.call('browser.remoteFrame', { threadId }));
     expect(jpegSize(frame.base64)).toEqual({ width: frame.width, height: frame.height });
     // A reply from a connection that does not host is refused.
     await expect(owner.call('browser.hostReply', { profile: 'default', messages: ['{}'] })).rejects.toThrow('does not host');
@@ -126,12 +127,12 @@ real('a viewer on another device watches and drives the tab, and hears it come a
     const shown = phone.next('browser.remoteChanged', event => event.threadId === threadId && event.live, 30_000);
     const { tabId } = await agent.call('browser.command', { threadId, action: { kind: 'open', url: url() } });
     expect((await shown).tabs[0]).toMatchObject({ tabId, profile: 'default', active: true });
-    const frame = await phone.call('browser.remoteFrame', { threadId });
+    const frame = await picture(phone.call('browser.remoteFrame', { threadId }));
     expect(frame).toMatchObject({ tabId, title: 'Fixture', url: url() });
     expect(jpegSize(frame.base64)).toEqual({ width: frame.width, height: frame.height });
     await Bun.sleep(150);
     // A narrow viewer gets a frame no wider than it shows, of the same page.
-    const small = await phone.call('browser.remoteFrame', { threadId, tabId, maxWidth: 400, quality: 40 });
+    const small = await picture(phone.call('browser.remoteFrame', { threadId, tabId, maxWidth: 400, quality: 40 }));
     expect(jpegSize(small.base64).width).toBe(400);
     expect([small.width, small.height]).toEqual([frame.width, frame.height]);
     await expect(phone.call('browser.remoteInput', { threadId, frameId: 'unknown', input: { kind: 'key', key: 'Enter' } })).rejects.toThrow('refresh');
@@ -141,7 +142,7 @@ real('a viewer on another device watches and drives the tab, and hears it come a
     expect(await evaluate('document.title')).toBe('clicked');
     // A computer's keyboard, mouse and clipboard: keys as key events, a paste, a selection read back.
     await Bun.sleep(150);
-    const live = await phone.call('browser.remoteFrame', { threadId, tabId });
+    const live = await picture(phone.call('browser.remoteFrame', { threadId, tabId }));
     const act = (input: Parameters<typeof phone.call<'browser.remoteInput'>>[1]['input']) => phone.call('browser.remoteInput', { threadId, frameId: live.id, input });
     const at = (x: number, y: number) => ({ x: x / live.width, y: y / live.height, width: live.width, height: live.height });
     await evaluate('window.keys = []; addEventListener("keydown", e => keys.push(e.key))');
@@ -177,6 +178,33 @@ real('a viewer on another device watches and drives the tab, and hears it come a
     await owner.call('threads.archive', { threadId });
     expect((await gone).tabs).toEqual([]);
   } finally { phone.close(); }
+}, 150_000);
+
+real('a viewer of a still page gets no new picture until the page draws, and the frame it holds stays usable', async () => {
+  const { owner, agent, threadId } = browserFixture;
+  const { tabId } = await agent.call('browser.command', { threadId, action: { kind: 'open', url: url() } });
+  await owner.call('threads.subscribe', { threadId });
+  // A shrunk frame: Chrome scaled a captured clip differently on each capture, so a still page never looked still.
+  const held = await picture(owner.call('browser.remoteFrame', { threadId, tabId, maxWidth: 400 }));
+  expect(jpegSize(held.base64).width).toBe(400);
+  const started = Date.now();
+  for (let i = 0; i < 6; i++) {
+    expect(await owner.call('browser.remoteFrame', { threadId, tabId, maxWidth: 400, after: held.id })).toMatchObject({ unchanged: true, id: held.id, tabId });
+  }
+  // Six answers, each after a second of waiting: past the 5 s a frame is valid for input when nobody refreshes it.
+  expect(Date.now() - started).toBeGreaterThan(5000);
+  await owner.call('browser.remoteInput', { threadId, frameId: held.id, input: { kind: 'tap', x: 200 / held.width, y: 140 / held.height, width: held.width, height: held.height } });
+  expect(await evaluate('document.title')).toBe('clicked');
+  // The click drew the pressed button and back; the next picture shows the page as it now is.
+  await evaluate('document.body.style.background = "rgb(200, 30, 30)"');
+  let shown = held.id, base64 = held.base64;
+  const until = Date.now() + 3000;
+  while (base64 === held.base64 && Date.now() < until) {
+    const next = await owner.call('browser.remoteFrame', { threadId, tabId, maxWidth: 400, after: shown });
+    if (!('unchanged' in next)) { shown = next.id; base64 = next.base64; }
+    await Bun.sleep(150);
+  }
+  expect(base64).not.toBe(held.base64);
 }, 150_000);
 
 real('a recording is an MP4 made in the browser itself, and one left running when the turn ends is thrown away', async () => {
