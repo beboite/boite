@@ -296,6 +296,8 @@ pub fn run() {
             phase("main-window", building);
             platform::watch::remember_main_window(&window);
             platform::watch::watch_webview(&window);
+            // Only the paths of the last drag on this window can be read back.
+            dropped::watch(&window);
             watchdog::start(handle.clone());
             if !hidden() {
                 let tray = std::time::Instant::now();
@@ -369,11 +371,6 @@ pub fn run() {
                         json!({ "scale": scale_factor, "width": new_inner_size.width, "height": new_inner_size.height }));
                 }
                 WindowEvent::ThemeChanged(_) => watchdog::saw(Seen::ThemeChanged),
-                // Kept before the page hears of the drag: only these paths can be read back.
-                WindowEvent::DragDrop(tauri::DragDropEvent::Enter { paths, .. } | tauri::DragDropEvent::Drop { paths, .. }) => {
-                    watchdog::saw(Seen::Other);
-                    closing.state::<dropped::Dropped>().remember(paths);
-                }
                 _ => watchdog::saw(Seen::Other),
             });
             phase("setup", setup);
