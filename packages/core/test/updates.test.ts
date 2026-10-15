@@ -143,14 +143,56 @@ describe('harness updates', () => {
     const dir = mkdtempSync(join(tmpdir(), 'boite-npm-'));
     try {
       const { prefix, link } = npmLayout(dir);
-      expect(npmInstallOf(link)).toEqual({ prefix, packageDir: join(prefix, 'lib', 'node_modules', '@boite-test', 'fake-agent') });
-      expect(npmInstallOf('/usr/lib/node_modules/opencode-ai/bin/opencode.exe')).toEqual({ prefix: '/usr', packageDir: '/usr/lib/node_modules/opencode-ai' });
+      expect(npmInstallOf(link)).toEqual({ prefix, packageDir: join(prefix, 'lib', 'node_modules', '@boite-test', 'fake-agent'), name: '@boite-test/fake-agent' });
+      expect(npmInstallOf('/usr/lib/node_modules/opencode-ai/bin/opencode.exe')).toEqual({ prefix: '/usr', packageDir: '/usr/lib/node_modules/opencode-ai', name: 'opencode-ai' });
       // pnpm and Bun keep their globals elsewhere, and a native install is no npm install.
       expect(npmInstallOf('/home/u/.bun/install/global/node_modules/x/bin/x')).toBeNull();
       expect(npmInstallOf('/home/u/.local/share/claude/versions/2.1.285')).toBeNull();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  test.skipIf(process.platform !== 'win32')('a Windows npm install is known by its shim in the prefix, a bare node_modules is not', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'boite-npm-'));
+    try {
+      const prefix = join(realpathSync(dir), 'npm');
+      const packageDir = join(prefix, 'node_modules', '@boite-test', 'fake-agent');
+      const program = join(packageDir, 'bin', 'fake-agent.exe');
+      mkdirSync(dirname(program), { recursive: true });
+      writeFileSync(program, '');
+      writeFileSync(join(packageDir, 'package.json'), JSON.stringify({ name: '@boite-test/fake-agent', bin: { 'fake-agent': 'bin/fake-agent.exe' } }));
+      // pnpm's global store has the same shape and keeps its shims elsewhere.
+      expect(npmInstallOf(program)).toBeNull();
+      writeFileSync(join(prefix, 'fake-agent.cmd'), '@echo off');
+      expect(npmInstallOf(program)).toEqual({ prefix, packageDir, name: '@boite-test/fake-agent' });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test.skipIf(process.platform === 'win32')('an npm install of the package the registry names is installed by npm at that version, not by the agent\'s updater', async () => {
+    let layout!: ReturnType<typeof npmLayout>;
+    // The agent's own updater fails, as `claude update` did when its five-second `npm view` ran out.
+    const { client, state } = await start('npm', 'update-broken', undefined, (dataDir) => {
+      layout = npmLayout(dataDir);
+      return { kind: 'file', value: layout.link };
+    });
+    const calls = join(harness!.dataDir, 'npm-calls.txt');
+    const cli = join(harness!.dataDir, 'npm-cli.js');
+    writeFileSync(cli, [
+      "const { appendFileSync, writeFileSync } = require('node:fs');",
+      `appendFileSync(${JSON.stringify(calls)}, JSON.stringify({ args: process.argv.slice(2), prefix: process.env.npm_config_prefix }) + '\\n');`,
+      `writeFileSync(${JSON.stringify(state)}, process.argv.at(-1).split('@').at(-1));`,
+    ].join('\n'));
+    harness!.core.updates.npmCli = () => ({ executable: process.execPath, script: cli });
+    expect(only(await client.call('providers.updates', { refresh: true })).latest).toBe('1.1.0');
+    const changed = client.next('providers.updatesChanged', (list) => list[0]?.state === 'idle' && list[0]?.current === '1.1.0', 20000);
+    await client.call('providers.update', { providerId: 'update-fake' });
+    await changed;
+    const ran = readFileSync(calls, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { args: string[]; prefix: string });
+    expect(ran).toEqual([{ args: ['install', '-g', '--allow-scripts=@boite-test/fake-agent', '@boite-test/fake-agent@1.1.0'], prefix: layout.prefix }]);
+    await waitFor(() => harness?.core.procs.liveCount('update:update-fake') === 0);
   });
 
   test('an agent that checks by itself is read, updated by its own updater, and traced', async () => {

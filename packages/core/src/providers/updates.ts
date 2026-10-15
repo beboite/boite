@@ -1,19 +1,19 @@
 import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { userInfo } from 'node:os';
 import { join, resolve, sep } from 'node:path';
-import { stripVTControlCharacters } from 'node:util';
 import type { HarnessUpdate, OsProfile, ProviderDescriptor, ProviderId, ProviderInstall, ProviderSelfUpdate, ThreadId } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { forgetProbes } from '../drivers/index.ts';
 import { notFound, refused } from '../errors.ts';
 import type { InstallOutcome } from './install.ts';
-import { npmInstallOf, unwritableDir } from './npm.ts';
-import { profileFor, resolveCommand } from './resolve.ts';
+import { npmCli, npmInstallOf, unwritableDir, type NpmCommand } from './npm.ts';
+import { profileFor, resolveCommand, type ResolvedCommand } from './resolve.ts';
 import { resumeAfterUpdate, resumePostponed, resumeUnwaited, type Resume } from './update-resume.ts';
 import { readVersion, recheckVersions } from './versions.ts';
 import { forgetWhich } from './which.ts';
 import { compareVersions, INSTALL_LATEST_MAX_AGE_MS, upToDate } from './install-latest.ts';
 import { logUpdate } from './install-log.ts';
+import { capture, failureSummary, stuckReason } from './update-output.ts';
 
 export { readVersion };
 
@@ -36,8 +36,6 @@ const PAUSE_LIMIT_MS = 15 * 60 * 1000;
 const VERSION_TIMEOUT_MS = 20_000;
 /** How long a timed-out run's pipes may stay open once its tree was killed, for a descendant killTree cannot reach. */
 const PIPE_GRACE_MS = 2_000;
-/** What is kept of each stream of an agent's run: its end, where the error line is. */
-const OUTPUT_MAX_BYTES = 256 * 1024;
 /** Agents read at once by a check, so an old machine never starts all of them together. */
 const CHECK_PARALLEL = 2;
 /** An agent's own updater. A managed update has no such limit: its download stops by itself on a dead connection. */
@@ -91,45 +89,6 @@ interface Target {
   route: HarnessUpdate['route'];
   /** The program the route resolves to now, as a person would recognise it. */
   program: string;
-}
-
-/** Reads a stream to its end, keeping its last OUTPUT_MAX_BYTES, so a chatty program never blocks on a full pipe. */
-async function capture(reader: { read(): Promise<{ done: boolean; value?: Uint8Array }> }): Promise<string> {
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (;;) {
-    const chunk = await reader.read();
-    if (chunk.done || chunk.value === undefined) break;
-    chunks.push(chunk.value);
-    size += chunk.value.length;
-    while (size > OUTPUT_MAX_BYTES && chunks.length > 1) size -= chunks.shift()!.length;
-  }
-  const text = Buffer.concat(chunks);
-  return text.subarray(Math.max(0, text.length - OUTPUT_MAX_BYTES)).toString('utf8');
-}
-
-/** stderr carries the failure; stdout often only announces the updater. */
-function failureSummary(stdout: string, stderr: string): string | undefined {
-  const lines = (output: string): string[] => stripVTControlCharacters(output).split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const errors = lines(stderr);
-  const output = errors.length > 0 ? errors : lines(stdout);
-  // npm ends with its log location, after the error explaining the failed operation.
-  return output.find((line) => /\berror:|\b(?:EACCES|EPERM)\b.*(?:permission denied|operation not permitted)/i.test(line)) ?? output.at(-1);
-}
-
-/**
- * Why an updater that exited with zero left its version where it was, in its
- * own words. `opencode upgrade` reports every failure and every skip this way,
- * through a prompt library whose frame falls back to ASCII letters (`x`, `o`)
- * when its output is not a Unicode terminal, and closes with `Done`.
- */
-function stuckReason(output: string): string | undefined {
-  const lines = stripVTControlCharacters(output).split(/\r?\n/)
-    .map((line) => line.trim().replace(/^[^\p{L}\p{N}]+/u, '').replace(/^[xoT]\s{2,}/, '').trim())
-    .filter((line) => /[\p{L}\p{N}]/u.test(line) && !/^done\.?$/i.test(line));
-  // An errno such as EBUSY or EPERM counts in capitals only: `exit` is no error code.
-  const reason = lines.findLast((line) => /fail|error|skipped|unknown|denied|cannot|could not|unable/i.test(line) || /\bE[A-Z]{3,}\b/.test(line)) ?? lines.at(-1);
-  return reason?.slice(0, 300);
 }
 
 async function npmLatest(name: string): Promise<string> {
@@ -197,8 +156,9 @@ export class HarnessUpdates {
   private readonly drains = new Map<ProviderId, Drain>();
   /** When the last whole check finished, kept across restarts. */
   private lastCheckAt: number | null = null;
-  /** Test seams: the registry read, the only providers a check may touch, how long a version read and a pause may take. */
+  /** Test seams: the registry read, npm's own CLI, the only providers a check may touch, how long a version read and a pause may take. */
   npmLatest: (name: string) => Promise<string> = npmLatest;
+  npmCli: () => NpmCommand | null = npmCli;
   only: ReadonlySet<ProviderId> | null = null;
   versionTimeoutMs = VERSION_TIMEOUT_MS;
   pauseLimitMs = PAUSE_LIMIT_MS;
@@ -549,13 +509,19 @@ export class HarnessUpdates {
   }
 
   /** One short run of the agent's own program, traced like every process of an agent. */
-  private async run(target: Target, args: string[], timeoutMs: number): Promise<string> {
+  /**
+   * Runs the agent's program with `args`, or with `via` another program in its
+   * name (npm installing it), and returns what it printed. `label` names the
+   * command in a failure.
+   */
+  private async run(target: Target, args: string[], timeoutMs: number, via?: { command: ResolvedCommand; label: string }): Promise<string> {
     this.assertOpen();
     // An updater just rewrote the program, or it was never asked its version: a
     // candidate that names a major resolves once the program has answered.
-    if (resolveCommand(target.profile) === null) await this.core.providers.settle(this.versionTimeoutMs);
-    const command = resolveCommand(target.profile);
+    if (via === undefined && resolveCommand(target.profile) === null) await this.core.providers.settle(this.versionTimeoutMs);
+    const command = via?.command ?? resolveCommand(target.profile);
     if (command === null) throw new Error(`${target.descriptor.name} is not on this machine any more`);
+    const label = via?.label ?? args.join(' ');
     const spawned = this.core.procs.spawnPiped(updateThreadId(target.descriptor.id), command.executable, [...command.prefix, ...args], {
       cwd: this.core.dataDir,
       env: updaterEnv(command.shown, command.updateEnv),
@@ -577,11 +543,11 @@ export class HarnessUpdates {
     }, timeoutMs);
     try {
       const ran = await Promise.race([Promise.all([capture(readers[0]), capture(readers[1]), spawned.exited]), late]);
-      if (ran === 'late' || timedOut) throw new Error(`${target.descriptor.name} did not answer \`${args.join(' ')}\` within ${Math.round(timeoutMs / 1000)} s`);
+      if (ran === 'late' || timedOut) throw new Error(`${target.descriptor.name} did not answer \`${label}\` within ${Math.round(timeoutMs / 1000)} s`);
       const [stdout, stderr, code] = ran;
       if (code !== 0) {
         const last = failureSummary(stdout, stderr);
-        throw new Error(`\`${args.join(' ')}\` exited with ${code}${last === undefined ? '' : `: ${last.slice(0, 300)}`}`);
+        throw new Error(`\`${label}\` exited with ${code}${last === undefined ? '' : `: ${last.slice(0, 300)}`}`);
       }
       return `${stdout}\n${stderr}`;
     } finally {
@@ -599,7 +565,10 @@ export class HarnessUpdates {
       if (target.route === 'managed') await this.runManaged(target);
       else {
         this.assertWritable(target);
-        said = await this.run(target, (target.profile.update as ProviderSelfUpdate).args, UPDATE_TIMEOUT_MS);
+        const npm = this.npmInstall(target, before);
+        said = npm === null
+          ? await this.run(target, (target.profile.update as ProviderSelfUpdate).args, UPDATE_TIMEOUT_MS)
+          : await this.run(target, npm.args, UPDATE_TIMEOUT_MS, npm);
       }
       // An updater may have moved the program on PATH.
       forgetWhich();
@@ -633,6 +602,29 @@ export class HarnessUpdates {
     }
     this.writeReadings();
     this.emit();
+  }
+
+  /**
+   * The npm command that installs the release the registry named, when the
+   * copy that runs is a global npm install of the very package the descriptor
+   * reads that release from. Boite already knows the version, so it does not
+   * ask the agent's updater to find it again: `claude update` gives its own
+   * `npm view` five seconds, and a cold npm on a slow laptop takes longer, so
+   * every first update failed there (2026-10-15). Null leaves the update to
+   * the agent's own updater.
+   */
+  private npmInstall(target: Target, before: Entry): { args: string[]; command: ResolvedCommand; label: string } | null {
+    const pkg = (target.profile.update as ProviderSelfUpdate).latestNpm;
+    if (pkg === undefined || before.latest === null) return null;
+    const install = npmInstallOf(target.program);
+    if (install === null || install.name !== pkg) return null;
+    const cli = this.npmCli();
+    if (cli === null) return null;
+    const spec = `${pkg}@${before.latest}`;
+    // The agent's program names the install, so the updater environment points npm at its prefix.
+    // npm 12 skips install scripts unless allowed, and Claude's copies its native binary over a stub;
+    // an older npm warns about the flag and goes on.
+    return { args: ['install', '-g', `--allow-scripts=${pkg}`, spec], command: { executable: cli.executable, prefix: [cli.script], shown: target.program, updateEnv: {} }, label: `npm install -g ${spec}` };
   }
 
   /**
