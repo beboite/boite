@@ -151,7 +151,8 @@ as it does a 401, so the driver holds that label until the turn's result: a
 403 in its `api_error_status`, or in the frame's own text ("API Error: 403"),
 fails only that turn, with the API's words after "Claude refused this request;
 the account is still signed in." Any other status signs the account out, and
-so does a CLI that exits before its result. A new login cannot grant a
+so does a CLI that exits before its result. A 401 result signs it out even
+with no labelled frame before it. A new login cannot grant a
 permission, and a signed-out account would refuse every later turn.
 
 Changed account statuses and identities reach every client as `accounts.updated`.

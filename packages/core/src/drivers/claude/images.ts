@@ -31,6 +31,13 @@ export async function fitImage(attachment: ImageAttachment): Promise<ImageAttach
   }
 }
 
-export function fitImages(attachments: readonly ImageAttachment[]): Promise<ImageAttachment[]> {
-  return Promise.all(attachments.map(fitImage));
+/**
+ * One image at a time: a turn takes twenty, and decoding them all at once at
+ * the pixel cap would hold gigabytes. Most are within the edge and cost only
+ * a header read.
+ */
+export async function fitImages(attachments: readonly ImageAttachment[]): Promise<ImageAttachment[]> {
+  const fitted: ImageAttachment[] = [];
+  for (const attachment of attachments) fitted.push(await fitImage(attachment));
+  return fitted;
 }

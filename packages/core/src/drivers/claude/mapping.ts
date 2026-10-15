@@ -229,6 +229,8 @@ export function isAuthenticationFailure(reason: string): boolean {
 
 /** The HTTP status of a refused request that a new login cannot cure: a permission, not a credential. */
 export const FORBIDDEN = 403;
+/** The HTTP status of a refused credential: an expired, revoked or invalid login. */
+const UNAUTHORIZED = 401;
 
 /**
  * The HTTP status of the API failure a frame reports: the result's own
@@ -265,8 +267,10 @@ export function authenticationSuspectOf(message: SDKMessage): boolean {
  */
 export function authenticationFailureOf(message: SDKMessage, suspect = false): string | null {
   if (subagentOf(message) !== null || message.type !== 'result') return null;
-  if (apiErrorStatusOf(message) === FORBIDDEN) return null;
-  if (suspect) return errorSentence('authentication_failed');
+  const status = apiErrorStatusOf(message);
+  if (status === FORBIDDEN) return null;
+  // A result can carry the 401 with no labelled frame before it, in words the text matcher does not know.
+  if (suspect || status === UNAUTHORIZED) return errorSentence('authentication_failed');
   if (message.subtype === 'success' && !message.is_error) return null;
   const reason = message.subtype === 'success' ? message.result : message.errors.join('; ');
   return isAuthenticationFailure(reason) ? reason : null;
