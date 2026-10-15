@@ -725,6 +725,16 @@ increases from 4,872,000 to 4,898,000 bytes, leaving 9,174 bytes of headroom;
 entry and core limits stay unchanged. Totals exclude precompressed copies, as
 `bun scripts/ci/budgets.ts` does.
 
+### Process load pacing and trace rows
+
+On 2026-10-15, after integrating `main` at `3202e281`, `bun run build:core`
+with Bun 1.4.2 on Linux measured 4,157,306 bytes of core JavaScript. Main
+measured 4,145,283 at that commit. The load pacer, the bare-name spawn
+resolver and Git launcher swap, the trace row pruning, the jobs packet filter
+and the guard pump wake add 12,023 bytes. The core JavaScript budget increases
+from 4,152,000 to 4,164,000 bytes, leaving 6,694 bytes of headroom; UI and
+core entry limits stay unchanged.
+
 ## The desktop browser on a phone
 
 A paired phone watching the desktop's browser tab, before the agent's browser
