@@ -108,11 +108,12 @@ test('an owner with no group gets Add a device and Join; adding a device starts 
   expect(one('group-leave')).toBeNull();
 });
 
-test('Add a device shows one QR code and a code, closes, and a machine that joins with the link spends it', async () => {
+test('Add a device shows one QR code and no code to type, closes, and a machine that joins with the link spends it', async () => {
   const first = await grouped();
   one<HTMLButtonElement>('group-add-device')!.click();
   await vi.waitFor(() => { flushSync(); expect(one('add-device-qr')?.querySelector('svg')).toBeTruthy(); });
-  expect(one('add-device-code')!.textContent).toBe(first.deviceInvite!.code);
+  expect(one('add-device-code')).toBeNull();
+  expect(one('add-device')!.textContent).toContain(strings.group.scanTitle);
   expect(one('lan-reach')).toBeNull();
   one<HTMLButtonElement>('add-device-close')!.click();
   await vi.waitFor(() => { flushSync(); expect(one('add-device')).toBeNull(); });

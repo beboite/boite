@@ -1,4 +1,5 @@
 import { readdirSync, rmSync, statSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -99,14 +100,17 @@ const REMOVE_DEADLINE_MS = 15_000;
 /**
  * Deletes a directory the run created, retrying with backoff while Windows
  * still holds a file of it. False, and one warning naming the path, when it
- * outlived the deadline: a leak is reported, never silent.
+ * outlived the deadline: a leak is reported, never silent. Asynchronous: a
+ * synchronous delete of a Chrome profile held the test process for 2 to 3 s on
+ * the Windows runner, and with it the Vite server, the in-process core and
+ * every other page of the file (2026-10-15).
  */
 export async function removeDirectory(path: string, deadlineMs = REMOVE_DEADLINE_MS): Promise<boolean> {
   const deadline = Date.now() + deadlineMs;
   let wait = 50;
   for (;;) {
     try {
-      rmSync(path, { recursive: true, force: true });
+      await rm(path, { recursive: true, force: true });
       return true;
     } catch (error) {
       if (Date.now() + wait > deadline) {
