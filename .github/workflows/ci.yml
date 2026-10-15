@@ -231,12 +231,21 @@ jobs:
     env:
       BOITE_E2E_PREBUILT_UI: '1'
       BOITE_E2E_FAKE_UI: tests/e2e/.artifacts/fake-ui
+      BOITE_E2E_PROBE: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
       - run: bun run build:ui
+      - name: Runner facts (temporary)
+        continue-on-error: true
+        run: |
+          Get-CimInstance Win32_ComputerSystem | Select-Object NumberOfLogicalProcessors,TotalPhysicalMemory | Format-List
+          Get-MpComputerStatus | Select-Object RealTimeProtectionEnabled,AntivirusEnabled,BehaviorMonitorEnabled | Format-List
+          (Get-MpPreference).ExclusionPath
+          (Get-Item 'C:\Program Files\Google\Chrome\Application\chrome.exe').VersionInfo.ProductVersion
+          Get-NetTCPSetting -SettingName Internet | Select-Object DynamicPortRangeStartPort,DynamicPortRangeNumberOfPorts | Format-List
       - name: Prepare end-to-end tests
         run: bun tests/e2e/lib/warm.ts $env:BOITE_E2E_FAKE_UI
       # Each runner has its own Vite cache. Files stay sequential within a shard.

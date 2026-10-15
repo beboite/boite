@@ -1,5 +1,8 @@
 import { afterAll } from 'bun:test';
 import { sweepStaleDirectories } from './e2e/lib/cleanup.ts';
+import { startProbe } from './e2e/lib/probe.ts';
+
+startProbe();
 
 // Tests never send production analytics. Telemetry tests inject their own relay.
 process.env.BOITE_TELEMETRY_URL = '';

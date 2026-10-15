@@ -1,6 +1,7 @@
 import { createRequire } from 'node:module';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { probeLog } from './probe.ts';
 
 const root = join(import.meta.dir, '../../../packages/ui');
 const requireUi = createRequire(join(root, 'package.json'));
@@ -47,8 +48,11 @@ export async function startUi(port: number, options: { development?: boolean } =
 export async function startDevUi(port: number): Promise<{ close(): Promise<void> }> {
   const server = await createServer({ root, plugins: [fixtureBridge], server: { host: '127.0.0.1', port, strictPort: true }, clearScreen: false });
   try {
+    const at = performance.now();
     await server.listen();
-    await transformAll(server, '/src/main.ts');
+    const listened = performance.now();
+    const count = await transformAll(server, '/src/main.ts');
+    probeLog(`dev server ${port}: listen ${Math.round(listened - at)} ms, ${count} modules in ${Math.round(performance.now() - listened)} ms`);
   } catch (error) {
     await server.close();
     throw error;
@@ -66,7 +70,7 @@ interface DevServer {
   environments: { client: { moduleGraph: { getModuleByUrl(url: string): Promise<{ importedModules: Set<{ url: string }> } | undefined> } } };
 }
 
-async function transformAll(server: DevServer, entry: string): Promise<void> {
+async function transformAll(server: DevServer, entry: string): Promise<number> {
   const graph = server.environments.client.moduleGraph;
   const seen = new Set<string>();
   let wave = [entry];
@@ -82,4 +86,5 @@ async function transformAll(server: DevServer, entry: string): Promise<void> {
     }));
     wave = next;
   }
+  return seen.size;
 }
