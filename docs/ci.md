@@ -151,11 +151,23 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 593,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,906,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,928,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,110,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,127,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-15, updating another Windows PC's desktop app (PR #498) merged
+with PR #494 measures 4,926,156 UI bytes and 4,125,352 core JavaScript bytes
+after fresh `bun run build:ui` and `bun run build:core` on Linux. The limits
+become 4,928,000 and 4,127,000; the entry limits stay unchanged.
+
+On 2026-10-15, the server update's handoff and the slimmer backup (PR #494),
+with a handoff time in the update cards since removed, measured 4,917,711 UI bytes
+and 4,119,340 core JavaScript bytes after fresh `bun run build:ui` and
+`bun run build:core` on Linux, 711 and 340 bytes over the limits of that day;
+Windows CI measured 4,119,299 core bytes. The limits become 4,919,000 and
+4,121,000; the entry limits stay unchanged.
 
 On 2026-10-14, files dropped on the desktop window going to the composer
 (`lib/native-drop.ts`, the attach overlay and its English and French strings)
