@@ -62,3 +62,11 @@ no longer calls `deliver` for a recipient whose team is paused or off, where
 held mail at once instead of at the next tick
 (`packages/core/test/delegation.test.ts`, "a paused team keeps its results
 until the owner resumes it, then they wake the parent at once").
+
+## Core bundle size
+
+`coreJavaScript` in `scripts/ci/budgets.json` goes from 4,127,000 to
+4,131,000 bytes. `bun run build:core` on Linux, 2026-10-15: 4,127,241 bytes on
+main (2adac07b), 4,130,934 on the branch, so the branch adds 3,693
+bytes: the bounded journal walks, the copy memo and file reference cache, the
+per-pump delegation config map and the undelivered-run set.
