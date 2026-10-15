@@ -1,4 +1,5 @@
 import type { Project, ProjectId } from '@boite/contracts';
+import { wasDropped } from '../client';
 import { strings } from '../strings';
 import { work } from '../work-prefs.svelte';
 import type { Draft } from '../store.svelte';
@@ -217,18 +218,27 @@ export class Projects {
   /**
    * Puts a project away or brings it back. Put away, the screen leaves it:
    * the thread or draft that was open in it gives way to where the app lands.
+   * A machine that is not connected still shows the projects it last sent:
+   * the choice is kept on this device and sent when the machine is back.
    */
   async archiveProject(projectId: ProjectId, archived: boolean): Promise<boolean> {
     const client = this.ctx.client;
     const clientGeneration = this.ctx.clientGeneration;
     if (!client) return false;
-    try {
-      const project = await client.call('projects.archive', { projectId, archived });
-      if (!this.ctx.currentClient(client, clientGeneration)) return false;
-      this.upsertProject(project);
-    } catch (error) {
-      if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
-      return false;
+    if (client.state !== 'ready') {
+      const project = this.projects.find((p) => p.id === projectId);
+      if (!project) return false;
+      this.#writePending({ ...this.#readPending(), [projectId]: archived });
+      this.upsertProject(withArchived(project, archived));
+    } else {
+      try {
+        const project = await client.call('projects.archive', { projectId, archived });
+        if (!this.ctx.currentClient(client, clientGeneration)) return false;
+        this.upsertProject(project);
+      } catch (error) {
+        if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
+        return false;
+      }
     }
     const s = this.ctx.store;
     if (archived && (s.openThread?.projectId === projectId || this.draft?.projectId === projectId)) {
@@ -240,6 +250,79 @@ export class Projects {
       await s.openWhereLeft();
     }
     return true;
+  }
+
+  /** Per core, like the last project: archive choices made while it was away. */
+  #pendingKey(): string { return 'boite.pendingArchive.v1:' + JSON.stringify([this.ctx.store.endpointUrl, this.ctx.store.core?.dataDir]); }
+  #readPending(): Record<string, boolean> {
+    try {
+      const value: unknown = JSON.parse(localStorage.getItem(this.#pendingKey()) ?? '{}');
+      if (value === null || typeof value !== 'object' || Array.isArray(value)) return {};
+      return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, boolean] => typeof entry[1] === 'boolean'));
+    } catch {
+      return {};
+    }
+  }
+  #writePending(pending: Record<string, boolean>): void {
+    try {
+      if (Object.keys(pending).length === 0) localStorage.removeItem(this.#pendingKey());
+      else localStorage.setItem(this.#pendingKey(), JSON.stringify(pending));
+    } catch { /* storage unavailable: the choice lasts until this client reloads */ }
+  }
+
+  /**
+   * A list the machine sent on reconnect, with the archive choices made while
+   * it was away laid over it, so the sidebar does not show them undone while
+   * they are sent.
+   */
+  withPendingArchives(projects: Project[]): Project[] {
+    const pending = this.#readPending();
+    if (Object.keys(pending).length === 0) return projects;
+    return projects.map((project) => {
+      const archived = pending[project.id];
+      return archived === undefined ? project : withArchived(project, archived);
+    });
+  }
+
+  /**
+   * Sends the archive choices made while the machine was away. A project the
+   * machine no longer lists drops its choice; a call the connection lost keeps
+   * it for the next reconnect.
+   */
+  sendPendingArchives(listed: Project[]): Promise<void> {
+    // Two loads close together would send the same choice twice.
+    this.#sending = this.#sending.then(() => this.#sendPending(listed));
+    return this.#sending;
+  }
+  #sending: Promise<void> = Promise.resolve();
+
+  async #sendPending(listed: Project[]): Promise<void> {
+    const client = this.ctx.client;
+    const generation = this.ctx.clientGeneration;
+    const pending = this.#readPending();
+    if (!client || Object.keys(pending).length === 0) return;
+    const byId = new Map(listed.map((p) => [p.id, p]));
+    for (const [projectId, archived] of Object.entries(pending)) {
+      if (!this.ctx.currentClient(client, generation) || client.state !== 'ready') return;
+      const listedProject = byId.get(projectId);
+      if (listedProject) {
+        try {
+          const project = await client.call('projects.archive', { projectId, archived });
+          if (this.ctx.currentClient(client, generation)) this.upsertProject(project);
+        } catch (error) {
+          // Lost with the connection: the next reconnect sends it again.
+          if (wasDropped(error) || client.state !== 'ready' || !this.ctx.currentClient(client, generation)) return;
+          // Refused: the machine's own state stands.
+          this.ctx.fail(error);
+          this.upsertProject(listedProject);
+        }
+      }
+      const rest = this.#readPending();
+      if (rest[projectId] === archived) {
+        delete rest[projectId];
+        this.#writePending(rest);
+      }
+    }
   }
 
   /**
@@ -452,4 +535,10 @@ export class Projects {
     if (!draft) return;
     this.draft = { ...draft, worktree, worktreeExplicit: true };
   }
+}
+
+function withArchived(project: Project, archived: boolean): Project {
+  if (archived) return { ...project, archived: true };
+  const { archived: _, ...rest } = project;
+  return rest;
 }

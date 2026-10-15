@@ -2153,6 +2153,11 @@ export interface Settings {
    */
   asyncQuestions?: boolean;
   /**
+   * Every normal turn asks the agent for short answers: result first, no
+   * preamble, recap or commentary between tool calls. Missing reads as on.
+   */
+  shortAnswers?: boolean;
+  /**
    * Agents may read this machine's anonymized diagnostics and draft an issue
    * from them (`boite logs`, `boite issue`). Missing reads as on.
    */

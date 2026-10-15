@@ -35,6 +35,7 @@ export interface SettingPlace {
  */
 export const REQUESTABLE_SETTINGS = {
   asyncQuestions: { page: 'general', section: 'conversations', sensitive: false },
+  shortAnswers: { page: 'general', section: 'conversations', sensitive: false },
   titleModel: { page: 'general', section: 'conversations', sensitive: false },
   threadDoneRetentionDays: { page: 'general', section: 'archived', sensitive: true },
   threadDeletionRetentionDays: { page: 'general', section: 'archived', sensitive: true },
@@ -113,6 +114,7 @@ export type SettingRequestParams = { threadId: ThreadId; reason: string } & (
 /** What a missing key means, for the keys the core's defaults leave out. */
 const MISSING: Partial<Record<RequestableSetting, unknown>> = {
   asyncQuestions: true,
+  shortAnswers: true,
   titleModel: null,
   autoCompact: null,
   publicUrl: null,
