@@ -46,7 +46,7 @@ agent's version is on its machine's card and nowhere else.
 | Route | Applies to | Installed version | Newest version | Update |
 | --- | --- | --- | --- | --- |
 | `managed` | a release Boite downloaded into its agents directory | the release record | the version the shipped descriptor pins, or the one its publisher names | `providers.install`, checksum included |
-| `self` | the user's own install, found on PATH or at a known path | the agent's `--version` | the npm `latest` tag, or the agent's own check | the agent's own updater |
+| `self` | the user's own install, found on PATH or at a known path | the agent's `--version` | the npm `latest` tag, or the agent's own check | `npm install -g` for a global npm install of the `latestNpm` package, else the agent's own updater |
 
 A managed release only moves with a Boite release, because its URL and SHA-256
 are pinned in the descriptor, unless its install block names a publisher
@@ -57,7 +57,14 @@ run to update itself, so a crash of an old release's own updater cannot stop
 it. Such a release only moves forward: after a restart, before the publisher is
 read again, the pin may be older than what is on disk, and it is not offered.
 The self route invokes the installed program with its descriptor's updater
-arguments; the program owns the download.
+arguments; the program owns the download. The exception is a global npm
+install of the very package `latestNpm` names: Boite already read the version
+from the registry, so it runs npm's own CLI with Node,
+`npm install -g --allow-scripts=<package> <package>@<version>`, and never asks
+the agent to look the version up again. npm 12 skips install scripts unless
+they are allowed, and Claude's script puts its native binary in place. `claude update` gives its own `npm view` five seconds; a cold
+npm on a slow laptop took longer, and every first update there failed while the
+second passed (2026-10-15).
 
 A profile opts in with an `update` block:
 
@@ -79,16 +86,17 @@ package starts its binary through a Node script that sets
 Codex installation method` without it. The Windows descriptor runs that binary
 directly, so its two npm candidates set the variable themselves.
 
-An agent installed by npm on Linux or macOS updates through `npm install -g`,
-which writes under npm's configured prefix. That prefix is not always the one
-holding the copy Boite runs: Codex under `/opt/boite` with a system npm whose
-prefix is `/usr` would install a second copy in `/usr/lib/node_modules` and
-leave the old one first on PATH. When the program resolves into
-`<prefix>/lib/node_modules`, the core runs its updater with `npm_config_prefix`
-set to that prefix. Before it runs, the core checks that its user can write the
-package's parent directory and `<prefix>/bin`. When it cannot, the update fails
-at once with the prefix and the directory it cannot write, without running the
-updater.
+An agent installed by npm updates through `npm install -g`, which writes under
+npm's configured prefix. That prefix is not always the one holding the copy
+Boite runs: Codex under `/opt/boite` with a system npm whose prefix is `/usr`
+would install a second copy in `/usr/lib/node_modules` and leave the old one
+first on PATH. When the program resolves into `<prefix>/lib/node_modules`, or on
+Windows into `<prefix>\node_modules` with npm's `.cmd` shim for one of the
+package's commands in `<prefix>`, the core runs npm or the agent's updater with
+`npm_config_prefix` set to that prefix. Before it runs, the core checks that its
+user can write the package's parent directory and `<prefix>/bin` (`<prefix>` on
+Windows). When it cannot, the update fails at once with the prefix and the
+directory it cannot write, without running anything.
 
 `latestNpm` and `latestArgs` exclude each other. With neither, the installed
 version is listed, no update is announced and `Run its updater` stays on the

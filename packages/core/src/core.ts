@@ -59,6 +59,7 @@ import { BrainStore } from './brain.ts';
 import { HookLedger } from './hooks.ts';
 import { TerminalStore } from './terminals.ts';
 import { ServerUpdates, type ServerUpdateOptions } from './server-update.ts';
+import { DesktopUpdates } from './desktop-update.ts';
 
 export { CORE_VERSION } from './version.ts';
 
@@ -166,6 +167,8 @@ export class Core {
   readonly telemetry: Telemetry;
   readonly updates: HarnessUpdates;
   readonly serverUpdates: ServerUpdates;
+  /** The desktop app's updater as this machine's own window reports it. */
+  readonly desktopUpdates: DesktopUpdates;
   readonly coordination: Coordination;
   /** The machines this core trusts as one owner's, and what it hands their clients. */
   readonly group: GroupStore;
@@ -209,16 +212,7 @@ export class Core {
     if (!this.#onShutdown) return 'unsupported';
     if (this.#idleShutdownAdmitted) return 'accepted';
     if (this.#shutdownRequested || this.#stopping) return 'busy';
-    const scheduler = this.scheduler.state();
-    const threads = this.threads;
-    if (this.router.activeRequests > 0 || scheduler.running.length > 0 || scheduler.queued.length > 0
-      // An agent's open tab is not work under way: its browser stays up after the turn and would hold an
-      // update back for good. Closing saves each profile's cookies; a browser command in flight is an active request.
-      || this.agentRuntime.busy || this.procs.liveThreads().some(scope => scope !== BROWSER_SCOPE)
-      || threads.sideQuestions.busy || this.updates.busy
-      || threads.runner.handles.size > 0 || threads.runner.steering.size > 0
-      || threads.deferred.pendingWakes.size > 0 || threads.deferred.deferredAnswers.size > 0 || threads.deferred.consumed.size > 0
-      || [...threads.agentState.background.values()].some(tasks => tasks.length > 0)) return 'busy';
+    if (!this.idle()) return 'busy';
     // Persist an updater's acknowledgement before closing admission or scheduling exit.
     beforeShutdown?.();
     this.logs.info('Idle shutdown accepted: no turn, request or agent process is running', { source: 'core', event: 'core.idle-shutdown.accepted' });
@@ -229,6 +223,39 @@ export class Core {
     this.procs.stopAccepting();
     this.requestShutdown();
     return 'accepted';
+  }
+
+  /**
+   * The server update's way out when the machine never goes idle: a busy
+   * server (an agent working for hours, a resident agent) held the idle gate
+   * shut for good. An agent install still half-written refuses, since the
+   * restart would replace the core under it; anything else is handed to the
+   * next core (`requestHandoffShutdown`), which resumes the running turns.
+   */
+  requestUpdateHandoff(beforeShutdown?: () => void): 'accepted' | 'busy' | 'unsupported' {
+    if (!this.#onShutdown) return 'unsupported';
+    if (this.#idleShutdownAdmitted) return 'accepted';
+    if (this.#shutdownRequested || this.#stopping || this.updates.busy) return 'busy';
+    beforeShutdown?.();
+    this.logs.info('Update handoff accepted: running turns end their tool call, then resume after the restart', { source: 'core', event: 'core.update-handoff.accepted' });
+    this.#idleShutdownAdmitted = true;
+    this.requestHandoffShutdown();
+    return 'accepted';
+  }
+
+  /** No turn, request, agent process, background task or agent install is under way. */
+  private idle(): boolean {
+    const scheduler = this.scheduler.state();
+    const threads = this.threads;
+    if (this.router.activeRequests > 0 || scheduler.running.length > 0 || scheduler.queued.length > 0
+      // An agent's open tab is not work under way: its browser stays up after the turn and would hold an
+      // update back for good. Closing saves each profile's cookies; a browser command in flight is an active request.
+      || this.agentRuntime.busy || this.procs.liveThreads().some(scope => scope !== BROWSER_SCOPE)
+      || threads.sideQuestions.busy || this.updates.busy
+      || threads.runner.handles.size > 0 || threads.runner.steering.size > 0
+      || threads.deferred.pendingWakes.size > 0 || threads.deferred.deferredAnswers.size > 0 || threads.deferred.consumed.size > 0
+      || [...threads.agentState.background.values()].some(tasks => tasks.length > 0)) return false;
+    return true;
   }
 
   /**
@@ -319,6 +346,7 @@ export class Core {
     this.telemetry = new Telemetry(this);
     this.updates = new HarnessUpdates(this);
     this.serverUpdates = new ServerUpdates(this, options.serverUpdates);
+    this.desktopUpdates = new DesktopUpdates(this);
     this.coordination = new Coordination(this);
     this.group = new GroupStore(this);
     this.group.restore();
@@ -405,7 +433,7 @@ export class Core {
       version: this.version,
       ...(this.bundleHash ? { bundleHash: this.bundleHash } : {}),
       protocolVersion: PROTOCOL_VERSION,
-      features: { threadSnapshots: true, chunkedAnswers: true, readingPages: true, deferredToolParts: true, deviceKeys: true, draftPreparation: true, attachmentUploads: true, revealMachines: true },
+      features: { threadSnapshots: true, chunkedAnswers: true, readingPages: true, deferredToolParts: true, deviceKeys: true, draftPreparation: true, attachmentUploads: true, revealMachines: true, desktopUpdates: true },
       coreId: this.coordination.card().coreId,
       hostname: hostname(),
       os: currentOs(),
@@ -472,6 +500,7 @@ export class Core {
     this.updates.close();
     this.providers.close();
     this.serverUpdates.close();
+    this.desktopUpdates.close();
     await this.drain();
     await this.delegation.close();
     await this.coordination.close();
