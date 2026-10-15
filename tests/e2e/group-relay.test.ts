@@ -60,7 +60,7 @@ afterAll(async () => {
   if (certificates !== undefined) rmSync(certificates, { recursive: true, force: true });
   await server?.close();
   for (const core of cores) await core.stop();
-}, 15_000);
+}, 30_000);
 
 test('a phone that cannot reach a machine of its group reaches it through the machine it paired with, chats there, and says so', async () => {
   const home = await startCore(),

@@ -52,7 +52,7 @@ beforeAll(async () => {
   await scheme('dark');
   await viewport(1280, 800);
 }, 60_000);
-afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
+afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
 test('the desktop page charts each day by provider, reads a column on hover and keys, and lists models and threads', async () => {
   await openUsage();

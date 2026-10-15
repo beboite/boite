@@ -62,7 +62,7 @@ test('commands are colored with aligned wrapping and four permission choices', a
   }
   await size(false);
 }, 30_000);
-afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
+afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
 test('the draft sentence follows worktree, permissions, model and effort on desktop and phone', async () => {
   await page.click(id('new-thread'));

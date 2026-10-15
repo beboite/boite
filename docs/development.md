@@ -569,6 +569,11 @@ diagnostics get at most 250 ms. A wait after `page.close()` fails immediately.
 
 `page.close()` requests CDP shutdown; POSIX also sends SIGTERM. A stalled browser
 falls back to its captured PID, waits for exit and retries profile removal.
+Removal and the core harness's tree kill are asynchronous: a synchronous delete
+of a Windows profile held the test process, its Vite server and in-process core
+for 2 to 3 s. Closing a browser there took up to 7 s, so every E2E `afterAll`
+names a deadline of at least 30 s instead of Bun's 5 s default
+(`scripts/ci/e2e-harness.test.ts`).
 Cleanup reports retained directories and the test preload removes interrupted
 `boite-e2e-*` directories older than an hour. `cleanup.test.ts` checks teardown.
 Never terminate processes by executable name or a path pattern.
