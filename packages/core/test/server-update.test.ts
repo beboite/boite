@@ -52,7 +52,7 @@ test('a downloaded archive is verified over every byte, refused when altered, an
   try {
     for (const algorithm of ['ED', 'Ed'] as const) {
       const offer = { version: '2.1.0', publishedAt: '', url: `http://127.0.0.1:${server.port}/payload.zip`, signature: Buffer.from(signs(archive, algorithm)).toString('base64') };
-      const directory = join(root, algorithm);
+      const directory = join(root, algorithm === 'ED' ? 'prehashed' : 'legacy');
       mkdirSync(directory);
       served = archive;
       let last = 0;
