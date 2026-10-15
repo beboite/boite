@@ -191,7 +191,7 @@ describe('harness updates', () => {
     await client.call('providers.update', { providerId: 'update-fake' });
     await changed;
     const ran = readFileSync(calls, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { args: string[]; prefix: string });
-    expect(ran).toEqual([{ args: ['install', '-g', '@boite-test/fake-agent@1.1.0'], prefix: layout.prefix }]);
+    expect(ran).toEqual([{ args: ['install', '-g', '--allow-scripts=@boite-test/fake-agent', '@boite-test/fake-agent@1.1.0'], prefix: layout.prefix }]);
     await waitFor(() => harness?.core.procs.liveCount('update:update-fake') === 0);
   });
 

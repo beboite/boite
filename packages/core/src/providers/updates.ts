@@ -622,7 +622,9 @@ export class HarnessUpdates {
     if (cli === null) return null;
     const spec = `${pkg}@${before.latest}`;
     // The agent's program names the install, so the updater environment points npm at its prefix.
-    return { args: ['install', '-g', spec], command: { executable: cli.executable, prefix: [cli.script], shown: target.program, updateEnv: {} }, label: `npm install -g ${spec}` };
+    // npm 12 skips install scripts unless allowed, and Claude's copies its native binary over a stub;
+    // an older npm warns about the flag and goes on.
+    return { args: ['install', '-g', `--allow-scripts=${pkg}`, spec], command: { executable: cli.executable, prefix: [cli.script], shown: target.program, updateEnv: {} }, label: `npm install -g ${spec}` };
   }
 
   /**

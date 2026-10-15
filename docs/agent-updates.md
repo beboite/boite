@@ -60,8 +60,9 @@ The self route invokes the installed program with its descriptor's updater
 arguments; the program owns the download. The exception is a global npm
 install of the very package `latestNpm` names: Boite already read the version
 from the registry, so it runs npm's own CLI with Node,
-`npm install -g <package>@<version>`, and never asks the agent to look the
-version up again. `claude update` gives its own `npm view` five seconds; a cold
+`npm install -g --allow-scripts=<package> <package>@<version>`, and never asks
+the agent to look the version up again. npm 12 skips install scripts unless
+they are allowed, and Claude's script puts its native binary in place. `claude update` gives its own `npm view` five seconds; a cold
 npm on a slow laptop took longer, and every first update there failed while the
 second passed (2026-10-15).
 
