@@ -861,7 +861,9 @@ way (`questions.answer` `attachments`); see [Providers](providers.md).
 
 The core validates bytes and writes sanitized, content-addressed copies under
 `<dataDir>/attachments/`. Copies survive resume and are currently not removed
-by archive or project removal. Timeline cards download those copies. Composer
+by archive or project removal. A copy the core wrote or compared is not read
+again while its size, mtime and inode stay the same; an agent's edit changes
+them, and the next reference gets a fresh copy. Timeline cards download those copies. Composer
 `[Image N]` references follow attachment order, preview inline and renumber after
 removal. A tile opens its picture large above the box; a second click on the
 tile, or a click on the large picture, puts it away. Copying or cutting a reference carries its picture
