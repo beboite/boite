@@ -36,6 +36,9 @@ export class FrameQueue {
   private timer: ReturnType<typeof setTimeout> | null = null;
   /** A pump is queued as a microtask. */
   private soon = false;
+  /** Time the microtask pumps took since the last timer pump or pause, and when the last one ended. */
+  private fastSpent = 0;
+  private fastEnd = 0;
   private count = 0;
   private bytes = 0;
   private closed = false;
@@ -133,16 +136,25 @@ export class FrameQueue {
   /**
    * A request that finds the queue idle runs in a microtask, after the frames
    * of the same read have queued, so a flood is still bounded before any of it
-   * runs. Busy, the queue pumps on a 1 ms timer, which lets HTTP, drains and
-   * other clients in between slices. Not `setImmediate`: with it, Windows CI
-   * left a client's last request queued until its socket closed.
+   * runs. Those microtask pumps share one 4 ms slice, refilled by a timer pump
+   * or a 4 ms pause: a burst of quick requests, each finding the queue idle,
+   * cannot hold the loop. Otherwise the queue pumps on a 1 ms timer, which lets
+   * HTTP, drains and other clients in between slices. Not `setImmediate`: with
+   * it, Windows CI left a client's last request queued until its socket closed.
    */
   private schedule(idle = false): void {
     if (this.closed || this.pending.size === 0 || this.timer !== null || this.soon) return;
-    if (idle) {
+    if (idle && performance.now() - this.fastEnd >= SLICE_MS) this.fastSpent = 0;
+    if (idle && this.fastSpent < SLICE_MS) {
       this.soon = true;
-      queueMicrotask(() => { if (this.soon) this.pump(); });
-    } else this.timer = setTimeout(() => this.pump(), 1);
+      queueMicrotask(() => {
+        if (!this.soon) return;
+        const started = performance.now();
+        this.pump();
+        this.fastEnd = performance.now();
+        this.fastSpent += this.fastEnd - started;
+      });
+    } else this.timer = setTimeout(() => { this.fastSpent = 0; this.pump(); }, 1);
   }
 
   private cancel(): void {
