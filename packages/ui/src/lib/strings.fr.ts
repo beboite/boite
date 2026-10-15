@@ -915,6 +915,8 @@ export const fr: Translation = {
       monitoringFor: 'Surveille depuis {elapsed}',
       background: 'En arrière-plan',
       backgroundFor: 'En arrière-plan depuis {elapsed}',
+      watching: 'Surveille une PR',
+      watchingMany: 'Surveille {count} PR',
       awaiting: 'Attend : {what}',
       interrupted: 'Interrompu',
       unreachable: 'Injoignable',
@@ -1660,7 +1662,20 @@ export const fr: Translation = {
     markDone: 'Confirmer que c\'est fait',
     removeTodo: 'Supprimer ce todo',
     collapse: 'Replier cette section',
-    expand: 'Déplier cette section'
+    expand: 'Déplier cette section',
+    watchSection: 'PR surveillées',
+    noWatches: 'Aucune PR surveillée',
+    watchHint: 'Boite lit la PR sur GitHub environ une fois par minute et réveille l’agent quand un check échoue, que les checks passent, qu’une review ou un commentaire arrive ou que la branche entre en conflit',
+    watchNotRead: 'Pas encore lue',
+    watchNoChecks: 'Aucun check',
+    watchChecks: '{total} checks',
+    watchRunning: '{count} en cours',
+    watchFailed: '{count} en échec',
+    watchConflict: 'En conflit avec {base}',
+    watchRateLimited: 'Limite de requêtes GitHub, prochaine lecture {time}',
+    watchUnreachable: 'GitHub injoignable, prochaine lecture {time}',
+    stopWatch: 'Arrêter la surveillance',
+    stopWatchOf: 'Ne plus surveiller #{number}'
   },
 
   files: {

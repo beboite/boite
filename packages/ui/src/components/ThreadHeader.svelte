@@ -5,7 +5,7 @@
   import { entrust } from '../lib/thread-entrust';
   import { tick } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
-  import { ArrowLeft, ChevronDown, FolderInput, GitBranch, Network, PanelRight, Search, SquareTerminal, UsersRound, VenetianMask } from '@lucide/svelte';
+  import { ArrowLeft, ChevronDown, FolderInput, GitBranch, GitPullRequest, Network, PanelRight, Search, SquareTerminal, UsersRound, VenetianMask } from '@lucide/svelte';
   import { focusOnMount } from '../lib/actions';
   import { contextMenu } from '../lib/context-menu.svelte';
   import { pendingLine } from '../lib/thread-move.svelte';
@@ -16,6 +16,7 @@
   import { controlMenu } from '../lib/controls';
   import type { Store } from '../lib/store.svelte';
   import Menu from './Menu.svelte';
+  import { watchStatus } from '../lib/pull-request-watch';
   import ContextModeBadge from './ContextModeBadge.svelte';
   import CoordinationDialog from './CoordinationDialog.svelte';
   let { store }: { store: Store } = $props();
@@ -215,6 +216,21 @@
           <span class="chip-name ui-label">{fill(strings.resident.lookedAfterBy, { name: resident.name })}</span>
         </button>
       {/if}
+      {#if thread && (thread.pullRequestWatches?.length ?? 0) > 0}
+        {@const watches = thread.pullRequestWatches ?? []}
+        <!-- What a watch saw and its Stop, on a phone too: a paired phone has no Tasks panel. -->
+        <span class="watch-chip" data-testid="thread-watches">
+          <Menu
+            items={watches.map((watch): MenuItem => ({ id: watch.url, label: fill(strings.tasks.stopWatchOf, { number: String(watch.number) }), hint: watchStatus(watch), title: watch.url, glyph: GitPullRequest }))}
+            onpick={(url) => void store.unwatchPullRequest(thread.id, url)}
+            label={strings.tasks.watchSection}
+            placement="bottom"
+            testid="thread-watches-trigger"
+          >
+            <GitPullRequest size={13} strokeWidth={1.75} /><span class="ui-label">{watches.map((watch) => `#${watch.number}`).join(' ')}</span>
+          </Menu>
+        </span>
+      {/if}
       {#if thread?.branch && work.shows('header.branch')}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <span class="chip path branch mono" title="{thread.branch}: {strings.thread.branchHint}: {thread.cwd}" data-testid="thread-branch" oncontextmenu={(event) => controlMenu(event, store, 'header.branch')}>
@@ -317,6 +333,8 @@
   .chip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .branch-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .branch :global(svg) { flex: none; }
+  .watch-chip { flex: none; display: inline-flex; color: var(--color-accent); }
+  .watch-chip :global(svg) { flex: none; }
 
   .trace {
     flex: none;

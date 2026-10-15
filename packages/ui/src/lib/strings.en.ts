@@ -935,6 +935,9 @@ export const strings = {
       /** The turn ended, the agent still runs a shell, a subagent or a workflow. */
       background: 'In background',
       backgroundFor: 'In background for {elapsed}',
+      /** The turn ended, Boite watches pull requests for the agent and wakes it when they need it. */
+      watching: 'Watching PR',
+      watchingMany: 'Watching {count} PRs',
       /** A delegated agent's turn ended on its own background work, which wakes it: what it waits for. */
       awaiting: 'Waiting on {what}',
       /** That work ended without waking it: the agent stopped there, its result never came. */
@@ -1766,7 +1769,21 @@ export const strings = {
     markDone: 'Confirm it is done',
     removeTodo: 'Remove this todo',
     collapse: 'Fold this section',
-    expand: 'Unfold this section'
+    expand: 'Unfold this section',
+    /** The pull requests the agent asked Boite to watch (`boite pr watch`). */
+    watchSection: 'Pull request watches',
+    noWatches: 'No pull request watched',
+    watchHint: 'Boite reads the pull request on GitHub about once a minute and wakes the agent when a check fails, the checks pass, a review or comment lands or the branch conflicts',
+    watchNotRead: 'Not read yet',
+    watchNoChecks: 'No checks',
+    watchChecks: '{total} checks',
+    watchRunning: '{count} running',
+    watchFailed: '{count} failed',
+    watchConflict: 'Conflicts with {base}',
+    watchRateLimited: 'GitHub rate limit, next read {time}',
+    watchUnreachable: 'GitHub out of reach, next read {time}',
+    stopWatch: 'Stop watching',
+    stopWatchOf: 'Stop watching #{number}'
   },
 
   /** The file tree and the file viewer, the two surfaces reading the working directory. */

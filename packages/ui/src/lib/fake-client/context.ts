@@ -103,6 +103,8 @@ export interface FakeClientOptions {
   delegationDemo?: boolean;
   /** An agent with an entrusted project, a picture, a memory pass and a notice, on `?fake=1&agents=1`. */
   agentsDemo?: boolean;
+  /** Two pull request watches on the trace thread, one paused by GitHub's rate limit, on `?fake=1&watch=1`. */
+  watchDemo?: boolean;
   /** Who this client is. `'session'` makes it a paired phone, refused like one. */
   principal?: Principal;
   /**

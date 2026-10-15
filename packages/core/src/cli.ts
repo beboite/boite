@@ -60,6 +60,10 @@ ${CONTROL_HELP}
                                  user's Device panel, capture and drive it
   pr list|refresh                this conversation's linked pull requests
   pr link|unlink <url>           attach or remove a PR link; does not change GitHub
+  pr watch [<url|number>]        wake this thread when the PR's checks fail or
+                                 pass, a review or comment lands or it starts
+                                 to conflict; end your turn instead of polling
+  pr unwatch [<url|number>]      stop one watch, or all of this thread's
   view <file.html>               draw an HTML page at the end of your answer
                                  (--title <text>); view help has the rules
                                  and the app's look, view example a full page
@@ -349,7 +353,17 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
     },
     pr: async () => {
       const action = rest[0] ?? 'list';
-      if (!['list', 'refresh', 'link', 'unlink'].includes(action) || rest.length > (action === 'link' || action === 'unlink' ? 2 : 1)) throw new Usage('pr expects list, refresh, link <url> or unlink <url>');
+      if (!['list', 'refresh', 'link', 'unlink', 'watch', 'unwatch'].includes(action) || rest.length > (action === 'list' || action === 'refresh' ? 1 : 2)) throw new Usage('pr expects list, refresh, link <url>, unlink <url>, watch [<url|number>] or unwatch [<url|number>]');
+      if (action === 'watch') {
+        const watch = await client.call('threads.watchPullRequest', { threadId, ...(rest[1] === undefined ? {} : { url: rest[1] }) });
+        print([`watching #${watch.number} ${watch.url}: ${watchStatus(watch)}`, 'Boite wakes this thread when it changes: end your turn, do not poll.'], watch);
+        return;
+      }
+      if (action === 'unwatch') {
+        const left = await client.call('threads.unwatchPullRequest', { threadId, ...(rest[1] === undefined ? {} : { url: rest[1] }) });
+        print(left.length ? left.map(watch => `still watching #${watch.number} ${watch.url}: ${watchStatus(watch)}`) : ['no pull request watched'], left);
+        return;
+      }
       const result = action === 'link' || action === 'unlink'
         ? await client.call(action === 'link' ? 'threads.linkPullRequest' : 'threads.unlinkPullRequest', { threadId, url: want(1, 'a pull request URL') })
         : await client.call('threads.pullRequests', { threadId, refresh: action === 'refresh' });
@@ -701,4 +715,14 @@ export function processIo(): CliIo {
     env: process.env,
     cwd: process.cwd(),
   };
+}
+
+/** One line on what a watch last saw, for `boite pr watch` and `unwatch`. */
+export function watchStatus(watch: import('@boite/contracts').PullRequestWatch): string {
+  const paused = watch.paused ? `paused until ${new Date(watch.paused.until).toISOString()} (${watch.paused.reason === 'rate-limit' ? 'GitHub rate limit' : watch.paused.message})` : null;
+  const seen = watch.seen;
+  if (!seen) return paused ?? 'not read yet';
+  const { total, running, failed } = seen.checks;
+  const checks = total === 0 ? 'no checks' : `${total} checks, ${running} running, ${failed} failed`;
+  return [`head ${seen.head}`, checks, seen.conflicting ? `conflicts with ${seen.base}` : null, paused].filter(Boolean).join('; ');
 }
