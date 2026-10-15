@@ -155,8 +155,13 @@ export class ServerUpdates {
         }
       } else {
         let admission: 'accepted' | 'busy' | 'unsupported';
+        const admit = () => writeFileSync(join(directory, 'admitted'), id, { mode: 0o600 });
         try {
-          admission = this.core.requestIdleShutdown(() => writeFileSync(join(directory, 'admitted'), id, { mode: 0o600 }));
+          // Idle installs at once; busy work ends its tool call, 30 s at most, and resumes
+          // after the restart, as a desktop update does. Waiting for idle held a server
+          // with an agent working for hours on "Waiting for work to finish" for good.
+          admission = this.core.requestIdleShutdown(admit);
+          if (admission === 'busy') admission = this.core.requestUpdateHandoff(admit);
         } catch (error) {
           this.cancelFiles(); this.abort = null; this.poll = null;
           this.move({ phase: 'error', error: messageOf(error) });
