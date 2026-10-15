@@ -574,7 +574,12 @@ process. `packages/core/test/lazy-driver.test.ts` covers these boundaries.
 runtime, is imported where it unzips. Evaluating it builds its Huffman tables,
 about 8 ms per core start measured on 2026-09-25, for code most starts never
 run. `packages/core/test/startup-imports.test.ts` fails if a static import
-brings it back.
+brings it back. The same test keeps `node:util` and `node:dns` out of the
+static graph: terminal escapes are stripped by `packages/core/src/ansi.ts`, and
+the MagicDNS lookup imports its resolver when it runs. The recommended plugin
+list is parsed on the first plugins call. The compiled Linux server carries
+ESM bytecode like the desktop sidecar. Measurements:
+`bench/results/2026-10-15-perf-media.md`.
 
 The core lists its providers twice before it listens (the registry loads, then
 the default accounts ask which ones are available), and again for every client

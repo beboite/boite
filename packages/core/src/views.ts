@@ -10,8 +10,7 @@ import { mkdir, rename, unlink, writeFile } from 'node:fs/promises';
 import { closeSync, constants, fstatSync, openSync, readFileSync } from 'node:fs';
 import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { promisify } from 'node:util';
-import { gzip } from 'node:zlib';
+import { gzip, type InputType, type ZlibOptions } from 'node:zlib';
 import {
   VIEW_BLEED, VIEW_DEFAULT_HEIGHT, VIEW_MAX_BYTES, VIEW_NARROW_WIDTH, VIEW_ROUTE, VIEW_TITLE_MAX, VIEW_WIDTH,
   clampViewHeight, viewDocument, viewTitleOf,
@@ -29,7 +28,9 @@ const VIEW_MIME = 'text/html';
  * gzip rather than br because a phone on plain http is offered no br.
  */
 export const VIEW_GZIP_SUFFIX = '.gz';
-const gzipped = promisify(gzip);
+// Not `promisify`: importing `node:util` costs every core start (startup-imports.test.ts).
+const gzipped = (data: InputType, options: ZlibOptions): Promise<Buffer> =>
+  new Promise((done, fail) => gzip(data, options, (error, result) => (error ? fail(error) : done(result))));
 
 /** What a page may embed from the disk, by extension. Anything else is refused by name. */
 const EMBEDDED: Record<string, string> = {

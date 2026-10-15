@@ -83,3 +83,60 @@ after the other was tried and dropped. In headless Chrome at a 4x CPU slowdown,
 on a 1920x1080 canvas: PNG `toBlob` 170 ms, JPEG 122 ms, both started together
 290 ms (medians of 5). Chrome runs the two encodes one after the other anyway,
 and starting both holds two canvases in memory at once.
+
+## Diagnostics live poll
+
+`DiagnosticLogs.query({ since: now - 5000, limit: 200 })`, the query the
+Diagnostics page sends every 3 s, over 8 full 2 MiB `core.N.ndjson` files whose
+modification times are one hour apart. Ten calls after one warm-up, three
+runs each, back to back, `nice -n 10 bun logs-poll.ts <logs.ts>` (a throwaway
+script that writes the files in a fresh temporary directory). Before is
+`logs.ts` of `3202e281`, after the branch's, which opens no file last written
+more than 10 minutes before `since`.
+
+| | before | after |
+| --- | ---: | ---: |
+| poll, ms (median of 10, median of 3 runs) | 481.9 | 57.1 |
+| first 1 h page that fills its limit, ms | 65.3 | 59.7 |
+
+## Log records kept in memory
+
+Heap after 4,096 `logs.debug` calls (short `process.started` records, flushed
+every 512), measured with `heapStats().heapSize` after `Bun.gc(true)` before
+and after, three runs each, `nice -n 10 bun logs-heap.ts <logs.ts>`. Before,
+memory kept the last 4,096 records; after, only those the files do not hold.
+
+| | before | after |
+| --- | ---: | ---: |
+| heap growth, KiB (median of 3) | 2,125 | 169 |
+
+## Core start: RSS at ready
+
+The bundled core (`bun run --cwd packages/core build`), started with
+`bun packages/core/dist/main.js --data-dir <fresh> --port 0` and
+`BOITE_HOST_AGENTS=0` until it prints `boite-core ready`; RSS read from
+`/proc/<pid>/status` at that line and 3 s later. Five starts per run, three
+runs, `nice -n 10`. After keeps `node:util` and `node:dns` out of the startup
+graph and parses the recommended plugin list on first use. Load average was
+17 to 21 during both, so the ready time is noise.
+
+| | before | after |
+| --- | ---: | ---: |
+| RSS at ready, MiB (median of 3 runs) | 59.1 | 57.6 |
+| RSS 3 s after ready, MiB | 58.5 | 56.9 |
+| ready, ms | 131.7 | 139.8 |
+
+## Linux server binary cold start
+
+`BOITE_ALLOW_BUN_MISMATCH=1 bun run build:core:linux` (this machine has Bun
+1.4.2, the pin is 1.4.3; both builds used 1.4.2), then the same start-to-ready
+script on `dist/boite-core-linux-x64`, seven starts per run, three runs,
+`nice -n 10`. "Without bytecode" is the branch's sources compiled with the
+old flags, to separate the two changes.
+
+| | before (`3202e281`) | branch, without bytecode | branch, `--bytecode --format=esm` |
+| --- | ---: | ---: | ---: |
+| ready, ms (median of 3 runs) | 225.1 | 259.0 | 83.1 |
+| RSS at ready, MiB | 70.0 | 69.1 | 71.5 |
+| RSS 3 s after ready, MiB | 65.7 | 65.5 | 71.3 |
+| binary, bytes | 85,485,024 | 85,485,024 | 99,345,888 |
