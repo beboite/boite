@@ -13,13 +13,14 @@ import { consumeCodexReset } from '../src/drivers/codex/models.ts';
 import { memoryLimitOfJob, cpuRateOfGlobalJob } from '../src/platform/windows/jobs.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import { TITLE_RETRY } from '../src/threads/retitle.ts';
+import { CONFIG_READ } from '../src/drivers/codex/config.ts';
 import type { TestCore } from './harness.ts';
 import { countLogLines, countProcesses, readScriptedLog, writeScriptedProvider } from './scripted-provider.ts';
 
 /** The fake Codex app-server: a real ndjson JSON-RPC process over stdio, run by bun. */
 const FAKE_SERVER = fileURLToPath(new URL('./fixtures/codex-server.ts', import.meta.url));
 /** The fixture's environment switches a test may set; every one is cleared after it. */
-const FAKE_SWITCHES = ['CODEX_FAKE_NO_LIVE_SETTINGS', 'CODEX_FAKE_FORK_ERROR', 'CODEX_FAKE_FORK_SAME', 'CODEX_FAKE_LOST', 'CODEX_FAKE_DEAF', 'CODEX_FAKE_SLOW_START', 'CODEX_FAKE_HOOKS', 'CODEX_FAKE_INIT_FAILURES', 'CODEX_FAKE_INIT_ERROR', 'CODEX_FAKE_CRASH_ERROR', 'CODEX_FAKE_INIT_RPC_ERROR', 'CODEX_FAKE_LOGIN_WAIT', 'CODEX_FAKE_RESET_CREDITS', 'CODEX_FAKE_RESET_ERROR', 'CODEX_FAKE_SLOW_MODELS', 'CODEX_FAKE_ARCHIVED', 'CODEX_FAKE_MCP', 'CODEX_FAKE_CONFIG_READ_ERROR', 'CODEX_FAKE_GRACE'];
+const FAKE_SWITCHES = ['CODEX_FAKE_NO_LIVE_SETTINGS', 'CODEX_FAKE_FORK_ERROR', 'CODEX_FAKE_FORK_SAME', 'CODEX_FAKE_LOST', 'CODEX_FAKE_DEAF', 'CODEX_FAKE_SLOW_START', 'CODEX_FAKE_HOOKS', 'CODEX_FAKE_INIT_FAILURES', 'CODEX_FAKE_INIT_ERROR', 'CODEX_FAKE_CRASH_ERROR', 'CODEX_FAKE_INIT_RPC_ERROR', 'CODEX_FAKE_LOGIN_WAIT', 'CODEX_FAKE_RESET_CREDITS', 'CODEX_FAKE_RESET_ERROR', 'CODEX_FAKE_SLOW_MODELS', 'CODEX_FAKE_ARCHIVED', 'CODEX_FAKE_MCP', 'CODEX_FAKE_CONFIG_READ_ERROR', 'CODEX_FAKE_GRACE', 'CODEX_FAKE_CONFIG_READ_HANG'];
 
 test('native collaboration is journalled and appears in Team without using Boite delegation', async () => {
   const client = await startCore();
@@ -742,6 +743,19 @@ describe('codex driver', () => {
     for (const open of ['thread/start', 'thread/resume']) {
       const config = fakeLog().split('\n').find(line => line.startsWith(`config:${open} `));
       expect(JSON.parse(config!.slice(`config:${open} `.length))).toEqual({ 'tools.update_plan.enabled': true, mcp_optional_startup_grace_ms: 10_000 });
+    }
+  });
+
+  test('a Codex silent on config/read still opens the thread, with the grace, once the read times out', async () => {
+    process.env['CODEX_FAKE_CONFIG_READ_HANG'] = '1';
+    CONFIG_READ.timeoutMs = 50;
+    try {
+      const client = await startCore({ warmProcessMinutes: 0 });
+      const threadId = await codexThread(client);
+      await runTurn(client, threadId, 'first');
+      expect(fakeLog()).toContain('config:thread/start {"tools.update_plan.enabled":true,"mcp_optional_startup_grace_ms":10000}');
+    } finally {
+      CONFIG_READ.timeoutMs = 10_000;
     }
   });
 
@@ -1674,7 +1688,7 @@ describe('codex driver', () => {
       20000,
     );
     // The user's MCP servers, one already off and one with a dot in its name.
-    process.env['CODEX_FAKE_MCP'] = JSON.stringify({ ssh: { command: 'ssh-mcp', enabled: true }, 'blender.lab': { command: 'blender-mcp' }, idle: { command: 'idle', enabled: false } });
+    process.env['CODEX_FAKE_MCP'] = '{"ssh":{"command":"ssh-mcp","enabled":true},"blender.lab":{"command":"blender-mcp"},"__proto__":{"command":"proto-mcp"},"idle":{"command":"idle","enabled":false}}';
     const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
     const finished = client.next('turn.finished', turn => turn.threadId === thread.id, 20000);
     await client.call('turns.start', { threadId: thread.id, prompt: 'remember the word pelican', attachments: [{ kind: 'image', mimeType: 'image/png', data: png, name: 'pelican.png' }] });
@@ -1688,7 +1702,7 @@ describe('codex driver', () => {
     expect(countLines(`image data:image/png;base64,${png}`)).toBe(2);
     // No MCP server, plugin or app starts for a title: only the conversation's own thread keeps them.
     expect(fakeLog()).toContain(`config/read cwd=${harness!.dataDir} noPlugins=true`);
-    expect(countLines('config:thread/start {"mcp_servers":{"ssh":{"enabled":false},"blender.lab":{"enabled":false}}}')).toBe(1);
+    expect(countLines('config:thread/start {"mcp_servers":{"ssh":{"enabled":false},"blender.lab":{"enabled":false},"__proto__":{"enabled":false}}}')).toBe(1);
     expect(fakeLog()).toContain('config:thread/start {"tools.update_plan.enabled":true');
     // Its app-server is gone with the answer, traced under the thread.
     await waitFor(() => harness?.core.procs.liveCount(thread.id) === 0);

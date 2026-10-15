@@ -571,6 +571,8 @@ function handle(method: string, raw: unknown): unknown {
     case 'config/read': {
       log(`config/read cwd=${textOf(params['cwd'])} noPlugins=${process.argv.includes('features.plugins=false') && process.argv.includes('features.apps=false')}`);
       if (process.env['CODEX_FAKE_CONFIG_READ_ERROR'] === '1') throw new Error('unknown method config/read');
+      // `CODEX_FAKE_CONFIG_READ_HANG=1`: a Codex that never answers it.
+      if (process.env['CODEX_FAKE_CONFIG_READ_HANG'] === '1') return new Promise(() => undefined);
       // `CODEX_FAKE_MCP=<json>`: the `mcp_servers` table of the effective config.
       // `CODEX_FAKE_GRACE=<ms>`: the user's own `mcp_optional_startup_grace_ms`; Codex answers null when unset.
       const grace = process.env['CODEX_FAKE_GRACE'];

@@ -8,9 +8,16 @@ interface CodexConfig {
   mcp_optional_startup_grace_ms?: number | null;
 }
 
+/**
+ * How long `config/read` may take. It reads local files, so a Codex silent past
+ * this is treated like one that refused it rather than hold the thread open.
+ * Mutable for the tests.
+ */
+export const CONFIG_READ = { timeoutMs: 10_000 };
+
 /** The effective configuration of `cwd`: the user's and the project's `config.toml` layers merged by Codex. */
 export async function readConfig(rpc: CodexRpc, cwd: string): Promise<CodexConfig> {
-  const read = await rpc.request<{ config?: CodexConfig | null }>('config/read', { cwd });
+  const read = await rpc.request<{ config?: CodexConfig | null }>('config/read', { cwd }, { timeoutMs: CONFIG_READ.timeoutMs });
   return read?.config ?? {};
 }
 
@@ -36,12 +43,10 @@ export async function threadConfig(rpc: CodexRpc, cwd: string, log: (level: 'inf
  * The `thread/start` override that turns off every MCP server the effective
  * config declares. Each server is named, since an override of `mcp_servers`
  * merges into the user's servers rather than replacing them, and nested so a
- * name with a dot stays one key. A server already off is left out.
+ * name with a dot stays one key. A server already off is left out. Built with
+ * `Object.fromEntries` so any name, `__proto__` included, is an own key.
  */
 export function mcpServersOff(config: CodexConfig): Record<string, { enabled: false }> | null {
-  const off: Record<string, { enabled: false }> = {};
-  for (const [name, server] of Object.entries(config.mcp_servers ?? {})) {
-    if (server?.enabled !== false) off[name] = { enabled: false };
-  }
-  return Object.keys(off).length === 0 ? null : off;
+  const names = Object.entries(config.mcp_servers ?? {}).filter(([, server]) => server?.enabled !== false).map(([name]) => name);
+  return names.length === 0 ? null : Object.fromEntries(names.map(name => [name, { enabled: false as const }]));
 }
