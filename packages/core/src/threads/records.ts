@@ -68,6 +68,7 @@ export function withLoad(core: Core, thread: ThreadSummary): ThreadSummary {
     moveNote: thread.agentSessionId ? null : pendingMoveNote(core, thread.id),
     pendingAnswers: [...(core.threads?.deferred?.deferredAnswers.get(thread.id) ?? [])],
     openQuestions: core.threads?.cards?.openAsyncCount(thread.id) ?? 0,
+    retry: core.threads?.runner?.retryOf(thread.id) ?? core.threads?.limitResumes?.retryOf(thread.id) ?? null,
   };
 }
 

@@ -162,6 +162,11 @@ phone offer Resume and Discard through `turns.recover`; neither creates a second
 input. Work that may already have reached a provider is never replayed by this
 recovery path. Explicit restart handoff keeps its own authorization rules.
 
+A turn a provider refused for availability retries at capacity within the same
+turn, or, with `autoResumeLimitedThreads`, resumes after a usage limit's reset
+from a plan journalled under `limit-resumes`; `ThreadSummary.retry` shows
+either ([usage](usage.md#when-a-provider-refuses-a-turn)).
+
 Owner and paired-device connections name one visible conversation through
 `threads.focus`. Claude, Codex, ACP, pi and Muse can prepare their traced process
 and native session before a prompt, without creating a turn, message or model prompt.

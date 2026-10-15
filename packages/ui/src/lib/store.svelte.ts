@@ -538,6 +538,12 @@ export class Store {
   createThread(...args: Parameters<Threads['createThread']>) { return this.#ctx.threads.createThread(...args); }
   update(...args: Parameters<Threads['update']>) { return this.#ctx.threads.update(...args); }
   recoverTurn(...args: Parameters<Threads['recoverTurn']>) { return this.#ctx.threads.recoverTurn(...args); }
+  /** Gives up the retry the core planned for the thread; its row's `retry` clears with the core's update. */
+  async cancelRetry(threadId: ThreadId) {
+    const client = this.#ctx.client;
+    if (!client) return;
+    try { await client.call('turns.cancelRetry', { threadId }); } catch (error) { this.#ctx.fail(error); }
+  }
   threadCapabilities(...args: Parameters<Threads['capabilities']>) { return this.#ctx.threads.capabilities(...args); }
   setPermissionMode(...args: Parameters<Threads['setPermissionMode']>) { return this.#ctx.threads.setPermissionMode(...args); }
   rename(...args: Parameters<Threads['rename']>) { return this.#ctx.threads.rename(...args); }

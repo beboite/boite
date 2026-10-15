@@ -226,7 +226,18 @@ export interface TurnResult {
    * entry (`Turn.checkpoint`). Absent when the driver has none.
    */
   checkpoint?: { sessionId: string; entry: string };
+  /**
+   * The provider refused the turn for availability, not for a fault of the
+   * request, and said so unambiguously: `capacity` when the model is at
+   * capacity right now (Codex `serverOverloaded`, Claude `overloaded_error`),
+   * `usage-limit` when the account's subscription window is spent, with its
+   * reset when the agent reported one. The core retries or resumes on it
+   * (`threads/retries.ts`); a driver that cannot tell leaves it out.
+   */
+  refusal?: TurnRefusal;
 }
+
+export type TurnRefusal = { kind: 'capacity' } | { kind: 'usage-limit'; resetsAt: number | null };
 
 export type PromptCacheLife = Pick<import('@boite/contracts').PromptCache, 'ttlSeconds' | 'maxSeconds' | 'source'>;
 

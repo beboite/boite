@@ -14,6 +14,7 @@ import {
   type RpcParams,
   type RpcResult,
   type ThreadId,
+  type ThreadRetry,
 } from '@boite/contracts';
 import { RpcFailure, type CallOptions, type ClientState, type EventHandler, type ObservableClient } from './client';
 import { closedFailure } from './rpc-error';
@@ -54,6 +55,7 @@ import { devicesMethods } from './fake-client/devices';
 import { pullRequestMethods } from './fake-client/pull-requests';
 import { worktreeMethods } from './fake-client/worktrees';
 import { serverUpdateMethods } from './fake-client/server-update';
+import { planRetry, retryMethods, seedRetry } from './fake-client/retry';
 import { closeSideQuestions } from './fake-client/side-questions';
 import { holdAfterRestart } from './fake-client/recovery';
 import { journalInspectionMethods } from './fake-client/journal-inspection';
@@ -98,6 +100,7 @@ export class FakeClient implements ObservableClient {
     seed(ctx);
     if (options.delegationDemo) seedDelegationDemo(ctx);
     if (options.agentsDemo) seedAgentsDemo(ctx);
+    seedRetry(ctx);
     if (options.uninstalled) {
       ctx.providers = ctx.providers.filter(provider => provider.id !== 'echo').map(provider => ({
         ...provider, available: false, executable: null,
@@ -155,6 +158,11 @@ export class FakeClient implements ObservableClient {
   holdAfterRestart(threadId: ThreadId, prompt: string) {
     return holdAfterRestart(this.#ctx, threadId, prompt);
   }
+  /** A fixture for a retry the core planned: the thread's row carries it until it is cancelled. */
+  planRetry(threadId: ThreadId, retry: ThreadRetry) {
+    planRetry(this.#ctx, threadId, retry);
+  }
+
 
   /**
    * Takes a folder off the fake's disk, as a repository deleted outside the
@@ -393,6 +401,7 @@ export class FakeClient implements ObservableClient {
       ...brainMethods(ctx),
       ...logMethods(ctx),
       ...serverUpdateMethods(ctx),
+      ...retryMethods(ctx),
       ...hookMethods(ctx),
       ...pairingMethods(ctx),
       ...projects,

@@ -12,6 +12,7 @@ import { codexQuotaDetails } from '../src/quota-details.ts';
 import { consumeCodexReset } from '../src/drivers/codex/models.ts';
 import { memoryLimitOfJob, cpuRateOfGlobalJob } from '../src/platform/windows/jobs.ts';
 import { startTestCore, waitFor } from './harness.ts';
+import { CAPACITY_RETRY } from '../src/threads/turn-attempts.ts';
 import type { TestCore } from './harness.ts';
 import { countLogLines, countProcesses, readScriptedLog, writeScriptedProvider } from './scripted-provider.ts';
 
@@ -678,6 +679,26 @@ describe('codex driver', () => {
     const thread = await client.call('threads.get', { threadId });
     expect(thread.progress).toBeNull();
     expect(thread.messages.flatMap(message => message.parts).some(part => part.type === 'error')).toBe(false);
+  });
+
+  test('a turn Codex refuses at capacity tries again by itself and a usage limit plans a resume at the spent window', async () => {
+    const delays = CAPACITY_RETRY.delaysMs;
+    CAPACITY_RETRY.delaysMs = [20, 20, 20];
+    try {
+      const client = await startCore({ autoResumeLimitedThreads: true });
+      const threadId = await codexThread(client);
+      await runTurn(client, threadId, 'Continue [at-capacity]');
+      expect(fakeLog().match(/at-capacity refused/g)).toHaveLength(1);
+
+      const finished = client.next('turn.finished', turn => turn.threadId === threadId, 20000);
+      await client.call('turns.start', { threadId, prompt: 'Go on [usage-limited]' });
+      const failed = await finished;
+      expect(failed.status).toBe('error');
+      expect(failed.error).toContain('usage limit');
+      // The five-hour window is the spent one, in milliseconds; the weekly one is not spent.
+      await waitFor(() => harness!.core.threads.list({}).find(thread => thread.id === threadId)?.retry?.resetsAt === 4_102_444_800_000);
+      expect(await client.call('turns.cancelRetry', { threadId })).toEqual({ cancelled: true });
+    } finally { CAPACITY_RETRY.delaysMs = delays; }
   });
 
   test('service tiers are model-specific, persisted and sent on the frozen turn', async () => {
