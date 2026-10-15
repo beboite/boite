@@ -361,3 +361,22 @@ test('a failed cancellation keeps installation waiting and reports the error', a
   expect(updater.cancelling).toBe(false);
   expect(updater.busy).toBe(true);
 });
+
+test('a release another machine asks for installs without a dialog, and only the release this window offers', async () => {
+  const native = backend({ check: vi.fn(async () => snapshot({ phase: 'available', version: '2.1.0' })) });
+  const updater = new AppUpdater(native, new FakeClock(), () => true);
+  const stop = updater.start();
+  await updater.settled();
+  updater.check('stable');
+  await updater.settled();
+
+  // A stale request names another release: nothing downloads or installs.
+  expect(await updater.installRequested('2.0.9')).toBe(false);
+  expect(native.download).not.toHaveBeenCalled();
+
+  expect(await updater.installRequested('2.1.0')).toBe(true);
+  expect(native.download).toHaveBeenCalledOnce();
+  await updater.settled();
+  expect(native.install).toHaveBeenCalledOnce();
+  stop();
+});

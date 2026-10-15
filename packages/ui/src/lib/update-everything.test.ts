@@ -94,3 +94,51 @@ test('Boite restarting on a machine out of reach is not done, and an offer put o
   const offered = reconcileRows([], planOf([machine('m2')], null), () => true, 0);
   expect(reconcileRows(offered, [], () => true, 100)).toEqual([]);
 });
+
+test("another Windows PC's desktop app is a part of its own, offered from here, never on a system whose installer asks there", () => {
+  const manual = { mode: 'manual', phase: 'idle', currentVersion: '2.0.0', version: null, received: 0, total: null, error: null } as const;
+  const plan = planOf([
+    machine('pc-b', { os: 'windows', server: manual, desktop: { ...app, phase: 'ready' }, agents: [agent('claude')] }),
+    // A .deb or a macOS installer may prompt with nobody at that machine.
+    machine('laptop', { os: 'macos', server: manual, desktop: app }),
+    // This computer's own app stays the window's updater, never a report.
+    machine('pc', { local: true, server: null, os: 'windows', desktop: app })
+  ], null);
+  expect(plan.map((entry) => [entry.id, entry.parts.map((part) => part.id)])).toEqual([['pc-b', ['desktop', 'claude']]]);
+  // Downloaded there but not installed: still an offer from here, since its window installs on request.
+  expect(plan[0]!.parts[0]).toMatchObject({ name: 'Boite', from: '2.0.0', version: '2.1.0', state: 'offered', startable: true });
+  expect(offerKeys(plan)).toEqual(['pc-b/desktop@2.1.0', 'pc-b/claude@1.1.0']);
+
+  const parts = (reading: Partial<MachineReading>) => planOf([machine('pc-b', { os: 'windows', server: manual, ...reading })], null)[0]?.parts ?? [];
+  expect(parts({ desktop: { ...app, phase: 'downloading', received: 50, total: 200 } })[0]).toMatchObject({ state: 'downloading', percent: 25, startable: false });
+  expect(parts({ desktop: { ...app, phase: 'installing' } })[0]).toMatchObject({ state: 'installing', startable: false });
+  // Asked while no window was open there: failed with the core's reason, and offered again.
+  const failure = { version: '2.1.0', message: 'Boite is not open on PC-B' };
+  expect(parts({ desktop: null, desktopFailure: failure })[0]).toMatchObject({ id: 'desktop', state: 'failed', message: 'Boite is not open on PC-B', startable: true });
+  expect(parts({ desktop: app, desktopFailure: failure })[0]).toMatchObject({ state: 'failed', startable: true });
+  // The window took it after all.
+  expect(parts({ desktop: { ...app, phase: 'downloading' }, desktopFailure: failure })[0]).toMatchObject({ state: 'downloading' });
+  expect(parts({ desktop: { ...app, phase: 'current', version: null } })).toEqual([]);
+});
+
+test("another PC's desktop app installing keeps its row while that PC restarts out of reach, and lands once it is back", () => {
+  const manual = { mode: 'manual', phase: 'idle', currentVersion: '2.0.0', version: null, received: 0, total: null, error: null } as const;
+  const installing = planOf([machine('pc-b', { os: 'windows', server: manual, desktop: { ...app, phase: 'installing' } })], null);
+  let rows = reconcileRows([], installing, () => true, 0);
+  rows = reconcileRows(rows, [], () => false, 400);
+  expect(rows.map((row) => [row.key, row.part.state, row.doneAt])).toEqual([['pc-b/desktop', 'installing', null]]);
+  rows = reconcileRows(rows, [], () => false, 30_000);
+  expect(rows.map((row) => row.doneAt)).toEqual([null]);
+  // Back on the new version: the new core has no offer left, so the row shows its check.
+  rows = reconcileRows(rows, [], () => true, 31_000);
+  expect(rows.map((row) => [row.key, row.doneAt])).toEqual([['pc-b/desktop', 31_000]]);
+});
+
+test("a release another PC's core took waits there for its agents, then follows its window", () => {
+  const manual = { mode: 'manual', phase: 'idle', currentVersion: '2.0.0', version: null, received: 0, total: null, error: null } as const;
+  const part = (reading: Partial<MachineReading>) => planOf([machine('pc-b', { os: 'windows', server: manual, desktopRequested: '2.1.0', ...reading })], null)[0]?.parts[0];
+  expect(part({ desktop: app })).toMatchObject({ id: 'desktop', state: 'waiting', startable: false });
+  expect(part({ desktop: { ...app, phase: 'downloading' } })).toMatchObject({ state: 'downloading' });
+  // A newer release than the one asked for is offered again.
+  expect(part({ desktop: { ...app, version: '2.2.0' } })).toMatchObject({ state: 'offered', startable: true });
+});
