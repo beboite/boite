@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, setSystemTime, test } from 'bun:test';
 import { GROUP_INVITE_PREFIX, type CoordinationConfig } from '@boite/contracts';
 import { createHash } from 'node:crypto';
 import { connect } from '../src/client.ts';
@@ -492,6 +492,66 @@ test('a machine removed while it was unreachable learns it from the first member
   await (b.core.group as unknown as { syncPending(): Promise<void> }).syncPending();
   expect(b.core.group.view('owner')).toBeNull();
   expect(b.core.journal.getSetting('group')).toBeUndefined();
+});
+
+test('a member that stops answering waits longer each time, unless the roster changes or it is heard from', async () => {
+  const a = await machine();
+  const b = await machine();
+  await a.core.group.create('Home');
+  await join(a, b);
+  type Store = { syncPending(): Promise<void>; pending: Set<Promise<unknown>> };
+  const store = a.core.group as unknown as Store;
+  // A change is offered from a microtask: let it start, then wait for every exchange in flight on both sides.
+  const settle = async () => {
+    await Bun.sleep(0);
+    for (const side of [store, b.core.group as unknown as Store]) while (side.pending.size > 0) await Promise.allSettled([...side.pending]);
+  };
+  await settle();
+  type Exchange = (peer: { coreId: string }, operation: string, payload: unknown) => Promise<unknown>;
+  // Neither machine reaches the other: any signed request from b, a directory read included, would end a's wait.
+  let down = true;
+  let offers = 0;
+  const cut = (from: TestCore, count: boolean) => {
+    const wire = from.core.coordination as unknown as { exchange: Exchange };
+    const real = wire.exchange.bind(wire);
+    wire.exchange = async (peer, operation, payload) => {
+      if (count && operation === 'group.sync' && peer.coreId === id(b)) offers += 1;
+      if (down) throw new Error('peer request failed');
+      return real(peer, operation, payload);
+    };
+    return () => { wire.exchange = real; };
+  };
+  const restore = [cut(a, true), cut(b, false)];
+  /** Offers to b made by one more round. */
+  const round = async () => { const before = offers; await store.syncPending(); return offers - before; };
+  try {
+    // A change goes out at once; b does not answer.
+    a.core.group.rename('Studio');
+    await settle();
+    expect(offers).toBeGreaterThan(0);
+    expect(await round()).toBe(0);
+    // Its 30 second wait over, it is offered the same roster again and fails again: the next wait is a minute.
+    setSystemTime(new Date(Date.now() + 31_000));
+    expect(await round()).toBe(1);
+    setSystemTime(new Date(Date.now() + 31_000));
+    expect(await round()).toBe(0);
+    setSystemTime();
+    // Another change still reaches it at once.
+    const before = offers;
+    a.core.group.rename('Office');
+    await settle();
+    expect(offers).toBeGreaterThan(before);
+    expect(await round()).toBe(0);
+    // b speaks, signed: a takes it as up and offers it the roster on its next round.
+    down = false;
+    await b.core.coordination.request(b.core.group.peers().find((peer) => peer.coreId === id(a))!, 'directory', {});
+    await settle();
+    expect(await round()).toBe(1);
+    await waitFor(() => b.core.group.view('owner')?.name === 'Office');
+  } finally {
+    setSystemTime();
+    for (const undo of restore) undo();
+  }
 });
 
 test('leaving tells the others first, and the last member leaving ends the group', async () => {

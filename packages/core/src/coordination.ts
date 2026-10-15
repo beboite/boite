@@ -796,6 +796,8 @@ export class Coordination {
       else rate.floor = Math.max(rate.floor ?? 0, envelope.at);
       if (rate.count > 120) return new Response('peer rate limit', { status: 429 });
     } catch { return new Response('invalid signed message', { status: 403 }); }
+    // A member that sent a signed request is up: the next tick offers it the roster, whatever its wait.
+    this.core.group.backoff.heard(peer.coreId);
     const groupOnly = envelope.operation === 'group.sync' || envelope.operation === 'group.push' || envelope.operation === 'group.redeem'; // the group's own: sealed, from a member
     if (this.core.group.removedPeer(peer.coreId) !== null && (groupOnly || !this.trusted().some(p => p.coreId === peer.coreId))) {
       return this.signed({ nonce: envelope.nonce, error: 'this machine was removed from the group', gone: true }, 410, sealing);

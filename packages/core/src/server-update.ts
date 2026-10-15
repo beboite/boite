@@ -132,7 +132,7 @@ export class ServerUpdates {
       const archive = join(directory, 'payload.zip');
       archiveHash = await downloadPayload(offer, archive, abort.signal, progress);
       if (abort.signal.aborted) return;
-      unpackPayload(archive, join(directory, 'stage'), offer.version);
+      await unpackPayload(archive, join(directory, 'stage'), offer.version, abort.signal);
     }
     if (abort.signal.aborted || this.closed) return;
     const plan: ServerUpdatePlan = { id, installation, dataDir: this.core.dataDir, version: offer.version,

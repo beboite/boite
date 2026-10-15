@@ -163,8 +163,10 @@ link to this guide. A core predating this feature needs one manual update first.
 The server checks eight seconds after startup, then every six hours. It follows
 its installed stable or nightly channel, downloads an immutable release's
 signed server archive, and verifies the publisher signature and embedded
-version before staging the complete core, CLI and UI. No update stops a running
-turn. The download and idle wait can be cancelled. Running and queued turns,
+version before staging the complete core, CLI and UI. The archive is hashed as
+it arrives and checked over every byte before anything unpacks; it is then
+inflated a chunk at a time, so neither it nor its files sit in memory and other
+requests keep being served. No update stops a running turn. The download and idle wait can be cancelled. Running and queued turns,
 terminals, warm sessions, background tasks and authenticated requests must
 finish before the existing idle-shutdown gate admits installation.
 

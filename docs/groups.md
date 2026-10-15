@@ -323,7 +323,9 @@ coordination already uses (`POST /agent-messages`, operation `group.sync`):
 the receiver merges and answers with the result, which leaves both equal after
 one round trip. A member offers its roster on every change, every 15 seconds
 to members that have not agreed on it yet, and to all of them every five
-minutes. A merge whose result would not be a valid roster is not kept. A roster is accepted only from a current member, never readable, and
+minutes. A member that does not answer waits longer after each failed offer,
+from 30 seconds doubling up to five minutes; a different roster still goes to
+it at once, and any signed request from it ends the wait. A merge whose result would not be a valid roster is not kept. A roster is accepted only from a current member, never readable, and
 never from a machine linked by hand for agent messages. An answer that arrives
 after its sender was removed is dropped.
 
