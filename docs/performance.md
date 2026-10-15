@@ -328,7 +328,9 @@ when the core advertises `chunkedAnswers`.
   `messages.attachment` with `display` answers a WebP at quality 80, at most
   1,280 px on its longer side, made once on Bun's image worker and kept in
   `media_displays`. Six 1,541 to 2,467 KB PNG screenshots measured 51 to
-  130 KB this way on 2026-10-07, about 130 ms each to make. AVIF would be
+  130 KB this way on 2026-10-07, about 130 ms each to make. A kept copy is
+  read by message, part and thread before anything else, so it answers without
+  loading the original's base64. AVIF would be
   smaller, but Bun's Linux build cannot encode it. A GIF, a copy that would not
   be lighter and any other file come as they are. A click opens the original
   in the viewer, and a download or an edit also fetches the original

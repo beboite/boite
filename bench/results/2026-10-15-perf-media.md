@@ -60,3 +60,26 @@ from `viewDocument` in packages/contracts/src/view.ts:
 
 Every mount of a view sends the gzip to a client that accepts it. Not measured
 over a real link.
+
+## Display copy of a picture
+
+`messages.attachment` with `display` on a picture whose WebP copy is already
+kept: 50 calls of `readMessageAttachment` after 10 warm-up calls, in a test
+core with a fresh data directory. The picture is a 1600x900 PNG of 3.2 MB
+(4,332,108 base64 characters), its copy 30,916. Before is the handler of
+`3202e281`, which reads the message part first; after is the branch's, which
+reads the copy by message, part and thread first. Three runs each, back to
+back, `nice -n 10 bun <script> before|after` from `packages/core`:
+
+| | before | after |
+| --- | ---: | ---: |
+| median per call, ms (median of 3 runs) | 3.908 | 0.075 |
+| 50 calls, ms (median of 3 runs) | 227.2 | 3.7 |
+
+## Attaching a large opaque screenshot (not changed)
+
+Encoding the PNG and the JPEG of an opaque picture at once instead of one
+after the other was tried and dropped. In headless Chrome at a 4x CPU slowdown,
+on a 1920x1080 canvas: PNG `toBlob` 170 ms, JPEG 122 ms, both started together
+290 ms (medians of 5). Chrome runs the two encodes one after the other anyway,
+and starting both holds two canvases in memory at once.

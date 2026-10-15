@@ -154,7 +154,16 @@ describe('deferred pictures', () => {
     // Kept: the second read is the same copy, from the journal.
     const kept = harness.core.journal.db.query('SELECT length(data) AS n FROM media_displays WHERE message_id = ?').get('msg_screen') as { n: number };
     expect(kept.n).toBe(bytes.length);
+    // The kept copy answers without reading the message, and only for the message's own thread.
+    const journal = harness.core.journal;
+    const messagePart = journal.messagePart.bind(journal);
+    let reads = 0;
+    journal.messagePart = (...args) => { reads += 1; return messagePart(...args); };
     expect((await client.call('messages.attachment', { threadId, messageId: 'msg_screen', partIndex: 0, display: true })).data).toBe(copy.data);
+    expect(reads).toBe(0);
+    const other = await echoThread(harness, client, 'other thread');
+    await expect(client.call('messages.attachment', { threadId: other.threadId, messageId: 'msg_screen', partIndex: 0, display: true })).rejects.toThrow('is not a message of thread');
+    journal.messagePart = messagePart;
     // The original is still what a plain read gives; a copy heavier than its PNG is not sent; a GIF stays a GIF.
     expect(await client.call('messages.attachment', { threadId, messageId: 'msg_screen', partIndex: 0 })).toEqual({ data: SCREEN });
     expect(await client.call('messages.attachment', { threadId, messageId: 'msg_shot', partIndex: 1, display: true })).toEqual({ data: SHOT });
