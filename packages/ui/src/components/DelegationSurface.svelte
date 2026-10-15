@@ -248,7 +248,7 @@
               <input aria-label={strings.delegation.profileLabel} value={profile.name} maxlength="80" onchange={(event) => patchProfile(profile, { name: event.currentTarget.value })} />
               <ModelPicker {store} {choice} onpick={(patch) => pickProfile(profile, patch)} disabled={store.delegationSaving} />
               {#if model?.effort?.levels.length}
-                <EffortSlider levels={model.effort.levels} active={profile.effort ?? model.effort.default} onpick={(effort) => patchProfile(profile, { effort })} />
+                <EffortSlider levels={model.effort.levels} active={profile.effort ?? model.effort.default ?? null} onpick={(effort) => patchProfile(profile, { effort })} />
               {/if}
               <button type="button" class="ghost small icon" aria-label={strings.delegation.removeProfile} onclick={() => save({ profiles: config.profiles.filter(entry => entry.id !== profile.id)})}><Trash2 size={14} /></button>
             </div>
