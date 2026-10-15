@@ -54,6 +54,11 @@ test('the session guide names the command and what calls for it, and view help c
   // The logs hint stands without a skill (one that could not be written), and only while agents may read logs.
   expect(agentGuide(true, true, [])).toContain('`boite logs problems`');
   expect(agentGuide(true, false, [])).not.toContain('boite logs');
+  // The diagnostic skill is offered only beside its logs; the others stand on their own.
+  const skills = [{ name: 'boite-report-issue', description: 'd1', path: '/r' }, { name: 'boite-prove-it', description: 'd2', path: '/p' }];
+  expect(agentGuide(true, false, skills)).not.toContain('boite-report-issue');
+  expect(agentGuide(true, false, skills)).toContain('boite-prove-it: d2\nFile: /p');
+  expect(agentGuide(true, true, skills)).toContain('; skill boite-report-issue: /r');
   expect(VIEW_GUIDE_LINE).toMatch(/when asked for a visual or a schema/);
   // One line of the session prompt, which every turn of every thread pays for.
   expect(VIEW_GUIDE_LINE.length).toBeLessThan(240);
