@@ -455,6 +455,14 @@ The UI build writes a `.br` and a `.gz` beside every text file of 1 KB or more
 never compresses anything itself. A browser only offers `br` over https, so a
 phone on the LAN gets the gzip.
 
+Every static answer outside `/assets/` carries an `ETag` and a `Last-Modified` of the variant sent,
+so revalidating the shell, `sw.js` or the manifest is a 304 without a body.
+Fonts and icons are fresh for a day: a phone on plain http has no service
+worker and would otherwise fetch the two default faces, 144 KB, on every load.
+A view is gzipped once when it is published and sent compressed to a client
+that reads gzip. The [2026-10-15 report](../bench/results/2026-10-15-perf-media.md)
+has the bytes before and after.
+
 The command palette, the project picker, the import dialog and the right panel
 are separate chunks. They load when first asked for, and all of them once the
 app has booted and the page is idle, so a PWA that goes offline later still has

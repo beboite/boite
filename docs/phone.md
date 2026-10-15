@@ -472,10 +472,10 @@ core behind it; both are skipped. A registration that fails is one
 
 ## What is cached, and what never is
 
-Each build uses `boite-ui-v3-<build id>`, where the build ID hashes the asset
+Each build uses `boite-ui-v4-<build id>`, where the build ID hashes the asset
 filenames. Vite stamps it into `dist/sw.js` before compression. Activation
 removes older `boite-ui-` caches, including their hashed assets, and leaves
-other applications' caches alone. Development uses unstamped `boite-ui-v3`.
+other applications' caches alone. Development uses unstamped `boite-ui-v4`.
 
 | Request | Rule |
 |---|---|
@@ -492,15 +492,21 @@ revalidated so a new build can replace cached assets.
 
 The core serves the matching headers. `/assets/`, whose names are content
 hashes, is `public, max-age=31536000, immutable`. The shell, `index.html`,
-`/sw.js` and `/manifest.webmanifest` are `no-cache`. `/sw.js` also carries
+`/sw.js` and `/manifest.webmanifest` are `no-cache`, and every static answer
+outside `/assets/` carries an `ETag` and a `Last-Modified`, so their revalidation is a 304.
+`/fonts/` and `/icons/` keep their names across builds and are
+`public, max-age=86400, stale-while-revalidate=604800`, which also spares a
+phone on plain http, where no worker registers, the fonts on every load. `/sw.js` also carries
 `Service-Worker-Allowed: /`, which is what lets a worker served from that path
 take the whole origin as its scope. A header test in
 `packages/core/test/server.test.ts` reads them out of the served build, and an
 end to end test stops the core, reloads the page and watches the shell paint
 anyway.
 
-Installation reads the entry HTML and precaches its hashed entry assets, the
-fonts, icon and manifest. Every successful navigation refreshes the offline
+Installation reads the entry HTML and precaches the hashed assets it names in
+a `src` or `href`, the default fonts, icon and manifest. The locale map of an
+inline script is left out, so a device reading English never stores the French
+catalogue; a French device stores it when the page first loads it. Every successful navigation refreshes the offline
 HTML. Network errors and HTTP 5xx responses fall back to that cached shell.
 Secondary screens are cached when opened; an uncached Settings screen names
 the missing connection instead of silently failing.

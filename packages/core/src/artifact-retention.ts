@@ -41,7 +41,9 @@ export async function pruneArtifactSnapshots(core: Core, now = Date.now(), signa
   if (entries.length === 0) return;
   const referenced = await scanReferences(join(core.dataDir, 'journal.db'), signal);
   for (const name of entries) {
-    if (!/^[a-f0-9-]{36}(\.partial)?$/.test(name) || referenced.has(name)) continue;
+    // A view's gzipped copy (`VIEW_GZIP_SUFFIX`) lives and goes with its snapshot; a `.partial` is never referenced.
+    const snapshot = /^([a-f0-9-]{36})(\.partial|\.gz)?$/.exec(name);
+    if (snapshot === null || referenced.has(snapshot[2] === '.gz' ? snapshot[1]! : name)) continue;
     const path = join(directory, name);
     try {
       const modified = (await lstat(path)).mtimeMs;

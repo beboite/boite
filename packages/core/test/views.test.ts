@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AGENT_ENV, VIEW_CONTENT_POLICY, VIEW_HELP, VIEW_GUIDE_LINE, viewDocument, viewFrameHeight, viewTitleOf, readViewMessage, type MessagePart } from '@boite/contracts';
 import { agentGuide } from '../src/agent-guide.ts';
@@ -192,6 +192,26 @@ test('boite view publishes a page as an artifact that opens only on the view rou
   expect(await response.text()).toBe(stored);
   expect((await fetch(new URL(shown.url, harness.url), { method: 'POST' })).status).toBe(405);
 
+  // The snapshot was gzipped once at publication: a client reading gzip gets that copy, under the same policy.
+  const view = async (encoding: string) => {
+    const { url } = await client.call('artifacts.read', { threadId, messageId: result.message.id, artifactId: part.id, view: true });
+    return fetch(new URL(url, harness.url), { headers: { 'accept-encoding': encoding }, decompress: false });
+  };
+  const compressed = await view('gzip, deflate, br');
+  expect(compressed.headers.get('content-encoding')).toBe('gzip');
+  expect(compressed.headers.get('vary')).toBe('accept-encoding');
+  expect(compressed.headers.get('content-security-policy')).toBe(`sandbox allow-scripts; ${VIEW_CONTENT_POLICY}`);
+  expect(compressed.headers.get('cache-control')).toBe('no-store');
+  expect(new TextDecoder().decode(Bun.gunzipSync(new Uint8Array(await compressed.arrayBuffer())))).toBe(stored);
+  const identity = await view('identity');
+  expect(identity.headers.get('content-encoding')).toBeNull();
+  expect(await identity.text()).toBe(stored);
+  // A view published before the copy existed is sent as it is.
+  rmSync(join(harness.dataDir, 'artifacts', `${part.id}.gz`));
+  const older = await view('gzip');
+  expect(older.headers.get('content-encoding')).toBeNull();
+  expect(await older.text()).toBe(stored);
+
   // The download address of the same snapshot never opens as a page, and a file ticket is nothing on the view route.
   const download = await client.call('artifacts.read', ids);
   expect(download.url).toMatch(/^\/file\//);
@@ -278,7 +298,10 @@ real('a page is loaded in a headless browser before it is shown: its height is m
   write('views/stores.html', page('<script>localStorage.setItem("seen", "1");</script>'));
   const stored = await agent.call('artifacts.view', { threadId, path: 'views/stores.html' }).then(() => null, (error: Error) => error.message);
   expect(stored).toMatch(/SecurityError/);
-  expect(readdirSync(join(harness.dataDir, 'artifacts')).length).toBe(5);
+  // Five views were kept, each with its gzipped copy; the refused ones left neither.
+  const kept = readdirSync(join(harness.dataDir, 'artifacts'));
+  expect(kept.filter(name => !name.endsWith('.gz')).length).toBe(5);
+  expect(kept.filter(name => name.endsWith('.gz')).sort()).toEqual(kept.filter(name => !name.endsWith('.gz')).map(name => `${name}.gz`).sort());
 }, 90_000);
 
 /** The gated test runs with the machine's browser: the core started without one is replaced. */

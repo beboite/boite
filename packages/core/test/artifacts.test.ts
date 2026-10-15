@@ -119,12 +119,15 @@ test('large snapshots stay out of JSON, seek over HTTP, renew, survive restart a
   const abandoned = join(harness.dataDir, 'artifacts', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.partial');
   writeFileSync(abandoned, 'incomplete');
   utimesSync(abandoned, 1, 1);
+  // A view's gzipped copy goes with its snapshot; one whose snapshot nobody references goes too.
+  writeFileSync(join(harness.dataDir, 'artifacts', `${part.id}.gz`), 'copy');
+  writeFileSync(join(harness.dataDir, 'artifacts', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb.gz'), 'orphan');
   // Retention keeps a snapshot still referenced by a fork, even after its original message is gone.
   const clone = { ...sent, id: 'msg_fork_fixture', threadId: other.threadId };
   harness.core.journal.putMessage(clone);
   harness.core.journal.db.query('DELETE FROM messages WHERE id = ?').run(sent.id);
   await pruneArtifactSnapshots(harness.core, Date.now() + 2 * 86_400_000);
-  expect(readdirSync(join(harness.dataDir, 'artifacts'))).toEqual([part.id]);
+  expect(readdirSync(join(harness.dataDir, 'artifacts')).sort()).toEqual([part.id, `${part.id}.gz`]);
   harness.core.journal.db.query('DELETE FROM messages WHERE id = ?').run(clone.id);
   await pruneArtifactSnapshots(harness.core, Date.now() + 2 * 86_400_000);
   expect(readdirSync(join(harness.dataDir, 'artifacts'))).toEqual([]);

@@ -10,6 +10,8 @@ import { mkdir, rename, unlink, writeFile } from 'node:fs/promises';
 import { closeSync, constants, fstatSync, openSync, readFileSync } from 'node:fs';
 import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { promisify } from 'node:util';
+import { gzip } from 'node:zlib';
 import {
   VIEW_BLEED, VIEW_DEFAULT_HEIGHT, VIEW_MAX_BYTES, VIEW_NARROW_WIDTH, VIEW_ROUTE, VIEW_TITLE_MAX, VIEW_WIDTH,
   clampViewHeight, viewDocument, viewTitleOf,
@@ -21,6 +23,13 @@ import { messageOf, refused } from './errors.ts';
 import { newId } from './ids.ts';
 
 const VIEW_MIME = 'text/html';
+/**
+ * The snapshot gzipped once at publication, beside it: the view route sends it
+ * to a client that reads gzip, about five times fewer bytes on every mount.
+ * gzip rather than br because a phone on plain http is offered no br.
+ */
+export const VIEW_GZIP_SUFFIX = '.gz';
+const gzipped = promisify(gzip);
 
 /** What a page may embed from the disk, by extension. Anything else is refused by name. */
 const EMBEDDED: Record<string, string> = {
@@ -231,6 +240,8 @@ export async function publishView(core: Core, params: RpcParams<'artifacts.view'
   await rename(`${destination}.partial`, destination).catch(async (error: unknown) => { await unlink(`${destination}.partial`).catch(() => {}); throw error; });
   let committed = false;
   try {
+    // Written before the probe, so the headless check loads the copy clients will get.
+    await writeFile(`${destination}${VIEW_GZIP_SUFFIX}`, await gzipped(data, { level: 9 }), { flag: 'wx' });
     const name = basename(found.absolute);
     // The check loads the page exactly as a client will: from the view route, under its sandbox and policy, in a frame as wide as the client's.
     const ticket = core.fileTickets.mint(destination, VIEW_MIME, Date.now(), name, undefined, true);
@@ -254,6 +265,6 @@ export async function publishView(core: Core, params: RpcParams<'artifacts.view'
     core.bus.emit('message.completed', { threadId: thread.id, messageId: message.id, state: 'complete' });
     return { message, checked: probe !== null, advice: viewAdvice(source) };
   } finally {
-    if (!committed) await unlink(destination).catch(() => {});
+    if (!committed) await Promise.all([unlink(destination), unlink(`${destination}${VIEW_GZIP_SUFFIX}`)].map(removal => removal.catch(() => {})));
   }
 }

@@ -188,7 +188,10 @@ which lifts the same running page over the app; and download.
 on the core's own port, so a phone and a proxied core need nothing more than
 they already reach. Only a ticket minted for a view opens there; a file
 ticket still only downloads, and a view's download address still does not
-render.
+render. Publication also writes the snapshot gzipped beside it
+(`<id>.gz`), and the route sends that copy with `content-encoding: gzip` to a
+client that reads gzip; a view published before that copy existed is sent as
+it is. Retention removes the copy with its snapshot.
 
 The route sends `content-security-policy: sandbox allow-scripts` and the
 frame carries the same sandbox. The page runs on an opaque origin: it has no

@@ -31,7 +31,7 @@ const RETITLE_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-retitle.png')
 const IMPORT_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-import.png');
 const EXPERIMENTS_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-experiments.png');
 /** The cache `public/sw.js` opens, before the build appends its id; every other cache is deleted on activate. */
-const UI_CACHE_PREFIX = 'boite-ui-v3-';
+const UI_CACHE_PREFIX = 'boite-ui-v4-';
 
 let core: RunningCore;
 let page: BrowserPage;
@@ -845,6 +845,8 @@ test(
     const entries = await page.evaluate<string[]>(cachedPaths);
     expect(entries).toContain('/');
     expect(entries.filter((path) => path.startsWith('/assets/')).length).toBeGreaterThan(0);
+    // The browser reads English (`--lang=en-US`): the French catalogue the inline locale map names is never stored.
+    expect(entries.filter((path) => path.startsWith('/assets/strings.fr-'))).toEqual([]);
 
     // The core goes away, and the reload has nothing but that cache to load from.
     const { port, dataDir, token } = core;
