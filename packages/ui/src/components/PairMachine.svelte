@@ -1,6 +1,5 @@
 <script lang="ts">
-  import { KeyRound, Plus, ScanLine, X } from '@lucide/svelte';
-  import { normalizePairingCode } from '@boite/contracts';
+  import { ClipboardPaste, Plus, ScanLine, X } from '@lucide/svelte';
   import { workspace } from '../lib/workspace.svelte';
   import { parsePairingLink } from '../lib/endpoint';
   import { fill, strings } from '../lib/strings';
@@ -21,8 +20,8 @@
   async function startScanning() {
     workspace.error = null;
     try { QrScanner ??= (await import('./QrScanner.svelte')).default; scanning = true; }
-    // The camera's code did not load: the letters are the other way in, opened in its place on a phone.
-    catch { workspace.error = strings.phone.dialogOffline; if (mobile && canType) codeOpen = true; else adding = true; }
+    // The camera's code did not load: a pasted link is the other way in, opened in its place.
+    catch { workspace.error = strings.phone.dialogOffline; if (mobile) pasting = true; else adding = true; }
   }
   /** A code that reads as a link to add a device connects at once; the machine names itself and the card renames it. */
   async function scanned(text: string) {
@@ -32,61 +31,18 @@
     await add();
   }
 
-  /**
-   * A code typed in the installed app goes to the machine that serves this
-   * page, which asks the other machines of its group when it did not draw
-   * that code itself. The camera app would hand a link to Safari, whose
-   * storage the home-screen app does not share; a code typed here stays here.
-   */
-  // The phone app's page is no machine's: the code goes to the machine its owner names beside it.
+  // The phone app's page is no machine's: a link naming plain http is turned down before its socket fails.
   const app = appPage();
-  const pageOrigin = !app && window.__TAURI_INTERNALS__ === undefined && /^https?:$/.test(location.protocol) ? location.origin : null;
-  let codeHost = $state('');
-  /** `boite.example.com`, with or without its scheme and port, as the machine's HTTPS address; plain http only on this device. */
-  function hostOrigin(text: string): string | null {
-    const trimmed = text.trim();
-    if (!trimmed) return null;
-    try {
-      const url = new URL(/^[a-z]+:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`);
-      return reachableFromApp(url.origin) ? url.origin : null;
-    } catch {
-      return null;
-    }
-  }
-  const codeOrigin = $derived(app ? hostOrigin(codeHost) : pageOrigin);
-  const canType = app || pageOrigin !== null;
-  let codeOpen = $state(false);
-  let code = $state('');
-  let codeError = $state('');
-  let codeInput = $state<HTMLInputElement | null>(null);
-  function toggleCode() {
+  /**
+   * A phone whose camera cannot read the code pastes the link instead, sent
+   * from the machine that drew it. The link names that machine, so it works
+   * from the app's own page as from a page a machine serves.
+   */
+  let pasting = $state(false);
+  function togglePaste() {
     workspace.error = null;
-    codeError = '';
-    codeOpen = !codeOpen;
-    if (codeOpen) requestAnimationFrame(() => codeInput?.focus());
-  }
-  async function pairCode() {
-    if (busy) return;
-    if (!codeOrigin) {
-      codeError = strings.machines.hostInvalid;
-      return;
-    }
-    const canonical = normalizePairingCode(code);
-    if (!canonical) {
-      codeError = strings.machines.codeInvalid;
-      return;
-    }
-    codeError = '';
-    busy = true;
-    try {
-      if (await workspace.pair(`${codeOrigin}/?grant=${canonical}`, '')) {
-        code = '';
-        codeOpen = false;
-        onpaired?.();
-      }
-    } finally {
-      busy = false;
-    }
+    pasting = !pasting;
+    if (pasting) requestAnimationFrame(() => linkInput?.focus());
   }
 
   let target = $derived(workspace.linkTarget(link));
@@ -100,6 +56,7 @@
   function stopAdding() {
     workspace.error = null;
     adding = false;
+    pasting = false;
     link = '';
     token = '';
     url = '';
@@ -109,7 +66,7 @@
     // The app's page is HTTPS: a scanned code naming a plain http machine would only fail as a socket error.
     const target = manual ? url.trim() : parsePairingLink(link)?.url;
     if (app && target !== undefined && !reachableFromApp(target)) {
-      workspace.error = strings.machines.codeInsecure;
+      workspace.error = strings.machines.linkInsecure;
       return;
     }
     busy = true;
@@ -130,44 +87,34 @@
       <div class="head-actions">
         <!-- A phone has a camera and the other machine draws a code: no link to copy across. -->
         {#if mobile}<button class="primary add-open" data-testid="machine-scan" disabled={busy} onclick={() => void startScanning()}><ScanLine size={15} /><span class="ui-label">{strings.machines.scan}</span></button>{/if}
-        {#if mobile && canType}<button class="add-open" data-testid="machine-code-open" aria-expanded={codeOpen} onclick={toggleCode}><KeyRound size={15} /><span class="ui-label">{strings.machines.typeCode}</span></button>{/if}
+        {#if mobile}<button class="add-open" data-testid="machine-paste-open" aria-expanded={pasting} onclick={togglePaste}><ClipboardPaste size={15} /><span class="ui-label">{strings.machines.pasteLink}</span></button>{/if}
         {#if !open && !mobile}<button class="primary add-open" data-testid="machine-add-open" onclick={startAdding}><Plus size={15} /><span class="ui-label">{strings.machines.add}</span></button>{/if}
       </div>
     {/if}
-  {#if mobile && !codeOpen && workspace.error}<p class="error" role="alert">{workspace.error}</p>{/if}
-  {#if codeOpen && canType}
-    <form class="card code-form" data-testid="machine-code-form" onsubmit={(e) => { e.preventDefault(); void pairCode(); }}>
-      {#if app}
-        <label>{strings.machines.hostLabel}<input
-            bind:value={codeHost}
-            data-testid="machine-code-host"
-            type="text"
-            inputmode="url"
-            autocapitalize="off"
-            autocomplete="off"
-            spellcheck="false"
-            placeholder={strings.machines.hostPlaceholder}
-          /></label>
-      {/if}
-      <label>{strings.machines.codeLabel}<input
-          bind:this={codeInput}
-          bind:value={code}
-          class="code-input"
-          data-testid="machine-code"
-          type="text"
-          inputmode="text"
-          autocapitalize="characters"
+  {#if mobile && !pasting && workspace.error}<p class="error" role="alert">{workspace.error}</p>{/if}
+  {#if mobile && pasting}
+    <form class="card paste-form" data-testid="machine-paste-form" onsubmit={(e) => { e.preventDefault(); void add(); }}>
+      <!-- Another link pasted: the last one's refusal no longer applies. -->
+      <label>{strings.machines.link}<input
+          bind:this={linkInput}
+          bind:value={link}
+          oninput={() => { workspace.error = null; }}
+          data-testid="machine-link"
+          type="password"
           autocomplete="off"
           spellcheck="false"
-          maxlength="16"
-          placeholder={strings.machines.codePlaceholder}
         /></label>
-      <p class="code-hint">{strings.machines.codeHint}</p>
-      <button type="submit" class="primary" data-testid="machine-code-submit" disabled={busy || !code.trim() || (app && !codeHost.trim())}>{busy ? strings.machines.adding : strings.machines.connect}</button>
-      {#if codeError || workspace.error}<p class="error" role="alert">{codeError || workspace.error}</p>{/if}
+      {#if target}
+        <p class="link-target" data-testid="machine-link-target">{target.machine
+          ? fill(target.machine.store.connection === 'ready' ? strings.machines.linkConnected : strings.machines.linkReplaces, { host: target.host, machine: target.machine.label })
+          : fill(strings.machines.linkReaches, { host: target.host })}</p>
+      {/if}
+      <p class="paste-hint">{strings.machines.addHint}</p>
+      <button type="submit" class="primary" data-testid="machine-add" disabled={busy || !link.trim()}>{busy ? strings.machines.adding : strings.machines.connect}</button>
+      {#if workspace.error}<p class="error" role="alert">{workspace.error}</p>{/if}
     </form>
   {/if}
-  <!-- A computer's browser pastes the link; a phone has its camera and the code, and nothing else. -->
+  <!-- A computer's browser pastes the link, with a URL and a token beside it; a phone scans, or pastes when its camera cannot. -->
   {#if !mobile}
   <div class="disclosure-fold" class:open inert={!open}>
     <div>
@@ -246,7 +193,6 @@
   .mobile .add-open { width: 100%; min-height: var(--touch-target); }
   .mobile .add { padding: 16px; }
   .mobile form > button { width: 100%; }
-  .code-form { padding: 16px; margin: 0 0 12px; }
-  .code-form .code-input { font-family: var(--font-mono); font-size: var(--text-base); letter-spacing: 1.5px; text-transform: uppercase; }
-  .code-hint { margin: 0; font-size: var(--text-xs); color: var(--color-muted-foreground); }
+  .paste-form { padding: 16px; margin: 0 0 12px; }
+  .paste-hint { margin: 0; font-size: var(--text-xs); color: var(--color-muted-foreground); }
 </style>

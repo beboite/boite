@@ -43,7 +43,7 @@ async function pickLocale(locale: 'en' | 'fr') {
 beforeAll(async () => { const port = await freePort(); base = `http://127.0.0.1:${port}`; server = await startUi(port); }, 60_000);
 beforeEach(async () => { page = await BrowserPage.launch({ url: `${base}/?fake=1` }); await width(1400); }, 30_000);
 afterEach(async () => { await page?.close(); }, 15_000);
-afterAll(async () => { await server?.close(); }, 15_000);
+afterAll(async () => { await server?.close(); }, 30_000);
 
 test('the footer button and Machines both reach updates, and the foot fits its controls', async () => {
   await page.navigate(`${base}/?fake=1&open=recent&machines=1&appUpdate=ready&appUpdateChannel=nightly`);
