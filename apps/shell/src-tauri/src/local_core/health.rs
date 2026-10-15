@@ -22,6 +22,10 @@ pub(crate) struct CoreFile {
     pub(crate) token: String,
     #[serde(default)]
     pub(crate) pid: Option<u32>,
+    /// When the core started, in milliseconds since the epoch: with `pid`, what
+    /// tells that core from a process that later got its number.
+    #[serde(default, rename = "startedAt")]
+    pub(crate) started_at: Option<u64>,
 }
 
 impl CoreFile {
@@ -103,10 +107,30 @@ fn judge(answer: Option<HealthBody>, version: &str, bundle_hash: Option<&str>) -
 /// would spend its whole timeout on it.
 pub(super) fn probe(file: &CoreFile, version: &str, bundle_hash: Option<&str>) -> Probe {
     let Some(pid) = file.pid else { return Probe::Absent };
-    if !platform::process::alive(pid) {
+    if !same_core(pid, file.started_at) {
         return Probe::Absent;
     }
     judge(health(file.port, pid), version, bundle_hash)
+}
+
+/// How far a process may seem to have started after the core recorded its own
+/// start and still be that core: the two clocks are read differently, and on
+/// Linux the boot time has whole seconds.
+const START_MARGIN_MS: u64 = 2000;
+
+/// Whether `pid` still names the core that recorded `started_at`. A process
+/// that exited is not; nor is one that started after the core did, which got
+/// the number once the core had exited (Windows reuses numbers soon, and a
+/// reboot hands them all out again). An unknown start time on either side
+/// keeps the answer of `alive`, the rule before start times were compared.
+pub(super) fn same_core(pid: u32, started_at: Option<u64>) -> bool {
+    if !platform::process::alive(pid) {
+        return false;
+    }
+    match (started_at, platform::process::started_at(pid)) {
+        (Some(core), Some(process)) => process <= core.saturating_add(START_MARGIN_MS),
+        _ => true,
+    }
 }
 
 /// A bound on how much of a `/health` response is ever read, so a local
@@ -235,10 +259,31 @@ mod tests {
         gone.wait().unwrap();
         drop(gone);
         let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
-        let file = CoreFile { port, host: None, token: "t".to_string(), pid: Some(pid) };
+        let file = CoreFile { port, host: None, token: "t".to_string(), pid: Some(pid), started_at: None };
         let started = Instant::now();
         assert_eq!(probe(&file, "2.0.0", None), Probe::Absent);
         // A refused connection alone takes HEALTH_TIMEOUT (500 ms) on Windows.
         assert!(started.elapsed() < Duration::from_millis(100), "probing a dead core took {:?}", started.elapsed());
+    }
+
+    #[test]
+    fn a_core_json_whose_pid_now_names_a_later_process_costs_no_connection() {
+        // This test's own process stands for the stranger that got the number:
+        // it is alive, and it started after the core `core.json` describes.
+        let pid = std::process::id();
+        let began = platform::process::started_at(pid);
+        // A port that accepts and never answers: a connection would wait out HEALTH_TIMEOUT.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let file = |started_at| CoreFile { port, host: None, token: "t".to_string(), pid: Some(pid), started_at };
+        if let Some(began) = began {
+            let started = Instant::now();
+            assert_eq!(probe(&file(Some(began - 60_000)), "2.0.0", None), Probe::Absent);
+            assert!(started.elapsed() < Duration::from_millis(100), "probing a reused pid took {:?}", started.elapsed());
+            assert!(same_core(pid, Some(began)), "the process that wrote the start time is that core");
+        }
+        // An unknown start time keeps the bare liveness answer.
+        assert!(same_core(pid, None));
+        drop(listener);
     }
 }

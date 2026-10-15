@@ -37,7 +37,9 @@ under Advanced. The origin check only keeps arbitrary websites out: the first
 frame must still be `hello` with an accepted credential within five seconds, or
 the socket closes with `4001`.
 The owner token is 32 random bytes generated on first start and stored in
-`<dataDir>/core.json` with the port and PID.
+`<dataDir>/core.json` with the port, PID and start time. The shell takes a live
+PID whose process started more than two seconds after that time for another
+process that got the number, not for the core.
 
 | Principal | Credential and authority |
 | --- | --- |

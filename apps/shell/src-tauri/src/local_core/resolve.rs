@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use super::health::{endpoint_of, health, probe, read_core_file, Probe};
 use super::spawn::spawn_core;
-use super::{CoreEndpoint, CoreState, HELD, POLL_INTERVAL};
+use super::{CoreState, Resolved, HELD, POLL_INTERVAL};
 use crate::shell_log::{self, Level};
 use serde_json::json;
 use crate::platform::{self, job};
@@ -73,7 +73,10 @@ fn exited_early(state: &CoreState) -> Option<String> {
 /// this shell's version, else one this shell starts. A core of another version
 /// is the one an update or a reinstall left running: it is stopped first,
 /// since it holds the data directory's lock and speaks an older protocol.
-pub(super) fn resolve_core(state: &CoreState) -> Result<(CoreEndpoint, Option<u32>), String> {
+pub(super) fn resolve_core(state: &CoreState) -> Result<Resolved, String> {
+    // A core adopted earlier is the one this resolution replaces: its handle
+    // only kept its exited pid from being reused until now.
+    if let Ok(mut adopted) = state.adopted.lock() { adopted.take(); }
     if state.held.load(Ordering::SeqCst) {
         return Err(HELD.to_string());
     }
@@ -87,10 +90,12 @@ pub(super) fn resolve_core(state: &CoreState) -> Result<(CoreEndpoint, Option<u3
         Ok(Some(existing)) => {
             match probe(&existing, &launch.version, launch.bundle_hash.as_deref()) {
                 Probe::Current => {
+                    let watched = existing.pid.and_then(platform::process::Watched::open);
+                    if let Ok(mut adopted) = state.adopted.lock() { *adopted = watched; }
                     shell_log::info("core", "shell.core.attached", format!("attached to the running core pid {} on port {}",
                         existing.pid.map(|pid| pid.to_string()).unwrap_or_else(|| "unknown".into()), existing.port),
                         json!({ "pid": existing.pid, "port": existing.port }));
-                    return Ok((endpoint_of(&existing), existing.pid));
+                    return Ok((endpoint_of(&existing), existing.pid, existing.started_at));
                 }
                 Probe::Stale(version) => {
                     eprintln!("[shell] the running core is version {version} and this shell {}: stopping it", launch.version);
@@ -146,7 +151,7 @@ pub(super) fn resolve_core(state: &CoreState) -> Result<(CoreEndpoint, Option<u3
                         shell_log::timed(Level::Info, "core", "shell.core.ready",
                             format!("the core pid {pid} answered on port {} after {} ms", found.port, took.as_millis()),
                             took, json!({ "pid": pid, "port": found.port }));
-                        return Ok((endpoint_of(&found), Some(pid)));
+                        return Ok((endpoint_of(&found), Some(pid), found.started_at));
                     }
                 }
             }

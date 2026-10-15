@@ -105,7 +105,7 @@ fn a_running_core_of_another_version_is_stopped_and_replaced() {
     let outcome = resolve_core(&state);
     let old_status = old.wait().unwrap();
     state.kill_child();
-    let (endpoint, pid) = outcome.expect("the shell starts its own core once the old one stopped");
+    let (endpoint, pid, _) = outcome.expect("the shell starts its own core once the old one stopped");
     assert_ne!(pid, Some(old_pid));
     assert!(endpoint.url.starts_with("http://127.0.0.1:"));
     // The old core left on its own, through /shutdown, not by a kill.
@@ -236,4 +236,16 @@ fn a_slow_resident_core_is_left_running_and_a_slow_owned_one_is_stopped() {
     assert!(error.contains("did not write"), "{error}");
     assert!(spawned_pid(&owned).is_none(), "an owned core that never answered is stopped");
     std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn a_settled_core_whose_pid_now_names_a_later_process_is_stale() {
+    // This test's own process stands for the one that got the dead core's number.
+    let pid = std::process::id();
+    let Some(began) = platform::process::started_at(pid) else { return };
+    let endpoint = CoreEndpoint { url: "http://127.0.0.1:1".to_string(), token: "t".to_string() };
+    let settled = |started_at| Settled { outcome: Ok(endpoint.clone()), pid: Some(pid), started_at, generation: 0 };
+    assert!(settled(Some(began - 60_000)).stale(), "a process that started after the core is not that core");
+    assert!(!settled(Some(began)).stale());
+    assert!(!settled(None).stale(), "an unknown start time keeps the liveness answer");
 }

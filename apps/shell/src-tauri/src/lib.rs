@@ -260,12 +260,11 @@ pub fn run() {
             commands(invoke)
         })
         .setup(move |app| {
+            // From the process start to here: the context, the instance lock, the
+            // command table, Tauri's builder and its event loop.
+            phase("pre-setup", launched);
             let setup = std::time::Instant::now();
             let handle = app.handle().clone();
-            match tauri::webview_version() {
-                Ok(version) => shell_log::info("startup", "shell.webview", format!("web view runtime {version}"), json!({ "webviewVersion": version })),
-                Err(error) => shell_log::warn("startup", "shell.webview", format!("the web view runtime version is unknown: {error}"), json!({})),
-            }
             match login_item {
                 Ok(item) => { app.manage(item); }
                 Err(error) => eprintln!("[shell] starting at login cannot be offered: {error}"),
@@ -276,19 +275,23 @@ pub fn run() {
             if in_tray { handle.state::<Reveal>().stay_hidden(); }
             let launch = Launch::new(channel, directory.clone(), handle.path().resource_dir().ok(),
                 handle.package_info().version.to_string());
-            app.manage(CoreState::new(launch));
             app.manage(tray::QuitGuard::default());
+            app.manage(CoreState::new(launch));
+            // As soon as it can, so the core starts while WebView2 does: building
+            // the window holds this thread for several hundred milliseconds, and
+            // the core used to wait behind it for no reason (bench/startup.ts).
+            start_core(&handle);
+            phase("core-dispatch", setup);
+            match tauri::webview_version() {
+                Ok(version) => shell_log::info("startup", "shell.webview", format!("web view runtime {version}"), json!({ "webviewVersion": version })),
+                Err(error) => shell_log::warn("startup", "shell.webview", format!("the web view runtime version is unknown: {error}"), json!({})),
+            }
             if owns_directory {
                 let waking = handle.clone();
                 if let Err(error) = instance::listen(&directory, move || show_main(&waking)) {
                     eprintln!("[shell] a second launch will not bring this window back: {error}");
                 }
             }
-            // First, so the core starts while WebView2 does: building the window
-            // holds this thread for several hundred milliseconds, and the core
-            // used to wait behind it for no reason (bench/startup.ts).
-            start_core(&handle);
-            phase("core-dispatch", setup);
             #[cfg(target_os = "macos")]
             window::install_macos_menu(&handle, channel)?;
             let building = std::time::Instant::now();
@@ -311,6 +314,7 @@ pub fn run() {
                 if autostart::starts_in_tray(at_login, handle.tray_by_id("boite").is_some(), hidden()) {
                     // Nothing on screen: the page does not paint until the tray shows it.
                     browser::park_all(&handle);
+                    window::main_memory(&handle, true);
                 } else { show_main(&handle); }
             }
 
