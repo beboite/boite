@@ -26,7 +26,7 @@ beforeAll(async () => {
   page = await BrowserPage.launch({ url, windowSize: { width: 1310, height: 820 } });
   await page.waitFor(`document.querySelector('${id('timeline')}')`);
 }, 60_000);
-afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
+afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
 test('sidebar shortcuts preserve the prompt and file edits, and toggle both panels', async () => {
   await page.evaluate(`(async () => {

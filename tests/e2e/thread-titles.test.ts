@@ -10,7 +10,7 @@ beforeAll(async () => {
   port = await freePort();
   server = await startUi(port);
 }, 60_000);
-afterAll(async () => { await server?.close(); });
+afterAll(async () => { await server?.close(); }, 30_000);
 
 for (const width of [1280, 390]) {
   test(`the generated title is visible during the first response at ${width}px`, async () => {

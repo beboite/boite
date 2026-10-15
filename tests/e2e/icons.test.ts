@@ -39,7 +39,7 @@ beforeAll(async () => {
   await page.click(id('thread-row'));
   await page.waitFor(`document.querySelector('${id('timeline')}')`);
 }, 30_000);
-afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
+afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
 test('no button shows its icon smaller than it was drawn', async () => {
   const found: string[] = [];

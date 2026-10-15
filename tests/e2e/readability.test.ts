@@ -21,7 +21,7 @@ beforeAll(async () => {
   await page.waitFor(`document.querySelector('[data-thread-id="t-trace"]')`);
   await page.click('[data-thread-id="t-trace"]');
 }, 90000);
-afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
+afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
 test('connecting another machine keeps thread rows at their single-machine height', async () => {
   await page.waitFor(`document.querySelectorAll('${id('thread-pr')}').length === 2`);

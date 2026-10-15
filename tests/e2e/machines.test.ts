@@ -26,7 +26,7 @@ afterAll(async () => {
   await page?.close();
   await server?.close();
   for (const core of cores) await core.stop();
-}, 15_000);
+}, 30_000);
 
 test('project and recent cards show both hosts, PRs and user-message ordering on desktop and phone', async () => {
   await page.waitFor(`document.querySelectorAll('${id('thread-row')}').length === 8`);

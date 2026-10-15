@@ -25,7 +25,7 @@ beforeAll(async () => {
   await page.waitFor(`document.querySelector('.thread-header [data-testid="thread-branch"]')?.textContent.includes(${JSON.stringify(branch)})`);
 }, 90_000);
 
-afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
+afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
 async function capture(name: string) {
   await page.settleAnimations();

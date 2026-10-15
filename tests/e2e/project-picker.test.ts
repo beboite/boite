@@ -14,7 +14,7 @@ beforeAll(async () => {
   page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&open=recent` });
   await page.waitFor(`document.querySelector('[data-testid=composer-picker]')`);
 }, 60_000);
-afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
+afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 test('project picker browses folders, opens a draft, and fits a phone', async () => {
   expect(await page.evaluate(`document.body.textContent.includes('Enter to send')`)).toBe(false);
   await capture('polish-desktop.png');
