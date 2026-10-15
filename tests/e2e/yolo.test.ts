@@ -25,7 +25,7 @@ beforeAll(async () => {
   await page.waitFor(`document.querySelector('${selector('composer-mode')}')`);
 }, 30_000);
 
-afterAll(async () => { await page?.close(); client?.close(); await core?.stop(); }, 15_000);
+afterAll(async () => { await page?.close(); client?.close(); await core?.stop(); }, 30_000);
 
 test('desktop and phone can select YOLO, run without a permission card and restore Ask', async () => {
   await page.click(selector('composer-mode'));

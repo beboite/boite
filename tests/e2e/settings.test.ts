@@ -20,7 +20,7 @@ beforeAll(async () => {
   page = await BrowserPage.launch({ url: `${uiUrl}/?fake=1&open=recent` });
   await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
 }, 60_000);
-afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
+afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
 test('model picker account tooltips keep emails private on desktop and phone', async () => {
   await page.navigate(`${uiUrl}/?fake=1&open=recent`);

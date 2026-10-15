@@ -27,7 +27,7 @@ beforeEach(async () => {
   await page.evaluate(`localStorage.removeItem('boite.updates-later')`);
 }, 30_000);
 afterEach(async () => { await page?.close(); }, 15_000);
-afterAll(async () => { await server?.close(); }, 15_000);
+afterAll(async () => { await server?.close(); }, 30_000);
 
 test('a release found opens the card bottom left at once, without downloading, and its close button puts it off until a newer one', async () => {
   await page.navigate(`${base}${fixture}`);

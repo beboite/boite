@@ -19,12 +19,12 @@ test('Add a device can be closed and a fresh link drawn', async ({ app: _app }) 
   expect(store.deviceInvite!.url).not.toBe(first);
 });
 
-test('Add a device draws one QR code of the phone part and a short code under it', async ({ app: _app }) => {
+test('Add a device draws one QR code of the phone part, with no code to type', async ({ app: _app }) => {
   store.showSettings('machines');
   await waitFor(() => document.querySelector('[data-testid=group-add-device]') !== null);
   query<HTMLButtonElement>('[data-testid=group-add-device]').click();
   await waitFor(() => document.querySelector('[data-testid=add-device-qr] svg') !== null);
-  expect(query('[data-testid=add-device-code]').textContent).toMatch(/^[0-9A-Z]{4}-[0-9A-Z]{4}$/);
+  expect(document.querySelector('[data-testid=add-device-code]')).toBeNull();
   // The phone's link and the invitation a computer joins with: one link, copied whole.
   expect(store.deviceInvite!.url).toMatch(/^http:\/\/192\.168\.1\.20:8777\/\?grant=[^#]+#join=/);
   // A machine in no group starts one of its own for the device.

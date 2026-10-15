@@ -76,7 +76,7 @@ async function prepareDiscussions() {
 }
 
 afterEach(async () => { await page?.close(); }, 15_000);
-afterAll(async () => { await server?.close(); }, 15_000);
+afterAll(async () => { await server?.close(); }, 30_000);
 
 test('the chat shows one row per discussion, and the panel lists discussions and opens their back and forth at desktop and phone widths', async () => {
   await prepareDiscussions();

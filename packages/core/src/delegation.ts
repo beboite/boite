@@ -134,9 +134,17 @@ export class Delegation {
   /** Delivery to one thread once the current synchronous work (a journal write, a turn end) is done. */
   private kick(threadId: string): void {
     queueMicrotask(() => {
-      if (this.closed || this.core.journal.isClosed()) return;
-      this.track(this.deliver(threadId).catch(error => { if (!this.closed) this.core.log('warn', `delegation ${threadId}: ${messageOf(error)}`); }));
+      if (!this.live()) return;
+      this.track(this.deliver(threadId).catch(error => { if (this.live()) this.core.log('warn', `delegation ${threadId}: ${messageOf(error)}`); }));
     });
+  }
+  /**
+   * Shutdown closes this module before the journal, but a crash, or a test
+   * simulating one, can close the journal under a timer or a queued callback:
+   * those return quietly instead of throwing on the closed database.
+   */
+  private live(): boolean {
+    return !this.closed && !this.core.journal.isClosed();
   }
 
   private root(threadId: string): ThreadSummary {
@@ -651,13 +659,15 @@ export class Delegation {
     this.pendingChanges.add(rootId);
     queueMicrotask(() => {
       this.pendingChanges.delete(rootId);
-      if (this.closed) return;
+      if (!this.live()) return;
       this.core.bus.emit('delegation.changed', { threadId: rootId });
       for (const row of this.rows(rootId)) this.core.bus.emit('delegation.changed', { threadId: row.thread_id });
     });
   }
   private tick(): void {
     if (this.closed) return;
+    // The journal closed without this module: nothing left to deliver or expire, so the timer stops.
+    if (this.core.journal.isClosed()) { clearInterval(this.timer); return; }
     const rows = this.core.journal.db.query("SELECT data FROM delegation_messages WHERE status = 'received'").all() as LetterRow[];
     const recipients = new Set<string>();
     for (const row of rows) {
@@ -665,7 +675,7 @@ export class Delegation {
       if (letter.expiresAt <= Date.now()) this.update(letter, 'expired', 'Message expired before delivery');
       else recipients.add(letter.to.threadId);
     }
-    for (const threadId of recipients) this.track(this.deliver(threadId));
+    for (const threadId of recipients) this.track(this.deliver(threadId).catch(error => { if (this.live()) this.core.log('warn', `delegation ${threadId}: ${messageOf(error)}`); }));
     // A wake that did not come in time: the child is done, or interrupted, and its row says so.
     const now = Date.now();
     for (const [threadId, until] of this.wakeDeadlines) {

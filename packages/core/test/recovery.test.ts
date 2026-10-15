@@ -210,6 +210,16 @@ describe('crash recovery', () => {
     }
   });
 
+  test('a crashed core whose shutdown is slow throws nothing from its delegation tick', async () => {
+    const harness = await startTestCore();
+    crash(harness);
+    // The delegation tick runs every second: a slow shutdown (Windows CI) lets it fire on the closed journal.
+    await Bun.sleep(1200);
+    expect(harness.core.journal.isClosed()).toBe(true);
+    await stopWithoutCleanup(harness);
+    await removeDir(harness.dataDir);
+  });
+
   test('a core that starts on a clean journal recovers nothing', async () => {
     const harness = await startTestCore();
     const client = await harness.connect();
