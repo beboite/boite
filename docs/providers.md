@@ -847,6 +847,12 @@ remaining approval requests; ACP has no standard hook-disable call. Antigravity
 uses its permission-skip flag. Questions seeking input still ask for real
 answers; YOLO does not invent form values or complete a device sign-in.
 
+- Claude takes a changed mode in place through the SDK's `setPermissionMode`,
+  sent before the next prompt and only when the mode moved. Claude can also move
+  by itself: EnterPlanMode puts it in `plan`, and an ExitPlanMode the user
+  refuses or stops leaves it there. The driver records the mode each `init`
+  and `status` frame reports, so the next turn on the same process sees the
+  drift and puts the thread's mode back before its prompt goes in.
 - ACP standardises the call, `session/set_mode`, and standardises none of the ids
   inside `availableModes`: the same mode is spelled `acceptEdits`,
   `accept_edits` and `auto_edit` by three different agents. So each Boite mode
@@ -984,6 +990,15 @@ the driver sets the flag rather than the SDK's `thinking` option. The API
 refuses `highlights` (one title per stretch of thinking) for a subscription
 login: `thinking.adaptive.display: Input should be 'summarized', 'omitted'`, and
 the CLI falls back to `omitted` for the rest of the process.
+
+Claude 5.1 and later write the short line they put ahead of a tool call ("Now
+I'll run the tests.") as a thinking block, not as text. When two non-empty
+thinking blocks of one API message come right before a tool call, the driver
+turns the second into a text part in place, so it reads as the agent's
+narration between tool groups; the first stays folded as reasoning. One
+thinking block before a call is reasoning, and a model before 5.1 (the model
+of the stream's `message_start`, else the thread's) writes its updates as text,
+so its consecutive thinking blocks share one part as before.
 
 Each tool summary is one request the CLI sends to Haiku after a batch of calls
 finished (`source=tool_use_summary_generation` in its debug log), on the
