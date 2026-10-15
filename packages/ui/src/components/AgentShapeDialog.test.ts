@@ -17,6 +17,9 @@ test('a Claude thread opens what its last request carried from the context meter
   const { store, client } = await ready();
   const thread = await client.call('threads.create', { projectId: 'p-boite', providerId: 'claude', accountId: 'a-claude-main', model: 'claude-opus-5-5' });
   await store.open(thread.id);
+  const composer = document.createElement('textarea');
+  composer.dataset['testid'] = 'composer-input';
+  document.body.append(composer);
   view = mount(ContextControl, { target: document.body, props: { store } });
   flushSync(); openPopup();
 
@@ -26,6 +29,8 @@ test('a Claude thread opens what its last request carried from the context meter
   expect(q('agent-shape-empty')!.textContent).toBe(strings.agentShape.noSession);
   window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   await expect.poll(() => q('agent-shape')).toBeNull();
+  // The button that opened it went with the popup: the keyboard lands on the composer, not the page.
+  expect(document.activeElement).toBe(composer);
 
   await client.call('turns.start', { threadId: thread.id, prompt: 'hello' });
   await expect.poll(async () => (await client.call('threads.get', { threadId: thread.id })).status).toBe('idle');

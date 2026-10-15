@@ -9,6 +9,7 @@
   import type { Store } from '../lib/store.svelte';
   import { Closing } from '../lib/closing.svelte';
   import { mobileOverlay } from '../lib/mobile-history';
+  import { focusedElement, restoreFocus } from '../lib/focus';
   import { count, time } from '../lib/format';
   import { fill, strings } from '../lib/strings';
   import InfoTip from './InfoTip.svelte';
@@ -19,6 +20,8 @@
   let shape = $state<AgentShape | null>(null);
   let error = $state<string | null>(null);
   let dialog = $state<HTMLDivElement>();
+  /** What held the focus before; the popup's button that opened this is gone, so usually the composer. */
+  let previous: HTMLElement | null = null;
 
   function portal(node: HTMLElement) {
     document.body.append(node);
@@ -26,6 +29,7 @@
   }
 
   onMount(() => {
+    previous = focusedElement();
     overlay.show();
     let current = true;
     void store.agentShape(threadId)
@@ -37,7 +41,8 @@
 
   $effect(() => { if (overlay.open) return mobileOverlay(close); });
 
-  function close() { overlay.hide(); }
+  // Left on the page's body, the next Escape would reach the window and stop the running turn.
+  function close() { overlay.hide(); restoreFocus(previous); }
   // Gone from the DOM after its exit, by animation or by `Closing`'s own settle.
   let opened = false;
   $effect(() => { if (overlay.shown) opened = true; else if (opened) onclose(); });

@@ -28,7 +28,9 @@
     if (!thread) return;
     const id = thread.id;
     popup.hide();
-    void import('./AgentShapeDialog.svelte').then(module => { ShapeDialog = module.default; shapeOf = id; });
+    // Offline, or after an update removed the old chunk, the dialog cannot load: say so.
+    void import('./AgentShapeDialog.svelte').then(module => { ShapeDialog = module.default; shapeOf = id; })
+      .catch((error: unknown) => store.reportError(error, 'minor'));
   }
   let capabilityFailed = $state(false);
   let capabilityPending = $state(false);
