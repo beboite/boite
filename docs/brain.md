@@ -120,7 +120,8 @@ and command kept. It goes every turn rather than once a session because
 harnesses ask for progress notes and a style said once fades within a few
 answers. It is `SHORT_ANSWERS` in `packages/core/src/agent-guide.ts`, about
 300 bytes. Context modes without guides, compaction and native slash commands
-do not receive it; the Boite guide switch does not affect it.
+do not receive it, and turning the Boite guide off removes it with the rest of
+Boite's own text.
 
 ## Global instructions
 

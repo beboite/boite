@@ -293,7 +293,8 @@ export class TurnContexts {
       // Custom rules lead every fresh session, whatever the guides, on every provider.
       const rules = inject && sessionId === null && mode?.rules ? `${contextRulesBlock(mode.rules)}\n\n` : '';
       // Every turn, not once a session: a style said once fades after a few answers.
-      const style = inject && !noGuides && operation !== 'compact' && this.core.settings.get().shortAnswers !== false ? `${SHORT_ANSWERS}\n\n` : '';
+      // Boite's own text, so the guide switch turns it off with the rest.
+      const style = inject && guideEnabled && operation !== 'compact' && this.core.settings.get().shortAnswers !== false ? `${SHORT_ANSWERS}\n\n` : '';
       const prefix = rules + (inject && !noGuides ? this.core.brain.instructions(provider.id) : '') + guide + style;
       return carried.memory + prefix + (prefix ? 'User request:\n' : '') + said + deferred + body + coordinationGuide + tail(inject && sessionId === null && guideEnabled) + this.threads.cards.askInstructions({ ...thread, sessionId }, provider, turn, body);
     };

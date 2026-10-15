@@ -321,6 +321,10 @@ test('short answers ride every turn until switched off, and the first lists the 
     expect(first).toContain(join(h.dataDir, 'skills', 'boite-visual', 'SKILL.md'));
     h.core.settings.set({ shortAnswers: false });
     expect(await run('Third')).not.toContain('Answer style');
+    // Back on, the Boite guide switch still silences it with the rest of Boite's own text.
+    h.core.settings.set({ shortAnswers: true });
+    await owner.call('brain.configure', { path: null, enabled: false, boiteGuide: false });
+    expect(await run('Fourth')).not.toContain('Answer style');
   } finally { restore(); }
 });
 
