@@ -20,7 +20,7 @@ beforeAll(async () => {
   page = await BrowserPage.launch({ url, windowSize: { width: 1300, height: 850 } });
   await page.waitFor(`document.querySelectorAll('${id('thread-row')}').length === 8`);
 }, 30_000);
-afterAll(async () => { await page?.close(); await server?.close(); });
+afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
 test('recent view filters one owning project and creates its draft', async () => {
   await showThreadView(page, 'recent');

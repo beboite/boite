@@ -33,7 +33,7 @@ beforeAll(async () => {
 }, 60_000);
 beforeEach(async () => { page = await BrowserPage.launch({ url }); await size(1400); await page.waitFor(`document.querySelector('${id('nav-settings')}') && window.__boiteTest?.workspace.machines.length === 2`); }, 30_000);
 afterEach(async () => { await page?.close(); }, 15_000);
-afterAll(async () => { await server?.close(); }, 15_000);
+afterAll(async () => { await server?.close(); }, 30_000);
 
 test('agent updates stay in Machines and Update and Skip target their own machine on desktop and phone', async () => {
   expect(await page.evaluate(`document.querySelector('${id('harness-update-notices')}') === null`)).toBe(true);

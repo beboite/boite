@@ -16,7 +16,7 @@ beforeAll(async () => {
   await onStore(`await store.open('t-trace'); store.panel.closeAll();`);
 }, 90_000);
 
-afterAll(async () => { await page?.close(); await ui?.close(); }, 15_000);
+afterAll(async () => { await page?.close(); await ui?.close(); }, 30_000);
 
 async function capture(name: string) {
   await page.evaluate(`Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])`);

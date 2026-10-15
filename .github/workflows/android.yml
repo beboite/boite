@@ -4,7 +4,9 @@ name: android
 # host: the phone app's own address (APP_ORIGIN in the contracts), or the
 # `host` input. ci builds it unsigned to prove it compiles; the nightly signs
 # it, or takes the previous release's back when nothing that goes into it
-# changed (scripts/ci/android-apk.ts). docs/android.md.
+# changed (scripts/ci/android-apk.ts). The app carries its own version,
+# apps/android/VERSION plus a patch counted from the last published APK, apart
+# from Boite's release version. docs/android.md.
 
 on:
   workflow_call:
@@ -13,9 +15,6 @@ on:
         description: Sign the APK and reuse the previous release's when nothing changed.
         type: boolean
         default: false
-      version:
-        type: string
-        default: ''
       host:
         description: The bare hostname the app opens; empty opens the phone app's own address.
         type: string
@@ -60,21 +59,15 @@ jobs:
         id: meta
         env:
           ANDROID_HOST: ${{ inputs.host }}
-          INPUT_VERSION: ${{ inputs.version }}
         run: |
           host="$ANDROID_HOST"
           if [[ -z "$host" ]]; then
             # The address no machine serves, which every core trusts.
             host=$(bun -e "import { APP_ORIGIN } from './packages/contracts/src/index.ts'; console.log(new URL(APP_ORIGIN).hostname)")
           fi
-          version="${INPUT_VERSION:-$(jq -r .version package.json)}"
-          {
-            echo "host=$host"
-            echo "version=$version"
-            # Android installs an update only over a smaller versionCode, and
-            # main only grows.
-            echo "code=$(git rev-list --count HEAD)"
-          } >> "$GITHUB_OUTPUT"
+          echo "host=$host" >> "$GITHUB_OUTPUT"
+          # VERSION with patch 0; a release counts the patch in the next step.
+          bun scripts/ci/android-apk.ts version
           mkdir -p "$RUNNER_TEMP/apk"
       - name: Reuse the previous APK when nothing in it changed
         id: probe
@@ -98,20 +91,20 @@ jobs:
         working-directory: apps/android
         env:
           HOST: ${{ steps.meta.outputs.host }}
-          VERSION: ${{ steps.meta.outputs.version }}
-          CODE: ${{ steps.meta.outputs.code }}
+          VERSION: ${{ steps.probe.outputs.version || steps.meta.outputs.version }}
+          CODE: ${{ steps.probe.outputs.code || steps.meta.outputs.code }}
         run: ./gradlew --no-daemon assembleRelease "-PboiteHost=$HOST" "-PboiteVersion=$VERSION" "-PboiteVersionCode=$CODE"
       - name: Keep the unsigned APK
         if: ${{ !inputs.release }}
         env:
           VERSION: ${{ steps.meta.outputs.version }}
-        run: cp apps/android/app/build/outputs/apk/release/app-release-unsigned.apk "$RUNNER_TEMP/apk/boite-$VERSION-unsigned.apk"
+        run: cp apps/android/app/build/outputs/apk/release/app-release-unsigned.apk "$RUNNER_TEMP/apk/boite-android-$VERSION-unsigned.apk"
       - name: Sign it
         if: inputs.release && steps.probe.outputs.reuse != 'true'
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE }}
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          VERSION: ${{ steps.meta.outputs.version }}
+          VERSION: ${{ steps.probe.outputs.version }}
         run: |
           set -euo pipefail
           # An unsigned APK is a file no phone installs: missing secrets fail the job.
@@ -121,7 +114,8 @@ jobs:
           fi
           bt=$(printf '%s\n' "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)
           ks="$RUNNER_TEMP/android.p12"
-          out="$RUNNER_TEMP/apk/boite-$VERSION.apk"
+          test -n "$VERSION"
+          out="$RUNNER_TEMP/apk/boite-android-$VERSION.apk"
           trap 'rm -f "$ks" "$RUNNER_TEMP/aligned.apk"' EXIT
           printf '%s' "$KEYSTORE_B64" | base64 -d > "$ks"
           "$bt/zipalign" -f -p 4 apps/android/app/build/outputs/apk/release/app-release-unsigned.apk "$RUNNER_TEMP/aligned.apk"

@@ -15,7 +15,6 @@
  */
 
 import groovy.xml.MarkupBuilder
-import groovy.json.JsonSlurper
 
 plugins {
     id 'com.android.application'
@@ -24,16 +23,26 @@ plugins {
 // The wrapper holds no address of its own: the core it opens is a build
 // parameter, so the repository names no deployment. `-PboiteHost=` is the bare
 // hostname the TWA trusts, the one serving /.well-known/assetlinks.json.
-// `-PboiteVersion=` is the release version (package.json's when absent) and
-// `-PboiteVersionCode=` the integer Android compares on update, which must grow
-// from one published APK to the next: CI passes the commit count of main.
+// The app's version is its own, not Boite's. `-PboiteVersion=` is
+// MAJOR.MINOR.PATCH and `-PboiteVersionCode=` the integer Android compares on
+// update, MAJOR*1000000 + MINOR*1000 + PATCH: CI counts the patch from the
+// last published APK (scripts/ci/android-apk.ts). Without them, a local build
+// takes ../VERSION (MAJOR.MINOR) with patch 0.
 def boiteHost = (findProperty('boiteHost') ?: '').toString().trim()
 if (!(boiteHost ==~ /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/)) {
     throw new GradleException("-PboiteHost must be a bare lowercase hostname such as boite.example.com, got '$boiteHost'")
 }
-def appVersionName = (findProperty('boiteVersion') ?:
-        new JsonSlurper().parse(file("$rootDir/../../package.json")).version).toString()
-def appVersionCode = (findProperty('boiteVersionCode') ?: '1').toString()
+def baseVersion = file("$rootDir/VERSION").text.trim()
+def baseMatch = baseVersion =~ /^([1-9][0-9]{0,2})\.([0-9]{1,3})$/
+if (!baseMatch.matches()) {
+    throw new GradleException("apps/android/VERSION must hold MAJOR.MINOR with MAJOR 1 to 999 and MINOR under 1000, got '$baseVersion'")
+}
+def appVersionName = (findProperty('boiteVersion') ?: "${baseVersion}.0").toString()
+if (!(appVersionName ==~ /^[0-9]+\.[0-9]+\.[0-9]+$/)) {
+    throw new GradleException("-PboiteVersion must be MAJOR.MINOR.PATCH, got '$appVersionName'")
+}
+def appVersionCode = (findProperty('boiteVersionCode') ?:
+        (baseMatch.group(1).toInteger() * 1000000 + baseMatch.group(2).toInteger() * 1000)).toString()
 if (!(appVersionCode ==~ /^[1-9][0-9]{0,8}$/)) {
     throw new GradleException("-PboiteVersionCode must be a positive integer under 10^9, got '$appVersionCode'")
 }
