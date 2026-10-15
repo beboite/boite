@@ -12,17 +12,32 @@ export function delegationNeeds(questions: QuestionRequest[], permissions: Permi
   return open.sort((a, b) => a.at - b.at).map(({ at: _at, ...need }) => need);
 }
 
-/** The question a parent's message to its child answers: a blocking one first, else the oldest. */
-export function delegationQuestion(questions: QuestionRequest[]): QuestionRequest | undefined {
-  const open = questions.filter(delegationAnswerable);
-  return open.find(q => q.async !== true) ?? open[0];
-}
-
 /** How a parent answers a question, in the words its refusal and its wake message use. */
 export function delegationAnswerForm(question: QuestionRequest): string {
   if (!question.options.length) return 'free text';
   const labels = `${question.multiple ? 'one or more option labels separated by commas' : 'one option label'} as written`;
   return question.allowText ? `${labels}, or free text` : labels;
+}
+
+/**
+ * What a parent's message to its child does. A blocking question takes it as
+ * its answer, or refuses it (the string) when it fits none of the forms. A
+ * question asked without stopping takes it only when it names its options:
+ * the child is still working, so any other text stays an ordinary message.
+ * Null: no question takes it.
+ */
+export function delegationReply(questions: QuestionRequest[], text: string): { question: QuestionRequest; answer: QuestionAnswer } | string | null {
+  const open = questions.filter(delegationAnswerable);
+  const blocking = open.find(q => q.async !== true);
+  if (blocking) {
+    const answer = delegationAnswer(blocking, text);
+    return typeof answer === 'string' ? answer : { question: blocking, answer };
+  }
+  for (const question of open) {
+    const answer = delegationAnswer(question, text);
+    if (typeof answer !== 'string' && answer.optionIds.length) return { question, answer };
+  }
+  return null;
 }
 
 /**

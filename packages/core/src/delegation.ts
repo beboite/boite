@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, delegationAnswerable as answerable, delegationNeeds as needsOf, delegationQuestion as questionToAnswer, nativeAgentsOfTool, processAgentCommand, SPEED_NEEDS_MODEL, threadBusy, type RpcEvents } from '@boite/contracts';
+import { CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, delegationAnswerable as answerable, delegationNeeds as needsOf, delegationReply, nativeAgentsOfTool, processAgentCommand, SPEED_NEEDS_MODEL, threadBusy, type RpcEvents } from '@boite/contracts';
 import type { AgentLetter, BackgroundWait, DelegatedAgent, DelegationConfig, DelegationModels, DelegationView, PermissionRequest, QuestionRequest, RequestId, RpcParams, ThreadSummary, Turn, Usage } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused } from './errors.ts';
@@ -13,7 +13,7 @@ import { withLoad } from './threads/records.ts';
 import { nativeAgents } from './native-agents.ts';
 import { delegatedResultPage, DelegationWaits } from './delegation/results.ts';
 import { INTERRUPTION_TEXT } from './delegation/interruption.ts';
-import { answerFor, permissionWake, questionWake, worktreeLine } from './delegation/messages.ts';
+import { permissionWake, questionWake, worktreeLine } from './delegation/messages.ts';
 import { ChildWorktrees } from './delegation/worktrees.ts';
 import type { Connection } from './router.ts';
 
@@ -462,8 +462,9 @@ export class Delegation {
     const count = this.core.journal.db.query('SELECT count(*) AS n FROM delegation_messages WHERE root_id = ? AND created_at > ?').get(root.id, Date.now() - 3_600_000) as { n: number };
     if (!fromCore && count.n >= 100) throw refused('delegation hourly message limit reached');
     // A parent writing to a child that waits on a question answers that question: a waiting child takes no mail.
-    const question = !sender.parentThreadId ? questionToAnswer(this.core.threads.listQuestions(recipient.id)) : undefined;
-    const answer = question ? answerFor(question, body) : undefined;
+    const reply = sender.parentThreadId ? null : delegationReply(this.core.threads.listQuestions(recipient.id), body);
+    if (typeof reply === 'string') throw refused(reply, { field: 'text', toThreadId: recipient.id });
+    const question = reply?.question, answer = reply?.answer;
     // A question letter stays until the card closes, which withdraws it if it was not delivered yet.
     const letter: AgentLetter = { id: randomUUID(), origin, ...(checkpoint ? { checkpoint: true } : {}), from: this.contact(sender), to: { coreId: 'local', threadId: recipient.id }, toTitle: recipient.title, toProject: this.contact(recipient).project, toMachine: 'Boite', text: body, replyTo: null, createdAt: Date.now(), expiresAt: fromCore ? Number.MAX_SAFE_INTEGER : Date.now() + 15 * 60_000, status: question ? 'delivered' : 'received', error: null, ...(question ? { answered: question.id } : {}) };
     this.core.journal.append({ type: 'delegation.sent', threadId: sender.id, version: 1, payload: letter }, () => {

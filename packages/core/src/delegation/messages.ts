@@ -1,6 +1,5 @@
 /** What a parent and the `boite delegate` rows read about a child: its open cards, how to answer them and where its worktree is. */
-import { delegationAnswer, delegationAnswerForm, type DelegationInput, type DelegationWorktree, type PermissionRequest, type QuestionAnswer, type QuestionRequest, type ThreadSummary } from '@boite/contracts';
-import { refused } from '../errors.ts';
+import { delegationAnswerForm, type DelegationInput, type DelegationWorktree, type PermissionRequest, type QuestionRequest, type ThreadSummary } from '@boite/contracts';
 
 const clip = (text: string, max: number) => text.length > max ? `${text.slice(0, max - 3)}...` : text;
 
@@ -9,8 +8,10 @@ export function questionWake(child: ThreadSummary, question: QuestionRequest): s
   const options = question.options.length ? `\nOptions: ${question.options.map(o => JSON.stringify(o.label)).join(' | ')}` : '';
   return [
     `${child.title} (${child.id}) asks: ${clip(question.text, 2500)}${clip(options, 800)}`,
-    question.async === true ? 'It keeps working meanwhile.' : 'It is blocked until it gets an answer.',
-    `Your next boite delegate send ${child.id} "<answer>" answers it (${delegationAnswerForm(question)}). Answer from the task and the user's instructions; ask the user when they do not settle it.`,
+    question.async === true
+      ? `It keeps working meanwhile. ${question.options.length ? `boite delegate send ${child.id} "<option>" with an option label answers it; any other text reaches it as an ordinary message.` : `It reads boite delegate send ${child.id} "<text>" as an ordinary message.`}`
+      : `It is blocked until it gets an answer. Your next boite delegate send ${child.id} "<answer>" answers it (${delegationAnswerForm(question)}).`,
+    'Answer from the task and the user\'s instructions; ask the user when they do not settle it.',
   ].join('\n');
 }
 
@@ -20,13 +21,6 @@ export function permissionWake(child: ThreadSummary, request: PermissionRequest)
     `${child.title} (${child.id}) waits for the user's approval to use ${request.toolName}${request.description ? `: ${clip(request.description, 1500)}` : ''}.`,
     'Only the user can approve it, in that subagent\'s conversation; tell them if your work depends on it. Your messages reach it once it runs again.',
   ].join('\n');
-}
-
-/** A parent's text as the answer to its child's question, refused with the options when it fits none. */
-export function answerFor(question: QuestionRequest, text: string): QuestionAnswer {
-  const answer = delegationAnswer(question, text);
-  if (typeof answer === 'string') throw refused(answer, { field: 'text', questionId: question.id, expected: question.options.map(o => o.label) });
-  return answer;
 }
 
 /** One line per open card, for `delegate list` and `delegate wait`. */

@@ -3634,10 +3634,12 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'delegation.spawn': { params: { threadId: ThreadId; profileId?: string; model?: string; effort?: string; speed?: string; context?: ContextRequest | ContextPreset; task: string; title?: string; worktree?: boolean; requestId: string }; result: DelegatedAgent };
   'delegation.models': { params: { threadId: ThreadId }; result: DelegationModels };
   /**
-   * From a parent to a child waiting on a question card, the text answers
+   * From a parent to a child blocked on a question card, the text answers
    * that question (an option label, or free text where it takes some) and the
-   * letter carries `answered`; a question that takes neither is refused with
-   * its options. Otherwise a message delivered at the next tool boundary or turn.
+   * letter carries `answered`; a text that fits neither is refused with the
+   * options. A question asked without stopping takes only its option labels.
+   * Otherwise a message delivered at the next tool boundary or turn
+   * (`delegationReply`).
    */
   'delegation.send': { params: { threadId: ThreadId; toThreadId: ThreadId; text: string; requestId: string }; result: AgentLetter };
   'delegation.stop': { params: { threadId: ThreadId; agentId?: ThreadId }; result: { stopped: number } };

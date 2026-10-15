@@ -83,6 +83,22 @@ test('a question answered before its parent was told never reaches the parent', 
   } finally { await s.stop(); }
 });
 
+test('a question asked without stopping takes only its option labels; other text stays a message', async () => {
+  const s = await setup();
+  try {
+    const ticket = s.ask({ text: 'Rename the module too?', options: [{ id: 'y', label: 'Yes' }, { id: 'n', label: 'No' }], allowText: false, async: true });
+    await waitFor(() => s.letters().length === 1);
+    expect(s.letters()[0]!.text).toContain('any other text reaches it as an ordinary message');
+    // Before: every steer was taken as the answer, and refused with the options.
+    const steer = await s.client.call('delegation.send', { threadId: s.threadId, toThreadId: s.childId, text: 'Also check the tests', requestId: 'steer' });
+    expect(steer.answered).toBeUndefined();
+    expect(s.h.core.threads.listQuestions(s.childId)).toHaveLength(1);
+    const answer = await s.client.call('delegation.send', { threadId: s.threadId, toThreadId: s.childId, text: 'yes', requestId: 'option' });
+    expect(answer.answered).toBe(ticket.questionId);
+    expect(await ticket).toEqual({ optionIds: ['y'] });
+  } finally { await s.stop(); }
+});
+
 test('a stopped child leaves no question open for its parent', async () => {
   const s = await setup();
   try {

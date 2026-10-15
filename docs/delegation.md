@@ -259,10 +259,12 @@ says that only the user can approve it, in the child's conversation. Settings
 cards are the owner's and never go to the parent.
 
 The parent's next `boite delegate send <child> "<answer>"` answers the child's
-question instead of queuing a message: a blocking question first, else the
-oldest. The text is an option label in any case, several labels separated by
-commas where the question takes several, or free text where it takes some; a
-text that fits none is refused with the options. The answer is recorded as
+blocking question instead of queuing a message. The text is an option label in
+any case, several labels separated by commas where the question takes several,
+or free text where it takes some; a text that fits none is refused with the
+options. A question asked without stopping takes the parent's text only when
+it names its options: the child is still working, so any other text stays an
+ordinary message. The answer is recorded as
 given by the parent agent, and the letter carries `answered` with the question
 id. A permission card is never answered this way: the message waits until the
 child runs again.

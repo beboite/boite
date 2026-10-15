@@ -1,6 +1,6 @@
 /** Delegation: a parent thread's team of child threads, their usage and letters. */
 import { errorText } from '../errors';
-import { collectNativeAgents, collectProcessAgents, CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, delegationAnswer, delegationNeeds, delegationQuestion, matchSpeed, providerEnabled, RpcErrorCode, SPEED_NEEDS_MODEL, speedRefusal, threadActive, type AgentLetter, type DelegatedAgent, type DelegationConfig, type DelegationModelChoice, type DelegationProfile, type DelegationView, type DelegationWaitResult, type RpcParams, type Message, type Thread, type ThreadId, type Turn } from '@boite/contracts';
+import { collectNativeAgents, collectProcessAgents, CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, delegationNeeds, delegationReply, matchSpeed, providerEnabled, RpcErrorCode, SPEED_NEEDS_MODEL, speedRefusal, threadActive, type AgentLetter, type DelegatedAgent, type DelegationConfig, type DelegationModelChoice, type DelegationProfile, type DelegationView, type DelegationWaitResult, type RpcParams, type Message, type Thread, type ThreadId, type Turn } from '@boite/contracts';
 import { fakeContextMode } from './context-mode';
 import { RpcFailure } from '../client';
 import { addUsage, emptyUsage, toSummary } from './shared';
@@ -458,9 +458,9 @@ export function delegationMethods(ctx: FakeContext) {
       if (ctx.thread(root).archived || sender.archived || recipient.archived) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation messages require an unarchived parent and threads' });
       if (!config.enabled || config.paused) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation is disabled or paused' });
       // As the core: a parent's message to a child waiting on a question answers it.
-      const question = sender.parentThreadId ? undefined : delegationQuestion([...ctx.pendingQuestions.values()].map(entry => entry.request).filter(request => request.threadId === recipient.id));
-      const answer = question ? delegationAnswer(question, body) : undefined;
-      if (typeof answer === 'string') throw new RpcFailure({ code: RpcErrorCode.Refused, message: answer });
+      const reply = sender.parentThreadId ? null : delegationReply([...ctx.pendingQuestions.values()].map(entry => entry.request).filter(request => request.threadId === recipient.id), body);
+      if (typeof reply === 'string') throw new RpcFailure({ code: RpcErrorCode.Refused, message: reply });
+      const question = reply?.question, answer = reply?.answer;
       const letter: AgentLetter = {
         id: `letter-${++ctx.seq}`,
         origin: 'user',
