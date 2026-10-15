@@ -572,7 +572,9 @@ function handle(method: string, raw: unknown): unknown {
       log(`config/read cwd=${textOf(params['cwd'])} noPlugins=${process.argv.includes('features.plugins=false') && process.argv.includes('features.apps=false')}`);
       if (process.env['CODEX_FAKE_CONFIG_READ_ERROR'] === '1') throw new Error('unknown method config/read');
       // `CODEX_FAKE_MCP=<json>`: the `mcp_servers` table of the effective config.
-      return { config: { mcp_servers: JSON.parse(process.env['CODEX_FAKE_MCP'] ?? '{}') }, origins: {}, layers: null };
+      // `CODEX_FAKE_GRACE=<ms>`: the user's own `mcp_optional_startup_grace_ms`; Codex answers null when unset.
+      const grace = process.env['CODEX_FAKE_GRACE'];
+      return { config: { mcp_servers: JSON.parse(process.env['CODEX_FAKE_MCP'] ?? '{}'), mcp_optional_startup_grace_ms: grace === undefined ? null : Number(grace) }, origins: {}, layers: null };
     }
     case 'thread/unarchive':
       log(`thread/unarchive ${textOf(params['threadId'])}`);

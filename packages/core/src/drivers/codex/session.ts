@@ -35,10 +35,10 @@ import {
   NO_NATIVE_SUBAGENTS,
   PERMISSIONS_TOOL_NAME,
   STDERR_MAX,
-  THREAD_CONFIG,
 } from './protocol.ts';
 import { CodexRpc } from './rpc.ts';
 import { resumeThread, ThreadLostError } from './resume.ts';
+import { threadConfig } from './config.ts';
 import { updateTurnSettings } from './live-settings.ts';
 import { CodexTurn } from './turn.ts';
 import { SessionRetention } from '../session-retention.ts';
@@ -332,6 +332,7 @@ export class CodexSession {
 
     const policy = MODE_POLICY[ctx.thread.permissionMode];
     const model = modelOf(ctx);
+    const config = await threadConfig(rpc, ctx.thread.cwd, (level, message) => ctx.log(level, message));
     if (ctx.sessionId !== null) {
       const resumed = await resumeThread(rpc, ctx, {
         threadId: ctx.sessionId,
@@ -339,7 +340,7 @@ export class CodexSession {
         approvalPolicy: policy.approvalPolicy,
         sandbox: policy.sandbox,
         ...(model === null ? {} : { model }),
-        config: THREAD_CONFIG,
+        config,
         excludeTurns: true,
       });
       this.threadId = resumed.thread.id;
@@ -348,7 +349,7 @@ export class CodexSession {
     }
 
     const created = await rpc.request<CodexThreadOpened>('thread/start', {
-      config: THREAD_CONFIG,
+      config,
       cwd: ctx.thread.cwd,
       approvalPolicy: policy.approvalPolicy,
       sandbox: policy.sandbox,

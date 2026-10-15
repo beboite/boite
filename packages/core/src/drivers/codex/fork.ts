@@ -5,7 +5,8 @@ import type { ForkedSession, SessionContext } from '../types.ts';
 import { exitWithin } from '../exit.ts';
 import { NativeForkUnsupported } from '../native-fork.ts';
 import { modelOf } from './mapping.ts';
-import { CLIENT_NAME, MODE_POLICY, NO_NATIVE_SUBAGENTS, THREAD_CONFIG } from './protocol.ts';
+import { CLIENT_NAME, MODE_POLICY, NO_NATIVE_SUBAGENTS } from './protocol.ts';
+import { threadConfig } from './config.ts';
 import { CodexRpc, CodexRpcError } from './rpc.ts';
 
 const FORK_TIMEOUT_MS = 30_000;
@@ -41,6 +42,7 @@ export async function forkSession(ctx: SessionContext, checkpoint: { sessionId: 
     rpc.notify('initialized', {});
     const policy = MODE_POLICY[ctx.thread.permissionMode];
     const model = modelOf(ctx);
+    const config = await threadConfig(rpc, ctx.thread.cwd, (level, message) => ctx.log(level, message));
     const answer = await rpc.request<{ thread: { id: string } }>('thread/fork', {
       threadId: checkpoint.sessionId,
       lastTurnId: checkpoint.entry,
@@ -49,7 +51,7 @@ export async function forkSession(ctx: SessionContext, checkpoint: { sessionId: 
       approvalPolicy: policy.approvalPolicy,
       sandbox: policy.sandbox,
       ...(model === null ? {} : { model }),
-      config: THREAD_CONFIG,
+      config,
     }, { timeoutMs: FORK_TIMEOUT_MS });
     const sessionId = answer?.thread?.id;
     if (typeof sessionId !== 'string' || !sessionId.length || sessionId === checkpoint.sessionId) {

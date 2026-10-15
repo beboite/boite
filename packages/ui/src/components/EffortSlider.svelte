@@ -24,7 +24,8 @@
     onpick,
     speeds = [],
     speed = null,
-    onspeed = () => {}
+    onspeed = () => {},
+    ondefault
   }: {
     levels: EffortLevel[];
     /**
@@ -37,6 +38,11 @@
     speeds?: { id: string; label: string; description?: string }[];
     speed?: string | null;
     onspeed?: (id: string | null) => void;
+    /**
+     * Given for a model whose agent picks its own level: a picked level then
+     * shows a Default switch that hands the level back to the agent.
+     */
+    ondefault?: () => void;
   } = $props();
 
   const popover = new Closing();
@@ -227,6 +233,9 @@
           </button>
         {/if}
         {#key rush?.id}<span class="level ui-label" class:dash={!!rush} class:strong={(rush?.power ?? 0) > 1}>{levelLabel}</span>{/key}
+        {#if ondefault && current}
+          <button type="button" class="speed agent-default ui-label" data-testid="effort-default" title={strings.composer.effortDefaultHint} onclick={ondefault}>{strings.composer.effortDefault}</button>
+        {/if}
       </div>
 
       {#if levels.length > 0}
@@ -286,6 +295,7 @@
 .speed:hover :global(svg) { transform: rotate(-12deg) scale(1.16); }
 .speed.active { color: var(--color-accent); background: var(--color-accent-soft); }
 .speed:active :global(svg) { transform: scale(.9); }
+.agent-default { grid-column: 3; justify-self: end; margin: 0 -4px 0 0; }
 .track { padding: 3px 12px; cursor: pointer; touch-action: none; height: 30px; background: var(--color-edge); border-radius: 999px; }
 .track:focus-visible { outline: 1px solid var(--color-reasoning); outline-offset: 3px; }
 .line { position: relative; height: 24px; }

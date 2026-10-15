@@ -797,7 +797,8 @@ a Job Object and in the trace like any other, then asks the protocol's own quest
   pi does not say which level it would run another model on, so those models
   carry their scale without a default. A thread that picks one sends no level,
   pi keeps its own clamped to that model, and the reasoning chip reads Default
-  until a level is picked. An unauthenticated pi answers with
+  until a level is picked. On such a model the reasoning popover, and the
+  phone's options sheet, offer Default to hand a picked level back to pi. An unauthenticated pi answers with
   nothing, so the descriptor's models are left standing rather than replaced by an
   empty list.
 
@@ -1005,7 +1006,9 @@ An initialization RPC error waits up to 2 seconds for process closure and remain
 stderr before the retry decision, so a process that stays alive cannot stall it.
 
 Every `thread/start`, `thread/resume` and `thread/fork` sends
-`mcp_optional_startup_grace_ms: 10000` in its per-thread configuration. Codex
+`mcp_optional_startup_grace_ms: 10000` in its per-thread configuration, unless
+`config/read` shows the user set that key, `0` included (Codex then waits for
+each server's own `startup_timeout_sec`). Codex
 waits that long for the MCP servers of `config.toml` before the first model
 request and leaves out any server still starting; its default of about a second
 is too short for a cold `npx` or `uvx` server, whose tools would then be missing
@@ -1023,8 +1026,9 @@ The app-server that writes a title or a branch name starts with
 configuration of the thread's folder with `config/read`, and opens its ephemeral
 thread with every MCP server listed there set to `enabled = false`. Without it,
 each title would start the user's MCP servers and plugins, and a server could act
-on the prompt. A Codex that refuses `config/read` still writes the title, with
-its MCP servers on, and the core logs a warning.
+on the prompt. A Codex that refuses `config/read` writes no title: the attempt
+fails with that reason rather than start the servers, and the thread keeps the
+title it has.
 
 ### Codex task tracking
 

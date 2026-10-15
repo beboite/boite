@@ -1563,6 +1563,7 @@ export const fr: Translation = {
     effortTitle: 'Niveau de raisonnement',
     speed: 'Vitesse de réponse',
     effortDefault: 'Par défaut',
+    effortDefaultHint: "Laisser l'agent choisir son propre niveau pour ce modèle",
     standardSpeed: 'Vitesse normale',
     favorites: 'Favoris',
     favorite: 'Ajouter aux favoris',

@@ -1661,6 +1661,7 @@ export const strings = {
     speed: 'Response speed',
     /** The reasoning chip of a model whose agent keeps its own level until one is picked. */
     effortDefault: 'Default',
+    effortDefaultHint: 'Let the agent pick its own level for this model',
     standardSpeed: 'Standard speed',
     favorites: 'Favorites',
     favorite: 'Add to favorites',
