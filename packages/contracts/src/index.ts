@@ -815,6 +815,13 @@ export interface Project {
   /** Automatically hide a quiescent worktree conversation after its exact PR merges. Missing means enabled. */
   autoArchiveMergedPr?: boolean;
   /**
+   * Remove a worktree the core created once every thread in it is archived or
+   * done and its work is settled: the exact head merged in a PR, or nothing
+   * missing from every other branch. Absent from a core older than this field;
+   * otherwise true unless the owner turned it off.
+   */
+  autoRemoveWorktrees?: boolean;
+  /**
    * The folder holds a `.git`, read on every answer rather than stored: the
    * test `threads.create.worktree` applies. Absent before the core's first
    * check of the folder answers, and from a core older than this field: a
@@ -969,6 +976,24 @@ export interface ThreadArchiveReason {
   archivedAt: Timestamp;
 }
 
+/**
+ * The core removed the worktree this thread worked in while it was archived.
+ * `cwd` still names the folder, which no longer exists: the thread can be read
+ * and restored but not continued there.
+ */
+export interface ThreadWorktreeRemoval {
+  /** The folder that was removed, the thread's `cwd` at the time. */
+  path: string;
+  /** The branch checked out there, null on a detached HEAD. */
+  branch: string | null;
+  /** The local branch went too. A kept branch can be checked out again by hand. */
+  branchDeleted: boolean;
+  /** `pr-merged`: the checkout's exact tip was a merged PR's head. `clean`: no change and no commit missing from every other branch. */
+  reason: 'pr-merged' | 'clean';
+  pullRequest?: { number: number; url: string };
+  removedAt: Timestamp;
+}
+
 /** Provenance of a copied conversation; native history and seeded history remain distinct. */
 export const JOURNAL_INSPECTION_TABLES = ['threads', 'turns', 'messages', 'turn_requests', 'background_observations', 'coordination_letters'] as const;
 export type JournalInspectionTable = typeof JOURNAL_INSPECTION_TABLES[number];
@@ -1012,6 +1037,8 @@ export interface ThreadSummary {
 
   /** Durable explanation for an automatic archive; absent for manual archives and restored conversations. */
   archiveReason?: ThreadArchiveReason;
+  /** Set once the core removed this thread's worktree, kept after a restore while `cwd` still names it. */
+  worktreeRemoved?: ThreadWorktreeRemoval | null;
   /** Core-owned delegation relationship. Absent on ordinary conversations. */
   parentThreadId?: ThreadId | null;
   /** What the conversation starts without, fixed at creation. Absent: the whole setup. */
@@ -3548,6 +3575,8 @@ export interface UpdateEverythingResult {
 export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, BrowserRpcMethods, PullRequestsRpcMethods, MobileDevicesRpcMethods, DiagnosticsRpcMethods {
   /** Owner-only merged-PR visibility policy; absent defaults to enabled. Disabling reveals automatically hidden roots, retaining manual archives. */
   'projects.setAutoArchiveMergedPr': { params: { projectId: ProjectId; enabled: boolean }; result: Project };
+  /** Owner-only automatic worktree removal policy; absent defaults to enabled. Turning it off stops future removals only. */
+  'projects.setAutoRemoveWorktrees': { params: { projectId: ProjectId; enabled: boolean }; result: Project };
   /** Owner-only, private bounded diagnostic history, including earlier runs. */
   'journal.inspect': { params: { cursor?: JournalInspectionCursor | null; limit?: number }; result: JournalInspection };
   'core.logs': { params: CoreLogsQuery; result: CoreLogRecord[] };

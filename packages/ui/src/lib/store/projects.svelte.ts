@@ -306,26 +306,43 @@ export class Projects {
     }
   }
 
-  #archivePolicyWrites = $state<string[]>([]);
+  /** Project policy writes under way, by policy, client generation and project. */
+  #policyWrites = $state<string[]>([]);
 
   projectAutoArchiveMergedPrBusy(projectId: ProjectId): boolean {
-    return this.#archivePolicyWrites.includes(JSON.stringify([this.ctx.clientGeneration, projectId]));
+    return this.#policyWrites.includes(JSON.stringify(['merged', this.ctx.clientGeneration, projectId]));
   }
 
-  async setProjectAutoArchiveMergedPr(projectId: ProjectId, enabled: boolean): Promise<void> {
+  projectAutoRemoveWorktreesBusy(projectId: ProjectId): boolean {
+    return this.#policyWrites.includes(JSON.stringify(['worktrees', this.ctx.clientGeneration, projectId]));
+  }
+
+  setProjectAutoArchiveMergedPr(projectId: ProjectId, enabled: boolean): Promise<void> {
+    return this.#setPolicy('merged', projectId, (project) => project.autoArchiveMergedPr !== undefined,
+      (client) => client.call('projects.setAutoArchiveMergedPr', { projectId, enabled }));
+  }
+
+  /** Settled worktrees removed on their own; absent on a core that cannot. */
+  setProjectAutoRemoveWorktrees(projectId: ProjectId, enabled: boolean): Promise<void> {
+    return this.#setPolicy('worktrees', projectId, (project) => project.autoRemoveWorktrees !== undefined,
+      (client) => client.call('projects.setAutoRemoveWorktrees', { projectId, enabled }));
+  }
+
+  async #setPolicy(policy: string, projectId: ProjectId, known: (project: Project) => boolean, write: (client: NonNullable<StoreContext['client']>) => Promise<Project>): Promise<void> {
     const client = this.ctx.client;
     const clientGeneration = this.ctx.clientGeneration;
-    if (!client || !this.ctx.store.owner || this.ctx.store.connection !== 'ready' || this.projects.find(project => project.id === projectId)?.autoArchiveMergedPr === undefined) return;
-    const key = JSON.stringify([clientGeneration, projectId]);
-    if (this.#archivePolicyWrites.includes(key)) return;
-    this.#archivePolicyWrites = [...this.#archivePolicyWrites, key];
+    const current = this.projects.find(project => project.id === projectId);
+    if (!client || !this.ctx.store.owner || this.ctx.store.connection !== 'ready' || !current || !known(current)) return;
+    const key = JSON.stringify([policy, clientGeneration, projectId]);
+    if (this.#policyWrites.includes(key)) return;
+    this.#policyWrites = [...this.#policyWrites, key];
     try {
-      const project = await client.call('projects.setAutoArchiveMergedPr', { projectId, enabled });
+      const project = await write(client);
       if (this.ctx.currentClient(client, clientGeneration)) this.upsertProject(project);
     } catch (error) {
       if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
     } finally {
-      this.#archivePolicyWrites = this.#archivePolicyWrites.filter(pending => pending !== key);
+      this.#policyWrites = this.#policyWrites.filter(pending => pending !== key);
     }
   }
 

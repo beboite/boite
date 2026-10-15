@@ -38,6 +38,7 @@ import { DraftPreparations } from './threads/draft-preparations.ts';
 import { AttachmentUploads } from './attachment-uploads.ts';
 import { scheduleThreadDeletionRetention } from './threads/deletion-retention.ts';
 import { scheduleDoneRetention } from './threads/done-retention.ts';
+import { WorktreeCleanup } from './worktree-cleanup.ts';
 import { scheduleArtifactRetention } from './artifact-retention.ts';
 import { ArtifactPreviews } from './artifact-preview.ts';
 import { AgentBrowser, BROWSER_SCOPE } from './browser.ts';
@@ -133,6 +134,7 @@ export class Core {
   readonly diagnostics: Diagnostics;
   readonly pullRequests: PullRequests;
   readonly mergedPrArchive: MergedPrArchive;
+  readonly worktreeCleanup: WorktreeCleanup;
   readonly journal: Journal;
   readonly router: Router;
   readonly settings: SettingsStore;
@@ -361,6 +363,8 @@ export class Core {
     this.brain.start();
     this.mergedPrArchive = new MergedPrArchive(this, this.pullRequests);
     this.mergedPrArchive.start();
+    this.worktreeCleanup = new WorktreeCleanup(this);
+    this.worktreeCleanup.start();
     this.logs.record('info', `Core ${this.version} started in ${Date.now() - this.startedAt} ms, ${process.platform} ${process.arch}, Bun ${process.versions.bun ?? 'unknown'}`, {
       source: 'core', event: 'core.started', durationMs: Date.now() - this.startedAt,
       data: { version: this.version, channel: this.channel, os: process.platform, arch: process.arch, bun: process.versions.bun ?? null, pid: process.pid, cliShim: this.cliDir !== null, trace: this.procs.capability().mode },
@@ -435,6 +439,7 @@ export class Core {
     this.workflows.beginClose();
     this.coordination.beginClose();
     void this.mergedPrArchive.close();
+    void this.worktreeCleanup.close();
     this.group.beginClose();
     this.activity.close();
     this.threads.autoCompact.close();
@@ -460,6 +465,7 @@ export class Core {
     this.artifactPreviews.stop();
     this.threads.sideQuestions.close();
     await this.mergedPrArchive.close();
+    await this.worktreeCleanup.close();
     this.threads.titles.close();
     this.threads.autoCompact.close();
     await this.agentRuntime.close();

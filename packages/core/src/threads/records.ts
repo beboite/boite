@@ -1,4 +1,5 @@
 import { archiveState } from '../merged-pr-archive-state.ts';
+import { worktreeRemovalOf } from '../worktree-cleanup-state.ts';
 import { backgroundWait } from '@boite/contracts';
 import type { BackgroundTask, BackgroundWait, MessageId, MessagePart, MoveNotice, RpcParams, ThreadId, ThreadStatus, ThreadSummary } from '@boite/contracts';
 import type { Core } from '../core.ts';
@@ -58,6 +59,7 @@ export function withLoad(core: Core, thread: ThreadSummary): ThreadSummary {
   return {
     ...thread,
     archiveReason: thread.archived ? archiveState(core.journal, thread.id).reason : undefined,
+    worktreeRemoved: thread.branch === null ? null : worktreeRemovalOf(core.journal, thread),
     load: core.procs.loadOf(thread.id),
     runningSince: busy ? core.journal.runningSince(thread.id) : null,
     requestSince: busy || tasks.length > 0 ? core.journal.requestSince(thread.id) : null,
