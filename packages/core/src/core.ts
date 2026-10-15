@@ -59,6 +59,7 @@ import { BrainStore } from './brain.ts';
 import { HookLedger } from './hooks.ts';
 import { TerminalStore } from './terminals.ts';
 import { ServerUpdates, type ServerUpdateOptions } from './server-update.ts';
+import { DesktopUpdates } from './desktop-update.ts';
 
 export { CORE_VERSION } from './version.ts';
 
@@ -166,6 +167,8 @@ export class Core {
   readonly telemetry: Telemetry;
   readonly updates: HarnessUpdates;
   readonly serverUpdates: ServerUpdates;
+  /** The desktop app's updater as this machine's own window reports it. */
+  readonly desktopUpdates: DesktopUpdates;
   readonly coordination: Coordination;
   /** The machines this core trusts as one owner's, and what it hands their clients. */
   readonly group: GroupStore;
@@ -343,6 +346,7 @@ export class Core {
     this.telemetry = new Telemetry(this);
     this.updates = new HarnessUpdates(this);
     this.serverUpdates = new ServerUpdates(this, options.serverUpdates);
+    this.desktopUpdates = new DesktopUpdates(this);
     this.coordination = new Coordination(this);
     this.group = new GroupStore(this);
     this.group.restore();
@@ -429,7 +433,7 @@ export class Core {
       version: this.version,
       ...(this.bundleHash ? { bundleHash: this.bundleHash } : {}),
       protocolVersion: PROTOCOL_VERSION,
-      features: { threadSnapshots: true, chunkedAnswers: true, readingPages: true, deferredToolParts: true, deviceKeys: true, draftPreparation: true, attachmentUploads: true, revealMachines: true },
+      features: { threadSnapshots: true, chunkedAnswers: true, readingPages: true, deferredToolParts: true, deviceKeys: true, draftPreparation: true, attachmentUploads: true, revealMachines: true, desktopUpdates: true },
       coreId: this.coordination.card().coreId,
       hostname: hostname(),
       os: currentOs(),
@@ -496,6 +500,7 @@ export class Core {
     this.updates.close();
     this.providers.close();
     this.serverUpdates.close();
+    this.desktopUpdates.close();
     await this.drain();
     await this.delegation.close();
     await this.coordination.close();
