@@ -142,7 +142,9 @@ when renaming.
 Settings, Machines and updates shows each machine on one row: its icon, its
 name, whether it is connected and one word about its updates. The row's chevron
 opens its details: its address, Boite's version on that machine with its
-update, its agents with theirs and the automatic update switch, Settings for
+update (on another Windows PC, its desktop app as its window reports it,
+[updated from here](updates.md#the-desktop-app-of-another-pc)), its agents
+with theirs and the automatic update switch, Settings for
 this machine and Remove machine. A machine alone on its list shows its details
 without a click. Before this, a machine appeared twice, once as an updates
 card listing every agent version and once as a connection.

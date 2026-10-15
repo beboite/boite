@@ -163,18 +163,31 @@ link to this guide. A core predating this feature needs one manual update first.
 The server checks eight seconds after startup, then every six hours. It follows
 its installed stable or nightly channel, downloads an immutable release's
 signed server archive, and verifies the publisher signature and embedded
-version before staging the complete core, CLI and UI. No update stops a running
-turn. The download and idle wait can be cancelled. Running and queued turns,
-terminals, warm sessions, background tasks and authenticated requests must
-finish before the existing idle-shutdown gate admits installation.
+version before staging the complete core, CLI and UI. The download and idle
+wait can be cancelled. An idle server installs through the idle gate. A busy
+one hands its turns to the next core at once, as a desktop update does
+([restart handoff](restart-handoff.md)): each running turn ends its tool call,
+30 seconds at most, queued turns stay queued, and all resume after the
+restart. Only an agent install under way holds it, since the restart would
+replace the core under a half-written agent. Waiting for idle instead held a
+machine with an agent working for hours on "Waiting for work to finish" for
+good.
 
 An independent systemd user job survives the core's shutdown. After the core
-stops, it backs up the complete data directory and installation, switches the
-staged installation into place, and restarts the same service. Health must
+stops, it backs up the installation and the data directory, switches the
+staged installation into place, and restarts the same service. The data
+snapshot holds the journal and the state files beside it; checkpoints,
+browser profiles, attachments, artifacts, logs and dictation models stay out,
+since a release does not rewrite them. Copying them kept a server with 1,300
+threads down 2 min 25 s for 8.9 GB, and filled its disk once mid-copy; a
+rollback keeps the live ones. Before stopping the service, the job checks that
+the disk holds the snapshot plus 1 GB and otherwise leaves the server running
+with the reason in its status. A copy cut short is deleted. Health must
 report the target version and that service's new PID within 30 seconds.
 Failure restores both the previous installation and its data snapshot before
 restarting. Pairings and conversations survive; clients reconnect normally.
-Backups remain private beside the installation as `.boite-backup-<id>`.
+Backups remain private beside the installation as `.boite-backup-<id>`; a
+successful update keeps the two newest and deletes the older ones.
 Failure artifacts also remain for diagnosis; inspect them before removing them.
 
 From a terminal on the server, the same owner actions need no thread:
