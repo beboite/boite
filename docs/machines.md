@@ -24,7 +24,7 @@ remembered core on the same computer that already has them.
 
 Repairing the primary connection saves its accepted device credential or session
 key before reporting the handshake as ready. Draft storage and list loading may
-still be pending; reloading then needs no new pairing code. Connecting another
+still be pending; reloading then needs no new pairing link. Connecting another
 machine saves its credentials without replacing the primary startup endpoint.
 
 A machine that is off does not hold the others back. When the machine the
@@ -125,9 +125,9 @@ running or waiting when the connection went.
 
 A key a remote core refuses is not retried: the machine shows as closed with
 the reason. A page opened on its own core with no key says the device is not in
-its group yet. A phone then scans or types the code of **Add a device** from any
-machine of the group ([phone](phone.md#adding-a-phone)); a computer's browser
-pastes the copied link under **Add a machine**. Both are the affected machine's
+its group yet. A phone then scans the QR code of **Add a device** from any
+machine of the group, or pastes its link ([phone](phone.md#adding-a-phone)); a
+computer's browser pastes the copied link under **Add a machine**. Both are the affected machine's
 **Add again** control too. Only a connected machine is refused as already
 connected.
 
@@ -156,8 +156,8 @@ one in progress, then one available, then a check in progress, then Up to
 date. A row says nothing until something has answered.
 
 The group card lists the machines, then the phones and browsers of the group,
-and has one button, **Add a device**, which draws the QR code and its code
-([groups](groups.md#using-it)). Phone app keeps the Tailscale HTTPS switch and
+and has one button, **Add a device**, which draws the QR code and offers the
+link ([groups](groups.md#using-it)). Phone app keeps the Tailscale HTTPS switch and
 Reachable on the local network in view, and folds the address of a reverse
 proxy of one's own under Use another HTTPS address.
 

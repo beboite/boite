@@ -25,6 +25,11 @@ which the app's address and every core serve. It names the package and its signi
 certificate. If validation fails, the app opens in a Custom Tab with an address
 bar.
 
+The page is public and the machines are private, so its sockets need Chrome's
+"Local network" permission ([phone](phone.md#chromes-local-network-permission)).
+A long press on the app's icon opens Site settings, where it is changed: that
+shortcut is `enableSiteSettingsShortcut` in `app/build.gradle`.
+
 The APK also claims `https://<host>/` links. A pairing QR code names the
 machine that drew it, so it opens the app only in an APK built for that
 machine's Public HTTPS address; the nightly's reads it with **Scan the code**.

@@ -28,7 +28,7 @@ afterAll(async () => {
   await core?.stop();
 }, 15_000);
 
-test('a phone with no key is added again from Machines with a typed code and sees its threads', async () => {
+test('a phone with no key is added again from Machines with a pasted link and sees its threads', async () => {
   await page.waitFor(`document.querySelector('${id('mobile-menu')}')`);
   await mobileAction(page, 'mobile-settings');
   await page.waitFor(`document.querySelector('${id('mobile-settings-home')}')`);
@@ -42,16 +42,17 @@ test('a phone with no key is added again from Machines with a typed code and see
   expect(await page.evaluate(`document.querySelector('${id('machine-remove')}') === null`)).toBe(true);
   await page.screenshot(join(import.meta.dir, '.artifacts', 'pairing-recovery-refused-phone.png'));
 
-  // A phone that reaches no machine is offered its two ways in at the top of the page: the code of Add a device, typed.
+  // A phone that reaches no machine is offered its two ways in at the top of the page: the link of Add a device, pasted.
   const owner = await connect(core.url, core.token);
-  const { code } = await owner.call('group.addDevice', {});
+  const added = await owner.call('group.addDevice', {});
   owner.close();
-  await page.click(id('machine-code-open'));
-  await page.type(id('machine-code'), code);
-  await page.click(id('machine-code-submit'));
+  await page.click(id('machine-paste-open'));
+  await page.waitFor(`document.querySelector('${id('machine-paste-form')} ${id('machine-link')}')`);
+  await page.type(id('machine-link'), added.url);
+  await page.click(id('machine-add'));
   await page.waitFor(`document.querySelector('${id('machine-card')} .status.ready')`, 20_000);
   // Added: the ways in fold away, and the machine and this phone are in one group card.
-  await page.waitFor(`!document.querySelector('${id('machine-code-open')}') && !!document.querySelector('${id('group-device')}')`);
+  await page.waitFor(`!document.querySelector('${id('machine-paste-open')}') && !!document.querySelector('${id('group-device')}')`);
   expect(await page.evaluate(`document.querySelectorAll('${id('machine-card')}').length`)).toBe(1);
   expect(await page.evaluate(`document.querySelector('${id('machine-card')} .error') === null`)).toBe(true);
   await page.screenshot(join(import.meta.dir, '.artifacts', 'pairing-recovery-paired-phone.png'));
@@ -61,7 +62,7 @@ test('a phone with no key is added again from Machines with a typed code and see
   await page.waitFor(`[...document.querySelectorAll('${id('mobile-list')} .thread')].some(row => row.textContent.includes('Seen once paired'))`);
   await page.screenshot(join(import.meta.dir, '.artifacts', 'pairing-recovery-threads-phone.png'));
 
-  // The device key is this phone's own: a reload needs no code.
+  // The device key is this phone's own: a reload needs no link.
   await page.reload();
   await page.waitFor(`document.querySelector('${id('mobile-menu')}')`);
   await mobileAction(page, 'mobile-conversations');

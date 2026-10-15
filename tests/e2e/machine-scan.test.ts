@@ -55,7 +55,7 @@ test('a phone scans the code of Add a device: another code leaves the camera ope
     await page.click(id('confirm-ok'));
     await page.waitFor(`document.querySelector('${id('mobile-connect')} ${id('machine-scan')}')`, 30_000);
     // Both ways in span the page: a thumb reaches them from either side.
-    expect(await page.evaluate(`[...document.querySelectorAll('${id('machine-scan')}, ${id('machine-code-open')}')].every(button => button.getBoundingClientRect().width >= 300)`)).toBe(true);
+    expect(await page.evaluate(`[...document.querySelectorAll('${id('machine-scan')}, ${id('machine-paste-open')}')].every(button => button.getBoundingClientRect().width >= 300)`)).toBe(true);
     await page.click(id('machine-scan'));
     await page.waitFor(`document.querySelector('${id('qr-scanner')} video.live')`);
     // A code that is not a link to add a device leaves the camera open and adds nothing.

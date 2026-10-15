@@ -300,8 +300,6 @@ says which role it carries and until when it works. Without `--owner` the link
 is a phone's. `--data-dir` and `--channel` name another core, as they do at
 start.
 
-stderr also gives the link's typing code, for an installed phone app.
-
 A server that belongs with your other machines joins their [group](groups.md)
 instead, with `boite-core group join`, which reads the invitation on its
 standard input: the desktop app of every member then drives it, and it needs

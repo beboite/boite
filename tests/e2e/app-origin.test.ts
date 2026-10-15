@@ -16,8 +16,13 @@ import { connect, type CoreClient } from '../../packages/core/src/client.ts';
  * every core is told it is the app's address (`BOITE_APP_ORIGIN`), as every
  * core knows the published one. Nothing else is set on any core. The app opens
  * on its way in alone, scans the code a machine of a group draws, and reaches
- * both machines of that group. A second phone types a code another machine
- * drew, with the address of the machine it sends it to.
+ * both machines of that group. A second phone pastes the link another machine
+ * drew.
+ *
+ * The first phone sees the page as Chrome does in the field: the app's address
+ * public, every machine's private, so its sockets need "Local network" allowed
+ * (`--ip-address-space-overrides`; without it everything here is loopback and
+ * nothing is checked).
  */
 
 const id = (name: string) => `[data-testid="${name}"]`;
@@ -36,12 +41,13 @@ async function capture(page: BrowserPage, name: string): Promise<void> {
   await page.screenshot(join(import.meta.dir, '.artifacts', name));
 }
 
-/** A phone at the app's address, the app's address known to its page before anything loads. */
-async function phone(video?: string): Promise<BrowserPage> {
+/** A phone at the app's address, the app's address known to its page before anything loads. `machines`: the app public and those private, as in the field. */
+async function phone(video?: string, machines: RunningCore[] = []): Promise<BrowserPage> {
+  const spaces = machines.length === 0 ? [] : [`--ip-address-space-overrides=${[`127.0.0.1:${app!.port}=public`, ...machines.map((core) => `${new URL(core.url).host}=local`)].join(',')}`];
   const page = await BrowserPage.launch({
     url: 'about:blank',
     windowSize: { width: 390, height: 844 },
-    args: ['--ignore-certificate-errors', '--host-resolver-rules=MAP app.test 127.0.0.1',
+    args: ['--ignore-certificate-errors', '--host-resolver-rules=MAP app.test 127.0.0.1', ...spaces,
       ...(video === undefined ? [] : ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', `--use-file-for-fake-video-capture=${video}`])],
   });
   pages.push(page);
@@ -91,7 +97,12 @@ afterAll(async () => {
   rmSync(scratch, { recursive: true, force: true });
 }, 20_000);
 
-test('the app on an address no machine serves scans one machine\'s code and reaches the whole group; another types a code with the machine\'s address', async () => {
+/** What the user answers when Chrome asks whether the app may reach the local network. */
+async function localNetwork(page: BrowserPage, setting: 'granted' | 'denied'): Promise<void> {
+  await page.send('Browser.setPermission', { origin: appUrl, permission: { name: 'local-network' }, setting });
+}
+
+test('the app on an address no machine serves scans one machine\'s code and reaches the whole group, once the local network is allowed; another pastes a link', async () => {
   const env = { env: { BOITE_APP_ORIGIN: appUrl } };
   const first = await startCore(env), second = await startCore(env);
   cores.push(first, second);
@@ -106,12 +117,17 @@ test('the app on an address no machine serves scans one machine\'s code and reac
   const added = await b.call('group.addDevice', {});
   const video = join(scratch, 'code.y4m');
   writeFileSync(video, codeVideo(added.url.split('#')[0]!));
-  const scanner = await phone(video);
+  const scanner = await phone(video, [first, second]);
   // No machine is the page's: the app opens on its way in, and nothing else.
-  await scanner.waitFor(`document.querySelector('${id('mobile-connect')} ${id('machine-scan')}') && document.querySelector('${id('machine-code-open')}')`, 30_000);
+  await scanner.waitFor(`document.querySelector('${id('mobile-connect')} ${id('machine-scan')}') && document.querySelector('${id('machine-paste-open')}')`, 30_000);
   expect(await scanner.evaluate(`globalThis.__boiteTest.workspace.machines.every(machine => machine.store.endpointUrl === null)`)).toBe(true);
+  // Chrome has not asked yet: the answer the scan will need is said first.
+  await scanner.waitFor(`document.querySelector('${id('mobile-local-network-ask')}')`);
   await capture(scanner, 'app-unpaired.png');
 
+  // The user allows it when Chrome asks (a headless Chrome cannot show the question).
+  await localNetwork(scanner, 'granted');
+  await scanner.waitFor(`!document.querySelector('${id('mobile-local-network-ask')}')`);
   await scanner.click(id('machine-scan'));
   // The machine it scanned becomes the one the app shows, and the group brings the other.
   await scanner.waitFor(`globalThis.__boiteTest.workspace.machines.length === 2 && globalThis.__boiteTest.workspace.machines.every(machine => machine.store.connection === 'ready')`, 45_000);
@@ -131,21 +147,35 @@ test('the app on an address no machine serves scans one machine\'s code and reac
   await scanner.reload();
   await scanner.waitFor(`globalThis.__boiteTest?.workspace.machines.length === 2 && globalThis.__boiteTest.workspace.machines.every(machine => machine.store.connection === 'ready')`, 45_000);
 
-  // Another phone types a code the first machine drew, and the address of the second, which passes it on.
-  const { code } = await a.call('group.addDevice', {});
-  const typist = await phone();
-  await typist.waitFor(`document.querySelector('${id('machine-code-open')}')`, 30_000);
-  await typist.click(id('machine-code-open'));
-  await typist.waitFor(`document.querySelector('${id('machine-code-host')}')`);
+  // Blocked in Chrome's site settings: every socket fails, and the screen says what to change rather than waiting for the computer.
+  await localNetwork(scanner, 'denied');
+  await scanner.reload();
+  await scanner.waitFor(`document.querySelector('${id('mobile-local-network')}')`, 30_000);
+  // Long enough for each machine's first attempts: Chrome refuses them, so none connects.
+  await Bun.sleep(2_500);
+  expect(await scanner.evaluate(`globalThis.__boiteTest.workspace.machines.some(machine => machine.store.connection === 'ready')`)).toBe(false);
+  // The screen names the cause: no "socket error" over it.
+  expect(await scanner.evaluate(`!document.querySelector('${id('error-toast')}')`)).toBe(true);
+  await capture(scanner, 'app-local-network-blocked.png');
+  // Allowed again: both machines connect at once, with no tap and no wait for a retry.
+  await localNetwork(scanner, 'granted');
+  await scanner.waitFor(`globalThis.__boiteTest.workspace.machines.length === 2 && globalThis.__boiteTest.workspace.machines.every(machine => machine.store.connection === 'ready')`, 3_000);
+  expect(await scanner.evaluate(`!document.querySelector('${id('mobile-connect')}')`)).toBe(true);
+
+  // Another phone, its camera unable to read the code, pastes the link the first machine drew.
+  const fromFirst = await a.call('group.addDevice', {});
+  const paster = await phone();
+  await paster.waitFor(`document.querySelector('${id('machine-paste-open')}')`, 30_000);
+  await paster.click(id('machine-paste-open'));
+  await paster.waitFor(`document.querySelector('${id('machine-link')}')`);
   // Plain http on another host is mixed content on this HTTPS page: turned down before any socket, not failed as one.
-  await typist.type(id('machine-code-host'), 'http://192.168.1.20:3773');
-  await typist.type(id('machine-code'), code);
-  await typist.click(id('machine-code-submit'));
-  await typist.waitFor(`document.querySelector('${id('machine-code-form')} [role="alert"]')?.textContent.includes('HTTPS address')`);
+  await paster.type(id('machine-link'), 'http://192.168.1.20:3773/?grant=plain-http-test-grant');
+  await paster.click(id('machine-add'));
+  await paster.waitFor(`document.querySelector('${id('machine-paste-form')} [role="alert"]')?.textContent.includes('HTTPS address')`);
   expect((await a.call('group.get', {}))?.devices).toHaveLength(1);
-  await typist.type(id('machine-code-host'), second.url);
-  await capture(typist, 'app-code-entry.png');
-  await typist.click(id('machine-code-submit'));
-  await typist.waitFor(`globalThis.__boiteTest.workspace.machines.length === 2 && globalThis.__boiteTest.workspace.machines.every(machine => machine.store.connection === 'ready')`, 45_000);
+  await paster.type(id('machine-link'), fromFirst.url);
+  await capture(paster, 'app-link-entry.png');
+  await paster.click(id('machine-add'));
+  await paster.waitFor(`globalThis.__boiteTest.workspace.machines.length === 2 && globalThis.__boiteTest.workspace.machines.every(machine => machine.store.connection === 'ready')`, 45_000);
   expect((await a.call('group.get', {}))?.devices).toHaveLength(2);
 }, 180_000);
