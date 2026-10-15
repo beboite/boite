@@ -258,6 +258,13 @@ On machines with less than 12288 MB of RAM, it uses 25% instead, so the
 desktop and a small agent can run without permanently tripping the guard.
 An explicit reserve keeps its configured value.
 
+Below the reserve alone, the guard stops a process only in the heaviest
+thread, and only when that thread's stoppable processes (all but the agent's
+root) hold at least an eighth of the reserve, capped at 256 MB. Otherwise other
+programs hold the memory: stopping a small helper, such as the process an agent
+starts for its sign-in, would break the agent and free nothing. The pressure
+state still reads critical. Thread quotas and the agent budget have no floor.
+
 Memory stops appear beside the interrupted tool. Persisted message/part
 boundaries keep later output from relocating the notice. Repeated notices at
 the same boundary, reason and threshold share a folded process list. Owners can
