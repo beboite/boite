@@ -20,18 +20,10 @@
  * phone's retry, with the same grant and the same nonce, gets the same session
  * back instead of "already used". The plaintext token of such a delivery lives
  * in memory only, and goes the moment its key first opens the core.
- *
- * A grant also comes as a short code, `XXXX-XXXX`, typed into an installed
- * iPhone app that cannot open the link: the camera hands links to Safari,
- * whose storage the home-screen app does not share. The code names the same
- * one-time grant for at most five minutes. Eight Crockford letters are 40
- * bits; ten wrong codes in a row drop every live code, so guessing one is out
- * of reach while the links themselves keep working. A `short` owner grant, the
- * one a phone may scan, lives those five minutes too.
  */
 
-import { createHash, randomInt, timingSafeEqual } from 'node:crypto';
-import { GRANT_QUERY_PARAM, GRANT_TTL_MS, normalizePairingCode, PAIRING_CODE_ALPHABET, PAIRING_CODE_TTL_MS, PAIRING_ROLES } from '@boite/contracts';
+import { createHash, timingSafeEqual } from 'node:crypto';
+import { GRANT_QUERY_PARAM, GRANT_TTL_MS, PAIRING_ROLES } from '@boite/contracts';
 import type { PairedSession, PairingGrant, PairingRole, Principal, ThreadId } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, refused, unauthorized } from './errors.ts';
@@ -91,20 +83,6 @@ export function principalOf(role: PairingRole): Principal {
   return role === 'owner' ? 'owner' : 'session';
 }
 
-/** Wrong codes in a row after which every live code is dropped. */
-export const CODE_FAILURES_MAX = 10;
-
-function newCode(): string {
-  let code = '';
-  for (let i = 0; i < 8; i++) code += PAIRING_CODE_ALPHABET.charAt(randomInt(PAIRING_CODE_ALPHABET.length));
-  return code;
-}
-
-/** `ABCD-EFGH`, the way a code is shown and read aloud. */
-export function formatCode(code: string): string {
-  return `${code.slice(0, 4)}-${code.slice(4)}`;
-}
-
 export function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
@@ -113,59 +91,21 @@ export class SessionStore {
   private readonly grants = new Map<string, Grant>();
   /** Keyed by grant. */
   private readonly deliveries = new Map<string, Delivery>();
-  /** Canonical code to the grant it names. */
-  private readonly codes = new Map<string, { grant: string; expiresAt: number }>();
-  private codeFailures = 0;
   /** Grants a device key redeemed, by grant: the same device asking again, after a lost answer, is answered the same. */
   private readonly redeemed = new Map<string, { deviceId: string; role: PairingRole; expiresAt: number }>();
-  /** The codes of those grants, so the retry of a typed code is no wrong code. */
-  private readonly redeemedCodes = new Map<string, { grant: string; expiresAt: number }>();
 
   constructor(private readonly core: Core) {}
 
-  /**
-   * A fresh grant, good for one exchange within `GRANT_TTL_MS`. A device
-   * grant, and an owner grant asked `short`, also come as a code. A short owner
-   * grant expires with its code: it is the one meant to be scanned.
-   */
-  grant(now = Date.now(), role: PairingRole = 'device', short = false): PairingGrant {
+  /** A fresh grant, good for one exchange within `GRANT_TTL_MS`. */
+  grant(now = Date.now(), role: PairingRole = 'device'): PairingGrant {
     if (!PAIRING_ROLES.includes(role)) {
       throw refused(`pairing.grant role must be ${PAIRING_ROLES.join(' or ')}, got ${String(role)}`, { role });
     }
-    if (typeof short !== 'boolean') throw invalidParams(`pairing.grant short must be a boolean, got ${typeof short}`, { field: 'short' });
     this.sweep(now);
     const grant = newToken();
-    const expiresAt = now + (role === 'owner' && short ? PAIRING_CODE_TTL_MS : GRANT_TTL_MS);
+    const expiresAt = now + GRANT_TTL_MS;
     this.grants.set(grant, { expiresAt, role });
-    const result: PairingGrant = { url: this.pairingUrl(grant), grant, role, expiresAt };
-    if (role === 'device' || short) {
-      let code = newCode();
-      while (this.codes.has(code)) code = newCode();
-      const codeExpiresAt = Math.min(expiresAt, now + PAIRING_CODE_TTL_MS);
-      this.codes.set(code, { grant, expiresAt: codeExpiresAt });
-      result.code = formatCode(code);
-      result.codeExpiresAt = codeExpiresAt;
-    }
-    return result;
-  }
-
-  /** The grant a typed code names; anything that is not code-shaped passes through. */
-  /** `counted`: a miss counts toward dropping every live code. A code another member passes on was counted there. */
-  private resolveCode(grant: string, counted = true): string {
-    if (grant.length > 16) return grant;
-    const code = normalizePairingCode(grant);
-    if (code === null) return grant;
-    const entry = this.codes.get(code);
-    if (entry !== undefined) {
-      this.codeFailures = 0;
-      return entry.grant;
-    }
-    if (counted && ++this.codeFailures >= CODE_FAILURES_MAX) {
-      this.codes.clear();
-      this.codeFailures = 0;
-      this.core.log('warn', `pairing codes dropped after ${CODE_FAILURES_MAX} wrong codes in a row`);
-    }
-    return grant;
+    return { url: this.pairingUrl(grant), grant, role, expiresAt };
   }
 
   pairingUrl(grant: string): string {
@@ -183,52 +123,37 @@ export class SessionStore {
     const problem = nonce === null ? null : nonceProblem(nonce);
     if (problem !== null) throw invalidParams(problem, { field: 'nonce', min: NONCE_MIN, max: NONCE_MAX });
     this.sweep(now);
-    const typed = grant;
-    grant = this.resolveCode(grant);
     const known = this.grants.get(grant);
     if (known === undefined) {
       const delivery = this.deliveries.get(grant);
       if (delivery !== undefined && nonce !== null && timingSafeEqual(delivery.nonceHash, nonceHash(nonce))) {
         return { id: delivery.id, token: delivery.token, role: delivery.role };
       }
-      if (typed.length <= 16 && normalizePairingCode(typed) !== null) {
-        throw unauthorized('the pairing code is wrong, expired, or was already used');
-      }
       throw unauthorized('the pairing link was already used, expired, or never issued');
     }
     this.grants.delete(grant);
-    // A code spent without a nonce has no retry to answer: it names nothing now.
-    if (nonce === null) this.dropCodes(grant);
     const session = this.issue(known.role, client, now);
     if (nonce !== null) this.deliveries.set(grant, { nonceHash: nonceHash(nonce), ...session, expiresAt: known.expiresAt });
     return session;
   }
 
   /**
-   * A grant, or a code naming one, spent by a device key: its role, once. The
-   * device that spent it asking again before the grant would have expired
-   * gets the same answer, so a lost answer costs no new link; anybody else is
-   * refused as for a used link. The device's key is its own retry nonce.
+   * A grant spent by a device key: its role, once. The device that spent it
+   * asking again before the grant would have expired gets the same answer, so
+   * a lost answer costs no new link; anybody else is refused as for a used
+   * link. The device's key is its own retry nonce.
    */
-  redeem(grant: string, deviceId: string, nonce: string | null = null, now = Date.now(), counted = true): PairingRole {
+  redeem(grant: string, deviceId: string, nonce: string | null = null, now = Date.now()): PairingRole {
     const problem = nonce === null ? null : nonceProblem(nonce);
     if (problem !== null) throw invalidParams(problem, { field: 'nonce', min: NONCE_MIN, max: NONCE_MAX });
     this.sweep(now);
-    const typed = grant;
-    const canonical = typed.length <= 16 ? normalizePairingCode(typed) : null;
-    const again = canonical === null ? undefined : this.redeemedCodes.get(canonical);
-    grant = again?.grant ?? this.resolveCode(grant, counted);
     const known = this.grants.get(grant);
     if (known === undefined) {
       const done = this.redeemed.get(grant);
       if (done !== undefined && done.deviceId === deviceId) return done.role;
-      if (typed.length <= 16 && normalizePairingCode(typed) !== null) throw unauthorized('the pairing code is wrong, expired, or was already used');
       throw unauthorized('the pairing link was already used, expired, or never issued');
     }
     this.grants.delete(grant);
-    // A retry by code stays answerable as long as one by the grant would.
-    for (const [code, entry] of this.codes) if (entry.grant === grant) this.redeemedCodes.set(code, { grant, expiresAt: known.expiresAt });
-    this.dropCodes(grant);
     this.redeemed.set(grant, { deviceId, role: known.role, expiresAt: known.expiresAt });
     return known.role;
   }
@@ -301,28 +226,14 @@ export class SessionStore {
     for (const [grant, entry] of this.deliveries) {
       if (entry.expiresAt <= now) this.deliveries.delete(grant);
     }
-    for (const [code, entry] of this.codes) {
-      if (entry.expiresAt <= now) this.codes.delete(code);
-    }
     for (const [grant, entry] of this.redeemed) {
       if (entry.expiresAt <= now) this.redeemed.delete(grant);
-    }
-    for (const [code, entry] of this.redeemedCodes) {
-      if (entry.expiresAt <= now) this.redeemedCodes.delete(code);
     }
   }
 
   private forgetDelivery(sessionId: string): void {
     for (const [grant, entry] of this.deliveries) {
-      if (entry.id !== sessionId) continue;
-      this.deliveries.delete(grant);
-      this.dropCodes(grant);
-    }
-  }
-
-  private dropCodes(grant: string): void {
-    for (const [code, entry] of this.codes) {
-      if (entry.grant === grant) this.codes.delete(code);
+      if (entry.id === sessionId) this.deliveries.delete(grant);
     }
   }
 }
@@ -331,7 +242,7 @@ export class SessionStore {
 // runs: `pairing.grant` and `sessions.revoke` are absent from `DEVICE_METHODS`,
 // so a paired device is refused them by name.
 export function registerSessionMethods(core: Core): void {
-  core.router.register('pairing.grant', (params) => core.sessions.grant(Date.now(), params?.role ?? 'device', params?.short ?? false));
+  core.router.register('pairing.grant', (params) => core.sessions.grant(Date.now(), params?.role ?? 'device'));
   core.router.register('sessions.list', (_params, ctx) => core.sessions.list(ctx.connection.identity.sessionId));
   core.router.register('sessions.revoke', (params) => {
     core.sessions.revoke(params.sessionId);

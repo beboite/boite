@@ -2,7 +2,7 @@
  * How a client gets into the machines of a group.
  *
  * A device, a phone or a browser, holds one key the roster lists
- * (`device-keys.ts`): it is admitted once, with a grant or a code, and says
+ * (`device-keys.ts`): it is admitted once, with a grant, and says
  * hello on any member with a signature made for that member. The desktop app
  * of a member, and a client paired before device keys, gets a ticket from a
  * member it is connected to instead, exchanged on another member for a key
@@ -10,19 +10,17 @@
  */
 import { randomUUID, verify } from 'node:crypto';
 import { hostname } from 'node:os';
-import { deviceAdmitInput, deviceHelloInput, DEVICE_LINK_JOIN, GRANT_TTL_MS, GROUP_TICKET_TTL_MS, normalizePairingCode, PAIRING_ROLES, RpcErrorCode } from '@boite/contracts';
-import type { CoordinationPeer, DeviceHello, DeviceInvite, Group, GroupTicket, PairingRole } from '@boite/contracts';
-import { invalidParams, messageOf, refused, RpcFailure, unauthorized, unavailable } from '../errors.ts';
+import { deviceAdmitInput, deviceHelloInput, DEVICE_LINK_JOIN, GROUP_TICKET_TTL_MS, PAIRING_ROLES } from '@boite/contracts';
+import type { DeviceHello, DeviceInvite, Group, GroupTicket, PairingRole } from '@boite/contracts';
+import { invalidParams, messageOf, refused, unauthorized, unavailable } from '../errors.ts';
 import type { GroupStore } from '../group.ts';
 import { newToken } from '../ids.ts';
 import { principalOf as principalOfRole, type ClientIdentity, type Identity } from '../sessions.ts';
 import { ticketAddresses } from './addresses.ts';
 import { deviceAdmissionInput, deviceId, deviceKey, deviceSigned, LEGACY_MAX, type DeviceKeyEntry } from './device-keys.ts';
-import { checkRoster, clockOf, DEVICE_ENTRIES_MAX, homeOf, liveCores, liveDeviceKeys, liveDevices, peerOf, reachOf, type DeviceEntry, type Roster } from './roster.ts';
+import { clockOf, DEVICE_ENTRIES_MAX, homeOf, liveCores, liveDeviceKeys, liveDevices, reachOf, type DeviceEntry, type Roster } from './roster.ts';
 import { encodeTicket, parseTicket, ticketSigningInput } from './ticket.ts';
 
-/** Typed codes a machine passes on to the others a minute, whoever types them. */
-export const FORWARDS_PER_MINUTE = 20;
 /** Clocks of two machines may differ by this much before a ticket is refused for its date. */
 const CLOCK_SKEW_MS = 60_000;
 /** Live devices a group holds at a time. */
@@ -32,11 +30,6 @@ export const DEVICES_MAX = 200;
 const DEVICE_HELLO_SKEW_MS = 2 * 60_000;
 /** Device hello nonces remembered at once; past it, hellos are refused until the oldest expire. */
 const DEVICE_NONCES_MAX = 20_000;
-
-/** A typed code as the member that drew it reads one: the test both ends of a forwarded code share. */
-function isCode(text: string): boolean {
-  return text.length <= 16 && normalizePairingCode(text) !== null;
-}
 
 export class GroupClients {
   /** Device hello nonces seen, until their hello would be refused for its date anyway. In memory: see docs/groups.md, limits. */
@@ -52,17 +45,12 @@ export class GroupClients {
     return this.group.require();
   }
 
-  /** "Add a device": one admission grant, as a link and a code, and an invitation a computer's core joins with. */
+  /** "Add a device": one admission grant as a link, carrying an invitation a computer's core joins with. */
   async addDevice(): Promise<DeviceInvite> {
     await this.ensureGroup();
     const grant = this.group.core.sessions.grant(Date.now(), 'device');
     const { invite } = await this.group.invite();
-    return {
-      url: `${grant.url}#${DEVICE_LINK_JOIN}=${encodeURIComponent(invite)}`,
-      code: grant.code!,
-      expiresAt: Math.min(grant.expiresAt, Date.now() + GRANT_TTL_MS),
-      codeExpiresAt: grant.codeExpiresAt!,
-    };
+    return { url: `${grant.url}#${DEVICE_LINK_JOIN}=${encodeURIComponent(invite)}`, expiresAt: grant.expiresAt };
   }
 
   /** Writes a device into the roster under this machine's signature; the same key again is the same device. */
@@ -96,10 +84,9 @@ export class GroupClients {
   }
 
   /**
-   * `hello` with a grant and a device key: the grant, or a code naming one, is
-   * spent here, or on the member that minted it when only that member knows
-   * the code, and the device is in the group from then on. The key is proven
-   * held by a signature over the grant itself.
+   * `hello` with a grant and a device key: the grant is spent here, and the
+   * device is in the group from then on. The key is proven held by a signature
+   * over the grant itself.
    */
   async admitDevice(grant: string, offer: { publicKey?: unknown; name?: unknown; sig?: unknown }, client: ClientIdentity, nonce: string | null): Promise<{ deviceId: string; sessionId: string; role: PairingRole }> {
     const publicKey = typeof offer.publicKey === 'string' ? offer.publicKey : '';
@@ -107,75 +94,14 @@ export class GroupClients {
     if (!deviceSigned(publicKey, deviceAdmitInput(grant, publicKey), offer.sig)) throw unauthorized('device.sig: expected the device\'s signature over the grant it redeems');
     const name = typeof offer.name === 'string' ? offer.name.slice(0, 100) : client.name;
     const id = deviceId(publicKey);
-    // Before the grant is spent: a removed key gets a refusal that leaves the code good for the key the app makes next.
+    // Before the grant is spent: a removed key gets a refusal that leaves the link good for the key the app makes next.
     if (this.group.roster?.deviceKeys?.some((device) => device.id === id && device.removed)) {
       throw unauthorized('this device was removed from the group: it needs a new key, which the app makes when it is added again');
     }
-    let role: PairingRole;
-    try {
-      role = this.group.core.sessions.redeem(grant, id, nonce);
-    } catch (error) {
-      // A code another member drew: that member knows it, and says yes or no. Only a well-formed code this
-      // machine does not know is passed on, a few a minute: a stranger's guesses must not spend the
-      // members' allowance for each other's requests, nor drop their codes.
-      if (!(error instanceof RpcFailure) || error.code !== RpcErrorCode.Unauthorized || !isCode(grant)
-        || this.group.roster === null || liveCores(this.group.roster).length < 2 || !this.forwardAllowed()) throw error;
-      const entry = await this.redeemElsewhere(grant, { publicKey, name, sig: offer.sig as string });
-      if (entry === null) throw error;
-      return { deviceId: entry.id, sessionId: this.deviceSession(entry, client), role: entry.role };
-    }
+    const role = this.group.core.sessions.redeem(grant, id, nonce);
     await this.ensureGroup();
     const entry = this.admitKey(publicKey, name, role);
     return { deviceId: entry.id, sessionId: this.deviceSession(entry, client), role: entry.role };
-  }
-
-  /** Codes passed on to the other members in the current minute. */
-  private forwarded = { since: 0, count: 0 };
-
-  private forwardAllowed(now = Date.now()): boolean {
-    if (now - this.forwarded.since > 60_000) this.forwarded = { since: now, count: 0 };
-    return ++this.forwarded.count <= FORWARDS_PER_MINUTE;
-  }
-
-  /** Asks every other member whether it drew this code, sealed; the one that did admits the device and answers with the roster. */
-  private async redeemElsewhere(code: string, offer: { publicKey: string; name: string; sig: string }): Promise<DeviceKeyEntry | null> {
-    const roster = this.group.require();
-    const self = this.group.selfId();
-    const asks = liveCores(roster).filter((core) => core.coreId !== self).map(async (core) => {
-      const answer = await this.group.core.coordination.request(peerOf(core), 'group.redeem', { code, ...offer }) as { roster?: unknown } | null;
-      const theirs = checkRoster(answer?.roster);
-      if (theirs.id !== this.group.roster?.id) throw new Error('another group');
-      this.group.absorb(theirs);
-      const entry = this.group.roster === null ? undefined : liveDeviceKeys(this.group.roster).find((device) => device.id === deviceId(offer.publicKey));
-      if (entry === undefined) throw new Error('not admitted');
-      return entry;
-    });
-    try {
-      return await Promise.any(asks);
-    } catch {
-      return null;
-    }
-  }
-
-  /** The other end of `redeemElsewhere`, on a member: its own code, spent here, for a device another member is talking to. */
-  redeemFor(peer: CoordinationPeer, payload: unknown): { roster: Roster } {
-    const roster = this.group.require();
-    if (!liveCores(roster).some((core) => core.coreId === peer.coreId)) throw refused('only a machine of this group may redeem a code here');
-    const raw = (typeof payload === 'object' && payload !== null ? payload : {}) as { code?: unknown; publicKey?: unknown; name?: unknown; sig?: unknown };
-    const code = typeof raw.code === 'string' ? raw.code : '';
-    const publicKey = typeof raw.publicKey === 'string' ? raw.publicKey : '';
-    if (!isCode(code) || deviceKey(publicKey) === null || !deviceSigned(publicKey, deviceAdmitInput(code, publicKey), raw.sig)) {
-      throw invalidParams('group.redeem: expected a code, a device key and its signature over the code');
-    }
-    const id = deviceId(publicKey);
-    // Before the code is spent, as on this machine's own hello: a removed key leaves it good for the next one.
-    if (roster.deviceKeys?.some((device) => device.id === id && device.removed)) {
-      throw unauthorized('this device was removed from the group: it needs a new key, which the app makes when it is added again');
-    }
-    // The member that passed it on counted a wrong one already: it does not drop this machine's codes too.
-    const role = this.group.core.sessions.redeem(code, id, null, Date.now(), false);
-    this.admitKey(publicKey, typeof raw.name === 'string' ? raw.name : 'device', role);
-    return { roster: this.group.require() };
   }
 
   /**

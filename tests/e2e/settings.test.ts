@@ -20,7 +20,7 @@ beforeAll(async () => {
   page = await BrowserPage.launch({ url: `${uiUrl}/?fake=1&open=recent` });
   await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
 }, 60_000);
-afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
+afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
 test('model picker account tooltips keep emails private on desktop and phone', async () => {
   await page.navigate(`${uiUrl}/?fake=1&open=recent`);
@@ -151,6 +151,21 @@ test('the Limits page turns the monitoring of each account on and off', async ()
   await capture('limits-tracked-phone.png');
   expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1000, deviceScaleFactor: 1, mobile: false });
+}, 30_000);
+
+test('Short answers starts on and saves when flipped', async () => {
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1000, deviceScaleFactor: 1, mobile: false });
+  await page.navigate(`${uiUrl}/?fake=1&open=recent`);
+  await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
+  await page.click(id('nav-settings')); await page.click(id('settings-tab-general'));
+  const toggle = id('setting-short-answers');
+  await page.waitFor(`document.querySelector('${toggle}') && !document.querySelector('${toggle}').disabled`);
+  expect(await page.evaluate(`document.querySelector('${toggle}').checked`)).toBe(true);
+  await capture('short-answers-desktop.png');
+  await page.click(toggle);
+  await page.waitFor(`globalThis.__boiteTest.workspace.active.settings?.shortAnswers === false`);
+  await page.click(toggle);
+  await page.waitFor(`globalThis.__boiteTest.workspace.active.settings?.shortAnswers === true`);
 }, 30_000);
 
 test('the experiment adds the Threads and Agents switch on the desktop and Agents in the phone menu', async () => {

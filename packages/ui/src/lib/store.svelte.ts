@@ -484,6 +484,8 @@ export class Store {
   setProjectWorktreeDefault(...args: Parameters<Projects['setProjectWorktreeDefault']>) { return this.#ctx.projects.setProjectWorktreeDefault(...args); }
   projectAutoArchiveMergedPrBusy(...args: Parameters<Projects['projectAutoArchiveMergedPrBusy']>) { return this.#ctx.projects.projectAutoArchiveMergedPrBusy(...args); }
   setProjectAutoArchiveMergedPr(...args: Parameters<Projects['setProjectAutoArchiveMergedPr']>) { return this.#ctx.projects.setProjectAutoArchiveMergedPr(...args); }
+  projectAutoRemoveWorktreesBusy(...args: Parameters<Projects['projectAutoRemoveWorktreesBusy']>) { return this.#ctx.projects.projectAutoRemoveWorktreesBusy(...args); }
+  setProjectAutoRemoveWorktrees(...args: Parameters<Projects['setProjectAutoRemoveWorktrees']>) { return this.#ctx.projects.setProjectAutoRemoveWorktrees(...args); }
   refreshProjectIcon(...args: Parameters<Projects['refreshProjectIcon']>) { return this.#ctx.projects.refreshProjectIcon(...args); }
   startDraft(...args: Parameters<Projects['startDraft']>) { return this.#ctx.projects.startDraft(...args); }
   setDraftProject(...args: Parameters<Projects['setDraftProject']>) { return this.#ctx.projects.setDraftProject(...args); }

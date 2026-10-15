@@ -18,6 +18,7 @@
   import ForkReturn from './ForkReturn.svelte';
   import ProjectTile from './ProjectTile.svelte';
   import DoneThreadNotice from './DoneThreadNotice.svelte';
+  import WorktreeGoneNotice from './WorktreeGoneNotice.svelte';
 
   let { store }: { store: Store } = $props();
 
@@ -142,6 +143,7 @@
       <AgentOwnerBar {store} {thread} />
     {:else}
       {#if store.openProject?.missing === true}<FolderGoneNotice {store} project={store.openProject} />{/if}
+      {#if thread?.worktreeRemoved}<WorktreeGoneNotice removal={thread.worktreeRemoved} archived={thread.archived} />{/if}
       {#if thread?.archived}<DoneThreadNotice {store} threadId={thread.id} />{:else}<Composer {store} centered={!thread && !sending} />{/if}
     {/if}
 

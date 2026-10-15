@@ -22,9 +22,9 @@
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
 
   /** A switch saves when it flips, as every other switch in Settings does; a refusal puts it back. */
-  async function toggleAsync(input: HTMLInputElement) {
-    const ok = await store.saveSettings({ asyncQuestions: input.checked });
-    if (!ok) input.checked = store.settings?.asyncQuestions ?? !input.checked;
+  async function toggle(key: 'asyncQuestions' | 'shortAnswers', input: HTMLInputElement) {
+    const ok = await store.saveSettings({ [key]: input.checked });
+    if (!ok) input.checked = store.settings?.[key] ?? !input.checked;
   }
 </script>
 
@@ -49,7 +49,14 @@
           <span class="ui-label" id="{uid}-async-name">{strings.settings.asyncQuestions}</span><InfoTip topic={strings.settings.asyncQuestions} text={strings.settings.asyncQuestionsHint} />
         </span>
         <input id="{uid}-async" aria-labelledby="{uid}-async-name" type="checkbox" role="switch" data-testid="setting-async-questions"
-          checked={store.settings?.asyncQuestions ?? true} disabled={!store.settings} onchange={(event) => void toggleAsync(event.currentTarget)} />
+          checked={store.settings?.asyncQuestions ?? true} disabled={!store.settings} onchange={(event) => void toggle('asyncQuestions', event.currentTarget)} />
+      </label>
+      <label for="{uid}-short" class="switch-row">
+        <span class="text ui-label-box">
+          <span class="ui-label" id="{uid}-short-name">{strings.settings.shortAnswers}</span><InfoTip topic={strings.settings.shortAnswers} text={strings.settings.shortAnswersHint} />
+        </span>
+        <input id="{uid}-short" aria-labelledby="{uid}-short-name" type="checkbox" role="switch" data-testid="setting-short-answers"
+          checked={store.settings?.shortAnswers ?? true} disabled={!store.settings} onchange={(event) => void toggle('shortAnswers', event.currentTarget)} />
       </label>
       {#if store.settings}<TitleModelSetting {store} />{/if}
     {/if}

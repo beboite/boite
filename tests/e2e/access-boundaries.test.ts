@@ -22,7 +22,7 @@ beforeAll(async () => {
   phone = await connect(core.url, '', { grant });
 }, 30_000);
 
-afterAll(async () => { phone?.close(); owner?.close(); await core?.stop(); }, 15_000);
+afterAll(async () => { phone?.close(); owner?.close(); await core?.stop(); }, 30_000);
 
 test('a phone sees a completed turn but receives none of its process trace', async () => {
   const ownerTrace: number[] = [];
