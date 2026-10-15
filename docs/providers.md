@@ -933,6 +933,12 @@ Send takes the card's picks with the text and files
 paste or a drop, with its caps and image reduction, and a file alone is a valid
 answer. Ignore on that line sets the thread's questions aside, and the composer
 sends ordinary messages again; the card's "Answer in writing" brings it back.
+A question never takes a composer the user is writing in. One that arrives
+while its thread's composer holds text or files stays out of it until that
+composer is empty, so Enter still sends the draft as a message; one that
+arrives within 1.5 s of a keystroke waits for that pause. "Answer in writing"
+takes it at once, draft included. Once a question has the composer, typing
+again does not give it back.
 No protocol carries an image in
 a question's answer (Claude's `AskUserQuestion` takes strings, Codex's
 `requestUserInput` and Muse's `userInput` take text, pi's dialogs a value), so
