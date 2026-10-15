@@ -4,6 +4,7 @@
   import { localNetwork } from '../lib/local-network.svelte';
   import { installed } from '../lib/pwa';
   import { fill, strings } from '../lib/strings';
+  import ConnectTroubleshoot from './ConnectTroubleshoot.svelte';
   import PairMachine from './PairMachine.svelte';
 
   let { store, onpaired }: { store: Store; onpaired: () => void } = $props();
@@ -37,6 +38,7 @@
     <button class="primary retry" data-testid="mobile-reconnect" disabled={store.connection === 'connecting'} onclick={() => void store.connect()}><RefreshCw size={16} /><span class="ui-label">{store.connection === 'connecting' ? strings.connection.connecting : strings.common.refresh}</span></button>
     <button class="ghost manage" onclick={() => store.showSettings('machines')}><span class="ui-label">{strings.connection.manage}</span></button>
   {/if}
+  <ConnectTroubleshoot machineUrl={store.pairingRequired ? null : store.endpointUrl} />
   {#if host}<p class="host" title={host}><Monitor size={13} /><span class="ui-label">{host}</span></p>{/if}
 </div>
 

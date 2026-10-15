@@ -53,6 +53,8 @@ async function phone(video?: string, machines: RunningCore[] = []): Promise<Brow
   pages.push(page);
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
   await page.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+  // An Android phone's browser, as the app runs in: Troubleshoot names Nearby devices there only.
+  await page.send('Emulation.setUserAgentOverride', { userAgent: 'Mozilla/5.0 (Linux; Android 16; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Mobile Safari/537.36' });
   await page.send('Page.addScriptToEvaluateOnNewDocument', { source: `globalThis.__BOITE_APP_ORIGIN__ = ${JSON.stringify(appUrl)}` });
   await page.navigate(`${appUrl}/`);
   return page;
@@ -157,6 +159,10 @@ test('the app on an address no machine serves scans one machine\'s code and reac
   // The screen names the cause: no "socket error" over it.
   expect(await scanner.evaluate(`!document.querySelector('${id('error-toast')}')`)).toBe(true);
   await capture(scanner, 'app-local-network-blocked.png');
+  // Troubleshoot lists every lock: the permission's live state, Nearby devices, and the machine's address to open.
+  await scanner.click(id('connect-troubleshoot-toggle'));
+  await scanner.waitFor(`document.querySelector('${id('check-local-network-state')}')?.textContent.trim() === 'Blocked' && document.querySelector('${id('check-nearby')}') && document.querySelector('${id('check-reach-open')}')?.href === ${JSON.stringify(`${second.url}/`)}`);
+  await capture(scanner, 'app-troubleshoot.png');
   // Allowed again: both machines connect at once, with no tap and no wait for a retry.
   await localNetwork(scanner, 'granted');
   await scanner.waitFor(`globalThis.__boiteTest.workspace.machines.length === 2 && globalThis.__boiteTest.workspace.machines.every(machine => machine.store.connection === 'ready')`, 3_000);

@@ -249,4 +249,26 @@ test('the app blocked from the local network says how to allow it, and says what
   expect(document.querySelector('h1')?.textContent).toBe(strings.mobile.offlineTitle);
   expect(document.querySelector('[data-testid=mobile-local-network]')).toBeNull();
   expect(document.querySelector('[data-testid=mobile-local-network-ask]')).toBeNull();
+  // Troubleshoot unfolds the checks: the permission's live state and the machine's address to open in a tab.
+  const toggle = document.querySelector<HTMLButtonElement>('[data-testid=connect-troubleshoot-toggle]')!;
+  expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  toggle.click();
+  flushSync();
+  expect(toggle.getAttribute('aria-expanded')).toBe('true');
+  expect(document.querySelector('[data-testid=check-local-network-state]')?.textContent?.trim()).toBe(strings.mobile.localNetworkStates.granted);
+  localNetwork.state = 'denied';
+  flushSync();
+  expect(document.querySelector('[data-testid=check-local-network-state]')?.textContent?.trim()).toBe(strings.mobile.localNetworkStates.denied);
+  expect(document.querySelector<HTMLAnchorElement>('[data-testid=check-reach-open]')?.href).toBe('https://computer.example/');
+  // Nearby devices is Android's own permission: no word of it elsewhere.
+  expect(document.querySelector('[data-testid=check-nearby]')).toBeNull();
+  await unmount(mounted!);
+  Object.defineProperty(navigator, 'userAgent', { value: 'Mozilla/5.0 (Linux; Android 16; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Mobile Safari/537.36', configurable: true });
+  try {
+    mounted = mount(MobileConnect, { target: document.body, props: { store, onpaired: vi.fn() } });
+    flushSync();
+    expect(document.querySelector('[data-testid=check-nearby]')?.textContent).toContain(strings.mobile.checkNearby);
+  } finally {
+    delete (navigator as { userAgent?: string }).userAgent;
+  }
 });
