@@ -304,11 +304,19 @@ Projects default to `autoArchiveMergedPr: true`; the owner changes it through
 root conversation only for a clean linked worktree and a uniquely identified,
 merged, non-fork PR from the same repository with the exact branch tip. The
 proof takes the checkout's current branch from `git status`, not the thread's
-recorded starting branch. It first asks `gh pr view` about up to five PRs the
-conversation linked, newest first: a linked PR needs the tip as its head commit
-but may have another head name, because agents often push `HEAD:fix/...`. A
-link that no longer resolves is skipped. Without a matching link it asks
-`gh pr list --head` for the checkout's branch, which needs that exact name.
+recorded starting branch. Cheapest evidence comes first: the repository's cached
+`git remote -v`, the branch in the worktree's `HEAD` file, then the repository's
+list of its newest 200 PRs, which the sidebar badges read too. `git status` runs
+only when a listed merged PR could match. Up to five PRs the conversation
+linked are tried first, newest first: a linked PR needs the tip as its head
+commit but may have another head name, because agents often push
+`HEAD:fix/...`. A link absent from a list that is not full does not exist and
+is skipped; one absent from a full list is asked with `gh pr view`. The
+checkout's branch then needs exactly one PR of that name in the list. When the
+list is full and holds a merged PR of that branch, or none, `gh pr list --head`
+confirms it. A thread whose proof finds nothing is not proved again for 5
+minutes, then 10, 20 and so on up to an hour, until the thread changes or
+links another PR.
 The grouping menu in both views exposes this project policy as Hide merged PR
 conversations and names the project it affects. In Recent it follows the project
 filter, or the current project when all projects are shown. Disabling reveals

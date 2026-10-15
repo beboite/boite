@@ -281,7 +281,8 @@ metadata comes from the execution machine's `gh pr list`, using the branch
 associated with the thread. A shared checkout's current branch alone does not
 identify a thread's PR. Non-repositories and detached checkouts have no PR.
 Lookups share the common Git directory across worktrees: `git remote -v` is
-cached for five minutes and the newest 200 PRs for one minute, errors included.
+cached for five minutes and the newest 200 PRs for 15 seconds; a failed read is
+kept 15 seconds. The merged-PR archive reads the same two caches.
 A missing branch gets its own lookup only when that list was full. At most two
 commands run at once, each with a ten-second deadline through `procs` as
 `pull-request:<threadId>`. Folded projects defer lookups until opened.

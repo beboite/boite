@@ -171,6 +171,8 @@ panel, waits until it is ready and prints the `adb -s <serial>` or
 `boite pr link <url>` verifies a GitHub pull request and saves its link in the
 current conversation. Link each PR in a stack. `boite pr list` returns them
 in dependency order; `boite pr refresh` updates titles and states from GitHub.
+Without a refresh, a listed PR is read again at most once a minute, and one
+saved as merged is kept as saved.
 `boite pr unlink <url>` removes the saved link without changing the PR.
 An agent can manage links only in its own conversation. Paired devices can
 read the list. Lookup uses the local `gh` login and the configured `GH_HOST`.
