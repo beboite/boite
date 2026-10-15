@@ -90,7 +90,7 @@ export function createBrowserFixture() {
    * answers as the app's webviews would. The app's own translation (one webview
    * per target) is tested in the UI; this is the core's side of the relay.
    */
-  async function fakeHost(name = 'shell') {
+  async function fakeHost(name = 'shell', extraArgs: string[] = []) {
     const dir = mkdtempSync(join(tmpdir(), 'boite-host-'));
     let browser: Bun.Subprocess | undefined, socket: WebSocket | undefined, app: CoreClient | undefined;
     let closing: Promise<void> | undefined;
@@ -123,7 +123,7 @@ export function createBrowserFixture() {
     hosts.add(close);
     try {
       const args = chromiumArgs(dir, 'linux').filter(arg => arg !== '--remote-debugging-pipe');
-      browser = Bun.spawn([findChromium().path!, ...args, '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1'], { stdout: 'ignore', stderr: 'ignore' });
+      browser = Bun.spawn([findChromium().path!, ...args, '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1', ...extraArgs], { stdout: 'ignore', stderr: 'ignore' });
       const connectedSocket = socket = new WebSocket(await waitForEndpoint(dir, browser.exited));
       await new Promise<void>((resolve, reject) => {
         const finish = (error?: Error) => {

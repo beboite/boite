@@ -57,7 +57,8 @@ const RECORDER_SCRIPT = `window.__boiteRecorder = (() => {
   const decode = async () => {
     while (waiting) {
       const next = waiting; waiting = null;
-      const bytes = Uint8Array.from(atob(next), c => c.charCodeAt(0));
+      // Native base64 decoding is about a hundred times faster than a callback per byte; older engines lack it.
+      const bytes = Uint8Array.fromBase64 ? Uint8Array.fromBase64(next) : Uint8Array.from(atob(next), c => c.charCodeAt(0));
       const bitmap = await createImageBitmap(new Blob([bytes], { type: 'image/jpeg' })).catch(() => null);
       if (!bitmap) continue;
       if (page) page.close();
@@ -120,6 +121,9 @@ export class TabRecorder {
   #offFrames: (() => void) | null = null;
   #forwarding = false;
   #pending: string | null = null;
+  /** The take's frame interval, a little short so a frame on time is never held back, and when the last frame left. */
+  #interval = 0;
+  #lastForward = 0;
   #result: BrowserRecording | null = null;
   #finish: Promise<BrowserRecording> | null = null;
   #disposed = false;
@@ -157,6 +161,7 @@ export class TabRecorder {
       const size = recordingSize(Math.round(metrics.cssVisualViewport.clientWidth), Math.round(metrics.cssVisualViewport.clientHeight));
       await this.#evaluate(`__boiteRecorder.start(${JSON.stringify(shot.data)}, ${size.width}, ${size.height}, ${JSON.stringify(type)}, ${recordingBitrate(size.width, size.height, frameRate)})`);
       const started = Date.now();
+      this.#interval = 1000 / frameRate - 4;
       this.#finish = (async () => {
         // Settles when the recorder stops: asked to, at the size limit or on an encoder error. No duration limit.
         const raw = await this.#evaluate<{ bytes: number; durationMs: number; frames: number; reason: BrowserRecording['reason']; error?: string; mimeType: string }>('__boiteRecorder.ended()', 2 ** 31 - 1);
@@ -172,21 +177,29 @@ export class TabRecorder {
         void this.cdp.send('Page.screencastFrameAck', { sessionId: params.sessionId }, this.pageSession).catch(() => {});
         this.#forward(String(params.data));
       });
-      await this.cdp.send('Page.startScreencast', { format: 'jpeg', quality: 80, maxWidth: 1920, maxHeight: 1080, everyNthFrame: 1 }, this.pageSession);
+      // Headless Chromium composites at 60 Hz: a 30 fps take asks for every second frame, not all of them.
+      await this.cdp.send('Page.startScreencast', { format: 'jpeg', quality: 80, maxWidth: 1920, maxHeight: 1080, everyNthFrame: frameRate === 30 ? 2 : 1 }, this.pageSession);
     } catch (error) {
       await this.dispose();
       throw error;
     }
   }
 
-  /** Only the newest frame waits while one is drawn: a slow encoder drops frames, never falls behind. */
+  /**
+   * Only the newest frame waits while one is drawn: a slow encoder drops frames, never falls behind.
+   * Frames leave at most at the take's rate, so a compositor faster than 60 Hz sends no extra ones;
+   * one that came too early waits its turn rather than being lost, so the last picture of a motion is kept.
+   */
   #forward(data: string): void {
     this.#pending = data;
     if (this.#forwarding) return;
     this.#forwarding = true;
     void (async () => {
       while (this.#pending && !this.#disposed && this.#helper) {
+        const early = this.#lastForward + this.#interval - performance.now();
+        if (early > 0) { await new Promise(resolve => setTimeout(resolve, early)); continue; }
         const next = this.#pending; this.#pending = null;
+        this.#lastForward = performance.now();
         const live = await this.#evaluate<boolean>(`__boiteRecorder.frame(${JSON.stringify(next)})`).catch(() => false);
         if (!live) break;
       }

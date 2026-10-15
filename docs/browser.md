@@ -116,7 +116,8 @@ too: show the agent's browser and sign in there.
 
 A conversation has at most 8 tabs and a machine 24. A page that opens a
 window, a sign-in popup for instance, adds a tab to the same conversation; past
-the limit the window is closed. Nobody can answer a dialog in a headless page.
+the limit the window is closed. A tab still attaching counts toward both
+limits, so a burst of windows opened at once stops at the limit too. Nobody can answer a dialog in a headless page.
 One raised while an agent command runs follows `dialog accept|dismiss`
 (accept until told otherwise) and is listed in that command's output; any
 other alert is accepted and a confirm or prompt declined, so a person acting in
@@ -153,7 +154,9 @@ browser would (`packages/ui/src/lib/browser-host.ts`): a page command goes to
 that webview's own DevTools channel, which WebView2 hands to the app without
 any port; `Target.createTarget`, `attachToTarget` and `closeTarget` create,
 name and close webviews; a page's events, its address and title, and the
-windows it opens come back with `browser.hostReply`. The shell lets an agent
+windows it opens come back with `browser.hostReply`. Network events cross cut
+to what the core reads: a request's address, and a response only when it
+failed, with its status and address (`compactPageEvent`). The shell lets an agent
 webview (an id starting with `agent-`) take the Page, Runtime, Input,
 Emulation, Network, Log and DOM domains, never the profile's cookies
 (`apps/shell/src-tauri/src/browser_control.rs`). An agent webview out of sight
@@ -188,8 +191,11 @@ macOS apps do not host; their webviews have no DevTools channel to relay.
 `recording-start` records the tab as a silent MP4 without any encoder on the
 machine. The tab streams its frames (`Page.startScreencast`, at most
 1920 × 1080), and a blank page of the same browser, in a throwaway context of
-its own, draws them on a canvas that a `MediaRecorder` encodes. A still page
-sends no frame, so the last one is drawn again each second and the video keeps
+its own, draws them on a canvas that a `MediaRecorder` encodes. A 30 fps take
+asks for every second frame of Chromium's 60 Hz compositor, and frames reach
+the canvas at most at the take's rate; a frame that comes early waits its turn
+and the newest replaces it. The helper decodes each frame with
+`Uint8Array.fromBase64`. A still page sends no frame, so the last one is drawn again each second and the video keeps
 its length. H.264 is the default. Chrome 153 on Linux encodes H.264 and AV1 into MP4, not
 HEVC; a codec the browser cannot encode is refused with the ones it can. The same 100 MB limit and turn rule
 as before apply: a recording still running when the agent's turn ends is

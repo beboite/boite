@@ -72,6 +72,9 @@ export class AgentBrowser {
   #threads = new Map<ThreadId, { order: string[]; active: string | null }>();
   /** Commands of one conversation run one at a time, in order. */
   #queues = new Map<ThreadId, Promise<unknown>>();
+  /** Tabs being attached, by conversation and in all: attaching takes several round trips, and the limits count them. */
+  #attaching = new Map<ThreadId, number>();
+  #attachingAll = 0;
   #announce = new Map<ThreadId, ReturnType<typeof setTimeout>>();
   #closed = false;
   /** Browsers started to check a page (`probe`): no conversation lists them, so they are closed by name. */
@@ -185,7 +188,12 @@ export class AgentBrowser {
       url => { tab.url = url; this.#remote.stale(tab); this.#changed(threadId); this.#engines.saveCookiesSoon(engine); });
     // Before its first request: the page, its workers and its requests say what a browser with a window says.
     if (engine.identity) await engine.cdp.send('Emulation.setUserAgentOverride', { userAgent: engine.identity.userAgent, userAgentMetadata: engine.identity.metadata }, sessionId).catch(() => {});
-    await Promise.all(['Page.enable', 'Runtime.enable', 'Network.enable'].map(method => engine.cdp.send(method, {}, sessionId)));
+    // Nothing reads response bodies (`Network.getResponseBody`): Chromium keeps none for this tab.
+    await Promise.all([
+      engine.cdp.send('Page.enable', {}, sessionId),
+      engine.cdp.send('Runtime.enable', {}, sessionId),
+      engine.cdp.send('Network.enable', { maxTotalBufferSize: 0, maxResourceBufferSize: 0 }, sessionId),
+    ]);
     // A window opened by a page may have navigated before it was attached: its address is read once now.
     const current = await engine.cdp.send<{ targetInfo: { url: string; title: string } }>('Target.getTargetInfo', { targetId }).catch(() => null);
     if (current) { tab.url = current.targetInfo.url || tab.url; tab.title = current.targetInfo.title.slice(0, 200); }
@@ -199,17 +207,37 @@ export class AgentBrowser {
     return tab;
   }
 
+  /** Which limit a new tab of `threadId` would cross, counting the tabs still attaching. */
+  #full(threadId: ThreadId): 'thread' | 'machine' | null {
+    if ((this.#threads.get(threadId)?.order.length ?? 0) + (this.#attaching.get(threadId) ?? 0) >= TABS_PER_THREAD) return 'thread';
+    if (this.#tabs.size + this.#attachingAll >= TABS_MAX) return 'machine';
+    return null;
+  }
+
+  /** Holds a tab's place from the limit check until it is attached or failed: a burst of windows sees each other. */
+  #reserve(threadId: ThreadId): () => void {
+    this.#attaching.set(threadId, (this.#attaching.get(threadId) ?? 0) + 1); this.#attachingAll++;
+    let held = true;
+    return () => {
+      if (!held) return;
+      held = false; this.#attachingAll--;
+      const left = (this.#attaching.get(threadId) ?? 1) - 1;
+      if (left > 0) this.#attaching.set(threadId, left); else this.#attaching.delete(threadId);
+    };
+  }
+
   /** A window a tab opened joins its conversation as a new tab, or is closed when it has no room. */
   async #adopt(engine: Engine, info: { targetId: string; type: string; openerId?: string; url: string }): Promise<void> {
     if (info.type !== 'page' || !info.openerId) return;
     const opener = [...engine.tabs].map(id => this.#tabs.get(id)).find(tab => tab?.targetId === info.openerId);
     if (!opener) return;
-    const state = this.#thread(opener.threadId);
-    if (state.order.length >= TABS_PER_THREAD || this.#tabs.size >= TABS_MAX) {
+    if (this.#full(opener.threadId)) {
       await engine.cdp.send('Target.closeTarget', { targetId: info.targetId }).catch(() => {});
       return;
     }
-    await this.#attach(engine, opener.threadId, info.targetId, info.url).catch(() => {});
+    const release = this.#reserve(opener.threadId);
+    try { await this.#attach(engine, opener.threadId, info.targetId, info.url).catch(() => {}); }
+    finally { release(); }
   }
 
   #info(engine: Engine, info: { targetId: string; url: string; title: string }): void {
@@ -327,14 +355,18 @@ export class AgentBrowser {
     const { profiles, defaultId } = browserProfilesOf(this.#core.settings.get());
     const profile = action.profile === undefined ? defaultId : findBrowserProfile(profiles, action.profile);
     if (profile === null) throw refused(`no browser profile is named ${action.profile}; browser profiles lists them`);
-    if ((this.#threads.get(threadId)?.order.length ?? 0) >= TABS_PER_THREAD) throw refused(`a conversation has at most ${TABS_PER_THREAD} browser tabs; close one first`);
-    if (this.#tabs.size >= TABS_MAX) throw refused(`this machine's agent browser has ${TABS_MAX} tabs open; close one first`);
-    const engine = await this.#engines.get(profile);
-    clearTimeout(engine.idle);
-    const { targetId } = await engine.cdp.send<{ targetId: string }>('Target.createTarget', { url: 'about:blank' });
+    const full = this.#full(threadId);
+    if (full === 'thread') throw refused(`a conversation has at most ${TABS_PER_THREAD} browser tabs; close one first`);
+    if (full === 'machine') throw refused(`this machine's agent browser has ${TABS_MAX} tabs open; close one first`);
+    const release = this.#reserve(threadId);
     let tab: Tab;
-    try { tab = await this.#attach(engine, threadId, targetId, 'about:blank'); }
-    catch (error) { await engine.cdp.send('Target.closeTarget', { targetId }).catch(() => {}); this.#engines.idle(engine); throw error; }
+    try {
+      const engine = await this.#engines.get(profile);
+      clearTimeout(engine.idle);
+      const { targetId } = await engine.cdp.send<{ targetId: string }>('Target.createTarget', { url: 'about:blank' });
+      try { tab = await this.#attach(engine, threadId, targetId, 'about:blank'); }
+      catch (error) { await engine.cdp.send('Target.closeTarget', { targetId }).catch(() => {}); this.#engines.idle(engine); throw error; }
+    } finally { release(); }
     return { ...await this.#command(tab, action, () => this.#navigate(tab, action.url)), profile };
   }
 
