@@ -853,14 +853,26 @@ files, including PDFs and archives, use `kind: 'file'` and host paths in the
 prompt. Provider tools decide which formats they can read. Boite neither
 extracts archives nor executes uploads.
 
-Before those caps, the client brings an image to 2048 px on its long edge
-(`lib/image-prepare.ts`): JPEG at 0.85, or PNG when that is lighter or the
-picture uses transparency. An image already within 2048 px and 512 KB goes as
-it is, and a GIF or an SVG is never redrawn. HEIC and HEIF become JPEG where the
+Before those caps, the client brings an image to 2000 px on its long edge
+(`IMAGE_MAX_EDGE`, `lib/image-prepare.ts`): JPEG at 0.85, or PNG when that is
+lighter or the picture uses transparency. Claude's API refuses an image over
+2000 px on either side once a request carries more than 20 images, which a
+long thread of screenshots reaches. An image already within 2000 px and 512 KB
+goes as it is, and a GIF or an SVG is never redrawn. HEIC and HEIF become JPEG where the
 browser decodes them (Safari does); elsewhere they travel as a plain file. A
 source over 50 MB is refused before decoding, since a phone's canvas would not
 hold it. So twenty iPhone screenshots, 2 to 4 MB each as PNG, fit one turn at
 around 400 KB each.
+
+The Claude driver fits every prompt image to the same edge again before it
+goes in (`drivers/claude/images.ts`, Bun's image codec, same format), because
+an image can reach a prompt without passing the composer: a client that sends
+it unreduced, a browser that could not decode it, or a message written under
+the earlier 2048 px cap and replayed by a retry or a carried-over history.
+The CLI forwards a prompt's images unchanged, while the images its own tools
+read are fitted by the CLI to the model's limit. A GIF, or anything Bun cannot
+decode, goes as it is. Tool images shown in the timeline
+(`drivers/documents.ts`) never go back to the agent.
 
 An answer to a question with a free field takes the composer's files the same
 way (`questions.answer` `attachments`); see [Providers](providers.md).

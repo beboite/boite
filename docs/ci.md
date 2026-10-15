@@ -151,18 +151,11 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 593,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,948,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,941,000 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 4,161,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
-
-On 2026-10-15, the timeline rendering work (turn file and diff caches, the
-resumable thought title scan and the linear link scanner, PR #520) merged with
-`origin/main` at `6961d5d9` measures 4,945,071 UI bytes after fresh
-`bun run build:ui` and `bun run build:core` on Linux, against the 4,938,784
-PR #502 measured, so the change adds about 6,300 bytes (0.13%). The UI total limit
-becomes 4,948,000; the core and entry limits stay unchanged.
 
 On 2026-10-15, views placed inside an answer (PR #502), merged with PR #503,
 measure 4,938,784 UI bytes and 4,151,081 core JavaScript bytes after fresh
