@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import { mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { SHORT_ANSWERS } from '../src/agent-guide.ts';
 import { nativeSkillFiles, scanBrain } from '../src/brain.ts';
 import { BrainStore } from '../src/brain.ts';
 import { connect } from '../src/client.ts';
@@ -321,6 +322,40 @@ test('the Boite guide switch persists, and echo never receives the ask command',
   await expect(owner.call('brain.configure', { path: root, enabled: true, boiteGuide: 'yes' as never })).rejects.toThrow('boiteGuide');
 });
 
+test('short answers ride every turn until switched off, and the first lists the built-in skills', async () => {
+  const owner = await h.connect();
+  const { threadId } = await echoThread(h, owner);
+  const prompts: string[] = [];
+  const restore = setDriver('echo', { ...echoDriver, startTurn(ctx) {
+    prompts.push(ctx.prompt);
+    return echoDriver.startTurn({ ...ctx, prompt: 'Hello' });
+  } });
+  const run = async (prompt: string) => {
+    const turn = await owner.call('turns.start', { threadId, prompt });
+    await waitFor(() => h.core.journal.listTurns(threadId).find(t => t.id === turn.id)?.status === 'done');
+    return prompts.at(-1)!;
+  };
+  try {
+    h.core.settings.set({ shortAnswers: true });
+    const first = await run('Hello');
+    // Said once a session, the style would fade: the warm second turn carries it as well.
+    const second = await run('Again');
+    expect(second).not.toContain('boite where');
+    for (const prompt of [first, second]) {
+      expect(prompt).toContain(SHORT_ANSWERS);
+      expect(prompt.indexOf(SHORT_ANSWERS)).toBeLessThan(prompt.indexOf('User request:'));
+    }
+    expect(first).toContain('boite-prove-it: ');
+    expect(first).toContain(join(h.dataDir, 'skills', 'boite-visual', 'SKILL.md'));
+    h.core.settings.set({ shortAnswers: false });
+    expect(await run('Third')).not.toContain('Answer style');
+    // Back on, the Boite guide switch still silences it with the rest of Boite's own text.
+    h.core.settings.set({ shortAnswers: true });
+    await owner.call('brain.configure', { path: null, enabled: false, boiteGuide: false });
+    expect(await run('Fourth')).not.toContain('Answer style');
+  } finally { restore(); }
+});
+
 test('echo with the default guide and asynchronous questions finishes without asking', async () => {
   h.core.settings.set({ asyncQuestions: true });
   const owner = await h.connect();
@@ -453,7 +488,9 @@ test('two checkouts exchange existing commits; dirty and diverged histories rema
   await expect(h.core.brain.sync()).rejects.toThrow('diverging');
   expect(await git(root, ['rev-parse', 'HEAD'])).toBe(before);
   expect((await h.core.brain.status()).git).toMatchObject({ ahead: 1, behind: 1, dirty: false });
-}, 30_000);
+  // About thirty git processes: 17 to 24 s on a Windows runner, past 30 s under parallel load
+  // (PR #503 on 2026-10-15), and the harness then stops the core under the last sync.
+}, 90_000);
 
 test.each(['fetch', 'push'] as const)('switching branches during %s cannot publish the newly selected branch', async phase => {
   const remote = join(h.dataDir, 'remote.git');
