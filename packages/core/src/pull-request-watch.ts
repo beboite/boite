@@ -64,6 +64,7 @@ export class PullRequestWatches {
   #pass: Promise<void> | null = null;
   #again = false;
   #closed = false;
+  #unsubscribe: () => void = () => undefined;
   #rateUntil = 0;
   #rateStrikes = 0;
   #rateMessage = '';
@@ -83,7 +84,7 @@ export class PullRequestWatches {
       // A restart reads each watch again soon, a few seconds apart.
       for (const record of records) this.#runtime.set(runtimeKey(threadId, record.url), { nextReadAt: Date.now() + 2_000 * ++stagger, failures: 0, paused: null, reading: false });
     }
-    core.bus.onAny((name, payload) => {
+    this.#unsubscribe = core.bus.onAny((name, payload) => {
       if (this.#closed) return;
       if (name === 'thread.removed') this.endThread((payload as { threadId: ThreadId }).threadId);
       else if (name === 'thread.updated') {
@@ -100,6 +101,7 @@ export class PullRequestWatches {
 
   close(): Promise<void> {
     this.#closed = true;
+    this.#unsubscribe();
     if (this.#timer) clearTimeout(this.#timer);
     this.#timer = null;
     return this.#pass ?? Promise.resolve();
@@ -173,6 +175,7 @@ export class PullRequestWatches {
 
   /** One pass now; tests drive the loop with it. */
   pass(): Promise<void> {
+    if (this.#closed) return Promise.resolve();
     if (this.#pass) { this.#again = true; return this.#pass; }
     if (this.#timer) clearTimeout(this.#timer);
     this.#timer = null;

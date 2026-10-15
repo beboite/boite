@@ -256,6 +256,8 @@ test('a rate limit pauses every read until it passes, an unreachable GitHub only
   expect(watches.of(threadId)[0]!.paused).toMatchObject({ reason: 'unreachable', message: 'error connecting to api.github.com' });
 
   // A new store over the same journal (a restarted core) picks the watch up, with what it was told.
+  const listeners = (harness!.core.bus as unknown as { listeners: Set<unknown> }).listeners;
+  const heard = listeners.size;
   const restarted = new PullRequestWatches(harness!.core, (_thread, args) => answer(github, args), { intervalMs: 0, coalesceMs: 0 });
   try {
     github.failure = null;
@@ -264,6 +266,11 @@ test('a rate limit pauses every read until it passes, an unreachable GitHub only
     await restarted.pass();
     expect(restarted.of(threadId)[0]!.paused).toBeNull();
   } finally { await restarted.close(); }
+  // A closed store hears nothing more and reads nothing more.
+  expect(listeners.size).toBe(heard);
+  github.calls = [];
+  await restarted.pass();
+  expect(github.calls).toEqual([]);
 });
 
 test('Stop, unwatch and archive end watches, and the refusals name what is wrong', async () => {
