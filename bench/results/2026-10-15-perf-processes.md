@@ -70,3 +70,22 @@ deletes and writes the row with its command line again. The after figures
 include the prune that runs every 500 exits of a thread. A thread's rows stop
 at its newest 2,000, plus its live rows and the rows its process agent cards
 read.
+
+## Spawn lookup
+
+`bun bench/spawn-lookup.ts 300`, 2026-10-15, `nice -n 10`, three runs, an
+8-entry PATH with git in `/usr/bin`. Before is the PATH walk Bun repeats on
+every spawn of a bare name (`Bun.which('git', { PATH })`); after is the lookup
+`procs` now makes (`resolveSpawnCommand`, a remembered hit and one `stat`).
+
+| | runs | median |
+| --- | --- | ---: |
+| lookup before | 14.29, 11.99, 11.82 µs | 11.99 µs |
+| lookup after | 5.27, 4.25, 4.04 µs | 4.25 µs |
+| `git --version` spawned by name | 2.418, 2.090, 2.168 ms | 2.168 ms |
+| `git --version` spawned by resolved path | 2.400, 2.341, 2.363 ms | 2.363 ms |
+
+On Linux the saving, about 8 µs a spawn, sits inside the spawn's noise. The
+lookup grows with PATH times PATHEXT on Windows, where it was not measured.
+Running Git for Windows' real `git.exe` instead of its launcher removes one
+process per git call there; no Windows host was available to measure it.

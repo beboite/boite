@@ -12,6 +12,7 @@ import { stopGroup } from './platform/posix-kill.ts';
 import type { GuardStatus, NativeProcessExit, NativeProcessInfo, ProcessPlatform } from './platform/types.ts';
 import { ResourceCollection } from './resource-usage.ts';
 import { orphansOf } from './process-orphans.ts';
+import { forgetOnMissing, resolveSpawnCommand, startResolved } from './spawn-command.ts';
 import { BUSY_CPU_PERCENT, IDLE_LOAD_INTERVAL_MS, LOAD_INTERVAL_MS, LoadPace, worthPushing } from './load-pace.ts';
 
 export interface SpawnOptions {
@@ -141,7 +142,7 @@ export class ProcRegistry {
   private knownSweptAt = 0;
   /** A sweep waiting for the thread to stay idle, cancelled by its next turn. */
   private readonly sweepTimers = new Map<ThreadId, ReturnType<typeof setTimeout>>();
-  /** Group stops still inside their grace, off Windows: what `killAll` waits for. */
+  /** Group stops still inside their grace off Windows, and taskkill fallbacks on it: what `killAll` waits for. */
   private readonly stops = new Set<Promise<void>>();
   private reapOrphans = true;
   private readonly orphanGraceMs: number;
@@ -282,8 +283,8 @@ export class ProcRegistry {
     this.assertAccepting();
     const env: Record<string, string | undefined> = { ...process.env, ...(opts.env ?? {}) };
     const extra = Math.max(0, Math.floor(opts.extraPipes ?? 0));
-    const proc = Bun.spawn({
-      cmd: [cmd, ...args],
+    const proc = startResolved(cmd, env, (executable) => Bun.spawn({
+      cmd: [executable, ...args],
       cwd: opts.cwd,
       env,
       ...(extra
@@ -291,7 +292,7 @@ export class ProcRegistry {
         : { stdin: 'ignore' as const, stdout: 'pipe' as const, stderr: 'pipe' as const }),
       windowsHide: opts.showWindow !== true,
       detached: OWN_GROUP,
-    }) as ChildProcess;
+    }) as ChildProcess);
     const fds = extra ? (proc.stdio as unknown[]).slice(3).map(Number) : undefined;
     if (opts.showWindow === true) this.shown.add(threadId);
 
@@ -322,8 +323,8 @@ export class ProcRegistry {
   spawnPiped(threadId: ThreadId, cmd: string, args: string[], opts: SpawnOptions = {}): SpawnedPipedProcess {
     this.assertAccepting();
     const env = opts.env ?? process.env;
-    const proc = Bun.spawn({
-      cmd: [cmd, ...args],
+    const proc = startResolved(cmd, env, (executable) => Bun.spawn({
+      cmd: [executable, ...args],
       cwd: opts.cwd,
       env,
       stdin: 'pipe',
@@ -331,7 +332,7 @@ export class ProcRegistry {
       stderr: 'pipe',
       windowsHide: true,
       detached: OWN_GROUP,
-    });
+    }));
 
     const record = this.register(threadId, proc.pid, cmd, args, {
       root: opts.agentRoot !== false,
@@ -422,7 +423,8 @@ export class ProcRegistry {
    */
   spawnChild(threadId: ThreadId, cmd: string, args: string[], opts: SpawnOptions = {}): SpawnedChild {
     this.assertAccepting();
-    const child = spawnNodeChild(cmd, args, {
+    const executable = resolveSpawnCommand(cmd, opts.env ?? process.env);
+    const child = spawnNodeChild(executable, args, {
       cwd: opts.cwd,
       env: opts.env,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -446,7 +448,8 @@ export class ProcRegistry {
     });
     // A child that never starts emits 'error' and no 'exit'; without this it
     // would stay in the live registry for the rest of the session.
-    child.once('error', () => {
+    child.once('error', (error) => {
+      forgetOnMissing(cmd, executable, error);
       this.onExit(threadId, record.pid, null, undefined, record);
     });
 
@@ -631,13 +634,9 @@ export class ProcRegistry {
     for (const entry of entries) {
       if (terminated && !this.unassigned.has(entry.record.pid)) continue;
       if (entry.record.pid <= 0) continue;
-      this.platform.terminateUnassigned(entry.record.pid);
-      try {
-        const stop = entry.kill();
-        if (stop !== undefined) this.trackStop(stop);
-      } catch {
-        // already exited
-      }
+      // The child's own kill waits for the tree kill: once the root is gone, taskkill /T finds no tree.
+      const fallback = this.platform.terminateUnassigned(entry.record.pid);
+      this.trackStop(fallback instanceof Promise ? fallback.then(() => killEntry(entry), () => killEntry(entry)) : killEntry(entry));
     }
     return entries.length;
   }
@@ -653,7 +652,8 @@ export class ProcRegistry {
     return Promise.all([...this.stops]).then(() => undefined);
   }
 
-  private trackStop(stop: Promise<void>): void {
+  private trackStop(stop: Promise<void> | undefined): void {
+    if (stop === undefined) return;
     this.stops.add(stop);
     void stop.finally(() => this.stops.delete(stop));
   }
@@ -875,14 +875,18 @@ export class ProcRegistry {
       if (this.capability().os === 'windows') return entry !== undefined && this.platform.terminateProcess(victim.threadId, victim.pid);
       try {
         if (entry === undefined) return this.platform.terminateProcess(victim.threadId, victim.pid);
-        const stop = entry.kill();
-        if (stop !== undefined) this.trackStop(stop);
+        this.trackStop(entry.kill() ?? undefined);
         return true;
       } catch {
         return false;
       }
     });
   }
+}
+
+/** An entry's own kill, and the group stop that may follow it. */
+function killEntry(entry: Entry): Promise<void> | undefined {
+  try { return entry.kill() ?? undefined; } catch { return undefined; /* already exited */ }
 }
 
 /** A Bun child's kill: its whole group off Windows, the process itself on Windows. */

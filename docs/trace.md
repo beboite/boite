@@ -46,11 +46,29 @@ toasts and appbar queries. Shared IPC commands still check their callers.
 `packages/core/src/procs.ts` own process creation. Bypassing them loses registry
 tracking and protections.
 
+A bare command name (`git`, `gh`) is resolved to an absolute path through the
+remembered PATH lookup, with the child's own PATH, so Bun and node do not walk
+PATH and PATHEXT again on each spawn (`spawn-command.ts`). A Windows `.cmd`,
+`.bat` or `.ps1` shim and a name PATH does not find are passed on unchanged.
+On Windows, when git resolves to Git for Windows' launcher (`<Git>\cmd\git.exe`,
+or the portable `<Git>\bin\git.exe`), the real `git.exe` under `ucrt64`,
+`clangarm64`, `mingw64` or `mingw32` runs instead, which saves a process per
+call. The real binary sets HOME and puts its own folders on PATH only when
+`MSYSTEM` is unset, so the launcher stays when the child's environment sets
+`MSYSTEM`. Another layout keeps the path PATH found. A resolved path that is gone
+(ENOENT) forgets the lookups: `spawn` and `spawnPiped` start the bare name once,
+`spawnChild` reports the error and its next spawn looks again. The trace row
+keeps the name the caller gave.
+
 Windows creates an unnamed per-thread Job Object nested in an unnamed global
 job. Both use `KILL_ON_JOB_CLOSE`, with no `BREAKAWAY_OK`. Children are assigned
 immediately after spawn and use `windowsHide: true`. Closing the core's jobs
 ends their member processes. An empty thread job is forgotten after 30 seconds;
-a job that still reports members remains held.
+a job that still reports members remains held. A pid that could not join its
+job, or any pid of a thread with no job, is stopped by `taskkill /T /F` started
+asynchronously, so the core keeps serving while it starts. The child's own kill
+runs once taskkill ends, since `/T` needs the root alive to find the tree, and
+`killAll` at shutdown waits for both.
 
 Codex initialization can temporarily use normal priority for at most 30 seconds.
 The driver restores below-normal priority on ready, failure or Stop; the registry
