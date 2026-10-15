@@ -48,9 +48,9 @@ core started ([hooks.md](hooks.md)).
 When sharing is enabled, the core prepends the contents of the two `AGENTS.md`
 entrypoints and the valid skill names, descriptions and absolute paths to
 normal turns. Claude additionally gets `CLAUDE.md`; Antigravity gets `GEMINI.md`.
-Claude Code already names every skill in `<config>/skills/<name>/SKILL.md` to
-its model, so the catalog leaves out a brain skill whose file, resolved through
-links, is one of those; other agents get the whole catalog. A context mode
+Claude Code already names every skill in `<config>/skills/<name>/SKILL.md` and
+in the thread folder's `.claude/skills` to its model, so the catalog leaves out a
+brain skill whose file, resolved through links, is one of those; other agents get the whole catalog. A context mode
 without the Skill tool also gets it whole. Skill bodies stay on disk for the agent
 to read when needed. Project instruction
 files still follow each agent's native discovery rules.

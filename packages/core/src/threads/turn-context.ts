@@ -304,7 +304,7 @@ export class TurnContexts {
     const origin = input.sentFrom;
     const systemGuide = this.systemGuide(thread, provider);
     // Skills the harness already names to its model stay out of the brain's catalog.
-    const listedSkills = nativeSkillFiles(provider.protocol, env, !mode?.tools || mode.tools.includes('Skill'));
+    const listedSkills = nativeSkillFiles(provider.protocol, env, { cwd: thread.cwd, skillTool: !mode?.tools || mode.tools.includes('Skill') });
     const compose = (body: string, sessionId: string | null): string => {
       const inject = !((operation && sessionId !== null) || nativeCommandPrompt(body));
       // Echo treats "question" as a test directive, including in injected help.

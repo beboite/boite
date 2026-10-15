@@ -239,14 +239,21 @@ test('Claude gets no skill twice: the catalog leaves out what its own skills fol
   // How a brain's setup shares a skill with Claude Code: one link per skill.
   symlinkSync(join(root, 'skills/review'), join(config, 'skills/review'), 'junction');
   file(join(config, 'skills/own/SKILL.md'), '---\nname: own\ndescription: Outside the brain.\n---\n');
-  const listed = nativeSkillFiles('claude-sdk', { CLAUDE_CONFIG_DIR: config });
-  expect([...listed].sort()).toEqual([realpathSync(join(root, 'skills/review/SKILL.md')), realpathSync(join(config, 'skills/own/SKILL.md'))].sort());
+  // A project skill: Claude Code lists it too when the thread runs in the brain's folder.
+  file(join(root, '.claude/skills/local/SKILL.md'), '---\nname: local\ndescription: A project skill.\n---\nBody');
+  const listed = nativeSkillFiles('claude-sdk', { CLAUDE_CONFIG_DIR: config }, { cwd: root });
+  expect([...listed].sort()).toEqual([
+    realpathSync(join(root, 'skills/review/SKILL.md')), realpathSync(join(config, 'skills/own/SKILL.md')), realpathSync(join(root, '.claude/skills/local/SKILL.md')),
+  ].sort());
   const claude = h.core.brain.instructions('claude', listed);
   expect(claude).not.toContain(join(root, 'skills/review/SKILL.md'));
+  expect(claude).not.toContain(join(root, '.claude/skills/local/SKILL.md'));
   expect(claude).toContain(join(root, 'skills/ship/SKILL.md'));
+  // Elsewhere the project skill is the brain's alone to announce.
+  expect(h.core.brain.instructions('claude', nativeSkillFiles('claude-sdk', { CLAUDE_CONFIG_DIR: config }))).toContain(join(root, '.claude/skills/local/SKILL.md'));
   // Another harness, or a Claude context mode without the Skill tool, keeps the whole catalog.
   expect(nativeSkillFiles('codex-appserver', { CLAUDE_CONFIG_DIR: config }).size).toBe(0);
-  expect(nativeSkillFiles('claude-sdk', { CLAUDE_CONFIG_DIR: config }, false).size).toBe(0);
+  expect(nativeSkillFiles('claude-sdk', { CLAUDE_CONFIG_DIR: config }, { cwd: root, skillTool: false }).size).toBe(0);
   expect(h.core.brain.instructions('codex')).toContain(join(root, 'skills/review/SKILL.md'));
 });
 

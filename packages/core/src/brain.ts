@@ -265,8 +265,8 @@ export class BrainStore {
     return status;
   }
 
-  /** Included in normal turns across all drivers, including already warm sessions. */
   /**
+   * Included in normal turns across all drivers, including already warm sessions.
    * `listed` holds the SKILL.md files, resolved through links, that the agent's
    * harness already lists to its model (`nativeSkillFiles`): the catalog leaves
    * them out so no skill reaches the model twice.
@@ -400,20 +400,24 @@ function listedSkill(listed: ReadonlySet<string>, file: string): boolean {
 
 /**
  * The skills a harness lists to its model by itself, as resolved SKILL.md
- * paths. Claude Code reads `<config>/skills/<name>/SKILL.md` and names each one
- * in its own context; a brain skill linked there would otherwise arrive twice,
- * once from the CLI and once in the catalog of every request. Other harnesses
- * get the whole catalog. `skillTool` is false when a context mode removed the
- * Skill tool, and with it the CLI's list.
+ * paths. Claude Code reads `<config>/skills/<name>/SKILL.md` and the project's
+ * `<cwd>/.claude/skills/<name>/SKILL.md`, and names each one in its own context;
+ * a brain skill found there would otherwise arrive twice, once from the CLI and
+ * once in the catalog of every request. Other harnesses get the whole catalog.
+ * `skillTool` is false when a context mode removed the Skill tool, and with it
+ * the CLI's list.
  */
-export function nativeSkillFiles(protocol: Protocol, env: Record<string, string>, skillTool = true): ReadonlySet<string> {
-  if (protocol !== 'claude-sdk' || !skillTool) return NONE;
-  const root = join(env['CLAUDE_CONFIG_DIR'] ?? process.env['CLAUDE_CONFIG_DIR'] ?? join(homePath(), '.claude'), 'skills');
-  let names: string[];
-  try { names = readdirSync(root); } catch { return NONE; }
+export function nativeSkillFiles(protocol: Protocol, env: Record<string, string>, options: { cwd?: string; skillTool?: boolean } = {}): ReadonlySet<string> {
+  if (protocol !== 'claude-sdk' || options.skillTool === false) return NONE;
+  const config = env['CLAUDE_CONFIG_DIR'] ?? process.env['CLAUDE_CONFIG_DIR'] ?? join(homePath(), '.claude');
+  const roots = [join(config, 'skills'), ...(options.cwd ? [join(options.cwd, '.claude', 'skills')] : [])];
   const files = new Set<string>();
-  for (const name of names) {
-    try { files.add(realpathSync(join(root, name, 'SKILL.md'))); } catch { /* Not a skill folder. */ }
+  for (const root of roots) {
+    let names: string[];
+    try { names = readdirSync(root); } catch { continue; }
+    for (const name of names) {
+      try { files.add(realpathSync(join(root, name, 'SKILL.md'))); } catch { /* Not a skill folder. */ }
+    }
   }
   return files;
 }
