@@ -5,6 +5,7 @@ import { profileFor, resolveExecutable } from '../../providers/resolve.ts';
 import { titleRequest } from '../../titles.ts';
 import type { TitleContext } from '../types.ts';
 import { childEnv, STDERR_MAX } from './query.ts';
+import { fitImages } from './images.ts';
 import type { ClaudeDeps } from './query.ts';
 
 /** What writes a thread's title when the core names no model: the CLI's alias for its smallest current model. */
@@ -38,11 +39,12 @@ export async function titleQuery(deps: ClaudeDeps, ctx: TitleContext): Promise<s
     return child;
   };
   const prompt = async function* (): AsyncGenerator<SDKUserMessage> {
+    const images = await fitImages(ctx.attachments ?? []);
     yield {
       type: 'user',
       message: { role: 'user', content: [
         { type: 'text', text: titleRequest(ctx.prompt, ctx.answer, ctx.initial, ctx.nameBranch) },
-        ...(ctx.attachments ?? []).map((attachment) => ({
+        ...images.map((attachment) => ({
           type: 'image' as const,
           source: { type: 'base64' as const, media_type: attachment.mimeType, data: attachment.data },
         })),

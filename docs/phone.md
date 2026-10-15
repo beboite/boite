@@ -328,7 +328,7 @@ page instead: this browser cannot start Boite, and the versions it needs.
 
 ## Pictures and videos
 
-Screenshots and photos shrink before they leave the phone: 2048 px on the long
+Screenshots and photos shrink before they leave the phone: 2000 px on the long
 edge, JPEG or PNG, HEIC converted to JPEG by Safari. A turn takes twenty
 files ([development.md](development.md#file-attachments)). While a question
 waits, the composer's paperclip attaches them to the answer.

@@ -146,6 +146,14 @@ the refusal across restarts: a session file alone cannot restore the connected
 status. A successful fresh CLI check or completed sign-in clears it. Billing,
 rate limits and failures inside subagents do not invalidate the account.
 
+An HTTP 403 does not either. The Claude CLI labels it `authentication_failed`
+as it does a 401, so the driver holds that label until the turn's result: a
+403 in its `api_error_status`, or in the frame's own text ("API Error: 403"),
+fails only that turn, with the API's words after "Claude refused this request;
+the account is still signed in." Any other status signs the account out, and
+so does a CLI that exits before its result. A new login cannot grant a
+permission, and a signed-out account would refuse every later turn.
+
 Changed account statuses and identities reach every client as `accounts.updated`.
 An unchanged passive check writes no journal row and sends no event.
 `accounts.rename` changes the label of any account, including a default CLI
