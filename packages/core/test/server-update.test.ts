@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { generateKeyPairSync, createHash, randomBytes, sign } from 'node:crypto';
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { zipSync } from 'fflate';
@@ -44,42 +44,70 @@ test('signed server archives cannot escape staging or disagree with their offere
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('server updates wait for running and queued work, cancel without stopping it, and reject stale versions', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'boite-server-controller-'));
-  let stops = 0;
+/** A test core whose updater stages instantly; `agentUpdating` stands in for an agent install under way. */
+async function updatingCore(prefix: string) {
+  const root = mkdtempSync(join(tmpdir(), prefix));
+  const state = { stops: 0, planFile: '', agentUpdating: false };
   const platform: ServerUpdatePlatform = {
     inspect: async () => ({ directory: join(root, 'install'), executable: join(root, 'install', 'boite-core'), service: 'test.service' }),
-    launch: async (_run, _executable, plan) => { writeFileSync(join(dirname(plan), 'ready'), ''); },
+    launch: async (_run, _executable, plan) => { state.planFile = plan; writeFileSync(join(dirname(plan), 'ready'), ''); },
     control: async () => undefined,
     mainPid: async () => process.pid,
   };
-  const h = await startTestCore({ onShutdown: () => { stops++; }, serverUpdates: { platform, pollMs: 5,
+  const h = await startTestCore({ onShutdown: () => { state.stops++; }, serverUpdates: { platform, pollMs: 5,
     findOffer: async () => ({ version: '2.0.0-beta.2', publishedAt: '2026-10-01T00:00:00Z', url: 'https://example.test/signed.zip', signature: 'signed' }),
     prepare: async () => 'a'.repeat(64) } });
+  Object.defineProperty(h.core.updates, 'busy', { get: () => state.agentUpdating, configurable: true });
+  const admitted = () => { try { return readFileSync(join(dirname(state.planFile), 'admitted'), 'utf8'); } catch { return null; } };
+  return { root, state, h, admitted, stop: async () => { await h.stop(); rmSync(root, { recursive: true, force: true }); } };
+}
+
+test('a busy server hands running and queued turns to the next core at once; only an agent install holds it, and cancel stops nothing', async () => {
+  const { state, h, admitted, stop } = await updatingCore('boite-server-controller-');
   let release: (() => void) | undefined;
   try {
     const client = await h.connect();
     expect((await client.call('core.updateStatus', { refresh: true })).phase).toBe('available');
     await expect(client.call('core.updateInstall', { version: '2.0.0-beta.3' })).rejects.toThrow('version');
-    const first = await echoThread(h, client, 'running');
+    const first = await echoThread(h, client, 'first');
     const second = await echoThread(h, client, 'queued');
     release = holdAccountTurns(h, second.accountId);
-    await client.call('turns.start', { threadId: first.threadId, prompt: '[sleep:300] finish my work' });
+    await client.call('turns.start', { threadId: first.threadId, prompt: '[sleep:60000] work for hours' });
     expect((await client.call('turns.start', { threadId: second.threadId, prompt: 'queued work' })).status).toBe('queued');
+    // A half-written agent install holds the restart, and the wait can be cancelled.
+    state.agentUpdating = true;
     await client.call('core.updateInstall', { version: '2.0.0-beta.2' });
     await waitFor(() => h.core.serverUpdates.snapshot().phase === 'waiting');
-    expect(stops).toBe(0);
+    await Bun.sleep(50);
+    expect(h.core.serverUpdates.snapshot().phase).toBe('waiting');
+    expect(state.stops).toBe(0);
     expect(h.core.stopping).toBe(false);
     expect((await client.call('core.updateCancel', {})).phase).toBe('available');
     expect(h.core.stopping).toBe(false);
     await client.call('core.updateInstall', { version: '2.0.0-beta.2' });
     await waitFor(() => h.core.serverUpdates.snapshot().phase === 'waiting');
-    release(); release = undefined;
+    // The install done, a busy server no longer waits for its work to end.
+    state.agentUpdating = false;
     await waitFor(() => h.core.serverUpdates.snapshot().phase === 'installing');
-    await waitFor(() => stops === 1);
-    expect(h.core.journal.listTurns(first.threadId)[0]?.status).toBe('done');
-    expect(h.core.journal.listTurns(second.threadId)[0]?.status).toBe('done');
-  } finally { release?.(); await h.stop(); rmSync(root, { recursive: true, force: true }); }
+    expect(admitted()).toBe(JSON.parse(readFileSync(state.planFile, 'utf8')).id);
+    const record = h.core.journal.getSetting('restart-handoff') as { turns: { threadId: string; was: string }[] };
+    // Both turns wait on the held account; the next core puts them back in line.
+    expect(record.turns.map(turn => turn.threadId).sort()).toEqual([first.threadId, second.threadId].sort());
+    await waitFor(() => state.stops === 1, 15_000);
+  } finally { release?.(); await stop(); }
+});
+
+test('an idle server installs through the idle gate and hands nothing over', async () => {
+  const { state, h, admitted, stop } = await updatingCore('boite-server-idle-');
+  try {
+    const client = await h.connect();
+    await client.call('core.updateStatus', { refresh: true });
+    await client.call('core.updateInstall', { version: '2.0.0-beta.2' });
+    await waitFor(() => h.core.serverUpdates.snapshot().phase === 'installing');
+    expect(admitted()).not.toBeNull();
+    expect(h.core.journal.getSetting('restart-handoff')).toBeUndefined();
+    await waitFor(() => state.stops === 1);
+  } finally { await stop(); }
 });
 
 test('a failed update admission write leaves the server running and reports the error', async () => {
@@ -112,7 +140,13 @@ test('a failed update admission write leaves the server running and reports the 
   } finally { await h.stop(); rmSync(root, { recursive: true, force: true }); }
 });
 
-for (const fails of [false, true]) test(`update helper ${fails ? 'restores the previous binary, SQLite journal and pairing on a failed restart' : 'installs the complete bundle and checks the new process health'}`, async () => {
+const APPLY_CASES = {
+  installs: 'installs the complete bundle and checks the new process health',
+  fails: 'restores the previous binary, SQLite journal and pairing on a failed restart',
+  full: 'leaves the server running when the disk cannot hold the backup',
+} as const;
+for (const mode of ['installs', 'fails', 'full'] as const) test(`update helper ${APPLY_CASES[mode]}`, async () => {
+  const fails = mode === 'fails';
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'boite-server-apply-')));
   const install = join(root, 'install');
   const data = join(root, 'data');
@@ -121,6 +155,15 @@ for (const fails of [false, true]) test(`update helper ${fails ? 'restores the p
   mkdirSync(install); mkdirSync(data); mkdirSync(operation);
   writeFileSync(join(install, 'boite-core'), 'old executable');
   writeFileSync(join(data, 'pairing.json'), 'test pairing survives');
+  // A bulk store the snapshot leaves out: a rollback keeps the live one.
+  mkdirSync(join(data, 'checkpoints', 'thr_a'), { recursive: true });
+  writeFileSync(join(data, 'checkpoints', 'thr_a', 'object'), 'checkpoint bytes');
+  // Two older snapshots: a successful update keeps the newest two in all.
+  const older = ['bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'cccccccc-cccc-cccc-cccc-cccccccccccc'].map((name, index) => {
+    const path = join(root, `.boite-backup-${name}`);
+    mkdirSync(path); utimesSync(path, new Date(2026, 0, 1 + index), new Date(2026, 0, 1 + index));
+    return path;
+  });
   const db = new Database(join(data, 'journal.db'));
   db.run('CREATE TABLE saved (message TEXT)'); db.run("INSERT INTO saved VALUES ('conversation')"); db.close();
   const entries = { 'boite-core': Buffer.from('new executable'), 'boite': Buffer.from('new shim'), 'ui/index.html': Buffer.from('new UI'), 'server-release.json': Buffer.from('{"version":"2.1.0"}') };
@@ -140,24 +183,38 @@ for (const fails of [false, true]) test(`update helper ${fails ? 'restores the p
       if (action === 'start' && readFileSync(join(install, 'boite-core'), 'utf8') === 'new executable') {
         const migrated = new Database(join(data, 'journal.db')); migrated.run('ALTER TABLE saved ADD COLUMN newer_schema INTEGER'); migrated.close();
         writeFileSync(join(data, 'pairing.json'), 'new run changed pairing');
+        writeFileSync(join(data, 'checkpoints', 'thr_a', 'object2'), 'written by the new run');
       }
     } };
   try {
     const run = applyServerUpdate(join(operation, 'plan.json'), platform, { pollMs: 5, healthTimeoutMs: 35,
+      spareBytes: mode === 'full' ? Number.MAX_SAFE_INTEGER : 0,
       health: async () => fails ? null : { ok: true, version: '2.1.0', pid: 456 } });
-    if (fails) {
+    if (mode === 'full') {
+      await expect(run).rejects.toThrow('Not enough disk space');
+      expect(controls).toEqual([]);
+      expect(existsSync(join(root, `.boite-backup-${id}`))).toBe(false);
+      expect(readFileSync(join(install, 'boite-core'), 'utf8')).toBe('old executable');
+      expect(JSON.parse(readFileSync(join(data, 'server-update-result.json'), 'utf8')).error).toContain('Server update was not installed. Not enough disk space');
+    } else if (fails) {
       await expect(run).rejects.toThrow('healthy');
       expect(readFileSync(join(install, 'boite-core'), 'utf8')).toBe('old executable');
       expect(readFileSync(join(data, 'pairing.json'), 'utf8')).toBe('test pairing survives');
       const restored = new Database(join(data, 'journal.db'));
       expect(restored.query('SELECT * FROM saved').all()).toEqual([{ message: 'conversation' }]); restored.close();
+      expect(readFileSync(join(data, 'checkpoints', 'thr_a', 'object'), 'utf8')).toBe('checkpoint bytes');
       expect(controls).toEqual(['stop', 'start', 'stop', 'start']);
+      expect(older.every(path => existsSync(path))).toBe(true);
     } else {
       await run;
       expect(readFileSync(join(install, 'boite-core'), 'utf8')).toBe('new executable');
       expect(readFileSync(join(install, 'ui', 'index.html'), 'utf8')).toBe('new UI');
       expect(readFileSync(join(root, `.boite-backup-${id}`, 'installation', 'boite-core'), 'utf8')).toBe('old executable');
+      expect(existsSync(join(root, `.boite-backup-${id}`, 'data', 'pairing.json'))).toBe(true);
+      expect(existsSync(join(root, `.boite-backup-${id}`, 'data', 'checkpoints'))).toBe(false);
       expect(controls).toEqual(['stop', 'start']);
+      // The oldest snapshot goes; this one and the newest older one stay.
+      expect(older.map(path => existsSync(path))).toEqual([false, true]);
     }
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

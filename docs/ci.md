@@ -151,11 +151,30 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 593,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,906,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,928,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,110,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,152,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-15, Claude's preset system prompt (PR #500) merged with `origin/main`
+at `2adac07b` measures 4,150,454 core JavaScript bytes after a clean
+`bun run build:core` on Linux with Bun 1.4.2, against 4,127,241 for that main.
+The Claude Agent SDK's update from 0.3.296 to 0.3.300 adds 21,565 bytes to its
+lazy chunk, which never loads at startup. The core total limit becomes
+4,152,000; the UI, entry and `main.js` limits stay unchanged.
+
+On 2026-10-15, updating another Windows PC's desktop app (PR #498) merged
+with PR #494 measures 4,926,156 UI bytes and 4,125,352 core JavaScript bytes
+after fresh `bun run build:ui` and `bun run build:core` on Linux. The limits
+become 4,928,000 and 4,127,000; the entry limits stay unchanged.
+
+On 2026-10-15, the server update's handoff and the slimmer backup (PR #494),
+with a handoff time in the update cards since removed, measured 4,917,711 UI bytes
+and 4,119,340 core JavaScript bytes after fresh `bun run build:ui` and
+`bun run build:core` on Linux, 711 and 340 bytes over the limits of that day;
+Windows CI measured 4,119,299 core bytes. The limits become 4,919,000 and
+4,121,000; the entry limits stay unchanged.
 
 On 2026-10-14, files dropped on the desktop window going to the composer
 (`lib/native-drop.ts`, the attach overlay and its English and French strings)
@@ -550,11 +569,6 @@ both languages, and about 16,900 core bytes for the cards, their shared checks,
 the CLI command and two MCP tools. The UI limit becomes 4,860,000 and the core
 total limit 4,070,000; the entry chunk (518,508 bytes) and `main.js` limits are
 unchanged.
-On 2026-10-15 on Linux with Bun 1.4.2, Claude's preset system prompt on top of
-`origin/main` at `3b16d436` measured 4,118,552 emitted core JavaScript bytes
-with the Claude Agent SDK at 0.3.296 and 4,140,117 at 0.3.300: the SDK's lazy
-chunk grows by 21,565 bytes and never loads at startup. The core total limit
-becomes 4,142,000; the UI, entry and `main.js` limits are unchanged.
 Explain measured growth when changing a limit. Shared-runner timings are not gated. Earlier sizes and
 runner observations remain in the [dated report](../bench/results/2026-09-29-resources.md#historical-ci-measurements).
 
