@@ -11,7 +11,8 @@ export function initialServerUpdate(): ServerUpdateStatus {
     phase: offered ? phase as ServerUpdateStatus['phase'] : 'current', version: offered ? '2.0.0-beta.2' : null,
     publishedAt: offered ? '2026-10-01T03:23:00Z' : null, checkedAt: Date.now(),
     received: phase === 'downloading' ? 24_000_000 : 0, total: phase === 'downloading' ? 60_000_000 : null,
-    error: phase === 'error' ? 'Update download could not reach the release server.' : null };
+    error: phase === 'error' ? 'Update download could not reach the release server.' : null,
+    handoffAt: phase === 'waiting' ? Date.now() + 120_000 : null };
 }
 
 export function serverUpdateMethods(ctx: FakeContext): Pick<FakeMethods, 'core.updateStatus' | 'core.updateInstall' | 'core.updateCancel' | 'core.updateEverything'> {
