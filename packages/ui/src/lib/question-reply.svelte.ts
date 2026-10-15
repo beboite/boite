@@ -26,9 +26,9 @@ class QuestionReplies {
   chosen = $state<string | null>(null);
   /** Questions that arrived while the user wrote: the composer leaves them until it is empty and quiet. */
   waiting = $state<Record<string, true>>({});
-  /** The composer typed in within the last pause, by its key. */
-  typing = $state<string | null>(null);
-  pause: ReturnType<typeof setTimeout> | undefined;
+  /** Composers typed in within their last pause, by key: each has its own, so typing in one never ends another's. */
+  typing = $state<Record<string, true>>({});
+  pauses = new Map<string, ReturnType<typeof setTimeout>>();
 }
 
 /** How long a composer sits untouched before a question that arrived during typing may take it. */
@@ -45,15 +45,15 @@ export function repliesOf(store: Store): QuestionReplies {
 
 function drafted(store: Store, threadId: string): boolean {
   const state = store.composerStates[threadId];
-  return !!state && (state.text.trim().length > 0 || state.attachments.length > 0);
+  return !!state && (state.text.length > 0 || state.attachments.length > 0);
 }
 
 /** A keystroke in the composer `key`: questions arriving now wait for the pause after it. */
 export function noteTyping(store: Store, key: string): void {
   const held = repliesOf(store);
-  held.typing = key;
-  clearTimeout(held.pause);
-  held.pause = setTimeout(() => { if (held.typing === key) held.typing = null; }, TYPING_PAUSE_MS);
+  held.typing[key] = true;
+  clearTimeout(held.pauses.get(key));
+  held.pauses.set(key, setTimeout(() => { delete held.typing[key]; held.pauses.delete(key); }, TYPING_PAUSE_MS));
 }
 
 /**
@@ -63,7 +63,7 @@ export function noteTyping(store: Store, key: string): void {
 export function noteQuestionAsked(store: Store, question: QuestionRequest): void {
   if (!question.allowText || store.pendingQuestions.some((known) => known.id === question.id)) return;
   const held = repliesOf(store);
-  if (held.typing === question.threadId || drafted(store, question.threadId)) held.waiting[question.id] = true;
+  if (held.typing[question.threadId] || drafted(store, question.threadId)) held.waiting[question.id] = true;
 }
 
 /** Lets a waiting question take its composer once that composer is empty and quiet, or the question is gone. */
@@ -71,7 +71,7 @@ export function releaseWaiting(store: Store): void {
   const held = repliesOf(store);
   for (const id of Object.keys(held.waiting)) {
     const question = store.pendingQuestions.find((pending) => pending.id === id);
-    if (!question || (held.typing !== question.threadId && !drafted(store, question.threadId))) delete held.waiting[id];
+    if (!question || (!held.typing[question.threadId] && !drafted(store, question.threadId))) delete held.waiting[id];
   }
 }
 

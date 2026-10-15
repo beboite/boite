@@ -122,7 +122,9 @@ afterEach(() => {
   document.body.innerHTML = '';
   window.localStorage.clear();
   // Each test's fake numbers its questions from one again, on the same store.
-  Object.assign(repliesOf(store), { picks: {}, ignored: {}, docked: null, chosen: null, waiting: {}, typing: null });
+  const replies = repliesOf(store);
+  for (const pause of replies.pauses.values()) clearTimeout(pause);
+  Object.assign(replies, { picks: {}, ignored: {}, docked: null, chosen: null, waiting: {}, typing: {}, pauses: new Map() });
   // The device's work record is module state: the next test starts with no record.
   work.load();
   vi.restoreAllMocks();
@@ -1160,6 +1162,14 @@ test('a question asked while the user types takes the emptied composer only afte
   await waitFor(() => store.pendingQuestions.some((question) => question.threadId === 't-trace'));
   expect(document.querySelector('[data-testid=composer-reply]')).toBeNull();
   const asked = store.pendingQuestions.find((question) => question.threadId === 't-trace')!;
+  // Typing in another thread within that pause does not end this one's.
+  await type('');
+  await store.open('t-descriptors');
+  await waitFor(() => store.openThread?.id === 't-descriptors');
+  await type('elsewhere');
+  await store.open('t-trace');
+  await waitFor(() => store.openThread?.id === 't-trace');
+  expect(document.querySelector('[data-testid=composer-reply]')).toBeNull();
   await waitFor(() => document.querySelector<HTMLElement>('[data-testid=composer-reply]')?.dataset.question === asked.id, 2000);
   expect(input().placeholder).toBe('Write your answer');
   // Once released, typing again does not hand the box back to messages.
