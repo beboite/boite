@@ -41,7 +41,7 @@ beforeAll(async () => {
   await load();
 }, 90_000);
 
-afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
+afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
 async function center(threadId: string): Promise<{ x: number; y: number }> {
   return page.evaluate<{ x: number; y: number }>(`(() => {

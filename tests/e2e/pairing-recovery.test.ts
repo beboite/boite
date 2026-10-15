@@ -26,7 +26,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await page?.close();
   await core?.stop();
-}, 15_000);
+}, 30_000);
 
 test('a phone with no key is added again from Machines with a typed code and sees its threads', async () => {
   await page.waitFor(`document.querySelector('${id('mobile-menu')}')`);

@@ -58,7 +58,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await desk?.close();
   await core?.stop();
-}, 15_000);
+}, 30_000);
 
 test('the Tailscale switch serves the core, the links follow it, and 443 held by another target is replaced only when confirmed', async () => {
   await desk.waitFor(`document.querySelector('${id('nav-settings')}')`);

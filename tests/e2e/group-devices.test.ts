@@ -132,7 +132,7 @@ afterAll(async () => {
   await ui?.close();
   for (const core of cores) await core.stop();
   rmSync(scratch, { recursive: true, force: true });
-}, 20_000);
+}, 30_000);
 
 /** What the first test leaves for the second: the two machines, their owners, the phone and the owner's computer. */
 let first: RunningCore, second: RunningCore;

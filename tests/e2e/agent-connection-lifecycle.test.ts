@@ -13,7 +13,7 @@ beforeAll(async () => {
   server = await startUi(port);
   url = `http://127.0.0.1:${port}/?fake=1&open=recent`;
 }, 60_000);
-afterAll(async () => { await server?.close(); });
+afterAll(async () => { await server?.close(); }, 30_000);
 
 for (const [name, width, height, mobile] of [['desktop', 1280, 900, false], ['phone', 390, 844, true]] as const) {
   test(`agent connection cards can close on ${name}`, async () => {
