@@ -151,7 +151,7 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 593,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,950,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,952,000 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 4,152,000 |
 
@@ -162,8 +162,9 @@ with `origin/main` at `3202e281` measures 4,948,440 UI bytes and 4,151,404 core
 JavaScript bytes after fresh `bun run build:ui` and `bun run build:core` on
 Linux, against 4,931,957 and 4,145,283 for that main: the dialog, its strings
 in both languages and the store add 16,483 UI bytes, the reader of the recorded
-request 6,121 core bytes. The UI limit becomes 4,950,000; the core, entry and
-`main.js` limits stay unchanged.
+request 6,121 core bytes. Handing the focus back on close brings Linux to
+4,948,554 and Windows CI to 4,950,063 UI bytes. The UI limit becomes 4,952,000;
+the core, entry and `main.js` limits stay unchanged.
 
 On 2026-10-15, Claude's preset system prompt (PR #500) merged with `origin/main`
 at `2adac07b` measures 4,150,454 core JavaScript bytes after a clean
