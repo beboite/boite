@@ -1,10 +1,33 @@
-import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { unzipSync } from 'fflate';
 import type { ServerUpdatePlan, ServerUpdatePlatform } from './types.ts';
 
 const pause = (ms: number) => new Promise<void>(done => setTimeout(done, ms));
+
+/**
+ * Data-directory entries the snapshot leaves out. A release migrates the
+ * journal and the small state files beside it; these stores it does not
+ * rewrite, and they were most of the bytes: on a server with 1,300 threads,
+ * checkpoints and browser profiles made the copy 8.9 GB and kept the service
+ * down 2 min 25 s per update. A rollback keeps the live ones in place.
+ */
+export const UNSAVED_DATA = new Set(['checkpoints', 'browser', 'attachments', 'attachment-uploads', 'artifacts', 'logs', 'speech']);
+
+/** Snapshots kept beside the installation; each still holds a whole journal. */
+export const KEPT_BACKUPS = 2;
+
+/** Drops all but the newest `KEPT_BACKUPS` snapshots; a failure here never fails an installed update. */
+function pruneBackups(parent: string): void {
+  try {
+    const backups = readdirSync(parent, { withFileTypes: true })
+      .filter(entry => entry.isDirectory() && /^\.boite-backup-[a-f0-9-]{36}$/.test(entry.name))
+      .map(entry => ({ path: join(parent, entry.name), at: statSync(join(parent, entry.name)).mtimeMs }))
+      .sort((a, b) => b.at - a.at);
+    for (const old of backups.slice(KEPT_BACKUPS)) rmSync(old.path, { recursive: true, force: true });
+  } catch { /* The next update prunes again. */ }
+}
 const contains = (parent: string, path: string) => path === parent || path.startsWith(`${parent}/`);
 
 /** The private plan is produced by the owner-only RPC, never supplied by a remote caller. */
@@ -75,7 +98,8 @@ export async function applyServerUpdate(file: string, platform: ServerUpdatePlat
     if (await platform.mainPid(plan.installation.service) !== 0) throw new Error('The server service did not stop');
     // Never copy a live SQLite directory. The whole snapshot also keeps account and pairing state.
     mkdirSync(backup, { mode: 0o700 });
-    cpSync(plan.dataDir, join(backup, 'data'), { recursive: true, dereference: false, errorOnExist: true, force: false });
+    cpSync(plan.dataDir, join(backup, 'data'), { recursive: true, dereference: false, errorOnExist: true, force: false,
+      filter: (source) => dirname(source) !== plan.dataDir || !UNSAVED_DATA.has(source.slice(plan.dataDir.length + 1)) });
     dataSaved = true;
     verifyStage(directory, plan);
     renameSync(root, join(backup, 'installation'));
@@ -98,6 +122,7 @@ export async function applyServerUpdate(file: string, platform: ServerUpdatePlat
     }
     if (!healthy) throw new Error('The updated server did not become healthy within 30 seconds');
     result(null);
+    pruneBackups(dirname(root));
   } catch (error) {
     failed = true;
     const reason = error instanceof Error ? error.message : String(error);
@@ -109,6 +134,8 @@ export async function applyServerUpdate(file: string, platform: ServerUpdatePlat
         // Preserve both the failed data and the snapshot if restoration itself fails.
         const restored = `${plan.dataDir}.restore-${plan.id}`;
         cpSync(join(backup, 'data'), restored, { recursive: true, dereference: false, errorOnExist: true, force: false });
+        // The stores left out of the snapshot move across as they are.
+        for (const name of UNSAVED_DATA) if (existsSync(join(plan.dataDir, name))) renameSync(join(plan.dataDir, name), join(restored, name));
         renameSync(plan.dataDir, `${plan.dataDir}.failed-${plan.id}`);
         renameSync(restored, plan.dataDir);
       }

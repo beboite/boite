@@ -175,12 +175,17 @@ replace the core under a half-written agent. Before this limit, a machine with
 an agent working for hours never installed its release.
 
 An independent systemd user job survives the core's shutdown. After the core
-stops, it backs up the complete data directory and installation, switches the
-staged installation into place, and restarts the same service. Health must
+stops, it backs up the installation and the data directory, switches the
+staged installation into place, and restarts the same service. The data
+snapshot holds the journal and the state files beside it; checkpoints,
+browser profiles, attachments, artifacts, logs and dictation models stay out,
+since a release does not rewrite them. Copying them kept a server with 1,300
+threads down 2 min 25 s for 8.9 GB; a rollback keeps the live ones. Health must
 report the target version and that service's new PID within 30 seconds.
 Failure restores both the previous installation and its data snapshot before
 restarting. Pairings and conversations survive; clients reconnect normally.
-Backups remain private beside the installation as `.boite-backup-<id>`.
+Backups remain private beside the installation as `.boite-backup-<id>`; a
+successful update keeps the two newest and deletes the older ones.
 Failure artifacts also remain for diagnosis; inspect them before removing them.
 
 From a terminal on the server, the same owner actions need no thread:

@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { generateKeyPairSync, createHash, randomBytes, sign } from 'node:crypto';
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { zipSync } from 'fflate';
@@ -154,6 +154,15 @@ for (const fails of [false, true]) test(`update helper ${fails ? 'restores the p
   mkdirSync(install); mkdirSync(data); mkdirSync(operation);
   writeFileSync(join(install, 'boite-core'), 'old executable');
   writeFileSync(join(data, 'pairing.json'), 'test pairing survives');
+  // A bulk store the snapshot leaves out: a rollback keeps the live one.
+  mkdirSync(join(data, 'checkpoints', 'thr_a'), { recursive: true });
+  writeFileSync(join(data, 'checkpoints', 'thr_a', 'object'), 'checkpoint bytes');
+  // Two older snapshots: a successful update keeps the newest two in all.
+  const older = ['bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'cccccccc-cccc-cccc-cccc-cccccccccccc'].map((name, index) => {
+    const path = join(root, `.boite-backup-${name}`);
+    mkdirSync(path); utimesSync(path, new Date(2026, 0, 1 + index), new Date(2026, 0, 1 + index));
+    return path;
+  });
   const db = new Database(join(data, 'journal.db'));
   db.run('CREATE TABLE saved (message TEXT)'); db.run("INSERT INTO saved VALUES ('conversation')"); db.close();
   const entries = { 'boite-core': Buffer.from('new executable'), 'boite': Buffer.from('new shim'), 'ui/index.html': Buffer.from('new UI'), 'server-release.json': Buffer.from('{"version":"2.1.0"}') };
@@ -173,6 +182,7 @@ for (const fails of [false, true]) test(`update helper ${fails ? 'restores the p
       if (action === 'start' && readFileSync(join(install, 'boite-core'), 'utf8') === 'new executable') {
         const migrated = new Database(join(data, 'journal.db')); migrated.run('ALTER TABLE saved ADD COLUMN newer_schema INTEGER'); migrated.close();
         writeFileSync(join(data, 'pairing.json'), 'new run changed pairing');
+        writeFileSync(join(data, 'checkpoints', 'thr_a', 'object2'), 'written by the new run');
       }
     } };
   try {
@@ -184,13 +194,19 @@ for (const fails of [false, true]) test(`update helper ${fails ? 'restores the p
       expect(readFileSync(join(data, 'pairing.json'), 'utf8')).toBe('test pairing survives');
       const restored = new Database(join(data, 'journal.db'));
       expect(restored.query('SELECT * FROM saved').all()).toEqual([{ message: 'conversation' }]); restored.close();
+      expect(readFileSync(join(data, 'checkpoints', 'thr_a', 'object'), 'utf8')).toBe('checkpoint bytes');
       expect(controls).toEqual(['stop', 'start', 'stop', 'start']);
+      expect(older.every(path => existsSync(path))).toBe(true);
     } else {
       await run;
       expect(readFileSync(join(install, 'boite-core'), 'utf8')).toBe('new executable');
       expect(readFileSync(join(install, 'ui', 'index.html'), 'utf8')).toBe('new UI');
       expect(readFileSync(join(root, `.boite-backup-${id}`, 'installation', 'boite-core'), 'utf8')).toBe('old executable');
+      expect(existsSync(join(root, `.boite-backup-${id}`, 'data', 'pairing.json'))).toBe(true);
+      expect(existsSync(join(root, `.boite-backup-${id}`, 'data', 'checkpoints'))).toBe(false);
       expect(controls).toEqual(['stop', 'start']);
+      // The oldest snapshot goes; this one and the newest older one stay.
+      expect(older.map(path => existsSync(path))).toEqual([false, true]);
     }
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
