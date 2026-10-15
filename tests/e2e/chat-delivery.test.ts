@@ -20,7 +20,7 @@ beforeAll(async () => {
   await page.waitFor(`document.querySelector('[data-thread-id="t-trace"]')`);
   await page.click('[data-thread-id="t-trace"]');
 }, 90000);
-afterAll(async () => { await page?.close(); await server?.close(); }, 15000);
+afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
 test('commands stay folded while live text remains visible during parallel activity', async () => {
   await update(`

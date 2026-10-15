@@ -592,6 +592,15 @@ no devtools socket, or a first navigation that did not commit in 20 seconds.
 It logs `[e2e] the browser did not start` when it does. Nothing the page does
 after it has loaded is retried.
 
+Both E2E steps point `TEMP` and `TMP` at `runner.temp`, on the runner's D:
+drive, so browser profiles and core data directories leave C:. With them on
+C:, Chrome held page loads for 15 to 60 s after the UI server had answered every
+request, while a fresh connection to the same server got the file in
+milliseconds: 8 such stalls in 5 of 9 shard runs, against none in 9 on D:, and
+706 s of tests against 420 s (PR #513, 2026-10-15). They had failed about one
+shard in five since 2026-10-10, on `main` as on branches, a different test each
+time. `scripts/ci/e2e-harness.test.ts` keeps both variables on both steps.
+
 CI Chromium uses CPU compositing with software GL disabled. Browser launch
 failures retain bounded stderr; exited browsers fail promptly. Navigation waits
 for committed state and asynchronous conditions, reporting page state, JS errors
