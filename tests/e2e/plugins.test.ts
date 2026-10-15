@@ -41,7 +41,7 @@ beforeAll(async () => {
   await page.click(id('settings-tab-plugins'));
   await page.waitFor(`document.querySelector('${row('pool-legacy')}')`);
 }, 60_000);
-afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
+afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
 test('the page lists installed plugins, then the recommended ones, then the URL form, every state visible', async () => {
   const sectionOf = (plugin: string) => page.evaluate<string>(`document.querySelector('${row(plugin)}').closest('section').dataset.testid`);

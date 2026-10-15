@@ -237,11 +237,21 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup
       - run: bun run build:ui
+      # Chrome profiles and core data directories go to the runner's temp
+      # drive (D:). On C:, Chrome stalled page loads for 15 to 60 s while the
+      # UI server had answered: 8 stalls in 5 of 9 shard runs against 0 in 9,
+      # and 706 s of tests against 420 s (PR #513, 2026-10-15).
       - name: Prepare end-to-end tests
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
         run: bun tests/e2e/lib/warm.ts $env:BOITE_E2E_FAKE_UI
       # Each runner has its own Vite cache. Files stay sequential within a shard.
       # The native shell file runs against the installer in the desktop job.
       - name: Browser and core end-to-end tests
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
         run: |
           $files = @(Get-ChildItem tests/e2e -Recurse -Filter *.test.ts | Where-Object { $_.FullName -ne (Join-Path $PWD 'tests/e2e/shell.test.ts') } | ForEach-Object { $_.FullName })
           if ($files.Count -eq 0) { throw 'No browser or core E2E files found' }

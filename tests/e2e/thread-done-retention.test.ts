@@ -6,7 +6,7 @@ import { mobileAction } from './lib/mobile.ts';
 
 let server: { close(): Promise<void> }, port: number;
 beforeAll(async () => { port = await freePort(); server = await startUi(port); }, 60_000);
-afterAll(async () => { await server?.close(); });
+afterAll(async () => { await server?.close(); }, 30_000);
 
 for (const width of [1280, 390]) {
   test(`done retention defaults to three days and saves validated settings at ${width}px`, async () => {
