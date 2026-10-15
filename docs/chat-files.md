@@ -54,12 +54,13 @@ text. A page runs only as an inline view, below.
 
 An agent that wants to show something writes one HTML file and runs
 `boite view .boite/views/orbit.html`: a diagram, a chart, an animated SVG, a
-simulator with its own sliders. The page is drawn in the conversation at the
-end of the agent's answer, with no card around it, on the conversation's own
-background, in the app's theme and faces. Every provider can use the command.
-No setting turns it on, and the switch above does not turn it off.
+simulator with its own sliders. The page is drawn in the conversation, inside
+the agent's answer where a line of it places the page, else at the end of the
+answer, with no card around it, on the conversation's own background, in the
+app's theme and faces. Every provider can use the command. No setting turns
+it on, and the switch above does not turn it off.
 
-Captures: [a view on desktop](images/inline-view-desktop.png) · [the same on a phone](images/inline-view-phone.png)
+Captures: [a view on desktop](images/inline-view-desktop.png) · [the same on a phone](images/inline-view-phone.png) · [a view placed between two paragraphs](images/inline-view-placed-desktop.png) · [the same on a phone](images/inline-view-placed-phone.png)
 
 ### The app's look
 
@@ -107,10 +108,19 @@ to animate and what the publish checks. Both texts are `VIEW_GUIDE_LINE` and `VI
 `packages/contracts/src/view.ts`, beside the code they describe.
 
 One file is one visual. Several visuals are several files, each published
-with its own command; they stack under the answer in the order they were
-published. Publishing the same file again in the same turn replaces that
-visual on screen, so an agent fixes a page in place. In a later turn the same
-file is a new view, and the earlier answer keeps the page it had.
+with its own command. The help and the command's output tell the agent to
+place each one right after the paragraph it explains, with a line of its own
+that names the file as a Markdown image; the output prints that line with the
+page's title and stored path:
+
+```text
+![Orbit](.boite/views/orbit.html)
+```
+
+Pages no line places stack under the answer in the order they were published.
+Publishing the same file again in the same turn replaces that visual on
+screen, so an agent fixes a page in place. In a later turn the same file is a
+new view, and the earlier answer keeps the page it had.
 
 ### What publishing does
 
@@ -157,12 +167,31 @@ shows the file card and still downloads the page. Retention, forks and
 
 ### Where it is drawn
 
-The message is journalled when the command runs. The timeline draws a turn's
-views after everything else the turn wrote (`placeViews` in
-`packages/ui/src/lib/inline-view.ts`), and draws none while the turn is still
-running: the answer being written stays the last thing in the thread, and the
-page arrives with the finished answer. Publishing does not cut the running
-answer in two, as a published file does.
+The message is journalled when the command runs. Where it is drawn depends on
+the answer of the same turn (`packages/ui/src/lib/inline-view.ts`):
+
+- A line of the answer that holds only such an image, its path naming a
+  page the turn published, places that page (`answerPieces`, `viewAt`). The
+  path is the one the command printed, relative to the working directory; an
+  absolute path or a bare file name finds the same page, the exact path first.
+  A line in a fenced block places nothing, and a line naming no page of the
+  turn stays text. The answer's bubble is cut there: the text above in one
+  bubble, the page across the whole column, the text under it in another
+  bubble. A page is drawn as soon as its line is complete, while the turn still
+  runs, and the line is never shown as a link while it is being written. An
+  answer of a turn that published a page is drawn this way from its first
+  word, so the line, once written, adds the page and the bubble under it
+  without drawing again the paragraphs above. Each text part reads its lines
+  again only when its text changed (a streamed delta grows it in place).
+- Every other page goes after everything else the turn wrote (`placeViews`),
+  and none of them is drawn while the turn is still running: the answer being
+  written stays the last thing in the thread, and the page arrives with the
+  finished answer.
+
+Publishing does not cut the running answer in two where the command ran, as a
+published file does: only the answer's own line places a page. A client
+without this placement shows the line as a link to the file and the page at
+the end of the answer.
 
 The frame reaches 4 px (`VIEW_BLEED`) past the answer column on each side,
 into the conversation's margin, and the kit pads the page's root by as much,
@@ -210,7 +239,7 @@ A page can still navigate its own frame. The client notices the second load
 and closes the frame.
 
 Tests: `packages/core/test/views.test.ts` (embedding, refusals, the route, the
-headless check), `packages/ui/src/lib/inline-view.test.ts` and
-`components/InlineView.test.ts` (order, frame, fallback),
+headless check), `packages/ui/src/lib/inline-view.test.ts`, `components/InlineView.test.ts`
+and `components/AssistantMessage.test.ts` (order, placement, frame, fallback),
 `tests/e2e/inline-views.test.ts` (a real core and browser on desktop and
 phone, and the shell's content policy).

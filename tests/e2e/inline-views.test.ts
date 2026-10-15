@@ -127,6 +127,70 @@ test('a view published during a turn is drawn at the end of the finished answer,
   } finally { await page?.close(); client.close(); await core.stop(); }
 }, 120_000);
 
+test('a view the answer places is drawn between the paragraphs around it, on desktop and paired phone', async () => {
+  ensureProductionUi();
+  const core = await startCore();
+  const client = await connect(core.url, core.token);
+  let page: BrowserPage | undefined;
+  try {
+    await client.call('brain.configure', { path: null, enabled: false, boiteGuide: false });
+    const project = await client.call('projects.add', { path: core.dataDir, name: 'Physics notes' });
+    const account = (await client.call('accounts.list', {})).find(account => account.providerId === 'echo')!;
+    mkdirSync(join(core.dataDir, '.boite', 'views'), { recursive: true });
+    writeFileSync(join(core.dataDir, '.boite', 'views', 'pendulum.html'), VIEW_EXAMPLE);
+    const answer = [
+      'A pendulum trades height for speed and back, twice per swing.',
+      '[permission]Its period depends on its length and on gravity, not on how far it swings, as long as the swing stays small. Drag the sliders: a longer string slows it, a wider swing barely changes it.',
+      '![Pendulum](.boite/views/pendulum.html)',
+      'This is why a pendulum clock keeps time while its swing slowly dies down. Past about 20 degrees the period starts to grow, and clockmakers keep the swing small for that reason.',
+    ].join('\n\n');
+    for (const mobile of [false, true]) {
+      const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account.id, permissionMode: 'default', title: 'How a pendulum swings' });
+      page = await BrowserPage.launch({ url: mobile ? await mintPairing(core) : pairingUrlOf(core), windowSize: { width: 1280, height: 900 }, args: [mobile ? PHONE_POINTER : DESKTOP_POINTER] });
+      if (mobile) await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+      await page.waitFor('document.querySelector("[data-testid=status-connection]")?.dataset.state === "ready"');
+      if (mobile) await mobileAction(page, 'mobile-conversations');
+      await page.click(mobile ? `[data-testid="mobile-thread-${thread.id}"]` : `[data-thread-id="${thread.id}"]`);
+      await client.call('turns.start', { threadId: thread.id, prompt: answer });
+      await page.waitFor('document.querySelector("[data-testid=permission-card]")');
+      // Published before the final text, the way an agent runs `boite view` and then writes the line that places it.
+      await client.call('artifacts.view', { threadId: thread.id, path: '.boite/views/pendulum.html' });
+      const [permission] = await client.call('permissions.list', { threadId: thread.id });
+      await client.call('permissions.answer', { requestId: permission!.id, decision: 'allow' });
+      await page.waitFor(`${READY} && Array.from(document.querySelectorAll("[data-testid=message]")).at(-1)?.textContent.includes("clockmakers")`);
+      expect((await client.call('threads.get', { threadId: thread.id })).messages.map(message => message.role)).toEqual(['user', 'assistant', 'assistant']);
+
+      // The page sits inside the answer, between the paragraph it explains and the one after it, and nothing trails the answer.
+      const layout = await page.evaluate<{ order: string[]; inLast: boolean; link: boolean; view: number; text: number; column: number }>(`(() => {
+        const answer = Array.from(document.querySelectorAll('[data-testid=message]')).at(-1);
+        const flow = answer.querySelector('[data-testid=inline-view]').closest('.flow');
+        const pieces = Array.from(flow.children).map(node => node.dataset.testid === 'inline-view' ? 'page' : node.textContent.includes('clockmakers') ? 'after' : node.textContent.includes('sliders') ? 'before' : 'other');
+        return {
+          order: pieces,
+          inLast: !!answer.querySelector('[data-testid=inline-view]'),
+          link: answer.textContent.includes('pendulum.html'),
+          view: answer.querySelector('[data-testid=inline-view]').getBoundingClientRect().width,
+          text: Math.max(...Array.from(flow.querySelectorAll('[data-testid=text-run]')).map(run => run.getBoundingClientRect().width)),
+          column: answer.querySelector('.parts').getBoundingClientRect().width,
+        };
+      })()`);
+      expect(layout.order).toEqual(['before', 'page', 'after']);
+      expect(layout.inLast).toBe(true);
+      expect(layout.link).toBe(false);
+      // The page takes the whole column, the text keeps its reading measure.
+      expect(layout.view).toBeGreaterThan(layout.column - 12);
+      expect(layout.text).toBeLessThanOrEqual(layout.view);
+      expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+      await page.evaluate('document.querySelector("[data-testid=inline-view]").scrollIntoView({ block: "center" })');
+      await page.evaluate(SETTLED);
+      await Bun.sleep(400);
+      await page.screenshot(join(SHOTS, `inline-view-placed-${mobile ? 'phone' : 'desktop'}.png`));
+      expect(page.errors()).toEqual([]);
+      await page.close(); page = undefined;
+    }
+  } finally { await page?.close(); client.close(); await core.stop(); }
+}, 120_000);
+
 test('a view from another machine loads under the shell content security policy', async () => {
   ensureProductionUi();
   const core = await startCore();

@@ -125,21 +125,36 @@ describe('automatic compaction', () => {
     client.close();
   });
 
+  /**
+   * Runs `change` in the core right after the thread's next finished turn arms
+   * its timer, in the same tick, so a slow runner cannot let the delay lapse first.
+   */
+  function onceArmed(threadId: string, change: () => void): void {
+    const auto = h.core.threads.autoCompact;
+    const original = auto.turnFinished;
+    auto.turnFinished = function (thread, finished) {
+      original.call(this, thread, finished);
+      if (thread.id !== threadId) return;
+      auto.turnFinished = original;
+      change();
+    };
+  }
+
   test('a moment switched off, or work that ended, before the delay is up starts nothing', async () => {
     AUTO_COMPACT.settleMs = 150;
     const client = await h.connect();
     const { threadId } = await quiet(client);
     await client.call('settings.set', { autoCompact: { tokens: null, moments: ['turn-end'] } });
-    await turn(client, threadId, 'first');
     // Echo's cache lives 300 s, so the only moment left is minutes away.
-    await client.call('settings.set', { autoCompact: { tokens: null, moments: ['cache-expiry'] } });
+    onceArmed(threadId, () => h.core.settings.set({ autoCompact: { tokens: null, moments: ['cache-expiry'] } }));
+    await turn(client, threadId, 'first');
     await pause(400);
     expect(await compactions(client, threadId)).toEqual([]);
 
     await client.call('settings.set', { autoCompact: { tokens: null, moments: ['background'] } });
     h.core.threads.agentState.noteBackground(threadId, [{ id: 'bg1', kind: 'shell', description: 'watch', toolId: null, startedAt: Date.now() }]);
+    onceArmed(threadId, () => h.core.threads.agentState.noteBackground(threadId, []));
     await turn(client, threadId, 'second');
-    h.core.threads.agentState.noteBackground(threadId, []);
     await pause(400);
     expect(await compactions(client, threadId)).toEqual([]);
     client.close();
