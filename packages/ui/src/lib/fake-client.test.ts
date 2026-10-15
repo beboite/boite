@@ -493,6 +493,21 @@ test('fake delegation enforces family access and keeps request IDs idempotent', 
   await expect(client.call('delegation.spawn', { ...params, threadId: first.thread.id, requestId: 'nested' })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
 });
 
+test('fake delegation mirrors the core: a child question ends the wait and the parent answers it; worktree children get a branch', async ({ createClient }) => {
+  const client = await createClient({ delayMs: 0 });
+  await client.call('delegation.configure', { threadId: 't-trace', config: { ...DEFAULT_DELEGATION_CONFIG, enabled: true } });
+  const child = await client.call('delegation.spawn', { threadId: 't-trace', task: 'Ask a question first', requestId: 'asker' });
+  const waited = await client.call('delegation.wait', { threadId: 't-trace', agentId: child.thread.id, timeoutMs: 5000 });
+  expect(waited.state).toBe('needs_input');
+  expect(waited.agents[0]!.needsInput).toEqual([expect.objectContaining({ kind: 'question', options: ['Short', 'Long'], blocking: true })]);
+  const sent = await client.call('delegation.send', { threadId: 't-trace', toThreadId: child.thread.id, text: 'long', requestId: 'answer' });
+  expect(sent).toMatchObject({ status: 'delivered', answered: waited.agents[0]!.needsInput![0]!.id });
+  expect((await client.call('delegation.get', { threadId: 't-trace' })).agents.find(agent => agent.thread.id === child.thread.id)!.needsInput).toBeUndefined();
+  const isolated = await client.call('delegation.spawn', { threadId: 't-trace', task: 'Edit on a branch', worktree: true, requestId: 'isolated' });
+  expect(isolated.worktree).toMatchObject({ state: 'pending', branch: isolated.thread.branch, path: isolated.thread.cwd });
+  await expect(client.call('delegation.spawn', { threadId: 't-trace', task: 'Edit', worktree: 'yes' as unknown as boolean, requestId: 'bad' })).rejects.toMatchObject({ code: RpcErrorCode.InvalidParams });
+});
+
 test('fake delegation gives a child a speed only when asked, by id or label, with the core\'s refusals', async ({ createClient }) => {
   const client = await createClient({ delayMs: 0 });
   // The parent runs fast on a model the agent listed; reading it is what fills the catalog.
