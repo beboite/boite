@@ -34,6 +34,7 @@ export class FrameQueue {
   private active = 0;
   private activeAgents = 0;
   private timer: ReturnType<typeof setImmediate> | null = null;
+  private fallback: ReturnType<typeof setTimeout> | null = null;
   private count = 0;
   private bytes = 0;
   private closed = false;
@@ -88,13 +89,12 @@ export class FrameQueue {
 
   close(): void {
     this.closed = true;
-    if (this.timer !== null) clearImmediate(this.timer);
-    this.timer = null;
+    this.cancel();
     for (const connection of this.pending.keys()) this.drop(connection);
   }
 
   private pump(): void {
-    this.timer = null;
+    this.cancel();
     const deadline = performance.now() + SLICE_MS;
     while (this.pending.size > 0 && this.active < MAX_ACTIVE && performance.now() < deadline) {
       const available = [...this.pending].find(([connection]) => (this.activeByConnection.get(connection) ?? 0) < MAX_ACTIVE_PER_CONNECTION
@@ -129,9 +129,22 @@ export class FrameQueue {
     if (this.active < MAX_ACTIVE) this.schedule();
   }
 
-  /** The check phase runs after I/O polling, so HTTP and drains still interleave without a 1 ms timer floor. */
+  /**
+   * The check phase runs after I/O polling, so HTTP and drains still interleave without a 1 ms timer floor.
+   * The 1 ms timer is a backstop: with the immediate alone, Windows CI left a client's last request queued
+   * until its socket closed. Whichever fires first pumps and cancels the other.
+   */
   private schedule(): void {
-    if (!this.closed && this.pending.size > 0 && this.timer === null) this.timer = setImmediate(() => this.pump());
+    if (this.closed || this.pending.size === 0 || this.timer !== null) return;
+    this.timer = setImmediate(() => this.pump());
+    this.fallback = setTimeout(() => this.pump(), 1);
+  }
+
+  private cancel(): void {
+    if (this.timer !== null) clearImmediate(this.timer);
+    if (this.fallback !== null) clearTimeout(this.fallback);
+    this.timer = null;
+    this.fallback = null;
   }
 
   private refuse(connection: ServerConnection, reason: string): void {

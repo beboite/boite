@@ -153,9 +153,17 @@ The tested installer becomes the release artifact.
 | UI entry chunk | 593,000 |
 | UI files, excluding `.br` and `.gz` copies | 4,928,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,127,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,136,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-15, the wire pass (PR #519: live prompt projection, one
+serialization per broadcast, shell output routed to its viewers and bounded
+relayed sockets) merged with `origin/main` measures 4,132,471 core JavaScript
+bytes after fresh `bun run build:core` on Linux, against 4,127,241 for
+`origin/main` built the same way: 5,230 bytes more. Windows CI measured
+4,132,272. The core total limit becomes 4,136,000; the other limits stay
+unchanged.
 
 On 2026-10-15, updating another Windows PC's desktop app (PR #498) merged
 with PR #494 measures 4,926,156 UI bytes and 4,125,352 core JavaScript bytes
