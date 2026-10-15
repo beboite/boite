@@ -91,12 +91,12 @@ The smaller six-process regression runs in the normal core suite and starts a
 fresh core so earlier tests cannot hide a race in first-use imports.
 
 Authenticated RPC requests rotate between connections in four-millisecond
-slices, scheduled with `setImmediate` rather than a 1 ms timer alone, so an idle
-queue dispatches a request on the next loop turn. The 1 ms timer stays as a
-backstop: on Windows CI the immediate alone left a client's last request queued
-until its socket closed. 300 sequential `settings.get`
-calls on loopback took 0.205 ms each (median) against 1.409 ms with the timer
-(`bun bench/rpc-serial.ts`, 2026-10-15). At most eight handlers per connection and 64 overall can wait on
+slices. A request that finds the queue idle runs in a microtask, after the
+other frames of the same read have queued, so a flood is still bounded before
+any of it runs; a busy queue pumps on a 1 ms timer. `setImmediate` is not used:
+on Windows CI it left a client's last request queued until its socket closed.
+300 sequential `settings.get` calls on loopback took 0.122 ms each (median)
+against 1.409 ms with the timer alone (`bun bench/rpc-serial.ts`, 2026-10-15). At most eight handlers per connection and 64 overall can wait on
 asynchronous work. Authenticated agents can occupy at most 48 of those slots,
 leaving capacity for owner actions, paired clients and authentication while
 agents wait for replies. Each connection retains at most 1,024 frames or 32 MiB of

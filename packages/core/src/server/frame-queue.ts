@@ -33,8 +33,9 @@ export class FrameQueue {
   private readonly retained = new Map<ServerConnection, { count: number; bytes: number }>();
   private active = 0;
   private activeAgents = 0;
-  private timer: ReturnType<typeof setImmediate> | null = null;
-  private fallback: ReturnType<typeof setTimeout> | null = null;
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  /** A pump is queued as a microtask. */
+  private soon = false;
   private count = 0;
   private bytes = 0;
   private closed = false;
@@ -72,7 +73,7 @@ export class FrameQueue {
     retained.bytes += bytes;
     this.retained.set(connection, retained);
     const result = new Promise<void>((resolve, reject) => queue.frames.push({ raw, resolve, reject }));
-    this.schedule();
+    this.schedule(this.active === 0 && this.count === 1);
     return result;
   }
 
@@ -130,21 +131,24 @@ export class FrameQueue {
   }
 
   /**
-   * The check phase runs after I/O polling, so HTTP and drains still interleave without a 1 ms timer floor.
-   * The 1 ms timer is a backstop: with the immediate alone, Windows CI left a client's last request queued
-   * until its socket closed. Whichever fires first pumps and cancels the other.
+   * A request that finds the queue idle runs in a microtask, after the frames
+   * of the same read have queued, so a flood is still bounded before any of it
+   * runs. Busy, the queue pumps on a 1 ms timer, which lets HTTP, drains and
+   * other clients in between slices. Not `setImmediate`: with it, Windows CI
+   * left a client's last request queued until its socket closed.
    */
-  private schedule(): void {
-    if (this.closed || this.pending.size === 0 || this.timer !== null) return;
-    this.timer = setImmediate(() => this.pump());
-    this.fallback = setTimeout(() => this.pump(), 1);
+  private schedule(idle = false): void {
+    if (this.closed || this.pending.size === 0 || this.timer !== null || this.soon) return;
+    if (idle) {
+      this.soon = true;
+      queueMicrotask(() => { if (this.soon) this.pump(); });
+    } else this.timer = setTimeout(() => this.pump(), 1);
   }
 
   private cancel(): void {
-    if (this.timer !== null) clearImmediate(this.timer);
-    if (this.fallback !== null) clearTimeout(this.fallback);
+    if (this.timer !== null) clearTimeout(this.timer);
     this.timer = null;
-    this.fallback = null;
+    this.soon = false;
   }
 
   private refuse(connection: ServerConnection, reason: string): void {
