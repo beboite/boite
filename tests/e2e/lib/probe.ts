@@ -1,4 +1,6 @@
-import { cpus, freemem, totalmem } from 'node:os';
+import { open, rm } from 'node:fs/promises';
+import { cpus, freemem, tmpdir, totalmem } from 'node:os';
+import { join } from 'node:path';
 
 /**
  * TEMPORARY diagnostics for the Windows E2E stalls. With BOITE_E2E_PROBE=1 the
@@ -59,9 +61,25 @@ async function snapshot(previous: { idle: number; total: number }): Promise<{ id
     }
     procs = [...images].map(([name, count]) => `${name}=${count}`).join(' ');
   }
+  // Write and flush 256 KB where the profiles live and on the checkout's drive.
+  const disks: string[] = [];
+  for (const [label, dir] of [['tmp', tmpdir()], ['cwd', process.cwd()]] as const) {
+    const file = join(dir, `boite-e2e-probe-${process.pid}.bin`);
+    const at = performance.now();
+    try {
+      const handle = await open(file, 'w');
+      await handle.write(new Uint8Array(256 * 1024));
+      await handle.sync();
+      await handle.close();
+      await rm(file, { force: true });
+      disks.push(`${label}(${dir.slice(0, 2)})=${Math.round(performance.now() - at)}ms`);
+    } catch (error) {
+      disks.push(`${label}=error ${String(error).slice(0, 60)}`);
+    }
+  }
   const rss = Math.round(process.memoryUsage().rss / 1e6);
   const dev = [...servers].map(([port, state]) => ` dev${port}=${state.sockets}sock/${state.received}req/${state.inFlight.size}open`).join('');
-  probeLog(`${dev} cpu=${busy.toFixed(0)}% free=${Math.round(freemem() / 1e6)}/${Math.round(totalmem() / 1e6)}MB rss=${rss}MB ${tcp} ${procs}`);
+  probeLog(`${disks.join(' ')}${dev} cpu=${busy.toFixed(0)}% free=${Math.round(freemem() / 1e6)}/${Math.round(totalmem() / 1e6)}MB rss=${rss}MB ${tcp} ${procs}`);
   return now;
 }
 

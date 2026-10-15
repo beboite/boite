@@ -252,6 +252,9 @@ jobs:
       # Each runner has its own Vite cache. Files stay sequential within a shard.
       # The native shell file runs against the installer in the desktop job.
       - name: Browser and core end-to-end tests
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
         run: |
           $files = @(Get-ChildItem tests/e2e -Recurse -Filter *.test.ts | Where-Object { $_.FullName -ne (Join-Path $PWD 'tests/e2e/shell.test.ts') } | ForEach-Object { $_.FullName })
           if ($files.Count -eq 0) { throw 'No browser or core E2E files found' }
