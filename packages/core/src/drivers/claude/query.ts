@@ -83,6 +83,10 @@ export class PromptQueue {
       const next = this.items.shift();
       if (next !== undefined) {
         yield next;
+        // Asking for the next prompt means the SDK wrote this one. Its loop and
+        // this generator still hold the object until then: let the images go.
+        const content = next.message.content;
+        if (typeof content !== 'string') next.message.content = content.filter(block => block.type !== 'image');
         continue;
       }
       if (this.ended) return;

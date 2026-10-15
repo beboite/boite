@@ -750,7 +750,10 @@ Otherwise it spawns one short-lived process under the synthetic thread
 a Job Object and in the trace like any other, then asks the protocol's own question:
 
 - Claude: SDK `supportedModels()` without a user prompt, with
-  `settings.disableAllHooks` so no `SessionStart` hook fires. Effort levels, adaptive
+  `settings.disableAllHooks` so no `SessionStart` hook fires, and
+  `strictMcpConfig` with no servers so it starts none of the user's MCP servers
+  (an empty `mcpServers` alone passes no flag). The CLI quota read, titles and
+  side questions do the same. Effort levels, adaptive
   thinking and Fast support come from each returned model. Descriptor effort
   controls stay hidden until that account has answered.
 - ACP: `initialize` and `session/new`, then whichever of two answers the agent

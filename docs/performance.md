@@ -57,6 +57,17 @@ and peak core RSS over the bench from 1,023 MiB to 370 MiB. The first start
 after the upgrade migrates once (7.9 s there), and the move of older inline
 values held the event loop for up to 2.1 s on its largest row.
 
+### What a Claude turn leaves behind
+
+Measured on 2026-10-15 with `bench/claude-turn-heap.ts`, a scripted turn of 20
+Write calls with 1 MiB results and a 5 MiB image on a warm session
+([results](../bench/results/2026-10-15-perf-drivers.md)). Once the turn ended,
+the core's heap stayed 33.7 MiB above its start: the session's query loop and
+its context kept the first turn, its tool outputs and the image. It now keeps
+1.8 MiB. A finished call's input and output live only in the stored part, and a
+late `tool_use_summary` patches that part, so a follow-up that cuts a running
+turn frees the cards it closed: 26.8 MiB held during the turn, now 1.6 MiB.
+
 ## Concurrent agent stress
 
 ```sh
@@ -846,6 +857,7 @@ bun bench/ui-frames.ts --trace --only "typing,long thread scroll"   # layouts pe
 bun bench/ui-frames.ts --runs 5 --only "heavy thread scroll,heavy thread flick,heavy thread jumps,heavy scroll while streaming"
 bun bench/ui-frames.ts --gpu --only "heavy thread scroll"          # composited on the machine's GPU, never a software renderer
 bun bench/rpc-actions.ts --journal <journal.db> --runs 6   # latency, core CPU, bytes and RSS per RPC (Linux)
+bun bench/claude-turn-heap.ts                  # heap a scripted Claude turn leaves; STEER=1 IMAGE_MIB=0 for a follow-up cut
 ```
 
 `bench/bandwidth.ts` puts a TCP relay between the client and the core, counts
@@ -880,7 +892,8 @@ settings are pointed at the temporary directory first.
 the core's own browser and has a paired phone client poll it on the viewer's
 schedule behind an added latency.
 
-Results: [bench/results/2026-10-05-rpc-actions.md](../bench/results/2026-10-05-rpc-actions.md),
+Results: [bench/results/2026-10-15-perf-drivers.md](../bench/results/2026-10-15-perf-drivers.md),
+[bench/results/2026-10-05-rpc-actions.md](../bench/results/2026-10-05-rpc-actions.md),
 [bench/results/2026-10-05-remote-browser-frames.md](../bench/results/2026-10-05-remote-browser-frames.md),
 [bench/results/2026-10-03-remote-browser-frames.md](../bench/results/2026-10-03-remote-browser-frames.md),
 [bench/results/2026-09-19-wire-and-startup.md](../bench/results/2026-09-19-wire-and-startup.md),

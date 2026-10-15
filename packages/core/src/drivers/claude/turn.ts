@@ -1,6 +1,6 @@
 import type { SDKAssistantMessage, SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { MessageId, MessagePart, ToolDocument, ToolStatus, Usage } from '@boite/contracts';
-import type { PromptCacheLife, TurnContext, TurnResult } from '../types.ts';
+import type { PromptCacheLife, ToolPatch, TurnContext, TurnResult } from '../types.ts';
 import {
   apiErrorReason,
   cacheLifeOf,
@@ -34,6 +34,11 @@ interface ToolEntry {
   documents: ToolDocument[];
   /** What the CLI's `tool_use_summary` said of the batch this call ran in. */
   summary: string | null;
+  /**
+   * The call finished and its card was written: `input`, `output` and
+   * `documents` live in the stored part only, and a later change patches it.
+   */
+  released: boolean;
 }
 
 type UserMessage = Extract<SDKMessage, { type: 'user' }>;
@@ -50,8 +55,15 @@ export class ClaudeTurn {
   private readonly thinkingBlocks = new Map<number, number>();
   /** Block index to tool id, so an `input_json_delta` reaches the part its block opened. */
   private readonly toolBlocks = new Map<number, string>();
-  private readonly streamedText = new Map<string, string>();
-  private readonly streamedThinking = new Map<string, string>();
+  /**
+   * The text and thinking the deltas carried for the current API message, so
+   * its `assistant` frame is not written twice. The CLI yields that frame before
+   * the next `message_start`, which clears them.
+   */
+  private streamedText = '';
+  private streamedThinking = '';
+  /** The API message `streamedText` and `streamedThinking` belong to. */
+  private streamedFor = '';
 
   private sessionId: string | null;
   /**
@@ -199,6 +211,9 @@ export class ClaudeTurn {
     switch (event.type) {
       case 'message_start':
         this.apiMessageId = event.message?.id ?? '';
+        this.streamedText = '';
+        this.streamedThinking = '';
+        this.streamedFor = this.apiMessageId;
         this.textBlocks.clear();
         this.thinkingBlocks.clear();
         this.toolBlocks.clear();
@@ -246,12 +261,18 @@ export class ClaudeTurn {
   private streamContent(kind: 'text' | 'thinking', blockIndex: number | undefined, text: string): void {
     if (!text.length) return;
     const blocks = kind === 'text' ? this.textBlocks : this.thinkingBlocks;
-    const accumulated = kind === 'text' ? this.streamedText : this.streamedThinking;
     const known = blockIndex === undefined ? undefined : blocks.get(blockIndex);
     const index = known ?? (kind === 'text' ? this.openText() : this.openThinking());
     if (blockIndex !== undefined) blocks.set(blockIndex, index);
     this.write(index, text);
-    accumulated.set(this.apiMessageId, (accumulated.get(this.apiMessageId) ?? '') + text);
+    if (kind === 'text') this.streamedText += text;
+    else this.streamedThinking += text;
+  }
+
+  /** What the deltas carried for API message `apiId`: nothing once another message started. */
+  private streamed(kind: 'text' | 'thinking', apiId: string): string {
+    if (apiId !== this.streamedFor) return '';
+    return kind === 'text' ? this.streamedText : this.streamedThinking;
   }
 
   /**
@@ -281,14 +302,14 @@ export class ClaudeTurn {
       if (block.type === 'text') {
         const text = block.text ?? '';
         // With includePartialMessages the deltas already carried this block.
-        if (text.length === 0 || (this.streamedText.get(apiId) ?? '').includes(text)) continue;
+        if (text.length === 0 || this.streamed('text', apiId).includes(text)) continue;
         this.write(this.openText(), text);
         continue;
       }
       if (block.type === 'thinking') {
         const thinking = block.thinking ?? '';
         // Same dedupe as text: the deltas already carried this block.
-        if (thinking.length === 0 || (this.streamedThinking.get(apiId) ?? '').includes(thinking)) continue;
+        if (thinking.length === 0 || this.streamed('thinking', apiId).includes(thinking)) continue;
         this.write(this.openThinking(), thinking);
         continue;
       }
@@ -401,13 +422,22 @@ export class ClaudeTurn {
    */
   upsertTool(toolId: string, name: string, input: unknown, inputText: string | null = null): void {
     const entry = this.tools.get(toolId) ?? this.newTool(name);
-    entry.name = name;
-    entry.input = input;
-    entry.inputText = inputText;
     // A streamed input is half-typed JSON: there is nothing to read a diff out
     // of until the parsed object lands, and then it lands whole.
-    if (inputText === null) entry.documents = editDocuments(name, input);
+    const documents = inputText === null ? editDocuments(name, input) : null;
+    entry.name = name;
+    entry.inputText = inputText;
     this.tools.set(toolId, entry);
+    if (entry.released) {
+      // The result came first (a replayed or adopted call): the card keeps its output.
+      this.patchTool(entry, {
+        name, input, inputText,
+        ...(documents === null ? {} : { documents: documents.length > 0 ? documents : undefined }),
+      });
+      return;
+    }
+    entry.input = input;
+    if (documents !== null) entry.documents = documents;
     this.emitTool(toolId, entry);
   }
 
@@ -419,10 +449,27 @@ export class ClaudeTurn {
 
   finishTool(toolId: string, output: string, status: ToolStatus): void {
     const entry = this.tools.get(toolId) ?? this.newTool(toolId);
-    entry.output = output;
     entry.status = status;
     this.tools.set(toolId, entry);
+    if (entry.released) {
+      this.patchTool(entry, { output, status });
+      return;
+    }
+    entry.output = output;
     this.emitTool(toolId, entry);
+    // The stored part holds the call now; a screenshot's base64 or a written
+    // file is not kept a second time for the rest of the turn.
+    if (status !== 'running') {
+      entry.released = true;
+      entry.input = null;
+      entry.output = null;
+      entry.documents = [];
+    }
+  }
+
+  private patchTool(entry: ToolEntry, fields: ToolPatch): void {
+    if (this.settled || this.messageId === null) return;
+    this.ctx.emit.patchTool(this.messageId, entry.index, fields);
   }
 
   private newTool(name: string): ToolEntry {
@@ -435,6 +482,7 @@ export class ClaudeTurn {
       status: 'running',
       documents: [],
       summary: null,
+      released: false,
     };
   }
 
@@ -465,7 +513,8 @@ export class ClaudeTurn {
       const entry = this.tools.get(toolId);
       if (entry === undefined || entry.summary === text) continue;
       entry.summary = text;
-      this.emitTool(toolId, entry);
+      if (entry.released) this.patchTool(entry, { summary: text });
+      else this.emitTool(toolId, entry);
     }
   }
 
