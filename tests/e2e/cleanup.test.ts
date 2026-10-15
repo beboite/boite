@@ -57,6 +57,22 @@ test.skipIf(process.platform !== 'win32')('a directory still locked for a few se
   }
 }, 20_000);
 
+test('removing a profile leaves the test process free to serve its pages meanwhile', async () => {
+  const dir = mkdtempSync(join(tmpdir(), `${E2E_DIR_PREFIX}profile-`));
+  for (let index = 0; index < 50; index += 1) writeFileSync(join(dir, `entry-${index}`), 'cache');
+  try {
+    // A synchronous delete ran to its end before the call returned: on the
+    // Windows runner it held the Vite server, the core and every page of the
+    // file for 2 to 3 s per closed browser.
+    const removal = removeDirectory(dir);
+    expect(existsSync(dir)).toBe(true);
+    expect(await removal).toBe(true);
+    expect(existsSync(dir)).toBe(false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('the sweep takes only harness directories an hour old, never a live one or a stranger', () => {
   const root = mkdtempSync(join(tmpdir(), 'boite-sweep-root-'));
   try {

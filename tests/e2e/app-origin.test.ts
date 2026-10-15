@@ -89,7 +89,7 @@ afterAll(async () => {
   await ui?.close();
   for (const core of cores) await core.stop();
   rmSync(scratch, { recursive: true, force: true });
-}, 20_000);
+}, 30_000);
 
 test('the app on an address no machine serves scans one machine\'s code and reaches the whole group; another types a code with the machine\'s address', async () => {
   const env = { env: { BOITE_APP_ORIGIN: appUrl } };
