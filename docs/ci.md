@@ -153,9 +153,17 @@ The tested installer becomes the release artifact.
 | UI entry chunk | 593,000 |
 | UI files, excluding `.br` and `.gz` copies | 4,941,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,161,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,166,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-15, shared git reads, checkpoint blobs and merged-PR backoff
+(PR #526) merged with `6961d5d9` measure 4,162,110 core JavaScript bytes after
+a clean `bun run build:core` on Linux, against 4,151,081 for that main. The
+core chunk adds 10,486 bytes and `main.js` 543: the shared checkpoint store,
+the batch diff read and its fallback, the eight read slots, the worktree pool
+and the merged-PR proof backoff. The core total limit becomes 4,166,000; the
+UI and entry limits stay unchanged.
 
 On 2026-10-15, views placed inside an answer (PR #502), merged with PR #503,
 measure 4,938,784 UI bytes and 4,151,081 core JavaScript bytes after fresh
