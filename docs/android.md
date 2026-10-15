@@ -27,8 +27,9 @@ bar.
 
 The page is public and the machines are private, so its sockets need Chrome's
 "Local network" permission ([phone](phone.md#chromes-local-network-permission)).
-A long press on the app's icon opens Site settings, where it is changed: that
-shortcut is `enableSiteSettingsShortcut` in `app/build.gradle`.
+It is changed in the settings of the browser the app runs in, Site settings,
+Local network. The icon's Site settings shortcut (`enableSiteSettingsShortcut`
+in `app/build.gradle`) only lists linked sites and their storage.
 
 The APK also claims `https://<host>/` links. A pairing QR code names the
 machine that drew it, so it opens the app only in an APK built for that

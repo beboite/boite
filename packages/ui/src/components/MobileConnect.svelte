@@ -3,7 +3,7 @@
   import type { Store } from '../lib/store.svelte';
   import { localNetwork } from '../lib/local-network.svelte';
   import { installed } from '../lib/pwa';
-  import { strings } from '../lib/strings';
+  import { fill, strings } from '../lib/strings';
   import PairMachine from './PairMachine.svelte';
 
   let { store, onpaired }: { store: Store; onpaired: () => void } = $props();
@@ -14,7 +14,8 @@
   // Chrome keeps the app's public page off the private addresses machines live on until "Local network" is allowed.
   let blocked = $derived(localNetwork.state === 'denied');
   let title = $derived(blocked ? strings.mobile.localNetworkTitle : store.pairingRequired ? strings.mobile.pairTitle : strings.mobile.offlineTitle);
-  let body = $derived(blocked ? strings.mobile.localNetworkBody : store.pairingRequired ? strings.mobile.pairBody : strings.mobile.offlineBody);
+  // The site to allow is this page's own: the app's address, or a fork's.
+  let body = $derived(blocked ? fill(strings.mobile.localNetworkBody, { host: location.host }) : store.pairingRequired ? strings.mobile.pairBody : strings.mobile.offlineBody);
 </script>
 
 <div class="connect" data-testid="mobile-connect">

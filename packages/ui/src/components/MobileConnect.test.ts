@@ -7,7 +7,7 @@ import { FakeClient } from '../lib/fake-client';
 import { Store, store as primary } from '../lib/store.svelte';
 import { localNetwork } from '../lib/local-network.svelte';
 import { workspace } from '../lib/workspace.svelte';
-import { strings } from '../lib/strings';
+import { fill, strings } from '../lib/strings';
 import MobileConnect from './MobileConnect.svelte';
 
 let mounted: ReturnType<typeof mount> | undefined;
@@ -240,7 +240,7 @@ test('the app blocked from the local network says how to allow it, and says what
   localNetwork.state = 'denied';
   flushSync();
   expect(document.querySelector('h1')?.textContent).toBe(strings.mobile.localNetworkTitle);
-  expect(document.querySelector('[data-testid=mobile-local-network]')?.textContent).toBe(strings.mobile.localNetworkBody);
+  expect(document.querySelector('[data-testid=mobile-local-network]')?.textContent).toBe(fill(strings.mobile.localNetworkBody, { host: location.host }));
   expect(document.querySelector('[data-testid=mobile-local-network-ask]')).toBeNull();
   expect(document.querySelector('[data-testid=mobile-reconnect]')).not.toBeNull();
   // Allowed: the waiting screen as before, nothing about the network.

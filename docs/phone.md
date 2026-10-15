@@ -179,7 +179,13 @@ it, WebSockets included since Chrome 147. The socket fails at once with
 `net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS` in the console and a bare
 socket error in the page, and the machine never sees it, so its log has no line
 for that phone. A page a machine serves is on the private side already and is
-not concerned.
+not concerned. Every Chromium on Android does the same, including the browser
+the installed app runs in when it is not Chrome (Titanium and Vanadium enforce it
+on WebSockets too).
+
+Android 17 adds a second lock: the browser app itself needs Android's
+`ACCESS_LOCAL_NETWORK` permission, shown as Nearby devices in its app settings,
+before any of its pages reaches the local network.
 
 The permission is `local-network` since Chrome 145, "Local network" in site
 settings; Chrome 142 to 144 named it `local-network-access`. Chrome asks the
@@ -189,9 +195,11 @@ reads its state with `navigator.permissions.query` and follows its changes:
 - `prompt`: the first screen and the waiting screen say what to answer before
   Chrome asks.
 - `denied`: the waiting screen becomes **Allow the local network** and gives the
-  way back: in the installed app, a long press on its icon opens Site settings
-  (the TWA's site settings shortcut, [android](android.md)); in Chrome, the icon
-  beside the address. The bare "socket error" is not shown over it.
+  way back: in the browser that runs the app, Settings, Site settings, Local
+  network, then the app's own host; on Android 17, Nearby devices for that
+  browser too. The app icon's Site settings shortcut is no way there: it opens
+  the browser's list of linked sites and their storage, without permissions. The
+  bare "socket error" is not shown over it.
 - `granted`: every machine is tried at once, through the same `resume()` as the
   `online` event, rather than at its next retry.
 
