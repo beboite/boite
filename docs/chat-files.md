@@ -110,9 +110,14 @@ to animate and what the publish checks. Both texts are `VIEW_GUIDE_LINE` and `VI
 One file is one visual. Several visuals are several files, each published
 with its own command. The help and the command's output tell the agent to
 place each one right after the paragraph it explains, with a line of its own
-that names the file as a Markdown image (`![Orbit](.boite/views/orbit.html)`);
-the output prints that line with the page's title and stored path. Pages no
-line places stack under the answer in the order they were published.
+that names the file as a Markdown image; the output prints that line with the
+page's title and stored path:
+
+```text
+![Orbit](.boite/views/orbit.html)
+```
+
+Pages no line places stack under the answer in the order they were published.
 Publishing the same file again in the same turn replaces that visual on
 screen, so an agent fixes a page in place. In a later turn the same file is a
 new view, and the earlier answer keeps the page it had.
@@ -165,7 +170,7 @@ shows the file card and still downloads the page. Retention, forks and
 The message is journalled when the command runs. Where it is drawn depends on
 the answer of the same turn (`packages/ui/src/lib/inline-view.ts`):
 
-- A line of the answer that holds only `![title](path)`, the path naming a
+- A line of the answer that holds only such an image, its path naming a
   page the turn published, places that page (`answerPieces`, `viewAt`). The
   path is the one the command printed, relative to the working directory; an
   absolute path or a bare file name finds the same page, the exact path first.
