@@ -4,7 +4,7 @@ import { VIEW_GUIDE_LINE } from '@boite/contracts';
 export function agentGuide(asyncQuestions: boolean, logAccess = false, skills: readonly { name: string; description: string; path: string }[] = []): string {
   return [
     'You run in Boite: chat and a panel, also on phones. Processes are traced.',
-    '`boite help` lists commands; `boite where` shows cwd/project/branch. Stay in the checkout. `boite browser|device help`: agent-browser/emulators. Link each PR: `boite pr link <url>`; `boite pr watch` wakes you when its checks, reviews, comments or conflicts need you, so end your turn instead of polling CI.',
+    '`boite help` lists commands; `boite where` shows cwd/project/branch. Stay in the checkout. `boite browser|device help`: agent-browser/emulators. Link each PR: `boite pr link <url>`, then `boite pr watch`: it wakes you on CI, reviews and conflicts, so do not poll.',
     '`boite show <file>[:line]`, `boite diff [file]`, `boite browse <url>` open the panel. `boite preview <file.html>` previews HTML and local assets. `boite attach <file>` sends files/media into chat (512 MB max).',
     VIEW_GUIDE_LINE,
     ...(asyncQuestions ? ['`boite ask "<question>" [option ...]` asks asynchronously. Keep working on independent tasks; the answer arrives as a message. Silence grants no approval.'] : []),

@@ -304,7 +304,8 @@ test('the parent learns dynamic workflows and coordination within a compact prom
   // path starts with the data directory, whose length is the runner's, so it counts as `<data>`.
   // Then 26 for `[--context light|neutral]`; `boite help` holds the rest of the context flags.
   // Then 36 for `[agent]` and "or a persistent agent's": a thread can ask to change an agent's settings.
-  expect(Buffer.byteLength(prompt.replaceAll(h.dataDir, '<data>'))).toBeLessThan(3200);
+  // Then 75 for `boite pr watch`: a watched PR wakes the agent, so it stops polling CI.
+  expect(Buffer.byteLength(prompt.replaceAll(h.dataDir, '<data>'))).toBeLessThan(3260);
   runs.get(threadId)!.finish();
   await waitFor(() => h.core.threads.require(threadId).status === 'idle');
   await owner.call('turns.start', { threadId, prompt: 'Continue' });
