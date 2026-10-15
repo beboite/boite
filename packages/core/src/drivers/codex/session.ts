@@ -35,22 +35,14 @@ import {
   NO_NATIVE_SUBAGENTS,
   PERMISSIONS_TOOL_NAME,
   STDERR_MAX,
+  THREAD_CONFIG,
 } from './protocol.ts';
 import { CodexRpc } from './rpc.ts';
+import { resumeThread, ThreadLostError } from './resume.ts';
 import { updateTurnSettings } from './live-settings.ts';
 import { CodexTurn } from './turn.ts';
 import { SessionRetention } from '../session-retention.ts';
 import { errorCodeOf, httpStatusOf, noteReady } from '../driver-log.ts';
-
-/**
- * What `thread/resume` answers when the thread's rollout file is gone. Both
- * sentences are in the 0.156.1 binary; any other refusal keeps the thread.
- */
-const MISSING_THREAD = /no rollout found for (?:thread|conversation) id|thread not found: /i;
-
-/** `thread/resume` refused a thread the agent no longer has. */
-/** `sessionLost` tells `noteReady` this is a resume miss the turn recovers from, not a failed open. */
-class ThreadLostError extends Error { readonly sessionLost = true; }
 
 /** `hook/completed` statuses as the ledger counts them; `running` is not an end. */
 const HOOK_OUTCOMES: Record<string, HookOutcome> = {
@@ -341,17 +333,14 @@ export class CodexSession {
     const policy = MODE_POLICY[ctx.thread.permissionMode];
     const model = modelOf(ctx);
     if (ctx.sessionId !== null) {
-      const resumed = await rpc.request<CodexThreadOpened>('thread/resume', {
+      const resumed = await resumeThread(rpc, ctx, {
         threadId: ctx.sessionId,
         cwd: ctx.thread.cwd,
         approvalPolicy: policy.approvalPolicy,
         sandbox: policy.sandbox,
         ...(model === null ? {} : { model }),
-        config: { 'tools.update_plan.enabled': true },
+        config: THREAD_CONFIG,
         excludeTurns: true,
-      }).catch((error: unknown) => {
-        const reason = messageOf(error);
-        throw MISSING_THREAD.test(reason) ? new ThreadLostError(reason) : error;
       });
       this.threadId = resumed.thread.id;
       this.served = servedOf(resumed);
@@ -359,7 +348,7 @@ export class CodexSession {
     }
 
     const created = await rpc.request<CodexThreadOpened>('thread/start', {
-      config: { 'tools.update_plan.enabled': true },
+      config: THREAD_CONFIG,
       cwd: ctx.thread.cwd,
       approvalPolicy: policy.approvalPolicy,
       sandbox: policy.sandbox,

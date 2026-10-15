@@ -1648,6 +1648,8 @@ export const strings = {
     installInSettings: 'Install in Settings',
     effortTitle: 'Reasoning effort',
     speed: 'Response speed',
+    /** The reasoning chip of a model whose agent keeps its own level until one is picked. */
+    effortDefault: 'Default',
     standardSpeed: 'Standard speed',
     favorites: 'Favorites',
     favorite: 'Add to favorites',

@@ -27,7 +27,11 @@
     onspeed = () => {}
   }: {
     levels: EffortLevel[];
-    /** The level the thread or draft runs, the model's own default when it picked none. */
+    /**
+     * The level the thread or draft runs, the model's own default when it picked
+     * none. Null or a level off the scale reads as the agent's own default: no
+     * dot is lit until one is picked.
+     */
     active: string | null;
     onpick: (id: string) => void;
     speeds?: { id: string; label: string; description?: string }[];
@@ -43,10 +47,13 @@
   let dragging = $state(false);
   let preview = $state<number | null>(null);
 
-  let index = $derived(preview ?? Math.max(0, levels.findIndex((level) => level.id === active)));
+  /** -1 while the agent keeps its own level: nothing picked and no default known. */
+  let index = $derived(preview ?? levels.findIndex((level) => level.id === active));
+  let position = $derived(Math.max(0, index));
   let current = $derived(levels[index] ?? null);
   const selectedSpeed = $derived(speeds.find(entry => entry.id === speed));
-  const label = $derived(current ? levelName(current) : selectedSpeed ? levelName(selectedSpeed) : strings.composer.standardSpeed);
+  const levelLabel = $derived(current ? levelName(current) : levels.length > 0 ? strings.composer.effortDefault : strings.composer.standardSpeed);
+  const label = $derived(current || levels.length > 0 ? levelLabel : selectedSpeed ? levelName(selectedSpeed) : strings.composer.standardSpeed);
   // An accent above a leading capital raises the label's visible centre.
   const accentedCap = $derived(/^\p{Lu}[\u0300-\u0314]/u.test(label.normalize('NFD')));
   function cycleSpeed() {
@@ -56,7 +63,7 @@
   }
   let last = $derived(Math.max(0, levels.length - 1));
   /** 0 at the lowest level, 1 at the highest: how much the filled part glows. */
-  let glow = $derived(last === 0 ? 1 : index / last);
+  let glow = $derived(last === 0 ? 1 : position / last);
 
   type Streak = { top: number; from: number; length: number; delay: number; duration: number; thick: number; alpha: number };
   /** The streaks of the latest switch to a speed; `power` is 1 for the first tier, 2 past it. */
@@ -187,7 +194,7 @@
     <Brain size={14} strokeWidth={1.75} />
     <span class="ui-label" class:accented-cap={accentedCap}>{label}</span>
     <!-- A fast mode switched on stays in sight with the popover closed. -->
-    {#if current && selectedSpeed}<span class="fast-mark" data-testid="effort-fast-mark" title={levelName(selectedSpeed)}><Zap size={12} fill="currentColor" /></span>{/if}
+    {#if levels.length > 0 && selectedSpeed}<span class="fast-mark" data-testid="effort-fast-mark" title={levelName(selectedSpeed)}><Zap size={12} fill="currentColor" /></span>{/if}
   </button>
 
   {#if popover.shown}
@@ -219,7 +226,7 @@
             {#if selectedSpeed}<span class="ui-label" data-testid="effort-speed-label">{levelName(selectedSpeed)}</span>{/if}
           </button>
         {/if}
-        {#key rush?.id}<span class="level ui-label" class:dash={!!rush} class:strong={(rush?.power ?? 0) > 1}>{current ? levelName(current) : strings.composer.standardSpeed}</span>{/key}
+        {#key rush?.id}<span class="level ui-label" class:dash={!!rush} class:strong={(rush?.power ?? 0) > 1}>{levelLabel}</span>{/key}
       </div>
 
       {#if levels.length > 0}
@@ -235,8 +242,8 @@
         aria-label={strings.composer.effortTitle}
         aria-valuemin={0}
         aria-valuemax={last}
-        aria-valuenow={index}
-        aria-valuetext={current ? levelName(current) : ''}
+        aria-valuenow={position}
+        aria-valuetext={levelLabel}
         data-testid="effort-track"
         onkeydown={ontrackkeydown}
         {onpointerdown}
@@ -245,8 +252,10 @@
         onpointercancel={onpointerup}
       >
         <div class="line" bind:this={line}>
-          <span class="progress" style="width: calc({offset(index)} + 12px)"></span>
-          <span class="thumb" style="left: {offset(index)}"></span>
+          {#if current}
+            <span class="progress" style="width: calc({offset(index)} + 12px)"></span>
+            <span class="thumb" style="left: {offset(index)}"></span>
+          {/if}
           {#each levels as level, at (level.id)}
             <button type="button" class="dot" class:on={at <= index} data-dot={level.id} data-value={level.id} title={levelName(level)} aria-label={levelName(level)} tabindex="-1" style="left: {offset(at)}" onclick={() => pick(at)}></button>
           {/each}

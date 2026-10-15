@@ -360,8 +360,14 @@ export interface ModelInfo {
   legacy?: boolean;
   /** A small mark next to the name in the picker. */
   badge?: 'new';
-  /** Reasoning effort this model offers. A model without it has no effort control. */
-  effort?: { levels: EffortLevel[]; default: string };
+  /**
+   * Reasoning effort this model offers. A model without it has no effort control.
+   * `default` is the level the agent runs this model on when none is picked;
+   * absent when the agent decides it itself and the core cannot read it (pi
+   * knows only the level of the model its session is on), so a thread on that
+   * model sends no level until the user picks one.
+   */
+  effort?: { levels: EffortLevel[]; default?: string };
   /** Native service tiers advertised for this model; absent means no speed control. */
   speeds?: SpeedTier[];
 }

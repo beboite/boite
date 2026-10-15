@@ -1551,6 +1551,7 @@ export const fr: Translation = {
     installInSettings: 'Installer dans les réglages',
     effortTitle: 'Niveau de raisonnement',
     speed: 'Vitesse de réponse',
+    effortDefault: 'Par défaut',
     standardSpeed: 'Vitesse normale',
     favorites: 'Favoris',
     favorite: 'Ajouter aux favoris',

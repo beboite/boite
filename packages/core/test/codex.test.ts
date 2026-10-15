@@ -18,7 +18,7 @@ import { countLogLines, countProcesses, readScriptedLog, writeScriptedProvider }
 /** The fake Codex app-server: a real ndjson JSON-RPC process over stdio, run by bun. */
 const FAKE_SERVER = fileURLToPath(new URL('./fixtures/codex-server.ts', import.meta.url));
 /** The fixture's environment switches a test may set; every one is cleared after it. */
-const FAKE_SWITCHES = ['CODEX_FAKE_NO_LIVE_SETTINGS', 'CODEX_FAKE_FORK_ERROR', 'CODEX_FAKE_FORK_SAME', 'CODEX_FAKE_LOST', 'CODEX_FAKE_DEAF', 'CODEX_FAKE_SLOW_START', 'CODEX_FAKE_HOOKS', 'CODEX_FAKE_INIT_FAILURES', 'CODEX_FAKE_INIT_ERROR', 'CODEX_FAKE_CRASH_ERROR', 'CODEX_FAKE_INIT_RPC_ERROR', 'CODEX_FAKE_LOGIN_WAIT', 'CODEX_FAKE_RESET_CREDITS', 'CODEX_FAKE_RESET_ERROR', 'CODEX_FAKE_SLOW_MODELS'];
+const FAKE_SWITCHES = ['CODEX_FAKE_NO_LIVE_SETTINGS', 'CODEX_FAKE_FORK_ERROR', 'CODEX_FAKE_FORK_SAME', 'CODEX_FAKE_LOST', 'CODEX_FAKE_DEAF', 'CODEX_FAKE_SLOW_START', 'CODEX_FAKE_HOOKS', 'CODEX_FAKE_INIT_FAILURES', 'CODEX_FAKE_INIT_ERROR', 'CODEX_FAKE_CRASH_ERROR', 'CODEX_FAKE_INIT_RPC_ERROR', 'CODEX_FAKE_LOGIN_WAIT', 'CODEX_FAKE_RESET_CREDITS', 'CODEX_FAKE_RESET_ERROR', 'CODEX_FAKE_SLOW_MODELS', 'CODEX_FAKE_ARCHIVED', 'CODEX_FAKE_MCP', 'CODEX_FAKE_CONFIG_READ_ERROR'];
 
 test('native collaboration is journalled and appears in Team without using Boite delegation', async () => {
   const client = await startCore();
@@ -737,6 +737,11 @@ describe('codex driver', () => {
       ]);
     }
     expect(fakeLog()).toContain('thread/resume');
+    // Slow MCP servers get the same grace on every open, so their tools reach the first turn.
+    for (const open of ['thread/start', 'thread/resume']) {
+      const config = fakeLog().split('\n').find(line => line.startsWith(`config:${open} `));
+      expect(JSON.parse(config!.slice(`config:${open} `.length))).toEqual({ 'tools.update_plan.enabled': true, mcp_optional_startup_grace_ms: 10_000 });
+    }
   });
 
   test('a plain prompt streams back as one text part, and the codex thread id is kept', async () => {
@@ -1361,6 +1366,28 @@ describe('codex driver', () => {
     expect(answer?.type === 'text' ? answer.text : '').toContain('remember the word pelican');
   });
 
+  test('a thread archived in the Codex app is unarchived and resumed with its history instead of failing', async () => {
+    const client = await startCore({ warmProcessMinutes: 0 });
+    const threadId = await codexThread(client);
+    await runTurn(client, threadId, 'first');
+    const sessionId = (await client.call('threads.get', { threadId })).sessionId ?? '';
+    expect(sessionId).not.toBe('');
+
+    process.env['CODEX_FAKE_ARCHIVED'] = '1';
+    await runTurn(client, threadId, 'second');
+    const lines = fakeLog().split('\n');
+    // Refused, unarchived, then resumed on the same native thread, never started over.
+    const resumed = lines.flatMap((line, at) => line.startsWith(`thread/resume ${sessionId} `) ? [at] : []);
+    const unarchived = lines.indexOf(`thread/unarchive ${sessionId}`);
+    expect(resumed).toHaveLength(2);
+    expect(unarchived).toBeGreaterThan(resumed[0]!);
+    expect(unarchived).toBeLessThan(resumed[1]!);
+    expect(lines.filter(line => line.startsWith('thread/start'))).toHaveLength(1);
+    const thread = await client.call('threads.get', { threadId });
+    expect(thread.sessionId).toBe(sessionId);
+    expect(thread.sessionGeneration ?? 0).toBe(0);
+  });
+
   test('a stop that lands while a lost thread resumes ends the turn stopped and starts nothing fresh', async () => {
     const client = await startCore({ warmProcessMinutes: 0 });
     const threadId = await codexThread(client);
@@ -1633,6 +1660,8 @@ describe('codex driver', () => {
       (summary) => summary.id === thread.id && summary.titleSource === 'agent',
       20000,
     );
+    // The user's MCP servers, one already off and one with a dot in its name.
+    process.env['CODEX_FAKE_MCP'] = JSON.stringify({ ssh: { command: 'ssh-mcp', enabled: true }, 'blender.lab': { command: 'blender-mcp' }, idle: { command: 'idle', enabled: false } });
     const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
     const finished = client.next('turn.finished', turn => turn.threadId === thread.id, 20000);
     await client.call('turns.start', { threadId: thread.id, prompt: 'remember the word pelican', attachments: [{ kind: 'image', mimeType: 'image/png', data: png, name: 'pelican.png' }] });
@@ -1644,8 +1673,26 @@ describe('codex driver', () => {
     expect(fakeLog()).toContain('thread/start approvalPolicy=never sandbox=read-only model=gpt-6-luna ephemeral');
     expect(fakeLog()).toContain('turn/start model=gpt-6-luna effort=low');
     expect(countLines(`image data:image/png;base64,${png}`)).toBe(2);
+    // No MCP server, plugin or app starts for a title: only the conversation's own thread keeps them.
+    expect(fakeLog()).toContain(`config/read cwd=${harness!.dataDir} noPlugins=true`);
+    expect(countLines('config:thread/start {"mcp_servers":{"ssh":{"enabled":false},"blender.lab":{"enabled":false}}}')).toBe(1);
+    expect(fakeLog()).toContain('config:thread/start {"tools.update_plan.enabled":true');
     // Its app-server is gone with the answer, traced under the thread.
     await waitFor(() => harness?.core.procs.liveCount(thread.id) === 0);
+  });
+
+  test('a Codex that cannot read its config still writes the title, with its MCP servers on', async () => {
+    const client = await startCore();
+    process.env['CODEX_FAKE_CONFIG_READ_ERROR'] = '1';
+    const { projectId, accountId } = await codexAccount(client);
+    const prompt = 'remember the word pelican';
+    const threadId = (await client.call('threads.create', { projectId, providerId: 'codex-fake', accountId, title: prompt, model: 'fake-codex' })).id;
+    await client.call('threads.subscribe', { threadId });
+    const titled = client.next('thread.updated', (summary) => summary.id === threadId && summary.titleSource === 'agent', 20000);
+    await runTurn(client, threadId, prompt);
+    expect((await titled).title).toBe('Pelican notes');
+    expect(fakeLog()).toContain('config/read cwd=');
+    expect(countLines('config:thread/start null')).toBe(1);
   });
 
   /** How many lines of the fake log are exactly this one. */
@@ -1774,6 +1821,7 @@ describe('native Codex fork', () => {
     expect(wire).toContain('approvalPolicy=on-request sandbox=workspace-write');
     expect(wire).toContain(`accountHome=${isolated.isolationDir}`);
     expect(wire).toContain('excludeTurns=true planEnabled=true');
+    expect(fakeLog()).toContain('config:thread/fork {"tools.update_plan.enabled":true,"mcp_optional_startup_grace_ms":10000}');
     expect(fakeLog()).toContain(`thread/turns/list threadId=${fork.sessionId} limit=1 sortDirection=desc`);
     // Windows may retain the trace row until its usage event or the 1 s fallback.
     await waitFor(() => harness!.core.procs.liveCount(fork.id) === 0);

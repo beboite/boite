@@ -6,16 +6,40 @@ import type { TitleContext } from '../types.ts';
 import { subscriptionProxyCodexArgs } from '../../subscription-proxy.ts';
 import { imageInputsOf, textOf } from './mapping.ts';
 import type { CodexThreadOpened, CodexTurnRecord, Timer } from './protocol.ts';
-import { AGENT_OWN_MODEL, CLIENT_NAME, STDERR_MAX } from './protocol.ts';
+import { AGENT_OWN_MODEL, CLIENT_NAME, NO_PLUGINS, STDERR_MAX } from './protocol.ts';
 import { CodexRpc } from './rpc.ts';
 
 /** How long one title call may take before its app-server is dropped. */
 const TITLE_TIMEOUT_MS = 30_000;
 
 /**
+ * The `thread/start` override that turns off every MCP server the effective
+ * config of `cwd` declares, read with `config/read` on the title's own
+ * app-server. Each server is named, since an override of `mcp_servers` merges
+ * into the user's servers rather than replacing them, and nested so a name with
+ * a dot stays one key. A server already off is left out. An app-server that
+ * cannot answer leaves the servers on: the title still gets written.
+ */
+async function mcpServersOff(rpc: CodexRpc, ctx: TitleContext): Promise<Record<string, { enabled: false }> | null> {
+  try {
+    const read = await rpc.request<{ config?: { mcp_servers?: Record<string, { enabled?: boolean } | null> | null } }>('config/read', { cwd: ctx.thread.cwd });
+    const off: Record<string, { enabled: false }> = {};
+    for (const [name, server] of Object.entries(read?.config?.mcp_servers ?? {})) {
+      if (server?.enabled !== false) off[name] = { enabled: false };
+    }
+    return Object.keys(off).length === 0 ? null : off;
+  } catch (error) {
+    ctx.log('warn', `codex title: config/read failed, so the MCP servers of ${ctx.thread.cwd} start for this title: ${messageOf(error)}`);
+    return null;
+  }
+}
+
+/**
  * One short-lived `codex app-server` on an ephemeral thread: nothing is written
  * to Codex's own history, the sandbox is read-only, nothing is asked, and the
- * effort is low. The agent message of that one turn is the title, as the model
+ * effort is low. No MCP server, plugin or app starts for it: the user's
+ * servers would otherwise launch with every title, branch name and retitle,
+ * and could act on the prompt. The agent message of that one turn is the title, as the model
  * wrote it; the core applies its one cleaning rule. A turn that fails is
  * thrown with Codex's own sentence.
  */
@@ -27,7 +51,7 @@ export async function titleTurn(ctx: TitleContext): Promise<string | null> {
   }
 
   let lastStderr = '';
-  const child = ctx.spawnChild(executable, subscriptionProxyCodexArgs(profile?.launch?.args ?? [], ctx.accountEnv), {
+  const child = ctx.spawnChild(executable, [...subscriptionProxyCodexArgs(profile?.launch?.args ?? [], ctx.accountEnv), ...NO_PLUGINS], {
     cwd: ctx.thread.cwd,
     env: { ...process.env, ...ctx.accountEnv },
   });
@@ -82,12 +106,14 @@ export async function titleTurn(ctx: TitleContext): Promise<string | null> {
         capabilities: null,
       });
       rpc.notify('initialized', {});
+      const servers = await mcpServersOff(rpc, ctx);
       const opened = await rpc.request<CodexThreadOpened>('thread/start', {
         cwd: ctx.thread.cwd,
         approvalPolicy: 'never',
         sandbox: 'read-only',
         ephemeral: true,
         ...(model === null ? {} : { model }),
+        ...(servers === null ? {} : { config: { mcp_servers: servers } }),
       });
       const started = await rpc.request<{ turn: CodexTurnRecord }>('turn/start', {
         threadId: opened.thread.id,

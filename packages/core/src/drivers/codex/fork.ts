@@ -5,7 +5,7 @@ import type { ForkedSession, SessionContext } from '../types.ts';
 import { exitWithin } from '../exit.ts';
 import { NativeForkUnsupported } from '../native-fork.ts';
 import { modelOf } from './mapping.ts';
-import { CLIENT_NAME, MODE_POLICY, NO_NATIVE_SUBAGENTS } from './protocol.ts';
+import { CLIENT_NAME, MODE_POLICY, NO_NATIVE_SUBAGENTS, THREAD_CONFIG } from './protocol.ts';
 import { CodexRpc, CodexRpcError } from './rpc.ts';
 
 const FORK_TIMEOUT_MS = 30_000;
@@ -49,7 +49,7 @@ export async function forkSession(ctx: SessionContext, checkpoint: { sessionId: 
       approvalPolicy: policy.approvalPolicy,
       sandbox: policy.sandbox,
       ...(model === null ? {} : { model }),
-      config: { 'tools.update_plan.enabled': true },
+      config: THREAD_CONFIG,
     }, { timeoutMs: FORK_TIMEOUT_MS });
     const sessionId = answer?.thread?.id;
     if (typeof sessionId !== 'string' || !sessionId.length || sessionId === checkpoint.sessionId) {
