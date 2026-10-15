@@ -808,7 +808,8 @@ When every call of the run carries the agent's own `summary` (Claude's
 git", or the thought being written) and its clock ticks. A reasoning step reads
 as its last bold heading (Codex) or the first sentence of its last paragraph
 (Claude's summary, a raw chain of thought), and as "Thinking" while it has no
-words (`thoughtTitle` in `lib/tool-groups.ts`). Reasoning with no words that
+words (`thoughtTitle` in `lib/tool-groups.ts`; a live step keeps a
+`ThoughtTitleScan` that reads only the lines each delta adds). Reasoning with no words that
 took under a second is not drawn. The core
 records each block's first appearance and the next part or message completion
 for every driver, so durations survive a reload. Older and imported blocks
