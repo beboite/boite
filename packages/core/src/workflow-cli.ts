@@ -53,7 +53,8 @@ shows its progress; boite workflow show <run-id> prints every step's result.
 A step with output returns it with boite workflow output '<json>' or a final
 \`\`\`json block; the core checks the shape and asks once more on a mismatch.
 Steps share this checkout: give parallel steps distinct files. A failed step
-pauses what depends on it; boite workflow retry <run-id> <step> runs it again.`;
+pauses what depends on it; boite workflow retry <run-id> <step> runs it again,
+and boite workflow retry <run-id> runs every failed step.`;
 
 function readPlan(raw: string | undefined, cwd: string, what: string): unknown {
   if (raw === undefined || raw.length === 0) throw new Error(`${what}: pass a JSON file or inline JSON`);

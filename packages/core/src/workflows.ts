@@ -632,7 +632,6 @@ export class Workflows {
         if (run.status === 'paused' && principal !== 'owner') throw refused('the run is paused; the owner resumes it');
         const nodes = params.stepId === undefined ? run.nodes.filter(n => broken(n.status) || n.instances.some(i => broken(i.status))) : run.nodes.filter(n => n.id === params.stepId);
         if (params.stepId !== undefined && !nodes.length) throw invalidParams(`stepId: no step ${params.stepId} in this run`);
-        this.resumeTeam(run.rootThreadId, principal);
         for (const node of run.nodes) {
           const target = nodes.includes(node);
           for (const inst of node.instances) if (target && broken(inst.status)) {
@@ -648,7 +647,10 @@ export class Workflows {
           // A stop left later steps unopened; they wait for the retried ones again.
           else if (node.status === 'stopped' && !node.instances.length) Object.assign(node, { status: 'waiting', error: null, startedAt: null, finishedAt: null });
         }
-        if (this.halted(run)) throw refused('nothing to retry in that step; retry the step that failed');
+        // Another failed step still holds the run: say which, instead of refusing the step that was named.
+        const holding = run.nodes.filter(node => broken(node.status) || node.instances.some(i => broken(i.status))).map(node => node.id);
+        if (holding.length) throw refused(`the run stays stopped while ${holding.join(', ')} ${holding.length === 1 ? 'has' : 'have'} failed; retry ${holding.length === 1 ? 'that step' : 'those steps'} too, or retry the whole run without naming a step`);
+        this.resumeTeam(run.rootThreadId, principal);
         this.save({ ...run, status: 'running', error: null, finishedAt: null, delivered: false, updatedAt: now });
         break;
       }

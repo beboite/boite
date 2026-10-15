@@ -110,7 +110,9 @@ summary goes back to the conversation. `boite workflow retry <run-id> <step>`
 runs the failed executions again in their own conversations, with the previous
 error in the prompt; an execution whose conversation was archived since gets a
 new one. The executions held back as "Not started" wait again with it, in any
-step.
+step. Without a step, retry runs every failed step. While another step stays
+failed, retrying one named step is refused with the names of the steps that
+still hold the run, and nothing changes.
 
 Handing the summary back is a turn of the parent. If the team is paused before
 delivery, the run keeps the reason as `deliveryError` and the panel shows it.
