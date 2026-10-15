@@ -312,7 +312,7 @@ ways, and the rewind result's `session` field says which one applied:
 | Driver | Behaviour |
 |---|---|
 | Claude | Exact. Each turn records `checkpoint: { sessionId, entry }`, the uuid of the last transcript entry it wrote. The next turn resumes that session with `resumeSessionAt: entry` and `forkSession: true`, so the CLI keeps the transcript up to the cut under a new session id and the original transcript is never shortened. A rewind closes the warm process first. |
-| Codex | Exact at a completed native turn boundary on the same account and session generation. A traced appserver calls `thread/fork` with the retained native turn ID as an inclusive boundary. Rewind prepares a new native session before restoring files and committing the journal cut. The source native transcript is unchanged. |
+| Codex | Exact at a completed native turn boundary on the same account and session generation. A traced appserver, started without plugins or connectors, calls `thread/fork` with the retained native turn ID as an inclusive boundary and every MCP server turned off for that call only. Rewind prepares a new native session before restoring files and committing the journal cut. The source native transcript is unchanged. |
 | ACP, Muse, pi, agy and echo | Seeded. The thread drops its native session. The next turn starts a fresh one carrying the kept history as bounded excerpts, the same [context transfer](model-switching.md#context-transfer) a change of account uses. |
 
 Claude falls back to the seeded path in four cases: the kept turn left no

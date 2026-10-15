@@ -68,6 +68,15 @@ its context kept the first turn, its tool outputs and the image. It now keeps
 late `tool_use_summary` patches that part, so a follow-up that cuts a running
 turn frees the cards it closed: 26.8 MiB held during the turn, now 1.6 MiB.
 
+### A running Codex command
+
+A running command's card is redrawn once a second with the last 4,000
+characters of its output; the completed item still carries all of it. Each
+redraw is a journal write and a `message.part` frame per client. For a 6 s
+command printing a line every 5 ms, `bench/codex-live-output.ts` measured 25
+redraws carrying 381,400 characters before, 7 carrying 28,000 now
+([results](../bench/results/2026-10-15-perf-drivers.md)).
+
 ## Concurrent agent stress
 
 ```sh
@@ -858,6 +867,7 @@ bun bench/ui-frames.ts --runs 5 --only "heavy thread scroll,heavy thread flick,h
 bun bench/ui-frames.ts --gpu --only "heavy thread scroll"          # composited on the machine's GPU, never a software renderer
 bun bench/rpc-actions.ts --journal <journal.db> --runs 6   # latency, core CPU, bytes and RSS per RPC (Linux)
 bun bench/claude-turn-heap.ts                  # heap a scripted Claude turn leaves; STEER=1 IMAGE_MIB=0 for a follow-up cut
+bun bench/codex-live-output.ts                 # redraws and characters of one running Codex command's live output
 ```
 
 `bench/bandwidth.ts` puts a TCP relay between the client and the core, counts

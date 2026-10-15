@@ -18,6 +18,9 @@
  * ending the turn.
  * `CODEX_FAKE_NO_LIVE_SETTINGS=1` is a server with no `turn/settings/update`.
  * `CODEX_FAKE_SLOW_MODELS=<ms>` delays the answer to `model/list`.
+ * `CODEX_FAKE_MCP_SERVERS=a,b` are the MCP servers `config/read` reports; a
+ * `thread/start` or `thread/fork` that turns them off logs `mcp off <names>`.
+ * `CODEX_FAKE_NO_CONFIG_READ=1` is an older server with no `config/read`.
  *
  * The wire is copied from the real server on purpose: responses and
  * notifications carry no `jsonrpc` member, which is what the driver has to
@@ -26,12 +29,12 @@
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const DIRECTIVE = /\[(agents|command|command-failed|approve|thought|summary|usage|late-context|slow|crash|input|async|stream|elicit|elicit-url|permissions|time|hook-block)\]/g;
+const DIRECTIVE = /\[(agents|command|command-failed|approve|thought|summary|usage|late-context|slow|crash|input|async|stream|elicit|elicit-url|permissions|time|hook-block|limits|flood)\]/g;
 const CHUNKS = 3;
 
 type Directive =
   | 'command' | 'command-failed' | 'approve' | 'thought' | 'summary' | 'usage' | 'late-context' | 'slow' | 'crash' | 'input' | 'async' | 'stream'
-  | 'elicit' | 'elicit-url' | 'permissions' | 'time' | 'hook-block' | 'agents';
+  | 'elicit' | 'elicit-url' | 'permissions' | 'time' | 'hook-block' | 'agents' | 'limits' | 'flood';
 
 let threadCounter = 0;
 let turnCounter = 0;
@@ -49,6 +52,15 @@ let ephemeral = false;
  * rather than dropped: the driver sends one the instant it learns the turn id.
  */
 const interrupted = new Set<string>();
+/** Resolved by the next `account/rateLimits/read`, so a rolling update can follow it. */
+let rateLimitsRead: (() => void) | null = null;
+
+/** Logs which MCP servers a thread request turns off through its `config` map. */
+function logMcpOff(params: Record<string, unknown>): void {
+  const servers = (params['config'] as Record<string, unknown> | undefined)?.['mcp_servers'] as Record<string, { enabled?: boolean }> | undefined;
+  if (servers === undefined) return;
+  log(`mcp off ${Object.entries(servers).filter(([, value]) => value.enabled === false).map(([name]) => name).join(',')}`);
+}
 const waiting = new Map<string, () => void>();
 
 function awaitInterrupt(turnId: string): Promise<void> {
@@ -422,9 +434,35 @@ async function runTurn(turnId: string, text: string): Promise<void> {
         notify('item/started', { item: commandItem(itemId, 'inProgress', null), threadId, turnId, startedAtMs: Date.now() });
         notify('item/commandExecution/outputDelta', { threadId, turnId, itemId, delta: 'line one\n' });
         notify('item/started', { item: { type: 'sleep', id: 'sleep-1', durationMs: 50 }, threadId, turnId, startedAtMs: Date.now() });
-        await Bun.sleep(600);
+        // Longer than one redraw beat, so the running card is drawn once.
+        await Bun.sleep(1_200);
         notify('item/completed', { item: { type: 'sleep', id: 'sleep-1', durationMs: 50 }, threadId, turnId, completedAtMs: Date.now() });
         notify('item/completed', { item: commandItem(itemId, 'completed', 'line one\nline two\n'), threadId, turnId, completedAtMs: Date.now() });
+        break;
+      }
+      case 'limits': {
+        // Sparse rolling updates: only the weekly window, and no reset credits.
+        const update = (usedPercent: number) => notify('account/rateLimits/updated', { rateLimits: {
+          limitId: 'codex', limitName: null, primary: null, secondary: { usedPercent, windowDurationMins: 10080, resetsAt: 1_900_000_000 },
+          credits: null, planType: null, rateLimitReachedType: null, individualLimit: null, spendControlReached: null, normalModelSlug: null } });
+        const read = new Promise<void>((resolve) => { rateLimitsRead = resolve; });
+        update(30);
+        await read;
+        await Bun.sleep(50);
+        update(35);
+        await Bun.sleep(50);
+        break;
+      }
+      case 'flood': {
+        // A chatty command: 200 deltas of 100 characters, faster than one redraw beat.
+        itemCounter += 1;
+        const itemId = `item-${itemCounter}`;
+        notify('item/started', { item: commandItem(itemId, 'inProgress', null), threadId, turnId, startedAtMs: Date.now() });
+        for (let index = 0; index < 200; index++) {
+          notify('item/commandExecution/outputDelta', { threadId, turnId, itemId, delta: `${String(index).padStart(4, '0')}${'x'.repeat(95)}\n` });
+        }
+        await Bun.sleep(1_300);
+        notify('item/completed', { item: commandItem(itemId, 'completed', 'flood done'), threadId, turnId, completedAtMs: Date.now() });
         break;
       }
       case 'late-context':
@@ -520,6 +558,8 @@ function handle(method: string, raw: unknown): unknown {
       };
     case 'account/rateLimits/read':
       log(`account/rateLimits/read ${JSON.stringify(params)}`);
+      rateLimitsRead?.();
+      rateLimitsRead = null;
       return { rateLimits: { limitId: 'codex', primary: { usedPercent: 100, windowDurationMins: 300 },
         credits: { hasCredits: true, unlimited: false, balance: '42.5' } },
         rateLimitResetCredits: process.env['CODEX_FAKE_RESET_CREDITS']
@@ -529,6 +569,12 @@ function handle(method: string, raw: unknown): unknown {
       log(`account/rateLimitResetCredit/consume ${JSON.stringify(params)}`);
       if (process.env['CODEX_FAKE_RESET_ERROR']) throw new Error(process.env['CODEX_FAKE_RESET_ERROR']);
       return { outcome: 'reset' };
+    case 'config/read': {
+      log(`config/read cwd=${textOf(params['cwd'])} includeLayers=${params['includeLayers'] === true}`);
+      if (process.env['CODEX_FAKE_NO_CONFIG_READ'] === '1') throw new Error('Method not found: config/read');
+      const names = (process.env['CODEX_FAKE_MCP_SERVERS'] ?? '').split(',').filter(name => name.length > 0);
+      return { config: { mcp_servers: Object.fromEntries(names.map(name => [name, { command: 'stub', enabled: true }])) }, origins: {}, layers: null };
+    }
     case 'hooks/list':
       log('hooks/list');
       // `CODEX_FAKE_HOOKS=1`: one hook the user never reviewed, one they did.
@@ -566,6 +612,7 @@ function handle(method: string, raw: unknown): unknown {
       threadCounter += 1;
       threadId = `codex-fake-${crypto.randomUUID().slice(0, 8)}-${threadCounter}`;
       ephemeral = params['ephemeral'] === true;
+      logMcpOff(params);
       log(
         `thread/start approvalPolicy=${textOf(params['approvalPolicy'])} sandbox=${textOf(params['sandbox'])} model=${textOf(params['model'])}${ephemeral ? ' ephemeral' : ''}`,
       );
@@ -583,6 +630,7 @@ function handle(method: string, raw: unknown): unknown {
     }
     case 'thread/fork': {
       log(`thread/fork threadId=${textOf(params['threadId'])} lastTurnId=${textOf(params['lastTurnId'])} cwd=${textOf(params['cwd'])} model=${textOf(params['model'])} approvalPolicy=${textOf(params['approvalPolicy'])} sandbox=${textOf(params['sandbox'])} excludeTurns=${params['excludeTurns'] === true} planEnabled=${(params['config'] as Record<string, unknown> | undefined)?.['tools.update_plan.enabled'] === true} accountHome=${process.env['CODEX_HOME'] ?? ''}`);
+      logMcpOff(params);
       if (process.env['CODEX_FAKE_FORK_ERROR'] === '1') throw new Error('native fork refused');
       forkBoundary = textOf(params['lastTurnId']);
       threadId = process.env['CODEX_FAKE_FORK_SAME'] === '1' ? textOf(params['threadId']) : `codex-fork-${crypto.randomUUID()}`;

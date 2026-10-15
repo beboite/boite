@@ -6,7 +6,8 @@ import type { TitleContext } from '../types.ts';
 import { subscriptionProxyCodexArgs } from '../../subscription-proxy.ts';
 import { imageInputsOf, textOf } from './mapping.ts';
 import type { CodexThreadOpened, CodexTurnRecord, Timer } from './protocol.ts';
-import { AGENT_OWN_MODEL, CLIENT_NAME, STDERR_MAX } from './protocol.ts';
+import { AGENT_OWN_MODEL, CLIENT_NAME, NO_NATIVE_SUBAGENTS, STDERR_MAX } from './protocol.ts';
+import { BACKGROUND_FEATURES_OFF, mcpServersOff } from './background.ts';
 import { CodexRpc } from './rpc.ts';
 
 /** How long one title call may take before its app-server is dropped. */
@@ -27,7 +28,12 @@ export async function titleTurn(ctx: TitleContext): Promise<string | null> {
   }
 
   let lastStderr = '';
-  const child = ctx.spawnChild(executable, subscriptionProxyCodexArgs(profile?.launch?.args ?? [], ctx.accountEnv), {
+  // No hooks, plugins, connectors or native subagents: a title is one read-only answer.
+  const args = [
+    ...subscriptionProxyCodexArgs(profile?.launch?.args ?? [], ctx.accountEnv),
+    '--config', 'features.hooks=false', ...NO_NATIVE_SUBAGENTS, ...BACKGROUND_FEATURES_OFF,
+  ];
+  const child = ctx.spawnChild(executable, args, {
     cwd: ctx.thread.cwd,
     env: { ...process.env, ...ctx.accountEnv },
   });
@@ -82,12 +88,14 @@ export async function titleTurn(ctx: TitleContext): Promise<string | null> {
         capabilities: null,
       });
       rpc.notify('initialized', {});
+      const config = await mcpServersOff(rpc, ctx.thread.cwd, ctx.log, TITLE_TIMEOUT_MS);
       const opened = await rpc.request<CodexThreadOpened>('thread/start', {
         cwd: ctx.thread.cwd,
         approvalPolicy: 'never',
         sandbox: 'read-only',
         ephemeral: true,
         ...(model === null ? {} : { model }),
+        ...(config.mcp_servers === undefined ? {} : { config }),
       });
       const started = await rpc.request<{ turn: CodexTurnRecord }>('turn/start', {
         threadId: opened.thread.id,

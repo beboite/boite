@@ -52,3 +52,49 @@ a file when started. No login and no model request.
 | --- | ---: | --- |
 | `mcpServers: {}` (before) | 5 | yes, 2 of 2 runs |
 | `mcpServers: {}, strictMcpConfig: true` (after) | 5 | no, 2 of 2 runs |
+
+# Codex driver: background app-servers and live command output
+
+Measured on 2026-10-15 in the Linux container (Bun 1.4.2, codex-cli 0.162.1),
+`nice -n 10`, three runs per side, alternating. Before is the Codex driver of
+`origin/main` at 2adac07b; after is `boite/perf-drivers`.
+
+## MCP servers a title starts
+
+A throwaway script called the driver's `titleTurn` against the installed
+`codex`, with a temporary `CODEX_HOME` whose `config.toml` lists two stdio MCP
+servers (one named with a dot) that append their PID to a file when started.
+No login: the title turn itself fails with HTTP 401, after `thread/start` has
+started or skipped the servers.
+
+| Reading | Before | After |
+| --- | ---: | ---: |
+| MCP servers started per title | 2 | 0 |
+
+Three runs each, identical. A per-server dotted key (`mcp_servers.<name>.enabled`)
+fails `thread/start` on a name with a dot, so the driver sends the nested
+table. The fork setup sends the same table with its `thread/fork`.
+
+## Live output of a running command
+
+```sh
+nice -n 10 bun bench/codex-live-output.ts
+```
+
+A 6 s command printing a 100-character line every 5 ms (1,200 deltas). Medians:
+
+| Reading | Before | After |
+| --- | ---: | ---: |
+| running parts published | 25 | 7 |
+| output characters in them | 381,400 | 28,000 |
+| CPU in `appendOutput` | 40.9 ms | 8.4 ms |
+
+The CPU line leaves out the one join per redraw, which now runs in the timer.
+
+## Not measured
+
+- Reasoning deltas no longer report the `thinking` phase once the part is
+  open: one progress call per reasoning section instead of one per delta. Work
+  removed, not timed.
+- Rolling rate-limit updates reach the quota store; the probe processes they
+  save need the store change of the network pull request.

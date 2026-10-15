@@ -18,7 +18,9 @@ can replace the prompt title during the first turn. It preserves manual names.
   one turn, no tools, no session written. The Codex driver starts its own
   app-server for an ephemeral thread, read-only sandbox, no approvals, `low`
   effort, and closes it after the answer; the thread's warm session is left
-  alone. Each attempt takes thirty seconds at most and is spawned under the thread so
+  alone. That app-server runs without the user's hooks, plugins, connectors or
+  native subagents, and the thread turns off every MCP server `config/read`
+  lists, so a title starts none of them. Each attempt takes thirty seconds at most and is spawned under the thread so
   the trace carries them. The request includes the first message and its
   images when the title provider supports images. The model returns JSON
   with `title` and `needsRefinement`, plus an English `branch` slug when an
