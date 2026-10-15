@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Bus } from '../src/bus.ts';
 import type { Core } from '../src/core.ts';
-import { RELAY, relayFor, Telemetry, telemetryEvent } from '../src/telemetry.ts';
+import { linuxVersion, macosVersion, RELAY, relayFor, Telemetry, telemetryEvent, windowsVersion } from '../src/telemetry.ts';
 import relay, { buildBatch, type Env } from '../../../telemetry/src/index.ts';
 import { enhancedDetails, publicModel } from '../../contracts/src/telemetry.ts';
 
@@ -53,9 +53,32 @@ test('public models follow families and Boite provider prefixes', () => {
     ['claude/claude-opus-5-5', 'claude-opus-5-5'], ['claude-haiku-5-5', 'claude-haiku-5-5'],
     ['codex/gpt-6.1-sol', 'gpt-6.1-sol'], ['grok-4.7', 'grok-4.7'],
     ['opencode/openrouter/deepseek-v4', 'deepseek-v4'], ['opus', 'opus'],
+    ['antigravity/gemini-3.8-flash-high', 'gemini-3.8-flash'], ['antigravity/claude-opus-4-6-thinking', 'claude-opus-4-6'],
   ]) expect(publicModel(selected)).toBe(reported);
   for (const hidden of ['ft:gpt-4o:acme:secret', 'gpt-6-acme', 'C:\\models\\gpt-5.gguf', 'claude-opus-5-internal', 'my-proxy/acme-coder'])
     expect(publicModel(hidden)).toBe('other');
+});
+
+test('the OS version comes from fixed system fields and the relay bounds its shape', () => {
+  // Windows 11 keeps "Windows 10" in the registry's product name; the build decides.
+  expect(windowsVersion('Windows 10 Pro', '10.0.26200')).toBe('Windows 11 Pro 26200');
+  expect(windowsVersion('Windows 10 Home', '10.0.19045')).toBe('Windows 10 Home 19045');
+  expect(windowsVersion('Windows 11 Pro', '10.0.26200')).toBe('Windows 11 Pro 26200');
+  expect(windowsVersion('C:\\Users\\nuno', '10.0.26200')).toBe('Windows 26200');
+  // PRETTY_NAME is free text a distribution writes; ID and VERSION_ID are identifiers.
+  expect(linuxVersion('PRETTY_NAME="Ubuntu 24.04.3 LTS"\nNAME="Ubuntu"\nVERSION_ID="24.04"\nID=ubuntu\n')).toBe('ubuntu 24.04');
+  expect(linuxVersion('NAME="Arch Linux"\nID=arch\nBUILD_ID=rolling\n')).toBe('arch');
+  expect(linuxVersion('ID="my secret distro"\n')).toBe('linux');
+  expect(macosVersion('<key>ProductName</key>\n\t<string>macOS</string>\n\t<key>ProductVersion</key>\n\t<string>15.1</string>')).toBe('macOS 15.1');
+  expect(macosVersion('')).toBe('macOS');
+  expect(telemetryEvent('ping', '2.0.0').os_version).toMatch(/^[A-Za-z][\w .+()-]{0,47}$/);
+  const ids = { eventIdentifier: 'daily', pingIdentifier: 'stable' };
+  const sent = (os_version: unknown) => buildBatch('A', [{ ...telemetryEvent('ping', '2.0.0'), os_version } as any], ids, 'FR', new Date().toISOString())[0]!.properties.os_version;
+  expect(sent('Windows 11 Pro 26200')).toBe('Windows 11 Pro 26200');
+  expect(sent('/home/nuno/.secret')).toBe('other');
+  expect(sent('x'.repeat(200))).toBe('other');
+  // A host older than the field sends none: the property stays absent, not `other`.
+  expect(sent(undefined)).toBeUndefined();
 });
 
 afterEach(async () => { for (const cleanup of cleanups.splice(0)) await cleanup(); });
