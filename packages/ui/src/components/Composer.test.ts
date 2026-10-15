@@ -7,7 +7,7 @@ import { FakeClient } from '../lib/fake-client';
 import { RpcFailure } from '../lib/client';
 import { defaultPrefs, PREFS_STORAGE_KEY, STASH_STORAGE_KEY } from '../lib/prefs';
 import { store } from '../lib/store.svelte';
-import { repliesOf } from '../lib/question-reply.svelte';
+import { repliesOf, TYPING_PAUSE_MS } from '../lib/question-reply.svelte';
 import { closeTour } from '../lib/onboarding.svelte';
 import { freshWork, work, WORK_STORAGE_KEY } from '../lib/work-prefs.svelte';
 import { setExperiment } from '../lib/experiments';
@@ -122,7 +122,7 @@ afterEach(() => {
   document.body.innerHTML = '';
   window.localStorage.clear();
   // Each test's fake numbers its questions from one again, on the same store.
-  Object.assign(repliesOf(store), { picks: {}, ignored: {}, docked: null, chosen: null });
+  Object.assign(repliesOf(store), { picks: {}, ignored: {}, docked: null, chosen: null, waiting: {}, typing: null });
   // The device's work record is module state: the next test starts with no record.
   work.load();
   vi.restoreAllMocks();
@@ -1130,6 +1130,41 @@ test('an ignored async question stays docked while an ordinary message goes out 
   expect(prompt.parts).toEqual([{ type: 'text', text: 'something else entirely' }]);
   expect(store.pendingQuestions.map((question) => question.id)).toContain(asked.id);
   expect(document.querySelector('[data-testid=activity-question]')).not.toBeNull();
+});
+
+test('a question asked over a draft leaves it an ordinary message until its card is chosen', async ({ app: _app }) => {
+  await store.open('t-trace');
+  await waitFor(() => store.openThread?.id === 't-trace' && !store.busy);
+  await type('my own steering message');
+  // Another client starts a turn that asks without stopping, while the draft is in the box.
+  await store.client!.call('turns.start', { threadId: 't-trace', prompt: '[ask] from elsewhere' });
+  await waitFor(() => store.pendingQuestions.some((question) => question.threadId === 't-trace'));
+  const asked = store.pendingQuestions.find((question) => question.threadId === 't-trace')!;
+  await new Promise((resolve) => setTimeout(resolve, TYPING_PAUSE_MS + 50));
+  // The pause passed, but the draft predates the question: the box still writes messages.
+  expect(document.querySelector('[data-testid=composer-reply]')).toBeNull();
+  expect(input().placeholder).not.toBe('Write your answer');
+  expect(input().value).toBe('my own steering message');
+  // The card's "Answer in writing" hands the question the box, draft included.
+  query<HTMLButtonElement>('[data-testid=question-write]').click();
+  await waitFor(() => document.querySelector<HTMLElement>('[data-testid=composer-reply]')?.dataset.question === asked.id);
+  expect(input().value).toBe('my own steering message');
+});
+
+test('a question asked while the user types takes the emptied composer only after a pause', async ({ app: _app }) => {
+  await store.open('t-trace');
+  await waitFor(() => store.openThread?.id === 't-trace' && !store.busy);
+  await type('half a thought');
+  await type('');
+  await store.client!.call('turns.start', { threadId: 't-trace', prompt: '[ask] from elsewhere' });
+  await waitFor(() => store.pendingQuestions.some((question) => question.threadId === 't-trace'));
+  expect(document.querySelector('[data-testid=composer-reply]')).toBeNull();
+  const asked = store.pendingQuestions.find((question) => question.threadId === 't-trace')!;
+  await waitFor(() => document.querySelector<HTMLElement>('[data-testid=composer-reply]')?.dataset.question === asked.id, 2000);
+  expect(input().placeholder).toBe('Write your answer');
+  // Once released, typing again does not hand the box back to messages.
+  await type('my answer');
+  expect(query('[data-testid=composer-reply]').dataset.question).toBe(asked.id);
 });
 
 test('a question card does not take a sent message being edited as its answer', async ({ app: _app }) => {
