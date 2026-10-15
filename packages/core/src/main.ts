@@ -424,9 +424,6 @@ export function main(argv: string[]): void {
         process.stderr.write(
           `pairing link for the ${grant.role} role, good for one use until ${new Date(grant.expiresAt).toISOString()}\n`,
         );
-        if (grant.code && grant.codeExpiresAt) {
-          process.stderr.write(`or type the code ${grant.code} in the installed app, until ${new Date(grant.codeExpiresAt).toISOString()}\n`);
-        }
         process.exit(0);
       },
       (error: unknown) => {

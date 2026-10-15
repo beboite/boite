@@ -74,14 +74,14 @@ for (const [name, width, height, mobile] of [['desktop', 1280, 900, false], ['ph
         await page.evaluate(`${store}.showSettings('machines')`);
         await page.waitFor(`document.querySelector('${id('group-add-device')}')`);
         await page.click(id('group-add-device'));
-        await page.waitFor(`document.querySelector('${id('add-device-code')}')`);
+        await page.waitFor(`document.querySelector('${id('add-device-qr')} svg')`);
         const first = await page.evaluate(`${store}.deviceInvite.url`);
         await page.evaluate(`document.querySelector('${id('add-device')}').scrollIntoView()`);
         await capture('add-device');
         await page.click(id('add-device-close'));
         await page.waitFor(`!document.querySelector('${id('add-device')}') && !document.querySelector('${id('add-device-qr')}')`);
         await page.click(id('group-add-device'));
-        await page.waitFor(`document.querySelector('${id('add-device-code')}')`);
+        await page.waitFor(`document.querySelector('${id('add-device-qr')} svg')`);
         expect(await page.evaluate(`${store}.deviceInvite.url`)).not.toBe(first);
         await page.click(id('add-device-close'));
 

@@ -178,9 +178,9 @@ test('a phone installed from one machine scans the code of another and lists and
   await phone.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
   await phone.reload();
 
-  // The app opens on a screen with one way in: scan the code, or type it. No link to paste, no machine to add.
+  // The app opens on a screen with one way in: scan the code, or paste the link behind a button. No machine to add by hand.
   await phone.waitFor(`document.querySelector('${id('mobile-connect')} ${id('machine-scan')}')`, 30_000);
-  expect(await phone.evaluate(`!!document.querySelector('${id('machine-code-open')}')`)).toBe(true);
+  expect(await phone.evaluate(`!!document.querySelector('${id('machine-paste-open')}')`)).toBe(true);
   expect(await phone.evaluate(`!document.querySelector('${id('machine-add-open')}') && !document.querySelector('${id('machine-link')}')`)).toBe(true);
   await capture(phone, 'devices-phone-unpaired.png');
 
@@ -242,7 +242,7 @@ test('a phone installed from one machine scans the code of another and lists and
   await desk.waitFor(`document.querySelector('${id('group-card')} ${id('group-device')}') && document.querySelectorAll('${id('machine-card')}').length === 2`);
   expect(await desk.evaluate(`document.body.textContent.includes('Phones and other devices')`)).toBe(false);
   await desk.click(id('group-add-device'));
-  await desk.waitFor(`document.querySelector('${id('add-device-qr')} svg') && /^[0-9A-Z]{4}-[0-9A-Z]{4}$/.test(document.querySelector('${id('add-device-code')}')?.textContent ?? '')`);
+  await desk.waitFor(`document.querySelector('${id('add-device-qr')} svg') && document.querySelector('${id('add-device')}').textContent.includes('Scan with your phone')`);
   await desk.evaluate(`document.querySelector('${id('group-card')}').scrollIntoView({ block: 'start' })`);
   await capture(desk, 'devices-desktop-machines.png');
   await desk.click(id('add-device-close'));
