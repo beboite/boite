@@ -228,7 +228,9 @@ export class Workspace {
     const remote = new Store();
     remote.machineId = 'http://builder.test';
     remote.visible = false;
-    remote.attach(new FakeClient({ coreId: 'fake-builder', coreName: 'Builder', publicUrl: 'https://builder.test' }));
+    // `?desktopUpdate=<phase>` makes it a Windows PC whose desktop app reports an update.
+    const desktopApp = new URLSearchParams(window.location.search).get('desktopUpdate') !== null;
+    remote.attach(new FakeClient({ coreId: 'fake-builder', coreName: 'Builder', publicUrl: 'https://builder.test', desktopApp }));
     await remote.connect();
     if (!this.#current(lifecycle)) {
       remote.client?.close();
@@ -236,7 +238,7 @@ export class Workspace {
       return;
     }
     remote.booted = true;
-    if (remote.core) remote.core.os = 'linux';
+    if (remote.core) remote.core.os = desktopApp ? 'windows' : 'linux';
     const machine = { id: remote.machineId, label: 'Builder', store: remote };
     this.restoreProfile(machine);
     this.machines = [...this.machines, machine];
