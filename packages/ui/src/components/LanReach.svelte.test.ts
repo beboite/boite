@@ -5,6 +5,7 @@ import type { Store } from '../lib/store.svelte';
 import AddDevice from './AddDevice.svelte';
 import PhoneSettings from './PhoneSettings.svelte';
 import { isLoopback } from './LanReach.svelte';
+import { strings } from '../lib/strings';
 
 let mounted: ReturnType<typeof mount> | undefined;
 beforeEach(() => {
@@ -22,7 +23,7 @@ afterEach(async () => {
 const settle = async () => { for (let i = 0; i < 20; i++) { await Promise.resolve(); flushSync(); } };
 const ready: FirewallStatus = { state: 'ready', networks: ['public'], allowed: ['public'], blocked: [] };
 const unset: FirewallStatus = { state: 'unset', networks: ['public'], allowed: [], blocked: [] };
-const invite = (origin: string): DeviceInvite => ({ url: `${origin}/?grant=g#join=boite-invite`, code: 'K7QM-2222', expiresAt: Date.now() + 600_000, codeExpiresAt: Date.now() + 300_000 });
+const invite = (origin: string): DeviceInvite => ({ url: `${origin}/?grant=g#join=boite-invite`, expiresAt: Date.now() + 600_000 });
 const tailscaleOff = { state: 'off', dnsName: null, url: null, servedTarget: null, target: 'http://127.0.0.1:7337', publicUrlMatches: false };
 
 /** "Add a device" on the desktop app's own core, which listens on itself until the setting is on and a restart applied it. */
@@ -56,7 +57,8 @@ test('a loopback link shows no QR code, and the button turns the network on, res
   await settle();
   expect(document.querySelector('[data-testid=add-device]')).not.toBeNull();
   expect(document.querySelector('[data-testid=add-device-qr]')).toBeNull();
-  expect(document.querySelector('[data-testid=add-device-code]')).toBeNull();
+  // Nothing tells a phone to scan a link that would name the phone itself.
+  expect(document.querySelector('[data-testid=add-device]')?.textContent).not.toContain(strings.group.scanTitle);
   document.querySelector<HTMLButtonElement>('[data-testid=lan-reach-button]')!.click();
   await settle();
   expect(store.settings.listenOnLan).toBe(true);
@@ -66,7 +68,7 @@ test('a loopback link shows no QR code, and the button turns the network on, res
   await settle();
   expect(store.deviceInvite?.url).toBe('http://192.168.1.52:7337/?grant=g#join=boite-invite');
   expect(document.querySelector('[data-testid=lan-reach]')).toBeNull();
-  expect(document.querySelector('[data-testid=add-device-code]')?.textContent).toBe('K7QM-2222');
+  expect(document.querySelector('[data-testid=add-device]')?.textContent).toContain(strings.group.scanTitle);
 });
 
 test('a core the desktop app did not start keeps the manual hint and no button', async () => {

@@ -4,7 +4,6 @@ import { createECDH, generateKeyPairSync, randomBytes, sign, type KeyObject } fr
 import { connect, type CoreClient } from '../src/client.ts';
 import { appOrigin, isAllowedOrigin } from '../src/server.ts';
 import { APP_ORIGIN } from '@boite/contracts';
-import { FORWARDS_PER_MINUTE } from '../src/group/clients.ts';
 import { mergeDeviceKeys } from '../src/group/device-keys.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 
@@ -75,7 +74,7 @@ async function pair(): Promise<[TestCore, TestCore]> {
 test('a phone added on one member says hello on every member with one key, and one revocation shuts it out everywhere', async () => {
   const [a, b] = await pair();
   const phone = phoneKey();
-  // "Add a device" on b: one link and one code.
+  // "Add a device" on b: one link.
   const added = await b.core.group.clients.addDevice();
   const grant = new URL(added.url).searchParams.get('grant')!;
   expect(added.url).toContain('#join=');
@@ -106,21 +105,6 @@ test('a phone added on one member says hello on every member with one key, and o
   // A device a machine never heard of is told to come back, never that it was removed.
   const stranger = phoneKey();
   await refused(a, open(a.url, { device: helloFor(stranger, 'f'.repeat(64), id(a)) }), 'has not heard of this device yet');
-});
-
-test('a code drawn on one member is typed on another and still admits the phone', async () => {
-  const [a, b] = await pair();
-  const phone = phoneKey();
-  const drawn = (await b.core.group.clients.addDevice()).code;
-  // The installed app sends the code to the machine that serves its page: a, which never drew it.
-  // Typed as people type it, lower case and spaced: b reads it as a would have.
-  const code = drawn.toLowerCase().replace('-', ' ');
-  const admitted = await open(a.url, { grant: code, device: { publicKey: phone.publicKey, sig: phone.sign(deviceAdmitInput(code, phone.publicKey)) } });
-  expect(admitted.device).toMatch(/^[0-9a-f]{64}$/);
-  expect(b.core.group.view('owner')?.devices.map((device) => device.by)).toEqual([id(b)]);
-  // Spent: another phone with the same code is refused.
-  const other = phoneKey();
-  await refused(a, open(a.url, { grant: code, device: { publicKey: other.publicKey, sig: other.sign(deviceAdmitInput(code, other.publicKey)) } }), 'wrong, expired, or was already used');
 });
 
 test('a phone paired the older way hands over its key and keeps both until revoked, and removing a machine keeps the phones it added', async () => {
@@ -184,15 +168,15 @@ test('a member trusts the origins the others are served from, learned from their
   await refused(b, connect(b.url, '', { headers: { origin: 'https://elsewhere.example' }, device: helloFor(phone, cross.device!, id(b)) }));
 });
 
-test('a device redeeming its code again after a lost answer is answered until the grant expires, and a malformed key keeps its own refusal', async () => {
+test('a device redeeming its grant again after a lost answer is answered until the grant expires, and a malformed key keeps its own refusal', async () => {
   const a = await machine();
   await a.core.group.create('Home');
-  const { code } = await a.core.group.clients.addDevice();
+  const spent = new URL((await a.core.group.clients.addDevice()).url).searchParams.get('grant')!;
   const now = Date.now();
-  expect(a.core.sessions.redeem(code, 'f'.repeat(64), null, now)).toBe('device');
-  // Past the code's five minutes, inside the grant's ten: the same device asking again gets the same answer.
-  expect(a.core.sessions.redeem(code, 'f'.repeat(64), null, now + 6 * 60_000)).toBe('device');
-  expect(() => a.core.sessions.redeem(code, 'e'.repeat(64), null, now + 6 * 60_000)).toThrow('already used');
+  expect(a.core.sessions.redeem(spent, 'f'.repeat(64), null, now)).toBe('device');
+  // Inside the grant's ten minutes: the same device asking again gets the same answer, any other is refused.
+  expect(a.core.sessions.redeem(spent, 'f'.repeat(64), null, now + 6 * 60_000)).toBe('device');
+  expect(() => a.core.sessions.redeem(spent, 'e'.repeat(64), null, now + 6 * 60_000)).toThrow('already used');
   // A key that is no key is invalid, said so with its field: never taken for a removal.
   const fresh = await a.core.group.clients.addDevice();
   const grant = new URL(fresh.url).searchParams.get('grant')!;
@@ -210,7 +194,7 @@ test('every core accepts the phone app\'s address, the published one or the one 
   expect(() => appOrigin({ BOITE_APP_ORIGIN: 'https://app.example/path' })).toThrow('BOITE_APP_ORIGIN');
 });
 
-test('a key handed over on two members keeps both older pairings, a removed key spends no code through another member, and a device key gets no ticket', async () => {
+test('a key handed over on two members keeps both older pairings, a removed key spends no link, and a device key gets no ticket', async () => {
   const merged = mergeDeviceKeys(
     [{ id: 'k', publicKey: 'p', name: 'Phone', role: 'device', admit: { by: 'a', sig: 's' }, at: 1, rev: 3, legacy: [`${'a'.repeat(64)}:ses_1`] }],
     [{ id: 'k', publicKey: 'p', name: 'Phone', role: 'device', admit: { by: 'b', sig: 's' }, at: 1, rev: 4, legacy: [`${'b'.repeat(64)}:ses_2`] }],
@@ -227,11 +211,11 @@ test('a key handed over on two members keeps both older pairings, a removed key 
   b.core.group.clients.revokeDevice(admitted.device!);
   await settled(b, 0);
   await waitFor(() => (a.core.group.view('owner')?.devices.length ?? 1) === 0);
-  // The removed key types a code b drew on a: refused, and the code still admits the next key.
-  const { code } = await b.core.group.clients.addDevice();
-  await refused(a, open(a.url, { grant: code, device: { publicKey: phone.publicKey, sig: phone.sign(deviceAdmitInput(code, phone.publicKey)) } }));
+  // The removed key opens a new link b drew: refused, and the link still admits the next key.
+  const link = new URL((await b.core.group.clients.addDevice()).url).searchParams.get('grant')!;
+  await refused(b, open(b.url, { grant: link, device: { publicKey: phone.publicKey, sig: phone.sign(deviceAdmitInput(link, phone.publicKey)) } }), 'removed from the group');
   const next = phoneKey();
-  const again = await open(a.url, { grant: code, device: { publicKey: next.publicKey, sig: next.sign(deviceAdmitInput(code, next.publicKey)) } });
+  const again = await open(b.url, { grant: link, device: { publicKey: next.publicKey, sig: next.sign(deviceAdmitInput(link, next.publicKey)) } });
   expect(again.device).toMatch(/^[0-9a-f]{64}$/);
   // An origin the roster could not read back is never written into it.
   a.core.group.servedFrom('null');
@@ -265,19 +249,3 @@ test('a push to a device key names the machine its thread is on, sent by that ma
   }
 });
 
-test('wrong codes typed on one member drop none of the codes another member drew, and only a few a minute are passed on', async () => {
-  const [a, b] = await pair();
-  const { code } = await b.core.group.clients.addDevice();
-  const guesser = phoneKey();
-  // A minute's worth of wrong codes typed on a's page: a counts them, b, which only hears them passed on, does not.
-  for (let i = 0; i < FORWARDS_PER_MINUTE; i++) {
-    const wrong = `ZZZZ-ZZ${String(i).padStart(2, '0')}`;
-    await refused(a, open(a.url, { grant: wrong, device: { publicKey: guesser.publicKey, sig: guesser.sign(deviceAdmitInput(wrong, guesser.publicKey)) } }));
-  }
-  // The next one is not passed on, good as it is: a refuses it alone, and b's code is not spent.
-  const phone = phoneKey();
-  const offer = { publicKey: phone.publicKey, sig: phone.sign(deviceAdmitInput(code, phone.publicKey)) };
-  await refused(a, open(a.url, { grant: code, device: offer }), 'wrong, expired, or was already used');
-  const admitted = await open(b.url, { grant: code, device: offer });
-  expect(admitted.device).toMatch(/^[0-9a-f]{64}$/);
-});

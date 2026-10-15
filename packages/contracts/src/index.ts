@@ -2748,13 +2748,6 @@ export interface PairingGrant {
   grant: string;
   role: PairingRole;
   expiresAt: Timestamp;
-  /**
-   * The same grant as a short code to type, `XXXX-XXXX`, for an installed
-   * iPhone app that cannot open the link (the camera hands it to Safari, which
-   * keeps its own storage). Valid until `codeExpiresAt`, once, like the grant.
-   */
-  code?: string;
-  codeExpiresAt?: Timestamp;
 }
 
 /**
@@ -3084,18 +3077,14 @@ export interface Group {
 }
 
 /**
- * What "Add a device" shows: one link, drawn as a QR code, and a short code
- * under it. A phone scans the link or types the code: it is admitted to the
- * group with its device key and reaches every member. A computer pastes the
- * link: its core joins the group with the invitation the link carries after
- * `#`. Both secrets are one-time and expire.
+ * What "Add a device" shows: one link, drawn as a QR code. A phone scans it:
+ * it is admitted to the group with its device key and reaches every member. A
+ * computer pastes it: its core joins the group with the invitation the link
+ * carries after `#`. Both secrets are one-time and expire.
  */
 export interface DeviceInvite {
   url: string;
-  /** `XXXX-XXXX`, the same admission for a phone, typed. */
-  code: string;
   expiresAt: Timestamp;
-  codeExpiresAt: Timestamp;
 }
 
 /**
@@ -3118,7 +3107,7 @@ export function deviceHelloInput(coreId: string, at: number, nonce: string): str
   return `boite-device-hello\n${coreId}\n${at}\n${nonce}`;
 }
 
-/** What a device signs when it is admitted: the grant or code it redeems, so its key is proven held by the one who scanned. */
+/** What a device signs when it is admitted: the grant it redeems, so its key is proven held by the one who scanned. */
 export function deviceAdmitInput(grant: string, publicKey: string): string {
   return `boite-device-admit\n${grant}\n${publicKey}`;
 }
@@ -3933,7 +3922,7 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'files.write': { params: { threadId: ThreadId; path: string; text: string }; result: { bytes: number; modifiedAt: Timestamp } };
 
   /** A fresh one-time pairing link, `device` unless the role says otherwise. Owner only. */
-  'pairing.grant': { params: { role?: PairingRole; short?: boolean }; result: PairingGrant };
+  'pairing.grant': { params: { role?: PairingRole }; result: PairingGrant };
   /** Tailscale CLI and `tailscale serve` state for this core. Owner only. */
   'tailscale.status': { params: Record<string, never>; result: TailscaleStatus };
   /** Serve this core on https://<MagicDNS name> and make it the public URL. `replace` takes 443 from another target. Owner only. */
@@ -4797,22 +4786,6 @@ export const GRANT_QUERY_PARAM = 'grant';
 export const GRANT_TTL_MS = 10 * 60 * 1000;
 /** Every role `pairing.grant` takes; anything else is refused by name. */
 export const PAIRING_ROLES: readonly PairingRole[] = ['device', 'owner'];
-/** How long a typed pairing code and a short owner grant stay valid. */
-export const PAIRING_CODE_TTL_MS = 5 * 60 * 1000;
-/** Letters of a pairing code: Crockford base32, no I, L, O or U to misread. */
-export const PAIRING_CODE_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
-
-/**
- * A typed or pasted pairing code in its canonical 8-letter form, or null when
- * it cannot be one. Case, spaces and dashes are ignored; O reads as 0, I and L as 1.
- */
-export function normalizePairingCode(text: string): string | null {
-  const code = text.toUpperCase().replace(/[\s-]+/g, '').replace(/O/g, '0').replace(/[IL]/g, '1');
-  if (code.length !== 8) return null;
-  for (const letter of code) if (!PAIRING_CODE_ALPHABET.includes(letter)) return null;
-  return code;
-}
-
 /**
  * What a client says it is in its `hello`. `plugin` is a desktop-app plugin
  * (`provides.desktopApp`) talking to the core that started it: it signs in
