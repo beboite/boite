@@ -49,6 +49,8 @@ export function registerModules(core: Core): void {
   core.router.register('core.updateInstall', params => core.serverUpdates.install(params.version));
   core.router.register('core.updateCancel', () => core.serverUpdates.cancel());
   core.router.register('core.updateEverything', params => updateEverything(core, params));
+  core.router.register('core.desktopUpdateReport', (params, ctx) => core.desktopUpdates.report(params, ctx.connection));
+  core.router.register('core.desktopUpdateStatus', () => core.desktopUpdates.snapshot());
   registerPersistentAgents(core);
   core.router.register('brain.status', () => core.brain.status());
   core.router.register('brain.configure', params => core.brain.configure(params));
