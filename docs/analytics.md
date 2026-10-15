@@ -48,8 +48,19 @@ by the relay can still finish during withdrawal; deletion is not instantaneous.
 | `thread_spawned` | A conversation is created | `provider` |
 | `turn_finished` | A turn finishes, fails or stops | `provider`, `outcome`, `duration_ms` |
 
-Every event has a random event UUID, timestamp, app version, OS and architecture.
-The relay adds country and collection mode. Providers and outcomes come from
+Every event has a random event UUID, timestamp, app version, OS, OS version and
+architecture. The relay adds country and collection mode.
+
+`os_version` names the host's release from fixed system fields, read once at
+startup: on Windows the product name and build (`Windows 11 Pro 26200`; the
+registry keeps "Windows 10" on Windows 11, so a build from 22000 is renamed),
+on macOS `ProductVersion` from `SystemVersion.plist` (`macOS 15.1`), on Linux
+`ID` and `VERSION_ID` from `os-release` (`ubuntu 24.04`, `arch` for a rolling
+release). `PRETTY_NAME` is not used because a distribution writes it freely.
+A server image reports the distribution of its container, not of the machine
+under it. The relay keeps a value of at most 48 characters starting with a
+letter and made of letters, digits, spaces and `._+()-`, otherwise `other`;
+events from hosts older than the field carry no `os_version` at all. Providers and outcomes come from
 closed lists; unknown values become `other`. Both the host and relay construct
 new payloads from approved fields.
 
@@ -64,9 +75,14 @@ changes.
 GPT and o-series, Gemini, Grok, DeepSeek, GLM, Kimi) with closed patterns, so a
 new release of a known family needs no Boite update. Only the segment after the
 last `/` is checked: `codex/gpt-6.1-sol` reports `gpt-6.1-sol` and the prefix is
-dropped. Unknown models, custom aliases, paths and fine-tuned IDs become `other`
+dropped.
+An effort suffix in the ID (`gemini-3.8-flash-high`, `claude-opus-4-6-thinking`,
+as Antigravity names its models) is removed before matching. Unknown models, custom aliases, paths and fine-tuned IDs become `other`
 on both the host and relay. Both normalize, so a family added to the patterns
-counts only after a host release and a relay deployment.
+counts only after a host release and a relay deployment. Deploy the relay in
+the same change: until 2026-10-15 it still ran the 2026-09-21 build, which
+filed every enhanced model and the `yolo` permission mode under `other`, even
+from hosts that reported them correctly. Events already stored keep `other`.
 Basic mode strips every enhanced field even from modified clients.
 
 These fields measure model adoption, retention among consenting installations,

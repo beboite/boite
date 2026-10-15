@@ -2459,6 +2459,8 @@ export interface CoreInfo {
     attachmentUploads?: boolean;
     /** `ui.reveal` takes `coreId` on a thread or an agent target and opens it on that machine. An older core drops the field and opens this core's. */
     revealMachines?: boolean;
+    /** `core.desktopUpdateReport`, `core.desktopUpdateStatus` and `core.updateEverything` `app`: the desktop app of this machine updates on another machine's click. */
+    desktopUpdates?: boolean;
   };
   /** The fingerprint of this core's identity key: the id its group knows it by, and the one a device signs its hello for. */
   coreId?: string;
@@ -3533,6 +3535,21 @@ export interface ServerUpdateStatus {
   error: string | null;
 }
 
+/**
+ * The desktop app's updater on the machine whose core this is, as that
+ * machine's own window reported it. Only the window drives the installer, so
+ * the core keeps the last report and nothing more.
+ */
+export interface DesktopUpdateStatus {
+  phase: 'idle' | 'checking' | 'current' | 'available' | 'downloading' | 'ready' | 'waiting' | 'installing' | 'error';
+  currentVersion: string;
+  version: string | null;
+  channel: 'stable' | 'nightly';
+  received: number;
+  total: number | null;
+  error: string | null;
+}
+
 /** What `core.updateEverything` started on its machine. */
 export interface UpdateEverythingResult {
   /** The agents whose update started, or was already under way. */
@@ -3543,6 +3560,10 @@ export interface UpdateEverythingResult {
   server: ServerUpdateStatus;
   /** Why Boite's own release did not start, null when it did or was not asked for. */
   serverError: string | null;
+  /** The desktop app's updater as its window last reported it; absent from a core without `desktopUpdates`. */
+  app?: DesktopUpdateStatus | null;
+  /** Why the desktop app's release was not handed to its window, null when it was or was not asked for. */
+  appError?: string | null;
 }
 
 export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, BrowserRpcMethods, PullRequestsRpcMethods, MobileDevicesRpcMethods, DiagnosticsRpcMethods {
@@ -3566,9 +3587,21 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * are done and the core is idle, so no updater is cut off by the restart.
    * Answers as soon as everything has started; progress arrives as
    * `providers.updatesChanged` and `core.updateChanged`. One part failing
-   * leaves the others running.
+   * leaves the others running. `app` names the desktop app's offered
+   * release: once the agents named here finished, the core hands it to this
+   * machine's own window, which installs it and restarts; `appError` says
+   * when no window is open to do it.
    */
-  'core.updateEverything': { params: { agents: ProviderId[]; server: string | null }; result: UpdateEverythingResult };
+  'core.updateEverything': { params: { agents: ProviderId[]; server: string | null; app?: string | null }; result: UpdateEverythingResult };
+  /**
+   * Owner only, and only from this machine's own desktop window (the core
+   * token on loopback): its updater's state, sent again on every change. A
+   * paired device or another member of the group has no installer here to
+   * speak for, so it is refused. Kept until that window's socket closes.
+   */
+  'core.desktopUpdateReport': { params: { status: DesktopUpdateStatus }; result: { ok: true } };
+  /** Owner only. The desktop app's updater on this machine, null when no window of it is connected. */
+  'core.desktopUpdateStatus': { params: Record<string, never>; result: DesktopUpdateStatus | null };
   'delegation.get': { params: { threadId: ThreadId }; result: DelegationView };
   'delegation.configure': { params: { threadId: ThreadId; config: DelegationConfig }; result: DelegationView };
   /**
@@ -4642,6 +4675,14 @@ export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents, BrowserR
   };
   'core.log': { level: CoreLogLevel; message: string; at: Timestamp } & CoreLogContext;
   'core.updateChanged': ServerUpdateStatus;
+  /** Owner connections only: this machine's desktop updater as its window reported it, null once that window left. */
+  'core.desktopUpdateChanged': { status: DesktopUpdateStatus | null };
+  /**
+   * This machine's own desktop window only: install this release now, the
+   * owner asked from another machine (`core.updateEverything` `app`). The
+   * window checks it against its own offer before anything installs.
+   */
+  'ui.appUpdate': { version: string };
   /** What a shell printed, as it printed it. */
   'terminal.output': { id: string; data: string; sequence?: number };
   /** Portable brain switches changed. The folder stays on its host. */

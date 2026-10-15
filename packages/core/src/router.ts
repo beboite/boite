@@ -16,6 +16,8 @@ export interface Connection {
   readonly sentFrom?: SentFrom | null;
   /** Reached by a name other than this machine's loopback: a phone, a laptop, a tunnel. Unset counts as remote. */
   readonly remote?: boolean;
+  /** The client name hello gave (`shell`, `pwa`, `plugin`, `cli`); unset for tests that build a connection by hand. */
+  readonly clientName?: string;
   sendEvent<E extends RpcEventName>(name: E, payload: RpcEvents[E]): void;
   close(code: number, reason?: string): void;
   /** Release held requests when this socket leaves, without stopping their work. */

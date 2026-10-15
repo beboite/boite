@@ -10,6 +10,7 @@ const sample = (patch: Partial<MemorySample> = {}): MemorySample => ({
   availableBytes: 1000, reserveBytes: 100, budgetBytes: 5000, quotaBytes: 2000,
   agentBytes: 0, processes: [], at: 0, ...patch,
 });
+const MB = 1024 ** 2;
 const child = (pid: number, bytes: number, root = false, threadId = 'thread') => ({ threadId, pid, exe: 'child', bytes, root });
 
 describe('memory policy', () => {
@@ -18,22 +19,22 @@ describe('memory policy', () => {
     const events: MemoryEvent[] = [];
     const guard = new MemoryGuard(bus, { ...createPosixPlatform('linux'), machineMemory: () => ({ totalBytes: 32 * 1024 ** 3, availableBytes: 0 }) });
     bus.onAny((name, payload) => { if (name === 'resources.memory') events.push(payload as MemoryEvent); });
-    const processes = [child(1, 100, true), child(2, 300)];
+    const processes = [child(1, 100 * MB, true), child(2, 300 * MB)];
     let kills = 0;
     const kill = () => { kills++; return true; };
     guard.applySettings(DEFAULT_SETTINGS);
-    guard.sample(400, processes, kill);
+    guard.sample(400 * MB, processes, kill);
     expect(kills).toBe(1);
     guard.applySettings({ ...DEFAULT_SETTINGS, memoryProtection: false });
     expect(events.at(-1)).toMatchObject({ kind: 'pressure', state: 'ok' });
     const count = events.length;
-    guard.sample(500, processes, kill);
+    guard.sample(500 * MB, processes, kill);
     guard.memoryLimit('thread', 'thread-cap');
     expect(kills).toBe(1);
     expect(events).toHaveLength(count);
-    expect(guard.status()).toMatchObject({ state: 'ok', agentBytes: 500, limits: { budgetMb: 0, threadMemoryCapMb: 0, memoryReserveMb: 0 } });
+    expect(guard.status()).toMatchObject({ state: 'ok', agentBytes: 500 * MB, limits: { budgetMb: 0, threadMemoryCapMb: 0, memoryReserveMb: 0 } });
     guard.applySettings(DEFAULT_SETTINGS);
-    guard.sample(400, processes, kill);
+    guard.sample(400 * MB, processes, kill);
     expect(kills).toBe(2);
     bus.dispose();
   });
@@ -72,6 +73,21 @@ describe('memory policy', () => {
     let policy = decideMemory(first.policy, sample()).policy;
     policy = decideMemory(policy, sample()).policy;
     expect(decideMemory(policy, low).nothingKillable).toEqual(['thread']);
+  });
+  test('a machine short of memory because of other programs keeps an agent signing in', () => {
+    // An 8 GB laptop with 307 MB available: the sign-in helper an agent starts
+    // weighs 24 MB, so stopping it fails the sign-in and frees nothing.
+    const low = sample({ availableBytes: 307 * MB, reserveBytes: 1989 * MB, budgetBytes: 4608 * MB, quotaBytes: 2304 * MB, agentBytes: 42 * MB, processes: [
+      child(1, 10 * MB, true, 'login'), child(2, 24 * MB, false, 'login'), child(3, 8 * MB, true, 'probe'),
+    ] });
+    const result = decideMemory(initialMemoryPolicy(), low);
+    expect(result).toMatchObject({ kills: [], nothingKillable: [], policy: { state: 'critical' } });
+    // A heavy protected root does not make its small helper worth stopping either.
+    const beside = decideMemory(initialMemoryPolicy(), { ...low, processes: [child(1, 600 * MB, true), child(2, 24 * MB)] });
+    expect(beside).toMatchObject({ kills: [], nothingKillable: ['thread'] });
+    // A build the agent started is.
+    const build = [child(1, 300 * MB, true), child(2, 1500 * MB)];
+    expect(decideMemory(initialMemoryPolicy(), { ...low, processes: build }).kills).toEqual([{ process: build[1]!, reason: 'machine', limitBytes: 1989 * MB }]);
   });
   test('recovery takes two good readings, missing readings reset it and recovery never kills', () => {
     let policy = decideMemory(initialMemoryPolicy(), sample({ availableBytes: 50 })).policy;
