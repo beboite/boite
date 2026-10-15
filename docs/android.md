@@ -31,7 +31,7 @@ machine's Public HTTPS address; the nightly's reads it with **Scan the code**.
 
 ## Installing it
 
-Each nightly release carries `boite-<version>.apk`: download it on the phone,
+Each nightly release carries `boite-android-<app version>.apk`: download it on the phone,
 allow the browser to install unknown apps when Android asks, and open Boite.
 Android updates the app over an older one when the certificate matches and the
 version code is higher. For another host, run `android.yml` by hand with
@@ -48,14 +48,36 @@ of these hold:
 - its certificate is the one `assetlinks.json` publishes.
 
 Otherwise the job builds the APK, signs it with `apksigner` and checks the
-certificate before uploading. A reused APK keeps its original version, so its
-filename may name an older version than the run that reused it. Only the
-Android wrapper goes into the APK; UI and core changes never rebuild it.
-
-The version name is the `package.json` version, and the version code is the
-number of commits on `main`, which only grows. `ci` builds an unsigned APK when
+certificate before uploading. Only the Android wrapper goes into the APK; UI
+and core changes never rebuild it. `ci` builds an unsigned APK when
 `apps/android/` or its pipeline changes and keeps it as the
 `android-apk-unsigned` artifact of that run.
+
+## The app version
+
+The app has its own version, `MAJOR.MINOR.PATCH`, apart from Boite's release
+version. `apps/android/VERSION` holds `MAJOR.MINOR`:
+
+- Raise the minor by hand for a large addition to the app.
+- Raise the major by hand for a rewrite.
+- Nothing automatic ever changes either one.
+
+The nightly sets the patch:
+
+- A reused APK keeps its file and its version. A release with no change to the
+  app does not move the version.
+- A rebuilt APK with the same `MAJOR.MINOR` as the last published one takes
+  that APK's patch plus one.
+- A rebuilt APK after `VERSION` was raised starts at patch 0.
+- The last APK named after Boite's release (`boite-2.0.0-nightly.*.apk`)
+  carries no app version, so the first rebuild after it is `1.0.0`.
+
+`android-apk.ts` reads the last version from the file name
+`boite-android-<version>.apk`. It refuses a `VERSION` below the published app
+and a minor or patch of 1000 or more. The version name is `MAJOR.MINOR.PATCH`.
+The version code is `MAJOR * 1000000 + MINOR * 1000 + PATCH`. It sits above
+the commit counts that older APKs used, and every newer version gets a larger
+code. Editing `VERSION` changes `apps/android/`, so the next nightly rebuilds.
 
 ## The signing key
 
@@ -79,8 +101,8 @@ cd apps/android
 ANDROID_HOME=<sdk> ./gradlew assembleRelease -PboiteHost=boite.example.com
 ```
 
-`-PboiteVersion` and `-PboiteVersionCode` default to the `package.json`
-version and `1`. The unsigned APK lands in
+`-PboiteVersion` and `-PboiteVersionCode` default to `VERSION` with patch 0
+and the code that version gets. The unsigned APK lands in
 `app/build/outputs/apk/release/app-release-unsigned.apk`; sign it with
 `zipalign` and `apksigner` as the workflow does.
 
