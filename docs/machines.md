@@ -311,6 +311,14 @@ account is ignored. A new thread needs the core, so a
 draft keeps its text until the machine returns. A machine offline since the app
 started has no cards to open: the client keeps no copy of the thread list.
 
+Archiving or restoring a project of a machine that is offline still works: the
+project moves at once and the choice is kept on this device, per core, in
+localStorage (`boite.pendingArchive.v1`). The machine's next project list is
+shown with those choices laid over it, then each is sent with
+`projects.archive`. A call lost with the connection waits for the next
+reconnect; a refused one, or a project the machine no longer lists, drops the
+choice (`store/projects.svelte.ts`).
+
 A lookup the user did not ask for fails quietly, and once `gh` is missing or
 signed out the core stops starting it. The thread menu's refresh reads the
 repository again, tries `gh` again, and shows a missing `gh`, an

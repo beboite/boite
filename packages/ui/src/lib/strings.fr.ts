@@ -63,6 +63,7 @@ export const fr: Translation = {
     compactAny: 'Quelle que soit la taille',
     keys: {
       asyncQuestions: 'Laisser les agents demander sans s\'arrêter',
+      shortAnswers: 'Réponses courtes',
       titleModel: 'Modèle des titres',
       threadDoneRetentionDays: 'Supprimer les conversations terminées après',
       threadDeletionRetentionDays: 'Purger les conversations supprimées après',
@@ -2157,6 +2158,8 @@ export const fr: Translation = {
     reapOrphansHint: 'Dix secondes après un tour, un processus dont le parent est sorti est arrêté. Windows uniquement.',
     asyncQuestions: 'Laisser les agents poser des questions sans s’arrêter',
     asyncQuestionsHint: 'Apprend la commande boite ask aux agents au début d\'une session. Codex pose déjà ses questions ainsi.',
+    shortAnswers: 'Réponses courtes',
+    shortAnswersHint: 'Demande à chaque agent, à chaque message, le résultat d\'abord en quelques phrases simples, sans préambule, récapitulatif ni commentaire en cours de route. Les faits, les chiffres et les commandes restent.',
     titleModel: 'Modèle des titres',
     titleModelHint: 'Nomme une conversation après sa première réponse. Automatique prend l\'agent de la conversation sur son petit modèle.',
     titleModelAuto: 'Automatique',

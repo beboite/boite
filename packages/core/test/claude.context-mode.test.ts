@@ -42,6 +42,8 @@ test('a light child starts with its brief, its hooks and a few tools; a plain on
   // The user's settings stay: their hooks still guard the child and their compaction window applies.
   expect(call.options.settingSources).toEqual(['user', 'project', 'local']);
   expect(call.options.settings).not.toHaveProperty('disableAllHooks');
+  // Claude Code's model-tuned prompt stays (Haiku's own autonomy section rides on it); Boite's guide does not.
+  expect(call.options.systemPrompt).toEqual({ type: 'preset', preset: 'claude_code', excludeDynamicSections: true });
   expect(call.prompts[0]).toContain('Count the lines of README.md');
   expect(call.prompts[0]).not.toContain('You are a Boite subagent of');
 
