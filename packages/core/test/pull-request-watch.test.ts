@@ -273,7 +273,7 @@ test('a rate limit pauses every read until it passes, an unreachable GitHub only
   expect(github.calls).toEqual([]);
 });
 
-test('Stop, unwatch and archive end watches, and the refusals name what is wrong', async () => {
+test('Stop ends every watch of the thread, and the refusals name what is wrong', async () => {
   const { owner, threadId, github } = await watchedThread();
   await expect(owner.call('threads.watchPullRequest', { threadId, url: '8' })).rejects.toThrow('no linked pull request is #8');
   await expect(owner.call('threads.watchPullRequest', { threadId, url: 'https://gitlab.example/a/b/pull/1' })).rejects.toThrow('host');
@@ -283,10 +283,13 @@ test('Stop, unwatch and archive end watches, and the refusals name what is wrong
   const before = github.calls.length;
   await Bun.sleep(300);
   expect(github.calls.length - before).toBeLessThanOrEqual(1);
+  await expect(owner.call('threads.unwatchPullRequest', { threadId, url: '#9' })).rejects.toThrow('does not watch #9');
   expect((await owner.call('turns.stop', { threadId })).stopped).toBe(true);
   expect(harness!.core.pullRequestWatches.of(threadId)).toEqual([]);
+});
 
-  // The agent's CLI: watch prints what the first read saw, unwatch what is left.
+test('the agent\'s CLI watches and unwatches, printing what the first read saw', async () => {
+  const { threadId } = await watchedThread();
   const boite = async (...args: string[]) => {
     let out = '';
     const code = await runCli(args, { out: text => { out += text; }, err: text => { out += text; }, cwd: harness!.dataDir,
@@ -294,10 +297,11 @@ test('Stop, unwatch and archive end watches, and the refusals name what is wrong
     return { code, out };
   };
   expect(await boite('pr', 'watch', URL)).toEqual({ code: 0, out: expect.stringContaining(`watching #7 ${URL}: head aaaaaaa; 1 checks, 1 running, 0 failed`) });
-  await expect(owner.call('threads.unwatchPullRequest', { threadId, url: '#9' })).rejects.toThrow('does not watch #9');
   expect(await boite('pr', 'unwatch', '7')).toEqual({ code: 0, out: expect.stringContaining('no pull request watched') });
+});
 
-  // An agent watches its own thread; a paired phone may stop a watch, not start one.
+test('an agent watches its own thread; a paired phone may stop a watch, never start one', async () => {
+  const { owner, threadId } = await watchedThread();
   const agent = await connect(harness!.url, harness!.core.agents.tokenFor(threadId), { client: { name: 'boite-cli', version: 'test' } });
   const { grant } = await owner.call('pairing.grant', {});
   const phone = await connect(harness!.url, '', { grant });
@@ -306,13 +310,15 @@ test('Stop, unwatch and archive end watches, and the refusals name what is wrong
     await expect(phone.call('threads.watchPullRequest', { threadId })).rejects.toThrow('owner');
     expect(await phone.call('threads.unwatchPullRequest', { threadId })).toEqual([]);
   } finally { agent.close(); phone.close(); }
+});
 
+test('archive ends the watches and their saved state, and a merged pull request has nothing to watch', async () => {
+  const { owner, threadId, github } = await watchedThread();
   await owner.call('threads.watchPullRequest', { threadId });
+  expect(harness!.core.journal.getSetting(`pr-watches:${threadId}`)).toHaveLength(1);
   await owner.call('threads.archive', { threadId });
   expect(harness!.core.pullRequestWatches.of(threadId)).toEqual([]);
   expect(harness!.core.journal.getSetting(`pr-watches:${threadId}`)).toBeUndefined();
-
-  // A merged pull request has nothing to watch.
   await owner.call('threads.archive', { threadId, archived: false });
   github.state = 'MERGED';
   await expect(owner.call('threads.watchPullRequest', { threadId })).rejects.toThrow('is merged');
