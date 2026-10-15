@@ -17,6 +17,8 @@ import type {
 import { activityPrompt } from '../activity-prompt.ts';
 import { agentEnvOf } from '../agent.ts';
 import { agentGuide, SHORT_ANSWERS } from '../agent-guide.ts';
+import { nativeSkillFiles } from '../brain.ts';
+import { takesSystemGuide } from '../drivers/index.ts';
 import { contextRulesBlock } from '@boite/contracts';
 import { prepareAttachments, fileReference } from '../attachments.ts';
 import { continuationInput } from '../continuation.ts';
@@ -48,6 +50,27 @@ export interface CarriedInput {
 export class TurnContexts {
   constructor(private readonly core: Core, private readonly threads: ThreadStore) {}
 
+  /**
+   * Boite's guide for this thread's agent, or '' when a context mode without
+   * guides or the brain's switch turns it off.
+   */
+  private boiteGuide(thread: ThreadSummary, provider: ProviderDescriptor): string {
+    const mode = thread.contextMode ?? null;
+    if ((mode !== null && !mode.guides) || this.core.brain.config().boiteGuide === false) return '';
+    const settings = this.core.settings.get();
+    const logAccess = settings.agentLogAccess !== false;
+    // Without log access the guide still lists the built-in skills; only report-issue needs the logs.
+    const skills = builtinSkills(this.core.dataDir, message => { try { this.core.logs.warn(message, { source: 'skills', event: 'skills.write-failed' }); } catch { /* The guide is built without that skill. */ } });
+    // Echo treats "question" as a test directive, including in injected help.
+    return agentGuide(provider.protocol !== 'echo' && settings.asyncQuestions !== false, logAccess, skills);
+  }
+
+  /** The guide as a session option, for a driver that puts it in the system prompt. */
+  private systemGuide(thread: ThreadSummary, provider: ProviderDescriptor): string | undefined {
+    if (!takesSystemGuide(provider.protocol)) return undefined;
+    return this.boiteGuide(thread, provider) || undefined;
+  }
+
   /** Setup only: no journalled turn, no consumed deferred input and no message sink. */
   makeSessionContext(thread: ThreadSummary, provider: ProviderDescriptor, account: Account): SessionContext {
     const threadId = thread.id;
@@ -59,6 +82,7 @@ export class TurnContexts {
       resumeAt: thread.sessionResumeAt ?? null,
       sessionBefore: this.sessionBefore(thread, ''),
       accountEnv: this.core.accounts.accountEnv(account, provider),
+      systemGuide: this.systemGuide(thread, provider),
       warmProcessMinutes: this.core.settings.get().warmProcessMinutes,
       log: (level, message, context) => {
         if (context?.kind === 'provider-output') noteStderr(threadId, message);
@@ -279,6 +303,9 @@ export class TurnContexts {
     const noGuides = mode !== null && !mode.guides;
     const tail = (fresh: boolean): string => operation === 'compact' ? '' : (noGuides ? '' : this.core.delegation.instructions(threadId, operation ? '' : prepared.prompt, fresh)) + carried.letters;
     const origin = input.sentFrom;
+    const systemGuide = this.systemGuide(thread, provider);
+    // Skills the harness already names to its model stay out of the brain's catalog.
+    const listedSkills = nativeSkillFiles(provider.protocol, env, { cwd: thread.cwd, skillTool: !mode?.tools || mode.tools.includes('Skill') });
     const compose = (body: string, sessionId: string | null): string => {
       const inject = !((operation && sessionId !== null) || nativeCommandPrompt(body));
       // Echo treats "question" as a test directive, including in injected help.
@@ -288,14 +315,14 @@ export class TurnContexts {
       const said = origin && inject && guideEnabled && (sessionId === null || !sameOrigin(origin, this.sentFromBefore(threadId, origin.messageId)))
         ? sentFromNote(origin.from) : '';
       const coordinationGuide = inject && operation !== 'compact' && guideEnabled ? this.core.coordination.instructions(threadId) + this.core.workforce.entrusted.instructions(threadId) : '';
-      const guide = inject && sessionId === null && guideEnabled
-        ? agentGuide(provider.protocol !== 'echo' && this.core.settings.get().asyncQuestions !== false, this.core.settings.get().agentLogAccess !== false, builtinSkills(this.core.dataDir, message => { try { this.core.logs.warn(message, { source: 'skills', event: 'skills.write-failed' }); } catch { /* The guide is built without that skill. */ } })) : '';
+      // A driver that takes the guide in its system prompt keeps it there, compaction included.
+      const guide = inject && sessionId === null && guideEnabled && systemGuide === undefined ? this.boiteGuide(thread, provider) : '';
       // Custom rules lead every fresh session, whatever the guides, on every provider.
       const rules = inject && sessionId === null && mode?.rules ? `${contextRulesBlock(mode.rules)}\n\n` : '';
       // Every turn, not once a session: a style said once fades after a few answers.
       // Boite's own text, so the guide switch turns it off with the rest.
       const style = inject && guideEnabled && operation !== 'compact' && this.core.settings.get().shortAnswers !== false ? `${SHORT_ANSWERS}\n\n` : '';
-      const prefix = rules + (inject && !noGuides ? this.core.brain.instructions(provider.id) : '') + guide + style;
+      const prefix = rules + (inject && !noGuides ? this.core.brain.instructions(provider.id, listedSkills) : '') + guide + style;
       return carried.memory + prefix + (prefix ? 'User request:\n' : '') + said + deferred + body + coordinationGuide + tail(inject && sessionId === null && guideEnabled) + this.threads.cards.askInstructions({ ...thread, sessionId }, provider, turn, body);
     };
     return {
@@ -304,6 +331,7 @@ export class TurnContexts {
       provider,
       turn,
       prompt: compose(prepared.prompt, thread.sessionId),
+      systemGuide,
       continuation: () => {
         const fresh = prepareAttachments(this.core.dataDir, carry());
         return { prompt: compose(fresh.prompt, null), attachments: fresh.attachments };
