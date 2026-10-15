@@ -17,6 +17,8 @@ function git(cwd: string, ...args: string[]): string {
   if (!run.success) throw new Error(`git ${args.join(' ')} failed: ${run.stderr.toString()}`);
   return run.stdout.toString().trim();
 }
+/** Git on a Windows runner takes seconds per worktree; a turn here runs several git commands. */
+const SLOW_GIT_MS = 30_000;
 const branchExists = (cwd: string, branch: string) => Bun.spawnSync({ cmd: ['git', 'rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], cwd, stdout: 'pipe', stderr: 'pipe', windowsHide: true }).success;
 
 /** Each turn of a child runs `work` in its working directory before it answers; the parent's turns answer at once. */
@@ -26,9 +28,11 @@ async function setup(work: (ctx: TurnContext) => void = () => {}) {
     if (!ctx.thread.parentThreadId) parentPrompts.push(ctx.prompt);
     const done = Promise.withResolvers<TurnResult>();
     queueMicrotask(() => {
-      if (ctx.thread.parentThreadId) work(ctx);
+      // A failing fixture answers with its error rather than leaving the turn hanging.
+      let failure = '';
+      try { if (ctx.thread.parentThreadId) work(ctx); } catch (error) { failure = ` but failed: ${(error as Error).message}`; }
       const message = ctx.emit.startMessage('assistant');
-      ctx.emit.part(message, 0, { type: 'text', text: `worked in ${ctx.thread.cwd}` });
+      ctx.emit.part(message, 0, { type: 'text', text: `worked in ${ctx.thread.cwd}${failure}` });
       ctx.emit.complete(message, 'complete');
       done.resolve({ status: 'done', sessionId: null, usage: null });
     });
@@ -58,7 +62,7 @@ test('a child spawned with worktree works on its own branch from the parent HEAD
   const { path, branch } = child.worktree!;
   expect(branch).toMatch(/^boite\/sub-/);
   expect(child.thread).toMatchObject({ cwd: path, branch });
-  await waitFor(() => s.results().length === 1);
+  await waitFor(() => s.results().length === 1, SLOW_GIT_MS);
   const result = s.results()[0]!.text;
   expect(result).toContain(`worked in ${path}`);
   expect(result).toContain(`removed with its branch ${branch}`);
@@ -69,10 +73,10 @@ test('a child spawned with worktree works on its own branch from the parent HEAD
   // A follow-up makes it again, from the parent's HEAD of now.
   git(s.repo, 'commit', '-q', '--allow-empty', '-m', 'more parent work');
   await s.client.call('delegation.send', { threadId: s.threadId, toThreadId: child.thread.id, text: 'Look again.', requestId: 'again' });
-  await waitFor(() => s.results().length === 2);
+  await waitFor(() => s.results().length === 2, SLOW_GIT_MS);
   expect(s.results()[1]!.text).toContain(`worked in ${path}`);
   expect(s.h.core.delegation.worktrees.get(child.thread.id)).toMatchObject({ state: 'removed', base: git(s.repo, 'rev-parse', 'HEAD') });
-});
+}, 90_000);
 
 test('a child that commits keeps its worktree, and its result names the branch to merge', async () => {
   const s = await setup(ctx => {
@@ -83,7 +87,7 @@ test('a child that commits keeps its worktree, and its result names the branch t
   });
   const child = await s.client.call('delegation.spawn', { threadId: s.threadId, task: 'Fix it and commit.', worktree: true, requestId: 'fixer' });
   const { path, branch } = child.worktree!;
-  await waitFor(() => s.results().length === 1);
+  await waitFor(() => s.results().length === 1, SLOW_GIT_MS);
   expect(s.results()[0]!.text).toContain(`Worktree kept: ${path} on branch ${branch}, 1 commit beyond`);
   expect(s.results()[0]!.text).toContain(`git merge ${branch} once its changes are committed`);
   expect(s.h.core.delegation.worktrees.get(child.thread.id)).toMatchObject({ state: 'kept', commits: 1, dirty: true });
@@ -91,7 +95,7 @@ test('a child that commits keeps its worktree, and its result names the branch t
   expect(branchExists(s.repo, branch)).toBe(true);
   // The main checkout is untouched: the work waits on the branch.
   expect(existsSync(join(s.repo, 'fix.txt'))).toBe(false);
-});
+}, 90_000);
 
 test('worktree is refused outside a git repository, and a plan step checks its worktree field', async () => {
   restores.push(setDriver('echo', { protocol: 'echo', startTurn() { return { done: new Promise<TurnResult>(() => {}), stop() {} }; } }));
@@ -113,13 +117,14 @@ test('a workflow step with worktree runs on its own branch and the summary names
     git(ctx.thread.cwd, 'commit', '-q', '-m', 'step');
   });
   const run = await s.client.call('workflows.start', { threadId: s.threadId, plan: { name: 'Isolated', steps: [{ id: 'edit', task: 'Edit step.txt', worktree: true }] }, requestId: 'isolated' });
-  await waitFor(() => s.h.core.workflows.get(s.threadId, run.id).status === 'done', 5000);
+  await waitFor(() => s.h.core.workflows.get(s.threadId, run.id).status === 'done', SLOW_GIT_MS);
   const inst = s.h.core.workflows.get(s.threadId, run.id).nodes[0]!.instances[0]!;
   expect(inst.worktree).toMatchObject({ state: 'kept', commits: 1 });
   const thread = s.h.core.threads.require(inst.threadId!);
   expect(thread.cwd).toBe(inst.worktree!.path);
   expect(branchExists(s.repo, inst.worktree!.branch)).toBe(true);
   expect(existsSync(join(s.repo, 'step.txt'))).toBe(false);
-  await waitFor(() => s.parentPrompts.some(prompt => prompt.includes('Boite workflow done')));
-  expect(s.parentPrompts.find(prompt => prompt.includes('Boite workflow done'))).toContain(`Worktree kept: ${inst.worktree!.path} on branch ${inst.worktree!.branch}`);
-});
+  await waitFor(() => s.parentPrompts.some(prompt => prompt.includes('Boite workflow done')), SLOW_GIT_MS);
+  // The summary is JSON: a Windows path's backslashes arrive escaped.
+  expect(s.parentPrompts.find(prompt => prompt.includes('Boite workflow done'))).toContain(JSON.stringify(`Worktree kept: ${inst.worktree!.path} on branch ${inst.worktree!.branch}`).slice(1, -1));
+}, 90_000);
