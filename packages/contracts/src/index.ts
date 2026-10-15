@@ -1330,7 +1330,7 @@ export type ToolDocument =
   /** `data` is base64 with no `data:` prefix. The core caps it before it is journalled. */
   | { kind: 'image'; mimeType: string; data: string; alt: string | null };
 
-export { IMAGE_MIME_TYPES, ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_TURN, ATTACHMENTS_TOTAL_MAX_BYTES, RPC_MAX_FRAME_BYTES } from './attachment-limits.ts';
+export { IMAGE_MIME_TYPES, IMAGE_MAX_EDGE, ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_TURN, ATTACHMENTS_TOTAL_MAX_BYTES, RPC_MAX_FRAME_BYTES } from './attachment-limits.ts';
 import type { ImageMimeType } from './attachment-limits.ts';
 export type { ImageMimeType } from './attachment-limits.ts';
 
@@ -2125,6 +2125,11 @@ export interface Settings {
    * Missing on older cores, which read as on.
    */
   asyncQuestions?: boolean;
+  /**
+   * Every normal turn asks the agent for short answers: result first, no
+   * preamble, recap or commentary between tool calls. Missing reads as on.
+   */
+  shortAnswers?: boolean;
   /**
    * Agents may read this machine's anonymized diagnostics and draft an issue
    * from them (`boite logs`, `boite issue`). Missing reads as on.
