@@ -164,7 +164,6 @@ export function createBrowserFixture() {
   };
 }
 
-/** The pixel size a JPEG declares in its start-of-frame segment. */
 /** A frame answer that carries a picture: a request without `after` never gets `unchanged`. */
 export async function picture(answer: Promise<RemoteBrowserFrame | RemoteBrowserUnchanged>): Promise<RemoteBrowserFrame> {
   const frame = await answer;
@@ -172,6 +171,7 @@ export async function picture(answer: Promise<RemoteBrowserFrame | RemoteBrowser
   return frame;
 }
 
+/** The pixel size a JPEG declares in its start-of-frame segment. */
 export function jpegSize(base64: string): { width: number; height: number } {
   const bytes = Buffer.from(base64, 'base64');
   expect([bytes[0], bytes[1]]).toEqual([0xff, 0xd8]);
