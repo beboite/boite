@@ -6,6 +6,7 @@ import type { ProviderProbe } from '../providers/probe.ts';
 import { defaultModel, needsModelDiscovery } from './selection.ts';
 import { LinkedPullRequests } from '../linked-pull-requests.ts';
 import { threadCapabilities } from './capabilities.ts';
+import { agentShape } from './agent-shape.ts';
 import { steerUser } from './user-steering.ts';
 import { readToolOutput, readToolPart } from './records.ts';
 import { readMessageAttachment } from './attachment-read.ts';
@@ -54,6 +55,7 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
     return { ok: true };
   });
   core.router.register('threads.capabilities', params => threadCapabilities(core, params.threadId));
+  core.router.register('threads.agentShape', params => agentShape(core, params.threadId));
   const pullRequests = core.pullRequests;
   const linked = new LinkedPullRequests(core, (threadId, url) => pullRequests.detail(threadId, url));
   core.router.register('threads.pullRequestReview', async p => {
