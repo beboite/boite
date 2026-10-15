@@ -53,3 +53,36 @@ Three runs each, alternated, median:
 
 The unpack takes longer because it now hands the event loop back after each
 64 KiB of archive; on `origin/main` the whole unpack is one stall.
+
+## Device frames on a still screen (part 3)
+
+`bench/device-frame.ts`, 20 polls per run on a 1080 by 2400 PNG of 5.3 MB
+(banded noise), resized to 540 wide at quality 60. `full` is what every poll
+cost on `origin/main`; `unchanged` is what a poll costs on the branch when the
+screen has not changed and the client names the frame it shows.
+
+```sh
+nice -n 10 bun bench/device-frame.ts full
+nice -n 10 bun bench/device-frame.ts unchanged
+```
+
+Three runs each, alternated, median:
+
+| What | origin/main | branch, still screen |
+| --- | --- | --- |
+| Core time per poll | 89.57 ms | 4.07 ms |
+| Answer size | 23,942 bytes | 135 bytes |
+
+A screen that changed now also pays the SHA-1 of its PNG, about 4 ms on this
+5.3 MB file. The fake SDK test "a still screen is answered unchanged with no
+picture" in `packages/core/test/devices.test.ts` checks the answers.
+
+## Group links from a client (part 3)
+
+A member a client cannot reach is tried a minute after the first failure, then
+after 2, 4, 8 and 15 minutes, instead of every minute; the minute's pass does
+not run while the page is hidden. Counted by the test "waits longer after each
+attempt that reached nothing" in `packages/ui/src/lib/group-links.test.ts`:
+attempts in the first 45 minutes, 46 on `origin/main`, 7 on the branch. Derived
+from that schedule, a machine off for 8 hours costs 36 dial rounds instead of
+480. Radio wake-ups and bytes are unmeasured.

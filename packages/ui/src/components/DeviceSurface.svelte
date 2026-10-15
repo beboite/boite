@@ -51,12 +51,16 @@
     try {
       if (!client || client.state !== 'ready') throw new Error(strings.remoteBrowser.reconnecting);
       const maxWidth = frameMaxWidth(areaWidth, window.devicePixelRatio), quality = frameQuality(roundTrip);
-      const next = await client.call('devices.frame', { threadId, deviceId: target.deviceId, ...(maxWidth ? { maxWidth } : {}), quality });
-      if (next.base64 !== frame?.base64) await decoded(next.base64);
+      // The core answers `unchanged`, with no picture, while the screen still shows the frame named here.
+      const previous = frame?.deviceId === target.deviceId ? frame.id : undefined;
+      const next = await client.call('devices.frame', { threadId, deviceId: target.deviceId, ...(maxWidth ? { maxWidth } : {}), quality, ...(previous ? { previous } : {}) });
+      const same = next.unchanged ? !!frame && next.id === frame.id : next.base64 === frame?.base64;
+      if (!same && !next.unchanged) await decoded(next.base64);
       if (!alive || run !== generation) return;
       roundTrip = performance.now() - started; failures = 0;
-      unchanged = frame && next.base64 === frame.base64 ? unchanged + 1 : 0;
-      frame = next; error = '';
+      unchanged = same ? unchanged + 1 : 0;
+      if (!next.unchanged) frame = next;
+      error = '';
     } catch (cause) {
       if (alive && run === generation) { failures++; error = errorText(cause); }
     } finally { pending = false; }

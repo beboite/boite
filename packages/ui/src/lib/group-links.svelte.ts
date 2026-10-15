@@ -6,8 +6,9 @@ import { DROPPED_STORAGE_KEY, isDropped, isMemberDropped, keepDropped, readEnvir
 import { usableAddresses } from './group-addresses';
 import type { Machine, Workspace } from './workspace.svelte';
 
-/** A machine that did not answer is asked again no sooner than this. */
+/** A machine that did not answer is asked again no sooner than this; each failure in a row doubles it, up to `RETRY_MAX_MS`. */
 const RETRY_MS = 60_000;
+const RETRY_MAX_MS = 15 * 60_000;
 const PROBE_MS = 4000;
 /** At start, how long the machines paired by hand are given to answer before a held key is used as it was left. */
 const VOUCH_WAIT_MS = 3000;
@@ -114,6 +115,10 @@ export class GroupLinks {
   /** Per core id, for the machines of the group this client is not connected to. */
   states = $state<Record<string, GroupLinkState>>({});
   #attempts = new Map<string, number>();
+  /** Per core id, attempts in a row that reached nothing: they space the next one out (`#due`). */
+  #failures = new Map<string, number>();
+  /** Per core id, the routes the last pass saw it at: a change brings the wait back to a minute. */
+  #routes = new Map<string, string>();
   #movedAt = new Map<string, number>();
   #running = new Set<string>();
   #reach: (addresses: string[]) => Promise<string | null>;
@@ -160,9 +165,23 @@ export class GroupLinks {
     });
   }
 
-  /** Runs for the whole window: every roster change and every reconnect is looked at again. */
+  /**
+   * Runs for the whole window: every roster change and every reconnect is looked at again. The minute's
+   * pass sleeps while the page is hidden; showing it again, or the network coming back, retries at once.
+   */
   start(): () => void {
-    const timer = setInterval(() => void this.reconcile(), RETRY_MS);
+    const timer = setInterval(() => { if (!document.hidden) void this.reconcile(); }, RETRY_MS);
+    const shown = (): void => {
+      if (document.hidden) return;
+      this.#failures.clear();
+      void this.reconcile();
+    };
+    // Back on a network: whatever was out of reach is tried now, without the minute's wait.
+    const online = (): void => {
+      this.#failures.clear();
+      this.#attempts.clear();
+      void this.reconcile();
+    };
     const stop = $effect.root(() => {
       $effect(() => {
         // Read so the effect follows them: the list, each connection, each roster.
@@ -184,9 +203,13 @@ export class GroupLinks {
     };
     keepDropped();
     window.addEventListener('storage', heard);
+    window.addEventListener('online', online);
+    document.addEventListener('visibilitychange', shown);
     return () => {
       clearInterval(timer);
       window.removeEventListener('storage', heard);
+      window.removeEventListener('online', online);
+      document.removeEventListener('visibilitychange', shown);
       stop();
     };
   }
@@ -255,8 +278,13 @@ export class GroupLinks {
     const states: Record<string, GroupLinkState> = {};
     const starting: (Wanted & { upgrade?: Machine })[] = [];
     for (const [coreId, state] of Object.entries(this.states)) if (wanted.has(coreId)) states[coreId] = state;
+    for (const coreId of this.#routes.keys()) if (!wanted.has(coreId)) this.#routes.delete(coreId);
     for (const [coreId, want] of wanted) {
       const { addresses, relays } = want;
+      // A member back with other addresses, or another route to it, is tried within the minute again, not after the longer wait.
+      const routes = JSON.stringify([want.core.epoch, want.core.addresses, addresses, relays]);
+      if (this.#routes.has(coreId) && this.#routes.get(coreId) !== routes) this.#failures.delete(coreId);
+      this.#routes.set(coreId, routes);
       let existing = this.workspace.machines.find((machine) => GroupLinks.coreOf(machine) === coreId);
       // A key the group handed out for an address the machine no longer gives, or no longer
       // allows now that it has HTTPS, is not sent there again: the machine is reached anew.
@@ -267,21 +295,30 @@ export class GroupLinks {
       }
       if (existing !== undefined && (existing.store.connection !== 'closed' || this.#holdsKey(existing))) {
         delete states[coreId];
+        // Reached on its own, by a key it kept: should it need a ticket again, it starts from a minute's wait.
+        if (existing.store.connection === 'ready' && !relays.includes(existing.id)) this.#failures.delete(coreId);
         // Carried by a member while the machine gives an address this client may use: tried directly
-        // once a minute, and the member's route given up the moment one answers.
-        if (relays.includes(existing.id) && addresses.length > 0 && !this.#running.has(coreId)
-          && this.#now() - (this.#attempts.get(coreId) ?? -RETRY_MS) >= RETRY_MS) {
+        // a minute after the last try, longer after each that failed, and the member's route given up the moment one answers.
+        if (relays.includes(existing.id) && addresses.length > 0 && !this.#running.has(coreId) && this.#due(coreId)) {
           starting.push({ ...want, relays: [], upgrade: existing });
         }
         continue;
       }
-      if (this.#running.has(coreId) || this.#now() - (this.#attempts.get(coreId) ?? -RETRY_MS) < RETRY_MS) continue;
+      if (this.#running.has(coreId) || !this.#due(coreId)) continue;
       states[coreId] = 'connecting';
       starting.push(want);
     }
     // Written before any attempt starts: one that ends at once writes its own state after this.
     this.states = states;
     for (const want of starting) void this.#connect(want);
+  }
+
+  /** Whether a member may be tried now: a minute after its last attempt, doubled by each failure in a row, 15 minutes at most. */
+  #due(coreId: string): boolean {
+    const at = this.#attempts.get(coreId);
+    if (at === undefined) return true;
+    const failures = this.#failures.get(coreId) ?? 0;
+    return this.#now() - at >= Math.min(RETRY_MS * 2 ** Math.max(0, failures - 1), RETRY_MAX_MS);
   }
 
   /**
@@ -394,6 +431,8 @@ export class GroupLinks {
     this.#attempts.set(coreId, this.#now());
     let state: GroupLinkState | null = upgrade === undefined ? 'unreachable' : null;
     let moved = false;
+    // Whether the member is now reached, or is another machine's to reach: the next attempt then waits only the minute.
+    let settled = false;
     try {
       // Directly when an address answers, else through the first member that does.
       const direct = addresses.length === 0 ? null : await this.#reach(addresses);
@@ -420,10 +459,12 @@ export class GroupLinks {
       if (signsFor(via.id) !== undefined) {
         if (sitting !== undefined && sitting.coreId !== coreId && this.#holdsKey(sitting) && signsFor(sitting.id) !== coreId) {
           state = null;
+          settled = true;
           return;
         }
         if (await this.workspace.add({ url, token: '', signs: coreId }, core.name, true)) {
           state = null;
+          settled = true;
           if (upgrade !== undefined && this.workspace.machines.includes(upgrade)) await this.#drop(upgrade, false);
         }
         return;
@@ -431,6 +472,7 @@ export class GroupLinks {
       // A machine paired by hand already sits at that address: it is that machine's to reach, with the key it has.
       if (sitting !== undefined && sitting.coreId !== coreId) {
         state = null;
+        settled = true;
         return;
       }
       // Asked for last: a ticket is good for a minute and for one socket.
@@ -444,6 +486,7 @@ export class GroupLinks {
       }
       if (await this.workspace.add({ url, token: '', ticket, coreId, groupId, epoch: core.epoch }, core.name, true)) {
         state = null;
+        settled = true;
         // A direct route found for a machine a member carried: the carried one goes once the direct one is in, never before.
         if (upgrade !== undefined && this.workspace.machines.includes(upgrade)) await this.#drop(upgrade, false);
       }
@@ -451,6 +494,8 @@ export class GroupLinks {
       // The machine that vouches went away, or the member refused: the next pass asks again.
     } finally {
       this.#running.delete(coreId);
+      if (settled) this.#failures.delete(coreId);
+      else if (!moved) this.#failures.set(coreId, Math.min((this.#failures.get(coreId) ?? 0) + 1, 16));
       const states = { ...this.states };
       if (state === null) delete states[coreId];
       else states[coreId] = state;

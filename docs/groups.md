@@ -278,7 +278,7 @@ came in with closes it, and its sockets to a machine that leaves the group are
 closed within fifteen seconds.
 
 While a member is reached through another, the client tries its own addresses
-once a minute and moves to the first that answers, so a phone back on the
+a minute after the last try, longer after each that fails, and moves to the first that answers, so a phone back on the
 tailnet, or a desktop given an HTTPS address, stops depending on the relaying
 machine. Settings, Machines names the machine a member is reached through.
 
@@ -454,7 +454,12 @@ listed in the roster as a device.
 
 The UI does the client's part by itself (`lib/group-links.svelte.ts`). Each
 connected machine says which group it is in; for every member this client
-holds no key for, it finds an address that answers and connects. A device signs
+holds no key for, it finds an address that answers and connects. A member that
+does not answer is tried again a minute later, then after 2, 4, 8 and at most
+15 minutes. The wait goes back to a minute when the roster gives the member
+other addresses, and the next try comes at once when the network comes back or
+the hidden page is shown; nothing is tried by the clock while the page is
+hidden. A device signs
 its own way in there and is done: what a member lists is all it needs, and a
 machine its key opens that another one of the group no longer lists leaves its
 list. Its page's own machine, waiting for the device to be added, is taken over

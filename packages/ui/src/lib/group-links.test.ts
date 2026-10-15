@@ -90,6 +90,60 @@ describe('group links', () => {
     expect(added).toEqual([]);
   });
 
+  it('waits longer after each attempt that reached nothing, up to 15 minutes, and a minute again once the member moves', async () => {
+    const a = machine('http://10.0.0.1:1', { group: group('a', members) });
+    const { workspace: ws } = workspace([a]);
+    let now = 1_000_000;
+    const reach = vi.fn(async () => null);
+    const links = new GroupLinks(ws, { reach, secure: () => false, now: () => now });
+    const tried: number[] = [];
+    const pass = async (minute: number) => {
+      now = 1_000_000 + minute * 60_000;
+      const before = reach.mock.calls.length;
+      await links.reconcile();
+      await settle();
+      if (reach.mock.calls.length > before) tried.push(minute);
+    };
+    for (let minute = 0; minute <= 45; minute++) await pass(minute);
+    expect(tried).toEqual([0, 1, 3, 7, 15, 30, 45]);
+    expect(links.states).toEqual({ b: 'unreachable' });
+    // Back with another address: tried a minute after the last attempt, not fifteen.
+    storeOf(a).group = group('a', [members[0]!, core('b', ['http://100.64.0.9:1'])]);
+    await pass(46);
+    expect(tried.at(-1)).toBe(46);
+    expect(reach).toHaveBeenLastCalledWith(['http://10.0.0.1:1/group/relay/b']);
+  });
+
+  it('sleeps while the page is hidden, and tries again at once when it is shown or the network comes back', async () => {
+    vi.useFakeTimers();
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+    const a = machine('http://10.0.0.1:1', { group: group('a', members) });
+    const { workspace: ws } = workspace([a]);
+    const reach = vi.fn(async (_addresses: string[]): Promise<string | null> => null);
+    const links = new GroupLinks(ws, { reach, secure: () => false, now: () => Date.now() });
+    const attempts = () => reach.mock.calls.filter(([addresses]) => addresses[0] === 'http://100.64.0.2:1').length;
+    const stop = links.start();
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(attempts()).toBe(1);
+      hidden.mockReturnValue(true);
+      await vi.advanceTimersByTimeAsync(60 * 60_000);
+      expect(attempts()).toBe(1);
+      hidden.mockReturnValue(false);
+      document.dispatchEvent(new Event('visibilitychange'));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(attempts()).toBe(2);
+      await vi.advanceTimersByTimeAsync(10_000);
+      window.dispatchEvent(new Event('online'));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(attempts()).toBe(3);
+    } finally {
+      stop();
+      vi.useRealTimers();
+      hidden.mockRestore();
+    }
+  });
+
   it('sends a key only where the transport says who answers', async () => {
     const all = ['https://b.example', 'http://b.tail:1', 'http://100.64.0.2:1', 'http://[fd7a:115c:a1e0::2]:1'];
     // A machine with an HTTPS address is reached there and nowhere else, even from a page that could open HTTP.

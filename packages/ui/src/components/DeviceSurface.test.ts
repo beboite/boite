@@ -45,6 +45,14 @@ test('the panel opens an emulator, shows its screen once booted and taps in scre
   await vi.advanceTimersByTimeAsync(300); await settle();
   const image = document.querySelector<HTMLImageElement>('[data-testid=device-frame]')!;
   expect(image.src).toMatch(/^data:image\/jpeg;base64,/);
+  // Later polls name the frame on screen; a still screen comes back unchanged, with no picture, and stays drawn.
+  const shown = image.src;
+  await vi.advanceTimersByTimeAsync(300); await settle();
+  const polls = calls.mock.calls.map((call, index) => ({ call, index })).filter(({ call }) => call[0] === 'devices.frame');
+  const last = polls.at(-1)!;
+  expect(last.call[1]).toMatchObject({ previous: expect.stringMatching(/^frame-Pixel_8_API_35-0-/) });
+  expect(await calls.mock.results[last.index]!.value).toMatchObject({ unchanged: true });
+  expect(document.querySelector<HTMLImageElement>('[data-testid=device-frame]')!.src).toBe(shown);
   // The screen is drawn 270 by 600: a fourth of the 1080 by 2400 phone.
   vi.spyOn(image, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 270, height: 600, right: 270, bottom: 600, x: 0, y: 0, toJSON: () => ({}) });
   const screen = image.parentElement!;
