@@ -151,17 +151,17 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 593,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,938,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,941,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,152,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,161,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
-On 2026-10-15, views placed inside an answer (PR #502), merged with PR #500,
-measure 4,935,954 UI bytes and 4,146,046 core JavaScript bytes after fresh
+On 2026-10-15, views placed inside an answer (PR #502), merged with PR #503,
+measure 4,938,784 UI bytes and 4,151,081 core JavaScript bytes after fresh
 `bun run build:ui` and `bun run build:core` on Linux. The UI adds the answer
-split around views. The UI limit becomes 4,938,000; the core and entry limits
-stay unchanged.
+split around views. The UI limit becomes 4,941,000; the core limit stays at
+the 4,161,000 PR #503 set, and the entry limits stay unchanged.
 
 On 2026-10-15, Claude's preset system prompt (PR #500) merged with `origin/main`
 at `2adac07b` measures 4,150,454 core JavaScript bytes after a clean
