@@ -183,6 +183,9 @@ test('boite view publishes a page as an artifact that opens only on the view rou
   expect(stored).toContain('boite-view-theme');
   expect(stored).toContain('<circle cx="20"');
   expect(readdirSync(join(harness.dataDir, 'artifacts')).filter(name => name.endsWith('.partial'))).toEqual([]);
+  // The output hands the agent the line that places the page in its answer, a path with spaces in angle brackets.
+  write('views/two words.html', page('<p>quiet</p>', '<title>Two [words]</title>'));
+  expect((await cli('view', 'views/two words.html')).output).toContain('place: ![Two words](<views/two words.html>) alone on a line of your answer');
   const history = await client.call('threads.get', { threadId });
   expect(history.messages.find(message => message.id === result.message.id)?.parts).toEqual(result.message.parts);
 
@@ -252,6 +255,8 @@ real('a page is loaded in a headless browser before it is shown: its height is m
   const loud = await cli('view', 'views/loud.html');
   expect(loud.code).toBe(0);
   expect(loud.output).toContain("advice: 1 fixed color (#ff0000) will not follow the user's theme");
+  // The output hands the agent the line that places the page in its answer, a path with spaces in angle brackets.
+  expect(loud.output).toContain('place: ![loud](views/loud.html) alone on a line of your answer');
 
   // Without a doctype a root is as tall as the window it is loaded in: the stored page has one, so its own height is what is measured.
   write('views/bare.html', '<html><head></head><body><div style="height:120px"></div></body></html>');
