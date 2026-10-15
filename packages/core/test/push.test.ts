@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, setSystemTime, test } from 'bun:test';
+import { afterEach, beforeEach, expect, setSystemTime, spyOn, test } from 'bun:test';
 import { ATTENTION_LEASE_MS, notificationExcerpt, type RpcEvents, type Turn, type TurnExecution } from '@boite/contracts';
 import { createECDH, randomBytes } from 'node:crypto';
 import { connect } from '../src/client.ts';
@@ -302,4 +302,31 @@ test('a notification of one very long line is read in bounded time', () => {
     expect(notificationExcerpt(line).length).toBeLessThanOrEqual(141);
     expect(performance.now() - started).toBeLessThan(500);
   }
+});
+
+test('with no subscription and no other member, a finished turn prepares no push at all', async () => {
+  const sent: string[] = [];
+  harness.core.push.send = async (_target, payload) => { sent.push(payload); };
+  const forwarded: unknown[] = [];
+  harness.core.push.forward = async (_home, payload) => { forwarded.push(payload); };
+  const walk = spyOn(harness.core.journal, 'walkAgentMessagesBackwards');
+  const badge = spyOn(harness.core.push, 'badge');
+  try {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    const thread = harness.core.journal.getThread(threadId)!;
+    const finish = (id: string) => harness.core.bus.emit('turn.finished', { id, threadId, status: 'done', queuedAt: 1, startedAt: 1, finishedAt: 2, usage: null, error: null,
+      execution: { providerId: thread.providerId, accountId: thread.accountId, model: null, effort: null, permissionMode: thread.permissionMode, sessionId: null, sessionGeneration: 0, selectionVersion: 0 } });
+    walk.mockClear(); badge.mockClear();
+    finish('quiet_1');
+    harness.core.bus.emit('question.asked', { id: 'quiet_question', threadId, text: 'Which branch?' } as RpcEvents['question.asked']);
+    await Bun.sleep(30);
+    expect([walk.mock.calls.length, badge.mock.calls.length, sent.length, forwarded.length]).toEqual([0, 0, 0, 0]);
+    // Subscribed mid-thread: the next turn reaches the phone.
+    harness.core.push.subscribe(session().id, subscription());
+    finish('quiet_2');
+    await waitFor(() => sent.length === 1);
+    expect(walk.mock.calls.length).toBeGreaterThan(0);
+    expect(forwarded).toEqual([]);
+  } finally { walk.mockRestore(); badge.mockRestore(); }
 });

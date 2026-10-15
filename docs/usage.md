@@ -51,8 +51,8 @@ estimate](#the-api-estimate)).
   reads again whether the switch went on or off.
 - Providers refresh independently, with up to two accounts per provider in
   flight. Each `quotas.progress` event carries the request ID and one account's
-  result; the final response retains the account order. Both events and calls
-  remain owner-only.
+  result, and goes only to the connection that sent that request; the final
+  response retains the account order. Both events and calls remain owner-only.
 - In the tray and the limits tab, existing bars lose saturation while their
   account is pending. Each answer updates its bars and restores their colour
   with a transition. A slow provider does not hold up the others. Cache and
@@ -130,8 +130,10 @@ quota views update the label immediately while retaining their cached windows.
 Quota readers live in `packages/core/src/quotas.ts` and `quota-readers.ts`, with
 Claude's fallback under `drivers/claude/quota.ts`. Successful snapshots cache for
 one minute; manual refreshes are at least ten seconds apart and failures back
-off for five minutes. A failed read returns the last successful windows as stale
-with its error and timestamp. Unknown percentages remain unavailable. Failed
+off for five minutes. A change to one account (a rename, a login check, a
+removal) clears that account's cache alone; reads of other accounts in flight
+still land in theirs. A provider change clears every account. A failed read
+returns the last successful windows as stale with its error and timestamp. Unknown percentages remain unavailable. Failed
 reads never advertise old resets or credits as available. Unsupported providers
 report unsupported limits rather than using local token totals as quota.
 
@@ -139,6 +141,12 @@ Muse observations stay in memory per account with their original observation
 time, including over-quota readings. Before the first observation, after
 monitoring is disabled or with an older host, the source is unavailable. Its
 schema supplies no paid credit balance or banked resets.
+
+A Codex limits reading a running session reports goes through
+`QuotaStore.observe` and stands as a successful read of that account, timed at
+its observation: the next list returns it without starting an app-server until
+it is a minute old, and a later read replaces it. A reading older than the one
+held is ignored, and `quotas.updated` goes out only when the values changed.
 
 ### Resets and paid allowances
 

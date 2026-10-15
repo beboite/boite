@@ -79,7 +79,7 @@ test('quotas come from Douane through the core, in both display modes, with the 
 
   // Refresh asks again, and every client hears the answer.
   const progress: string[] = [];
-  harness.core.bus.onAny((name, payload) => { if (name === 'quotas.progress') progress.push((payload as RpcEvents['quotas.progress']).quota.accountId); });
+  owner.on('quotas.progress', (event) => progress.push(event.quota.accountId));
   await owner.call('quotas.list', { refresh: true, requestId: 'gateway-refresh' });
   expect(seen).toHaveLength(2);
   // Only the refresh asked by hand tells Douane to read its accounts first.
