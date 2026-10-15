@@ -13,7 +13,7 @@ import { JOIN_ROUTE } from './group.ts';
 import { parseRelayPath, RelayHub, type RelaySocketData } from './group/relay.ts';
 import type { Connection } from './router.ts';
 import type { EventFrames, SocketData } from './server/connection.ts';
-import { ServerConnection } from './server/connection.ts';
+import { OUTBOUND_MAX_BUFFERED_BYTES, ServerConnection } from './server/connection.ts';
 import { clientField, logConnectionClosed } from './server/connection-log.ts';
 import { handleFrame } from './server/frame.ts';
 import { authenticateToken } from './server/hello.ts';
@@ -513,7 +513,7 @@ export function startServer(options: ServerOptions): RunningServer {
             core.log('warn', `refused a relayed websocket: ${refusal}`, { source: 'connections', event: 'connection.preauth-refused' });
             return new Response('too many connections waiting for hello', { status: 503 });
           }
-          const pipe = relays.pipe(relayed.coreId, peer);
+          const pipe = relays.pipe(relayed.coreId, peer, !isLoopbackHost(request.headers.get('host')));
           if (self.upgrade(request, { data: { relay: pipe } })) return undefined;
           pipe.close(1000);
           return new Response('expected a websocket upgrade', { status: 400 });
@@ -567,6 +567,11 @@ export function startServer(options: ServerOptions): RunningServer {
       // The contract derives the attachment total of a turn from this number,
       // and the UI refuses a larger frame before sending it.
       maxPayloadLength: RPC_MAX_FRAME_BYTES,
+      // Bun drops a frame, and keeps the socket open, once this much waits
+      // (16 MiB by default). The connections and relays close at their own
+      // 32 MiB budget first, checked before each send, so nothing is dropped
+      // below the limit the code enforces.
+      backpressureLimit: OUTBOUND_MAX_BUFFERED_BYTES,
 
       open(socket) {
         if ('relay' in socket.data) {
@@ -602,7 +607,10 @@ export function startServer(options: ServerOptions): RunningServer {
         void frame.catch((error: unknown) => core.log('error', messageOf(error))).finally(() => frames.delete(frame));
       },
 
-      drain(socket) { if (!('relay' in socket.data)) socket.data.connection.drain(); },
+      drain(socket) {
+        if ('relay' in socket.data) socket.data.relay.drained();
+        else socket.data.connection.drain();
+      },
 
       close(socket, code, reason) {
         if ('relay' in socket.data) {
@@ -613,6 +621,7 @@ export function startServer(options: ServerOptions): RunningServer {
         core.procs.unwatchResources(socket.data.connection.id);
         core.coordination.bridge.disconnect(socket.data.connection.id);
         core.browser.disconnect(socket.data.connection.id);
+        core.terminals.disconnect(socket.data.connection.id);
         core.threads.focus.disconnect(socket.data.connection.id);
         void core.drafts.disconnect(socket.data.connection.id).catch(error => core.log('warn', `draft cleanup failed: ${String(error)}`));
         void core.attachmentUploads.disconnect(socket.data.connection.id).catch(error => core.log('warn', `attachment cleanup failed: ${String(error)}`));
@@ -737,8 +746,12 @@ export function startServer(options: ServerOptions): RunningServer {
       // that thread open; an agent socket still gets its own thread's.
       if (name === 'thread.activity' && connection.identity.principal !== 'agent' && (threadId === null || !connection.subscriptions.has(threadId))) continue;
       if (name === 'todos.updated' && !mayReadTodos(core, connection, (payload as RpcEvents['todos.updated']).projectId)) continue;
+      // A shell's bytes go to the windows that attached it. Its exit still goes to every owner window: one
+      // that lays the pane out without having attached it, a background tab say, drops the pane then.
+      if (name === 'terminal.output' && !core.terminals.watches((payload as RpcEvents['terminal.output']).id, connection.id)) continue;
       connection.sendEvent(name, payload, frames);
     }
+    if (name === 'terminal.exited') core.terminals.exitSent((payload as RpcEvents['terminal.exited']).id);
   };
   let pendingScheduler: RpcEvents['scheduler.updated'] | null = null;
   let schedulerTimer: ReturnType<typeof setTimeout> | null = null;

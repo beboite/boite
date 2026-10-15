@@ -834,8 +834,11 @@ export function registerAccountMethods(core: Core): void {
   core.router.register('accounts.check', (params) => params.refresh === true ? core.accounts.verify(params.accountId) : core.accounts.check(params.accountId));
   core.router.register('accounts.login', (params) => core.accounts.login(params.accountId));
   core.router.register('accounts.logins', () => core.accounts.loginStates());
-  core.router.register('accounts.loginTerminal', (params) =>
-    core.accounts.loginTerminal(params.accountId, params.cols, params.rows));
+  core.router.register('accounts.loginTerminal', (params, ctx) => {
+    const state = core.accounts.loginTerminal(params.accountId, params.cols, params.rows);
+    core.terminals.watch(state.id, ctx.connection.id);
+    return state;
+  });
   core.router.register('accounts.loginCancel', (params) => core.accounts.loginCancel(params.accountId));
   core.router.register('accounts.loginInput', (params) => {
     if (typeof params.text !== 'string') throw invalidParams('a login input needs text', { field: 'text' });

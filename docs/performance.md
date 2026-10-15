@@ -91,7 +91,10 @@ The smaller six-process regression runs in the normal core suite and starts a
 fresh core so earlier tests cannot hide a race in first-use imports.
 
 Authenticated RPC requests rotate between connections in four-millisecond
-slices. At most eight handlers per connection and 64 overall can wait on
+slices, scheduled with `setImmediate` rather than a 1 ms timer, so an idle
+queue dispatches a request on the next loop turn. 300 sequential `settings.get`
+calls on loopback took 0.205 ms each (median) against 1.409 ms with the timer
+(`bun bench/rpc-serial.ts`, 2026-10-15). At most eight handlers per connection and 64 overall can wait on
 asynchronous work. Authenticated agents can occupy at most 48 of those slots,
 leaving capacity for owner actions, paired clients and authentication while
 agents wait for replies. Each connection retains at most 1,024 frames or 32 MiB of
@@ -238,6 +241,15 @@ closes with reconnectable 1013 after 10 seconds without draining, or before
 a frame would exceed the byte budget. Further sends are ignored and timers
 and pending parts are cleared. This closes only that client; the journal and
 other connections continue. Reconnecting clients load a fresh thread snapshot.
+The server's `backpressureLimit` is set to the same 32 MiB, so Bun never drops
+a frame (its default is 16 MiB) below the budget the code enforces.
+
+A relayed socket (`/group/relay/<core id>/rpc`) keeps the same budget: past
+32 MiB unread, a dropped send or 10 seconds without a drain, it closes with
+1013. It is deflated when its Host is not loopback, as a direct remote socket
+is. `terminal.output` goes only to the connections that attached that shell
+with `terminals.open` or `accounts.loginTerminal`; `terminal.exited` still
+reaches every owner window.
 
 When a socket backs up (Bun's `send` returns -1), subsequent frames stay queued
 within these limits except `message.delta`, which is dropped. Catch-up tracks

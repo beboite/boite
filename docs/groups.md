@@ -271,7 +271,11 @@ a wrong one) is answered `Refused`, and a member it cannot reach `Unavailable`:
 never `Unauthorized`, which the client would take for its key on the member
 being revoked. A first frame that is not a hello is answered `Unauthorized`, as
 on a direct socket. A file or a view answers 404 for a machine that is not another member
-and 502 when that member does not answer. Until its key is checked, a relayed
+and 502 when that member does not answer. A relayed socket is deflated when
+the client asked for a host that is not loopback, and is held to a direct
+socket's outgoing budget: 32 MiB unread, a dropped send or 10 seconds without
+a drain closes it with 1013, and the client reconnects and loads a fresh
+snapshot. Until its key is checked, a relayed
 socket counts against the same bounds as a direct one: five seconds and 64 KB
 for its hello, and the places for sockets waiting on one. Revoking the key it
 came in with closes it, and its sockets to a machine that leaves the group are

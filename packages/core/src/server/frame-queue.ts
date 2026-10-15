@@ -33,7 +33,7 @@ export class FrameQueue {
   private readonly retained = new Map<ServerConnection, { count: number; bytes: number }>();
   private active = 0;
   private activeAgents = 0;
-  private timer: ReturnType<typeof setTimeout> | null = null;
+  private timer: ReturnType<typeof setImmediate> | null = null;
   private count = 0;
   private bytes = 0;
   private closed = false;
@@ -88,7 +88,7 @@ export class FrameQueue {
 
   close(): void {
     this.closed = true;
-    if (this.timer !== null) clearTimeout(this.timer);
+    if (this.timer !== null) clearImmediate(this.timer);
     this.timer = null;
     for (const connection of this.pending.keys()) this.drop(connection);
   }
@@ -129,8 +129,9 @@ export class FrameQueue {
     if (this.active < MAX_ACTIVE) this.schedule();
   }
 
+  /** The check phase runs after I/O polling, so HTTP and drains still interleave without a 1 ms timer floor. */
   private schedule(): void {
-    if (!this.closed && this.pending.size > 0 && this.timer === null) this.timer = setTimeout(() => this.pump(), 1);
+    if (!this.closed && this.pending.size > 0 && this.timer === null) this.timer = setImmediate(() => this.pump());
   }
 
   private refuse(connection: ServerConnection, reason: string): void {
