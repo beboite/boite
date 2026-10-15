@@ -74,7 +74,15 @@ of leaving an unanswered request behind.
 
 ## The journal is the truth, the tables are a projection
 
-`bun:sqlite` uses WAL mode. An append to
+`bun:sqlite` uses WAL mode with SQLite's automatic checkpoint off
+(`journal/wal-checkpoints.ts`). A Worker with its own connection, started at
+the first checkpoint after a write, runs a passive checkpoint once the WAL
+passes 4 MiB and truncates it after 30 s without writes. The main thread
+checkpoints when the Worker is unavailable or when the WAL reaches 16 MiB
+because writes kept landing during the Worker's passes, and it truncates the
+WAL at close. A write that binds more than 64 KiB, such as a message's parts,
+runs on a statement finalized after use (`journal/statements.ts`): a cached
+statement keeps its last bound values alive. An append to
 `events(id, thread_id, ts, type, version, payload)` and its projection changes
 commit in one transaction. Events have versions but are not replayed to rebuild
 the tables. Retention runs one minute after startup and daily, deleting events

@@ -17,6 +17,8 @@ import { isNativeAgentPart } from './journal/native-agent-parts.ts';
 import { TRAIL_ONLY, trailOf } from './journal/trail.ts';
 import { hydrate, hydratePart } from './journal/part-blobs.ts';
 import { migrate } from './journal/schema.ts';
+import { runWrite } from './journal/statements.ts';
+import { WAL_LIMIT_BYTES, WalCheckpoints, type WalCheckpointOptions } from './journal/wal-checkpoints.ts';
 import { toAccount, toMessage, toProcess, toProject, toThread, toTurn, parseJson } from './journal/rows.ts';
 import type { AccountRow, MessageRow, ProcessRow, ProjectIconRow, ProjectRow, ThreadRow, TurnRow } from './journal/rows.ts';
 import type { DetectedIcon as StoredProjectIcon } from './project-icons.ts';
@@ -28,6 +30,8 @@ import { sent, type Projection } from './journal/sent.ts';
 export interface JournalOptions {
   /** Where a write that fails on a timer, with no caller to throw to, is reported. */
   onError?: (message: string) => void;
+  /** Overrides the WAL checkpoint thresholds, for tests (`journal/wal-checkpoints.ts`). */
+  checkpoints?: WalCheckpointOptions;
 }
 
 /** What `listMessagePage` hands back: the page itself and the cursor for what is behind it. */
@@ -70,6 +74,8 @@ export class Journal {
   private readonly stream: StreamBuffer;
   private readonly onError: (message: string) => void;
   private closed = false;
+  /** Checkpoints the WAL off the event loop; null for a database without a WAL file. */
+  readonly checkpoints: WalCheckpoints | null = null;
   /** The schema version found on disk and the one after migration, for the startup log. */
   schema = { from: 0, to: 0 };
 
@@ -81,13 +87,16 @@ export class Journal {
       this.db.exec('PRAGMA journal_mode = WAL');
       this.db.exec('PRAGMA synchronous = NORMAL');
       this.db.exec('PRAGMA busy_timeout = 5000');
-      // A large transaction grows the WAL file; this lets it shrink back at the next checkpoint.
-      this.db.exec('PRAGMA journal_size_limit = 33554432');
+      // The WAL file shrinks back to this at a restart, so it grows past it only once that much was written since.
+      this.db.exec(`PRAGMA journal_size_limit = ${WAL_LIMIT_BYTES}`);
       this.schema = this.db.transaction(() => migrate(this.db, file))();
       foldStreamingParts(this.db); // What a stream left beside its row when the last core stopped without closing.
       // An incognito conversation never outlives the core that held it.
       this.purgeIncognitoThreads();
+      // Started after the writes above: SQLite checkpoints those itself, as before.
+      this.checkpoints = WalCheckpoints.start(this.db, file, this.onError, options.checkpoints);
     } catch (error) {
+      this.checkpoints?.close();
       this.db.close(false);
       throw error;
     }
@@ -166,6 +175,7 @@ export class Journal {
     } finally {
       this.stream.clear();
       this.closed = true;
+      this.checkpoints?.close();
       this.db.close(false);
     }
   }
@@ -476,11 +486,11 @@ export class Journal {
    */
   listTurnsFor(threadId: string, turnIds: Iterable<string>): Turn[] {
     const ids = [...new Set(turnIds)];
-    const marks = ids.map(() => '?').join(', ');
-    const where = ids.length === 0 ? '' : ` OR id IN (${marks})`;
-    const rows = this.db
-      .query(`SELECT * FROM turns WHERE thread_id = ? AND (status IN ('running', 'queued')${where}) ORDER BY rowid`)
-      .all(threadId, ...ids) as TurnRow[];
+    // One JSON list, not one `?` per id: every page size shares one cached statement.
+    const rows = (ids.length === 0
+      ? this.db.query("SELECT * FROM turns WHERE thread_id = ? AND status IN ('running', 'queued') ORDER BY rowid").all(threadId)
+      : this.db.query("SELECT * FROM turns WHERE thread_id = ? AND (status IN ('running', 'queued') OR id IN (SELECT value FROM json_each(?))) ORDER BY rowid")
+        .all(threadId, JSON.stringify(ids))) as TurnRow[];
     return rows.map(toTurn);
   }
 
@@ -536,20 +546,8 @@ export class Journal {
 
   putMessage(message: Message): void {
     const parts = this.stream.track(message);
-    this.db
-      .query(
-        `INSERT OR REPLACE INTO messages (id, thread_id, turn_id, role, parts, state, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        message.id,
-        message.threadId,
-        message.turnId,
-        message.role,
-        parts,
-        message.state,
-        message.createdAt,
-      );
+    runWrite(this.db, 'INSERT OR REPLACE INTO messages (id, thread_id, turn_id, role, parts, state, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      message.id, message.threadId, message.turnId, message.role, parts, message.state, message.createdAt);
     if (message.parts.some(isNativeAgentPart)) this.markNativeAgents(message.id, message.threadId);
   }
 

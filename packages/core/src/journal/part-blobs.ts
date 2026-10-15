@@ -1,6 +1,7 @@
 import type { Database } from 'bun:sqlite';
 import { TOOL_OUTPUT_PREVIEW_CHARS } from '@boite/contracts';
 import type { Message, MessagePart } from '@boite/contracts';
+import { runWrite } from './statements.ts';
 
 /**
  * Large values of a message part live in `part_blobs`, one row each, instead
@@ -15,6 +16,7 @@ import type { Message, MessagePart } from '@boite/contracts';
  */
 export const BLOB_MIN_CHARS = 32 * 1024;
 const MARK = '$blob';
+const INSERT_BLOB = 'INSERT OR REPLACE INTO part_blobs (message_id, part_index, field, thread_id, data, digest) VALUES (?, ?, ?, ?, ?, ?)';
 
 type Stored = MessagePart & { [MARK]?: string[] };
 
@@ -50,12 +52,11 @@ export function storePart(db: Database, message: Pick<Message, 'id' | 'threadId'
     .all(message.id, index) as { field: string; digest: string; threadId: string }[]).map(row => [row.field, `${row.threadId}:${row.digest}`]));
   const remove = db.query('DELETE FROM part_blobs WHERE message_id = ? AND part_index = ? AND field = ?');
   for (const field of kept.keys()) if (!moved.includes(field)) remove.run(message.id, index, field);
-  const insert = db.query('INSERT OR REPLACE INTO part_blobs (message_id, part_index, field, thread_id, data, digest) VALUES (?, ?, ?, ?, ?, ?)');
   const stored: Record<string, unknown> = { ...values, [MARK]: moved };
   for (const field of moved) {
     const value = values[field] as string;
     const digest = Bun.hash(value).toString(36);
-    if (kept.get(field) !== `${message.threadId}:${digest}`) insert.run(message.id, index, field, message.threadId, value, digest);
+    if (kept.get(field) !== `${message.threadId}:${digest}`) runWrite(db, INSERT_BLOB, message.id, index, field, message.threadId, value, digest);
     stored[field] = '';
   }
   return JSON.stringify(stored);
@@ -149,7 +150,7 @@ export function moveInlineValues(db: Database, afterRowid: number, isOpen: (mess
   if (inline) {
     db.transaction(() => {
       const texts = stored.map((part, index) => part === null || part[MARK] ? JSON.stringify(part) : storePart(db, { id: row.id, threadId: row.threadId }, index, part));
-      db.query('UPDATE messages SET parts = ? WHERE id = ?').run(`[${texts.join(',')}]`, row.id);
+      runWrite(db, 'UPDATE messages SET parts = ? WHERE id = ?', `[${texts.join(',')}]`, row.id);
     })();
   }
   return row.rowid;

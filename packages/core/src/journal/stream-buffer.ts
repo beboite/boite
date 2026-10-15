@@ -2,6 +2,7 @@ import type { Database } from 'bun:sqlite';
 import type { Message, MessagePart } from '@boite/contracts';
 import type { Journal } from '../journal.ts';
 import { isNativeAgentPart } from './native-agent-parts.ts';
+import { runWrite } from './statements.ts';
 import { copyBlobs, hydratePart, storePart, storeParts } from './part-blobs.ts';
 
 const DELTA_WINDOW_MS = 16;
@@ -119,7 +120,6 @@ export class StreamBuffer {
     const nested = this.db.inTransaction;
     const started = performance.now();
     const now = Date.now();
-    const side = this.db.query(UPSERT_SIDE);
     const written: [OpenMessage, (string | undefined)[], boolean][] = [];
     this.db.transaction(() => {
       for (const entry of dirty) {
@@ -132,7 +132,7 @@ export class StreamBuffer {
         entry.message.parts.forEach((part, index) => {
           if (json[index] !== undefined) return;
           json[index] = storePart(this.db, entry.message, index, part);
-          side.run(id, index, threadId, json[index]);
+          runWrite(this.db, UPSERT_SIDE, id, index, threadId, json[index]);
         });
         written.push([entry, json, false]);
       }
@@ -270,7 +270,7 @@ export class StreamBuffer {
     padInPlace(stored, partIndex);
     const texts = stored.map(part => JSON.stringify(part ?? null));
     texts[partIndex] = storePart(this.db, { id: messageId, threadId: row.threadId }, partIndex, next);
-    this.db.query('UPDATE messages SET parts = ? WHERE id = ?').run(`[${texts.join(',')}]`, messageId);
+    runWrite(this.db, 'UPDATE messages SET parts = ? WHERE id = ?', `[${texts.join(',')}]`, messageId);
   }
 
   /** Every part's stored JSON: the committed one when unchanged, else stored now. */
@@ -308,7 +308,7 @@ export class StreamBuffer {
   private writeRow(entry: OpenMessage): string[] {
     const parts = this.stored(entry);
     this.db.transaction(() => {
-      this.db.query('UPDATE messages SET parts = ? WHERE id = ?').run(`[${parts.join(',')}]`, entry.message.id);
+      runWrite(this.db, 'UPDATE messages SET parts = ? WHERE id = ?', `[${parts.join(',')}]`, entry.message.id);
       this.db.query('DELETE FROM streaming_parts WHERE message_id = ?').run(entry.message.id);
     })();
     return parts;
@@ -374,7 +374,6 @@ export function foldStreamingParts(db: Database, messageId?: string): number {
   for (const row of rows) byMessage.set(row.id, [...byMessage.get(row.id) ?? [], row]);
   db.transaction(() => {
     const read = db.query('SELECT parts FROM messages WHERE id = ?');
-    const write = db.query('UPDATE messages SET parts = ? WHERE id = ?');
     for (const [id, parts] of byMessage) {
       // A message removed while it streamed has no row left to write.
       const row = read.get(id) as { parts: string } | null;
@@ -384,7 +383,7 @@ export function foldStreamingParts(db: Database, messageId?: string): number {
         while (texts.length < partIndex) texts.push(EMPTY_TEXT);
         texts[partIndex] = json;
       }
-      write.run(`[${texts.join(',')}]`, id);
+      runWrite(db, 'UPDATE messages SET parts = ? WHERE id = ?', `[${texts.join(',')}]`, id);
     }
     if (messageId === undefined) db.exec('DELETE FROM streaming_parts');
     else db.query('DELETE FROM streaming_parts WHERE message_id = ?').run(messageId);

@@ -417,13 +417,16 @@ export class TurnContexts {
    * filter only narrows: a prompt can quote the key, so each row is parsed.
    */
   private sentFromBefore(threadId: ThreadId, messageId: MessageId): SentFrom | null {
-    const rows = this.core.journal.db.query(`SELECT parts FROM messages WHERE thread_id = ? AND role = 'user' AND parts LIKE '%"sentFrom":%'
-      AND rowid < (SELECT rowid FROM messages WHERE id = ?) ORDER BY rowid DESC`).iterate(threadId, messageId) as Iterable<{ parts: string }>;
-    for (const row of rows) {
-      const part = (JSON.parse(row.parts) as MessagePart[]).find(p => p.type === 'text' && p.sentFrom !== undefined);
-      if (part?.type === 'text' && part.sentFrom) return part.sentFrom;
-    }
-    return null;
+    // Its own statement: the loop stops early, and a cached statement left mid-iteration fails its next use.
+    const statement = this.core.journal.db.prepare(`SELECT parts FROM messages WHERE thread_id = ? AND role = 'user' AND parts LIKE '%"sentFrom":%'
+      AND rowid < (SELECT rowid FROM messages WHERE id = ?) ORDER BY rowid DESC`);
+    try {
+      for (const row of statement.iterate(threadId, messageId) as Iterable<{ parts: string }>) {
+        const part = (JSON.parse(row.parts) as MessagePart[]).find(p => p.type === 'text' && p.sentFrom !== undefined);
+        if (part?.type === 'text' && part.sentFrom) return part.sentFrom;
+      }
+      return null;
+    } finally { statement.finalize(); }
   }
 
   /** The user message of the turn, read back from the journal: the text and the images it carried. */
