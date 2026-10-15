@@ -8,6 +8,8 @@ import {
 import { withLoad } from './threads/records.ts';
 
 const PREFIX = 'pr-watches:';
+/** The shortest wait the loop schedules between two passes of its own. */
+const MIN_PASS_GAP_MS = 1_000;
 /** Watches one conversation may hold. */
 export const WATCH_LIMIT = 10;
 
@@ -372,7 +374,10 @@ export class PullRequestWatches {
       if (record.pendingSince !== null) next = Math.min(next, record.pendingSince + this.#timing.coalesceMs);
     }
     next = Math.max(next, this.#rateUntil);
-    this.#soon(Math.min(Math.max(next - Date.now(), 1_000), this.#timing.intervalMs));
+    // Never sooner than a second: a pass re-armed at 0 ms after each one would
+    // keep the timer queue due forever where the clock moves in 15 ms steps
+    // (Windows), and nothing else would run.
+    this.#soon(Math.max(Math.min(next - Date.now(), this.#timing.intervalMs), MIN_PASS_GAP_MS));
   }
 }
 

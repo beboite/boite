@@ -271,6 +271,11 @@ test('Stop, unwatch and archive end watches, and the refusals name what is wrong
   await expect(owner.call('threads.watchPullRequest', { threadId, url: '8' })).rejects.toThrow('no linked pull request is #8');
   await expect(owner.call('threads.watchPullRequest', { threadId, url: 'https://gitlab.example/a/b/pull/1' })).rejects.toThrow('host');
   await owner.call('threads.watchPullRequest', { threadId });
+  // The loop rests a second between its own passes even when a read is due at once:
+  // re-arming at 0 ms kept a Windows event loop from reaching anything else.
+  const before = github.calls.length;
+  await Bun.sleep(300);
+  expect(github.calls.length - before).toBeLessThanOrEqual(1);
   expect((await owner.call('turns.stop', { threadId })).stopped).toBe(true);
   expect(harness!.core.pullRequestWatches.of(threadId)).toEqual([]);
 
