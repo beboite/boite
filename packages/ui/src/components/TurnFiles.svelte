@@ -101,7 +101,7 @@
       {#if loading}<p data-testid="turn-diff-loading">{strings.app.loading}</p>{/if}
       {#if loadError}<p role="alert">{loadError}</p>{/if}
       {#each diffs as doc, index (index)}
-        <DiffView path={doc.path} oldText={doc.oldText} newText={doc.newText} />
+        <DiffView path={doc.path} oldText={doc.oldText} newText={doc.newText} {doc} />
       {/each}
     </div>
   {/if}

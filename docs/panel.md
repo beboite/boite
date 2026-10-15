@@ -217,7 +217,9 @@ grammar on demand. Unknown languages and texts over 200,000 characters remain
 plain text. The editor keeps its selection, caret and scroll in a textarea
 over the colored text. Diffs render additions in green and deletions in red,
 including the text, line numbers and signs; unchanged context keeps syntax
-colors. Multiline tokens retain their color across folded context.
+colors. Multiline tokens retain their color across folded context. A diff
+draws plain rows first and highlights once the page is idle, the old side only
+when a line was removed; a text highlighted once is not highlighted again.
 
 Run `bun test tests/e2e/panel.test.ts` to check the panel at desktop and phone
 widths. Captures and `browser-idle.json`, which counts geometry reads across

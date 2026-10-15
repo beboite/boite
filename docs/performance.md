@@ -601,7 +601,9 @@ limits expensive work while streaming, typing and scrolling:
   cancelling browser scrolling. `MessageList.test.ts` guards the listener
   options.
 - Icon shapes and locale date formatters are reused. Finished Markdown markup
-  has a four-million-character cache bound.
+  has a four-million-character cache bound, highlighted code a
+  two-million-character one shared by every view of the same text. A diff
+  document's rows are computed once per whitespace mode and kept with it.
 - The composer uses `field-sizing: content` where supported; IndexedDB draft
   writes wait for a typing pause. Bottom following runs after layout and before
   paint through `ResizeObserver`.
@@ -624,8 +626,12 @@ for the files card. `?fake=1&heavy=1` seeds that shape: forty messages,
 - A part arriving on a streaming message changes its last row only: the rows
   above stay the same objects and draw nothing again.
 - The window hands back the same object while it covers the same rows, and
-  the files card reads tool calls only for a finished turn whose last row is
-  drawn: a scroll inside the rows on the page runs neither.
+  the files card reads tool calls only for a turn whose last row is drawn: a
+  scroll inside the rows on the page runs neither. Each turn end reads its own
+  turn, so a part arriving on the running turn rereads no finished one. A
+  finished turn compares its part objects, and fields only for a deferred
+  call. The last 24 turns read stay cached, so a turn end that scrolls back
+  reads nothing.
 - A reading position saves the message and the row of it on top; a find hit
   names its part, and opens the row that draws it.
 - An anchor is read from the rows by id instead of searching every node, a
