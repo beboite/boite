@@ -13,7 +13,7 @@ const captureDir = process.env.BOITE_SERVER_UPDATE_CAPTURES ?? join(import.meta.
 beforeAll(async () => { const port = await freePort(); base = `http://127.0.0.1:${port}`; server = await startUi(port); }, 90_000);
 beforeEach(async () => { page = await BrowserPage.launch({ url: `${base}/?fake=1&machines=1&open=recent` }); }, 30_000);
 afterEach(async () => { await page?.close(); }, 15_000);
-afterAll(async () => { await server?.close(); }, 15_000);
+afterAll(async () => { await server?.close(); }, 30_000);
 
 async function size(width: number) {
   await page.send('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: width < 720 });

@@ -125,6 +125,7 @@ jobs:
 
   # Signed for the phone app's own address, or the previous release's APK taken
   # back when apps/android, the host and the key are unchanged (docs/android.md).
+  # The app's version is its own, not this release's.
   android:
     name: Android
     needs: revision
@@ -135,7 +136,6 @@ jobs:
       ANDROID_KEYSTORE_PASSWORD: ${{ !inputs.dry-run && secrets.ANDROID_KEYSTORE_PASSWORD || '' }}
     with:
       release: ${{ !inputs.dry-run }}
-      version: ${{ needs.revision.outputs.version }}
 
   image:
     name: Server image

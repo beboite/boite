@@ -43,6 +43,17 @@ export function getDriver(protocol: Protocol): Driver {
   return driver;
 }
 
+/**
+ * Protocols whose agent takes Boite's guide in its system prompt
+ * (`TurnContext.systemGuide`) instead of in the first message. Claude's preset
+ * prompt keeps it through compaction and in the cached prefix.
+ */
+const SYSTEM_GUIDE = new Set<Protocol>(['claude-sdk']);
+
+export function takesSystemGuide(protocol: Protocol): boolean {
+  return SYSTEM_GUIDE.has(protocol);
+}
+
 /** Whether this protocol's agent writes thread titles (`Driver.title`). */
 export function writesTitles(protocol: Protocol): boolean {
   return DRIVERS.get(protocol)?.title !== undefined;

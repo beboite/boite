@@ -45,7 +45,7 @@ async function installMicrophone() {
 afterAll(async () => {
   try { await page?.close(); }
   finally { if (server) await new Promise<void>((resolve, reject) => server.httpServer.close((error?: Error) => error ? reject(error) : resolve())); }
-}, 15_000);
+}, 30_000);
 
 async function capture(name: string) {
   await page.evaluate(`document.fonts.ready`);

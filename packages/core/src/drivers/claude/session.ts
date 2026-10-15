@@ -737,6 +737,18 @@ export class ClaudeSession {
       // This enables the live setter; permissionMode still controls the actual approvals.
       allowDangerouslySkipPermissions: true,
       pathToClaudeCodeExecutable: executable,
+      // Claude Code's own prompt, tuned per model by Anthropic, with Boite's guide
+      // appended. Without a preset the SDK sends an empty one and the model gets a
+      // single identity line. Working directory and memory path go to the first
+      // message, so every thread and worktree shares one cached system prompt.
+      // The CLI records the prompt on a session's first request and reuses it
+      // until compaction, so a resumed session keeps the one it started with.
+      systemPrompt: {
+        type: 'preset',
+        preset: 'claude_code',
+        excludeDynamicSections: true,
+        ...(ctx.systemGuide ? { append: ctx.systemGuide } : {}),
+      },
       settingSources: ['user', 'project', 'local'],
       // Subagents in Boite are Boite conversations (`boite delegate spawn`), so the user
       // can follow, steer and stop them; the CLI's own subagent tools never reach the model.
@@ -746,6 +758,9 @@ export class ClaudeSession {
       ...(mode && !mode.mcp ? { strictMcpConfig: true, mcpServers: {} } : {}),
       settings: {
         fastMode: setup.fastMode,
+        // Memory belongs to the user's brain and Boite's own notes, not to a
+        // per-folder store the preset would otherwise tell the agent to write.
+        autoMemoryEnabled: false,
         ...(setup.disableHooks ? { disableAllHooks: true } : {}),
       },
       includePartialMessages: true,

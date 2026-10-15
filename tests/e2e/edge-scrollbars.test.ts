@@ -85,7 +85,7 @@ beforeAll(async () => {
   await settled();
 }, 60_000);
 
-afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
+afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
 test('edge scrollbars take no room, fade in near the edge, drag, and turn off cleanly', async () => {
   // The experiment's gate, answered by the driver when headless has no mouse.

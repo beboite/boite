@@ -50,7 +50,7 @@ beforeAll(async () => {
   await page.waitFor(`document.querySelector('[data-testid="composer-input"]')`);
 }, 30_000);
 
-afterAll(async () => { await page?.close(); client?.close(); await core?.stop(); }, 15_000);
+afterAll(async () => { await page?.close(); client?.close(); await core?.stop(); }, 30_000);
 
 test('opening the production conversation prepares the agent before the first prompt', async () => {
   await prepared(1);

@@ -14,7 +14,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await Promise.all(pages.map((page) => page.close()));
   await server?.close();
-}, 15_000);
+}, 30_000);
 
 const STORE = `(await import('/src/lib/workspace.svelte.ts')).workspace.active`;
 const CHIP = '[data-testid="prompt-cache"]';
