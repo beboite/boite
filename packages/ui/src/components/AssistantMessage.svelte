@@ -29,6 +29,7 @@
    * `signedOut` is the thread's account when it is signed out, so an error can
    * carry the way back in. `from` and `to` name the parts to draw when the
    * timeline cut a long message in several rows (lib/timeline-rows.ts).
+   * `views` are the pages its turn published, for its answer to place.
    */
   let {
     store,
@@ -39,7 +40,8 @@
     signedOut,
     showModel,
     latestInTurn = true,
-    memoryEvents = []
+    memoryEvents = [],
+    views
   }: {
     store: Store;
     threadId: string;
@@ -50,6 +52,7 @@
     showModel: boolean;
     latestInTurn?: boolean;
     memoryEvents?: MemoryEvent[];
+    views?: readonly Message[];
   } = $props();
 
   function lastTextIndex(message: Message): number {
@@ -108,7 +111,8 @@
     <div class="part" data-kind={part.type}>
       {#if part.type === 'text'}
         <Prose text={shownText} live={index === caretAt && part.complete !== true} bubble={message.role === 'assistant'}
-          typing={!compacting && latestInTurn && !toolRunning && message.role === 'assistant' && store.connection === 'ready' && store.openThread?.status === 'running' && index === message.parts.length - 1 && index === caretAt && part.complete !== true} {store} {threadId} />
+          typing={!compacting && latestInTurn && !toolRunning && message.role === 'assistant' && store.connection === 'ready' && store.openThread?.status === 'running' && index === message.parts.length - 1 && index === caretAt && part.complete !== true} {store} {threadId}
+          views={message.role === 'assistant' ? views : undefined} />
         {#if part.omitted}<p class="omitted" data-testid="text-omitted">{fill(strings.chat.textOmitted, { count: count(part.omitted) })}</p>{/if}
 
       {:else if part.type === 'artifact' && part.view}
@@ -241,6 +245,11 @@
   /* An answer is read at its own measure; cards keep the whole column. */
   .part[data-kind='text'] {
     max-width: var(--prose);
+  }
+
+  /* One that places pages gives each its column and keeps the measure on its text (Prose). */
+  .part[data-kind='text']:has(> :global(.flow)) {
+    max-width: none;
   }
 
 

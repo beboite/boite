@@ -37,7 +37,7 @@
   import { editWhole, fillShort, pullNewer, pullOlder } from '../lib/reading-window';
   import { ReadingAnchor, type RowAnchor } from '../lib/reading-anchor';
   import { MediaQuery } from 'svelte/reactivity';
-  import { placeViews, viewPart } from '../lib/inline-view';
+  import { placeViews, turnViews, viewPart } from '../lib/inline-view';
 
   /** A phone has no room left of the bubbles for the outline rail: it is not drawn there. */
   const narrow = new MediaQuery('(max-width: 720px)');
@@ -95,8 +95,10 @@
       a.createdAt - b.createdAt || Number(after(a)) - Number(after(b)) || a.id.localeCompare(b.id));
     return groupAgentMail(rows, mail);
   });
-  /** A turn's views go after its answer, and wait for a turn still running to end (`placeViews`). */
-  const timeline = $derived(placeViews(grouped.timeline, store.openThread?.id === threadId ? store.openThread.turns : store.delegationThread?.id === threadId ? store.delegationThread.turns : []));
+  /** The pages each turn published: its answer places them, or they go after it once the turn ends (`placeViews`). */
+  let shownViews: ReadonlyMap<string, Message[]> | undefined;
+  const views = $derived.by(() => (shownViews = turnViews(grouped.timeline, shownViews)));
+  const timeline = $derived(placeViews(grouped.timeline, store.openThread?.id === threadId ? store.openThread.turns : store.delegationThread?.id === threadId ? store.delegationThread.turns : [], views));
   const memoryPlacement = $derived(placeMemoryEvents(messages, store.openThread?.id === threadId ? store.openThread.memoryEvents ?? [] : store.delegationThread?.id === threadId ? store.delegationThread.memoryEvents ?? [] : []));
   const memoryRows = $derived(new Map(memoryPlacement.standalone.map((event, index) => [`memory:${event.at}:${event.kind}:${index}`, event])));
   /** What the window lists and measures: a row per message, several for the message of a long turn (lib/timeline-rows.ts). */
@@ -790,7 +792,7 @@
             <UserMessage {store} {message} {turn} {progress} edit={atRest && !isSending(message) ? () => void editMessage(message) : undefined} />
           {:else}
             <AssistantMessage {store} {threadId} {message} from={row.from} to={row.to} {signedOut} showModel={row.first && firstAssistantInTurn.get(message.turnId) === message.id}
-              latestInTurn={lastInTurn.get(message.turnId) === message.id} memoryEvents={memoryPlacement.inline.get(message.id) ?? []} />
+              latestInTurn={lastInTurn.get(message.turnId) === message.id} memoryEvents={memoryPlacement.inline.get(message.id) ?? []} views={views.get(message.turnId)} />
           {/if}
           {#if turn && closes}
             {@const files = filesOf(turn)}

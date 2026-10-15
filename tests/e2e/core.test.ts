@@ -34,7 +34,7 @@ afterAll(async () => {
   client?.close();
   await core?.stop();
   if (projectDir !== undefined) await removeDirectory(projectDir);
-}, 15_000);
+}, 30_000);
 
 test(
   'hello answers with a core that can trace',

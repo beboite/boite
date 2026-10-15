@@ -82,7 +82,7 @@ export async function startTestCore(options: TestCoreOptions = {}): Promise<Test
   const core = new Core({ dataDir, token, onShutdown: options.onShutdown, bundleHash: options.bundleHash, serverUpdates: options.serverUpdates, retentionPassMs: options.retentionPassMs });
   // The scripted agents echo their prompt, and the line that teaches `boite ask`
   // would ride along in every reply: a test that wants it turns it back on.
-  core.settings.set({ asyncQuestions: false, ...options.settings });
+  core.settings.set({ asyncQuestions: false, shortAnswers: false, ...options.settings });
   // Keep scripted replies limited to test input unless testing session context.
   if (!options.boiteGuide) core.journal.setSetting('brain', { path: null, enabled: false, boiteGuide: false });
 
