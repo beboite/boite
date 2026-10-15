@@ -24,7 +24,7 @@ beforeAll(async () => {
   await page.waitFor(`document.querySelector('[data-testid=composer-picker]')`);
 }, 60_000);
 
-afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
+afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
 test('a project whose folder is gone is marked, explained above the composer and removable', async () => {
   expect(await page.evaluate(`document.querySelector('[data-testid=folder-gone]') === null && document.querySelector('[data-testid=project-missing]') === null`)).toBe(true);

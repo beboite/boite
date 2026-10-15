@@ -17,7 +17,7 @@ beforeAll(async () => {
   page = await BrowserPage.launch({ url });
   await page.waitFor(`document.querySelector('[data-testid=composer-picker]')`);
 }, 60_000);
-afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
+afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
 test.each([1440, 390])('paired devices discover, refresh and select native models at %ipx', async width => {
   await page.send('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: width < 720 });

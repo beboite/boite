@@ -1,5 +1,5 @@
 /** The group of machines: one roster shared by the fake cores of this page that joined it. */
-import { DEVICE_LINK_JOIN, GRANT_TTL_MS, GROUP_INVITE_PREFIX, GROUP_MAX_CORES, GROUP_TICKET_TTL_MS, PAIRING_CODE_TTL_MS, RpcErrorCode, type Group, type GroupCore, type GroupDevice } from '@boite/contracts';
+import { DEVICE_LINK_JOIN, GRANT_TTL_MS, GROUP_INVITE_PREFIX, GROUP_MAX_CORES, GROUP_TICKET_TTL_MS, RpcErrorCode, type Group, type GroupCore, type GroupDevice } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { usableAddresses } from '../group-addresses';
 import { secureId } from '../secure-id';
@@ -168,9 +168,7 @@ export function groupMethods(ctx: FakeContext) {
       const origin = ctx.settings.publicUrl ?? (lanOff ? 'http://127.0.0.1:8777' : 'http://192.168.1.20:8777');
       return {
         url: `${origin}/?grant=fake-grant-${ctx.seq}#${DEVICE_LINK_JOIN}=${encodeURIComponent(invite)}`,
-        code: `K7QM-${String(ctx.seq).padStart(4, '2')}`,
-        expiresAt,
-        codeExpiresAt: ctx.now() + PAIRING_CODE_TTL_MS
+        expiresAt
       };
     },
     'group.revokeDevice': async (params) => {

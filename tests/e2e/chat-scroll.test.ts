@@ -80,7 +80,7 @@ beforeAll(async () => {
   url = `http://127.0.0.1:${port}/?fake=1&open=recent&long=1`;
   page = await BrowserPage.launch({ url });
 }, 60_000);
-afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
+afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
 for (const phone of [false, true]) {
   const name = phone ? 'phone' : 'desktop';

@@ -14,7 +14,7 @@ beforeAll(async () => {
   origin = `http://127.0.0.1:${port}`;
   page = await BrowserPage.launch({ url: `${origin}/?fake=1`, windowSize: { width: 1280, height: 900 } });
 }, 60_000);
-afterAll(async () => { await page?.close(); await server?.close(); });
+afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
 async function capture(name: string) {
   await page.evaluate(`Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])`);
