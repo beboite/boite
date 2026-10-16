@@ -153,9 +153,17 @@ The tested installer becomes the release artifact.
 | UI entry chunk | 593,000 |
 | UI files, excluding `.br` and `.gz` copies | 4,990,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,286,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,297,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-16, faster provider detection and the native Codex binary (PR #524)
+merged with `origin/main` at `0a63d907` measure 4,983,859 UI bytes and 4,292,757
+core JavaScript bytes after fresh `bun run build:ui` and `bun run build:core`
+on Linux, against 4,983,859 and 4,281,763 for that main: the hand-written ACP
+update parser, the Codex launcher lookup, the live Codex limits and the provider
+lookup memo add 10,994 core bytes. The core limit becomes 4,297,000; the other
+limits stay unchanged.
 
 On 2026-10-16, the process sampling changes (PR #522) merged with `origin/main`
 at `2f979036` measure 4,983,647 UI bytes and 4,281,183 core JavaScript bytes
