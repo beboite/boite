@@ -97,7 +97,7 @@ export class PushStore {
         this.notify(request.threadId, text ? { body: text } : { body: 'Needs your answer', label: 'needsYou' }, `request-${request.id}`, true);
       } else if (name === 'turn.finished') {
         const turn = payload as RpcEvents['turn.finished'];
-        if (this.closed || this.core.journal.isClosed() || (turn.status !== 'done' && turn.status !== 'error')) return;
+        if (this.closed || this.core.journal.isClosed() || (turn.status !== 'done' && turn.status !== 'error') || !this.reachable()) return;
         const thread = this.core.journal.getThread(turn.threadId);
         if (thread === null || !notifiesOnFinish(thread, turn, this.activeChildren(thread.id))) return;
         // The reply is the news; an error's own message is often a stack or a
@@ -130,6 +130,15 @@ export class PushStore {
       const thread = this.core.journal.getThread(row.id);
       return thread !== null && backgroundWaitOf(this.core, thread, live)?.state === 'waiting';
     }).length;
+  }
+
+  /**
+   * Whether a push could reach anybody: a subscription here, or another member
+   * a device paired with this machine gets its pushes through. Checked when the
+   * news happens, so a phone that subscribes mid-turn hears the next one.
+   */
+  private reachable(): boolean {
+    return Object.keys(this.subscriptions()).length > 0 || this.core.group.peers().length > 0;
   }
 
   private subscriptions(): Record<string, Subscription> {
@@ -219,7 +228,7 @@ export class PushStore {
    * an attended thread does not prove the user noticed its question or permission.
    */
   private notify(threadId: string, text: Pick<PushPayload, 'body' | 'label'>, tag: string, needsInput = false) {
-    if (this.closed) return;
+    if (this.closed || !this.reachable()) return;
     if (!needsInput && this.core.threads.focus.attended(threadId)) {
       this.held.set(tag, { threadId, text, at: Date.now() });
       this.releaseHeld();

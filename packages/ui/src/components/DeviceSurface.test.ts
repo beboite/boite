@@ -45,6 +45,14 @@ test('the panel opens an emulator, shows its screen once booted and taps in scre
   await vi.advanceTimersByTimeAsync(300); await settle();
   const image = document.querySelector<HTMLImageElement>('[data-testid=device-frame]')!;
   expect(image.src).toMatch(/^data:image\/jpeg;base64,/);
+  // Later polls name the frame on screen; a still screen comes back unchanged, with no picture, and stays drawn.
+  const shown = image.src;
+  await vi.advanceTimersByTimeAsync(300); await settle();
+  const polls = calls.mock.calls.map((call, index) => ({ call, index })).filter(({ call }) => call[0] === 'devices.frame');
+  const last = polls.at(-1)!;
+  expect(last.call[1]).toMatchObject({ previous: expect.stringMatching(/^frame-Pixel_8_API_35-0-/) });
+  expect(await calls.mock.results[last.index]!.value).toMatchObject({ unchanged: true });
+  expect(document.querySelector<HTMLImageElement>('[data-testid=device-frame]')!.src).toBe(shown);
   // The screen is drawn 270 by 600: a fourth of the 1080 by 2400 phone.
   vi.spyOn(image, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 270, height: 600, right: 270, bottom: 600, x: 0, y: 0, toJSON: () => ({}) });
   const screen = image.parentElement!;
@@ -75,6 +83,30 @@ test('the panel opens an emulator, shows its screen once booted and taps in scre
   document.querySelector<HTMLButtonElement>('[data-testid=device-close]')!.click(); await settle();
   expect(calls).toHaveBeenCalledWith('devices.close', { threadId: thread, deviceId: 'Pixel_8_API_35' });
   expect(document.querySelector('[data-testid=device-picker]')).not.toBeNull();
+});
+
+test('a still screen on a slow link keeps its quality and frame id after a quick unchanged answer', async () => {
+  vi.useFakeTimers();
+  // A picture takes 600 ms to arrive, an unchanged answer 50 ms: only a picture's trip sets the quality.
+  const real = client.call.bind(client) as (method: string, params: unknown) => Promise<unknown>;
+  const calls = vi.spyOn(client, 'call').mockImplementation((async (method: string, params: unknown) => {
+    const result = await real(method, params);
+    if (method === 'devices.frame') await new Promise(resolve => setTimeout(resolve, (result as { unchanged?: boolean }).unchanged ? 50 : 600));
+    return result;
+  }) as typeof client.call);
+  app = mount(DeviceSurface, { target: document.body, props: { store, threadId: thread } }); await settle();
+  document.querySelector<HTMLButtonElement>('[data-testid=device-open]')!.click(); await settle();
+  await vi.advanceTimersByTimeAsync(FAKE_BOOT_MS + 300); await settle();
+  document.querySelector<HTMLButtonElement>('[data-testid=device-show]')!.click(); await settle();
+  await vi.advanceTimersByTimeAsync(4000); await settle();
+  const polls = calls.mock.calls.filter(([method]) => method === 'devices.frame').map(([, params]) => params as { quality: number; previous?: string });
+  expect(polls.length).toBeGreaterThanOrEqual(4);
+  // The first frame came slowly at 55, so the second is made at 45; every later poll keeps 45 and names that frame.
+  expect(polls.slice(1).map(poll => poll.quality)).toEqual(polls.slice(1).map(() => 45));
+  expect(polls[2]!.previous).toMatch(/-45$/);
+  expect(polls.slice(2).every(poll => poll.previous === polls[2]!.previous)).toBe(true);
+  const pictures = await Promise.all(calls.mock.results.filter((_, index) => calls.mock.calls[index]![0] === 'devices.frame').map(result => result.value as Promise<{ unchanged?: boolean }>));
+  expect(pictures.filter(result => !result.unchanged)).toHaveLength(2);
 });
 
 test('a device the agent opens brings the Device tab forward, and its card is always offered', async () => {
