@@ -1,6 +1,7 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import type { AccountQuota } from '@boite/contracts';
+import { RpcErrorCode, type AccountQuota } from '@boite/contracts';
+import { RpcFailure } from '../lib/client';
 import { SvelteMap } from 'svelte/reactivity';
 import { Store } from '../lib/store.svelte';
 import { strings } from '../lib/strings';
@@ -75,15 +76,27 @@ test('the last reading stays up while the next one loads, and only signed-in acc
   expect(document.querySelector('[data-testid="usage-limits"]')!.classList.contains('loading')).toBe(false);
 });
 
-test('a device is told where the limits are read, and asks for none', async () => {
-  const call = vi.fn(async () => []);
+test('a paired device draws the limit bars the core holds, with no refresh, switch or connect button', async () => {
+  const call = vi.fn(async () => [quota('Claude')]);
   mounted = mount(LimitsPage, { target: document.body, props: {
-    store: { client: { call, on: () => () => {} }, connection: 'ready', owner: false } as unknown as Store,
+    store: { client: { call, on: () => () => {} }, connection: 'ready', owner: false, endpointUrl: 'device-core', accounts: [] } as unknown as Store,
   } });
   await settle();
-  expect(document.querySelector('[data-testid="usage-limits-owner"]')).not.toBeNull();
+  expect(document.querySelectorAll('[data-testid="usage-limit-account"]')).toHaveLength(1);
   expect(document.querySelector('[data-testid="limits-refresh"]')).toBeNull();
-  expect(call).not.toHaveBeenCalled();
+  expect(document.querySelector('[data-testid="limits-tracked"]')).toBeNull();
+  expect(call).toHaveBeenCalledWith('quotas.list', expect.objectContaining({ refresh: false }));
+});
+
+test('a core that refuses a paired device its limits asks for an update instead of an error', async () => {
+  const call = vi.fn(async () => { throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'quotas.list is for the owner only' }); });
+  mounted = mount(LimitsPage, { target: document.body, props: {
+    store: { client: { call, on: () => () => {} }, connection: 'ready', owner: false, endpointUrl: 'device-older-core', accounts: [] } as unknown as Store,
+  } });
+  await settle();
+  expect(document.querySelector('[data-testid="limits-outdated"]')!.textContent).toBe(strings.quotas.outdated);
+  expect(document.querySelector('[data-testid="limits-error"]')).toBeNull();
+  expect(document.querySelector('[data-testid="limits-empty"]')).toBeNull();
 });
 
 test('the read waits for the socket, a failure shows with a retry, and a kept reading reads as stale', async () => {
@@ -200,6 +213,28 @@ test('Douane quotas are native cards grouped by provider, with plan, status, cre
     document.querySelector<HTMLButtonElement>('[data-testid="subscription-proxy-open"]')!.click();
     expect(open).toHaveBeenCalledWith(douane.dashboardUrl, '_blank', 'noopener,noreferrer');
   } finally { store.detach(); client.close(); }
+});
+
+test('a paired phone shows Douane as native bars, never its embedded dashboard', async () => {
+  const store = new Store();
+  const client = new FakeClient({ delayMs: 0 });
+  store.attach(client);
+  await store.connect();
+  await client.call('subscriptionProxy.configure', { subscriptionProxy: douane });
+  store.detach();
+  client.becomes('session');
+  const phone = new Store();
+  phone.attach(client);
+  await phone.connect();
+  expect(phone.owner).toBe(false);
+  mounted = mount(LimitsPage, { target: document.body, props: { store: phone } });
+  try {
+    await vi.waitFor(() => expect(document.querySelectorAll('[data-testid="gateway-quotas"]')).toHaveLength(3));
+    expect(document.querySelector('[data-testid="subscription-proxy-dashboard-page"]')).toBeNull();
+    expect(document.querySelector('iframe')).toBeNull();
+    expect(document.querySelector('[data-testid="limits-error"]')).toBeNull();
+    expect(document.querySelector('[data-testid="gateway-quotas-error"]')).toBeNull();
+  } finally { phone.detach(); client.close(); }
 });
 
 test('CLIProxyAPI and a Douane without the route keep the embedded dashboard', async () => {

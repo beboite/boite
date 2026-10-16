@@ -155,6 +155,11 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   // Sums of the same finished turns per day, provider and model. The thread
   // titles it names are the ones `threads.list` already shows the device.
   'usage.history',
+  // The limit bars of the accounts `accounts.list` already names, and the gateway's.
+  // A device reads what the core holds: forcing a refresh, switching monitoring and
+  // spending a reset stay the owner's (core access.ts).
+  'quotas.list',
+  'subscriptionProxy.quotas',
   'settings.get',
   'keybindings.get',
 ]);
@@ -179,6 +184,7 @@ export const DEVICE_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
   'message.started', 'message.delta', 'message.part', 'message.completed', 'message.truncated',
   'permission.requested', 'permission.resolved', 'question.asked', 'question.answered',
   'scheduler.updated', 'accounts.updated', 'accounts.removed',
+  'quotas.updated', 'quotas.progress', 'subscriptionProxy.quotasUpdated', // What quotas.list and subscriptionProxy.quotas answer.
   'settings.updated', 'keybindings.updated', 'sessions.updated',
   'group.updated', // Invalidation only; group.get applies the device read policy.
   'providers.updated', 'providers.installProgress', 'providers.probed',

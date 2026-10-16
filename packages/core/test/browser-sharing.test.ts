@@ -191,10 +191,17 @@ real('a viewer of a still page gets no new picture until the page draws, and the
   const { tabId } = await agent.call('browser.command', { threadId, action: { kind: 'open', url: url() } });
   await owner.call('threads.subscribe', { threadId });
   // A shrunk frame: Chrome scaled a captured clip differently on each capture, so a still page never looked still.
-  const held = await picture(owner.call('browser.remoteFrame', { threadId, tabId, maxWidth: 400 }));
+  let held = await picture(owner.call('browser.remoteFrame', { threadId, tabId, maxWidth: 400 }));
   expect(jpegSize(held.base64).width).toBe(400);
   // The core refuses a viewer's requests closer than 120 ms apart, and a running screencast answers the first one faster.
   await Bun.sleep(150);
+  // Chrome on macOS draws the freshly loaded page once more: the viewer holds the picture after which nothing comes.
+  for (let settle = 0; settle < 10; settle++) {
+    const next = await owner.call('browser.remoteFrame', { threadId, tabId, maxWidth: 400, after: held.id });
+    if ('unchanged' in next) break;
+    held = next;
+    await Bun.sleep(150);
+  }
   const started = Date.now();
   for (let i = 0; i < 6; i++) {
     expect(await owner.call('browser.remoteFrame', { threadId, tabId, maxWidth: 400, after: held.id })).toMatchObject({ unchanged: true, id: held.id, tabId });

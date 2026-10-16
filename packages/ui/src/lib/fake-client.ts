@@ -297,6 +297,7 @@ export class FakeClient implements ObservableClient {
     }
     if (bus.principal === 'session' && method === 'agents.message.send' && (params as RpcParams<'agents.message.send'>).threadId !== undefined) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'agents.message.send: paired devices must omit threadId and speak as the user' });
     if (bus.principal === 'session' && method === 'git.diff' && ![undefined, '', 'HEAD'].includes((params as RpcParams<'git.diff'>).ref)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'git.diff: paired devices compare the working tree with HEAD only' });
+    if (bus.principal === 'session' && (method === 'quotas.list' || method === 'subscriptionProxy.quotas') && (params as { refresh?: unknown }).refresh === true) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method}: paired devices read the last reading; refresh must be false or absent` });
     const result = await bus.hold(this.#dispatch(method, params)) as RpcResult<M>;
     if (this.#ctx.rttMs > 0) {
       // An answer still on its way back when the socket changed never arrives.

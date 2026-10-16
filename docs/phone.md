@@ -36,14 +36,14 @@ core; its card can rename it.
 Voice shows the connected core's dictation readiness. Engine installation and
 API credentials stay in desktop Voice settings, including for owner sessions.
 Usage shows the connected core's tokens and API cost per day, provider and
-model; its subscription limits need an owner session ([usage.md](usage.md)).
+model; Limits draws the core's subscription bars, read-only ([usage.md](usage.md)).
 
 Provider accounts, keyboard shortcuts, plugins, resource limits, adding and
 removing devices and server configuration stay in desktop settings. This smaller
 phone menu also applies to owner sessions; it does not change RPC permissions.
 
 Device sessions receive only events corresponding to the state they may read.
-Account login output, process traces, plugin state, quotas and core diagnostics
+Account login output, process traces, plugin state and core diagnostics
 remain owner-only. Event permissions are deny-by-default in
 `packages/contracts/src/access.ts`, just like RPC permissions, and `?fake=1`
 with `principal=session` withholds the same events.

@@ -5,11 +5,14 @@
   import { fill, strings } from '../lib/strings';
   import QuotaOverview from './QuotaOverview.svelte';
 
-  let { rows, loading, completed, error = '', owner = true, order = [], reorder, refresh, connect, settings, close, title, testPrefix = 'quota' }: {
+  let { rows, loading, completed, error = '', outdated = false, owner = true, order = [], reorder, refresh, connect, settings, close, title, testPrefix = 'quota' }: {
     rows: AccountQuota[] | null;
     loading: boolean;
     completed: string[];
     error?: string;
+    /** The core predates paired devices reading limits. */
+    outdated?: boolean;
+    /** Only the owner forces a new reading; a paired device's retry reads what the core holds. */
     owner?: boolean;
     order?: string[];
     reorder?: (order: string[]) => Promise<boolean>;
@@ -33,20 +36,18 @@
     </div>
   </header>
   <section class="body">
-    {#if !owner}
-      <p class="muted">{strings.usage.limitsOwner}</p>
-    {:else}
-      {#if error}
-        <div class="failed" role="alert" data-testid={`${testPrefix}-error`}>
-          <p>{fill(strings.quotas.readFailed, { error })}</p>
-          <button type="button" class="ghost small" disabled={loading} data-testid={`${testPrefix}-retry`} onclick={refresh}><span class="ui-label">{strings.common.retry}</span></button>
-        </div>
-      {/if}
-      {#if rows === null}
-        <p class="muted" role="status">{strings.quotas.loading}</p>
-      {:else if !(error && rows.length === 0)}
-        <QuotaOverview {rows} {loading} {completed} {connect} {order} onreorder={reorder} />
-      {/if}
+    {#if error}
+      <div class="failed" role="alert" data-testid={`${testPrefix}-error`}>
+        <p>{fill(strings.quotas.readFailed, { error })}</p>
+        <button type="button" class="ghost small" disabled={loading} data-testid={`${testPrefix}-retry`} onclick={refresh}><span class="ui-label">{strings.common.retry}</span></button>
+      </div>
+    {/if}
+    {#if outdated}
+      <p class="muted" data-testid={`${testPrefix}-outdated`}>{strings.quotas.outdated}</p>
+    {:else if rows === null}
+      <p class="muted" role="status">{strings.quotas.loading}</p>
+    {:else if !(error && rows.length === 0)}
+      <QuotaOverview {rows} {loading} {completed} {connect} {order} onreorder={reorder} />
     {/if}
   </section>
   <footer>
