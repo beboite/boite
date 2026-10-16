@@ -516,3 +516,27 @@ test('a step names its model and reasoning level, and a level the model lacks is
   expect(h.core.threads.require(quick!.threadId!).effort).toBe('low');
   expect(plain!.effort).toBe(h.core.threads.require(threadId).effort);
 });
+
+test('retrying one of two failed steps names the other, changes nothing, and a run retry reopens both', async () => {
+  const { held } = scripted(ctx => !ctx.thread.parentThreadId ? 'noted' : { hold: true });
+  const { h, owner, threadId } = await setup();
+  const run = await owner.call('workflows.start', { threadId, plan: { name: 'Pair', limits: { maxConcurrent: 2 }, steps: [
+    { id: 'left', profile: 'fast', task: 'left' },
+    { id: 'right', profile: 'fast', task: 'right' },
+  ] }, requestId: 'pair' });
+  await waitFor(() => held.size === 2);
+  for (const finish of [...held.values()]) finish('', 'error');
+  const failed = await settled(h, threadId, run.id);
+  expect(failed.nodes.map(node => node.status)).toEqual(['failed', 'failed']);
+
+  await expect(owner.call('workflows.control', { threadId, runId: run.id, action: 'retry', stepId: 'left' }))
+    .rejects.toThrow('the run stays stopped while right has failed; retry that step too, or retry the whole run without naming a step');
+  const unchanged = h.core.workflows.get(threadId, run.id);
+  expect([unchanged.status, ...unchanged.nodes.map(node => node.status)]).toEqual(['failed', 'failed', 'failed']);
+
+  await owner.call('workflows.control', { threadId, runId: run.id, action: 'retry' });
+  await waitFor(() => held.size === 2);
+  expect(h.core.workflows.get(threadId, run.id).nodes.map(node => node.status)).toEqual(['running', 'running']);
+  for (const finish of [...held.values()]) finish('ok');
+  expect((await settled(h, threadId, run.id)).status).toBe('done');
+});

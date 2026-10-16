@@ -168,8 +168,44 @@ export interface StartOptions {
 
 export class TerminalStore {
   private readonly sessions = new Map<string, Session>();
+  /**
+   * The connections that attached each shell: `terminal.output` goes to them
+   * only. A window without that pane would drop the bytes anyway.
+   */
+  private readonly watchers = new Map<string, Set<string>>();
 
   constructor(private readonly core: Core) {}
+
+  /** The connection attached shell `id`: from now on its output reaches it. */
+  watch(id: string, connectionId: string): void {
+    const watching = this.watchers.get(id);
+    if (watching === undefined) this.watchers.set(id, new Set([connectionId]));
+    else watching.add(connectionId);
+  }
+
+  watches(id: string, connectionId: string): boolean {
+    return this.watchers.get(id)?.has(connectionId) === true;
+  }
+
+  /** The connection let go of shell `id`. */
+  unwatch(id: string, connectionId: string): void {
+    const watching = this.watchers.get(id);
+    watching?.delete(connectionId);
+    if (watching?.size === 0) this.watchers.delete(id);
+  }
+
+  /**
+   * The `terminal.exited` of shell `id` went out, after every line it printed:
+   * nobody watches it any more, unless a shell of the same id started since.
+   */
+  exitSent(id: string): void {
+    if (!this.sessions.has(id)) this.watchers.delete(id);
+  }
+
+  /** The socket closed: it watches nothing any more. */
+  disconnect(connectionId: string): void {
+    for (const id of [...this.watchers.keys()]) this.unwatch(id, connectionId);
+  }
 
   /** One of the thread's shells, started in its working directory the first time. */
   openThread(threadId: ThreadId, cols: number, rows: number, terminalId?: string): TerminalState {
@@ -406,8 +442,11 @@ function requireString(value: unknown, field: string): string {
 
 export function registerTerminalMethods(core: Core): void {
   const router: Router = core.router;
-  router.register('terminals.open', (params) =>
-    core.terminals.openThread(requireString(params.threadId, 'threadId') as ThreadId, params.cols, params.rows, params.terminalId));
+  router.register('terminals.open', (params, ctx) => {
+    const state = core.terminals.openThread(requireString(params.threadId, 'threadId') as ThreadId, params.cols, params.rows, params.terminalId);
+    core.terminals.watch(state.id, ctx.connection.id);
+    return state;
+  });
   router.register('terminals.list', (params) => {
     const threadId = requireString(params.threadId, 'threadId') as ThreadId;
     core.threads.require(threadId);
@@ -419,6 +458,11 @@ export function registerTerminalMethods(core: Core): void {
   });
   router.register('terminals.resize', (params) =>
     core.terminals.resize(requireString(params.id, 'id'), params.cols, params.rows));
-  router.register('terminals.close', (params) => core.terminals.close(requireString(params.id, 'id')));
+  router.register('terminals.close', (params, ctx) => {
+    const id = requireString(params.id, 'id');
+    // The closing window's pane goes now; the others keep the last lines until `terminal.exited`.
+    core.terminals.unwatch(id, ctx.connection.id);
+    return core.terminals.close(id);
+  });
   router.register('terminals.history', (params) => core.terminals.history(requireString(params.id, 'id')));
 }

@@ -129,3 +129,17 @@ test('the outline rail eases its prompt bars without laying the page out', () =>
     expect(body).not.toMatch(/transition\s*:[^;]*\b(?:width|height|margin|padding)\b/);
   }
 });
+
+/**
+ * A fold builds its body on the first open and keeps it, so the close can
+ * animate. Closed, that body is styled and laid out on every layout of its row
+ * unless it skips its content once the close has run. The transition belongs
+ * to the closed state alone: on the open one it would hold the body hidden for
+ * a frame.
+ */
+test('a closed fold skips its body once the close has run, and an open one shows it at once', () => {
+  const css = readFileSync(join(SRC, 'app.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const closed = /@supports\s*\(transition-behavior:\s*allow-discrete\)\s*\{\s*\.disclosure-fold:not\(\.open\)\s*>\s*\*\s*\{([^{}]*)\}/.exec(css)?.[1] ?? '';
+  expect(closed).toMatch(/content-visibility\s*:\s*hidden/);
+  expect(closed).toMatch(/transition\s*:\s*content-visibility\s+var\(--dur-3\)\s+allow-discrete/);
+});

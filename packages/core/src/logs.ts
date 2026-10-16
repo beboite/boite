@@ -13,7 +13,8 @@ export const LOG_FILE_COUNT = 8;
 export const SHELL_LOG_FILE_COUNT = 4;
 export { LOG_MESSAGE_CHARS } from '@boite/contracts';
 const PENDING_RECORDS = 1024;
-const RECENT_RECORDS = 4096;
+/** Records kept in memory only: written while persistence fails, or dropped from a full pending buffer. */
+const UNPERSISTED_RECORDS = 4096;
 const FLUSH_MS = 250;
 /** How far ahead of the core a record's time may be: clients' times are kept within 10 minutes. */
 const CLOCK_SKEW_MS = 10 * 60_000;
@@ -39,7 +40,13 @@ export class DiagnosticLogs {
   readonly directory: string;
   /** Resolves a thread id to its agent; set by the core once the journal is open. */
   describeThread: (threadId: string) => ThreadIdentity | null = () => null;
-  private readonly recent = new Map<string, CoreLogRecord>();
+  /**
+   * Records the files do not hold yet, oldest first: pending ones and the batch being
+   * appended, which a query running meanwhile still sees, plus those that will never be
+   * written (persistence failed, the pending buffer was full, a record too large for a
+   * file). An append removes what it wrote: the files answer for it from then on.
+   */
+  private readonly unpersisted = new Map<string, CoreLogRecord>();
   private pending: CoreLogRecord[] = [];
   private writing: Promise<void> = Promise.resolve();
   private readonly ready: Promise<void>;
@@ -155,12 +162,12 @@ export class DiagnosticLogs {
       ...(data ? { data } : {}),
       message: redactLogText(message, this.secrets),
     };
-    this.recent.set(record.id, record);
-    if (this.recent.size > RECENT_RECORDS) this.recent.delete(this.recent.keys().next().value!);
+    this.unpersisted.set(record.id, record);
+    if (this.unpersisted.size > UNPERSISTED_RECORDS) this.unpersisted.delete(this.unpersisted.keys().next().value!);
     if (this.failed) return;
     if (this.pending.length >= PENDING_RECORDS) {
       this.dropped += 1;
-      if (!this.overflowReported) { this.overflowReported = true; this.safeReport('diagnostic logs: pending buffer is full; new records remain only in recent memory and will not be persisted'); }
+      if (!this.overflowReported) { this.overflowReported = true; this.safeReport('diagnostic logs: pending buffer is full; new records remain only in memory and will not be persisted'); }
       return;
     }
     this.pending.push(record);
@@ -268,18 +275,21 @@ export class DiagnosticLogs {
   private async append(batch: CoreLogRecord[]): Promise<void> {
     let chunk = '';
     let chunkBytes = 0;
+    let written: string[] = [];
     const write = async (): Promise<void> => {
       if (!chunk) return;
       const handle = await open(this.path(0), 'a', 0o600);
       try { await handle.writeFile(chunk); } finally { await handle.close(); }
       this.bytes += chunkBytes; chunk = ''; chunkBytes = 0;
+      for (const id of written) this.unpersisted.delete(id);
+      written = [];
     };
     for (const record of batch) {
       const line = `${JSON.stringify(record)}\n`;
       const bytes = Buffer.byteLength(line);
       if (bytes > this.fileBytes) continue;
       if (this.bytes + chunkBytes + bytes > this.fileBytes) { await write(); await this.rotate(); }
-      chunk += line; chunkBytes += bytes;
+      chunk += line; chunkBytes += bytes; written.push(record.id);
     }
     await write();
   }
@@ -295,19 +305,21 @@ export class DiagnosticLogs {
   async query(raw: CoreLogsQuery): Promise<CoreLogRecord[]> {
     let query: ReturnType<typeof validateCoreLogsQuery>;
     try { query = validateCoreLogsQuery(raw); } catch (error) { throw invalidParams((error as Error).message); }
-    return this.select(record => logMatches(record, query), query.limit);
+    return this.select(record => logMatches(record, query), query.limit, query.since);
   }
 
   /**
    * The newest `limit` records a predicate keeps, from every core and shell
-   * file and recent memory, newest first. Core files are read newest first and
-   * the read stops once an older file cannot change the answer.
+   * file and the records not written yet, newest first. Core files are read
+   * newest first and the read stops once an older file cannot change the answer.
+   * `since`, when the predicate keeps nothing older, skips every file last
+   * written before it.
    */
-  async select(keep: (record: CoreLogRecord) => boolean, limit: number): Promise<CoreLogRecord[]> {
+  async select(keep: (record: CoreLogRecord) => boolean, limit: number, since?: number): Promise<CoreLogRecord[]> {
     await this.ready;
     await this.flush();
     let result: CoreLogRecord[] = [];
-    const fromMemory = (): CoreLogRecord[] => [...this.recent.values()].filter(keep);
+    const fromMemory = (): CoreLogRecord[] => [...this.unpersisted.values()].filter(keep);
     // Serialize the bounded history read with rotation, so a query cannot miss a renamed file.
     this.writing = this.writing.then(async () => {
       const records = new Map<string, CoreLogRecord>();
@@ -316,22 +328,34 @@ export class DiagnosticLogs {
       const rank = new Map<string, number>();
       const place = (record: CoreLogRecord, value: number): void => { records.set(record.id, record); rank.set(record.id, value); };
       fromMemory().forEach((record, line) => place(record, (LOG_FILE_COUNT + 1) * LINES_PER_FILE + line));
+      // A record's time can be earlier than its write (a turn logs when it was queued), so file
+      // order says nothing about `at`. A file's modification time does bound what it holds:
+      // nothing in it is newer than its last write, give or take a client's allowed clock skew.
+      const tooOld = (modified: number): boolean => since !== undefined && modified + CLOCK_SKEW_MS < since;
       for (let index = 0; index < LOG_FILE_COUNT; index += 1) {
-        // A record's time can be earlier than its write (a turn logs when it was queued), so file
-        // order says nothing about `at`. A file's modification time does bound what it holds:
-        // nothing in it is newer than its last write, give or take a client's allowed clock skew.
-        // Once `limit` kept records are all newer than that, this file and older ones cannot enter.
-        if (index > 0 && records.size >= limit) {
+        // Once `limit` kept records are all newer than that bound, or `since` is, this file and
+        // older rotations cannot enter. The newest file is read whatever its time unless `since` excludes it.
+        if (since !== undefined || (index > 0 && records.size >= limit)) {
           const modified = await this.modified(this.path(index));
           // A missing file (deleted, or a crash mid-rotation) holds nothing; older ones still can.
           if (modified === null) continue;
-          const limitTh = [...records.values()].map(record => record.at).sort((a, b) => b - a)[limit - 1]!;
-          if (limitTh > modified + CLOCK_SKEW_MS) break;
+          if (tooOld(modified)) break;
+          if (index > 0 && records.size >= limit) {
+            const limitTh = [...records.values()].map(record => record.at).sort((a, b) => b - a)[limit - 1]!;
+            if (limitTh > modified + CLOCK_SKEW_MS) break;
+          }
         }
         (await this.read(this.path(index), 'core', keep)).forEach((record, line) => { if (!records.has(record.id)) place(record, (LOG_FILE_COUNT - index) * LINES_PER_FILE + line); });
       }
       // Bands below the core's, so a shell and a core record of the same millisecond always sort the same way.
-      for (let index = 0; index < SHELL_LOG_FILE_COUNT; index += 1) (await this.read(this.shellPath(index), 'shell', keep)).forEach((record, line) => place(record, -(index + 1) * LINES_PER_FILE + line));
+      // The shell rotates its own files: each one is checked on its own.
+      for (let index = 0; index < SHELL_LOG_FILE_COUNT; index += 1) {
+        if (since !== undefined) {
+          const modified = await this.modified(this.shellPath(index));
+          if (modified === null || tooOld(modified)) continue;
+        }
+        (await this.read(this.shellPath(index), 'shell', keep)).forEach((record, line) => place(record, -(index + 1) * LINES_PER_FILE + line));
+      }
       // What was recorded while the files were read is in memory only, and newest of all.
       fromMemory().forEach((record, line) => { if (!records.has(record.id)) place(record, (LOG_FILE_COUNT + 2) * LINES_PER_FILE + line); });
       result = sortNewest([...records.values()], record => rank.get(record.id) ?? 0).slice(0, limit);

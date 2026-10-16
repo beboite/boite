@@ -1,21 +1,25 @@
 <script lang="ts">
   import { Columns2, Space } from '@lucide/svelte';
-  import { diffCounts, diffRows, splitRows, type DiffRow } from '../lib/diff';
+  import { diffCounts, diffRows, diffRowsOf, splitRows, type DiffRow, type DiffSource } from '../lib/diff';
   import { diffPrefs, setDiffPref } from '../lib/diff-prefs.svelte';
   import { fill, strings } from '../lib/strings';
   import { codeLanguage, highlightCode } from '../lib/code-highlight';
+  import { whenIdle } from '../lib/prefetch';
   import { boxWidth } from '../lib/box-width';
 
   let {
     path,
     oldText,
     newText,
+    doc,
     headless = false,
     grow = false
   }: {
     path: string;
     oldText: string;
     newText: string;
+    /** The document `oldText` and `newText` come from, when there is one: its rows are read once and kept across mounts. */
+    doc?: DiffSource;
     /** Under a line that already names the file and counts the lines: no heading of its own. */
     headless?: boolean;
     /** The only thing in a scrolling pane: the rows grow with it instead of scrolling in a box of their own. */
@@ -28,7 +32,7 @@
   const SPLIT_MIN_WIDTH = 560;
 
   let width = $state(0);
-  let rows = $derived(diffRows(oldText, newText, { ignoreWhitespace: diffPrefs.ignoreWhitespace }));
+  let rows = $derived(doc ? diffRowsOf(doc, diffPrefs.ignoreWhitespace) : diffRows(oldText, newText, { ignoreWhitespace: diffPrefs.ignoreWhitespace }));
   let counts = $derived(diffCounts(rows));
   let expanded = $state(false);
   let shown = $derived(expanded ? rows : rows.slice(0, FIRST_ROWS));
@@ -36,19 +40,29 @@
   let split = $derived(splittable && diffPrefs.split);
   let pairs = $derived(split ? splitRows(shown) : []);
   const language = $derived(codeLanguage(path));
-  let oldCode = $state.raw<string[] | null>(null);
-  let newCode = $state.raw<string[] | null>(null);
+  /** Highlighted lines, kept with the text and grammar they were read from so a changed text never shows stale colors. */
+  type Coded = { text: string; grammar: string | null; lines: string[] | null };
+  let oldCoded = $state.raw<Coded | null>(null);
+  let newCoded = $state.raw<Coded | null>(null);
+  const oldCode = $derived(oldCoded?.text === oldText && oldCoded.grammar === language ? oldCoded.lines : null);
+  const newCode = $derived(newCoded?.text === newText && newCoded.grammar === language ? newCoded.lines : null);
+  /** Only a removed line reads the old side: context lines read the new one. A new file or a pure addition skips it. */
+  const needsOld = $derived(rows.some((row) => row.kind === 'remove'));
 
   $effect(() => {
-    const before = oldText;
+    const before = needsOld ? oldText : null;
     const after = newText;
     const grammar = language;
-    oldCode = newCode = null;
     let cancelled = false;
-    void Promise.all([highlightCode(before, grammar), highlightCode(after, grammar)]).then(([oldLines, newLines]) => {
-      if (!cancelled) { oldCode = oldLines; newCode = newLines; }
-    }).catch(() => { /* The plain diff remains available if a grammar cannot load. */ });
-    return () => { cancelled = true; };
+    // The plain rows draw first; the grammar runs once the fold has opened and the page is idle.
+    const cancel = whenIdle(() => {
+      void Promise.all([before === null ? null : highlightCode(before, grammar), highlightCode(after, grammar)]).then(([oldLines, newLines]) => {
+        if (cancelled) return;
+        if (before !== null) oldCoded = { text: before, grammar, lines: oldLines };
+        newCoded = { text: after, grammar, lines: newLines };
+      }).catch(() => { /* The plain diff remains available if a grammar cannot load. */ });
+    }, { timeout: 300, fallback: 0 });
+    return () => { cancelled = true; cancel(); };
   });
 
   function codeOf(row: Exclude<DiffRow, { kind: 'gap' }>): string | undefined {

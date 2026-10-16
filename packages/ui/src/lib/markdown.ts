@@ -1,4 +1,4 @@
-import { richInline, fileLike, linkHtml } from './chat-links';
+import { BracketLinks, richInline, fileLike, linkHtml } from './chat-links';
 /**
  * The markdown an agent answer needs: paragraphs, headings, nested and task
  * lists, block quotes, tables, rules, fenced and inline code, bold, italic,
@@ -34,8 +34,20 @@ function inlineFormatting(text: string): string {
   out = out.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
   out = out.replace(/(^|[^*\w])\*([^*\n]+)\*(?!\w)/g, '$1<em>$2</em>');
   out = out.replace(/~~([^~\n]+)~~/g, '<del>$1</del>');
-  out = out.replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
-  return out;
+  return webLinks(out);
+}
+
+/** `[label](http://...)` as a link, in linear time where a regex retried from every `[`. */
+function webLinks(text: string): string {
+  if (!text.includes('](http')) return text;
+  const links = new BracketLinks(text, true);
+  let out = '';
+  let start = 0;
+  for (let link = links.next(0); link; link = links.next(link.end)) {
+    out += `${text.slice(start, link.index)}<a href="${link.target}" target="_blank" rel="noopener noreferrer">${link.label}</a>`;
+    start = link.end;
+  }
+  return out + text.slice(start);
 }
 
 const FENCE = /^```([\w+-]*)\s*$/;
