@@ -15,12 +15,16 @@ import type {
 } from '@boite/contracts';
 import { isNativeAgentPart } from './journal/native-agent-parts.ts';
 import { TRAIL_ONLY, trailOf } from './journal/trail.ts';
-import { copyBlobs, hydrate, hydratePart, storeParts } from './journal/part-blobs.ts';
+import { hydrate, hydratePart } from './journal/part-blobs.ts';
 import { migrate } from './journal/schema.ts';
+import { runWrite } from './journal/statements.ts';
+import { WAL_LIMIT_BYTES, WalCheckpoints, type WalCheckpointOptions } from './journal/wal-checkpoints.ts';
 import { toAccount, toMessage, toProcess, toProject, toThread, toTurn, parseJson } from './journal/rows.ts';
+import { threadsWhere, VISIBLE_THREADS, writeThread } from './journal/thread-rows.ts';
+import { oneTurn, sumSessionUsage, writeTurn } from './journal/turn-rows.ts';
 import type { AccountRow, MessageRow, ProcessRow, ProjectIconRow, ProjectRow, ThreadRow, TurnRow } from './journal/rows.ts';
 import type { DetectedIcon as StoredProjectIcon } from './project-icons.ts';
-import { messageOfError, StreamBuffer } from './journal/stream-buffer.ts';
+import { copyStoredParts, foldStreamingParts, messageOfError, StreamBuffer } from './journal/stream-buffer.ts';
 import { requestSince } from './journal/request-since.ts';
 import { usageByBucket, usageByThread, type UsageSumRow, type UsageThreadRow } from './journal/usage-sums.ts';
 import { sent, type Projection } from './journal/sent.ts';
@@ -28,6 +32,8 @@ import { sent, type Projection } from './journal/sent.ts';
 export interface JournalOptions {
   /** Where a write that fails on a timer, with no caller to throw to, is reported. */
   onError?: (message: string) => void;
+  /** Overrides the WAL checkpoint thresholds, for tests (`journal/wal-checkpoints.ts`). */
+  checkpoints?: WalCheckpointOptions;
 }
 
 /** What `listMessagePage` hands back: the page itself and the cursor for what is behind it. */
@@ -68,8 +74,11 @@ export class Journal {
   readonly db: Database;
   /** The streaming write path: deltas and the parts of messages still streaming. */
   private readonly stream: StreamBuffer;
+  private readonly turnListeners = new Set<(turn: Turn) => void>();
   private readonly onError: (message: string) => void;
   private closed = false;
+  /** Checkpoints the WAL off the event loop; null for a database without a WAL file. */
+  readonly checkpoints: WalCheckpoints | null = null;
   /** The schema version found on disk and the one after migration, for the startup log. */
   schema = { from: 0, to: 0 };
 
@@ -81,12 +90,16 @@ export class Journal {
       this.db.exec('PRAGMA journal_mode = WAL');
       this.db.exec('PRAGMA synchronous = NORMAL');
       this.db.exec('PRAGMA busy_timeout = 5000');
-      // A large transaction grows the WAL file; this lets it shrink back at the next checkpoint.
-      this.db.exec('PRAGMA journal_size_limit = 33554432');
+      // The WAL file shrinks back to this at a restart, so it grows past it only once that much was written since.
+      this.db.exec(`PRAGMA journal_size_limit = ${WAL_LIMIT_BYTES}`);
       this.schema = this.db.transaction(() => migrate(this.db, file))();
+      foldStreamingParts(this.db); // What a stream left beside its row when the last core stopped without closing.
       // An incognito conversation never outlives the core that held it.
       this.purgeIncognitoThreads();
+      // Started after the writes above: SQLite checkpoints those itself, as before.
+      this.checkpoints = WalCheckpoints.start(this.db, file, this.onError, options.checkpoints);
     } catch (error) {
+      this.checkpoints?.close();
       this.db.close(false);
       throw error;
     }
@@ -160,11 +173,12 @@ export class Journal {
     if (this.closed) return;
     try {
       this.flushDeltas();
-      this.persistMessages();
+      this.stream.writeRows();
       this.purgeIncognitoThreads();
     } finally {
       this.stream.clear();
       this.closed = true;
+      this.checkpoints?.close();
       this.db.close(false);
     }
   }
@@ -235,61 +249,23 @@ export class Journal {
 
   // -- threads --------------------------------------------------------------
 
-  putThread(thread: ThreadSummary): void {
-    this.db
-      .query(
-        `INSERT OR REPLACE INTO threads
-         (id, project_id, title, title_source, provider_id, account_id, model, effort, cwd, branch, permission_mode, status, unread, archived, pinned, session_id, context, created_at, updated_at, session_generation, selection_version, speed, parent_thread_id, prompt_cache, agent_session_id, session_resume_at, title_state, branch_naming_pending, fork_origin, done_at, incognito, archived_at, context_mode)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        thread.id,
-        thread.projectId,
-        thread.title,
-        thread.titleSource,
-        thread.providerId,
-        thread.accountId,
-        thread.model,
-        thread.effort,
-        thread.cwd,
-        thread.branch,
-        thread.permissionMode,
-        thread.status,
-        thread.unread ? 1 : 0,
-        thread.archived ? 1 : 0,
-        thread.pinned ? 1 : 0,
-        thread.sessionId,
-        thread.context === null ? null : JSON.stringify(thread.context),
-        thread.createdAt,
-        thread.updatedAt,
-        thread.sessionGeneration ?? 0,
-        thread.selectionVersion ?? 0,
-        thread.speed ?? null,
-        thread.parentThreadId ?? null,
-        thread.promptCache ? JSON.stringify(thread.promptCache) : null,
-        thread.agentSessionId ?? null,
-        thread.sessionResumeAt ?? null,
-        thread.titleState ? JSON.stringify(thread.titleState) : null,
-        thread.branchNamingPending === true ? 1 : 0,
-        thread.forkOrigin ? JSON.stringify(thread.forkOrigin) : null,
-        thread.doneAt ?? null,
-        thread.incognito ? 1 : 0,
-        thread.archived ? (thread.archivedAt ?? null) : null, thread.contextMode ? JSON.stringify(thread.contextMode) : null,
-      );
-  }
+  putThread(thread: ThreadSummary): void { writeThread(this.db, thread); }
 
   getThread(threadId: string): ThreadSummary | null {
-    const row = this.db.query("SELECT *, (SELECT MAX(created_at) FROM messages WHERE thread_id = threads.id AND role = 'user') AS last_user_message_at FROM threads WHERE id = ? AND id NOT IN (SELECT thread_id FROM thread_deletions)").get(threadId) as ThreadRow | null;
+    const row = this.db.query(`${VISIBLE_THREADS} AND id = ?`).get(threadId) as ThreadRow | null;
     return row === null ? null : toThread(row);
   }
 
   listThreads(projectId?: string): ThreadSummary[] {
-    const rows =
-      projectId === undefined
-        ? (this.db.query("SELECT *, (SELECT MAX(created_at) FROM messages WHERE thread_id = threads.id AND role = 'user') AS last_user_message_at FROM threads WHERE id NOT IN (SELECT thread_id FROM thread_deletions) ORDER BY rowid").all() as ThreadRow[])
-        : (this.db.query("SELECT *, (SELECT MAX(created_at) FROM messages WHERE thread_id = threads.id AND role = 'user') AS last_user_message_at FROM threads WHERE project_id = ? AND id NOT IN (SELECT thread_id FROM thread_deletions) ORDER BY rowid").all(projectId) as ThreadRow[]);
-    return rows.map(toThread);
+    return projectId === undefined ? threadsWhere(this.db, '') : threadsWhere(this.db, 'AND project_id = ?', projectId);
   }
+
+  /** Startup reads: only the threads each recovery acts on, not every thread's JSON. */
+  listChildThreads(): ThreadSummary[] { return threadsWhere(this.db, "AND parent_thread_id IS NOT NULL AND parent_thread_id <> ''"); }
+  listThreadsIn(ids: Iterable<string>): ThreadSummary[] { return threadsWhere(this.db, 'AND id IN (SELECT value FROM json_each(?))', JSON.stringify([...ids])); }
+  listThreadsWithStatus(statuses: readonly ThreadSummary['status'][]): ThreadSummary[] { return threadsWhere(this.db, 'AND status IN (SELECT value FROM json_each(?))', JSON.stringify(statuses)); }
+  /** Threads whose title state may ask for a refinement; the caller reads the flag. */
+  listThreadsWithTitleState(): ThreadSummary[] { return threadsWhere(this.db, "AND title_state LIKE '%needsRefinement%'"); }
 
   /** Keep full hydration's corruption errors before startup recovery writes. */
   validateVisibleThreadJson(): void {
@@ -311,7 +287,7 @@ export class Journal {
   /** Hide the stopped family while keeping its rows and deletion time across restarts. */
   stageThreadDeletion(rootId: string, threads: ThreadSummary[]): void {
     this.flushDeltas();
-    this.persistMessages();
+    this.stream.writeRows(new Set(threads.map(t => t.id))); // Forgotten below: a restore needs whole rows.
     const now = Date.now();
     this.db.transaction(() => {
       for (const thread of threads) {
@@ -366,7 +342,7 @@ export class Journal {
     // table keyed by thread is cleared here, events included, so a removed
     // project's prompts and tool output leave the disk.
     this.db.transaction(() => {
-      for (const table of ['background_observations', 'turn_requests', 'turns', 'messages', 'native_agent_messages', 'part_blobs', 'media_previews', 'media_displays', 'processes', 'coordination_letters', 'coordination_wakes', 'events']) {
+      for (const table of ['background_observations', 'turn_requests', 'turns', 'messages', 'native_agent_messages', 'part_blobs', 'streaming_parts', 'media_previews', 'media_displays', 'processes', 'coordination_letters', 'coordination_wakes', 'events']) {
         const query = this.db.query(`DELETE FROM ${table} WHERE thread_id = ?`);
         for (const id of threadIds) query.run(id);
       }
@@ -419,25 +395,15 @@ export class Journal {
 
   // -- turns ----------------------------------------------------------------
 
+  /** Hear every turn `putTurn` writes, inside the write: a rolled-back write is not taken back. */
+  onTurnWritten(listener: (turn: Turn) => void): () => void {
+    this.turnListeners.add(listener);
+    return () => { this.turnListeners.delete(listener); };
+  }
+
   putTurn(turn: Turn): void {
-    this.db
-      .query(
-        `INSERT OR REPLACE INTO turns (id, thread_id, status, queued_at, started_at, finished_at, usage, error, execution, checkpoint, queue_hold)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        turn.id,
-        turn.threadId,
-        turn.status,
-        turn.queuedAt,
-        turn.startedAt,
-        turn.finishedAt,
-        turn.usage === null ? null : JSON.stringify(turn.usage),
-        turn.error,
-        turn.execution === undefined ? null : JSON.stringify(turn.execution),
-        turn.checkpoint ? JSON.stringify(turn.checkpoint) : null,
-        turn.queueHold ? JSON.stringify(turn.queueHold) : null,
-      );
+    writeTurn(this.db, turn);
+    for (const listener of this.turnListeners) listener(turn);
   }
 
   getTurn(turnId: string): Turn | null {
@@ -461,6 +427,15 @@ export class Journal {
     return rows.map(toTurn);
   }
 
+  /** One turn read without the thread's history (`journal/turn-rows.ts`). */
+  runningTurn(threadId: string): Turn | null { return oneTurn(this.db, 'running', threadId); }
+  lastTurn(threadId: string): Turn | null { return oneTurn(this.db, 'last', threadId); }
+  /** The newest turn that is neither queued nor running. */
+  lastEndedTurn(threadId: string): Turn | null { return oneTurn(this.db, 'ended', threadId); }
+  /** The oldest queued turn that runs `operation`. */
+  queuedTurn(threadId: string, operation: string): Turn | null { return oneTurn(this.db, 'queued', threadId, operation); }
+  sessionUsage(threadId: string, generation: number, exceptTurnId: string): { costUsd: number; tokens: number } { return sumSessionUsage(this.db, threadId, generation, exceptTurnId); }
+
   /** A coordination contact needs one completion timestamp, without loading its turn history. */
   lastCompletedAt(threadId: string): number | null {
     const row = this.db.query("SELECT finished_at AS at FROM turns WHERE thread_id = ? AND status = 'done' AND finished_at IS NOT NULL ORDER BY rowid DESC LIMIT 1").get(threadId) as { at: number } | null;
@@ -474,11 +449,11 @@ export class Journal {
    */
   listTurnsFor(threadId: string, turnIds: Iterable<string>): Turn[] {
     const ids = [...new Set(turnIds)];
-    const marks = ids.map(() => '?').join(', ');
-    const where = ids.length === 0 ? '' : ` OR id IN (${marks})`;
-    const rows = this.db
-      .query(`SELECT * FROM turns WHERE thread_id = ? AND (status IN ('running', 'queued')${where}) ORDER BY rowid`)
-      .all(threadId, ...ids) as TurnRow[];
+    // One JSON list, not one `?` per id: every page size shares one cached statement.
+    const rows = (ids.length === 0
+      ? this.db.query("SELECT * FROM turns WHERE thread_id = ? AND status IN ('running', 'queued') ORDER BY rowid").all(threadId)
+      : this.db.query("SELECT * FROM turns WHERE thread_id = ? AND (status IN ('running', 'queued') OR id IN (SELECT value FROM json_each(?))) ORDER BY rowid")
+        .all(threadId, JSON.stringify(ids))) as TurnRow[];
     return rows.map(toTurn);
   }
 
@@ -533,21 +508,9 @@ export class Journal {
   // -- messages -------------------------------------------------------------
 
   putMessage(message: Message): void {
-    this.stream.track(message);
-    this.db
-      .query(
-        `INSERT OR REPLACE INTO messages (id, thread_id, turn_id, role, parts, state, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        message.id,
-        message.threadId,
-        message.turnId,
-        message.role,
-        storeParts(this.db, message),
-        message.state,
-        message.createdAt,
-      );
+    const parts = this.stream.track(message);
+    runWrite(this.db, 'INSERT OR REPLACE INTO messages (id, thread_id, turn_id, role, parts, state, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      message.id, message.threadId, message.turnId, message.role, parts, message.state, message.createdAt);
     if (message.parts.some(isNativeAgentPart)) this.markNativeAgents(message.id, message.threadId);
   }
 
@@ -569,7 +532,7 @@ export class Journal {
       SELECT ?, ?, ?, role, parts, ?, created_at FROM messages WHERE id = ?`).run(copy.id, copy.threadId, copy.turnId, copy.state, sourceId);
     this.db.query('INSERT OR IGNORE INTO native_agent_messages (message_id, thread_id) SELECT ?, ? FROM native_agent_messages WHERE message_id = ?')
       .run(copy.id, copy.threadId, sourceId);
-    copyBlobs(this.db, sourceId, copy);
+    copyStoredParts(this.db, sourceId, copy);
   }
 
   getMessage(messageId: string): Message | null {
@@ -611,11 +574,19 @@ export class Journal {
     } finally { statement.finalize(); }
   }
 
-  *walkTurnMessages(threadId: string, turnId: string): Iterable<Message> {
+  /**
+   * The messages of one turn. With `blobs: false`, values kept in `part_blobs`
+   * (tool output and input, file and image data of 32 KiB or more) are not read
+   * back: they read as '' beside a `$blob` marker. Use it only to read text,
+   * ids, roles or states, and never write such a part back.
+   */
+  *walkTurnMessages(threadId: string, turnId: string, options: { blobs?: boolean } = {}): Iterable<Message> {
     this.flushDeltas();
     const statement = this.db.prepare('SELECT * FROM messages WHERE thread_id = ? AND turn_id = ? ORDER BY rowid');
     try {
-      for (const row of statement.iterate(threadId, turnId)) yield this.currentMessage(row as MessageRow);
+      for (const row of statement.iterate(threadId, turnId)) {
+        yield options.blobs === false ? this.stream.openCopy((row as MessageRow).id) ?? toMessage(row as MessageRow) : this.currentMessage(row as MessageRow);
+      }
     } finally { statement.finalize(); }
   }
 
@@ -750,8 +721,7 @@ export class Journal {
     const removed = this.messageIdsFrom(threadId, fromRowid);
     this.db.query('DELETE FROM turn_requests WHERE thread_id = ? AND message_id IN (SELECT id FROM messages WHERE thread_id = ? AND rowid >= ?)').run(threadId, threadId, fromRowid);
     this.db.query('DELETE FROM native_agent_messages WHERE message_id IN (SELECT id FROM messages WHERE thread_id = ? AND rowid >= ?)').run(threadId, fromRowid);
-    this.db.query('DELETE FROM part_blobs WHERE message_id IN (SELECT id FROM messages WHERE thread_id = ? AND rowid >= ?)').run(threadId, fromRowid);
-    for (const table of ['media_previews', 'media_displays']) this.db.query(`DELETE FROM ${table} WHERE message_id IN (SELECT id FROM messages WHERE thread_id = ? AND rowid >= ?)`).run(threadId, fromRowid);
+    for (const table of ['part_blobs', 'streaming_parts', 'media_previews', 'media_displays']) this.db.query(`DELETE FROM ${table} WHERE message_id IN (SELECT id FROM messages WHERE thread_id = ? AND rowid >= ?)`).run(threadId, fromRowid);
     this.db.query('DELETE FROM messages WHERE thread_id = ? AND rowid >= ?').run(threadId, fromRowid);
     for (const turnId of removed.turnIds) {
       // An unknown accepted follow-up might be the removed input. Never acknowledge it again.

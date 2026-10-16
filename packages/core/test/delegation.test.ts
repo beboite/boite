@@ -201,6 +201,12 @@ test('native results survive message pagination and restart without using delega
   const id = run.ctx.emit.startMessage('assistant');
   run.ctx.emit.part(id, 0, { type: 'tool', toolId: 'native-review', name: 'Agent', input: { prompt: 'Review parsing', model: 'reviewer' }, output: null, status: 'running' });
   const rawParts = (messageId: string) => (h.core.journal.db.query('SELECT parts FROM messages WHERE id = ?').get(messageId) as { parts: string }).parts;
+  // What a restart reads: a streaming message's timed writes land in streaming_parts beside its row.
+  const diskParts = (messageId: string) => {
+    const parts = JSON.parse(rawParts(messageId)) as unknown[];
+    for (const row of h.core.journal.db.query('SELECT part_index AS i, json FROM streaming_parts WHERE message_id = ?').all(messageId) as { i: number; json: string }[]) parts[row.i] = JSON.parse(row.json);
+    return parts;
+  };
   // A Team read must show live tools without persisting this or other streams.
   expect(h.core.delegation.get(threadId).nativeAgents[0]).toMatchObject({ task: 'Review parsing', status: 'running' });
   expect(rawParts(id)).toBe('[]');
@@ -210,15 +216,15 @@ test('native results survive message pagination and restart without using delega
   expect(rawParts(id)).toBe('[]');
   expect(rawParts(unrelatedId)).toBe('[]');
   h.core.journal.persistMessages();
-  expect(JSON.parse(rawParts(id))[0]).toMatchObject({ output: 'Checked', status: 'done' });
-  expect(JSON.parse(rawParts(unrelatedId))).toEqual([{ type: 'text', text: 'Unrelated streamed text' }]);
+  expect(diskParts(id)[0]).toMatchObject({ output: 'Checked', status: 'done' });
+  expect(diskParts(unrelatedId)).toEqual([{ type: 'text', text: 'Unrelated streamed text' }]);
   // A stale persisted tool cannot override its newer live update in the merge.
   run.ctx.emit.part(id, 0, { type: 'tool', toolId: 'native-review', name: 'Agent', input: { prompt: 'Review parsing', model: 'reviewer' }, output: null, status: 'running' });
   const live = h.core.delegation.get(threadId).nativeAgents;
   expect(live).toHaveLength(1);
   expect(live[0]).toMatchObject({ status: 'running' });
   expect(live[0]?.result).toBeUndefined();
-  expect(JSON.parse(rawParts(id))[0]).toMatchObject({ output: 'Checked', status: 'done' });
+  expect(diskParts(id)[0]).toMatchObject({ output: 'Checked', status: 'done' });
   run.ctx.emit.part(id, 0, { type: 'tool', toolId: 'native-review', name: 'Agent', input: { prompt: 'Review parsing', model: 'reviewer' }, output: 'Checked', status: 'done' });
   run.ctx.emit.complete(id, 'complete');
   await changed;

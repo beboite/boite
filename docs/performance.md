@@ -49,7 +49,12 @@ that reads screenshots back keeps each PNG as base64 in its tool output; one
 message held 33.5 MiB. Large values now live in `part_blobs`
 ([architecture](architecture.md)), so a streaming message rewrites only the
 parts that changed: 20 s of text on top of 93 stored screenshots spent 396 ms
-in writes instead of 3,838 ms. `delegation.get` reads the messages that
+in writes instead of 3,838 ms. Between whole-row writes, a streaming message
+writes only its changed parts to `streaming_parts`: 60 s of text on a row of
+100 tool parts wrote 4.2 MiB of WAL instead of 95.7 MiB
+([results](../bench/results/2026-10-15-perf-journal.md)). WAL checkpoints run
+in a Worker instead of inside whichever commit crossed 1,000 pages, and the
+statement cache holds 128 statements instead of Bun's 20. `delegation.get` reads the messages that
 `native_agent_messages` names instead of every part of the thread: 30 ms
 instead of 1,051 ms on a 115 MiB thread. Partial indexes on the events read
 back took the core's start on that journal from 1.9 s to 0.38 s once settled,
@@ -551,8 +556,12 @@ port refusal, the compiled binary and graceful lock release.
 
 Activity restoration selects threads with saved activities. Coordination
 recovery selects active threads and threads with potentially pending letters.
-Both validate visible thread JSON before recovery and retain the original
-error order, archived-thread handling and recovery writes.
+The core validates visible thread JSON once, where activity's own check ran,
+so both keep the original error order, archived-thread handling and recovery
+writes; each still validates when built on its own. Delegation reads child
+threads and pending roots, turn recovery the queued, running and waiting
+threads, and title recovery the threads with a title state, not every thread
+(`bench/journal-reads.ts`).
 
 Claude and ACP join the other native drivers behind a lazy factory. Listing
 providers, capabilities or cached models does not load their protocol runtime.

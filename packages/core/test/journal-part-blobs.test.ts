@@ -45,6 +45,26 @@ test('a streaming turn of screenshots writes each one once, outside its message 
   expect(journal.getMessage('msg_a')!.parts.slice(0, 2)).toEqual([{ ...read(0), output: 'small now' }, read(1)]);
 });
 
+test('a part changed beside an unchanged screenshot keeps its stored value in place', () => {
+  journal.putMessage({ id: 'msg_a', threadId: 'thr_a', turnId: 'trn_a', role: 'assistant', parts: [], state: 'streaming', createdAt: 1 });
+  journal.setMessagePart('msg_a', 0, read(0));
+  journal.persistMessages();
+  const first = blobRows();
+  expect(first).toHaveLength(1);
+  // A tool summary arrives after the part was written: same output, one more small field.
+  journal.setMessagePart('msg_a', 0, { ...read(0), summary: 'Read 0.png' });
+  journal.persistMessages();
+  expect(blobRows()).toEqual(first);
+  journal.setMessageState('msg_a', 'complete');
+  journal.setMessagePart('msg_a', 0, { ...read(0), summary: 'Read the first screenshot' });
+  expect(blobRows()).toEqual(first);
+  expect(journal.getMessage('msg_a')?.parts).toEqual([{ ...read(0), summary: 'Read the first screenshot' }]);
+  // A changed value is written again.
+  journal.setMessagePart('msg_a', 0, read(1));
+  expect(blobRows()).not.toEqual(first);
+  expect(journal.getMessage('msg_a')?.parts).toEqual([read(1)]);
+});
+
 test('copies, rewinds and deletions carry or remove the stored values with their message', () => {
   const message: Message = { id: 'msg_a', threadId: 'thr_a', turnId: 'trn_a', role: 'assistant', parts: [read(0), read(1)], state: 'complete', createdAt: 1 };
   journal.putMessage(message);

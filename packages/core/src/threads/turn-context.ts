@@ -431,15 +431,8 @@ export class TurnContexts {
 
   /** What the agent session this turn resumes already used, summed over its recorded turns. */
   private sessionBefore(thread: ThreadSummary, turnId: TurnId): { costUsd: number; tokens: number } {
-    const before = { costUsd: 0, tokens: 0 };
-    if (thread.sessionId === null) return before;
-    for (const earlier of this.core.journal.listTurns(thread.id)) {
-      if (earlier.id === turnId || earlier.usage === null) continue;
-      if (earlier.execution?.sessionGeneration !== (thread.sessionGeneration ?? 0)) continue;
-      before.costUsd += earlier.usage.costUsdEquivalent ?? 0;
-      before.tokens += earlier.usage.inputTokens + earlier.usage.outputTokens + earlier.usage.cacheReadTokens + earlier.usage.cacheWriteTokens;
-    }
-    return before;
+    if (thread.sessionId === null) return { costUsd: 0, tokens: 0 };
+    return this.core.journal.sessionUsage(thread.id, thread.sessionGeneration ?? 0, turnId);
   }
 
   /**
@@ -448,13 +441,16 @@ export class TurnContexts {
    * filter only narrows: a prompt can quote the key, so each row is parsed.
    */
   private sentFromBefore(threadId: ThreadId, messageId: MessageId): SentFrom | null {
-    const rows = this.core.journal.db.query(`SELECT parts FROM messages WHERE thread_id = ? AND role = 'user' AND parts LIKE '%"sentFrom":%'
-      AND rowid < (SELECT rowid FROM messages WHERE id = ?) ORDER BY rowid DESC`).iterate(threadId, messageId) as Iterable<{ parts: string }>;
-    for (const row of rows) {
-      const part = (JSON.parse(row.parts) as MessagePart[]).find(p => p.type === 'text' && p.sentFrom !== undefined);
-      if (part?.type === 'text' && part.sentFrom) return part.sentFrom;
-    }
-    return null;
+    // Its own statement: the loop stops early, and a cached statement left mid-iteration fails its next use.
+    const statement = this.core.journal.db.prepare(`SELECT parts FROM messages WHERE thread_id = ? AND role = 'user' AND parts LIKE '%"sentFrom":%'
+      AND rowid < (SELECT rowid FROM messages WHERE id = ?) ORDER BY rowid DESC`);
+    try {
+      for (const row of statement.iterate(threadId, messageId) as Iterable<{ parts: string }>) {
+        const part = (JSON.parse(row.parts) as MessagePart[]).find(p => p.type === 'text' && p.sentFrom !== undefined);
+        if (part?.type === 'text' && part.sentFrom) return part.sentFrom;
+      }
+      return null;
+    } finally { statement.finalize(); }
   }
 
   /** The user message of the turn, read back from the journal: the text and the images it carried. */

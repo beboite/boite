@@ -209,7 +209,7 @@ const notReady = (problems: string[]) => refused(`artifacts.view page is not rea
 export async function publishView(core: Core, params: RpcParams<'artifacts.view'>): Promise<RpcResult<'artifacts.view'>> {
   const thread = core.threads.require(params.threadId);
   if (thread.archived) throw refused('artifacts.view needs an active thread', { threadId: thread.id });
-  const turn = core.journal.listTurns(thread.id).at(-1);
+  const turn = core.journal.lastTurn(thread.id);
   if (!turn) throw refused('artifacts.view needs a thread with a turn', { threadId: thread.id });
   const found = existingInside(thread.cwd, params.path, 'file', 'artifacts.view path');
   if (!/\.html?$/i.test(found.relative)) throw refused('artifacts.view path must be an HTML file', { path: params.path });
