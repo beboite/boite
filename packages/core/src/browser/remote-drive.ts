@@ -200,11 +200,12 @@ export class RemoteDrive {
       case 'reset-viewport': retire(); await this.context.screen(tab, () => this.context.send(tab, 'Emulation.clearDeviceMetricsOverride'), true); tab.preset = null; return { ok: true };
       default: break;
     }
+    // The size the viewer aimed at is known without the page: a tap on another one is refused before a read of it.
+    if ((input.kind === 'tap' || input.kind === 'drag') && (input.width !== saved.frame.width || input.height !== saved.frame.height)) throw refused('the browser viewport changed; refresh before tapping');
     // Read in turn with captures: a scaled one in flight resizes the page for its shot.
     const page = await this.context.screen(tab, () => this.context.evaluate(tab, PAGE_INFO_SCRIPT, 5000), true) as PageInfo;
     const same = page.width === saved.page.width && page.height === saved.page.height && page.href === saved.page.href && page.origin === saved.page.origin;
     if (!same) throw changed();
-    if ((input.kind === 'tap' || input.kind === 'drag') && (input.width !== saved.frame.width || input.height !== saved.frame.height)) throw refused('the browser viewport changed; refresh before tapping');
     const at = (x: number, y: number) => ({ x: Math.min(page.width - 1, x * page.width), y: Math.min(page.height - 1, y * page.height) });
     switch (input.kind) {
       case 'tap': await this.#click(tab, at(input.x, input.y), input.count ?? 1, input.shift === true); break;

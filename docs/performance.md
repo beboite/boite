@@ -321,7 +321,14 @@ when the core advertises `chunkedAnswers`.
   subscription, unread acknowledgement and fresh snapshot run in the background.
   Unchanged messages and turns keep their identities through revalidation.
   The cache retains up to 16 visits, at most 4 MiB of text per thread and
-  16 MiB in total, with a 2,000-message bound per thread.
+  16 MiB in total, with a 2,000-message bound per thread. A leave counts the
+  thread it leaves and keeps that size beside the entry, so it never measures
+  the other visits again (`ReadingCache` in `reading-cache.ts`). Once the page
+  is idle, a plain copy replaces the deep `$state` proxy the timeline drew,
+  which weighed several times its data.
+- A summary written over the open thread (`thread.updated`, a load tick)
+  writes only the fields that changed (`patchFields`), so a tick that moves
+  `load` alone wakes only what reads `load`.
 - Cores advertising `threadSnapshots` receive one `threads.get` for an open.
   Its receipt includes pending cards, subscribes this socket, replaces the
   previous subscription and acknowledges unread content after a successful read.
@@ -410,7 +417,9 @@ when the core advertises `chunkedAnswers`.
   smaller, but Bun's Linux build cannot encode it. A GIF, a copy that would not
   be lighter and any other file come as they are. A click opens the original
   in the viewer, and a download or an edit also fetches the original
-  (`store/display-images.ts`).
+  (`store/display-images.ts`). The client keeps 120 copies and 24 M characters
+  of them at most, since a GIF or an original can weigh several MB, and drops
+  them when the Store switches to another machine.
 - A light read first makes the blurs of the messages around its page that no
   read looked at before, waiting 1.5 s at most. It does this before the page is
   read, never between the read and the answer, so the answer still holds every
@@ -482,6 +491,19 @@ when the core advertises `chunkedAnswers`.
 - A streamed delta, part or turn looks up its message or turn from the end of
   the loaded timeline, where the item being written sits.
 - The trace is read when the trace surface is on screen, not on every open.
+- Sidebar cards ask for their pull request when they mount or change branch,
+  then on one timer per connection: every 15 seconds while the thread works,
+  every 60 seconds at rest, above the core's 15-second cache of a repository's
+  list, so a round of idle cards runs `gh` at most once per repository. A
+  hidden page skips its rounds; back in view, it runs one if a round is due.
+  The rounds skip a merged pull request; a mount, a reconnect, a status change
+  and Refresh PR still ask, so a new PR on the same branch shows when the turn
+  ends (`watchPullRequests` in `pull-request.ts`).
+- An open Done or Archived fold reads the archive again only when a project's
+  archive count, the listed projects or a connection change, not when a prompt
+  re-sorts the list, and keeps its rows on screen while it reads.
+- The sidebar sorts each project's rows once, for its section and for
+  Alt+1 to Alt+9, and a change in one project sorts that project alone.
 - A process exit updates five columns of its trace row instead of rewriting it,
   and a thread keeps its newest 2,000 rows (`bun bench/process-rows.ts`).
 - A spawn of a bare name (`gh`, git when its lookup found no real binary)
@@ -502,7 +524,9 @@ Phone navigation reveals the conversation immediately after selection.
 `bun bench/thread-switch.ts --delay 300 --runs 7` measures an optimized fixture
 bundle with 400 messages and delayed thread RPC replies. Use `--phone --cpu 4`
 for a 390 px viewport and slower CPU, or `--ui <checkout>/packages/ui` for a
-baseline checkout. The [2026-10-02 measurements](../bench/results/2026-10-02-thread-switching.md)
+baseline checkout. `--cached 16` first reads 16 more threads of 400 messages
+to the top, then reports the synchronous leave time of each click and the JS
+heap after a forced collection. The [2026-10-02 measurements](../bench/results/2026-10-02-thread-switching.md)
 record samples, reading-position drift and the subsequent t3code comparison.
 `tests/e2e/thread-switch.test.ts` separately exercises the production UI with
 a real temporary core, a 750 ms snapshot delay and a large folded tool output.
@@ -727,6 +751,12 @@ limits expensive work while streaming, typing and scrolling:
 - The composer uses `field-sizing: content` where supported; IndexedDB draft
   writes wait for a typing pause. Bottom following runs after layout and before
   paint through `ResizeObserver`.
+- On a phone, the chat behind the thread or activity list gets
+  `content-visibility: hidden` once the exits the cover started have ended
+  (`--dur-whip`): a stream keeps writing to it without layout or paint, and it
+  comes back at the same position. Skipped content advances no animation, so
+  E2E captures wait through `settleAnimations()`, which ignores it. The "phone
+  streaming behind list" scenario measures it.
 
 ### A long turn is many rows
 

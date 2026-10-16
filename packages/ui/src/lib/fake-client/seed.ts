@@ -74,6 +74,10 @@ export function seed(ctx: FakeContext): void {
     const long = longThread();
     ctx.threads.set(long.id, long);
   }
+  for (let copy = 1; copy <= ctx.longCopies; copy++) {
+    const long = longThread(`t-long-${copy}`);
+    ctx.threads.set(long.id, long);
+  }
   if (ctx.heavy) {
     const heavy = heavyThread();
     ctx.threads.set(heavy.id, heavy);

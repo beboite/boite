@@ -214,6 +214,8 @@ describe('WsClient', () => {
 
       await vi.advanceTimersByTimeAsync(25_000);
       expect(first.sent.map(raw => JSON.parse(raw).method)).toEqual(['hello', 'hello']);
+      // The core reads nothing of a probe's params: no credential goes with it.
+      expect(Object.keys(first.frame(1).params ?? {}).sort()).toEqual(['client', 'protocolVersion']);
       expect(client.state).toBe('ready');
       await vi.advanceTimersByTimeAsync(15_000);
       expect(first.closed).toBe(true);

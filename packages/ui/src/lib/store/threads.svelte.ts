@@ -10,7 +10,7 @@ import type {
   ThreadRewind,
   ThreadSummary
 } from '@boite/contracts';
-import { readingCacheBytes, READING_CACHE_BYTES } from '../reading-cache';
+import { ReadingCache, readingCacheBytes } from '../reading-cache';
 import type { ToolPart } from '../tool-groups';
 import { INITIAL_MESSAGE_PAGE, INITIAL_PAGE_BYTES, MESSAGE_PAGE_MAX, READING_PAGE_BYTES, forTransport } from '@boite/contracts';
 import { askPage, ThreadPreloads } from './thread-preload';
@@ -18,7 +18,7 @@ import { lightPage, NewerPages, setMessagesAfter, type ReadingPosition } from '.
 export type { ReadingPosition } from './reading-pages.svelte';
 import { forgetArchivedThread } from '../archive-history';
 import { rightPanel } from '../right-panel.svelte';
-import { workingChildren, type WorkingChildren, lastIndexById, mergeResumed, patchRow, reconcileThread, threadsByProject } from '../thread-rows';
+import { workingChildren, type WorkingChildren, lastIndexById, mergeResumed, patchFields, patchRow, reconcileThread, threadsByProject } from '../thread-rows';
 import type { StoreContext } from './context';
 import { RpcErrorCode, threadActive } from '@boite/contracts';
 import { RpcFailure } from '../client';
@@ -58,7 +58,7 @@ export class Threads {
    */
   rewinding = $state<Record<ThreadId, MessageId>>({});
   readonly readingPositions = new Map<string, ReadingPosition>();
-  readingThreads = new Map<string, Thread>();
+  readonly readingThreads = new ReadingCache();
   subscribedThreadId: ThreadId | null = null;
   /** The newest navigation intent, including drafts, pages and detached clients. */
   openGeneration = 0;
@@ -112,17 +112,11 @@ export class Threads {
     if (!thread || (this.loadingThreadId === thread.id && thread.messages.length === 0)) return;
     // Keep more small visits within the same 16 MiB budget. An expanded tool
     // gives its full output back to the core before it enters this cache.
-    this.readingThreads.delete(thread.id);
     const messages = forTransport(thread.messages, lightPage(this.ctx));
-    const snapshot = messages.every((message, index) => message === thread.messages[index]) ? thread : { ...thread, messages };
-    const bytes = readingCacheBytes(messages);
-    if (bytes <= READING_CACHE_BYTES) this.readingThreads.set(thread.id, snapshot);
-    let total = [...this.readingThreads.values()].reduce((sum, held) => sum + readingCacheBytes(held.messages), 0);
-    while (this.readingThreads.size > 16 || total > 4 * READING_CACHE_BYTES) {
-      const oldest = this.readingThreads.keys().next().value!;
-      total -= readingCacheBytes(this.readingThreads.get(oldest)!.messages);
-      this.readingThreads.delete(oldest);
-    }
+    const kept = messages.every((message, index) => message === thread.messages[index]) ? thread : { ...thread, messages };
+    // The deep proxy on screen weighs several times its data: once the next thread is painted, plain data replaces it.
+    this.readingThreads.remember(thread.id, kept, readingCacheBytes(messages), held => $state.snapshot(held) as Thread,
+      () => this.openThread?.id !== thread.id && this.preloads.waitingThreadId !== thread.id);
   }
 
   #unreadCount = $derived(this.threads.filter((t) => t.unread).length);
@@ -316,14 +310,14 @@ export class Threads {
       }
     };
     const previousThread = this.openThread;
-    const held = this.openThread?.id === threadId ? this.openThread : this.readingThreads.get(threadId);
+    let held = this.openThread?.id === threadId ? this.openThread : this.readingThreads.get(threadId);
     // A press on this thread already asked for its page (`thread-preload.ts`): the open takes it over.
     const preloaded = this.preloads.claim(threadId, client, held);
     const deselect = this.openThread?.id !== threadId && s.delegationSelectedAgentId && s.delegationSelectedAgentId !== threadId;
     // Paint a recent visit in this task. Its revalidation and subscription can
     // take a whole network round trip without holding the reader's text back.
     const row = this.threads.find(thread => thread.id === threadId);
-    if (held) this.#show(Object.assign(held, row), navigate);
+    if (held) held = this.#showHeld(Object.assign(held, row), navigate);
     else if (row) this.#show({ ...row, messages: [], turns: [], commands: [], messagesBefore: null }, navigate);
     this.loadingThreadId = held ? null : threadId;
     const deselected = deselect ? s.selectDelegatedAgent(null) : Promise.resolve();
@@ -431,6 +425,15 @@ export class Threads {
       if (newest()) { this.loadingThreadId = null; this.loadingBytes = null; }
       await deselected;
     }
+  }
+
+  /** A plain visit becomes a new proxy on screen that does not write through to it: later changes go to what this answers. */
+  #showHeld(held: Thread, navigate: boolean): Thread {
+    this.#show(held, navigate);
+    const shown = this.openThread;
+    if (!shown || shown === held || shown.id !== held.id) return held;
+    this.readingThreads.replace(held.id, held, shown);
+    return shown;
   }
 
   /** Select the history synchronously; network work never owns navigation. */
@@ -622,7 +625,7 @@ export class Threads {
       if (!this.ctx.currentClient(client, clientGeneration)) return false;
       this.upsertThread(summary);
       const open = this.openThread;
-      if (open && open.id === threadId) Object.assign(open, summary);
+      if (open && open.id === threadId) patchFields(open, summary);
       return true;
     } catch (error) {
       if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
@@ -653,7 +656,7 @@ export class Threads {
       if (!this.ctx.currentClient(client, clientGeneration)) return;
       this.upsertThread(summary);
       const open = this.openThread;
-      if (open && open.id === threadId) Object.assign(open, summary);
+      if (open && open.id === threadId) patchFields(open, summary);
     } catch (error) {
       if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
     } finally {
@@ -701,7 +704,7 @@ export class Threads {
       if (!this.ctx.currentClient(client, clientGeneration)) return null;
       this.upsertThread(summary);
       const open = this.openThread;
-      if (open && open.id === threadId) Object.assign(open, summary);
+      if (open && open.id === threadId) patchFields(open, summary);
       return summary;
     } catch (error) {
       if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
