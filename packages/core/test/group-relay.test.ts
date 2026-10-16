@@ -1,8 +1,9 @@
 import { afterEach, expect, test } from 'bun:test';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { groupRelayUrl, RpcErrorCode, type PushPayload, type RpcEvents } from '@boite/contracts';
+import { groupRelayUrl, PROTOCOL_VERSION, RpcErrorCode, type PushPayload, type RpcEvents } from '@boite/contracts';
 import { createECDH, randomBytes } from 'node:crypto';
+import { connect as tcp, type Socket } from 'node:net';
 import { connect } from '../src/client.ts';
 import { parseRelayPath } from '../src/group/relay.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
@@ -43,6 +44,107 @@ async function home(): Promise<{ a: TestCore; b: TestCore; phone: Awaited<Return
   const phone = await connect(a.url, '', { grant: grant.grant, client: { name: 'pwa', version: '1' } });
   return { a, b, phone };
 }
+
+interface RawFrame { rsv1: boolean; opcode: number; payload: Buffer }
+
+/**
+ * A websocket read off the wire, so a test sees what a browser would not show:
+ * whether a frame came deflated, and what a client that stops reading costs.
+ */
+async function rawSocket(url: string, host: string): Promise<{ socket: Socket; frames: RawFrame[]; send(text: string): void }> {
+  const { hostname, port, pathname } = new URL(url);
+  const socket = tcp({ host: hostname, port: Number(port) });
+  await new Promise<void>((resolve, reject) => { socket.once('connect', resolve); socket.once('error', reject); });
+  socket.write([
+    `GET ${pathname} HTTP/1.1`, `Host: ${host}`, 'Upgrade: websocket', 'Connection: Upgrade',
+    `Sec-WebSocket-Key: ${randomBytes(16).toString('base64')}`, 'Sec-WebSocket-Version: 13',
+    'Sec-WebSocket-Extensions: permessage-deflate', '', '',
+  ].join('\r\n'));
+  const frames: RawFrame[] = [];
+  let buffer = Buffer.alloc(0);
+  let upgraded = false;
+  socket.on('data', (chunk: Buffer) => {
+    buffer = Buffer.concat([buffer, chunk]);
+    if (!upgraded) {
+      const end = buffer.indexOf('\r\n\r\n');
+      if (end < 0) return;
+      if (!buffer.subarray(0, end).toString().startsWith('HTTP/1.1 101')) throw new Error(`upgrade refused: ${buffer.subarray(0, end)}`);
+      upgraded = true;
+      buffer = buffer.subarray(end + 4);
+      socket.emit('upgraded');
+    }
+    while (buffer.length >= 2) {
+      let length = buffer[1]! & 0x7f, offset = 2;
+      if (length === 126) { if (buffer.length < 4) return; length = buffer.readUInt16BE(2); offset = 4; }
+      else if (length === 127) { if (buffer.length < 10) return; length = Number(buffer.readBigUInt64BE(2)); offset = 10; }
+      if (buffer.length < offset + length) return;
+      frames.push({ rsv1: (buffer[0]! & 0x40) !== 0, opcode: buffer[0]! & 0x0f, payload: Buffer.from(buffer.subarray(offset, offset + length)) });
+      buffer = buffer.subarray(offset + length);
+    }
+  });
+  const send = (text: string): void => {
+    const payload = Buffer.from(text);
+    const mask = randomBytes(4);
+    const head = payload.length < 126 ? Buffer.from([0x81, 0x80 | payload.length])
+      : Buffer.concat([Buffer.from([0x81, 0x80 | 126]), Buffer.from([payload.length >> 8, payload.length & 0xff])]);
+    socket.write(Buffer.concat([head, mask, payload.map((byte, index) => byte ^ mask[index % 4]!)]));
+  };
+  // A frame written before the answer to the upgrade is not read.
+  await new Promise((resolve) => socket.once('upgraded', resolve));
+  return { socket, frames, send };
+}
+
+/** A raw socket on b through a, past its hello. */
+async function relayedRaw(a: TestCore, b: TestCore, phone: Awaited<ReturnType<typeof connect>>, host: string): Promise<Awaited<ReturnType<typeof rawSocket>>> {
+  const { ticket } = await phone.call('group.ticket', { coreId: id(b) });
+  const raw = await rawSocket(`${groupRelayUrl(a.url, id(b))}/rpc`, host);
+  raw.send(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'hello', params: { ticket, relay: phone.session!.token, protocolVersion: PROTOCOL_VERSION, client: { name: 'pwa', version: '1' } } }));
+  await waitFor(() => raw.frames.some((frame) => frame.opcode === 1));
+  return raw;
+}
+
+test('a relayed socket is deflated for a client at a remote address, as a direct one is', async () => {
+  const { a, b, phone } = await home();
+  const remote = await relayedRaw(a, b, phone, 'phone.example');
+  const local = await relayedRaw(a, b, phone, new URL(a.url).host);
+  const settings = JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'settings.get', params: {} });
+  remote.send(settings);
+  local.send(settings);
+  await waitFor(() => remote.frames.length >= 2 && local.frames.length >= 2);
+  expect(remote.frames.filter((frame) => frame.opcode === 1).every((frame) => frame.rsv1)).toBe(true);
+  expect(local.frames.some((frame) => frame.rsv1)).toBe(false);
+  remote.socket.destroy();
+  local.socket.destroy();
+  await waitFor(() => a.core.relays.size === 0);
+  phone.close();
+});
+
+test('a relayed client that stops reading is told to reconnect at the outgoing budget, rather than losing frames', async () => {
+  const { a, b, phone } = await home();
+  const raw = await relayedRaw(a, b, phone, new URL(a.url).host);
+  expect(a.core.relays.size).toBe(1);
+  raw.socket.pause();
+  // 48 MiB of b's news, sent faster than nobody reads it: past the 32 MiB a relay holds for one client.
+  const pad = randomBytes(768 * 1024).toString('base64');
+  for (let index = 0; index < 48 && a.core.relays.size > 0; index++) {
+    b.core.bus.emit('providers.installProgress', { providerId: 'echo', pad } as unknown as RpcEvents['providers.installProgress']);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  await waitFor(() => a.core.relays.size === 0, 10_000);
+  raw.socket.resume();
+  const close = await new Promise<RawFrame>((resolve) => {
+    const seen = (): void => {
+      const frame = raw.frames.find((candidate) => candidate.opcode === 8);
+      if (frame === undefined) setTimeout(seen, 20);
+      else resolve(frame);
+    };
+    seen();
+  });
+  expect(close.payload.readUInt16BE(0)).toBe(1013);
+  expect(close.payload.subarray(2).toString()).toContain('outgoing buffer limit');
+  raw.socket.destroy();
+  phone.close();
+}, 30_000);
 
 test('a relay route names a machine by its id and carries the socket, files and views only', () => {
   const coreId = 'c'.repeat(64);

@@ -231,17 +231,35 @@ that frame's serialized UTF-8 size fits within 32 MiB. Events also obey the
 `threads.get` with `open` asked for `compactTools` or `compactToolParts`
 receives each finished tool call's `message.part` the way its pages carry it,
 so a call that ends with a 30 MB output or Write reaches it as a preview
-instead of closing it. A backed-up socket
+instead of closing it. With `compactFiles` or `compactImages`, the files and
+large pictures of a live `message.started` (a prompt, an artifact) and of a
+`message.part` are deferred the same way. A picture goes without its blur,
+which is queued for the next page. A remote window opened this way received
+4,273 bytes for a prompt with a 1 MiB picture, against 1,057,351 before
+(`bun bench/fanout.ts`, 2026-10-15). A broadcast serializes each event once
+per projection rather than once per socket: a 1 MiB tool output took 9.1 ms
+to emit to four local sockets, against 19.0 ms before. A backed-up socket
 closes with reconnectable 1013 after 10 seconds without draining, or before
 a frame would exceed the byte budget. Further sends are ignored and timers
 and pending parts are cleared. This closes only that client; the journal and
 other connections continue. Reconnecting clients load a fresh thread snapshot.
+The server's `backpressureLimit` is set to the same 32 MiB, so Bun never drops
+a frame (its default is 16 MiB) below the budget the code enforces.
+
+A relayed socket (`/group/relay/<core id>/rpc`) keeps the same budget: past
+32 MiB unread, a dropped send or 10 seconds without a drain, it closes with
+1013. It is deflated when its Host is not loopback, as a direct remote socket
+is. `terminal.output` goes only to the connections that attached that shell
+with `terminals.open` or `accounts.loginTerminal`; `terminal.exited` still
+reaches every owner window.
 
 When a socket backs up (Bun's `send` returns -1), subsequent frames stay queued
 within these limits except `message.delta`, which is dropped. Catch-up tracks
 at most 1,024 distinct parts and 16 MiB of UTF-8 keys before closing with 1013.
 Pacing flushes at 1,024 parts or 16 MiB of serialized held frames, preserving
-wire order without an additional transport queue. On `drain` the core resends the text
+wire order without an additional transport queue. Text merged into a held
+delta counts as 6 bytes per UTF-16 unit until that bound could cross 16 MiB;
+only then is what is held serialized and counted exactly. On `drain` the core resends the text
 parts those deltas belonged to, one `message.part` each, and nothing else: a
 finished tool output in the same message never goes out twice. Deltas the bus
 still holds are dispatched before that resend, so they fold into the part

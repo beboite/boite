@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { RPC_CHUNK_BYTES, RPC_CHUNK_MARK, type MessageId, type RpcEvents } from '@boite/contracts';
+import { RPC_CHUNK_BYTES, RPC_CHUNK_MARK, RPC_MAX_FRAME_BYTES, type MessageId, type RpcEvents } from '@boite/contracts';
 import { connect } from '../src/client.ts';
 import { isLoopbackHost, ServerConnection, staticResponse } from '../src/server.ts';
 import { slices } from '../src/server/connection.ts';
@@ -89,6 +89,26 @@ describe('what a remote client is sent', () => {
     expect(sent).toHaveLength(1026);
     expect(sent[1024]!.frame.params?.text).toBe('x');
     expect(sent[1025]!.frame.id).toBe(1);
+    connection.close(1000);
+  });
+
+  test('held text leaves when its exact JSON, not an estimate of it, would pass the frame limit', () => {
+    const { connection, sent } = attached(true);
+    connection.sendEvent('message.delta', delta('a'));
+    let room = RPC_MAX_FRAME_BYTES - Buffer.byteLength(JSON.stringify({ jsonrpc: '2.0', method: 'message.delta', params: delta('a') }));
+    // Escaped characters weigh two bytes each in JSON, plain ones one.
+    const quoted = '"\\'.repeat(64 * 1024);
+    connection.sendEvent('message.delta', delta(quoted));
+    room -= 2 * quoted.length;
+    for (; room > 1024 * 1024; room -= 1024 * 1024) connection.sendEvent('message.delta', delta('x'.repeat(1024 * 1024)));
+    connection.sendEvent('message.delta', delta('x'.repeat(room)));
+    // Exactly at the limit: still held as one part.
+    expect(sent).toEqual([]);
+    connection.sendEvent('message.delta', delta('y'));
+    expect(sent).toHaveLength(1);
+    const frame = JSON.stringify(sent[0]!.frame);
+    expect(Buffer.byteLength(frame)).toBe(RPC_MAX_FRAME_BYTES);
+    expect(sent[0]!.frame.params?.text?.endsWith('x')).toBe(true);
     connection.close(1000);
   });
 
