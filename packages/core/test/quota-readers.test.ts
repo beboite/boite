@@ -112,14 +112,19 @@ test('an Antigravity account reads its limits from the server sign-in, renewing 
       { displayName: 'Claude and GPT', buckets: [{ bucketId: '3p-weekly', window: 'weekly', remainingFraction: 1 }] },
     ],
   };
+  let issued = 0;
+  const refused = new Set<string>();
   const fakeFetch: typeof fetch = Object.assign(async (url: string | URL | Request, options?: RequestInit) => {
     const address = String(url);
     calls.push(address);
     if (address === 'https://oauth2.googleapis.com/token') {
       expect(String(options?.body)).toContain('refresh_token=fixture-refresh');
-      return Response.json({ access_token: 'fixture-access', expires_in: 3600 });
+      issued += 1;
+      return Response.json({ access_token: `fixture-access-${issued}`, expires_in: 3600 });
     }
-    expect(options?.headers).toMatchObject({ Authorization: 'Bearer fixture-access' });
+    const bearer = String((options?.headers as Record<string, string>)['Authorization']).replace('Bearer ', '');
+    expect(bearer).toBe(`fixture-access-${issued}`);
+    if (refused.has(bearer) || refused.has('*')) return new Response('', { status: 401 });
     expect(JSON.parse(String(options?.body))).toEqual({ project: 'fixture-project' });
     if (address.endsWith(':retrieveUserQuotaSummary')) return address.startsWith('https://daily-') ? new Response('', { status: 503 }) : Response.json(summary);
     if (address.endsWith(':fetchAvailableModels')) {
@@ -142,4 +147,13 @@ test('an Antigravity account reads its limits from the server sign-in, renewing 
   // One renewal for both reads: the access token was still good.
   expect(calls.filter((url) => url.includes('oauth2')).length).toBe(1);
   expect(calls.every((url) => url.startsWith('https://oauth2.googleapis.com/') || url.includes('cloudcode-pa.googleapis.com/v1internal:'))).toBe(true);
+
+  // Google stops taking an access token before its expiry: it is renewed once.
+  refused.add('fixture-access-1');
+  expect((await readExtraQuota(core, account)).length).toBe(2);
+  expect(issued).toBe(2);
+  // A fresh token refused too: the sign-in is gone, and the page says so.
+  refused.add('*');
+  await expect(readExtraQuota(core, account)).rejects.toThrow('The Antigravity sign-in expired');
+  expect(issued).toBe(3);
 });

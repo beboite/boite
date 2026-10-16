@@ -80,11 +80,16 @@ export function antigravityModelWindows(raw: unknown): QuotaWindow[] {
 /** Access tokens by the sign-in they came from, so a new sign-in never reuses the previous one's. */
 const accessTokens = new Map<string, { token: string; expiresAt: number }>();
 
+/** Google refused the sign-in or the access token traded for it. */
+class RejectedSignIn extends Error {
+  constructor() { super('The Antigravity sign-in expired. Sign in again in Providers.'); }
+}
+
 async function json(fetchImpl: Fetch, url: string, init: RequestInit): Promise<unknown> {
   let response: Response;
   try { response = await fetchImpl(url, { ...init, redirect: 'error', signal: AbortSignal.timeout(TIMEOUT_MS) }); }
   catch { throw new Error('Antigravity usage request failed. Check the connection and retry.'); }
-  if (response.status === 400 || response.status === 401) throw new Error('The Antigravity sign-in expired. Sign in again in Providers.');
+  if (response.status === 400 || response.status === 401) throw new RejectedSignIn();
   if (!response.ok) throw new Error(`Antigravity usage returned HTTP ${response.status}. Retry in five minutes.`);
   try { return await response.json(); } catch { throw new Error('Antigravity returned an invalid usage response.'); }
 }
@@ -104,8 +109,7 @@ export async function readAntigravityQuota(home: string, fetchImpl: Fetch = fetc
   const project = text(file['project_id']);
   const key = createHash('sha256').update(`${clientId}\0${refreshToken}\0${project ?? ''}`).digest('hex');
 
-  let held = accessTokens.get(key);
-  if (held === undefined || held.expiresAt <= now + 60_000) {
+  const renew = async (): Promise<string> => {
     const answer = obj(await json(fetchImpl, TOKEN_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
@@ -114,35 +118,51 @@ export async function readAntigravityQuota(home: string, fetchImpl: Fetch = fetc
     const token = text(answer['access_token']);
     const expiresIn = answer['expires_in'];
     if (token === null || typeof expiresIn !== 'number' || expiresIn <= 0) throw new Error('Google did not renew the Antigravity sign-in. Sign in again in Providers.');
-    held = { token, expiresAt: now + expiresIn * 1000 };
-    accessTokens.set(key, held);
-  }
-
-  const ask = async (operation: string, parse: (raw: unknown) => QuotaWindow[]): Promise<QuotaWindow[]> => {
-    for (const endpoint of ENDPOINTS) {
-      let windows: QuotaWindow[] = [];
-      try {
-        windows = parse(await json(fetchImpl, `${endpoint}/v1internal:${operation}`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${held.token}`,
-            'Content-Type': 'application/json',
-            Accept: 'application/json',
-            'User-Agent': `antigravity/hub/1.0.0 (aidev_client; os_type=${process.platform}; arch=${process.arch}; cl=963137146)`,
-          },
-          body: JSON.stringify(project === null ? {} : { project }),
-        }));
-      } catch {
-        // The next endpoint, then the other operation, may answer.
-      }
-      if (windows.length > 0) return windows;
-    }
-    return [];
+    accessTokens.set(key, { token, expiresAt: now + expiresIn * 1000 });
+    return token;
   };
-  const windows = await ask('retrieveUserQuotaSummary', antigravitySummaryWindows);
-  if (windows.length > 0) return windows;
-  const models = await ask('fetchAvailableModels', antigravityModelWindows);
-  if (models.length > 0) return models;
+
+  /** The windows, or none and whether an endpoint refused the access token. */
+  const readWith = async (token: string): Promise<{ windows: QuotaWindow[]; rejected: boolean }> => {
+    let rejected = false;
+    const ask = async (operation: string, parse: (raw: unknown) => QuotaWindow[]): Promise<QuotaWindow[]> => {
+      for (const endpoint of ENDPOINTS) {
+        let windows: QuotaWindow[] = [];
+        try {
+          windows = parse(await json(fetchImpl, `${endpoint}/v1internal:${operation}`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json',
+              Accept: 'application/json',
+              'User-Agent': `antigravity/hub/1.0.0 (aidev_client; os_type=${process.platform}; arch=${process.arch}; cl=963137146)`,
+            },
+            body: JSON.stringify(project === null ? {} : { project }),
+          }));
+        } catch (error) {
+          // The next endpoint, then the other operation, may answer.
+          if (error instanceof RejectedSignIn) rejected = true;
+        }
+        if (windows.length > 0) return windows;
+      }
+      return [];
+    };
+    const summary = await ask('retrieveUserQuotaSummary', antigravitySummaryWindows);
+    if (summary.length > 0) return { windows: summary, rejected };
+    return { windows: await ask('fetchAvailableModels', antigravityModelWindows), rejected };
+  };
+
+  const held = accessTokens.get(key);
+  const cached = held !== undefined && held.expiresAt > now + 60_000;
+  let read = await readWith(cached ? held.token : await renew());
+  // An access token Google stopped taking before its expiry is renewed once;
+  // a fresh one refused too means the sign-in itself is gone.
+  if (read.windows.length === 0 && read.rejected && cached) read = await readWith(await renew());
+  if (read.windows.length > 0) return read.windows;
+  if (read.rejected) {
+    accessTokens.delete(key);
+    throw new RejectedSignIn();
+  }
   throw new Error('Antigravity did not return usable quota information. Retry in five minutes.');
 }
 
