@@ -13,13 +13,13 @@ let agent: AgentProfile;
 let client: Awaited<ReturnType<TestCore['connect']>>;
 beforeEach(async () => {
  h = await startTestCore(); client = await h.connect();
- h.core.workforce.setLimits({ paused: true, backgroundConcurrency: 2, kebaccExperiment: false });
+ h.core.workforce.setLimits({ paused: true, backgroundConcurrency: 2 });
  const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
- agent = await client.call('agents.profile.save', { value: { name:'Resident', domain:'Research', instructions:'Keep useful notes.', avatar:'', status:'active', tools:['memory','messages','decisions'], accountIntegration:'provider', selection:{providerId:'echo',accountId:account.id,model:'echo',effort:null,permissionMode:'default'} } });
+ agent = await client.call('agents.profile.save', { value: { name:'Resident', domain:'Research', instructions:'Keep useful notes.', avatar:'', status:'active', tools:['memory','messages','decisions'], selection:{providerId:'echo',accountId:account.id,model:'echo',effort:null,permissionMode:'default'} } });
 });
 afterEach(async () => { await h?.stop(); });
 function policy(): AgentRuntimeConfig { return { defaultRoute:agent.selection,allowedRoutes:[{...agent.selection,model:'echo',id:'main',name:'Main'}], subagents:{enabled:false,paused:false,profiles:[]},compactAfterTurns:8,maxRunMinutes:10,autoMemory:false }; }
-function unpause(){h.core.workforce.setLimits({paused:false,backgroundConcurrency:2,kebaccExperiment:false});}
+function unpause(){h.core.workforce.setLimits({paused:false,backgroundConcurrency:2});}
 test('each identity owns a durable brain, with revision-checked edits',async()=>{
  const brain = await client.call('agents.brain.get',{agentId:agent.id});
  expect(existsSync(brain.path)).toBe(true);

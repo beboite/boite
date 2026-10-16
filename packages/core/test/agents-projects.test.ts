@@ -42,7 +42,7 @@ async function setup(entrusted: ('test' | 'Other' | 'Notes')[] = ['test', 'Other
   const other = await owner.call('projects.add', { path: folder('other'), name: 'Other' });
   const outside = (await thread('Outside', notes.id)).id;
   const ids = { test: project, Other: other.id, Notes: notes.id };
-  let agent = await owner.call('agents.profile.save', { value: { name: 'Ada', domain: 'Open source', instructions: 'Keep the projects moving.', avatar: '', status: 'active', tools: ['messages'], accountIntegration: 'provider', projectIds: entrusted.map(name => ids[name]), selection: { providerId: 'echo', accountId, model: 'echo', effort: null, permissionMode: 'default' } } });
+  let agent = await owner.call('agents.profile.save', { value: { name: 'Ada', domain: 'Open source', instructions: 'Keep the projects moving.', avatar: '', status: 'active', tools: ['messages'], projectIds: entrusted.map(name => ids[name]), selection: { providerId: 'echo', accountId, model: 'echo', effort: null, permissionMode: 'default' } } });
   // Its direct conversation exists once it answered a first message.
   await owner.call('agents.message.send', { scope: { kind: 'agent', id: agent.id }, recipientIds: [agent.id], text: 'Hello', requestId: 'hello-ada-001' });
   await waitFor(() => h.core.workforce.records.list('work').some(w => w.status === 'done'));
@@ -136,7 +136,7 @@ test('its messages reach a thread as the agent\'s whatever that thread\'s settin
 test('notices: failures and questions from any thread, finished turns only from followed ones, gathered in one work item', async () => {
   answering(); const { h, owner, worker, outside, project, thread, notices, entrust } = await setup(['test']);
   // Held, so the notices stay pending where the test can read them.
-  h.core.workforce.setLimits({ paused: true, backgroundConcurrency: 2, kebaccExperiment: false });
+  h.core.workforce.setLimits({ paused: true, backgroundConcurrency: 2 });
   const quiet = (await thread('Quiet', project)).id;
   await owner.call('turns.start', { threadId: quiet, prompt: 'Build it' });
   await owner.call('turns.start', { threadId: outside, prompt: 'FAIL-ME elsewhere' });

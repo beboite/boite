@@ -358,3 +358,21 @@ after five minutes. A disabled paid-usage flag alone does not report quota data.
 
 [Plugins](plugins.md) can manage external CLI account pools. Boite does not
 rotate accounts automatically or relay provider requests.
+
+## Moving a login to Douane
+
+Settings can hand this machine's logins to a Douane gateway
+([providers](providers.md#moving-connections-to-douane)): the core reads each
+account's login file from the location above, its isolation directory or the
+CLI's default one, and posts it to Douane. Nothing is deleted here and the
+account stays as it is.
+
+It is a move, not a copy. Claude, Codex and Grok refresh tokens rotate: the
+first time Douane refreshes a login it received, the refresh token Boite still
+holds stops working. While the proxy is on, that does not matter, since the
+gateway serves the provider and the local account only lends its name. Turned
+off later, the proxy gives the account back with a dead login, which reads
+signed out at its next refusal: sign in again from Providers. OpenCode API
+keys and a GitHub Copilot sign-in do not rotate and keep working in both
+places. A test core (`BOITE_HOST_AGENTS=0`) lists isolated accounts only and
+never reads the user's own CLI logins.

@@ -5,6 +5,8 @@
   import type { Store } from '../lib/store.svelte';
   import { strings } from '../lib/strings';
   import InfoTip from './InfoTip.svelte';
+  import GatewayMoveDialog from './GatewayMoveDialog.svelte';
+  import GatewayOpenButton from './GatewayOpenButton.svelte';
 
   let { store }: { store: Store } = $props();
   let config = $state<SubscriptionProxy>({ enabled: false, kind: 'douane', baseUrl: 'http://127.0.0.1:8787', dashboardUrl: 'http://127.0.0.1:8787/admin/#quotas' });
@@ -13,6 +15,9 @@
   let busy = $state(false);
   let result = $state('');
   let failed = $state(false);
+  let moving = $state(false);
+  /** A saved Douane, on a core that can move logins into it. */
+  const movable = $derived(store.settings?.subscriptionProxy?.kind === 'douane' && !!store.settings.subscriptionProxy.baseUrl && store.core?.features?.gatewayMove === true);
   $effect(() => {
     const saved = store.settings?.subscriptionProxy;
     untrack(() => { if (saved) config = { ...saved }; });
@@ -56,9 +61,16 @@
     <label><span class="ui-label">{strings.subscriptionProxy.dashboardUrl}</span><input type="url" bind:value={config.dashboardUrl} required data-testid="subscription-proxy-dashboard" /></label>
     <label><span class="ui-label-box"><span class="ui-label">{strings.subscriptionProxy.key}</span><InfoTip topic={strings.subscriptionProxy.key} text={strings.subscriptionProxy.keyHint} /></span><input type="password" bind:value={key} autocomplete="new-password" disabled={clearKey} data-testid="subscription-proxy-key" /></label>
     <label class="clear-key"><input type="checkbox" bind:checked={clearKey} /><span class="ui-label">{strings.subscriptionProxy.clearKey}</span></label>
-    <div class="actions"><button type="submit" class="primary small" disabled={busy} data-testid="subscription-proxy-save"><span class="ui-label">{strings.subscriptionProxy.save}</span></button></div>
+    <div class="actions"><button type="submit" class="primary small" disabled={busy} data-testid="subscription-proxy-save"><span class="ui-label">{strings.subscriptionProxy.save}</span></button><GatewayOpenButton {store} /></div>
     {#if result}<p class="hint" class:error={failed} role="status" data-testid="subscription-proxy-result">{result}</p>{/if}
   </form>
+  {#if movable}
+    <div class="move">
+      <button type="button" class="ghost small" onclick={() => moving = true} data-testid="gateway-move-open"><span class="ui-label">{strings.subscriptionProxy.move.open}</span></button>
+      <InfoTip topic={strings.subscriptionProxy.move.open} text={strings.subscriptionProxy.move.openHint} />
+    </div>
+    <GatewayMoveDialog {store} open={moving} onclose={() => moving = false} />
+  {/if}
 </section>
 
 <style>
@@ -71,4 +83,6 @@
   .proxy-settings > .hint { margin: 2px 0 10px; color: var(--color-muted-foreground); font-size: var(--text-sm); }
   .error { color: var(--color-danger); }
   [aria-pressed='true'] { background: var(--color-active); }
+  .actions { display: flex; flex-wrap: wrap; gap: 6px; }
+  .move { display: flex; align-items: center; gap: 4px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--color-border); }
 </style>

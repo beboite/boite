@@ -71,6 +71,27 @@ test('disabled mode retains the native glance; Douane brings its quota bars and 
   await page.click('[data-testid="subscription-proxy-save"]');
   await page.waitFor(saved);
 
+  // The saved Douane opens in the browser, and this machine's logins move into it from the same card.
+  expect(await page.text('[data-testid=subscription-proxy-settings] [data-testid=subscription-proxy-open]')).toBe('Open Douane');
+  const moveRow = (id: string) => `document.querySelector('[data-testid=gateway-move-row][data-id="${id}"]')`;
+  await page.click('[data-testid="gateway-move-open"]');
+  await page.waitFor('document.querySelectorAll("[data-testid=gateway-move-row]").length > 3');
+  expect(await page.evaluate(`${moveRow('a-opencode:key:groq')}.textContent`)).toContain('No known API address');
+  await capture('boite-proxy-move-desktop.png');
+  await page.click('[data-testid="gateway-move-confirm"]');
+  await page.waitFor(`${moveRow('a-opencode:key:deepseek')}?.textContent.includes("Moved")`);
+  expect(await page.evaluate(`${moveRow('a-opencode:key:opencode')}.textContent`)).toContain('Refused');
+  await capture('boite-proxy-moved-desktop.png');
+  await page.click('[data-testid="gateway-move-close"]');
+  await page.waitFor('document.querySelector("[data-testid=gateway-move-dialog]") === null');
+  // A second move adds nothing twice.
+  await page.click('[data-testid="gateway-move-open"]');
+  await page.waitFor('document.querySelectorAll("[data-testid=gateway-move-row]").length > 3');
+  await page.click('[data-testid="gateway-move-confirm"]');
+  await page.waitFor(`${moveRow('a-opencode:key:deepseek')}?.textContent.includes("Already there")`);
+  await page.click('[data-testid="gateway-move-close"]');
+  await page.waitFor('document.querySelector("[data-testid=gateway-move-dialog]") === null');
+
   // Claude reads ready through the gateway, with one account and nothing to manage.
   await page.waitFor('document.querySelector("[data-testid=provider-settings][data-provider-id=claude]")?.textContent.includes("Ready · via Douane")');
   await page.evaluate(showGatewayRow);
@@ -106,6 +127,8 @@ test('disabled mode retains the native glance; Douane brings its quota bars and 
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await page.waitFor('document.querySelector("[data-testid=mobile-settings-detail] [data-testid=gateway-quotas]")');
   expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+  // This browser reaches its core at a loopback address: the loopback dashboard opens from here.
+  expect(await page.text('[data-testid=mobile-settings-detail] [data-testid=subscription-proxy-open]')).toBe('Open Douane');
   await capture('boite-proxy-gateway-quotas-phone.png');
   await page.send('Emulation.clearDeviceMetricsOverride', {});
   await page.waitFor('document.querySelector("[data-testid=mobile-settings-detail]") === null');

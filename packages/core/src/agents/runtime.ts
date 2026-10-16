@@ -91,7 +91,6 @@ export class AgentRuntime {
     // The next conversation starts from the memory the last one left.
     if (this.store.memory.holding(agent.id)) return false;
     if (!this.store.resident.allowed(agent.id, agent.selection)) { this.fail(work, 'The default model or account is no longer allowed. Choose an authorized default and resume.', 'paused'); return false; }
-    if (agent.accountIntegration === 'kebacc-experiment' && !this.store.limits().kebaccExperiment) return false;
     const used = this.r.episodeRuns(work.episodeId).filter(run => run.startedAt !== null || run.status === 'accepted');
     if (work.scope.kind === 'group') {
       const group = this.r.get('group', work.scope.id);
@@ -139,7 +138,6 @@ export class AgentRuntime {
     const agent = this.r.get('profile', work.agentId);
     if (agent.status !== 'active') return 'The agent is paused or archived.';
     if (!this.store.canRead(agent.id, work.scope)) return 'The agent no longer belongs to this context.';
-    if (agent.accountIntegration === 'kebacc-experiment' && !this.store.limits().kebaccExperiment) return 'The kebacc experiment is disabled.';
     if (work.scope.kind === 'group' && this.r.get('group', work.scope.id).paused) return 'The group is paused.';
     if (work.scope.kind === 'mission') {
       const mission = this.r.get('mission', work.scope.id);

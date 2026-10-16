@@ -59,11 +59,70 @@ dashboard inside Boite instead of the account popup. Desktop uses the shell's
 existing browser view, and browsers and phones use an iframe. The dashboard must permit embedding
 and its configured URL must be reachable from the device displaying it.
 HTTPS browser sessions require an HTTPS dashboard URL; Boite shows this before
-creating a blocked HTTP frame. Open dashboard provides a separate sign-in page,
+creating a blocked HTTP frame. Open Douane (Open CLIProxyAPI) provides a separate sign-in page,
 then Reload retries the embedded view. Some gateways refuse framing or restrict
-cross-site cookies; those dashboards remain available through Open dashboard.
+cross-site cookies; those dashboards remain available through that button.
 Show account limits opens the native limits and monitoring switches for agents
 that keep their own configuration; Show proxy dashboard returns to the gateway.
+
+### Open Douane
+
+Open Douane, or Open CLIProxyAPI, opens the gateway's dashboard URL in the
+system browser (`openExternal`). It sits beside Save proxy in the settings, at
+the top of Limits whenever the proxy is on, and in the embedded dashboard's
+header. A dashboard at a loopback address (`localhost`, `127.0.0.1`, `::1`)
+answers only on the core's machine, so the button shows there alone: in the
+desktop app on its own core, or in a browser that reaches its core at a
+loopback address. A phone or another computer gets no button for it rather
+than a dead link (`gatewayDashboardReachable` in contracts,
+`lib/gateway-dashboard.ts`).
+
+### Moving connections to Douane
+
+Move my connections to Douane, under the proxy settings, appears once a Douane
+gateway is saved and the core advertises `features.gatewayMove`. It lists what
+this machine's accounts hold that Douane can serve, default and isolated
+accounts alike (`subscriptionProxy.movePlan`), and the user ticks what to move:
+
+- Claude's `.credentials.json`, Codex's `auth.json` and Grok's `auth.json`,
+  sent whole.
+- OpenCode's `opencode/auth.json`: its `github-copilot` entry, alone, becomes a
+  Copilot account. Each `type: "api"` key becomes a custom endpoint
+  `{"type":"openai_compatible","route","base_url","api_key","dialect":"chat"}`.
+  The route is OpenCode's provider id, lowercased, renamed when Douane keeps
+  that name for a provider of its own: `opencode` (Zen) becomes `zen`, any
+  other such name takes `-api`. The address is the provider's `api` field in
+  OpenCode's catalog cache, `$XDG_CACHE_HOME/opencode/models.json` (else
+  `~/.cache/opencode/models.json`, on every OS), which an isolated account
+  shares. `opencode-go` goes to Douane's own `opencode_go` provider as its
+  key instead.
+- Not movable, with the reason on the line: a signed-out account, a file that
+  is not JSON, a key whose provider has no `api` address in the catalog
+  (`noAddress`), a provider whose package is not an OpenAI-compatible one
+  (`otherApi`), an OpenCode OAuth sign-in other than Copilot's
+  (`otherSignIn`). OpenCode 2 keeps its sign-ins in a database and is not
+  listed.
+
+`subscriptionProxy.move` makes the core read each ticked file again and post
+it alone to `POST <gateway>/admin/api/accounts/import`. The client never
+receives a value; a gateway's error that repeats a value of the payload has
+it replaced by `[hidden]`, and the log line counts items only. Each line then
+reads Moved, Already there or Refused with Douane's reason. Before posting,
+the core reads `GET /admin/api/accounts` and skips what Douane already has
+and could not tell apart by itself: an endpoint with the same route and
+address, a Copilot or OpenCode Go account, a sign-in whose email matches the
+Boite account's. An endpoint whose route Douane already serves at another
+address is refused (`routeTaken`). Douane updates a sign-in it recognizes by
+its account id instead of adding it twice; that line reads Already there.
+
+A remote Douane can ask for a management token (`management_token_env`), or
+sit behind a login page. The dialog takes an optional token, sent as
+`x-management-key` and saved on the core like the proxy key (journal setting
+`subscription-proxy-management-token`, never sent to a client; the plan only
+says whether one is saved). A 401 or 403 asks for that token, and a redirect or
+an HTML page says the API is behind a login, both with `field:
+managementToken`. A local Douane answers on loopback without one. What moving
+a sign-in means for Boite's own copy: [accounts](accounts.md#moving-a-login-to-douane).
 
 Which agents the proxy serves is decided per provider, not per protocol
 (`subscriptionProxyServes` in the contract): the Claude and Codex protocols

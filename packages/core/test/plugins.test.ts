@@ -2,13 +2,13 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
-import { PLUGIN_MANIFEST_FILE, type Account } from '@boite/contracts';
+import { PLUGIN_MANIFEST_FILE, type Account, type PluginManifest } from '@boite/contracts';
 import { connect } from '../src/client.ts';
 import { getDriver } from '../src/drivers/index.ts';
-import { parsePluginPool, recommendedPlugins, verifyPluginDownload } from '../src/plugins.ts';
+import { parsePluginPool, verifyPluginDownload } from '../src/plugins.ts';
 import { fetchManifest } from '../src/plugins/source.ts';
 import type { SpawnedProcess } from '../src/procs.ts';
-import { platformKey } from '../src/plugins/manifest.ts';
+import { parseManifest, platformKey } from '../src/plugins/manifest.ts';
 import { startTestCore, waitFor, type TestCore } from './harness.ts';
 
 let harness: TestCore | undefined;
@@ -34,8 +34,38 @@ function git(cwd: string, ...args: string[]): string {
 }
 
 const sha256 = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
-/** kebacc-switcher's entry in the shipped list, wherever it sits in it. */
-const KEBACC = recommendedPlugins().find((manifest) => manifest.id === 'kebacc-switcher')!;
+const POOL_URL = 'https://plugins.example.invalid/pool-switcher-2.0.1';
+
+/** A recommended plugin with account pools, as a reviewed entry would list it; `bytes` is what its download serves. */
+function poolSwitcher(bytes = new Uint8Array([1, 2, 3, 4])): PluginManifest {
+  return parseManifest({
+    schema: 1,
+    id: 'pool-switcher',
+    name: 'Pool switcher',
+    version: '2.0.1',
+    description: 'Switches Claude, Codex and Antigravity logins from saved pools.',
+    homepage: 'https://plugins.example.invalid/pool-switcher',
+    executable: 'pool',
+    artifacts: { [platformKey()]: { url: POOL_URL, sha256: sha256(bytes) } },
+    provides: { accountPools: { providers: ['claude', 'codex', 'antigravity'] } },
+  }, 'recommended.json[0]');
+}
+
+/** A core whose recommended list is the pool switcher alone. */
+async function startPoolCore(bytes?: Uint8Array<ArrayBuffer>): Promise<TestCore> {
+  harness = await startTestCore();
+  harness.core.plugins.recommended = [poolSwitcher(bytes)];
+  return harness;
+}
+
+/** Writes an installed pool switcher, as a finished install from the recommended list leaves it. */
+function installPool(dataDir: string): string {
+  const dir = join(dataDir, 'plugins', 'pool-switcher');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `pool${EXE}`), 'fixture');
+  writeFileSync(join(dir, 'installed.json'), JSON.stringify({ schema: 1, origin: 'recommended', installedAt: 1, source: null, manifest: poolSwitcher() }));
+  return dir;
+}
 
 /** Every download answered from memory: tests never reach the network. */
 function serveDownloads(files: Record<string, Uint8Array | number>): string[] {
@@ -85,7 +115,7 @@ function commitManifest(path: string, content: Record<string, unknown>): string 
   return git(path, 'rev-parse', 'HEAD');
 }
 
-test('kebacc v2 JSON maps live and unknown quotas without inventing reset times', () => {
+test('pool JSON maps live and unknown quotas without inventing reset times', () => {
   const pool = parsePluginPool('codex', JSON.stringify({ pool: 'Codex', accounts: [
     { email: 'user@example.com', live: true, fiveHour: 0, sevenDay: null, checkedSecondsAgo: 19, readyAt: '2026-09-13T12:00:00Z', file: 'must-not-leave-core' },
   ] }));
@@ -95,76 +125,72 @@ test('kebacc v2 JSON maps live and unknown quotas without inventing reset times'
   expect(() => verifyPluginDownload(new Uint8Array([1,2,3]), 'wrong')).toThrow('sha256');
 });
 test('plugin RPC refuses unknown IDs and unavailable installs, uninstall keeps account pools', async () => {
-  harness = await startTestCore(); const client = await harness.connect();
+  harness = await startPoolCore(); const client = await harness.connect();
   await expect(client.call('plugins.install', { id: '../escape' })).rejects.toThrow('unknown plugin');
   await expect(client.call('plugins.install', { id: 'never-added' })).rejects.toThrow('unknown plugin');
-  await expect(client.call('plugins.accounts', { id: 'kebacc-switcher' })).rejects.toThrow('Install kebacc-switcher first');
+  await expect(client.call('plugins.accounts', { id: 'pool-switcher' })).rejects.toThrow('Install pool-switcher first');
   const pool = join(harness.dataDir, 'saved-logins'); mkdirSync(pool); writeFileSync(join(pool, 'keep'), 'fixture');
-  const state = await client.call('plugins.uninstall', { id: 'kebacc-switcher' });
+  const state = await client.call('plugins.uninstall', { id: 'pool-switcher' });
   expect(state.status).toBe('not-installed'); expect(existsSync(join(pool, 'keep'))).toBe(true);
 });
 test('plugin state accepts a missing directory but refuses a dangling directory link', async () => {
-  harness = await startTestCore();
-  expect(harness.core.plugins.state('kebacc-switcher').status).toBe('not-installed');
+  harness = await startPoolCore();
+  expect(harness.core.plugins.state('pool-switcher').status).toBe('not-installed');
   const root = join(harness.dataDir, 'plugins');
   mkdirSync(root, { recursive: true });
-  const dir = join(root, 'kebacc-switcher');
+  const dir = join(root, 'pool-switcher');
   symlinkSync(join(harness.dataDir, 'missing-plugin'), dir, 'junction');
   expect(existsSync(dir)).toBe(false);
-  expect(() => harness!.core.plugins.state('kebacc-switcher')).toThrow('must not be a symbolic link');
+  expect(() => harness!.core.plugins.state('pool-switcher')).toThrow('must not be a symbolic link');
 });
 
 test('a truncated manifest is an error on the card, not a Plugins page that will not open', async () => {
-  harness = await startTestCore(); const client = await harness.connect();
-  const dir = join(harness.dataDir, 'plugins', 'kebacc-switcher'); mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, `kebacc${EXE}`), 'fixture');
+  harness = await startPoolCore(); const client = await harness.connect();
+  const dir = join(harness.dataDir, 'plugins', 'pool-switcher'); mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `pool${EXE}`), 'fixture');
   // What a power loss during an install leaves: the binary is there, the
   // manifest is half written. `JSON.parse` used to throw out of `state()`, so
   // `plugins.list` failed and the page had no way to reinstall.
-  writeFileSync(join(dir, 'installed.json'), '{"version":');
-  const kebaccOf = async () => (await client.call('plugins.list', {})).find((plugin) => plugin.id === 'kebacc-switcher');
-  const broken = await kebaccOf();
+  writeFileSync(join(dir, 'installed.json'), '{"schema":');
+  const poolOf = async () => (await client.call('plugins.list', {})).find((plugin) => plugin.id === 'pool-switcher');
+  const broken = await poolOf();
   expect(broken?.status).toBe('error');
   expect(broken?.version).toBeNull();
   expect(broken?.error).toContain('installed.json');
-  expect(broken?.error).toContain('Reinstall kebacc-switcher.');
+  expect(broken?.error).toContain('Reinstall pool-switcher.');
 
-  // A manifest that parses but carries the wrong type says so just as plainly.
-  writeFileSync(join(dir, 'installed.json'), '{"version":2}');
-  const typed = await kebaccOf();
-  expect(typed?.status).toBe('error');
-  expect(typed?.error).toContain('must carry a "version" string, found number');
+  // A record without a schema, the version alone, is no longer read as an install.
+  writeFileSync(join(dir, 'installed.json'), '{"version":"2.0.1"}');
+  const versionOnly = await poolOf();
+  expect(versionOnly?.status).toBe('rejected');
+  expect(versionOnly?.version).toBeNull();
+  expect(versionOnly?.rejected?.field).toBe('version');
 
   // And the page can still act: uninstall clears both the files and the error.
-  const cleared = await client.call('plugins.uninstall', { id: 'kebacc-switcher' });
+  const cleared = await client.call('plugins.uninstall', { id: 'pool-switcher' });
   expect(cleared.status).toBe('not-installed');
   expect(cleared.error).toBeNull();
 });
 test('the adapter runs the v2 pool flags through the process registry and normalizes JSON', async () => {
-  harness = await startTestCore();
-  const dir = join(harness.dataDir, 'plugins', 'kebacc-switcher'); mkdirSync(dir, { recursive: true });
-  // The record kebacc-switcher wrote before manifests still reads as installed.
-  writeFileSync(join(dir, 'installed.json'), '{"version":"2.0.1"}');
-  writeFileSync(join(dir, `kebacc${EXE}`), 'fixture');
+  harness = await startPoolCore();
+  const dir = installPool(harness.dataDir);
   const fixture = join(dir, 'fixture.ts');
   writeFileSync(fixture, `const args = process.argv.slice(2); if(args[0] !== 'list' || !['-claude','-codex','-antigravity'].includes(args[1]) || args[2] !== '-Json') process.exit(3); console.log(JSON.stringify({accounts:[{email:'fixture@example.com', live:true, fiveHour:12, sevenDay:65, checkedSecondsAgo:0}]}));`);
   const spawn = harness.core.procs.spawn.bind(harness.core.procs);
   const replacement = spyOn(harness.core.procs, 'spawn').mockImplementation((thread, _cmd, args, options) => spawn(thread, process.execPath, [fixture, ...args], options));
   try {
-    expect(harness.core.plugins.state('kebacc-switcher')).toMatchObject({ status: 'installed', version: '2.0.1', origin: 'recommended' });
-    const result = await harness.core.plugins.accounts('kebacc-switcher');
+    expect(harness.core.plugins.state('pool-switcher')).toMatchObject({ status: 'installed', version: '2.0.1', origin: 'recommended' });
+    const result = await harness.core.plugins.accounts('pool-switcher');
     expect(result.map((pool) => pool.provider)).toEqual(['claude', 'codex', 'antigravity']);
     expect(result[0]?.accounts[0]?.windows[1]?.usedPercent).toBe(65);
     expect(replacement).toHaveBeenCalledTimes(3);
-    await harness.core.plugins.accounts('kebacc-switcher'); expect(replacement).toHaveBeenCalledTimes(3);
+    await harness.core.plugins.accounts('pool-switcher'); expect(replacement).toHaveBeenCalledTimes(3);
   } finally { replacement.mockRestore(); }
 });
 
 test('a plugin login switch announces the default account and drops its probed models, even when its status stays the same', async () => {
-  harness = await startTestCore();
-  const dir = join(harness.dataDir, 'plugins', 'kebacc-switcher'); mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'installed.json'), '{"version":"2.0.1"}');
-  writeFileSync(join(dir, `kebacc${EXE}`), 'fixture');
+  harness = await startPoolCore();
+  const dir = installPool(harness.dataDir);
   const fixture = join(dir, 'fixture.ts');
   writeFileSync(fixture, `const args = process.argv.slice(2); if (args[0] === 'list') console.log(JSON.stringify({accounts:[{email:'next@example.com', live:true, fiveHour:1, sevenDay:2, checkedSecondsAgo:0}]})); else if (args[0] !== 'switch') process.exit(3);`);
   const spawn = harness.core.procs.spawn.bind(harness.core.procs);
@@ -178,65 +204,57 @@ test('a plugin login switch announces the default account and drops its probed m
     // A plain check that finds the same status stays silent: that is what the switch must not rely on.
     harness.core.accounts.check(account.id);
     expect(announced).toEqual([]);
-    await harness.core.plugins.accountAction({ id: 'kebacc-switcher', provider: 'claude', action: 'switch', email: 'next@example.com' });
+    await harness.core.plugins.accountAction({ id: 'pool-switcher', provider: 'claude', action: 'switch', email: 'next@example.com' });
     expect(announced).toEqual([account.status]);
     expect(forget).toHaveBeenCalledWith({ providerId: 'claude', accountId: account.id });
   } finally { off(); forget.mockRestore(); replacement.mockRestore(); }
 });
 
 describe('recommended plugins', () => {
-  test('kebacc-switcher is listed and installs through the manifest path, its download checked and recorded', async () => {
-    harness = await startTestCore(); const client = await harness.connect();
-    const kebacc = KEBACC;
-    const published = kebacc.artifacts[platformKey() as keyof typeof kebacc.artifacts]!;
+  test('a recommended plugin with account pools is listed and installs through the manifest path, its download checked and recorded', async () => {
     const bytes = new Uint8Array([1, 2, 3, 4]);
-    // Same URL as the release; only the digest follows the fixture's bytes.
-    harness.core.plugins.recommended = [{ ...kebacc, artifacts: { [platformKey()]: { url: published.url, sha256: sha256(bytes) } } }];
-    const asked = serveDownloads({ [published.url]: bytes });
+    harness = await startPoolCore(bytes); const client = await harness.connect();
+    const asked = serveDownloads({ [POOL_URL]: bytes });
 
     const [listed] = await client.call('plugins.list', {});
-    expect(listed).toMatchObject({ id: 'kebacc-switcher', origin: 'recommended', status: 'not-installed', version: null, availableVersion: '2.0.1', source: null, pools: ['claude', 'codex', 'antigravity'] });
-    expect(listed?.artifact?.url).toBe(published.url);
-    expect(listed?.commands).toContain('kebacc switch -<pool> -Email <email> -Yes');
+    expect(listed).toMatchObject({ id: 'pool-switcher', origin: 'recommended', status: 'not-installed', version: null, availableVersion: '2.0.1', source: null, pools: ['claude', 'codex', 'antigravity'] });
+    expect(listed?.artifact?.url).toBe(POOL_URL);
+    expect(listed?.commands).toContain('pool switch -<pool> -Email <email> -Yes');
 
-    const started = await client.call('plugins.install', { id: 'kebacc-switcher' });
+    const started = await client.call('plugins.install', { id: 'pool-switcher' });
     expect(started.status).toBe('installing');
-    await waitFor(() => harness!.core.plugins.state('kebacc-switcher').status !== 'installing');
-    const state = harness.core.plugins.state('kebacc-switcher');
+    await waitFor(() => harness!.core.plugins.state('pool-switcher').status !== 'installing');
+    const state = harness.core.plugins.state('pool-switcher');
     expect(state).toMatchObject({ status: 'installed', version: '2.0.1', error: null });
-    expect(asked).toEqual([published.url]);
-    const dir = join(harness.dataDir, 'plugins', 'kebacc-switcher');
-    expect(new Uint8Array(readFileSync(join(dir, `kebacc${EXE}`)))).toEqual(bytes);
+    expect(asked).toEqual([POOL_URL]);
+    const dir = join(harness.dataDir, 'plugins', 'pool-switcher');
+    expect(new Uint8Array(readFileSync(join(dir, `pool${EXE}`)))).toEqual(bytes);
     const record = JSON.parse(readFileSync(join(dir, 'installed.json'), 'utf8')) as Record<string, unknown>;
     expect(record).toMatchObject({ schema: 1, origin: 'recommended', source: null });
-    expect((record['manifest'] as { id: string }).id).toBe('kebacc-switcher');
-    expect(readdirSync(dir).sort()).toEqual(['installed.json', `kebacc${EXE}`]);
+    expect((record['manifest'] as { id: string }).id).toBe('pool-switcher');
+    expect(readdirSync(dir).sort()).toEqual(['installed.json', `pool${EXE}`]);
 
-    await client.call('plugins.uninstall', { id: 'kebacc-switcher' });
+    await client.call('plugins.uninstall', { id: 'pool-switcher' });
     expect(existsSync(dir)).toBe(false);
   });
 
   test('a download whose digest differs from the pinned one installs nothing', async () => {
-    harness = await startTestCore(); const client = await harness.connect();
-    const url = KEBACC.artifacts[platformKey() as keyof typeof KEBACC.artifacts]!.url;
-    serveDownloads({ [url]: new Uint8Array([9, 9, 9]) });
-    await client.call('plugins.install', { id: 'kebacc-switcher' });
-    await waitFor(() => harness!.core.plugins.state('kebacc-switcher').status !== 'installing');
-    const state = harness.core.plugins.state('kebacc-switcher');
+    harness = await startPoolCore(new Uint8Array([1, 2, 3, 4])); const client = await harness.connect();
+    serveDownloads({ [POOL_URL]: new Uint8Array([9, 9, 9]) });
+    await client.call('plugins.install', { id: 'pool-switcher' });
+    await waitFor(() => harness!.core.plugins.state('pool-switcher').status !== 'installing');
+    const state = harness.core.plugins.state('pool-switcher');
     expect(state.status).toBe('error');
     expect(state.error).toContain('sha256 does not match');
-    expect(existsSync(join(harness.dataDir, 'plugins', 'kebacc-switcher'))).toBe(false);
+    expect(existsSync(join(harness.dataDir, 'plugins', 'pool-switcher'))).toBe(false);
   });
 });
 
 describe('a plugin download on a slow link', () => {
   /** One recommended plugin whose download trickles `bytes` in pieces `gapMs` apart, then stalls forever when `stall` is set. */
   async function trickle(gapMs: number, stall: boolean): Promise<{ client: Awaited<ReturnType<TestCore['connect']>>; bytes: Uint8Array<ArrayBuffer> }> {
-    harness = await startTestCore(); const client = await harness.connect();
-    const kebacc = KEBACC;
-    const url = kebacc.artifacts[platformKey() as keyof typeof kebacc.artifacts]!.url;
     const bytes = new Uint8Array(8).map((_, index) => index + 1);
-    harness.core.plugins.recommended = [{ ...kebacc, artifacts: { [platformKey()]: { url, sha256: sha256(bytes) } } }];
+    harness = await startPoolCore(bytes); const client = await harness.connect();
     harness.core.plugins.downloadIdleMs = 300;
     fetchSpy = spyOn(globalThis, 'fetch').mockImplementation((async (_input: string | URL | Request) => new Response(new ReadableStream<Uint8Array>({
       async start(controller) {
@@ -253,20 +271,20 @@ describe('a plugin download on a slow link', () => {
 
   test('a download that keeps receiving finishes, however long it takes in all', async () => {
     const { client, bytes } = await trickle(150, false);
-    await client.call('plugins.install', { id: 'kebacc-switcher' });
-    await waitFor(() => harness!.core.plugins.state('kebacc-switcher').status !== 'installing');
-    expect(harness!.core.plugins.state('kebacc-switcher')).toMatchObject({ status: 'installed', error: null });
-    expect(new Uint8Array(readFileSync(join(harness!.dataDir, 'plugins', 'kebacc-switcher', `kebacc${EXE}`)))).toEqual(bytes);
+    await client.call('plugins.install', { id: 'pool-switcher' });
+    await waitFor(() => harness!.core.plugins.state('pool-switcher').status !== 'installing');
+    expect(harness!.core.plugins.state('pool-switcher')).toMatchObject({ status: 'installed', error: null });
+    expect(new Uint8Array(readFileSync(join(harness!.dataDir, 'plugins', 'pool-switcher', `pool${EXE}`)))).toEqual(bytes);
   });
 
   test('a download that goes silent stops after the idle wait and says it stalled', async () => {
     const { client } = await trickle(10, true);
-    await client.call('plugins.install', { id: 'kebacc-switcher' });
-    await waitFor(() => harness!.core.plugins.state('kebacc-switcher').status !== 'installing', 3_000);
-    const state = harness!.core.plugins.state('kebacc-switcher');
+    await client.call('plugins.install', { id: 'pool-switcher' });
+    await waitFor(() => harness!.core.plugins.state('pool-switcher').status !== 'installing', 3_000);
+    const state = harness!.core.plugins.state('pool-switcher');
     expect(state.status).toBe('error');
     expect(state.error).toMatch(/stalled: no data for \d+ seconds after 4 bytes/);
-    expect(existsSync(join(harness!.dataDir, 'plugins', 'kebacc-switcher'))).toBe(false);
+    expect(existsSync(join(harness!.dataDir, 'plugins', 'pool-switcher'))).toBe(false);
   });
 });
 
@@ -299,7 +317,7 @@ describe('plugins from a git URL', () => {
     const dir = join(harness.dataDir, 'plugins', 'seat-pool');
     const record = JSON.parse(readFileSync(join(dir, 'installed.json'), 'utf8')) as { source: { commit: string } };
     expect(record.source.commit).toBe(repo.commit);
-    expect((await client.call('plugins.list', {})).map((plugin) => plugin.id)).toEqual(['bots', 'kebacc-switcher', 'seat-pool']);
+    expect((await client.call('plugins.list', {})).map((plugin) => plugin.id)).toEqual(['bots', 'seat-pool']);
 
     // A preview is used once.
     await expect(client.call('plugins.add', { previewId: preview.previewId! })).rejects.toThrow('unknown or expired');
@@ -320,7 +338,7 @@ describe('plugins from a git URL', () => {
     const removed = await client.call('plugins.uninstall', { id: 'seat-pool' });
     expect(removed.status).toBe('not-installed');
     expect(existsSync(dir)).toBe(false);
-    expect((await client.call('plugins.list', {})).map((plugin) => plugin.id)).toEqual(['bots', 'kebacc-switcher']);
+    expect((await client.call('plugins.list', {})).map((plugin) => plugin.id)).toEqual(['bots']);
     await expect(client.call('plugins.install', { id: 'seat-pool' })).rejects.toThrow('unknown plugin');
   }, 30_000);
 
@@ -340,7 +358,7 @@ describe('plugins from a git URL', () => {
     const broken = repository('broken', '{"schema": 1,');
     expect((await client.call('plugins.inspect', { url: broken.path })).rejected?.expected).toBe('valid JSON');
 
-    const squat = repository('squat', manifest({ id: 'kebacc-switcher' }));
+    const squat = repository('squat', manifest({ id: 'bots' }));
     const squatted = await client.call('plugins.inspect', { url: squat.path });
     expect(squatted.rejected?.field).toBe('id');
     expect(squatted.rejected?.expected).toContain('no recommended plugin uses');
@@ -406,7 +424,7 @@ describe('plugins from a git URL', () => {
     await waitFor(() => harness!.core.plugins.state('seat-pool').status !== 'installing');
     expect(harness.core.plugins.state('seat-pool')).toMatchObject({ status: 'installed', source: { commit: repo.commit } });
     await client.call('plugins.uninstall', { id: 'seat-pool' });
-    expect((await client.call('plugins.list', {})).map((plugin) => plugin.id)).toEqual(['bots', 'kebacc-switcher']);
+    expect((await client.call('plugins.list', {})).map((plugin) => plugin.id)).toEqual(['bots']);
   }, 30_000);
 
   test('an installed.json the core no longer accepts is listed as rejected: it can be removed, never run', async () => {
@@ -435,7 +453,7 @@ describe('plugins from a git URL', () => {
     try {
       await expect(device.call('plugins.inspect', { url: 'https://github.com/owner/repo' })).rejects.toThrow('plugins.inspect is for the owner only');
       await expect(device.call('plugins.add', { previewId: 'f'.repeat(64) })).rejects.toThrow('plugins.add is for the owner only');
-      await expect(device.call('plugins.install', { id: 'kebacc-switcher' })).rejects.toThrow('plugins.install is for the owner only');
+      await expect(device.call('plugins.install', { id: 'bots' })).rejects.toThrow('plugins.install is for the owner only');
       await expect(device.call('plugins.list', {})).rejects.toThrow('plugins.list is for the owner only');
     } finally { device.close(); }
   });

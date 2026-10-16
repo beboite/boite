@@ -6,7 +6,7 @@ import { startTestCore, removeDir, waitFor, type TestCore } from './harness.ts';
 async function startSleepingAgent(h: TestCore) {
   const client = await h.connect();
   const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
-  const agent = await client.call('agents.profile.save', { value: { name: 'Worker', domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' }, status: 'active', tools: ['messages', 'memory', 'missions', 'decisions'], accountIntegration: 'provider' } });
+  const agent = await client.call('agents.profile.save', { value: { name: 'Worker', domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' }, status: 'active', tools: ['messages', 'memory', 'missions', 'decisions'] } });
   await client.call('agents.message.send', { scope: { kind: 'agent', id: agent.id }, recipientIds: [agent.id], text: '[sleep:60000] inspect workspace', requestId: 'recovery_001' });
   await waitFor(() => h.core.workforce.records.list('run').some(r => r.status === 'running'));
   const run = h.core.workforce.records.list('run')[0]!;

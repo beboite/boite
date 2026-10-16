@@ -4,7 +4,7 @@ import { test } from '../test/fake-client';
 import type { FakeClient } from './fake-client';
 
 async function agent(client: FakeClient, name = 'Mira'): Promise<AgentProfile> {
-  return client.call('agents.profile.save', { value: { name, domain: '', instructions: '', avatar: '', status: 'active', tools: [], accountIntegration: 'provider', projectIds: [],
+  return client.call('agents.profile.save', { value: { name, domain: '', instructions: '', avatar: '', status: 'active', tools: [], projectIds: [],
     selection: { providerId: 'echo', accountId: 'a-echo', model: 'echo-1', effort: null, permissionMode: 'default' } } });
 }
 

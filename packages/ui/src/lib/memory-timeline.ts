@@ -26,6 +26,36 @@ export function placeMemoryEvents(messages: Message[], events: MemoryEvent[]) {
 
 type MemoryRun = { kind: 'memory'; key: string; events: MemoryEvent[] };
 
+/** What a notice card says: the kind, a stop's reason and the limit it crossed. */
+function noticeKey(event: MemoryEvent): string {
+  if (event.kind === 'killed') return `killed:${event.reason}:${event.limitBytes}`;
+  return event.kind === 'throttled' ? `throttled:${event.limitBytes}` : event.kind;
+}
+
+/** Back-to-back notices that would read the same become one card, whatever time passed between them. */
+export const sameNotice = (before: MemoryEvent | undefined, event: MemoryEvent): boolean =>
+  before !== undefined && noticeKey(before) === noticeKey(event);
+
+/**
+ * Folds each standalone notice row that directly follows another into it:
+ * `rows` is the sorted timeline, `notices` the event behind each notice row.
+ * Returns the timeline without the folded rows and the events each kept row shows.
+ */
+export function mergeNoticeRows(rows: Message[], notices: ReadonlyMap<string, MemoryEvent>): { rows: Message[]; notices: Map<string, MemoryEvent[]> } {
+  const kept: Message[] = [];
+  const merged = new Map<string, MemoryEvent[]>();
+  let open: MemoryEvent[] | undefined;
+  for (const row of rows) {
+    const event = notices.get(row.id);
+    if (event === undefined) { open = undefined; kept.push(row); continue; }
+    if (open && sameNotice(open.at(-1), event)) { open.push(event); continue; }
+    open = [event];
+    merged.set(row.id, open);
+    kept.push(row);
+  }
+  return { rows: kept, notices: merged };
+}
+
 /**
  * Break folded activity runs at notice boundaries so later calls cannot cover them.
  * `from` and `to` name the parts one row of a cut message draws (`timeline-rows.ts`):
@@ -45,12 +75,9 @@ export function memoryPartRuns(parts: MessagePart[], events: MemoryEvent[], from
   let start = from;
   for (const [end, notices] of [...boundaries].sort((a, b) => a[0] - b[0])) {
     runs.push(...partRuns(parts, start, end, groupChanges));
-    // Group consecutive stops only when their reason and threshold match.
     for (const [index, event] of notices.entries()) {
       const previous = runs.at(-1);
-      const last = previous?.kind === 'memory' ? previous.events.at(-1) : undefined;
-      if (previous?.kind === 'memory' && last?.kind === 'killed' && event.kind === 'killed' &&
-        last.reason === event.reason && last.limitBytes === event.limitBytes && event.at - last.at <= 10000) previous.events.push(event);
+      if (previous?.kind === 'memory' && sameNotice(previous.events.at(-1), event)) previous.events.push(event);
       else runs.push({ kind: 'memory', key: `memory-${end}-${index}`, events: [event] });
     }
     start = end;

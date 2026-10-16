@@ -6,15 +6,21 @@ manifest names. There are two features today: account pools, which save and
 switch the default login of an agent CLI, and desktop apps, which Boite starts
 beside itself with the owner's access ([Desktop apps](#desktop-apps)).
 
-Settings > Plugins has three sections:
+Settings > Plugins has three sections. Installed and Recommended are drawn
+only when they hold a plugin:
 
 - Installed: every plugin on this core, with its version, the commit it came
   from, its pools and its errors.
 - Recommended: the plugins Boite ships a manifest for and that are not
   installed yet, in the order Boite lists them. Today that is
-  [Bots](https://github.com/beboite/bots), the desktop companion, first, then
-  [kebacc-switcher](https://github.com/kebab1337420/kebacc-switch).
+  [Bots](https://github.com/beboite/bots), the desktop companion. A row there
+  carries the name, version, a link to the source, the description and
+  Install, with no state line.
 - Add from a git URL: any repository with a `boite-plugin.json` at its root.
+
+A plugin installed as recommended that a later Boite no longer lists, such as
+kebacc-switcher before 2026-10-16, stays under Installed with its pools until
+the owner uninstalls it; it no longer receives updates.
 
 Plugins are administration of the machine that hosts the core, so every
 `plugins.*` method is owner only and the phone settings leave the page to the
@@ -254,7 +260,7 @@ A recommended plugin installs from its row. A plugin from a URL takes two
 steps:
 
 1. The owner pastes the repository URL and, optionally, a branch, tag or commit
-   (the default branch otherwise), then clicks Read manifest. The core fetches
+   (the default branch otherwise), then clicks Preview. The core fetches
    that one commit and reads the manifest (`plugins.inspect`). The page shows
    the name, version, source commit, download URL, SHA-256, the command lines
    and the pools. Nothing is downloaded or run yet.
@@ -502,5 +508,5 @@ six hours or at the owner's Check for updates. Without one, updating is the
 same pull request with a new `version`, URLs and digests. A pinned entry newer
 than what the source offers wins. Bump the entry now and then anyway: a fresh
 install never reads the source by itself until the plugin is installed.
-`BOITE_E2E_KEBACC_INSTALL=1` runs the real download of kebacc-switcher and its
+`BOITE_E2E_PLUGIN_INSTALL=1` runs the real download of Bots and its
 uninstall in a temporary data directory ([development](development.md)).

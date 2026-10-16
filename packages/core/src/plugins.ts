@@ -279,7 +279,6 @@ export class PluginStore {
     const dir = this.directory(id);
     const file = join(dir, INSTALLED_FILE);
     if (!existsSync(file)) return { kind: 'none' };
-    const recommended = this.recommendedManifest(id);
     let data: unknown;
     try {
       data = JSON.parse(readFileSync(file, 'utf8'));
@@ -288,19 +287,11 @@ export class PluginStore {
     }
     if (!isRecord(data)) return { kind: 'error', message: `${file} must be a JSON object. Reinstall ${id}.` };
     let record: Omit<Installed, 'binary'>;
-    if (data['schema'] === undefined && recommended !== null) {
-      // What kebacc-switcher wrote before manifests: its version alone.
-      if (typeof data['version'] !== 'string') {
-        return { kind: 'error', message: `${file} must carry a "version" string, found ${typeof data['version']}. Reinstall ${id}.` };
-      }
-      record = { version: data['version'], origin: 'recommended', source: null, manifest: recommended };
-    } else {
-      try {
-        record = readRecord(data, file, id, dir);
-      } catch (error) {
-        if (error instanceof ManifestRefused) return { kind: 'rejected', rejected: error.rejected };
-        throw error;
-      }
+    try {
+      record = readRecord(data, file, id, dir);
+    } catch (error) {
+      if (error instanceof ManifestRefused) return { kind: 'rejected', rejected: error.rejected };
+      throw error;
     }
     const binary = this.binaryPath(dir, record.manifest);
     if (!existsSync(binary)) return { kind: 'error', message: `${binary} is missing. Reinstall ${id}.` };
