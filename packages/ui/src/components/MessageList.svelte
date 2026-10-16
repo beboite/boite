@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount, tick, untrack } from 'svelte';
   import { ArrowDown } from '@lucide/svelte';
-  import { MESSAGE_PAGE, type Message, type Turn } from '@boite/contracts';
+  import { MESSAGE_PAGE, type MemoryEvent, type Message, type Turn } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import MessageTurnSummary from './MessageTurnSummary.svelte';
@@ -20,7 +20,7 @@
   import MoveMarker from './MoveMarker.svelte';
   import SpawnMarker from './SpawnMarker.svelte';
   import MemoryRow from './MemoryRow.svelte';
-  import { placeMemoryEvents } from '../lib/memory-timeline';
+  import { mergeNoticeRows, placeMemoryEvents } from '../lib/memory-timeline';
   import MessageActions from './MessageActions.svelte';
   import { movedBy, pendingMoveOf, startedFrom, turnAnswer } from '../lib/message-display';
   import { focusComposer } from '../lib/focus';
@@ -88,14 +88,15 @@
   /** Rows that follow the message sharing their millisecond: agent mail and a launch card, anchored with `<=`. */
   const after = (row: Message) => row.id.startsWith('coordination:') || row.id.startsWith('delegation:');
   const grouped = $derived.by(() => {
-    if (mail.length === 0 && launches.size === 0 && workflowRows.size === 0 && memoryRows.size === 0) return { timeline: messages, groups: new Map() };
+    if (mail.length === 0 && launches.size === 0 && workflowRows.size === 0 && memoryRows.size === 0) return { timeline: messages, groups: new Map(), notices: new Map<string, MemoryEvent[]>() };
     const activity: Message[] = [...launches.values()].map(({ id, createdAt }) => ({ id, threadId, turnId: id, role: 'system', parts: [], state: 'complete', createdAt }));
     const runs: Message[] = [...workflowRows].map(([id, run]) => ({ id, threadId, turnId: id, role: 'system', parts: [], state: 'complete', createdAt: run.createdAt }));
     const memory: Message[] = [...memoryRows].map(([id, event]) => ({ id, threadId, turnId: id, role: 'system', parts: [], state: 'complete', createdAt: event.at }));
     // Output that already existed in this millisecond precedes its exchange.
-    const rows = [...withAgentMail(messages, mail, threadId, shownTurns), ...activity, ...runs, ...memory].sort((a, b) =>
+    const sorted = [...withAgentMail(messages, mail, threadId, shownTurns), ...activity, ...runs, ...memory].sort((a, b) =>
       a.createdAt - b.createdAt || Number(after(a)) - Number(after(b)) || a.id.localeCompare(b.id));
-    return groupAgentMail(rows, mail);
+    const { rows, notices } = mergeNoticeRows(sorted, memoryRows);
+    return { ...groupAgentMail(rows, mail), notices };
   });
   /** The pages each turn published: its answer places them, or they go after it once the turn ends (`placeViews`). */
   let shownViews: ReadonlyMap<string, Message[]> | undefined;
@@ -783,8 +784,9 @@
             <WorkflowActivity {store} run={workflowRows.get(message.id)!} />
           {:else if group}
             <AgentMessageGroup {store} {group} />
-          {:else if memoryRows.has(message.id)}
-            <MemoryRow event={memoryRows.get(message.id)!} onconfigure={store.owner ? () => store.showSettings('resources', 'limits') : undefined} />
+          {:else if grouped.notices.has(message.id)}
+            {@const notices = grouped.notices.get(message.id)!}
+            <MemoryRow event={notices[0]!} events={notices} onconfigure={store.owner ? () => store.showSettings('resources', 'limits') : undefined} />
           {:else if movedBy(message)}
             <MoveMarker notice={movedBy(message)!} />
           {:else if startedFrom(message)}

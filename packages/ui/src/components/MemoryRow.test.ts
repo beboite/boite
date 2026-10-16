@@ -106,3 +106,29 @@ test('thread history and live notices appear in the timeline and survive reopeni
     expect(document.querySelectorAll('[data-testid=memory-row]')).toHaveLength(2);
   } finally { store.detach(); client.close(); }
 });
+
+test('back-to-back stops share one card until a message or another limit comes between them', async () => {
+  const client = new FakeClient({ delayMs: 0 }); const store = new Store(); store.attach(client);
+  try {
+    await store.connect(); await store.open('t-trace');
+    mounted = mount(MessageList, { target: document.body, props: { store, threadId: 't-trace', messages: store.openThread!.messages } });
+    flushSync();
+    const before = document.querySelectorAll('[data-testid=memory-row]').length;
+    const at = Date.now();
+    const stop = (exe: string, offset: number, limitBytes = 3277 * 1048576) => client.emitMemory({ threadId: 't-trace', kind: 'killed', reason: 'machine', limitBytes, exe, bytes: 700 * 1048576, state: 'critical', at: at + offset });
+    // Linkers stopped a minute apart, with nothing said in between.
+    stop('link.exe', 0); stop('rust-lld.exe', 60_000); stop('rust-lld.exe', 120_000);
+    flushSync();
+    const rows = () => [...document.querySelectorAll('[data-testid=memory-row]')];
+    expect(rows()).toHaveLength(before + 1);
+    expect(rows().at(-1)!.querySelector('.title')?.textContent).toBe(strings.resources.killCount(3));
+    expect([...rows().at(-1)!.querySelectorAll('.process')].map(node => node.textContent)).toEqual(['link.exe', 'rust-lld.exe', 'rust-lld.exe']);
+    // Another limit reads differently: its own card.
+    stop('cargo.exe', 130_000, 9728 * 1048576);
+    flushSync(); expect(rows()).toHaveLength(before + 2);
+    store.openThread!.messages.push({ id: 'between-stops', threadId: 't-trace', turnId: 'between-stops', role: 'user', parts: [{ type: 'text', text: 'Build again' }], state: 'complete', createdAt: at + 140_000 });
+    stop('link.exe', 150_000);
+    flushSync(); expect(rows()).toHaveLength(before + 3);
+    expect(rows().at(-1)!.querySelector('.title')?.textContent).toBe(strings.resources.killTitle);
+  } finally { store.detach(); client.close(); }
+});
