@@ -334,7 +334,6 @@ export class Connection {
     s.threads = [];
     // What the next core answers replaces these; one that cannot answer must not show the last one's.
     s.harnessUpdates = [];
-    s.douane = null;
     s.todos = {};
     s.resources = [];
     s.trace = [];
@@ -609,7 +608,6 @@ export class Connection {
       await Promise.all([essential, ...secondary]);
       if (!current()) return;
       void s.loadHarnessUpdates();
-      void s.loadDouane();
       // Beside the lists, not among them: the machines of the group are connected once it answers.
       void s.loadGroup();
       void s.refreshMemory();

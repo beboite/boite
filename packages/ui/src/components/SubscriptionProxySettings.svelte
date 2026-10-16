@@ -1,42 +1,47 @@
 <script lang="ts">
   import { errorText } from '../lib/errors';
-  import { untrack } from 'svelte';
-  import { checkSettingsPatch, type SubscriptionProxy, type SubscriptionProxyMode } from '@boite/contracts';
+  import { onMount, untrack } from 'svelte';
+  import { checkSettingsPatch, type PluginState, type SubscriptionProxy, type SubscriptionProxyMode } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
-  import { clockTime } from '../lib/format';
   import { fill, strings } from '../lib/strings';
   import InfoTip from './InfoTip.svelte';
+  import GatewayMoveDialog from './GatewayMoveDialog.svelte';
+  import GatewayOpenButton from './GatewayOpenButton.svelte';
 
   let { store }: { store: Store } = $props();
   let config = $state<SubscriptionProxy>({ enabled: false, kind: 'douane', baseUrl: 'http://127.0.0.1:8787', dashboardUrl: 'http://127.0.0.1:8787/admin/#quotas' });
   let key = $state('');
   let clearKey = $state(false);
   let busy = $state(false);
-  let acting = $state(false);
   let result = $state('');
   let failed = $state(false);
-  /** What the form leaves when it switches to local mode, so switching back finds the address typed. */
-  let remote = $state<Pick<SubscriptionProxy, 'kind' | 'baseUrl' | 'dashboardUrl'> | null>(null);
+  let moving = $state(false);
+  /** A saved Douane, on a core that can move logins into it. */
+  const movable = $derived(store.settings?.subscriptionProxy?.kind === 'douane' && !!store.settings.subscriptionProxy.baseUrl && store.core?.features?.gatewayMove === true);
   $effect(() => {
     const saved = store.settings?.subscriptionProxy;
     untrack(() => { if (saved) config = { ...saved }; });
   });
   const local = $derived(config.mode === 'local');
-  /** Douane's state is shown once local mode is saved: before that, nothing runs. */
-  const savedLocal = $derived(store.settings?.subscriptionProxy?.mode === 'local');
-  const douane = $derived(savedLocal ? store.douane : null);
-  const percent = $derived(douane?.progress && douane.progress.totalBytes > 0
-    ? Math.min(100, Math.round((douane.progress.receivedBytes / douane.progress.totalBytes) * 100)) : null);
-  const runs = $derived(douane !== null && ['running', 'starting', 'installing', 'updating'].includes(douane.state));
+  /** What the form leaves when it switches to the plugin, so switching back finds the address typed. */
+  let remote = $state<Pick<SubscriptionProxy, 'kind' | 'baseUrl' | 'dashboardUrl'> | null>(null);
+  /** The Douane plugin as `plugins.list` reads it: undefined before an answer, null on a core without it. */
+  let douane = $state<PluginState | null | undefined>(undefined);
+  const gateway = $derived(douane?.status === 'installed' ? douane.gateway ?? null : null);
 
-  function choose(kind: SubscriptionProxy['kind']) {
-    const oldDefault = config.kind === 'douane' ? 'http://127.0.0.1:8787' : 'http://127.0.0.1:8317';
-    const baseUrl = config.baseUrl === oldDefault ? (kind === 'douane' ? 'http://127.0.0.1:8787' : 'http://127.0.0.1:8317') : config.baseUrl;
-    config = { ...config, kind, baseUrl, dashboardUrl: `${baseUrl.replace(/\/v1\/?$/, '').replace(/\/$/, '')}${kind === 'douane' ? '/admin/#quotas' : '/management.html#/quota'}` };
-    result = '';
-  }
+  // Plugins are the owner's: a paired device reads none and shows no plugin state.
+  onMount(() => {
+    const client = store.client;
+    if (!client || !store.owner) return;
+    let disposed = false;
+    const off = client.on('plugins.updated', (value) => { if (value.id === 'douane') douane = value; });
+    void client.call('plugins.list', {}).then((rows) => {
+      if (!disposed) douane = rows.find((plugin) => plugin.id === 'douane') ?? null;
+    }).catch(() => { if (!disposed) douane = null; });
+    return () => { disposed = true; off(); };
+  });
 
-  /** Local mode runs Douane: the core writes the URLs, the ones here only pass the check. */
+  /** Local mode points at the Douane plugin: the core writes the URLs, the ones here only pass the check. */
   function chooseMode(mode: SubscriptionProxyMode) {
     if (mode === (config.mode ?? 'remote')) return;
     result = '';
@@ -47,6 +52,13 @@
       const back = remote ?? { kind: 'douane' as const, baseUrl: 'http://127.0.0.1:8787', dashboardUrl: 'http://127.0.0.1:8787/admin/#quotas' };
       config = { ...config, ...back, mode };
     }
+  }
+
+  function choose(kind: SubscriptionProxy['kind']) {
+    const oldDefault = config.kind === 'douane' ? 'http://127.0.0.1:8787' : 'http://127.0.0.1:8317';
+    const baseUrl = config.baseUrl === oldDefault ? (kind === 'douane' ? 'http://127.0.0.1:8787' : 'http://127.0.0.1:8317') : config.baseUrl;
+    config = { ...config, kind, baseUrl, dashboardUrl: `${baseUrl.replace(/\/v1\/?$/, '').replace(/\/$/, '')}${kind === 'douane' ? '/admin/#quotas' : '/management.html#/quota'}` };
+    result = '';
   }
 
   async function save() {
@@ -65,13 +77,6 @@
     } catch (error) { failed = true; result = errorText(error); }
     finally { busy = false; }
   }
-
-  async function act(action: 'start' | 'stop' | 'update') {
-    if (acting || !store.owner) return;
-    acting = true;
-    try { await store.douaneAction(action); }
-    finally { acting = false; }
-  }
 </script>
 
 <section class="card proxy-settings" data-testid="subscription-proxy-settings">
@@ -86,56 +91,42 @@
     </div>
   </div>
   {#if local}
-    {#if douane}
-      <div class="local" data-testid="douane-local" data-state={douane.state}>
-        <div class="status">
-          <span class="dot" class:ok={douane.state === 'running'} class:live={['installing', 'starting', 'updating'].includes(douane.state)} class:bad={douane.state === 'failed'}></span>
-          <span class="state" data-testid="douane-local-state">{strings.subscriptionProxy.localState[douane.state]}</span>
-          {#if douane.version}
-            <span class="version" data-testid="douane-local-version">{douane.available ? fill(strings.subscriptionProxy.localAvailable, { version: douane.version, available: douane.available }) : fill(strings.subscriptionProxy.localVersion, { version: douane.version })}</span>
-          {/if}
-          {#if douane.state === 'running'}<span class="port">{fill(strings.subscriptionProxy.localPort, { port: String(douane.port) })}</span>{/if}
-          {#if douane.development}<span class="port">{strings.subscriptionProxy.localDevelopment}</span>{/if}
-        </div>
-        {#if douane.progress}
-          <div class="progress">
-            <span class="figure">{fill(strings.subscriptionProxy.localDownloaded, { percent: String(percent ?? 0) })}</span>
-            <span class="track"><span class="bar" style:width={`${percent ?? 0}%`}></span></span>
-          </div>
-        {/if}
-        {#if douane.message}<p class="hint" class:error={douane.state === 'failed'} data-testid="douane-local-message">{douane.message}</p>{/if}
-        {#if douane.restartAt}<p class="hint">{fill(strings.subscriptionProxy.localRestartAt, { time: clockTime(douane.restartAt) })}</p>{/if}
-        {#if store.owner}
-          <div class="actions">
-            {#if runs}
-              <button type="button" class="quiet small" disabled={acting} onclick={() => act('stop')} data-testid="douane-local-stop"><span class="ui-label">{strings.subscriptionProxy.stop}</span></button>
-            {:else}
-              <button type="button" class="quiet small" disabled={acting || douane.state === 'unavailable'} onclick={() => act('start')} data-testid="douane-local-start"><span class="ui-label">{strings.subscriptionProxy.start}</span></button>
-            {/if}
-            {#if douane.available && douane.state !== 'updating'}
-              <button type="button" class="quiet small" disabled={acting} onclick={() => act('update')} data-testid="douane-local-update"><span class="ui-label">{strings.subscriptionProxy.update}</span></button>
-            {/if}
-          </div>
+    {#if douane !== undefined}
+      <div class="plugin" data-testid="subscription-proxy-plugin" data-state={gateway?.status ?? 'missing'}>
+        <span class="dot" class:ok={gateway?.status === 'running'} class:live={gateway?.status === 'starting' || gateway?.status === 'updating'} class:bad={gateway?.status === 'crashed'}></span>
+        <span class="line">{gateway === null ? strings.subscriptionProxy.localMissing
+          : gateway.status === 'running' ? fill(strings.subscriptionProxy.localRunning, { version: gateway.version ?? '', port: String(gateway.port) }).replace('  ', ' ')
+          : gateway.status === 'starting' || gateway.status === 'updating' ? strings.subscriptionProxy.localStarting
+          : strings.subscriptionProxy.localStopped}</span>
+        {#if gateway?.status !== 'running'}
+          <button type="button" class="ghost small" onclick={() => store.showSettings('plugins')} data-testid="subscription-proxy-open-plugins"><span class="ui-label">{strings.subscriptionProxy.openPlugins}</span></button>
         {/if}
       </div>
     {/if}
     <form onsubmit={(event) => { event.preventDefault(); void save(); }}>
-      <div class="actions"><button type="submit" class="primary small" disabled={busy || !store.owner} data-testid="subscription-proxy-save"><span class="ui-label">{strings.subscriptionProxy.save}</span></button></div>
+      <div class="actions"><button type="submit" class="primary small" disabled={busy || !store.owner} data-testid="subscription-proxy-save"><span class="ui-label">{strings.subscriptionProxy.save}</span></button><GatewayOpenButton {store} /></div>
       {#if result}<p class="hint" class:error={failed} role="status" data-testid="subscription-proxy-result">{result}</p>{/if}
     </form>
   {:else}
-    <div class="actions" role="group" aria-label={strings.subscriptionProxy.heading}>
-      <button type="button" class="quiet small" aria-pressed={config.kind === 'douane'} onclick={() => choose('douane')} data-testid="subscription-proxy-douane"><span class="ui-label">Douane</span></button>
-      <button type="button" class="quiet small" aria-pressed={config.kind === 'cliproxyapi'} onclick={() => choose('cliproxyapi')} data-testid="subscription-proxy-cliproxyapi"><span class="ui-label">CLIProxyAPI</span></button>
+  <div class="actions" role="group" aria-label={strings.subscriptionProxy.heading}>
+    <button type="button" class="quiet small" aria-pressed={config.kind === 'douane'} onclick={() => choose('douane')} data-testid="subscription-proxy-douane"><span class="ui-label">Douane</span></button>
+    <button type="button" class="quiet small" aria-pressed={config.kind === 'cliproxyapi'} onclick={() => choose('cliproxyapi')} data-testid="subscription-proxy-cliproxyapi"><span class="ui-label">CLIProxyAPI</span></button>
+  </div>
+  <form onsubmit={(event) => { event.preventDefault(); void save(); }}>
+    <label><span class="ui-label">{strings.subscriptionProxy.baseUrl}</span><input type="url" bind:value={config.baseUrl} required data-testid="subscription-proxy-url" /></label>
+    <label><span class="ui-label">{strings.subscriptionProxy.dashboardUrl}</span><input type="url" bind:value={config.dashboardUrl} required data-testid="subscription-proxy-dashboard" /></label>
+    <label><span class="ui-label-box"><span class="ui-label">{strings.subscriptionProxy.key}</span><InfoTip topic={strings.subscriptionProxy.key} text={strings.subscriptionProxy.keyHint} /></span><input type="password" bind:value={key} autocomplete="new-password" disabled={clearKey} data-testid="subscription-proxy-key" /></label>
+    <label class="clear-key"><input type="checkbox" bind:checked={clearKey} /><span class="ui-label">{strings.subscriptionProxy.clearKey}</span></label>
+    <div class="actions"><button type="submit" class="primary small" disabled={busy} data-testid="subscription-proxy-save"><span class="ui-label">{strings.subscriptionProxy.save}</span></button><GatewayOpenButton {store} /></div>
+    {#if result}<p class="hint" class:error={failed} role="status" data-testid="subscription-proxy-result">{result}</p>{/if}
+  </form>
+  {/if}
+  {#if movable}
+    <div class="move">
+      <button type="button" class="ghost small" onclick={() => moving = true} data-testid="gateway-move-open"><span class="ui-label">{strings.subscriptionProxy.move.open}</span></button>
+      <InfoTip topic={strings.subscriptionProxy.move.open} text={strings.subscriptionProxy.move.openHint} />
     </div>
-    <form onsubmit={(event) => { event.preventDefault(); void save(); }}>
-      <label><span class="ui-label">{strings.subscriptionProxy.baseUrl}</span><input type="url" bind:value={config.baseUrl} required data-testid="subscription-proxy-url" /></label>
-      <label><span class="ui-label">{strings.subscriptionProxy.dashboardUrl}</span><input type="url" bind:value={config.dashboardUrl} required data-testid="subscription-proxy-dashboard" /></label>
-      <label><span class="ui-label-box"><span class="ui-label">{strings.subscriptionProxy.key}</span><InfoTip topic={strings.subscriptionProxy.key} text={strings.subscriptionProxy.keyHint} /></span><input type="password" bind:value={key} autocomplete="new-password" disabled={clearKey} data-testid="subscription-proxy-key" /></label>
-      <label class="clear-key"><input type="checkbox" bind:checked={clearKey} /><span class="ui-label">{strings.subscriptionProxy.clearKey}</span></label>
-      <div class="actions"><button type="submit" class="primary small" disabled={busy} data-testid="subscription-proxy-save"><span class="ui-label">{strings.subscriptionProxy.save}</span></button></div>
-      {#if result}<p class="hint" class:error={failed} role="status" data-testid="subscription-proxy-result">{result}</p>{/if}
-    </form>
+    <GatewayMoveDialog {store} open={moving} onclose={() => moving = false} />
   {/if}
 </section>
 
@@ -149,7 +140,7 @@
   .proxy-settings > .hint { margin: 2px 0 10px; color: var(--color-muted-foreground); font-size: var(--text-sm); }
   .error { color: var(--color-danger); }
   [aria-pressed='true'] { background: var(--color-active); }
-
+  .actions { display: flex; flex-wrap: wrap; gap: 6px; }
   .mode { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; font-size: var(--text-sm); }
   .segmented { display: inline-flex; padding: 2px; gap: 2px; border-radius: var(--radius-md); background: var(--color-surface-2); }
   .segmented button {
@@ -159,21 +150,11 @@
   }
   .segmented button:hover { color: var(--color-foreground); }
   .segmented button[aria-pressed='true'] { background: var(--color-active); color: var(--color-foreground); }
-
-  .local { display: grid; gap: 8px; padding: 12px 14px; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-2); animation: rise var(--dur-3) var(--ease-out-quint); }
-  .status { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; font-size: var(--text-sm); }
-  .state { font-weight: 500; }
-  .version, .port { color: var(--color-muted-foreground); font-variant-numeric: tabular-nums; }
-  .port { font-family: var(--font-mono); }
+  .plugin { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; padding: 10px 12px; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-2); font-size: var(--text-sm); }
+  .plugin .line { flex: 1; min-width: 0; color: var(--color-muted-foreground); font-variant-numeric: tabular-nums; }
   .dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--color-subtle); }
   .dot.ok { background: var(--color-success); }
   .dot.live { background: var(--color-live); }
   .dot.bad { background: var(--color-danger); }
-  .local .hint { margin: 0; color: var(--color-muted-foreground); font-size: var(--text-sm); }
-  .local .hint.error { color: var(--color-danger); }
-  .progress { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 10px; font-size: var(--text-sm); color: var(--color-muted-foreground); }
-  .figure { font-variant-numeric: tabular-nums; }
-  .track { height: 2px; border-radius: 999px; background: var(--color-surface-3); overflow: hidden; }
-  .bar { display: block; height: 100%; background: var(--color-foreground); transition: width var(--dur-2) var(--ease-out-quint); }
-  .local .actions { margin: 0; }
+  .move { display: flex; align-items: center; gap: 4px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--color-border); }
 </style>

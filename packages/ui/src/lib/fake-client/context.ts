@@ -48,7 +48,6 @@ import {
   type Settings,
   type ServerUpdateStatus,
   type DesktopUpdateStatus,
-  type LocalDouaneStatus,
   type SpeechConfig,
   type SpeechStatus,
   type TelemetryState,
@@ -162,10 +161,6 @@ export class FakeContext {
   serverUpdate: ServerUpdateStatus = initialServerUpdate();
   /** The desktop app's updater as this machine's window reported it; null with no window, or on a server. */
   desktopUpdate: DesktopUpdateStatus | null = null;
-  /** Douane as this fake core runs it in the proxy's local mode (`douane.ts`). */
-  douane: LocalDouaneStatus = { state: 'off', version: null, available: null, port: 8787 };
-  /** Bumped by every Douane start, stop and update, so a step scheduled before one lands nowhere. */
-  douaneGeneration = 0;
   readonly bus: FakeBus;
   readonly agents: FakeAgents;
   /** A settle of the agent setting cards is queued after the current change. */
@@ -301,7 +296,6 @@ export class FakeContext {
       create: (agent, sessionId, work) => createAgentSession(this, agent, sessionId, work),
       start: (threadId, prompt, agent) => { Object.assign(this.thread(threadId), agent.selection); return this.startTurn(threadId, prompt); },
       stop: threadId => { void this.stopTurn(threadId); },
-      protocol: providerId => this.providers.find(p => p.id === providerId)?.protocol,
       thread: threadId => this.threads.get(threadId),
       goal: (threadId, objective) => {
         const methods = activityMethods(this);
@@ -368,7 +362,7 @@ export class FakeContext {
       version: '2.0.0-beta.1',
       coreId,
       protocolVersion: PROTOCOL_VERSION,
-      features: { draftPreparation: true, attachmentUploads: true, threadSnapshots: true, chunkedAnswers: true, readingPages: true, messagePositions: true, deferredToolParts: true, deviceKeys: true, revealMachines: true, loadEvents: true, desktopUpdates: true },
+      features: { draftPreparation: true, attachmentUploads: true, threadSnapshots: true, chunkedAnswers: true, readingPages: true, messagePositions: true, deferredToolParts: true, deviceKeys: true, revealMachines: true, loadEvents: true, desktopUpdates: true, gatewayMove: true },
       os: 'windows',
       channel: 'stable',
       pid: 4242,

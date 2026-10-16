@@ -225,7 +225,10 @@ describe('a desktop app', () => {
     expect(app().pid).not.toBe(second);
     expect(new PluginStore(harness.core).state('bots').app?.enabled).toBe(true);
     await expect(client.call('plugins.app', { id: 'bots', action: 'pause' as 'stop' })).rejects.toThrow('start, stop or restart');
-    await expect(client.call('plugins.app', { id: 'kebacc-switcher', action: 'start' })).rejects.toThrow('Install kebacc-switcher first');
+    // A recommended plugin that is not installed has no app to start.
+    const pools = parseManifest({ ...manifest(), id: 'pool-switcher', name: 'Pool switcher', executable: 'pool', provides: { accountPools: { providers: ['claude'] } } }, 'recommended.json[1]');
+    harness.core.plugins.recommended = [...harness.core.plugins.recommended, pools];
+    await expect(client.call('plugins.app', { id: 'pool-switcher', action: 'start' })).rejects.toThrow('Install pool-switcher first');
   });
 
   test('the core start launches an enabled app, and close() kills it', async () => {

@@ -26,7 +26,7 @@ async function setup(): Promise<{ client: FakeClient; store: Store; agent: Agent
   store.attach(client);
   await store.connect();
   await store.open('t-trace');
-  const agent = await client.call('agents.profile.save', { value: { name: 'Mira', domain: '', instructions: '', avatar: '', status: 'active', tools: [], accountIntegration: 'provider', projectIds: [],
+  const agent = await client.call('agents.profile.save', { value: { name: 'Mira', domain: '', instructions: '', avatar: '', status: 'active', tools: [], projectIds: [],
     selection: { providerId: 'claude', accountId: 'a-claude-main', model: null, effort: null, permissionMode: 'default' } } });
   return { client, store, agent };
 }

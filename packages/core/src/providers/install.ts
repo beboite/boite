@@ -2,7 +2,7 @@ import { lstatSync, readdirSync, realpathSync, rmSync, statfsSync, statSync } fr
 import { isAbsolute, join, relative } from 'node:path';
 import type { ProviderId, ProviderInstall, ProviderInstallState } from '@boite/contracts';
 import { newId } from '../ids.ts';
-import { providerAgentDir } from '../paths.ts';
+import { agentsDirPath, providerAgentDir } from '../paths.ts';
 import { messageOf, refused } from '../errors.ts';
 import { forgetWhich } from './which.ts';
 import {
@@ -90,15 +90,7 @@ export class InstallManager {
   idleTimeoutMs = IDLE_TIMEOUT_MS;
   retryDelaysMs: readonly number[] = RETRY_DELAYS_MS;
 
-  /**
-   * `dirOf` names the directory one install owns: `<dataDir>/agents/<id>` for
-   * an agent, another folder of the data directory for a program the core runs
-   * itself (Douane). It holds `releases/`, `downloads/` and the `current` link.
-   */
-  constructor(
-    private readonly dataDir: string,
-    private readonly dirOf: (providerId: ProviderId) => string = (providerId) => providerAgentDir(dataDir, providerId),
-  ) {}
+  constructor(private readonly dataDir: string) {}
 
   attach(sink: InstallSink): void {
     this.#sink = sink;
@@ -107,15 +99,15 @@ export class InstallManager {
   // -- paths ----------------------------------------------------------------
 
   currentDir(providerId: ProviderId): string {
-    return join(this.dirOf(providerId), 'current');
+    return agentsDirPath(this.dataDir, providerId);
   }
 
   releaseDir(providerId: ProviderId, version: string): string {
-    return this.#inside(join(this.dirOf(providerId), 'releases'), version);
+    return this.#inside(join(providerAgentDir(this.dataDir, providerId), 'releases'), version);
   }
 
   partFile(providerId: ProviderId, version: string): string {
-    return this.#inside(join(this.dirOf(providerId), 'downloads'), `${version}.zip.part`);
+    return this.#inside(join(providerAgentDir(this.dataDir, providerId), 'downloads'), `${version}.zip.part`);
   }
 
   /** A version is deleted recursively on failure: whatever it says, it stays one entry of its directory. */
@@ -216,7 +208,7 @@ export class InstallManager {
    */
   prune(providerId: ProviderId, keepDownload?: string | null): void {
     if (this.#running.has(providerId) || this.leaseCount(providerId) > 0) return;
-    const root = this.dirOf(providerId);
+    const root = providerAgentDir(this.dataDir, providerId);
     // A junction at `agents/<id>` makes `releases/<version>` resolve outside
     // the data directory. Removing those names would delete the target's files.
     if (reachesThroughLink(this.dataDir, root)) {
@@ -381,7 +373,7 @@ export class InstallManager {
         leases: held,
       });
     }
-    const dir = this.dirOf(providerId);
+    const dir = providerAgentDir(this.dataDir, providerId);
     removeCurrent(this.currentDir(providerId));
     rmSync(dir, { recursive: true, force: true });
     forgetWhich();

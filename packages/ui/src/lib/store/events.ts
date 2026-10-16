@@ -329,9 +329,6 @@ export function listen(ctx: StoreContext, client: Client): void {
   on('providers.updatesChanged', (updates) => {
     s.harnessUpdates = updates;
   });
-  on('douane.updated', (status) => {
-    s.douane = status;
-  });
   on('providers.updated', ({ loaded, rejected }) => {
     ctx.metadataRevision.providers++;
     s.providers = loaded;

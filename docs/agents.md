@@ -284,12 +284,7 @@ Antigravity CLI uses agy stream-json and its single default login. Print mode
 has no interactive tool-approval channel. Muse Code uses MSP, including
 approvals and session resume. The separate Antigravity ACP integration has its
 own accounts. See [providers](providers.md) and [accounts](accounts.md).
-
-Experimental agy account management belongs to the external kebacc-switcher
-plugin. The Agents experiment is off by default. It marks dependent agents and
-prevents their work when disabled. It does not copy credentials, rotate logins
-or implement another switcher. Collaboration uses the provider-independent
-[`boite agent` commands](cli.md).
+Collaboration uses the provider-independent [`boite agent` commands](cli.md).
 
 ## Individual brain and compaction
 

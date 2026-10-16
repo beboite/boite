@@ -16,7 +16,7 @@ import { registerTailscaleMethods } from './tailscale.ts';
 import { registerFirewallMethods } from './firewall.ts';
 import { registerSettingsMethods } from './settings.ts';
 import { registerSubscriptionProxy } from './subscription-proxy.ts';
-import { registerLocalDouane } from './douane-local.ts';
+import { registerGatewayMove } from './gateway-move.ts';
 import { registerThreadMethods } from './threads/rpc.ts';
 import { registerTraceMethods } from './trace.ts';
 import { registerUsageMethods } from './usage.ts';
@@ -79,6 +79,7 @@ export function registerModules(core: Core): void {
   core.router.register('plugins.accounts', (params) => core.plugins.accounts(params.id, params.refresh));
   core.router.register('plugins.accountAction', (params) => core.plugins.accountAction(params));
   core.router.register('plugins.app', (params) => core.plugins.app(params));
+  core.router.register('plugins.gateway', (params) => core.plugins.gateway(params));
   core.router.register('plugins.checkUpdates', (params) => core.plugins.checkUpdates(params));
   core.router.register('ui.reveal', (params) => reveal(core, params));
   registerProjectMethods(core);
@@ -104,7 +105,7 @@ export function registerModules(core: Core): void {
   registerUsageMethods(core);
   registerSettingsMethods(core);
   registerSubscriptionProxy(core);
-  registerLocalDouane(core);
+  registerGatewayMove(core);
   registerKeybindingMethods(core);
   registerSessionMethods(core);
   registerTailscaleMethods(core);

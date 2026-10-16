@@ -240,7 +240,11 @@ export class Drafts {
       && (typeof indexedDB !== 'undefined' || [...this.#entries.values()].every(entry => entry.backedUp));
   }
 
-  /** Every draft with something in it, newest first by creation, so typing never reorders the list. */
+  /**
+   * Every draft with something in it, newest first by creation, so typing
+   * never reorders the list. A draft with no project names the drafts project
+   * once it exists; before that its project is null.
+   */
   get entries(): { id: string; projectId: string | null; text: string; active: boolean }[] {
     const s = this.ctx.store;
     const rows = new Map<string, { id: string; projectId: string | null; text: string; active: boolean; createdAt: number }>();
@@ -254,10 +258,12 @@ export class Drafts {
       if (!hasContent(input)) rows.delete(id);
       else rows.set(id, { id, projectId: s.draft.projectId, text: input?.text ?? '', active: true, createdAt: s.draft.createdAt ?? 0 });
     }
+    // A draft with no project is sent to the drafts, so it is listed there once they exist.
+    const drafts = s.draftsProject?.id ?? null;
     return [...rows.values()]
       .filter(row => row.active || row.projectId === null || s.projects.some(p => p.id === row.projectId && !p.archived))
       .sort((a, b) => b.createdAt - a.createdAt)
-      .map(({ createdAt: _createdAt, ...row }) => row);
+      .map(({ createdAt: _createdAt, ...row }) => ({ ...row, projectId: row.projectId ?? drafts }));
   }
 
   /** Back up new input before hydration; only a readable journal can receive a full checkpoint. */

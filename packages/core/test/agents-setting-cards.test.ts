@@ -34,7 +34,7 @@ async function setup() {
   const folder = (name: string) => { const path = join(h.dataDir, name); mkdirSync(path, { recursive: true }); return path; };
   const notes = await owner.call('projects.add', { path: folder('notes'), name: 'Notes' });
   const other = await owner.call('projects.add', { path: folder('other'), name: 'Other' });
-  const agent = await owner.call('agents.profile.save', { value: { name: 'Ada', domain: 'Open source', instructions: '', avatar: '', status: 'active', tools: ['messages'], accountIntegration: 'provider', projectIds: [], selection: { providerId: 'echo', accountId, model: 'echo', effort: null, permissionMode: 'default' } } });
+  const agent = await owner.call('agents.profile.save', { value: { name: 'Ada', domain: 'Open source', instructions: '', avatar: '', status: 'active', tools: ['messages'], projectIds: [], selection: { providerId: 'echo', accountId, model: 'echo', effort: null, permissionMode: 'default' } } });
   await h.core.workforce.resident.configure({ agentId: agent.id, expectedRevision: agent.revision, config: { ...h.core.workforce.resident.config(agent.id), autoMemory: false } });
   const run = async (args: string[], as: string) => {
     let out = '', err = '';

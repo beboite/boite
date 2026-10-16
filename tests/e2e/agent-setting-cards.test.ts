@@ -32,7 +32,7 @@ test('a thread asks to entrust a project to an agent; Apply entrusts it and the 
   // An agent with no project, and a thread of boite whose agent asks for it to be entrusted.
   const ids = await page.evaluate(`(async () => {
     const store = window.__boiteTest.workspace.active;
-    const agent = await store.client.call('agents.profile.save', { value: { name: 'Scout', domain: 'Follows projects', instructions: '', avatar: '', status: 'active', tools: [], accountIntegration: 'provider', projectIds: [],
+    const agent = await store.client.call('agents.profile.save', { value: { name: 'Scout', domain: 'Follows projects', instructions: '', avatar: '', status: 'active', tools: [], projectIds: [],
       selection: { providerId: 'echo', accountId: 'a-echo', model: 'echo-1', effort: null, permissionMode: 'default' } } });
     const thread = await store.client.call('threads.create', { projectId: 'p-boite', providerId: 'echo', accountId: 'a-echo' });
     await window.__boiteTest.workspace.select(store, thread.id);

@@ -53,6 +53,29 @@ test('abandoning an in-flight preparation releases its exact id again after the 
   expect(store.threads.some(row => row.id === 'stale-thread')).toBe(false);
 });
 
+test('a draft prepared in the drafts and sent after removing them goes to new drafts, not the removed project', async ({ ready }) => {
+  visible();
+  const { store, client } = await ready();
+  const spy = vi.spyOn(client, 'call');
+  store.startDraft(null, { fresh: true });
+  store.draftChoice = { providerId: 'echo', accountId: 'a-echo', permissionMode: 'default', model: 'echo-1', effort: null };
+  store.composerStates[DRAFT_STASH_KEY]!.text = 'Sort my photos';
+  flushSync();
+  await vi.waitFor(() => expect(callsOf(spy, 'drafts.prepare')).toHaveLength(1));
+  const first = callsOf(spy, 'drafts.prepare')[0]![1] as RpcParams<'drafts.prepare'>;
+  await vi.waitFor(() => expect(store.draftsProject?.id).toBe(first.projectId));
+  // The draft has no project of its own: it lists under the drafts.
+  expect(store.draftEntries.find(entry => entry.active)).toMatchObject({ projectId: first.projectId });
+  await store.removeProject(first.projectId);
+  expect(store.draft).toMatchObject({ projectId: null });
+  expect(store.composerStates[DRAFT_STASH_KEY]?.text).toBe('Sort my photos');
+  expect(await store.submit('Sort my photos', store.draftChoice!)).toBe(true);
+  const created = callsOf(spy, 'threads.create').at(-1)![1] as RpcParams<'threads.create'>;
+  expect(created.projectId).not.toBe(first.projectId);
+  expect(created.projectId).toBe(store.draftsProject?.id);
+  expect(store.error).toBeNull();
+});
+
 test('a selection change before reactive cleanup cannot claim the former choice', async ({ ready }) => {
   visible();
   const { store, client } = await ready();

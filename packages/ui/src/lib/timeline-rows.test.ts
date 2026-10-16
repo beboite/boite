@@ -70,6 +70,10 @@ test('blank text, a hidden marker, a noticed part and the last part never start 
   expect(rowCuts(long, new Set([ROW_PARTS + 12]))).toEqual([ROW_PARTS + 16]);
   const notice = { at: 1, kind: 'killed', anchor: { messageId: 'm-1', partIndex: ROW_PARTS + 12 } } as unknown as MemoryEvent;
   expect(new TimelineRows().build([long], new Map([['m-1', [notice]]])).map(row => row.from)).toEqual([0, ROW_PARTS + 16]);
+  // Stops a minute apart on the same call read as one card; another limit does not join it.
+  const stop = (at: number, limitBytes = 1) => ({ ...notice, at, reason: 'machine', limitBytes }) as MemoryEvent;
+  const runs = memoryPartRuns(parts, [stop(1), stop(60_001), stop(60_002, 2)]).filter(run => run.kind === 'memory');
+  expect(runs.map(run => run.kind === 'memory' && run.events.length)).toEqual([2, 1]);
   // The closing paragraph is the one an answer may still be writing: it is not read.
   const closing = message('m-2', [...Array.from({ length: CUT_FROM + 6 }, (_, index) => tool(`k-${index}`)), text('still writing')]);
   expect(rowCuts(closing)).toEqual([]);

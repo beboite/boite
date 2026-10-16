@@ -114,20 +114,17 @@ export class ServerUpdater {
    * Boite's own release when `server` is its offered version. The core runs
    * them in order, so nothing here waits for them. `app` is the version of
    * the desktop app that machine's window offers, handed to that window once
-   * its agents are done. `douane` updates the Douane that core runs. A core
-   * from before that request gets the same updates one call each, without
-   * its ordering.
+   * its agents are done. A core from before that request gets the same
+   * updates one call each, without its ordering.
    */
-  async everything(agents: ProviderId[], server: string | null, app: string | null = null, douane = false): Promise<EverythingStarted | null> {
+  async everything(agents: ProviderId[], server: string | null, app: string | null = null): Promise<EverythingStarted | null> {
     const client = this.ctx.client;
     // A core that does not report its desktop app cannot be asked to install it.
     if (app !== null && !this.desktopSupported) app = null;
-    if (!client || !this.ctx.store.owner || (agents.length === 0 && server === null && app === null && !douane)) return null;
+    if (!client || !this.ctx.store.owner || (agents.length === 0 && server === null && app === null)) return null;
     const generation = ++this.generation;
     try {
-      const answer = await client.call('core.updateEverything', { agents, server, ...(app === null ? {} : { app }), ...(douane ? { douane } : {}) });
-      if (client === this.ctx.client && answer.douane) this.ctx.accounts.douane = answer.douane;
-      if (answer.douaneError) console.warn(`updating Douane did not start: ${answer.douaneError}`);
+      const answer = await client.call('core.updateEverything', app === null ? { agents, server } : { agents, server, app });
       if (client === this.ctx.client && app !== null) {
         if (answer.app !== undefined) this.applyDesktop(answer.app);
         this.desktopFailure = answer.appError ? { version: app, message: answer.appError } : null;

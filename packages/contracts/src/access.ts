@@ -160,8 +160,6 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   // spending a reset stay the owner's (core access.ts).
   'quotas.list',
   'subscriptionProxy.quotas',
-  // Whether this machine runs Douane, its version and port; starting, stopping and updating it stay the owner's.
-  'douane.status',
   'settings.get',
   'keybindings.get',
 ]);
@@ -187,7 +185,6 @@ export const DEVICE_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
   'permission.requested', 'permission.resolved', 'question.asked', 'question.answered',
   'scheduler.updated', 'accounts.updated', 'accounts.removed',
   'quotas.updated', 'quotas.progress', 'subscriptionProxy.quotasUpdated', // What quotas.list and subscriptionProxy.quotas answer.
-  'douane.updated', // What douane.status answers.
   'settings.updated', 'keybindings.updated', 'sessions.updated',
   'group.updated', // Invalidation only; group.get applies the device read policy.
   'providers.updated', 'providers.installProgress', 'providers.probed',

@@ -30,7 +30,7 @@ async function open(edit?: (rows: PluginState[]) => void): Promise<void> {
   }
   const store = { client, providers: [] } as unknown as Store;
   mounted = mount(PluginsPage, { target: document.body, props: { store } });
-  await vi.waitFor(() => expect(row('kebacc-switcher')).not.toBeNull());
+  await vi.waitFor(() => expect(row('bots')).not.toBeNull());
 }
 
 function type(selector: string, value: string): void {
@@ -43,11 +43,12 @@ function type(selector: string, value: string): void {
 test('each section holds its plugins, every state drawn with what the owner can do next', async () => {
   await open();
   const installed = q('[data-testid="plugins-installed"]')!;
-  const recommended = q('[data-testid="plugins-recommended"]')!;
-  expect([...installed.querySelectorAll('[data-testid="plugin-row"]')].map((el) => el.getAttribute('data-plugin'))).toEqual(['bots', 'grok-seats', 'pool-legacy', 'seat-pool']);
-  expect([...recommended.querySelectorAll('[data-testid="plugin-row"]')].map((el) => el.getAttribute('data-plugin'))).toEqual(['kebacc-switcher']);
-
-  expect(row('kebacc-switcher')?.querySelector('[data-testid="plugin-install"]')).not.toBeNull();
+  expect([...installed.querySelectorAll('[data-testid="plugin-row"]')].map((el) => el.getAttribute('data-plugin'))).toEqual(['bots', 'douane', 'grok-seats', 'pool-legacy', 'seat-pool']);
+  // Every recommended plugin is installed: the section has nothing to say and is not drawn.
+  expect(q('[data-testid="plugins-recommended"]')).toBeNull();
+  // A recommended plugin links its source from its name; a URL one shows the repository and commit instead.
+  expect(row('bots')?.querySelector('[data-testid="plugin-home"]')?.getAttribute('href')).toBe('https://github.com/beboite/bots');
+  expect(row('seat-pool')?.querySelector('[data-testid="plugin-home"]')).toBeNull();
   expect(row('grok-seats')?.querySelector('[data-testid="plugin-progress"]')?.getAttribute('aria-valuenow')).toBe('45');
   expect(row('grok-seats')?.querySelector('[data-testid="plugin-cancel"]')).not.toBeNull();
   expect(row('seat-pool')?.textContent).toContain('github.com/example/seat-pool');
@@ -159,7 +160,7 @@ test('a refused manifest shows the file, the field and what was expected, with n
   expect(q('[data-testid="plugin-preview"]')).toBeNull();
 });
 
-test('uninstalling a URL plugin takes its row away; the recommended one goes back to Recommended', async () => {
+test('uninstalling a URL plugin takes its row away; the recommended one goes back to Recommended and installs again', async () => {
   await open();
   const { confirm } = await import('../lib/confirm.svelte');
   const ask = vi.spyOn(confirm, 'ask').mockResolvedValue(true);
@@ -169,11 +170,17 @@ test('uninstalling a URL plugin takes its row away; the recommended one goes bac
     (row('grok-seats')!.querySelector('[data-testid="plugin-cancel"]') as HTMLElement).click();
     await vi.waitFor(() => expect(row('grok-seats')).toBeNull());
 
-    (row('kebacc-switcher')!.querySelector('[data-testid="plugin-install"]') as HTMLElement).click();
-    await vi.waitFor(() => expect(q('[data-testid="plugins-installed"]')?.contains(row('kebacc-switcher'))).toBe(true), { timeout: 3000 });
-    await vi.waitFor(() => expect(row('kebacc-switcher')?.querySelectorAll('[data-testid="plugin-pool"]').length).toBe(3));
-    (row('kebacc-switcher')!.querySelector('[data-testid="plugin-uninstall"]') as HTMLElement).click();
-    await vi.waitFor(() => expect(q('[data-testid="plugins-recommended"]')?.contains(row('kebacc-switcher'))).toBe(true));
+    (row('bots')!.querySelector('[data-testid="plugin-uninstall"]') as HTMLElement).click();
+    await vi.waitFor(() => expect(q('[data-testid="plugins-recommended"]')?.contains(row('bots'))).toBe(true));
+    // Not installed: the Install button is all it needs, no state line, no update check.
+    expect(row('bots')?.querySelector('.state')).toBeNull();
+    expect(row('bots')?.querySelector('[data-testid="plugin-updates"]')).toBeNull();
+    expect(row('bots')?.querySelector('[data-testid="plugin-check-updates"]')).toBeNull();
+
+    (row('bots')!.querySelector('[data-testid="plugin-install"]') as HTMLElement).click();
+    await vi.waitFor(() => expect(q('[data-testid="plugins-installed"]')?.contains(row('bots'))).toBe(true), { timeout: 3000 });
+    await vi.waitFor(() => expect(app('bots')?.getAttribute('data-app-status')).toBe('running'));
+    expect(q('[data-testid="plugins-recommended"]')).toBeNull();
     expect(ask).toHaveBeenCalledTimes(2);
   } finally {
     ask.mockRestore();
@@ -189,8 +196,6 @@ test('a recommended plugin with an update source says what it last found, and a 
   const line = () => bots().querySelector('[data-testid="plugin-updates-line"]')?.textContent ?? '';
   expect(line()).toBe('Up to date · checked 3 hr. ago');
   expect(bots().querySelector('[data-testid="plugin-update"]')).toBeNull();
-  // Not installed, nothing is checked by itself: no line.
-  expect(row('kebacc-switcher')?.querySelector('[data-testid="plugin-updates"]')).toBeNull();
 
   (bots().querySelector('[data-testid="plugin-check-updates"]') as HTMLElement).click();
   await vi.waitFor(() => expect(bots().querySelector('[data-testid="plugin-update"]')?.textContent).toBe('Update to v0.1.10'));
@@ -211,4 +216,26 @@ test('an ignored release and a failed check read as quiet notes, never alarms', 
   const updates = row('bots')!.querySelector('[data-testid="plugin-updates"]')!;
   expect(updates.textContent).toContain('Not offered: 0.1.8 found there, older than 0.1.9; Boite never goes back.');
   expect(updates.querySelector('[role="alert"], .bad')).toBeNull();
+});
+test('Douane\'s row shows its gateway on loopback, stops and starts it, and its uninstall says the sign-ins stay', async () => {
+  await open();
+  const strip = () => q('[data-testid="plugin-gateway"][data-plugin="douane"]');
+  await vi.waitFor(() => expect(strip()?.dataset.gatewayStatus).toBe('running'));
+  expect(q('[data-testid="plugin-gateway-state"]')?.textContent).toContain('0.3.0 on 127.0.0.1:8787');
+  // The page runs at a loopback address, beside its core: the dashboard opens from here.
+  expect(q('[data-testid="plugin-gateway-open"]')?.textContent).toContain('Open Douane');
+
+  q('[data-testid="plugin-gateway-stop"]')!.click();
+  await vi.waitFor(() => expect(strip()?.dataset.gatewayStatus).toBe('stopped'));
+  expect(q('[data-testid="plugin-gateway-state"]')?.textContent).toContain('starts again only when you start it');
+  q('[data-testid="plugin-gateway-start"]')!.click();
+  await vi.waitFor(() => expect(strip()?.dataset.gatewayStatus).toBe('running'));
+
+  const { confirm } = await import('../lib/confirm.svelte');
+  const ask = vi.spyOn(confirm, 'ask').mockResolvedValue(false);
+  q('[data-testid="plugin-uninstall"][data-plugin="douane"]')!.click();
+  await vi.waitFor(() => expect(ask).toHaveBeenCalled());
+  expect(ask.mock.calls[0]![0].body).toMatch(/sign-ins, settings and database stay in .*douane/);
+  expect(strip()).not.toBeNull();
+  ask.mockRestore();
 });

@@ -255,8 +255,6 @@ export class HarnessUpdates {
 
   check(): Promise<HarnessUpdate[]> {
     if (this.closed || this.core.stopping) return Promise.reject(refused('the core is stopping; agent updates are closed'));
-    // Douane run by this core follows the same check; its answer arrives as `douane.updated`.
-    if (this.checking === null) void this.core.douane.check().catch(() => {});
     this.checking ??= this.runCheck().finally(() => {
       this.checking = null;
     });

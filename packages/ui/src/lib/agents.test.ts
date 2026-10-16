@@ -119,7 +119,7 @@ test('a snapshot that no longer touches kept history restarts that kind and drop
 function directory() {
   const base = new FakeAgents(() => {}).snapshot();
   const record = { revision: 1, createdAt: 1 };
-  const profile = (id: string, name: string, updatedAt: number, status: AgentEntities['profile']['status'] = 'active') => ({ ...record, id, updatedAt, name, domain: `${name} domain`, instructions: '', avatar: '', selection: { providerId: 'p', accountId: 'a', model: null, effort: null, permissionMode: 'default' as const }, status, tools: [], accountIntegration: 'provider' as const });
+  const profile = (id: string, name: string, updatedAt: number, status: AgentEntities['profile']['status'] = 'active') => ({ ...record, id, updatedAt, name, domain: `${name} domain`, instructions: '', avatar: '', selection: { providerId: 'p', accountId: 'a', model: null, effort: null, permissionMode: 'default' as const }, status, tools: [] });
   const snapshot: AgentsSnapshot = {
     ...base,
     profiles: [profile('mira', 'Mira', 10), profile('atlas', 'Atlas', 20), profile('lin', 'Lin', 90, 'archived')],

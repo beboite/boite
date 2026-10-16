@@ -646,7 +646,7 @@ export interface PluginArtifact {
   sha256: string;
 }
 
-/** What Boite does with the executable: account pools, a desktop app, or both. */
+/** What Boite does with the executable: account pools, a desktop app, a gateway, or several. */
 export interface PluginProvides {
   /** The executable answers the account pool commands for these providers. */
   accountPools?: { providers: ProviderId[] };
@@ -656,6 +656,37 @@ export interface PluginProvides {
    * token in `BOITE_TOKEN`. No fields today.
    */
   desktopApp?: Record<string, never>;
+  /**
+   * The executable is a subscription gateway speaking Douane's runtime
+   * contract: the core runs it in the background with `--config <file>` it
+   * writes, on a loopback port, and the subscription proxy's local mode points
+   * at it. No fields today.
+   */
+  gateway?: Record<string, never>;
+}
+
+/** Where a gateway plugin stands. Null on a plugin that provides no gateway. */
+export interface PluginGatewayState {
+  /** Whether the core runs it. True after a first install, kept across restarts and updates. */
+  enabled: boolean;
+  /**
+   * `starting`: launched and not answering `/health` yet, or waiting to start
+   * again after a crash. `updating`: a newer release waits for the requests in
+   * flight to end. `crashed`: it failed four times in five minutes; it waits
+   * for the owner.
+   */
+  status: 'stopped' | 'starting' | 'running' | 'updating' | 'crashed';
+  /** The loopback port it listens on, or will at its next start. */
+  port: number;
+  /** What its `/health` reported, once it answered. */
+  version: string | null;
+  pid: number | null;
+  exitCode: number | null;
+  /** Why it is not running, when Boite knows. Never its own output. */
+  error: string | null;
+  startedAt: Timestamp | null;
+  /** Where its configuration, sign-ins and database live; an uninstall keeps them. */
+  dataDir: string;
 }
 
 /** Where a desktop-app plugin stands. Null on a plugin that provides no desktop app. */
@@ -720,6 +751,12 @@ export interface PluginRejected {
   message: string;
 }
 
+/**
+ * Where a move sends the logins: the configured proxy's Douane (absent), or
+ * `plugin`, the Douane plugin this core runs, whatever the proxy points at.
+ */
+export type GatewayMoveTarget = 'proxy' | 'plugin';
+
 export interface PluginState {
   id: string;
   name: string;
@@ -748,6 +785,8 @@ export interface PluginState {
   rejected: PluginRejected | null;
   /** The desktop app the plugin provides, null when it provides none. */
   app: PluginAppState | null;
+  /** The gateway the plugin provides, null when it provides none. Absent from cores older than gateway plugins. */
+  gateway?: PluginGatewayState | null;
   /**
    * Where Boite looks for this recommended plugin's newer releases, and what
    * it last found there. Null when its entry names no update source. Absent
@@ -2263,39 +2302,14 @@ export interface SubscriptionProxy {
   dashboardUrl: string;
   /**
    * Where the gateway runs. Missing or `remote`: at the URLs above, which the
-   * user typed. `local`: Douane run by this core on this machine (`douane.*`);
-   * the kind is `douane` and the core writes both URLs from its loopback port.
+   * user typed. `local`: the Douane plugin this core runs (`provides.gateway`,
+   * docs/plugins.md); the kind is `douane` and the core writes both URLs from
+   * the plugin's loopback port.
    */
   mode?: SubscriptionProxyMode;
 }
 
 export type SubscriptionProxyMode = 'remote' | 'local';
-
-/**
- * Douane as the core runs it on this machine, for the subscription proxy's
- * local mode. `off`: the mode is remote or the proxy unset, nothing runs.
- * `unavailable`: no release for this machine yet (an unpublished release, a
- * platform Douane does not build), with the reason. `installing` carries the
- * download's progress, `updating` a newer release waiting for Douane to finish
- * the requests it serves. `stopped`: the owner pressed Stop; the next core start
- * or Start runs it again. `failed`: the last start or install failed, with the
- * reason and, after a crash, when the core starts it again.
- */
-export interface LocalDouaneStatus {
-  state: 'off' | 'unavailable' | 'installing' | 'starting' | 'running' | 'updating' | 'stopped' | 'failed';
-  /** The release on disk, or the one a development binary reported. Null before the first install. */
-  version: string | null;
-  /** The newest published release when it is newer than `version`, else null. */
-  available: string | null;
-  /** The loopback port it listens on, or will at its next start. */
-  port: number;
-  progress?: { receivedBytes: number; totalBytes: number };
-  message?: string;
-  /** After a crash: when the core starts it again. */
-  restartAt?: Timestamp;
-  /** `BOITE_DOUANE_BINARY` names the executable: nothing is downloaded or updated. */
-  development?: boolean;
-}
 
 /** The protocols whose every agent a subscription proxy serves. */
 export const SUBSCRIPTION_PROXY_PROTOCOLS: readonly Protocol[] = ['claude-sdk', 'codex-appserver'];
@@ -2344,6 +2358,80 @@ export function subscriptionProxyOrigin(proxy: SubscriptionProxy): string {
   // No `URL` here: contracts build without DOM or Node types. Credentials in the address never show.
   const match = /^([a-z][a-z0-9+.-]*:\/\/)(?:[^/?#@]*@)?([^/?#@]+)/i.exec(proxy.baseUrl);
   return match ? `${match[1]}${match[2]}`.toLowerCase() : proxy.baseUrl;
+}
+
+/**
+ * Whether a client can open the gateway's dashboard: a loopback address only
+ * answers on the core's own machine, so a phone or another computer gets no
+ * dead link. `sameMachine` says the client runs where the core does.
+ */
+export function gatewayDashboardReachable(dashboardUrl: string | null | undefined, sameMachine: boolean): boolean {
+  if (!dashboardUrl) return false;
+  const match = /^https?:\/\/(?:[^/?#@]*@)?(\[[^\]]+\]|[^/?#:]+)/i.exec(dashboardUrl);
+  if (!match) return false;
+  return sameMachine || !isLoopbackHost(match[1]!);
+}
+
+/** `localhost`, `127.x.y.z`, `::1` and the IPv4-mapped loopback. */
+export function isLoopbackHost(host: string): boolean {
+  const name = host.toLowerCase().replace(/^\[|\]$/g, '');
+  return name === 'localhost' || name.endsWith('.localhost') || /^127(?:\.\d{1,3}){3}$/.test(name)
+    || name === '::1' || /^(?:0:){5}ffff:127\./.test(name) || /^::ffff:127\./.test(name);
+}
+
+/**
+ * What a move to Douane takes from one Boite account. `login`: the agent's
+ * own sign-in file (Claude, Codex, Grok). `copilot`: OpenCode's GitHub Copilot
+ * sign-in. `endpoint`: an OpenCode API key, served by Douane as a custom
+ * endpoint under `route`. `opencodeGo`: OpenCode Go's key, Douane's own
+ * `opencode_go` subscription.
+ */
+export type GatewayMoveKind = 'login' | 'copilot' | 'endpoint' | 'opencodeGo';
+
+/**
+ * Why an item cannot move. `signedOut`: no login file. `unreadable`: the file
+ * is not JSON. `noAddress`: OpenCode's catalog gives the key no API address.
+ * `otherApi`: the provider does not speak the OpenAI API. `otherSignIn`: an
+ * OpenCode sign-in Douane cannot take (only GitHub Copilot's). `routeTaken`:
+ * the gateway already serves another address under that endpoint's route.
+ */
+export type GatewayMoveReason = 'signedOut' | 'unreadable' | 'noAddress' | 'otherApi' | 'otherSignIn' | 'routeTaken';
+
+export interface GatewayMoveItem {
+  /** Stable while the files do not change: `subscriptionProxy.move` names items by it. */
+  id: string;
+  accountId: AccountId;
+  providerId: ProviderId;
+  kind: GatewayMoveKind;
+  /** OpenCode's provider for a key or a sign-in: its id and its catalog name. */
+  source?: { id: string; name: string };
+  /** An endpoint's route at the gateway and its upstream address. */
+  route?: string;
+  baseUrl?: string;
+  movable: boolean;
+  reason: GatewayMoveReason | null;
+}
+
+/** `subscriptionProxy.movePlan`: what this machine could move, read from its files. No credential value. */
+export interface GatewayMovePlan {
+  /** The configured Douane's address as a person reads it, null when no Douane is configured. */
+  origin: string | null;
+  /** A management token for the gateway's `/admin/api` is saved on the core. */
+  managementToken: boolean;
+  items: GatewayMoveItem[];
+}
+
+/**
+ * One item's result. `moved`: the gateway took it. `present`: the gateway
+ * already had it; a sign-in it already had is updated with this copy.
+ * `refused`: the gateway said no (`message` is its reason) or the item cannot
+ * move (`reason`). `missing`: no such item any more.
+ */
+export interface GatewayMoveOutcome {
+  id: string;
+  outcome: 'moved' | 'present' | 'refused' | 'missing';
+  reason: GatewayMoveReason | null;
+  message: string | null;
 }
 
 export type WorktreeStorage =
@@ -2644,6 +2732,8 @@ export interface CoreInfo {
     loadEvents?: boolean;
     /** `core.desktopUpdateReport`, `core.desktopUpdateStatus` and `core.updateEverything` `app`: the desktop app of this machine updates on another machine's click. */
     desktopUpdates?: boolean;
+    /** `subscriptionProxy.movePlan` and `subscriptionProxy.move`: this machine's logins move into Douane. */
+    gatewayMove?: boolean;
   };
   /** The fingerprint of this core's identity key: the id its group knows it by, and the one a device signs its hello for. */
   coreId?: string;
@@ -3782,10 +3872,6 @@ export interface UpdateEverythingResult {
   app?: DesktopUpdateStatus | null;
   /** Why the desktop app's release was not handed to its window, null when it was or was not asked for. */
   appError?: string | null;
-  /** Douane run by this core once `douane` was asked for; absent when it was not. */
-  douane?: LocalDouaneStatus;
-  /** Why Douane's update did not start, null when it did. */
-  douaneError?: string | null;
 }
 
 export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, BrowserRpcMethods, PullRequestsRpcMethods, MobileDevicesRpcMethods, DiagnosticsRpcMethods {
@@ -3814,10 +3900,9 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * leaves the others running. `app` names the desktop app's offered
    * release: once the agents named here finished, the core hands it to this
    * machine's own window, which installs it and restarts; `appError` says
-   * when no window is open to do it. `douane` updates the Douane this core
-   * runs (`douane.update`).
+   * when no window is open to do it.
    */
-  'core.updateEverything': { params: { agents: ProviderId[]; server: string | null; app?: string | null; douane?: boolean }; result: UpdateEverythingResult };
+  'core.updateEverything': { params: { agents: ProviderId[]; server: string | null; app?: string | null }; result: UpdateEverythingResult };
   /**
    * Owner only, and only from this machine's own desktop window (the core
    * token on loopback): its updater's state, sent again on every change. A
@@ -3996,6 +4081,8 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * disables and kills it, `restart` kills and launches it again.
    */
   'plugins.app': { params: { id: string; action: 'start' | 'stop' | 'restart' }; result: PluginState };
+  /** Owner-only. Start, stop or restart a gateway plugin; stop keeps it off across core starts until a start. */
+  'plugins.gateway': { params: { id: string; action: 'start' | 'stop' | 'restart' }; result: PluginState };
   /**
    * Reads the update source of one recommended plugin, or of every one that
    * names a source, now. Answers once the reads finish; each changed state is
@@ -4773,16 +4860,14 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'subscriptionProxy.configure': { params: { subscriptionProxy: SubscriptionProxy; key?: string | null }; result: Settings };
   /** Owner-only. The core reads the gateway's quotas route itself; `quotas.list` carries the same entries. */
   'subscriptionProxy.quotas': { params: { refresh?: boolean }; result: SubscriptionProxyQuotas };
-  /** Douane run by this core for the local mode. Paired devices read it; only the owner changes it. */
-  'douane.status': { params: Record<string, never>; result: LocalDouaneStatus };
-  /** Owner-only. Installs Douane when missing, then starts it; refused unless the proxy's mode is `local`. */
-  'douane.start': { params: Record<string, never>; result: LocalDouaneStatus };
-  /** Owner-only. Stops Douane until Start or the next core start; its data stays. */
-  'douane.stop': { params: Record<string, never>; result: LocalDouaneStatus };
-  /** Owner-only. Reads Douane's newest release; `available` names it when newer. */
-  'douane.check': { params: Record<string, never>; result: LocalDouaneStatus };
-  /** Owner-only. Installs the newer release and swaps it in once Douane serves no request. */
-  'douane.update': { params: Record<string, never>; result: LocalDouaneStatus };
+  /** Owner-only. The logins and OpenCode keys of this machine's accounts Douane could take, without their values. */
+  'subscriptionProxy.movePlan': { params: { target?: GatewayMoveTarget }; result: GatewayMovePlan };
+  /**
+   * Owner-only. The core reads each named item's file and posts it to the
+   * configured Douane's `/admin/api/accounts/import`. `managementToken` saves
+   * (or with null removes) the token sent to that API; omitted keeps it.
+   */
+  'subscriptionProxy.move': { params: { ids: string[]; managementToken?: string | null; target?: GatewayMoveTarget }; result: { outcomes: GatewayMoveOutcome[] } };
   'settings.set': { params: Partial<Settings>; result: Settings };
   /** The keybindings file as last read: the path, the entries it names, and what it got wrong. */
   'keybindings.get': { params: Record<string, never>; result: Keybindings };
@@ -4834,8 +4919,6 @@ export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents, BrowserR
   'quotas.progress': { requestId: string; quota: AccountQuota };
   /** Owner-only. Every answer or failure of the gateway's quotas route, whoever asked. */
   'subscriptionProxy.quotasUpdated': SubscriptionProxyQuotas;
-  /** Douane run by this core, after any change of its state. */
-  'douane.updated': LocalDouaneStatus;
   /** One plugin after any change. A `url` plugin that comes back `not-installed` is gone from the list. */
   'plugins.updated': PluginState;
   /** Owner connections only: show this thread or agent in the desktop window. */

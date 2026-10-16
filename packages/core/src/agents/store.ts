@@ -22,7 +22,7 @@ import { MemoryKeeper } from './memory.ts';
 import { boolean, ids, integer, object, oneOf, sameScope, scope, text } from './validation.ts';
 import { invalidParams } from '../errors.ts';
 
-const DEFAULT_LIMITS: AgentsSnapshot['limits'] = { backgroundConcurrency: 2, paused: false, kebaccExperiment: false };
+const DEFAULT_LIMITS: AgentsSnapshot['limits'] = { backgroundConcurrency: 2, paused: false };
 const TOOLS = ['messages', 'missions', 'memory', 'artifacts', 'decisions', 'routines'] as const;
 
 const newestFirst = (a: AgentRecord, b: AgentRecord) => b.updatedAt - a.updatedAt || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0);
@@ -52,12 +52,15 @@ export class AgentStore {
   /** Read on every scheduler pass; `setLimits` is its only writer, so it is read from disk once. */
   private held: Readonly<AgentsSnapshot['limits']> | null = null;
   limits(): AgentsSnapshot['limits'] {
-    this.held ??= Object.freeze((this.core.journal.getSetting('agents:limits') as AgentsSnapshot['limits'] | undefined) ?? { ...DEFAULT_LIMITS });
+    if (this.held) return this.held;
+    // Only the known keys: limits stored by older cores also carry retired flags.
+    const stored = (this.core.journal.getSetting('agents:limits') as Partial<AgentsSnapshot['limits']> | undefined) ?? DEFAULT_LIMITS;
+    this.held = Object.freeze({ backgroundConcurrency: stored.backgroundConcurrency ?? DEFAULT_LIMITS.backgroundConcurrency, paused: stored.paused ?? DEFAULT_LIMITS.paused });
     return this.held;
   }
   setLimits(value: AgentsSnapshot['limits']): AgentsSnapshot['limits'] {
     object(value, 'limits');
-    const next = { backgroundConcurrency: integer(value.backgroundConcurrency, 'backgroundConcurrency', 1, 8), paused: boolean(value.paused, 'paused'), kebaccExperiment: boolean(value.kebaccExperiment, 'kebaccExperiment') };
+    const next = { backgroundConcurrency: integer(value.backgroundConcurrency, 'backgroundConcurrency', 1, 8), paused: boolean(value.paused, 'paused') };
     this.core.journal.append({ type: 'agents.limits', threadId: null, version: 1, payload: next }, () => this.core.journal.setSetting('agents:limits', next));
     this.held = Object.freeze({ ...next });
     this.changed();
@@ -81,8 +84,6 @@ export class AgentStore {
     const previous = params.id ? this.records.get('profile', params.id) : null;
     if (previous && this.core.journal.getSetting(`agents:runtime:${previous.id}`) && JSON.stringify(previous.selection) !== JSON.stringify({ ...v.selection, model }) && !this.resident.allowed(previous.id, { ...v.selection, model })) throw refused('selection.model: default model must be allowed by this agent policy');
     const effort = checkEffort(provider, account.id, model, v.selection.effort);
-    const accountIntegration = oneOf(v.accountIntegration, 'accountIntegration', ['provider', 'kebacc-experiment']);
-    if (accountIntegration === 'kebacc-experiment' && (provider.protocol !== 'agy' || !this.limits().kebaccExperiment)) throw refused('accountIntegration: enable the kebacc experiment for an Antigravity CLI agent first');
     const tools = ids(v.tools, 'tools', TOOLS.length);
     for (const tool of tools) oneOf(tool, 'tools', TOOLS);
     const projectIds = ids(v.projectIds ?? [], 'projectIds', 50);
@@ -92,7 +93,7 @@ export class AgentStore {
     }
     const saved = this.save('profile', params, {
       name: text(v.name, 'name', 100), domain: text(v.domain, 'domain', 500, true), instructions: text(v.instructions, 'instructions', 32000, true),
-      avatar: text(v.avatar, 'avatar', 40, true), status: oneOf(v.status, 'status', ['active', 'paused', 'archived']), tools, accountIntegration, projectIds,
+      avatar: text(v.avatar, 'avatar', 40, true), status: oneOf(v.status, 'status', ['active', 'paused', 'archived']), tools, projectIds,
       selection: { providerId: provider.id, accountId: account.id, model, effort, permissionMode: oneOf(v.selection.permissionMode, 'permissionMode', ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'yolo', 'dontAsk']) },
     });
     if (previous && saved.status !== 'active') this.resident.enforce();

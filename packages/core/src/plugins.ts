@@ -36,9 +36,11 @@ import {
   platformKey,
   poolsOf,
   providesApp,
+  providesGateway,
   refusal,
 } from './plugins/manifest.ts';
 import { PluginApps } from './plugins/apps.ts';
+import { DOUANE_PLUGIN, PluginGateways } from './plugins/gateway.ts';
 import { checkRef, fetchManifest, normalizeSourceUrl } from './plugins/source.ts';
 import { PluginUpdateChecks, compareVersions, parseRecommendedEntry, type UpdateSource } from './plugins/updates.ts';
 import recommendedList from './plugins/recommended.json';
@@ -193,6 +195,8 @@ export class PluginStore {
 
   /** The desktop apps plugins provide: started, stopped and relaunched here. */
   readonly apps: PluginApps;
+  /** The gateways plugins provide: run in the background on a loopback port. */
+  readonly gateways: PluginGateways;
   /** Newer releases of recommended plugins, read from the update sources the list names. */
   readonly updates: PluginUpdateChecks;
 
@@ -224,6 +228,20 @@ export class PluginStore {
         return { binary: disk.installed.binary, dir: this.directory(id) };
       },
       changed: (id) => this.emit(id),
+    });
+    this.gateways = new PluginGateways({
+      procs: core.procs,
+      dataDir: core.dataDir,
+      log: (level, message, event) => core.logs.record(level, message, { source: 'plugins', event }),
+      getSetting: (key) => core.journal.getSetting(key),
+      setSetting: (key, value) => core.journal.setSetting(key, value),
+      installed: (id) => {
+        const disk = this.onDisk(id);
+        if (disk.kind !== 'installed' || !providesGateway(disk.installed.manifest)) return null;
+        return { binary: disk.installed.binary, executable: disk.installed.manifest.executable };
+      },
+      changed: (id) => this.emit(id),
+      moved: (id, port) => { if (id === DOUANE_PLUGIN) core.settings.followGateway(port); },
     });
   }
 
@@ -279,7 +297,6 @@ export class PluginStore {
     const dir = this.directory(id);
     const file = join(dir, INSTALLED_FILE);
     if (!existsSync(file)) return { kind: 'none' };
-    const recommended = this.recommendedManifest(id);
     let data: unknown;
     try {
       data = JSON.parse(readFileSync(file, 'utf8'));
@@ -288,19 +305,11 @@ export class PluginStore {
     }
     if (!isRecord(data)) return { kind: 'error', message: `${file} must be a JSON object. Reinstall ${id}.` };
     let record: Omit<Installed, 'binary'>;
-    if (data['schema'] === undefined && recommended !== null) {
-      // What kebacc-switcher wrote before manifests: its version alone.
-      if (typeof data['version'] !== 'string') {
-        return { kind: 'error', message: `${file} must carry a "version" string, found ${typeof data['version']}. Reinstall ${id}.` };
-      }
-      record = { version: data['version'], origin: 'recommended', source: null, manifest: recommended };
-    } else {
-      try {
-        record = readRecord(data, file, id, dir);
-      } catch (error) {
-        if (error instanceof ManifestRefused) return { kind: 'rejected', rejected: error.rejected };
-        throw error;
-      }
+    try {
+      record = readRecord(data, file, id, dir);
+    } catch (error) {
+      if (error instanceof ManifestRefused) return { kind: 'rejected', rejected: error.rejected };
+      throw error;
     }
     const binary = this.binaryPath(dir, record.manifest);
     if (!existsSync(binary)) return { kind: 'error', message: `${binary} is missing. Reinstall ${id}.` };
@@ -335,6 +344,7 @@ export class PluginStore {
       pools: running ? poolsOf(running) : [],
       rejected: disk.kind === 'rejected' ? disk.rejected : null,
       app: running !== null && providesApp(running) ? this.apps.state(id, this.directory(id)) : null,
+      gateway: running !== null && providesGateway(running) ? this.gateways.state(id, this.directory(id)) : null,
       updates: recommended !== null ? this.updates.state(id) : null,
     };
   }
@@ -473,7 +483,13 @@ export class PluginStore {
         job.relaunch = true;
         await this.apps.kill(id);
       }
-      await rename(temporary, binary);
+      if (previous.kind === 'installed' && providesGateway(previous.installed.manifest) && providesGateway(manifest)) {
+        await this.swapGateway(id, previous.installed, manifest, temporary, binary);
+      } else {
+        // A gateway still serving would be cut off: it waits for its requests like an update, then stops.
+        if (previous.kind === 'installed' && providesGateway(previous.installed.manifest)) await this.gateways.drainForUpdate(id, manifest.version);
+        await rename(temporary, binary);
+      }
       if (previous.kind === 'installed' && previous.installed.binary !== binary) await rm(previous.installed.binary, { force: true });
       await writeFile(record, JSON.stringify({ schema: 1, origin, source, installedAt: Date.now(), manifest }, null, 2), 'utf8');
       await rename(record, join(dir, INSTALLED_FILE));
@@ -484,6 +500,35 @@ export class PluginStore {
       await rm(temporary, { force: true });
       await rm(record, { force: true });
     }
+  }
+
+  /**
+   * A gateway's update: the running release serves its requests in flight
+   * (bounded), stops, and the new executable takes its place. The previous one
+   * stays beside it until the new one answers `/health`; when it does not, the
+   * previous one goes back and starts again, and the update fails with the
+   * reason, keeping the version that worked.
+   */
+  private async swapGateway(id: string, previous: Installed, manifest: PluginManifest, temporary: string, binary: string): Promise<void> {
+    const ran = await this.gateways.drainForUpdate(id, manifest.version);
+    const kept = `${previous.binary}.previous`;
+    await rm(kept, { force: true });
+    await rename(previous.binary, kept);
+    await rename(temporary, binary);
+    if (!ran) {
+      await rm(kept, { force: true });
+      return;
+    }
+    if (await this.gateways.launch(id)) {
+      await rm(kept, { force: true });
+      return;
+    }
+    const why = this.gateways.state(id, this.directory(id)).error ?? `${id} ${manifest.version} did not start`;
+    await this.gateways.kill(id);
+    await rm(binary, { force: true });
+    await rename(kept, previous.binary);
+    await this.gateways.launch(id);
+    throw new Error(`${why}. ${previous.version} runs again.`);
   }
 
   /**
@@ -600,6 +645,8 @@ export class PluginStore {
     this.known(id);
     if (this.busy(id)) throw refused('Wait for the current plugin operation before uninstalling.');
     await this.apps.forget(id);
+    // Its data directory stays: a gateway's sign-ins outlive its program.
+    await this.gateways.forget(id);
     await removeTree(this.directory(id));
     this.pending.delete(id);
     this.failures.delete(id);
@@ -717,6 +764,7 @@ export class PluginStore {
     try {
       const disk = this.onDisk(id);
       if (disk.kind === 'installed' && providesApp(disk.installed.manifest)) this.apps.resume(id, this.directory(id));
+      if (disk.kind === 'installed' && providesGateway(disk.installed.manifest)) this.gateways.resume(id, this.directory(id));
     } catch (error) {
       this.core.log('warn', `plugin ${id} app did not start: ${messageOf(error)}`);
     }
@@ -750,6 +798,18 @@ export class PluginStore {
     return this.state(id);
   }
 
+  /** `plugins.gateway`: start, stop or restart a gateway plugin. */
+  async gateway(params: RpcParams<'plugins.gateway'>): Promise<PluginState> {
+    const id = this.known(params.id);
+    if (!['start', 'stop', 'restart'].includes(params.action)) {
+      throw invalidParams('plugin gateway action must be start, stop or restart', { field: 'action', expected: 'start, stop or restart' });
+    }
+    const installed = this.usable(id);
+    if (!providesGateway(installed.manifest)) throw refused(`${id} provides no gateway.`);
+    await this.gateways.control(id, this.directory(id), params.action);
+    return this.state(id);
+  }
+
   /** At core start: the update checks of the recommended plugins that name a source. */
   startUpdateChecks(): void {
     if (!this.closing) this.updates.start();
@@ -772,6 +832,7 @@ export class PluginStore {
   async close(): Promise<void> {
     this.closing = true;
     const apps = this.apps.close();
+    const gateways = this.gateways.close();
     this.shutdown.abort();
     const checks = this.updates.close();
     const jobs = [...this.jobs.values()];
@@ -781,6 +842,7 @@ export class PluginStore {
     await Promise.all(this.exits);
     await Promise.all([...this.listings.values(), ...this.inspecting].map((pending) => pending.catch(() => undefined)));
     await apps;
+    await gateways;
     await checks;
   }
 }

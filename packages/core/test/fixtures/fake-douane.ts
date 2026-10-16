@@ -27,6 +27,8 @@ Bun.serve({
     const path = new URL(request.url).pathname;
     if (path === '/health') return Response.json({ status: 'ok', version, service: 'douane' });
     if (path === '/v1/models') return Response.json({ object: 'list', data: [{ id: 'claude-sonnet-5', object: 'model', supported_endpoint_types: ['anthropic'] }] });
+    // What the core left in its environment: a gateway gets no owner token and no agent variable.
+    if (path === '/debug/env') return Response.json({ token: process.env.BOITE_TOKEN !== undefined, thread: process.env.BOITE_THREAD_ID !== undefined, cwd: process.cwd() });
     if (path === '/admin/api/summary') {
       const file = process.env.FAKE_DOUANE_IN_FLIGHT_FILE;
       const inFlight = file && existsSync(file) ? Number(readFileSync(file, 'utf8').trim()) || 0 : 0;

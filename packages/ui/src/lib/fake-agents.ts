@@ -50,12 +50,11 @@ export class FakeAgents {
   private revision = 0;
   private sequence = 0;
   private entrusted: AgentEntrustment[] = [];
-  private limits: AgentsSnapshot['limits'] = { backgroundConcurrency: 2, paused: false, kebaccExperiment: false };
+  private limits: AgentsSnapshot['limits'] = { backgroundConcurrency: 2, paused: false };
   constructor(private readonly changed: (revision: number) => void, private readonly runner?: {
     create: (agent: AgentProfile, sessionId: string, work: AgentWork) => string;
     start: (threadId: string, prompt: string, agent: AgentProfile) => Turn;
     stop: (threadId: string) => void;
-    protocol: (providerId: string) => string | undefined;
     thread?: (threadId: string) => EntrustedThread | undefined;
     /** Starts the thread's goal, or removes it with `null`. */
     goal?: (threadId: string, objective: string | null) => void;
@@ -84,7 +83,7 @@ export class FakeAgents {
       return structuredClone(record);
     };
     const put = <K extends AgentEntityKind>(kind: K, record: AgentEntities[K]) => { this.rows.set(`${kind}:${record.id}`, record); };
-    const agent = dated('profile', { name: 'Mira', domain: 'Product scout', instructions: 'Keep an eye on the product and tell me what matters, with pictures.', avatar: '', selection: host.selection, status: 'active', tools: ['messages', 'memory', 'artifacts', 'decisions', 'routines'], accountIntegration: 'provider', projectIds: host.project ? [host.project.id] : [] }, 0);
+    const agent = dated('profile', { name: 'Mira', domain: 'Product scout', instructions: 'Keep an eye on the product and tell me what matters, with pictures.', avatar: '', selection: host.selection, status: 'active', tools: ['messages', 'memory', 'artifacts', 'decisions', 'routines'], projectIds: host.project ? [host.project.id] : [] }, 0);
     const scope: AgentScope = { kind: 'agent', id: agent.id };
     const asked = dated('message', { scope, senderId: null, text: 'Can you look at the new welcome screen and tell me how it reads?', recipientIds: [agent.id], replyTo: null, episodeId: 'demo-episode-1', sourceRunId: null }, 1);
     const work = (draft: Partial<AgentDraft<AgentWork>> & Pick<AgentWork, 'prompt' | 'episodeId'>, minutes: number) => dated('work', { agentId: agent.id, scope, taskId: null, taskGeneration: null, messageId: null, status: 'done', error: null, runId: null, notBefore: start, ...draft }, minutes);
@@ -441,7 +440,6 @@ export class FakeAgents {
 
   private saveProfile(p: RpcParams<'agents.profile.save'>): RpcResult<'agents.profile.save'> {
     if (!p.value.name.trim()) this.refuse('name: expected nonempty text');
-    if (p.value.accountIntegration === 'kebacc-experiment' && (!this.limits.kebaccExperiment || this.runner?.protocol(p.value.selection.providerId) !== 'agy')) this.refuse('enable the kebacc experiment for an Antigravity CLI agent first');
     const saved = this.save('profile', p);
     this.place(saved);
     return saved;
@@ -502,7 +500,7 @@ export class FakeAgents {
 
   private setLimits(p: RpcParams<'agents.limits.set'>): RpcResult<'agents.limits.set'> {
     if (!Number.isInteger(p.backgroundConcurrency) || p.backgroundConcurrency < 1 || p.backgroundConcurrency > 8) this.refuse('backgroundConcurrency: expected an integer from 1 to 8');
-    this.limits = { ...p };
+    this.limits = { backgroundConcurrency: p.backgroundConcurrency, paused: p.paused };
     this.changed(++this.revision);
     return this.limits;
   }
