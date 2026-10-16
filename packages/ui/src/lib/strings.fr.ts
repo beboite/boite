@@ -2660,14 +2660,15 @@ export const fr: Translation = {
   onboarding: {
     privacy: {
       title: 'VENDEZ VOTRE ÂME À BOITE !',
-      intro: "Boite compte quelques statistiques d'utilisation anonymes pour savoir quoi corriger en premier. Vos messages, fichiers et comptes ne quittent jamais votre machine, l'application marche pareil dans tous les cas, et vous pouvez changer d'avis quand vous voulez dans les réglages.",
+      intro: 'Quelques stats anonymes nous disent quoi corriger en premier. Vos messages, fichiers et comptes ne quittent jamais votre machine.',
       question: 'Marché conclu ?',
       video: 'Mème Trade Offer',
       basic: 'NON ! Juste les compteurs de base',
       basicDefault: '(par défaut)',
-      basicHint: "Des compteurs d'installations actives, de lancements, de conversations et de résultats des tours. Les identifiants d'usage changent chaque jour. Aucun profil.",
+      basicHint: 'Des compteurs anonymes, aucun profil.',
       deal: 'MARCHÉ CONCLU',
-      dealHint: "Ajoute les modèles publics choisis, le niveau de raisonnement, les modes de vitesse et de permission, les durées et les volumes de jetons, sous un identifiant aléatoire stable. Les modèles privés comptent comme « autre ». Ça aide beaucoup. Merci !",
+      dealHint: 'Aussi les modèles et réglages utilisés. Merci !',
+      details: "De base : installations actives sous un identifiant aléatoire haché, et lancements, conversations et résultats des tours sous des identifiants qui changent chaque jour. Aucun profil. Marché conclu ajoute les modèles publics choisis, le niveau de raisonnement, les modes de vitesse et de permission, les durées et les volumes de jetons, sous un identifiant aléatoire stable ; les modèles privés comptent comme « autre ». L'application marche pareil dans tous les cas, et les réglages le changent quand vous voulez.",
       optOut: 'Si vous ne voulez VRAIMENT pas aider Boite :',
       offLabel: 'tout désactiver :c',
       doc: 'Ce qui est collecté'
