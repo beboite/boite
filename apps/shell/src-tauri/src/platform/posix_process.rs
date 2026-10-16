@@ -62,21 +62,31 @@ pub fn alive(pid: u32) -> bool {
     libc::pid_t::try_from(pid).is_ok_and(|pid| pid > 0 && alive_pid(pid))
 }
 
-/// When the process wearing `pid` started, in milliseconds since the epoch,
-/// to tell the core `core.json` named from a later process given its number.
-/// `None` when it cannot be read.
+/// How Linux names one run of the process wearing `pid`: the boot it runs in
+/// and its start in clock ticks since that boot, `<boot_id>:<ticks>`, the
+/// string the core writes as `startKey` (`linuxStartKey` in the core). Neither
+/// part moves when the wall clock is stepped. `None` when it cannot be read.
 #[cfg(target_os = "linux")]
-pub fn started_at(pid: u32) -> Option<u64> {
+pub fn start_key(pid: u32) -> Option<String> {
     // Field 22 counts clock ticks since boot; the name before it, in
     // parentheses, may hold spaces, so fields are counted after the last ')'.
     let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
     let ticks: u64 = stat.rsplit_once(')')?.1.split_whitespace().nth(19)?.parse().ok()?;
-    let boot: u64 = std::fs::read_to_string("/proc/stat").ok()?
-        .lines().find_map(|line| line.strip_prefix("btime"))?.trim().parse().ok()?;
-    let hertz = u64::try_from(unsafe { libc::sysconf(libc::_SC_CLK_TCK) }).ok().filter(|hertz| *hertz > 0)?;
-    Some(boot * 1000 + ticks * 1000 / hertz)
+    let boot = std::fs::read_to_string("/proc/sys/kernel/random/boot_id").ok()?;
+    let boot = boot.trim();
+    (!boot.is_empty()).then(|| format!("{boot}:{ticks}"))
 }
 
+#[cfg(not(target_os = "linux"))]
+pub fn start_key(_pid: u32) -> Option<String> {
+    None
+}
+
+/// When the process wearing `pid` started, in milliseconds since the epoch,
+/// to tell the core `core.json` named from a later process given its number.
+/// `None` when it cannot be read, and always on Linux: its absolute start is
+/// `btime` plus ticks, and `btime` moves with every step of the wall clock,
+/// so `start_key` tells runs apart there.
 #[cfg(target_os = "macos")]
 pub fn started_at(pid: u32) -> Option<u64> {
     let pid = libc::c_int::try_from(pid).ok().filter(|pid| *pid > 0)?;
@@ -86,7 +96,7 @@ pub fn started_at(pid: u32) -> Option<u64> {
     (read == size).then(|| info.pbi_start_tvsec * 1000 + info.pbi_start_tvusec / 1000)
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+#[cfg(not(target_os = "macos"))]
 pub fn started_at(_pid: u32) -> Option<u64> {
     None
 }

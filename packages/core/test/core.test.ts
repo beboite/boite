@@ -365,6 +365,24 @@ describe('the data directory lock', () => {
     release();
   });
 
+  test('a start key decides alone: a stepped wall clock leaves the holder its lock, another run loses it', () => {
+    // An NTP step after the core started: its Linux start and boot times read
+    // hours after the time it wrote, yet the boot and start ticks are the same.
+    const file = join(dir, 'core.lock');
+    const lockedAt = Date.parse('2026-09-27T03:29:39Z');
+    const drifted = () => lockedAt + 3_600_000;
+    const key = () => 'boot-a:4242';
+    writeFileSync(file, JSON.stringify({ pid: process.ppid, startedAt: lockedAt, startKey: 'boot-a:4242' }), 'utf8');
+    expect(() => lockDataDir(dir, drifted, drifted, key)).toThrow(`another core is already running on ${dir}`);
+    // A later boot, or a later process in the same boot, is another run.
+    for (const other of ['boot-b:4242', 'boot-a:9000']) {
+      writeFileSync(file, JSON.stringify({ pid: process.ppid, startedAt: lockedAt, startKey: other }), 'utf8');
+      const release = lockDataDir(dir, () => lockedAt, () => 0, key);
+      expect(JSON.parse(readFileSync(file, 'utf8')) as { pid: number }).toMatchObject({ pid: process.pid });
+      release();
+    }
+  });
+
   test.skipIf(process.platform === 'win32')('the data directory is private to its owner, an existing one included', () => {
     chmodSync(dir, 0o755);
     prepareDataDir(dir);
@@ -398,6 +416,11 @@ describe('the data directory lock', () => {
     expect(started!).toBeLessThanOrEqual(Date.now());
     expect(started!).toBeGreaterThanOrEqual(Date.now() - process.uptime() * 1000 - 2000);
     expect(processPlatform.startedAt(DEAD_PID)).toBeNull();
+    if (process.platform === 'linux') {
+      expect(processPlatform.startKey?.(process.pid)).toMatch(/^[0-9a-f-]{36}:\d+$/);
+      expect(processPlatform.startKey?.(process.pid)).toBe(processPlatform.startKey?.(process.pid) ?? '');
+      expect(processPlatform.startKey?.(DEAD_PID)).toBeNull();
+    }
     // A lock older than the parent process names it, and the real reading takes it over.
     writeFileSync(join(dir, 'core.lock'), JSON.stringify({ pid: process.ppid, startedAt: 0 }), 'utf8');
     const release = lockDataDir(dir);

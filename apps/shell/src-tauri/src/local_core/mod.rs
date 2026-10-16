@@ -46,9 +46,9 @@ struct Slot {
     endpoint: Option<CoreEndpoint>,
     /// The process behind `endpoint`, to notice once it has exited.
     pid: Option<u32>,
-    /// When that core started, as `core.json` says: a process that started
+    /// How that core started, as `core.json` says: a process that started
     /// later wears its number only because the core exited.
-    started_at: Option<u64>,
+    start: health::CoreStart,
     error: Option<String>,
     done: bool,
     /// Bumped each time a new resolution starts, so that of several callers
@@ -192,7 +192,7 @@ pub(crate) async fn core_endpoint(app: AppHandle, webview: Webview) -> Result<Co
 struct Settled {
     outcome: Result<CoreEndpoint, String>,
     pid: Option<u32>,
-    started_at: Option<u64>,
+    start: health::CoreStart,
     generation: u64,
 }
 
@@ -201,7 +201,7 @@ impl Settled {
     /// kill, "Stop this core". Either way a new resolution is due. A pid that
     /// another process got since then is the same exit, not a live core.
     fn stale(&self) -> bool {
-        self.outcome.is_err() || self.pid.is_some_and(|pid| !health::same_core(pid, self.started_at))
+        self.outcome.is_err() || self.pid.is_some_and(|pid| !health::same_core(pid, &self.start))
     }
 }
 
@@ -254,17 +254,17 @@ fn claim(slot: &(Mutex<Slot>, Condvar), generation: u64) -> bool {
 }
 
 /// What a resolution settled on: the endpoint, and the process behind it with
-/// its start time when known.
-pub(super) type Resolved = (CoreEndpoint, Option<u32>, Option<u64>);
+/// how it started when known.
+pub(super) type Resolved = (CoreEndpoint, Option<u32>, health::CoreStart);
 
 fn publish(slot: &(Mutex<Slot>, Condvar), outcome: Result<Resolved, String>) {
     let (lock, ready) = slot;
     if let Ok(mut guard) = lock.lock() {
         match outcome {
-            Ok((endpoint, pid, started_at)) => {
+            Ok((endpoint, pid, start)) => {
                 guard.endpoint = Some(endpoint);
                 guard.pid = pid;
-                guard.started_at = started_at;
+                guard.start = start;
             }
             Err(error) => guard.error = Some(error),
         }
@@ -299,7 +299,7 @@ fn wait_for_endpoint(slot: &(Mutex<Slot>, Condvar), patience: Duration) -> Resul
         (None, Some(error)) => Err(error.clone()),
         (None, None) => Err("the core resolved to nothing".to_string()),
     };
-    Ok(Settled { outcome, pid: guard.pid, started_at: guard.started_at, generation: guard.generation })
+    Ok(Settled { outcome, pid: guard.pid, start: guard.start.clone(), generation: guard.generation })
 }
 
 /// The first resolution, started with the app, and the timers that show the

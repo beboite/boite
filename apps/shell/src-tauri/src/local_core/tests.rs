@@ -242,10 +242,10 @@ fn a_slow_resident_core_is_left_running_and_a_slow_owned_one_is_stopped() {
 fn a_settled_core_whose_pid_now_names_a_later_process_is_stale() {
     // This test's own process stands for the one that got the dead core's number.
     let pid = std::process::id();
-    let Some(began) = platform::process::started_at(pid) else { return };
+    let (own, earlier) = health::own_start_and_an_earlier_one();
     let endpoint = CoreEndpoint { url: "http://127.0.0.1:1".to_string(), token: "t".to_string() };
-    let settled = |started_at| Settled { outcome: Ok(endpoint.clone()), pid: Some(pid), started_at, generation: 0 };
-    assert!(settled(Some(began - 60_000)).stale(), "a process that started after the core is not that core");
-    assert!(!settled(Some(began)).stale());
-    assert!(!settled(None).stale(), "an unknown start time keeps the liveness answer");
+    let settled = |start| Settled { outcome: Ok(endpoint.clone()), pid: Some(pid), start, generation: 0 };
+    assert!(settled(earlier).stale(), "a process that started after the core is not that core");
+    assert!(!settled(own).stale());
+    assert!(!settled(health::CoreStart::default()).stale(), "an unknown start time keeps the liveness answer");
 }

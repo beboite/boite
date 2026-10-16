@@ -95,7 +95,7 @@ pub(super) fn resolve_core(state: &CoreState) -> Result<Resolved, String> {
                     shell_log::info("core", "shell.core.attached", format!("attached to the running core pid {} on port {}",
                         existing.pid.map(|pid| pid.to_string()).unwrap_or_else(|| "unknown".into()), existing.port),
                         json!({ "pid": existing.pid, "port": existing.port }));
-                    return Ok((endpoint_of(&existing), existing.pid, existing.started_at));
+                    return Ok((endpoint_of(&existing), existing.pid, existing.start()));
                 }
                 Probe::Stale(version) => {
                     eprintln!("[shell] the running core is version {version} and this shell {}: stopping it", launch.version);
@@ -151,7 +151,7 @@ pub(super) fn resolve_core(state: &CoreState) -> Result<Resolved, String> {
                         shell_log::timed(Level::Info, "core", "shell.core.ready",
                             format!("the core pid {pid} answered on port {} after {} ms", found.port, took.as_millis()),
                             took, json!({ "pid": pid, "port": found.port }));
-                        return Ok((endpoint_of(&found), Some(pid), found.started_at));
+                        return Ok((endpoint_of(&found), Some(pid), found.start()));
                     }
                 }
             }

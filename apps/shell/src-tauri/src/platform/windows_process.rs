@@ -74,3 +74,9 @@ pub fn started_at(pid: u32) -> Option<u64> {
     let intervals = (u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime);
     (intervals / 10_000).checked_sub(11_644_473_600_000)
 }
+
+/// Windows gives an absolute creation time, which `started_at` reads, so it
+/// needs no key of its own to tell runs apart.
+pub fn start_key(_pid: u32) -> Option<String> {
+    None
+}
