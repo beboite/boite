@@ -406,8 +406,8 @@ when the core advertises `chunkedAnswers`.
 - The trace is read when the trace surface is on screen, not on every open.
 - A process exit updates five columns of its trace row instead of rewriting it,
   and a thread keeps its newest 2,000 rows (`bun bench/process-rows.ts`).
-- A spawn of a bare name (`git`, `gh`) reuses the remembered PATH lookup, and
-  on Windows git skips Git for Windows' launcher process (`bun bench/spawn-lookup.ts`).
+- A spawn of a bare name (`gh`, git when its lookup found no real binary)
+  reuses the remembered PATH lookup (`bun bench/spawn-lookup.ts`).
 - On Windows the guard pump wakes once a second instead of ten times while a
   traced process lives, new processes inside 100 ms share one audio-session
   walk, and the jobs Worker drops the global job's copy of every start and exit.

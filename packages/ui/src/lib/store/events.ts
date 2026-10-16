@@ -1,6 +1,7 @@
 import { lastAgentText, requestExcerpt, type ProviderInstallState, type RpcEventName, type ThreadId, type TurnId } from '@boite/contracts';
 import type { Client, EventHandler } from '../client';
 import { noteThisComputer } from '../device';
+import { noteQuestionAsked } from '../question-reply.svelte';
 import { finishNotifies } from '../notify';
 import { resetPullRequestSupport } from '../pull-request';
 import { revealRequested } from '../reveal';
@@ -241,6 +242,7 @@ export function listen(ctx: StoreContext, client: Client): void {
   });
 
   on('question.asked', (request) => {
+    noteQuestionAsked(s, request);
     requests.mergeQuestions([request], 'one');
     layout.notify('needs-you', request.threadId, requestExcerpt(request) || null);
   });

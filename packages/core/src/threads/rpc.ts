@@ -1,5 +1,5 @@
 import { stat } from 'node:fs/promises';
-import type { AccountId, ProviderId, ThreadId } from '@boite/contracts';
+import { pullRequestAddress, type AccountId, type ProviderId, type ThreadId } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { invalidParams, refused } from '../errors.ts';
 import type { ProviderProbe } from '../providers/probe.ts';
@@ -28,6 +28,37 @@ async function requireCwd(core: Core, threadId: ThreadId): Promise<void> {
       threadId, cwd: thread.cwd, field: 'cwd', expected: 'an existing folder',
     });
   }
+}
+
+/** `12` or `#12`, else null. */
+function pullRequestNumber(input: string): number | null {
+  const match = /^#?([1-9]\d{0,9})$/.exec(input.trim());
+  return match ? Number(match[1]) : null;
+}
+
+/**
+ * The pull request `boite pr watch` names: a linked one by URL or number, a
+ * new URL linked first (which checks it on GitHub), or with nothing named
+ * the conversation's only linked one, or its only open one.
+ */
+async function watchTarget(linked: LinkedPullRequests, threadId: ThreadId, input: string | undefined): Promise<string> {
+  const saved = linked.saved(threadId);
+  const listed = saved.map(pr => pr.url).join(', ');
+  if (input === undefined) {
+    const open = saved.filter(pr => pr.state === 'OPEN');
+    const only = saved.length === 1 ? saved[0] : open.length === 1 ? open[0] : undefined;
+    if (only) return only.url;
+    throw refused(saved.length ? `this conversation links several pull requests (${listed}); name the one to watch` : 'this conversation has no linked pull request: run boite pr link <url> first, or name its URL', { field: 'url', expected: 'a pull request URL or number' });
+  }
+  const number = pullRequestNumber(input);
+  if (number !== null) {
+    const matches = saved.filter(pr => pr.number === number);
+    if (matches.length === 1) return matches[0]!.url;
+    throw refused(matches.length ? `several linked pull requests are #${number}; name it by URL` : `no linked pull request is #${number}; name its URL to link and watch it`, { field: 'url', expected: listed || 'a pull request URL' });
+  }
+  const { url } = pullRequestAddress(input);
+  if (!saved.some(pr => pr.url.toLowerCase() === url.toLowerCase())) await linked.link(threadId, url);
+  return url;
 }
 
 export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
@@ -68,6 +99,15 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
   core.router.register('threads.linkPullRequest', p => linked.link(p.threadId, p.url));
   core.router.register('threads.unlinkPullRequest', p => linked.unlink(p.threadId, p.url));
   core.router.register('threads.pullRequest', params => pullRequests.read(params.threadId, params.refresh === true));
+  core.router.register('threads.watchPullRequest', async p => core.pullRequestWatches.watch(p.threadId, await watchTarget(linked, p.threadId, p.url)));
+  core.router.register('threads.unwatchPullRequest', p => {
+    if (p.url === undefined) return core.pullRequestWatches.unwatch(p.threadId);
+    const number = pullRequestNumber(p.url);
+    const watched = core.pullRequestWatches.of(p.threadId);
+    const matches = number === null ? [] : watched.filter(watch => watch.number === number);
+    if (number !== null && matches.length !== 1) throw refused(matches.length ? `several watched pull requests are #${number}; name it by URL` : `this conversation does not watch #${number}`, { field: 'url', expected: watched.map(watch => watch.url).join(', ') || 'a watched pull request' });
+    return core.pullRequestWatches.unwatch(p.threadId, matches[0]?.url ?? p.url);
+  });
   core.router.register('threads.compact', async (params) => {
     await requireCwd(core, params.threadId);
     return core.threads.compact(params.threadId, params.expectedSelectionVersion);
@@ -175,7 +215,9 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
   core.router.register('turns.stop', (params, ctx) => {
     const by = ctx.connection.identity.principal === 'agent' ? `agent of ${ctx.connection.identity.threadId}` : `${ctx.connection.identity.principal} from ${ctx.connection.sentFrom?.client ?? 'a client'}`;
     core.activity.pauseAll(params.threadId);
-    const stopped = core.threads.stopTurn(params.threadId);
+    // Stop ends what would wake the thread again, its pull request watches included.
+    const unwatched = core.pullRequestWatches.endThread(params.threadId);
+    const stopped = core.threads.stopTurn(params.threadId) || unwatched > 0;
     // After the stop, so an unknown thread (which throws) logs nothing, and with what it did.
     core.logs.info(`Stop requested by the ${by}: ${stopped ? 'a turn was stopped' : 'nothing was running'}`, { source: 'turns', event: 'turn.stop-asked', threadId: params.threadId, data: { principal: ctx.connection.identity.principal, client: ctx.connection.sentFrom?.client ?? null, stopped } });
     return { stopped };
@@ -184,6 +226,7 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
     if (params.action === 'resume') await requireCwd(core, params.threadId);
     return core.threads.recoverTurn(params);
   });
+  core.router.register('turns.cancelRetry', (params) => ({ cancelled: core.threads.cancelRetry(params.threadId) }));
   core.router.register('turns.steer', params => steerUser(core, core.threads, params));
   core.router.register('permissions.list', (params) => core.threads.listPermissions(params.threadId));
   core.router.register('permissions.answer', (params) => {

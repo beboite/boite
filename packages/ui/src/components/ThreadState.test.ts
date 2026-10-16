@@ -205,3 +205,19 @@ test('threads, workflow runs and steps share one status mark vocabulary', () => 
   expect(workflowTone('waiting').tone).toBe('idle');
   expect(workflowTone('skipped').tone).toBe('skipped');
 });
+
+test('a thread at rest watching pull requests reads as watching them, and counts with the work in a rollup', () => {
+  const watch = { url: 'https://github.com/example/repo/pull/7', repository: 'example/repo', number: 7, since: NOW, seen: null, paused: null };
+  const shown = { status: 'idle' as const, unread: true, runningSince: null, backgroundWork: null, lastUserMessageAt: NOW - 120_000, createdAt: NOW - 600_000 };
+  running = mount(ThreadState, { target: document.body, props: { thread: { ...shown, pullRequestWatches: [watch, { ...watch, number: 9 }] }, now: NOW } });
+  flushSync();
+  const state = document.body.firstElementChild as HTMLElement;
+  expect(state.dataset['state']).toBe('watching');
+  expect(state.getAttribute('title')).toBe('Watching 2 PRs\n#7, #9');
+  expect(state.textContent).toContain('#7 #9');
+  // Its own turn still comes first; a finished watch leaves the thread done.
+  expect(threadState({ status: 'running', unread: false, pullRequestWatches: [watch] })).toBe('working');
+  expect(threadState({ status: 'idle', unread: true, pullRequestWatches: [] })).toBe('done');
+  expect(projectRollup([{ status: 'idle', unread: true }, { status: 'idle', unread: false, pullRequestWatches: [watch] }])).toEqual({ kind: 'watching', count: 1 });
+});
+

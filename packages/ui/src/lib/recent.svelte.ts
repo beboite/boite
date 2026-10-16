@@ -44,10 +44,10 @@ export function groupWorkingThread(store: Store, thread: ThreadSummary): boolean
   return workingThread(store, thread);
 }
 
-/** At work, its own turn, its delegated agents' or what it left running: nothing for the user to do yet. */
+/** At work, its own turn, its delegated agents', what it left running or a pull request it watches: nothing for the user to do yet. */
 export function workingThread(store: Pick<Store, 'subagents'>, thread: ThreadSummary): boolean {
   const state = threadState(thread, store.subagents(thread.id)?.count ?? 0);
-  return state === 'working' || state === 'queued' || state === 'delegating' || state === 'monitoring' || state === 'background';
+  return state === 'working' || state === 'queued' || state === 'delegating' || state === 'monitoring' || state === 'background' || state === 'watching';
 }
 
 /** Marking done never interrupts a turn or discards input; Archive is a separate menu action. */

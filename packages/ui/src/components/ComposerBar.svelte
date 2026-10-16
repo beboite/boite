@@ -123,6 +123,8 @@
   let speedOptions = $derived(speedControl(choice ? store.modelsOf(choice.providerId, choice.accountId) : [], choice));
   let speeds = $derived(speedOptions.speeds);
   let activeEffort = $derived(choice?.effort ?? store.modelOf(choice)?.effort?.default ?? null);
+  /** The model has a scale but no default: its agent picks the level until the user does. */
+  let agentDefault = $derived(effortLevels.length > 0 && store.modelOf(choice)?.effort?.default === undefined);
 
   /** A null effort runs at the model's own default, not at a preset the client configured. */
   function cacheKey(selection: Choice): CacheKey {
@@ -188,7 +190,7 @@
     store.remember(choice);
   }
 
-  function pickEffort(id: string) {
+  function pickEffort(id: string | null) {
     pick({ effort: id });
   }
 
@@ -222,7 +224,7 @@
 <div class="bar" class:answering bind:this={bar}>
   {#if !answering}
   {#key `${key}:${store.draft?.projectId ?? ''}`}
-  <ComposerOptions busy={picking} levels={effortLevels} effort={activeEffort} {speeds} speed={speedOptions.speed} {modes} modeLabel={(mode) => modeLabel(mode, provider)} modeHint={(mode) => modeHint(mode, provider)} mode={displayedMode} worktree={store.draft && draftRepository ? store.draft.worktree : null} {canAttach} onattach={() => picker?.click()} oneffort={pickEffort} onspeed={(speed) => void pick(speedOptions.pick(speed))} onmode={pickMode} onworktree={() => store.setDraftWorktree(!store.draft?.worktree)} />
+  <ComposerOptions busy={picking} levels={effortLevels} effort={activeEffort} {agentDefault} {speeds} speed={speedOptions.speed} {modes} modeLabel={(mode) => modeLabel(mode, provider)} modeHint={(mode) => modeHint(mode, provider)} mode={displayedMode} worktree={store.draft && draftRepository ? store.draft.worktree : null} {canAttach} onattach={() => picker?.click()} oneffort={pickEffort} onspeed={(speed) => void pick(speedOptions.pick(speed))} onmode={pickMode} onworktree={() => store.setDraftWorktree(!store.draft?.worktree)} />
   {/key}
   <div class="chips">
     <ModelPicker {store} {choice} disabled={picking} onpick={pick} />
@@ -243,7 +245,7 @@
 
     <div class="desktop-options">
     {#if effortLevels.length > 0 || speeds.length > 0}
-      <EffortSlider levels={effortLevels} active={activeEffort} onpick={pickEffort} {speeds} speed={speedOptions.speed} onspeed={(speed) => void pick(speedOptions.pick(speed))} />
+      <EffortSlider levels={effortLevels} active={activeEffort} onpick={pickEffort} ondefault={agentDefault ? () => pickEffort(null) : undefined} {speeds} speed={speedOptions.speed} onspeed={(speed) => void pick(speedOptions.pick(speed))} />
     {/if}
 
     {#if modes.length > 0}

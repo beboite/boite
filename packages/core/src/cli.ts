@@ -60,7 +60,12 @@ ${CONTROL_HELP}
                                  user's Device panel, capture and drive it
   pr list|refresh                this conversation's linked pull requests
   pr link|unlink <url>           attach or remove a PR link; does not change GitHub
-  view <file.html>               draw an HTML page at the end of your answer
+  pr watch [<url|number>]        wake this thread when the PR's checks fail or
+                                 pass, a review or comment lands or it starts
+                                 to conflict; end your turn instead of polling
+  pr unwatch [<url|number>]      stop one watch, or all of this thread's
+  view <file.html>               draw an HTML page in your answer, where a
+                                 line ![title](file.html) places it
                                  (--title <text>); view help has the rules
                                  and the app's look, view example a full page
   preview <file.html>             open a local HTML artifact with its assets
@@ -129,15 +134,19 @@ ${CONTROL_HELP}
   delegate spawn <brief>         start a subagent on one bounded job; its result
                                  comes back as a message (--model <provider/model>,
                                  --effort <level>, --speed <tier>, --title <title>,
-                                 --profile <id>, and a context mode: --context
+                                 --profile <id>, --worktree for a git worktree of
+                                 its own branched from your HEAD instead of your
+                                 checkout, and a context mode: --context
                                  light|neutral, --keep|--drop <parts>, --tools
                                  <Tool,...>, --rules <text>|--rules-file <path>)
   delegate list                  every subagent and workflow: state, model, time
   delegate send <thread-id> <text>
-                                 steer or reuse a subagent, or ask the parent
+                                 steer or reuse a subagent, or ask the parent;
+                                 to a subagent that asks something, the answer
   delegate stop [thread-id]      stop one subagent, or all of them
-  delegate wait [thread-id]      block until children finish (--timeout <s>,
-                                 default 600, max 3600); only with nothing else to do
+  delegate wait [thread-id]      block until children finish or one asks something
+                                 (--timeout <s>, default 600, max 3600); only with
+                                 nothing else to do
   delegate result <child> <turn> [offset]
                                  read a bounded page of full assistant text
   delegate profiles              the owner's named routes
@@ -349,7 +358,17 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
     },
     pr: async () => {
       const action = rest[0] ?? 'list';
-      if (!['list', 'refresh', 'link', 'unlink'].includes(action) || rest.length > (action === 'link' || action === 'unlink' ? 2 : 1)) throw new Usage('pr expects list, refresh, link <url> or unlink <url>');
+      if (!['list', 'refresh', 'link', 'unlink', 'watch', 'unwatch'].includes(action) || rest.length > (action === 'list' || action === 'refresh' ? 1 : 2)) throw new Usage('pr expects list, refresh, link <url>, unlink <url>, watch [<url|number>] or unwatch [<url|number>]');
+      if (action === 'watch') {
+        const watch = await client.call('threads.watchPullRequest', { threadId, ...(rest[1] === undefined ? {} : { url: rest[1] }) });
+        print([`watching #${watch.number} ${watch.url}: ${watchStatus(watch)}`, 'Boite wakes this thread when it changes: end your turn, do not poll.'], watch);
+        return;
+      }
+      if (action === 'unwatch') {
+        const left = await client.call('threads.unwatchPullRequest', { threadId, ...(rest[1] === undefined ? {} : { url: rest[1] }) });
+        print(left.length ? left.map(watch => `still watching #${watch.number} ${watch.url}: ${watchStatus(watch)}`) : ['no pull request watched'], left);
+        return;
+      }
       const result = action === 'link' || action === 'unlink'
         ? await client.call(action === 'link' ? 'threads.linkPullRequest' : 'threads.unlinkPullRequest', { threadId, url: want(1, 'a pull request URL') })
         : await client.call('threads.pullRequests', { threadId, refresh: action === 'refresh' });
@@ -393,6 +412,7 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
         ...(parsed.requestId === undefined ? {} : { requestId: parsed.requestId }), ...(parsed.timeout === undefined ? {} : { timeout: parsed.timeout }),
         ...(parsed.title === undefined ? {} : { title: parsed.title }), ...(parsed.model === undefined ? {} : { model: parsed.model }),
         ...(parsed.effort === undefined ? {} : { effort: parsed.effort }), ...(parsed.speed === undefined ? {} : { speed: parsed.speed }), ...(parsed.profile === undefined ? {} : { profile: parsed.profile }),
+        ...(parsed.worktree === true ? { worktree: true } : {}),
         ...(parsed.context === undefined ? {} : { context: contextRequest(parsed, readRules) }),
       }, print);
     },
@@ -505,12 +525,14 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
       if (rest[0] === 'example') { print([VIEW_EXAMPLE], { example: VIEW_EXAMPLE }); return; }
       const result = await client.call('artifacts.view', { threadId, path: absolute(io.cwd, want(0, 'an HTML file')), ...(parsed.title === undefined ? {} : { title: parsed.title }) });
       const view = result.message.parts[0]?.type === 'artifact' ? result.message.parts[0].view : undefined;
+      const source = view?.source ?? rest[0]!;
+      const line = `![${(view?.title ?? '').replace(/[\s[\]]+/g, ' ').trim()}](${/[\s()<>]/.test(source) ? `<${source}>` : source})`;
       print([
         `view: ${view?.title ?? rest[0]}`,
         result.checked
           ? `checked: loaded without an error, ${view?.height}px tall on a desktop${view?.narrowHeight ? `, ${view.narrowHeight}px on a phone` : ''}`
           : 'checked: no, this machine has no browser to load it in; read the page once more before you answer',
-        'shown: under your final text when this turn ends. Do not announce it or repeat what it shows.',
+        `place: ${line} alone on a line of your answer, right after the paragraph it explains. Without that line it is drawn under your final text when this turn ends. Do not announce it or repeat what it shows.`,
         ...result.advice.map(advice => `advice: ${advice}`),
       ], result);
     },
@@ -701,4 +723,14 @@ export function processIo(): CliIo {
     env: process.env,
     cwd: process.cwd(),
   };
+}
+
+/** One line on what a watch last saw, for `boite pr watch` and `unwatch`. */
+export function watchStatus(watch: import('@boite/contracts').PullRequestWatch): string {
+  const paused = watch.paused ? `paused until ${new Date(watch.paused.until).toISOString()} (${watch.paused.reason === 'rate-limit' ? 'GitHub rate limit' : watch.paused.message})` : null;
+  const seen = watch.seen;
+  if (!seen) return paused ?? 'not read yet';
+  const { total, running, failed } = seen.checks;
+  const checks = total === 0 ? 'no checks' : `${total} checks, ${running} running, ${failed} failed`;
+  return [`head ${seen.head}`, checks, seen.conflicting ? `conflicts with ${seen.base}` : null, paused].filter(Boolean).join('; ');
 }

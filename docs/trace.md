@@ -50,12 +50,9 @@ A bare command name (`git`, `gh`) is resolved to an absolute path through the
 remembered PATH lookup, with the child's own PATH, so Bun and node do not walk
 PATH and PATHEXT again on each spawn (`spawn-command.ts`). A Windows `.cmd`,
 `.bat` or `.ps1` shim and a name PATH does not find are passed on unchanged.
-On Windows, when git resolves to Git for Windows' launcher (`<Git>\cmd\git.exe`,
-or the portable `<Git>\bin\git.exe`), the real `git.exe` under `ucrt64`,
-`clangarm64`, `mingw64` or `mingw32` runs instead, which saves a process per
-call. The real binary sets HOME and puts its own folders on PATH only when
-`MSYSTEM` is unset, so the launcher stays when the child's environment sets
-`MSYSTEM`. Another layout keeps the path PATH found. A resolved path that is gone
+Git is resolved first by `launchOf` (`git/command.ts`), which on Windows
+already swaps Git for Windows' launcher for its real binary; this lookup leaves
+that absolute path alone. A resolved path that is gone
 (ENOENT) forgets the lookups: `spawn` and `spawnPiped` start the bare name once,
 `spawnChild` reports the error and its next spawn looks again. The trace row
 keeps the name the caller gave.

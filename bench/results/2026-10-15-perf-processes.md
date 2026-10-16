@@ -87,8 +87,8 @@ every spawn of a bare name (`Bun.which('git', { PATH })`); after is the lookup
 
 On Linux the saving, about 8 µs a spawn, sits inside the spawn's noise. The
 lookup grows with PATH times PATHEXT on Windows, where it was not measured.
-Running Git for Windows' real `git.exe` instead of its launcher removes one
-process per git call there; no Windows host was available to measure it.
+Running Git for Windows' real `git.exe` instead of its launcher now comes from
+`main` (`git/command.ts`), so this branch dropped its own copy of that swap.
 
 ## Windows guard and jobs Workers
 

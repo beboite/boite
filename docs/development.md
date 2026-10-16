@@ -140,7 +140,8 @@ Shared storage uses `<project-name>-<project-id>/wt-<id>` to separate repositori
 with matching names. A changed setting affects new worktrees only. Existing
 threads and prepared workspaces retain their recorded path. Nested directories
 are excluded through Git's local `info/exclude`, without changing `.gitignore`.
-Archiving retains the worktree and branch; `worktrees.remove` owns removal.
+Archiving retains the worktree and branch; `worktrees.remove` and the
+[settled worktree cleanup](#settled-worktree-cleanup) own removal.
 
 The title operation can rename a temporary branch to `boite/<slug>`, adding
 `-2`, `-3` when needed. It preserves the directory, commits and session.
@@ -173,6 +174,64 @@ worktrees requires no force; ignored dependencies and build output leave with
 the directory. Dirty or unmerged removal asks first. Archive alone never removes
 a branch or worktree. Restoring a thread whose worktree was removed retains its
 `cwd`; sending or compacting refuses the missing folder instead of recreating it.
+
+### Settled worktree cleanup
+
+The core removes a worktree it created once its work is settled
+(`worktree-cleanup.ts`). The first pass runs five minutes after startup, then
+every ten minutes, with at most eight removals, eight merge proofs and two
+minutes per pass. A worktree qualifies when all of these hold:
+
+- It lies under the project's `.boite/worktrees` or the project's folder in the
+  current shared storage. Manual worktrees elsewhere are never touched.
+- Every thread whose `cwd` is that folder or below it was archived, marked done
+  or deleted at least an hour ago, and none has a live process or terminal. An
+  archive written by an older core counts from `updatedAt`.
+- With no thread standing there, the branch starts with `boite/` (or HEAD is
+  detached), no draft reservation names the folder, and git created it at least
+  an hour ago (the `.git` file's date).
+- `git status` lists nothing, untracked files included. Ignored files such as
+  dependencies and build output leave with the folder.
+- HEAD is on another local branch or remote-tracking ref, or a merged, non-fork
+  GitHub pull request has that exact commit as its head. The proof is the one
+  [merged pull request archives](#merged-pull-request-archives) use, so a squash
+  or rebase merge counts. A worktree no thread stands in is asked for by branch
+  name only.
+
+`WorktreeSweep.removeSettled` reads the worktree again and applies the refusals
+of `worktrees.remove` without force, except that a proved merged head passes.
+It runs `git worktree remove` without `--force`, so git itself refuses a change
+that appeared meanwhile. The branch then goes with `git branch -d`, or after a
+merge proof with `git update-ref -d refs/heads/<branch> <sha>`, which deletes it
+only while it still points at the merged commit and no other worktree has it
+checked out. Remote branches are left to the forge's own "delete head branch"
+setting. A worktree kept for a reason is looked at again an hour later, or as
+soon as its HEAD moves.
+
+Each thread that stood there gets `worktreeRemoved` on its summary: the path,
+branch, whether the branch went, the reason (`pr-merged` or `clean`) and the
+pull request. The done notice and, after Move to Recent, the composer show it:
+the thread can be read but a turn is refused because the folder is gone. The
+field disappears once the thread moves to another folder.
+
+Owners turn this off per project through `projects.setAutoRemoveWorktrees`
+(owner only), shown as Remove settled worktrees beside Hide merged PR
+conversations in the grouping menu and in Manage project. `Project.autoRemoveWorktrees`
+is true unless turned off; a core older than this feature does not send it and
+the clients hide the switch. Turning it off stops later removals only.
+
+### Git on Windows
+
+Every git process the core starts goes through `procs.spawn`, which on Windows
+adds `core.longpaths=true` through `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_<n>` and
+`GIT_CONFIG_VALUE_<n>`, after any entries the environment already carries.
+Without it git cannot create or delete a path over 260 characters, and a
+worktree adds about 30 characters to every path in the repository. The user's
+git config is not written. The same launcher replaces Git for Windows'
+`cmd\git.exe` or `bin\git.exe` with the real binary under `ucrt64`,
+`clangarm64`, `mingw64` or `mingw32`, which saves one process per git call. It
+keeps the launcher when `MSYSTEM` is set, when the layout is absent and when
+PATH finds a `git.cmd` wrapper (`git/command.ts`).
 
 ## Thread lifecycle
 
@@ -331,7 +390,8 @@ grace and repeats at 60-second intervals after completion, admitting at most
 eight candidates within a 30-second budget for proof and validation.
 
 Automatic archive changes visibility and records its reason; it does not stop
-work or remove a worktree or branch. Restore dismisses the exact PR and protects
+work or remove a worktree or branch. An hour later the
+[settled worktree cleanup](#settled-worktree-cleanup) can remove both. Restore dismisses the exact PR and protects
 that restored checkout from another automatic archive, including after restart.
 Connected clients publish protected drafts and pending input through
 `threads.focus`. A focus caller that has never reported input protection blocks
@@ -852,14 +912,26 @@ files, including PDFs and archives, use `kind: 'file'` and host paths in the
 prompt. Provider tools decide which formats they can read. Boite neither
 extracts archives nor executes uploads.
 
-Before those caps, the client brings an image to 2048 px on its long edge
-(`lib/image-prepare.ts`): JPEG at 0.85, or PNG when that is lighter or the
-picture uses transparency. An image already within 2048 px and 512 KB goes as
-it is, and a GIF or an SVG is never redrawn. HEIC and HEIF become JPEG where the
+Before those caps, the client brings an image to 2000 px on its long edge
+(`IMAGE_MAX_EDGE`, `lib/image-prepare.ts`): JPEG at 0.85, or PNG when that is
+lighter or the picture uses transparency. Claude's API refuses an image over
+2000 px on either side once a request carries more than 20 images, which a
+long thread of screenshots reaches. An image already within 2000 px and 512 KB
+goes as it is, and a GIF or an SVG is never redrawn. HEIC and HEIF become JPEG where the
 browser decodes them (Safari does); elsewhere they travel as a plain file. A
 source over 50 MB is refused before decoding, since a phone's canvas would not
 hold it. So twenty iPhone screenshots, 2 to 4 MB each as PNG, fit one turn at
 around 400 KB each.
+
+The Claude driver fits every prompt image to the same edge again before it
+goes in (`drivers/claude/images.ts`, Bun's image codec, same format), because
+an image can reach a prompt without passing the composer: a client that sends
+it unreduced, a browser that could not decode it, or a message written under
+the earlier 2048 px cap and replayed by a retry or a carried-over history.
+The CLI forwards a prompt's images unchanged, while the images its own tools
+read are fitted by the CLI to the model's limit. A GIF, or anything Bun cannot
+decode, goes as it is. Tool images shown in the timeline
+(`drivers/documents.ts`) never go back to the agent.
 
 An answer to a question with a free field takes the composer's files the same
 way (`questions.answer` `attachments`); see [Providers](providers.md).

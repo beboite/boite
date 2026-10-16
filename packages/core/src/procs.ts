@@ -8,12 +8,13 @@ import { MemoryGuard } from './memory-guard.ts';
 import type { MemoryProcess } from './memory-guard-logic.ts';
 import { processPlatform } from './platform/index.ts';
 import { type KnownProcess, type ProcessIdentity, unseenIdentity } from './process-identity.ts';
-import { stopGroup } from './platform/posix-kill.ts';
+import { killBunChild, stopGroup } from './platform/posix-kill.ts';
 import type { GuardStatus, NativeProcessExit, NativeProcessInfo, ProcessPlatform } from './platform/types.ts';
 import { ResourceCollection } from './resource-usage.ts';
 import { orphansOf } from './process-orphans.ts';
 import { forgetOnMissing, resolveSpawnCommand, startResolved } from './spawn-command.ts';
 import { BUSY_CPU_PERCENT, IDLE_LOAD_INTERVAL_MS, LOAD_INTERVAL_MS, LoadPace, worthPushing } from './load-pace.ts';
+import { launchOf } from './git/command.ts';
 
 export interface SpawnOptions {
   /** Bounded normal-priority initialization, ended explicitly when the agent is ready. */
@@ -281,9 +282,9 @@ export class ProcRegistry {
 
   spawn(threadId: ThreadId, cmd: string, args: string[], opts: SpawnOptions = {}): SpawnedProcess {
     this.assertAccepting();
-    const env: Record<string, string | undefined> = { ...process.env, ...(opts.env ?? {}) };
+    const [command, env] = launchOf(cmd, { ...process.env, ...(opts.env ?? {}) });
     const extra = Math.max(0, Math.floor(opts.extraPipes ?? 0));
-    const proc = startResolved(cmd, env, (executable) => Bun.spawn({
+    const proc = startResolved(command, env, (executable) => Bun.spawn({
       cmd: [executable, ...args],
       cwd: opts.cwd,
       env,
@@ -322,8 +323,8 @@ export class ProcRegistry {
    */
   spawnPiped(threadId: ThreadId, cmd: string, args: string[], opts: SpawnOptions = {}): SpawnedPipedProcess {
     this.assertAccepting();
-    const env = opts.env ?? process.env;
-    const proc = startResolved(cmd, env, (executable) => Bun.spawn({
+    const [command, env] = launchOf(cmd, opts.env ?? process.env);
+    const proc = startResolved(command, env, (executable) => Bun.spawn({
       cmd: [executable, ...args],
       cwd: opts.cwd,
       env,
@@ -423,10 +424,11 @@ export class ProcRegistry {
    */
   spawnChild(threadId: ThreadId, cmd: string, args: string[], opts: SpawnOptions = {}): SpawnedChild {
     this.assertAccepting();
-    const executable = resolveSpawnCommand(cmd, opts.env ?? process.env);
+    const [command, env] = launchOf(cmd, opts.env);
+    const executable = resolveSpawnCommand(command, env ?? process.env);
     const child = spawnNodeChild(executable, args, {
       cwd: opts.cwd,
-      env: opts.env,
+      env,
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
       detached: OWN_GROUP,
@@ -449,7 +451,7 @@ export class ProcRegistry {
     // A child that never starts emits 'error' and no 'exit'; without this it
     // would stay in the live registry for the rest of the session.
     child.once('error', (error) => {
-      forgetOnMissing(cmd, executable, error);
+      forgetOnMissing(command, executable, error);
       this.onExit(threadId, record.pid, null, undefined, record);
     });
 
@@ -887,11 +889,4 @@ export class ProcRegistry {
 /** An entry's own kill, and the group stop that may follow it. */
 function killEntry(entry: Entry): Promise<void> | undefined {
   try { return entry.kill() ?? undefined; } catch { return undefined; /* already exited */ }
-}
-
-/** A Bun child's kill: its whole group off Windows, the process itself on Windows. */
-function killBunChild(proc: Bun.Subprocess): Promise<void> | undefined {
-  if (OWN_GROUP) return stopGroup(proc.pid, () => proc.exitCode === null && proc.signalCode === null);
-  proc.kill();
-  return undefined;
 }

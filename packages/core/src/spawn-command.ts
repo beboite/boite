@@ -1,4 +1,3 @@
-import { statSync } from 'node:fs';
 import { posix, win32 } from 'node:path';
 import { forgetWhich, which } from './providers/which.ts';
 
@@ -11,28 +10,9 @@ import { forgetWhich, which } from './providers/which.ts';
 export interface SpawnLookup {
   windows: boolean;
   which(name: string, PATH: string): string | null;
-  isFile(path: string): boolean;
 }
 
-/** How long a launcher swap is trusted, as long as the PATH lookup behind it. */
-const SWAP_TTL_MS = 30_000;
-/**
- * Git for Windows 2.56 moved x64 builds from mingw64 to ucrt64; ARM64 builds
- * live in clangarm64 and 32-bit ones in mingw32.
- */
-const GIT_FOR_WINDOWS_BUILDS = ['ucrt64', 'clangarm64', 'mingw64', 'mingw32'] as const;
-
-let swaps = new Map<string, { at: number; real: string }>();
-
-function isFile(path: string): boolean {
-  try {
-    return statSync(path).isFile();
-  } catch {
-    return false;
-  }
-}
-
-const hostLookup: SpawnLookup = { windows: process.platform === 'win32', which, isFile };
+const hostLookup: SpawnLookup = { windows: process.platform === 'win32', which };
 
 /** An environment variable, by any case on Windows, where `Path` is the usual spelling. */
 function envValue(env: Record<string, string | undefined>, name: string, windows: boolean): string | undefined {
@@ -40,45 +20,6 @@ function envValue(env: Record<string, string | undefined>, name: string, windows
   const upper = name.toUpperCase();
   for (const key of Object.keys(env)) if (key.toUpperCase() === upper) return env[key];
   return undefined;
-}
-
-/**
- * Git for Windows' launcher (`<Git>\cmd\git.exe`, the only git its installer
- * puts on PATH, or the portable build's `<Git>\bin\git.exe`) swapped for the
- * git.exe it starts. The launcher costs a second process on every git command
- * and leaks a kernel token reference per run. The real binary sets HOME and,
- * when MSYSTEM is unset, puts its own folders on PATH for hooks, ssh and
- * credential helpers, so the launcher stays when MSYSTEM is set. Any other path
- * comes back as is.
- */
-export function preferGitForWindowsBinary(
-  executable: string,
-  env: Record<string, string | undefined>,
-  fileExists: (path: string) => boolean = isFile,
-): string {
-  if (envValue(env, 'MSYSTEM', true)) return executable;
-  if (win32.basename(executable).toLowerCase() !== 'git.exe') return executable;
-  const launcherDir = win32.dirname(executable);
-  const folder = win32.basename(launcherDir).toLowerCase();
-  if (folder !== 'cmd' && folder !== 'bin') return executable;
-  const root = win32.dirname(launcherDir);
-  for (const build of GIT_FOR_WINDOWS_BUILDS) {
-    const candidate = win32.join(root, build, 'bin', 'git.exe');
-    if (fileExists(candidate)) return candidate;
-  }
-  return executable;
-}
-
-/** The launcher swap, remembered: its file checks would otherwise run before every git spawn. */
-function swapLauncher(found: string, env: Record<string, string | undefined>, lookup: SpawnLookup): string {
-  if (envValue(env, 'MSYSTEM', true)) return found;
-  const now = Date.now();
-  const kept = swaps.get(found);
-  if (kept !== undefined && now - kept.at < SWAP_TTL_MS) return kept.real;
-  const real = preferGitForWindowsBinary(found, env, lookup.isFile);
-  if (swaps.size >= 64) swaps = new Map();
-  swaps.set(found, { at: now, real });
-  return real;
 }
 
 /**
@@ -94,13 +35,12 @@ export function resolveSpawnCommand(cmd: string, env: Record<string, string | un
   if (found === null || !(windows ? win32 : posix).isAbsolute(found)) return cmd;
   if (!windows) return found;
   const extension = win32.extname(found).toLowerCase();
-  if (extension !== '.exe' && extension !== '.com') return cmd;
-  return win32.basename(found).toLowerCase() === 'git.exe' ? swapLauncher(found, env, lookup) : found;
+  // Git for Windows' launcher was already swapped for its real binary (git/command.ts).
+  return extension === '.exe' || extension === '.com' ? found : cmd;
 }
 
-/** Forgets every lookup and swap: a spawn of a resolved path found nothing there. */
+/** Forgets every lookup: a spawn of a resolved path found nothing there. */
 export function forgetSpawnCommands(): void {
-  swaps = new Map();
   forgetWhich();
 }
 

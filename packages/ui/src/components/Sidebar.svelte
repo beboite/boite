@@ -392,12 +392,12 @@
     font-variant-numeric: tabular-nums;
   }
   .rollup .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-  .rollup.working, .rollup.delegating, .rollup.monitoring, .rollup.background { color: var(--color-accent); }
+  .rollup.working, .rollup.delegating, .rollup.monitoring, .rollup.background, .rollup.watching { color: var(--color-accent); }
   .rollup.waiting { color: var(--color-live); }
   .rollup.error { color: var(--color-danger); }
   .rollup.done { color: var(--color-success); }
   .rollup.queued { color: var(--color-muted-foreground); }
-  .rollup.delegating .dot, .rollup.monitoring .dot, .rollup.background .dot { animation: pulse 1.6s var(--ease-out-quint) infinite; }
+  .rollup.delegating .dot, .rollup.monitoring .dot, .rollup.background .dot, .rollup.watching .dot { animation: pulse 1.6s var(--ease-out-quint) infinite; }
   .rollup :global(.spinner) { animation: spin 1s linear infinite; }
   @media (prefers-reduced-motion: reduce) { .rollup .dot, .rollup :global(.spinner) { animation: none; } }
   :global(html[data-motion='reduced']) .rollup .dot,
