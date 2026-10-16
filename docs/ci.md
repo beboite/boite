@@ -151,7 +151,7 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 593,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,990,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,993,000 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 4,286,000 |
 
@@ -164,6 +164,14 @@ after fresh `bun run build:ui` and `bun run build:core` on Linux, against
 the `thread.load` event and the command lookup cache add 9,038 core bytes, the
 client side of `thread.load` 818 UI bytes. The limits rise by that growth to
 4,990,000 and 4,286,000; the entry and `main.js` limits stay unchanged.
+
+On 2026-10-16, the reading cache, display image and pull request polling
+changes (PR #525) merged with `origin/main` at `0a63d907` measure 4,986,586 UI
+bytes after fresh `bun run build:ui` on Linux, against 4,983,859 for that main;
+core JavaScript is unchanged at 4,281,763. The shared pull request timer, the
+reading cache's size accounting, the bounded display image cache and the
+per-project sidebar lists add 2,727 bytes. The UI limit becomes 4,993,000; the
+other limits stay unchanged.
 
 On 2026-10-16, the browser recording and viewer changes (PR #529) merged with
 `origin/main` at `c561ea2c` measure 4,982,829 UI bytes and 4,272,145 core
