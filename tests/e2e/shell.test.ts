@@ -573,7 +573,7 @@ afterAll(async () => {
   if (coreFile !== undefined) killProcessTree(coreFile.pid);
   if (dataDir !== '') await removeDirectory(dataDir);
   if (projectDir !== '') await removeDirectory(projectDir);
-}, 15_000);
+}, 30_000);
 
 shellTest(
   'the hidden shell starts a core of its own and reaches it',

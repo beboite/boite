@@ -2,9 +2,16 @@
 export const IMAGE_MIME_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const;
 export type ImageMimeType = (typeof IMAGE_MIME_TYPES)[number];
 /**
+ * The longest edge, in pixels, of an image sent to an agent. Claude's API
+ * refuses an image over 2000 px on either side once a request carries more
+ * than 20 images, and a long thread of screenshots gets there: one image over
+ * it would fail every later request of the conversation.
+ */
+export const IMAGE_MAX_EDGE = 2000;
+/**
  * Maximum decoded bytes per attachment. Claude's API refuses an image over
  * 5 MB; the UI brings a photo or a screenshot well under it before sending
- * (2048 px on its long edge, JPEG at 0.85: about 0.3 to 1.5 MB).
+ * (`IMAGE_MAX_EDGE` on its long edge, JPEG at 0.85: about 0.3 to 1.5 MB).
  */
 export const ATTACHMENT_MAX_BYTES = 5 * 1024 * 1024;
 /** Maximum attachments carried by one turn: a series of phone screenshots fits. */

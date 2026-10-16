@@ -83,3 +83,32 @@ test('a late status response cannot undo a newer update event', async () => {
   finish(current); await read;
   expect(store.serverUpdater.snapshot?.phase).toBe('waiting');
 });
+
+test("another PC's desktop app replaces the manual server guide, installs on a confirmed click and names a closed window", async () => {
+  history.replaceState(null, '', '/?fake=1&desktopUpdate=available');
+  const store = new Store(); stores.push(store);
+  const client = new FakeClient({ delayMs: 0, desktopApp: true }); store.attach(client); await store.connect();
+  await vi.waitFor(() => expect(store.serverUpdater.desktop?.phase).toBe('available'));
+  await store.serverUpdater.load();
+  const call = vi.spyOn(client, 'call');
+  view = mount(ServerUpdateCard, { target: document.body, props: { store, label: 'PC B' } });
+  flushSync();
+  expect(document.querySelector('.disclosure')).toBeNull();
+  expect(document.querySelector('[data-testid=desktop-update-target]')?.textContent).toBe('2.0.0-beta.2');
+  document.querySelector<HTMLButtonElement>('[data-testid=desktop-update-install]')!.click();
+  await flush();
+  expect(confirm.current?.title).toBe('Update Boite on PC B?');
+  confirm.answer(true);
+  await vi.waitFor(() => expect(call).toHaveBeenCalledWith('core.updateEverything', { agents: [], server: null, app: '2.0.0-beta.2' }));
+  await vi.waitFor(() => expect(store.serverUpdater.desktop?.phase).toBe('downloading'));
+  flushSync();
+  expect(document.querySelector('[data-testid=desktop-update-install]')).toBeNull();
+
+  // The window there closed before the click: the reason shows and the button retries.
+  call.mockImplementationOnce(async () => ({ agents: [], failed: [], server: store.serverUpdater.snapshot!, serverError: null, app: null, appError: 'Boite is not open on Builder' }) as never);
+  store.serverUpdater.applyDesktop(null);
+  await store.serverUpdater.everything([], null, '2.0.0-beta.3');
+  flushSync();
+  expect(document.querySelector('[data-testid=desktop-update-status]')?.textContent).toBe('Boite is not open on Builder');
+  expect(document.querySelector('[data-testid=desktop-update-install]')?.textContent).toBe('Try again');
+});

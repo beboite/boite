@@ -38,7 +38,7 @@ beforeAll(async () => {
   await page.click('[data-thread-id="t-trace"]');
   await page.waitFor(`${store}.openThread?.id === 't-trace'`);
 }, 90_000);
-afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
+afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
 test('a page the agent opens shows the Agent browser covered, naming the machine; Show streams it and a tap reaches the page', async () => {
   const machine = await page.evaluate<string>(`globalThis.__boiteTest.workspace.machines.find(m => m.store === ${store}).label`);

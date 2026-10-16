@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick, type Component } from 'svelte';
-  import { ArrowDownWideNarrow, Folder, Folders, GitMerge, GripVertical, List, LoaderCircle } from '@lucide/svelte';
+  import { ArrowDownWideNarrow, Folder, FolderMinus, Folders, GitMerge, GripVertical, List, LoaderCircle } from '@lucide/svelte';
   import type { Closing } from '../lib/closing.svelte';
   import { floating } from '../lib/floating';
   import { workspace } from '../lib/workspace.svelte';
@@ -39,6 +39,9 @@
   const merged = $derived(target && owner.owner && target.autoArchiveMergedPr !== undefined && target.repository !== false && target.kind !== 'drafts' ? target : null);
   // Both follow the project on screen: the section's heading names the project a press writes to, and a lost connection disables it.
   const mergedBusy = $derived(merged ? owner.connection !== 'ready' || owner.projectAutoArchiveMergedPrBusy(merged.id) : true);
+  /** The worktree removal switch, beside it on cores that know it. */
+  const removal = $derived(merged && merged.autoRemoveWorktrees !== undefined ? merged : null);
+  const removalBusy = $derived(removal ? owner.connection !== 'ready' || owner.projectAutoRemoveWorktreesBusy(removal.id) : true);
 
   $effect(() => {
     if (!popover.open) return;
@@ -126,6 +129,10 @@
       <h3 class="ui-label project"><ProjectTile {project} store={owner} size={14} /><span>{projectName(project)}</span></h3>
       {@render option('merged', strings.sidebar.autoArchiveMergedPr, project.autoArchiveMergedPr === true, GitMerge, strings.sidebar.autoArchiveMergedPrHint,
         () => { if (!mergedBusy) void owner.setProjectAutoArchiveMergedPr(project.id, !project.autoArchiveMergedPr); }, mergedBusy)}
+      {#if removal}
+        {@render option('auto-remove-worktrees', strings.sidebar.autoRemoveWorktrees, removal.autoRemoveWorktrees === true, FolderMinus, strings.sidebar.autoRemoveWorktreesHint,
+          () => { if (!removalBusy) void owner.setProjectAutoRemoveWorktrees(removal.id, !removal.autoRemoveWorktrees); }, removalBusy)}
+      {/if}
     </section>
   {/if}
 </div>

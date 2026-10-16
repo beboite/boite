@@ -11,7 +11,7 @@ export function describedProject(ctx: FakeContext, project: Project): Project {
   const archivedThreads = archived.length;
   const doneThreads = archived.filter((t) => t.doneAt != null).length;
   const missing = ctx.goneFolders.has(pathKey(project.path));
-  return structuredClone({ ...row, autoArchiveMergedPr: row.autoArchiveMergedPr !== false, ...(missing ? { repository: false, missing: true } : {}), ...(archivedThreads > 0 ? { archivedThreads } : {}), ...(doneThreads > 0 ? { doneThreads } : {}) });
+  return structuredClone({ ...row, autoArchiveMergedPr: row.autoArchiveMergedPr !== false, autoRemoveWorktrees: row.autoRemoveWorktrees !== false, ...(missing ? { repository: false, missing: true } : {}), ...(archivedThreads > 0 ? { archivedThreads } : {}), ...(doneThreads > 0 ? { doneThreads } : {}) });
 }
 
 /** The core's `folderGone`: one sentence for every method that meets a folder no longer on the disk. */

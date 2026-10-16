@@ -151,11 +151,46 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 593,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,906,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,982,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,110,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,240,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-16, the dialog showing what a Claude thread sends (PR #501) merged
+with `origin/main` at `4eec5562` measures 4,975,415 UI bytes and 4,237,867 core
+JavaScript bytes after fresh `bun run build:ui` and `bun run build:core` on
+Linux, against 4,958,781 and 4,231,749 for that main: the dialog, its strings in
+both languages and the store add 16,634 UI bytes, the reader of the recorded
+request 6,118 core bytes. On `d11f6d16` Windows CI measured the UI about 5,000
+bytes above Linux. The limits become 4,982,000 and 4,240,000; the entry and
+`main.js` limits stay unchanged. The core row before this showed 4,161,000
+while `budgets.json` held the 4,233,000 PR #505 set.
+
+On 2026-10-15, views placed inside an answer (PR #502), merged with PR #503,
+measure 4,938,784 UI bytes and 4,151,081 core JavaScript bytes after fresh
+`bun run build:ui` and `bun run build:core` on Linux. The UI adds the answer
+split around views. The UI limit becomes 4,941,000; the core limit stays at
+the 4,161,000 PR #503 set, and the entry limits stay unchanged.
+
+On 2026-10-15, Claude's preset system prompt (PR #500) merged with `origin/main`
+at `2adac07b` measures 4,150,454 core JavaScript bytes after a clean
+`bun run build:core` on Linux with Bun 1.4.2, against 4,127,241 for that main.
+The Claude Agent SDK's update from 0.3.296 to 0.3.300 adds 21,565 bytes to its
+lazy chunk, which never loads at startup. The core total limit becomes
+4,152,000; the UI, entry and `main.js` limits stay unchanged.
+
+On 2026-10-15, updating another Windows PC's desktop app (PR #498) merged
+with PR #494 measures 4,926,156 UI bytes and 4,125,352 core JavaScript bytes
+after fresh `bun run build:ui` and `bun run build:core` on Linux. The limits
+become 4,928,000 and 4,127,000; the entry limits stay unchanged.
+
+On 2026-10-15, the server update's handoff and the slimmer backup (PR #494),
+with a handoff time in the update cards since removed, measured 4,917,711 UI bytes
+and 4,119,340 core JavaScript bytes after fresh `bun run build:ui` and
+`bun run build:core` on Linux, 711 and 340 bytes over the limits of that day;
+Windows CI measured 4,119,299 core bytes. The limits become 4,919,000 and
+4,121,000; the entry limits stay unchanged.
 
 On 2026-10-14, files dropped on the desktop window going to the composer
 (`lib/native-drop.ts`, the attach overlay and its English and French strings)
@@ -579,6 +614,15 @@ browser once more when the first never reached its page: no debugging port,
 no devtools socket, or a first navigation that did not commit in 20 seconds.
 It logs `[e2e] the browser did not start` when it does. Nothing the page does
 after it has loaded is retried.
+
+Both E2E steps point `TEMP` and `TMP` at `runner.temp`, on the runner's D:
+drive, so browser profiles and core data directories leave C:. With them on
+C:, Chrome held page loads for 15 to 60 s after the UI server had answered every
+request, while a fresh connection to the same server got the file in
+milliseconds: 8 such stalls in 5 of 9 shard runs, against none in 9 on D:, and
+706 s of tests against 420 s (PR #513, 2026-10-15). They had failed about one
+shard in five since 2026-10-10, on `main` as on branches, a different test each
+time. `scripts/ci/e2e-harness.test.ts` keeps both variables on both steps.
 
 CI Chromium uses CPU compositing with software GL disabled. Browser launch
 failures retain bounded stderr; exited browsers fail promptly. Navigation waits

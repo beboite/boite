@@ -12,7 +12,7 @@ beforeAll(async () => {
   server = await startUi(port);
   url = `http://127.0.0.1:${port}/?fake=1&open=recent`;
 }, 60_000);
-afterAll(async () => { await server?.close(); });
+afterAll(async () => { await server?.close(); }, 30_000);
 
 // A provider opened a second message in the middle of a turn: the call still
 // running there sits under the finished ones at the gap of one message's parts.

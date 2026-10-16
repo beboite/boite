@@ -138,7 +138,9 @@ agents. The default deletion retention is 30 days; `threadDeletionRetentionDays`
 accepts 0 to 3650, with 0 disabling automatic purge. Startup and minute passes
 purge expired families transactionally. Reads and restoration also check expiry.
 Project removal purges its pending deletions. Files, worktrees, branches and
-native provider transcripts stay on disk. See
+native provider transcripts stay on disk; the
+[settled worktree cleanup](development.md#settled-worktree-cleanup) later removes
+a deleted thread's worktree when nothing in it would be lost. See
 [thread lifecycle](development.md#thread-lifecycle).
 
 The journal does not replace a provider's native transcript. A turn resumes the
@@ -161,6 +163,11 @@ held with its original turn, input receipt and execution selection. Desktop and
 phone offer Resume and Discard through `turns.recover`; neither creates a second
 input. Work that may already have reached a provider is never replayed by this
 recovery path. Explicit restart handoff keeps its own authorization rules.
+
+A turn a provider refused for availability retries at capacity within the same
+turn, or, with `autoResumeLimitedThreads`, resumes after a usage limit's reset
+from a plan journalled under `limit-resumes`; `ThreadSummary.retry` shows
+either ([usage](usage.md#when-a-provider-refuses-a-turn)).
 
 Owner and paired-device connections name one visible conversation through
 `threads.focus`. Claude, Codex, ACP, pi and Muse can prepare their traced process

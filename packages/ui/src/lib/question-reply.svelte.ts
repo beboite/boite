@@ -11,6 +11,11 @@ import { strings } from './strings';
  * here, so the composer's Send can take it, and so can a card that scrolls out
  * of the timeline's window and comes back. The user can set the questions of a
  * thread aside to write an ordinary message instead.
+ *
+ * A question never takes a composer the user is writing in: one that arrives
+ * while its thread's composer holds a draft, or was typed in within the last
+ * pause, waits until that composer is empty and quiet, so Enter sends the
+ * draft as the message it was meant to be. The card can still choose it.
  */
 class QuestionReplies {
   picks = $state<Record<string, string[]>>({});
@@ -19,7 +24,15 @@ class QuestionReplies {
   docked = $state<string | null>(null);
   /** The question a card's "Answer in writing" gave the composer. */
   chosen = $state<string | null>(null);
+  /** Questions that arrived while the user wrote: the composer leaves them until it is empty and quiet. */
+  waiting = $state<Record<string, true>>({});
+  /** Composers typed in within their last pause, by key: each has its own, so typing in one never ends another's. */
+  typing = $state<Record<string, true>>({});
+  pauses = new Map<string, ReturnType<typeof setTimeout>>();
 }
+
+/** How long a composer sits untouched before a question that arrived during typing may take it. */
+export const TYPING_PAUSE_MS = 1500;
 
 /** Per machine: question ids are only unique on the core that asked. */
 const replies = new WeakMap<Store, QuestionReplies>();
@@ -30,17 +43,51 @@ export function repliesOf(store: Store): QuestionReplies {
   return held;
 }
 
+function drafted(store: Store, threadId: string): boolean {
+  const state = store.composerStates[threadId];
+  return !!state && (state.text.length > 0 || state.attachments.length > 0);
+}
+
+/** A keystroke in the composer `key`: questions arriving now wait for the pause after it. */
+export function noteTyping(store: Store, key: string): void {
+  const held = repliesOf(store);
+  held.typing[key] = true;
+  clearTimeout(held.pauses.get(key));
+  held.pauses.set(key, setTimeout(() => { delete held.typing[key]; held.pauses.delete(key); }, TYPING_PAUSE_MS));
+}
+
+/**
+ * Called as a question reaches this device, before it joins the pending list.
+ * A question already known (a repeated event) keeps its state.
+ */
+export function noteQuestionAsked(store: Store, question: QuestionRequest): void {
+  if (!question.allowText || store.pendingQuestions.some((known) => known.id === question.id)) return;
+  const held = repliesOf(store);
+  if (held.typing[question.threadId] || drafted(store, question.threadId)) held.waiting[question.id] = true;
+}
+
+/** Lets a waiting question take its composer once that composer is empty and quiet, or the question is gone. */
+export function releaseWaiting(store: Store): void {
+  const held = repliesOf(store);
+  for (const id of Object.keys(held.waiting)) {
+    const question = store.pendingQuestions.find((pending) => pending.id === id);
+    if (!question || (!held.typing[question.threadId] && !drafted(store, question.threadId))) delete held.waiting[id];
+  }
+}
+
 /**
  * The question the composer answers, or null when it sends ordinary messages.
  * The one a card chose, else the question the agent stopped for, else the one
  * the dock shows. None while the composer edits a sent message: Send replaces
- * that message, and a card's Answer must not take the recalled text.
+ * that message, and a card's Answer must not take the recalled text. A question
+ * that arrived while the user wrote is left out until it is released.
  */
 export function replyTarget(store: Store): QuestionRequest | null {
   const thread = store.openThread?.id;
   if (!thread || store.composerStates[thread]?.editing) return null;
   const held = repliesOf(store);
-  const open = store.pendingQuestions.filter((question) => question.threadId === thread && question.allowText && !held.ignored[question.id]);
+  const open = store.pendingQuestions.filter((question) =>
+    question.threadId === thread && question.allowText && !held.ignored[question.id] && (!held.waiting[question.id] || question.id === held.chosen));
   return open.find((question) => question.id === held.chosen)
     ?? open.find((question) => question.async !== true)
     ?? open.find((question) => question.id === held.docked)
@@ -85,6 +132,7 @@ export async function sendAnswer(store: Store, question: QuestionRequest): Promi
 export function writeAnswer(store: Store, questionId: string): void {
   const held = repliesOf(store);
   delete held.ignored[questionId];
+  delete held.waiting[questionId];
   held.chosen = questionId;
   focusComposer();
 }

@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, nativeAgentsOfTool, processAgentCommand, SPEED_NEEDS_MODEL, threadBusy, type RpcEvents } from '@boite/contracts';
-import type { AgentLetter, BackgroundWait, DelegatedAgent, DelegationConfig, DelegationModels, DelegationView, RpcParams, ThreadSummary, Turn, Usage } from '@boite/contracts';
+import { CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, delegationAnswerable as answerable, delegationNeeds as needsOf, delegationReply, nativeAgentsOfTool, processAgentCommand, SPEED_NEEDS_MODEL, threadBusy, type RpcEvents } from '@boite/contracts';
+import type { AgentLetter, BackgroundWait, DelegatedAgent, DelegationConfig, DelegationModels, DelegationView, PermissionRequest, QuestionRequest, RequestId, RpcParams, ThreadSummary, Turn, Usage } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused } from './errors.ts';
 import { checkContext } from './context-mode.ts';
@@ -13,10 +13,14 @@ import { withLoad } from './threads/records.ts';
 import { nativeAgents } from './native-agents.ts';
 import { delegatedResultPage, DelegationWaits } from './delegation/results.ts';
 import { INTERRUPTION_TEXT } from './delegation/interruption.ts';
+import { permissionWake, questionWake, worktreeLine } from './delegation/messages.ts';
+import { ChildWorktrees } from './delegation/worktrees.ts';
 import type { Connection } from './router.ts';
 
 interface AgentRow { thread_id: string; root_id: string; request_id: string; fingerprint: string; profile_id: string; task: string }
 interface LetterRow { data: string; fingerprint: string }
+/** A permission the user answers within this time, watching the child, does not wake its parent. */
+export const PERMISSION_WAKE_MS = 30_000;
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 function text(value: unknown, field: string, max: number): string {
   if (typeof value !== 'string' || !value.trim() || value.length > max) throw invalidParams(`${field}: expected 1 to ${max} characters`);
@@ -24,7 +28,7 @@ function text(value: unknown, field: string, max: number): string {
 }
 /** Load and the derived live fields arrive in thread.updated without changing team history. */
 function teamState(thread: ThreadSummary): string {
-  const { load, progress, runningSince, requestSince, backgroundWork, backgroundWait, pendingMove, moveNote, pendingAnswers, openQuestions, ...stored } = thread;
+  const { load, progress, runningSince, requestSince, backgroundWork, backgroundWait, pendingMove, moveNote, pendingAnswers, openQuestions, retry, pullRequestWatches, ...stored } = thread;
   return JSON.stringify(Object.fromEntries(Object.entries(stored).sort(([left], [right]) => left.localeCompare(right))));
 }
 /**
@@ -50,8 +54,8 @@ export function subagentGuide(config: DelegationConfig): string {
   if (!config.enabled) return `${head} the owner turned them off for this conversation; work alone and point the user to Subagents > Settings if they asked for some.\n${WORKFLOW_LINE}`;
   return [
     head,
-    `- boite delegate spawn "<brief>" [--model <provider/model>] [--effort <level>] [--speed <tier>] [--context light|neutral]: one bounded job each, on this conversation's model by default, standard speed without --speed (tiers: boite delegate models). ${anyModel(config) ? 'Any model of boite delegate models works, any harness (Claude can run codex/<model>).' : `The owner allows only this model${profiles ? ' and the profiles' : ''}.`}${profiles ? ` --profile: ${profiles}.` : ''}`,
-    '- The brief is all a child sees: goal, files it owns, limits, how to verify. Shared checkout: give parallel children distinct files.',
+    `- boite delegate spawn "<brief>" [--model <provider/model>] [--effort <level>] [--speed <tier>] [--context light|neutral] [--worktree]: one bounded job each, on this conversation's model by default, standard speed without --speed (tiers: boite delegate models). ${anyModel(config) ? 'Any model of boite delegate models works, any harness (Claude can run codex/<model>).' : `The owner allows only this model${profiles ? ' and the profiles' : ''}.`}${profiles ? ` --profile: ${profiles}.` : ''}`,
+    '- The brief is all a child sees: goal, files it owns, limits, how to verify. Shared checkout: give parallel children distinct files, or --worktree (a branch from your last commit; its result names it).',
     '- Results return as messages: keep working or end your turn, never poll. Follow: boite delegate list; steer with boite delegate send <id> <text>; boite delegate stop [id].',
     `- ${WORKFLOW_LINE}`,
     ...(config.paused ? ['Paused by the owner: new children and steps wait until they resume it in Subagents > Settings.'] : []),
@@ -61,6 +65,7 @@ export function subagentGuide(config: DelegationConfig): string {
 /** A family of ordinary threads. No extra orchestrator model or provider process. */
 export class Delegation {
   readonly waits: DelegationWaits;
+  readonly worktrees: ChildWorktrees;
   private closed = false;
   private readonly delivering = new Set<string>();
   private readonly jobs = new Set<Promise<void>>();
@@ -70,11 +75,17 @@ export class Delegation {
   private readonly nativeActive = new Set<string>();
   /** Delegated agents whose background work just ended: when a wake that has not come stops being expected. */
   private readonly wakeDeadlines = new Map<string, number>();
+  /** Permission requests of delegated agents, by id: when their parent hears of one still open. */
+  private readonly permissionWakes = new Map<RequestId, { threadId: string; at: number }>();
   private readonly off: () => void;
   private readonly timer: ReturnType<typeof setInterval>;
 
   constructor(private readonly core: Core) {
-    this.waits = new DelegationWaits(core, threadId => this.rows(threadId).map(row => this.member(row)));
+    this.worktrees = new ChildWorktrees(core, threadId => {
+      const thread = this.core.journal.getThread(threadId);
+      if (thread?.parentThreadId) this.changed(thread.parentThreadId);
+    });
+    this.waits = new DelegationWaits(core, threadId => this.rows(threadId).map(row => this.member(row)), threadId => this.worktrees.isSettling(threadId));
     // Restart preserves relationships/results, but never restarts paid work: a team
     // with mail still to deliver or a child turn cut short waits for its owner.
     // A team with nothing pending has nothing to restart and stays usable.
@@ -121,6 +132,17 @@ export class Delegation {
         }
       }
       if (name === 'thread.removed' && !(payload as { undoable?: boolean }).undoable) this.remove((payload as { threadId: string }).threadId);
+      if (name === 'question.asked') this.asked(payload as QuestionRequest);
+      if (name === 'permission.requested') this.permissionAsked(payload as PermissionRequest);
+      if (name === 'question.answered') {
+        const event = payload as RpcEvents['question.answered'];
+        this.cardClosed(event.threadId, event.questionId);
+      }
+      if (name === 'permission.resolved') {
+        const event = payload as RpcEvents['permission.resolved'];
+        this.permissionWakes.delete(event.requestId);
+        this.cardClosed(event.threadId, event.requestId);
+      }
     });
     // The tick remains for expiry and a steer a driver was not ready for.
     this.timer = setInterval(() => this.tick(), 1000);
@@ -134,9 +156,17 @@ export class Delegation {
   /** Delivery to one thread once the current synchronous work (a journal write, a turn end) is done. */
   private kick(threadId: string): void {
     queueMicrotask(() => {
-      if (this.closed || this.core.journal.isClosed()) return;
-      this.track(this.deliver(threadId).catch(error => { if (!this.closed) this.core.log('warn', `delegation ${threadId}: ${messageOf(error)}`); }));
+      if (!this.live()) return;
+      this.track(this.deliver(threadId).catch(error => { if (this.live()) this.core.log('warn', `delegation ${threadId}: ${messageOf(error)}`); }));
     });
+  }
+  /**
+   * Shutdown closes this module before the journal, but a crash, or a test
+   * simulating one, can close the journal under a timer or a queued callback:
+   * those return quietly instead of throwing on the closed database.
+   */
+  private live(): boolean {
+    return !this.closed && !this.core.journal.isClosed();
   }
 
   private root(threadId: string): ThreadSummary {
@@ -191,8 +221,11 @@ export class Delegation {
     // A turn ended to wait on background work left a checkpoint, not a result: none is available
     // while that work may still wake it, and an interrupted wait is settled without one.
     const wait = thread.backgroundWait?.state;
+    const needsInput = needsOf(this.core.threads.listQuestions(row.thread_id), this.core.threads.listPermissions(row.thread_id));
+    const worktree = this.worktrees.get(row.thread_id);
     return { thread, profileId: row.profile_id, task: row.task, lastTurn, result: this.result(lastTurn),
-      ...(terminal && wait !== 'waiting' ? { resultRef: { agentId: row.thread_id, turnId: lastTurn.id }, settlement: wait === 'interrupted' ? 'settled' as const : 'result_available' as const } : lastTurn === null ? { settlement: 'settled' as const } : {}) };
+      ...(terminal && wait !== 'waiting' ? { resultRef: { agentId: row.thread_id, turnId: lastTurn.id }, settlement: wait === 'interrupted' ? 'settled' as const : 'result_available' as const } : lastTurn === null ? { settlement: 'settled' as const } : {}),
+      ...(needsInput.length ? { needsInput } : {}), ...(worktree ? { worktree } : {}) };
   }
   /** A turn under way, or one ended on background work that will wake it. */
   private busy(thread: ThreadSummary): boolean {
@@ -264,10 +297,12 @@ export class Delegation {
     const requestId = text(params.requestId, 'requestId', 128);
     const task = text(params.task, 'task', 12000);
     const title = params.title === undefined ? task.split('\n')[0]!.slice(0, 80) : text(params.title, 'title', 120);
+    if (params.worktree !== undefined && typeof params.worktree !== 'boolean') throw invalidParams('worktree: expected true, false or absent');
+    const worktree = params.worktree === true;
     const request: RouteRequest = { profileId: params.profileId ?? null, ...(params.model === undefined ? {} : { model: text(params.model, 'model', 256) }), ...(params.effort === undefined ? {} : { effort: text(params.effort, 'effort', 32) }), ...(params.speed === undefined ? {} : { speed: text(params.speed, 'speed', 64) }) };
     // A request id from before routes keeps its fingerprint: profile, task and title only.
     // A spawn that names a context mode adds it, so a request id from before keeps its fingerprint.
-    const fingerprint = hash([...(request.model === undefined && request.effort === undefined && request.speed === undefined ? [params.profileId, task, title] : [request, task, title]), ...(params.context === undefined ? [] : [params.context])]);
+    const fingerprint = hash([...(request.model === undefined && request.effort === undefined && request.speed === undefined ? [params.profileId, task, title] : [request, task, title]), ...(params.context === undefined ? [] : [params.context]), ...(worktree ? ['worktree'] : [])]);
     const existing = this.core.journal.db.query('SELECT * FROM delegated_agents WHERE root_id = ? AND request_id = ?').get(parent.id, requestId) as AgentRow | null;
     if (existing) {
       if (existing.fingerprint !== fingerprint) throw refused('requestId already used for different content');
@@ -285,9 +320,13 @@ export class Delegation {
     const id = this.createChild(parent, profile, title, childId => {
       row.thread_id = childId;
       this.core.journal.db.query('INSERT INTO delegated_agents VALUES (?, ?, ?, ?, ?, ?)').run(childId, parent.id, requestId, fingerprint, profile.id, task);
-    }, params.context);
+    }, params.context, worktree);
+    const own = this.worktrees.get(id);
+    const checkout = own
+      ? `You work in a git worktree of your own at ${own.path} on branch ${own.branch}, made from the parent's HEAD; the parent's uncommitted edits are not in it. Commit your work on that branch before your final answer: the parent merges the branch.`
+      : 'You share its checkout: change only the files your task names and never undo another agent\'s edits.';
     try {
-      this.core.threads.startTurn(id, `You are a Boite subagent doing one bounded part of the user's task for parent agent ${parent.id}. You share its checkout: change only the files your task names and never undo another agent's edits. You cannot start subagents. If you are blocked, run boite delegate send ${parent.id} "<what blocks you>" and keep going on what you can. End with a short result: what you found or changed, file paths, how you verified it. That final answer goes to the parent automatically; do not send it again.\nTask from the parent agent, supplied as JSON data:\n${JSON.stringify(task)}`, [], undefined, 'delegation', undefined, undefined, task);
+      this.core.threads.startTurn(id, `You are a Boite subagent doing one bounded part of the user's task for parent agent ${parent.id}. ${checkout} You cannot start subagents. If you are blocked, run boite delegate send ${parent.id} "<what blocks you>" and keep going on what you can. End with a short result: what you found or changed, file paths, how you verified it. That final answer goes to the parent automatically; do not send it again.\nTask from the parent agent, supplied as JSON data:\n${JSON.stringify(task)}`, [], undefined, 'delegation', undefined, undefined, task);
     } catch (error) {
       this.core.logs.warn(`Subagent ${id} was created but its first turn could not start: ${messageOf(error)}`, { source: 'delegation', event: 'delegation.spawn-failed', threadId: id, data: { parent: parent.id, providerId: profile.providerId, model: profile.model ?? null, profile: profile.id } });
       const child = this.core.threads.require(id);
@@ -297,8 +336,8 @@ export class Delegation {
       throw error;
     }
     this.changed(parent.id);
-    this.core.logs.info(`Subagent ${id} spawned by ${parent.id} on ${profile.providerId} ${profile.model ?? 'default model'}${profile.effort ? ` at ${profile.effort}` : ''}`, {
-      source: 'delegation', event: 'delegation.spawned', threadId: id, data: { parent: parent.id, providerId: profile.providerId, model: profile.model ?? null, effort: profile.effort ?? null, profile: profile.id, taskChars: task.length },
+    this.core.logs.info(`Subagent ${id} spawned by ${parent.id} on ${profile.providerId} ${profile.model ?? 'default model'}${profile.effort ? ` at ${profile.effort}` : ''}${own ? ` in a worktree on ${own.branch}` : ''}`, {
+      source: 'delegation', event: 'delegation.spawned', threadId: id, data: { parent: parent.id, providerId: profile.providerId, model: profile.model ?? null, effort: profile.effort ?? null, profile: profile.id, taskChars: task.length, worktree: own !== undefined },
     });
     return this.member(row);
   }
@@ -343,14 +382,17 @@ export class Delegation {
    * workflow step that names none, in the parent's checkout and permission
    * mode, on the route's speed tier or none: never the parent's. The tier is
    * checked here, whoever built the route. `record` runs in the same
-   * transaction.
+   * transaction. `worktree` gives it a git worktree of its own instead of the
+   * parent's checkout: its branch and folder now, the worktree itself before
+   * its first turn ([worktrees](./delegation/worktrees.ts)).
    */
-  createChild(parent: ThreadSummary, profile: ChildRoute, title: string, record: (id: string) => void, context?: unknown): string {
+  createChild(parent: ThreadSummary, profile: ChildRoute, title: string, record: (id: string) => void, context?: unknown, worktree = false): string {
     const id = newId('thr_');
     const { speed: asked, ...route } = profile;
     if (asked != null && route.model === null) throw invalidParams(SPEED_NEEDS_MODEL);
     const speed = checkSpeed(this.core.providers.require(route.providerId), route.accountId, route.model, asked ?? null);
     const contextMode = checkContext(this.core.providers.require(route.providerId), context);
+    const planned = worktree ? this.worktrees.plan(parent, id) : null;
     this.core.journal.db.transaction(() => {
       if (parent.projectId === null) {
         const now = Date.now();
@@ -359,7 +401,8 @@ export class Delegation {
           context: null, promptCache: null, load: null, unread: false, pinned: false, createdAt: now, updatedAt: now };
         this.core.journal.append({ type: 'thread.created', threadId: id, version: 1, payload: child }, () => this.core.journal.putThread(child));
         this.core.bus.emit('thread.created', child);
-      } else this.core.threads.create({ projectId: parent.projectId, providerId: route.providerId, accountId: route.accountId, model: route.model ?? undefined, effort: route.effort, speed, title, cwd: parent.cwd, permissionMode: parent.permissionMode, ...(context === undefined ? {} : { context: context as RpcParams<'threads.create'>['context'] }) }, { id, branch: parent.branch, parentThreadId: parent.id });
+      } else this.core.threads.create({ projectId: parent.projectId, providerId: route.providerId, accountId: route.accountId, model: route.model ?? undefined, effort: route.effort, speed, title, cwd: planned?.path ?? parent.cwd, permissionMode: parent.permissionMode, ...(context === undefined ? {} : { context: context as RpcParams<'threads.create'>['context'] }) }, { id, branch: planned?.branch ?? parent.branch, parentThreadId: parent.id });
+      if (planned) this.worktrees.record(id, planned);
       record(id);
       const child = this.core.threads.require(id);
       this.core.journal.putThread({ ...child, titleSource: 'user' });
@@ -414,6 +457,7 @@ export class Delegation {
     if (!permitted) throw refused('toThreadId must be this agent\'s parent or a direct child');
     const body = text(params.text, 'text', 4000), requestId = text(params.requestId, 'requestId', 128);
     if (origin !== 'result' && requestId.startsWith('result:')) throw invalidParams('requestId: result: is reserved for core completion delivery');
+    if (origin !== 'question' && requestId.startsWith('question:')) throw invalidParams('requestId: question: is reserved for the core telling a parent its child asks something');
     const fingerprint = hash([recipient.id, body, origin]);
     const existing = this.core.journal.db.query('SELECT data, fingerprint FROM delegation_messages WHERE sender_id = ? AND request_id = ?').get(sender.id, requestId) as LetterRow | null;
     if (existing) {
@@ -422,9 +466,15 @@ export class Delegation {
     }
     this.available(root);
     if (sender.archived || recipient.archived) throw refused('delegation messages require unarchived threads');
+    const fromCore = origin === 'result' || origin === 'question';
     const count = this.core.journal.db.query('SELECT count(*) AS n FROM delegation_messages WHERE root_id = ? AND created_at > ?').get(root.id, Date.now() - 3_600_000) as { n: number };
-    if (origin !== 'result' && count.n >= 100) throw refused('delegation hourly message limit reached');
-    const letter: AgentLetter = { id: randomUUID(), origin, ...(checkpoint ? { checkpoint: true } : {}), from: this.contact(sender), to: { coreId: 'local', threadId: recipient.id }, toTitle: recipient.title, toProject: this.contact(recipient).project, toMachine: 'Boite', text: body, replyTo: null, createdAt: Date.now(), expiresAt: origin === 'result' ? Number.MAX_SAFE_INTEGER : Date.now() + 15 * 60_000, status: 'received', error: null };
+    if (!fromCore && count.n >= 100) throw refused('delegation hourly message limit reached');
+    // A parent writing to a child that waits on a question answers that question: a waiting child takes no mail.
+    const reply = sender.parentThreadId ? null : delegationReply(this.core.threads.listQuestions(recipient.id), body);
+    if (typeof reply === 'string') throw refused(reply, { field: 'text', toThreadId: recipient.id });
+    const question = reply?.question, answer = reply?.answer;
+    // A question letter stays until the card closes, which withdraws it if it was not delivered yet.
+    const letter: AgentLetter = { id: randomUUID(), origin, ...(checkpoint ? { checkpoint: true } : {}), from: this.contact(sender), to: { coreId: 'local', threadId: recipient.id }, toTitle: recipient.title, toProject: this.contact(recipient).project, toMachine: 'Boite', text: body, replyTo: null, createdAt: Date.now(), expiresAt: fromCore ? Number.MAX_SAFE_INTEGER : Date.now() + 15 * 60_000, status: question ? 'delivered' : 'received', error: null, ...(question ? { answered: question.id } : {}) };
     this.core.journal.append({ type: 'delegation.sent', threadId: sender.id, version: 1, payload: letter }, () => {
       this.core.journal.db.query('INSERT INTO delegation_messages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(letter.id, root.id, sender.id, recipient.id, requestId, fingerprint, letter.status, letter.createdAt, JSON.stringify(letter));
     });
@@ -432,6 +482,10 @@ export class Delegation {
     // An explicit new instruction resumes this child only. It cannot resume a paused team.
     this.stopped.delete(recipient.id);
     this.changed(root.id);
+    if (question && answer) {
+      this.core.threads.answerQuestion({ threadId: recipient.id, questionId: question.id, optionIds: answer.optionIds, ...(answer.text === undefined ? {} : { text: answer.text }) }, origin === 'user' ? 'the user, through the parent' : 'the parent agent');
+      return letter;
+    }
     this.kick(recipient.id);
     return letter;
   }
@@ -530,6 +584,9 @@ export class Delegation {
     // reason to stop its team: the children keep working and their results wake it again.
     // Only the owner's Stop (`threads.stopTurn`, `delegation.stop`) pauses a team.
     if (!thread.parentThreadId) return;
+    // Ended to wait on its own background work: it is not done, and its worktree is still in use.
+    const live = turn.status === 'done' ? this.core.threads.agentState.background.get(thread.id) ?? [] : [];
+    const settling = live.length > 0 ? null : this.worktrees.settle(thread.id);
     // A workflow step's answer goes to its run, and a goal reviewer's to its goal, never to the parent as mail.
     if (this.stepOwned(thread.id)) return;
     const root = this.core.journal.getThread(thread.parentThreadId);
@@ -542,18 +599,66 @@ export class Delegation {
     });
     // Stopping a child is final until an explicit new instruction; no failure retry loop.
     if (turn.status !== 'done') this.stopped.add(thread.id);
+    // A child that is over leaves no question behind for its parent to find.
+    if (live.length === 0) this.closeQuestions(thread.id, `the core, since the subagent's turn ended ${turn.status}`);
     const config = this.config(root.id);
     if (!config.enabled || config.paused || root.archived) return;
     const result = this.result(turn);
     // Ended to wait on its own background work: what it says is a checkpoint, the result follows.
-    const live = turn.status === 'done' ? this.core.threads.agentState.background.get(thread.id) ?? [] : [];
     if (live.length > 0) this.wakeDeadlines.delete(thread.id);
     const head = live.length > 0
       ? `${thread.title}: waiting on its background work (${[...new Set(live.map(task => task.description.trim() || task.kind))].join(', ')})\nCheckpoint, not its final result: that work wakes it and its final result follows.`
       : `${thread.title}: ${turn.status}`;
+    const deliver = () => {
+      // The worktree line is never cut: the parent needs the branch to merge.
+      const worktree = live.length > 0 ? undefined : this.worktrees.get(thread.id);
+      const tail = worktree ? `\n${worktreeLine(worktree)}` : '';
+      try {
+        this.send({ threadId: thread.id, toThreadId: root.id, requestId: `result:${turn.id}`, text: `${`${head}\n${result ?? 'No text result was returned.'}`.slice(0, 4000 - tail.length)}${tail}` }, 'result', live.length > 0);
+      } catch (error) { this.core.log('warn', `delegation result ${thread.id}: ${messageOf(error)}`); }
+    };
+    if (settling) this.track(settling.then(() => { if (!this.closed) deliver(); }));
+    else deliver();
+  }
+  /** Is this thread a delegated agent the parent spawned, rather than a workflow step or a reviewer? */
+  private delegated(threadId: string): boolean {
+    return this.core.journal.db.query('SELECT 1 FROM delegated_agents WHERE thread_id = ?').get(threadId) !== null;
+  }
+  /** A delegated agent asked something: its parent learns at once. */
+  private asked(request: QuestionRequest): void {
+    const child = this.core.journal.getThread(request.threadId);
+    if (!child?.parentThreadId || !answerable(request) || !this.delegated(child.id)) return;
+    this.changed(child.parentThreadId);
+    this.wake(child, request.id, questionWake(child, request));
+  }
+  /** A permission request: the parent learns of it only if the user has not answered it in a moment. */
+  private permissionAsked(request: PermissionRequest): void {
+    const child = this.core.journal.getThread(request.threadId);
+    if (!child?.parentThreadId || !this.delegated(child.id)) return;
+    this.changed(child.parentThreadId);
+    this.permissionWakes.set(request.id, { threadId: child.id, at: Date.now() });
+  }
+  private wake(child: ThreadSummary, requestId: RequestId, text: string): void {
     try {
-      this.send({ threadId: thread.id, toThreadId: root.id, requestId: `result:${turn.id}`, text: `${head}\n${result ?? 'No text result was returned.'}`.slice(0, 4000) }, 'result', live.length > 0);
-    } catch (error) { this.core.log('warn', `delegation result ${thread.id}: ${messageOf(error)}`); }
+      this.send({ threadId: child.id, toThreadId: child.parentThreadId!, requestId: `question:${requestId}`, text }, 'question');
+    } catch (error) { this.core.log('warn', `delegation question ${child.id}: ${messageOf(error)}`); }
+  }
+  /** A card closed: a parent that was not told yet is not told at all. */
+  private cardClosed(threadId: string, requestId: RequestId): void {
+    const row = this.core.journal.db.query("SELECT data FROM delegation_messages WHERE sender_id = ? AND request_id = ?").get(threadId, `question:${requestId}`) as LetterRow | null;
+    const thread = this.core.journal.getThread(threadId);
+    if (thread?.parentThreadId && this.delegated(threadId)) this.changed(thread.parentThreadId);
+    if (!row) return;
+    const letter = JSON.parse(row.data) as AgentLetter;
+    if (letter.status === 'received') this.update(letter, 'expired', 'The question closed before it was delivered');
+  }
+  /** The open asynchronous questions of a delegated agent that is over or stopped. */
+  private closeQuestions(threadId: string, by: string): void {
+    for (const question of this.core.threads.listQuestions(threadId)) {
+      // A blocking one goes with its turn; only an asynchronous card outlives it.
+      if (!answerable(question) || question.async !== true) continue;
+      try { this.core.threads.skipQuestion({ threadId, questionId: question.id }, by); } catch { /* Already closed by a nested settle. */ }
+    }
   }
   /**
    * A delegated agent's background work changed. Once it ended, the agent gets
@@ -615,6 +720,7 @@ export class Delegation {
       this.core.activity.pauseAll(id);
       this.core.coordination.pause(id);
       if (this.core.scheduler.stop(id) || waiting) stopped++;
+      this.closeQuestions(id, 'the core, since the subagent was stopped');
       this.core.threads.releaseAgent(id);
       for (const letter of this.letters(id, 'received')) this.update(letter, 'rejected', 'Agent stopped');
       for (const letter of this.letters(id, 'uncertain')) {
@@ -639,7 +745,11 @@ export class Delegation {
     // A memory pass's prompt says everything it needs; it neither delegates nor writes mail.
     if (thread.parentThreadId && this.core.workforce.memory.owns(threadId)) return '';
     if (thread.parentThreadId && this.core.activity.ownsReviewer(threadId)) return '\nYou are a Boite goal reviewer. Your final answer and its VERDICT line go to the goal automatically; do not message the parent, start subagents or edit project files.\n';
-    if (thread.parentThreadId) return config.enabled ? `\nYou are a Boite subagent of ${root.id}. Blocked: boite delegate send ${root.id} "<what blocks you>". Your final answer returns automatically. You cannot start subagents or workflows. Shared checkout: change only the files your task names.\n` : '';
+    if (thread.parentThreadId) {
+      const own = this.worktrees.get(threadId);
+      const checkout = own ? `Own worktree ${own.path} on branch ${own.branch}: commit your work there; the parent merges it.` : 'Shared checkout: change only the files your task names.';
+      return config.enabled ? `\nYou are a Boite subagent of ${root.id}. Blocked: boite delegate send ${root.id} "<what blocks you>". Your final answer returns automatically. You cannot start subagents or workflows. ${checkout}\n` : '';
+    }
     // With delegation off, only a workflow request is worth the words; spawn would be refused anyway.
     const asked = request === undefined || /workflow/i.test(request) || (config.enabled && DELEGATION_WORDS.test(request));
     // A persistent agent splits its work like a thread: the guide joins a fresh session while its subagents are on.
@@ -651,13 +761,15 @@ export class Delegation {
     this.pendingChanges.add(rootId);
     queueMicrotask(() => {
       this.pendingChanges.delete(rootId);
-      if (this.closed) return;
+      if (!this.live()) return;
       this.core.bus.emit('delegation.changed', { threadId: rootId });
       for (const row of this.rows(rootId)) this.core.bus.emit('delegation.changed', { threadId: row.thread_id });
     });
   }
   private tick(): void {
     if (this.closed) return;
+    // The journal closed without this module: nothing left to deliver or expire, so the timer stops.
+    if (this.core.journal.isClosed()) { clearInterval(this.timer); return; }
     const rows = this.core.journal.db.query("SELECT data FROM delegation_messages WHERE status = 'received'").all() as LetterRow[];
     const recipients = new Set<string>();
     for (const row of rows) {
@@ -665,9 +777,16 @@ export class Delegation {
       if (letter.expiresAt <= Date.now()) this.update(letter, 'expired', 'Message expired before delivery');
       else recipients.add(letter.to.threadId);
     }
-    for (const threadId of recipients) this.track(this.deliver(threadId));
+    for (const threadId of recipients) this.track(this.deliver(threadId).catch(error => { if (this.live()) this.core.log('warn', `delegation ${threadId}: ${messageOf(error)}`); }));
     // A wake that did not come in time: the child is done, or interrupted, and its row says so.
     const now = Date.now();
+    for (const [requestId, entry] of this.permissionWakes) {
+      if (now - entry.at < PERMISSION_WAKE_MS) continue;
+      this.permissionWakes.delete(requestId);
+      const request = this.core.threads.listPermissions(entry.threadId).find(open => open.id === requestId);
+      const child = this.core.journal.getThread(entry.threadId);
+      if (request && child) this.wake(child, requestId, permissionWake(child, request));
+    }
     for (const [threadId, until] of this.wakeDeadlines) {
       if (until > now) continue;
       this.wakeDeadlines.delete(threadId);
@@ -682,10 +801,11 @@ export class Delegation {
     this.nativeActive.delete(threadId);
     this.wakeDeadlines.delete(threadId);
     this.summaries.delete(threadId);
+    for (const [requestId, entry] of this.permissionWakes) if (entry.threadId === threadId) this.permissionWakes.delete(requestId);
     this.core.journal.db.query('DELETE FROM delegated_agents WHERE thread_id = ? OR root_id = ?').run(threadId, threadId);
     this.core.journal.db.query('DELETE FROM delegation_messages WHERE root_id = ? OR sender_id = ? OR recipient_id = ?').run(threadId, threadId, threadId);
   }
-  beginClose(): void { this.waits.close(); this.closed = true; clearInterval(this.timer); this.off(); this.summaries.clear(); this.pendingChanges.clear(); this.nativeActive.clear(); this.wakeDeadlines.clear(); }
+  beginClose(): void { this.waits.close(); this.closed = true; clearInterval(this.timer); this.off(); this.summaries.clear(); this.pendingChanges.clear(); this.nativeActive.clear(); this.wakeDeadlines.clear(); this.permissionWakes.clear(); }
   async close(): Promise<void> {
     this.beginClose();
     // Driver cancellation releases an in-flight steer. Do not wait here before

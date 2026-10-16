@@ -1,5 +1,6 @@
 import { MergedPrArchive } from './merged-pr-archive.ts';
 import { PullRequests } from './pull-requests.ts';
+import { PullRequestWatches, type WatchTiming } from './pull-request-watch.ts';
 import { existsSync, mkdirSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { basename, dirname, join } from 'node:path';
@@ -38,6 +39,7 @@ import { DraftPreparations } from './threads/draft-preparations.ts';
 import { AttachmentUploads } from './attachment-uploads.ts';
 import { scheduleThreadDeletionRetention } from './threads/deletion-retention.ts';
 import { scheduleDoneRetention } from './threads/done-retention.ts';
+import { WorktreeCleanup } from './worktree-cleanup.ts';
 import { scheduleArtifactRetention } from './artifact-retention.ts';
 import { ArtifactPreviews } from './artifact-preview.ts';
 import { AgentBrowser, BROWSER_SCOPE } from './browser.ts';
@@ -59,6 +61,7 @@ import { BrainStore } from './brain.ts';
 import { HookLedger } from './hooks.ts';
 import { TerminalStore } from './terminals.ts';
 import { ServerUpdates, type ServerUpdateOptions } from './server-update.ts';
+import { DesktopUpdates } from './desktop-update.ts';
 
 export { CORE_VERSION } from './version.ts';
 
@@ -75,6 +78,8 @@ export interface SubscriptionSink {
 
 export interface CoreOptions {
   serverUpdates?: ServerUpdateOptions;
+  /** Tests shorten the pull request watch loop's waits. */
+  pullRequestWatches?: Partial<WatchTiming>;
   bundleHash?: string;
   dataDir: string;
   token: string;
@@ -133,6 +138,8 @@ export class Core {
   readonly diagnostics: Diagnostics;
   readonly pullRequests: PullRequests;
   readonly mergedPrArchive: MergedPrArchive;
+  readonly worktreeCleanup: WorktreeCleanup;
+  readonly pullRequestWatches: PullRequestWatches;
   readonly journal: Journal;
   readonly router: Router;
   readonly settings: SettingsStore;
@@ -166,6 +173,8 @@ export class Core {
   readonly telemetry: Telemetry;
   readonly updates: HarnessUpdates;
   readonly serverUpdates: ServerUpdates;
+  /** The desktop app's updater as this machine's own window reports it. */
+  readonly desktopUpdates: DesktopUpdates;
   readonly coordination: Coordination;
   /** The machines this core trusts as one owner's, and what it hands their clients. */
   readonly group: GroupStore;
@@ -209,16 +218,7 @@ export class Core {
     if (!this.#onShutdown) return 'unsupported';
     if (this.#idleShutdownAdmitted) return 'accepted';
     if (this.#shutdownRequested || this.#stopping) return 'busy';
-    const scheduler = this.scheduler.state();
-    const threads = this.threads;
-    if (this.router.activeRequests > 0 || scheduler.running.length > 0 || scheduler.queued.length > 0
-      // An agent's open tab is not work under way: its browser stays up after the turn and would hold an
-      // update back for good. Closing saves each profile's cookies; a browser command in flight is an active request.
-      || this.agentRuntime.busy || this.procs.liveThreads().some(scope => scope !== BROWSER_SCOPE)
-      || threads.sideQuestions.busy || this.updates.busy
-      || threads.runner.handles.size > 0 || threads.runner.steering.size > 0
-      || threads.deferred.pendingWakes.size > 0 || threads.deferred.deferredAnswers.size > 0 || threads.deferred.consumed.size > 0
-      || [...threads.agentState.background.values()].some(tasks => tasks.length > 0)) return 'busy';
+    if (!this.idle()) return 'busy';
     // Persist an updater's acknowledgement before closing admission or scheduling exit.
     beforeShutdown?.();
     this.logs.info('Idle shutdown accepted: no turn, request or agent process is running', { source: 'core', event: 'core.idle-shutdown.accepted' });
@@ -229,6 +229,39 @@ export class Core {
     this.procs.stopAccepting();
     this.requestShutdown();
     return 'accepted';
+  }
+
+  /**
+   * The server update's way out when the machine never goes idle: a busy
+   * server (an agent working for hours, a resident agent) held the idle gate
+   * shut for good. An agent install still half-written refuses, since the
+   * restart would replace the core under it; anything else is handed to the
+   * next core (`requestHandoffShutdown`), which resumes the running turns.
+   */
+  requestUpdateHandoff(beforeShutdown?: () => void): 'accepted' | 'busy' | 'unsupported' {
+    if (!this.#onShutdown) return 'unsupported';
+    if (this.#idleShutdownAdmitted) return 'accepted';
+    if (this.#shutdownRequested || this.#stopping || this.updates.busy) return 'busy';
+    beforeShutdown?.();
+    this.logs.info('Update handoff accepted: running turns end their tool call, then resume after the restart', { source: 'core', event: 'core.update-handoff.accepted' });
+    this.#idleShutdownAdmitted = true;
+    this.requestHandoffShutdown();
+    return 'accepted';
+  }
+
+  /** No turn, request, agent process, background task or agent install is under way. */
+  private idle(): boolean {
+    const scheduler = this.scheduler.state();
+    const threads = this.threads;
+    if (this.router.activeRequests > 0 || scheduler.running.length > 0 || scheduler.queued.length > 0
+      // An agent's open tab is not work under way: its browser stays up after the turn and would hold an
+      // update back for good. Closing saves each profile's cookies; a browser command in flight is an active request.
+      || this.agentRuntime.busy || this.procs.liveThreads().some(scope => scope !== BROWSER_SCOPE)
+      || threads.sideQuestions.busy || this.updates.busy
+      || threads.runner.handles.size > 0 || threads.runner.steering.size > 0
+      || threads.deferred.pendingWakes.size > 0 || threads.deferred.deferredAnswers.size > 0 || threads.deferred.consumed.size > 0
+      || [...threads.agentState.background.values()].some(tasks => tasks.length > 0)) return false;
+    return true;
   }
 
   /**
@@ -319,6 +352,7 @@ export class Core {
     this.telemetry = new Telemetry(this);
     this.updates = new HarnessUpdates(this);
     this.serverUpdates = new ServerUpdates(this, options.serverUpdates);
+    this.desktopUpdates = new DesktopUpdates(this);
     this.coordination = new Coordination(this);
     this.group = new GroupStore(this);
     this.group.restore();
@@ -330,6 +364,7 @@ export class Core {
 
     this.workforce = new AgentStore(this);
     this.pullRequests = new PullRequests(this);
+    this.pullRequestWatches = new PullRequestWatches(this, (threadId, args) => this.pullRequests.gh(threadId, args), options.pullRequestWatches);
     registerModules(this);
     phase('startup.stores-ready', 'Stores and RPC handlers ready', { methods: this.router.methods().length });
     this.#onShutdown = options.onShutdown;
@@ -350,6 +385,8 @@ export class Core {
     // left running or queued is closed here, or nothing ever would.
     this.threads.agentState.backgroundHistory.interruptLive();
     const recovered = this.threads.recoverStuckTurns();
+    // After recovery: a thread a usage limit stopped resumes at its window's reset, across restarts.
+    this.threads.limitResumes.start();
     this.threads.cards.restoreAsyncQuestions();
     phase('startup.recovered', `Previous run recovered, ${recovered} unfinished turns`, { stuckTurns: recovered });
     queueMicrotask(() => {
@@ -361,6 +398,9 @@ export class Core {
     this.brain.start();
     this.mergedPrArchive = new MergedPrArchive(this, this.pullRequests);
     this.mergedPrArchive.start();
+    this.worktreeCleanup = new WorktreeCleanup(this);
+    this.worktreeCleanup.start();
+    this.pullRequestWatches.start();
     this.logs.record('info', `Core ${this.version} started in ${Date.now() - this.startedAt} ms, ${process.platform} ${process.arch}, Bun ${process.versions.bun ?? 'unknown'}`, {
       source: 'core', event: 'core.started', durationMs: Date.now() - this.startedAt,
       data: { version: this.version, channel: this.channel, os: process.platform, arch: process.arch, bun: process.versions.bun ?? null, pid: process.pid, cliShim: this.cliDir !== null, trace: this.procs.capability().mode },
@@ -405,7 +445,7 @@ export class Core {
       version: this.version,
       ...(this.bundleHash ? { bundleHash: this.bundleHash } : {}),
       protocolVersion: PROTOCOL_VERSION,
-      features: { threadSnapshots: true, chunkedAnswers: true, readingPages: true, deferredToolParts: true, deviceKeys: true, draftPreparation: true, attachmentUploads: true, revealMachines: true },
+      features: { threadSnapshots: true, chunkedAnswers: true, readingPages: true, deferredToolParts: true, deviceKeys: true, draftPreparation: true, attachmentUploads: true, revealMachines: true, desktopUpdates: true },
       coreId: this.coordination.card().coreId,
       hostname: hostname(),
       os: currentOs(),
@@ -435,9 +475,12 @@ export class Core {
     this.workflows.beginClose();
     this.coordination.beginClose();
     void this.mergedPrArchive.close();
+    void this.worktreeCleanup.close();
+    void this.pullRequestWatches.close();
     this.group.beginClose();
     this.activity.close();
     this.threads.autoCompact.close();
+    this.threads.limitResumes.close();
     this.#drainPromise = this.agentRuntime.close().then(() => this.scheduler.drain(timeoutMs));
     return this.#drainPromise;
   }
@@ -460,8 +503,11 @@ export class Core {
     this.artifactPreviews.stop();
     this.threads.sideQuestions.close();
     await this.mergedPrArchive.close();
+    await this.worktreeCleanup.close();
+    await this.pullRequestWatches.close();
     this.threads.titles.close();
     this.threads.autoCompact.close();
+    this.threads.limitResumes.close();
     await this.agentRuntime.close();
     this.workforce.close();
     this.#stopping = true;
@@ -472,6 +518,7 @@ export class Core {
     this.updates.close();
     this.providers.close();
     this.serverUpdates.close();
+    this.desktopUpdates.close();
     await this.drain();
     await this.delegation.close();
     await this.coordination.close();

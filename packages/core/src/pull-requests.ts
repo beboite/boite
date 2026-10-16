@@ -9,6 +9,8 @@ import { GIT_PROBE_TIMEOUT_MS, hasGitMarker } from './projects.ts';
 import { PullRequestReviews } from './pull-request-review.ts';
 
 type PullRequest = ThreadSummary['pullRequest'];
+/** What a merge proof reads of a thread. The worktree cleanup also asks for a worktree whose thread was deleted. */
+export type CheckoutOwner = Pick<ThreadSummary, 'id' | 'cwd' | 'branch' | 'projectId'>;
 
 export function hasGitHubRemote(remotes: string, host = process.env.GH_HOST ?? 'github.com'): boolean {
   return remotes.split('\n').some(line => {
@@ -196,6 +198,16 @@ export class PullRequests {
     this.#maxOutputBytes = options.maxOutputBytes ?? 8 * 1024 * 1024;
   }
 
+  /**
+   * A `gh` call for a pull request watch, in the thread's folder when it is
+   * still there (a removed worktree leaves it gone; `gh api` needs none), under
+   * the same two-at-a-time queue and deadline as every lookup here.
+   */
+  gh(threadId: string, args: string[]): Promise<string> {
+    const thread = this.core.threads.require(threadId);
+    return this.#run(thread, existsSync(thread.cwd) ? thread.cwd : this.core.dataDir, 'gh', args);
+  }
+
   async detail(threadId: string, input: string): Promise<LinkedPullRequest> {
     const address = pullRequestAddress(input);
     const host = (process.env.GH_HOST ?? 'github.com').toLowerCase();
@@ -227,7 +239,7 @@ export class PullRequests {
    * the fix, so the branch is read from the checkout, not from the thread.
    * Fresh checkout checks use the same bounded process queue as display lookups.
    */
-  async cleanCheckout(thread: ThreadSummary, sha?: string, signal?: AbortSignal): Promise<{ branch: string | null; sha: string } | null> {
+  async cleanCheckout(thread: CheckoutOwner, sha?: string, signal?: AbortSignal): Promise<{ branch: string | null; sha: string } | null> {
     if (!thread.branch || thread.branch === 'HEAD') return null;
     const status = await this.#run(thread, thread.cwd, 'git', ['status', '--porcelain=v2', '--branch', '-z'], signal);
     const records = status.split('\0').filter(Boolean);
@@ -237,13 +249,13 @@ export class PullRequests {
     return { branch: branch === '(detached)' ? null : branch, sha: tip };
   }
 
-  async validateMergedCheckout(thread: ThreadSummary, proof: MergedPrProof, signal?: AbortSignal): Promise<boolean> {
+  async validateMergedCheckout(thread: CheckoutOwner, proof: MergedPrProof, signal?: AbortSignal): Promise<boolean> {
     signal?.throwIfAborted();
     if (repositoryOf(thread.cwd) !== proof.checkoutRepository || githubRepository(await this.#run(thread, thread.cwd, 'git', ['remote', '-v'], signal)) !== proof.repository) return false;
     return (await this.cleanCheckout(thread, proof.sha, signal))?.branch === proof.branch;
   }
 
-  async proveMerged(thread: ThreadSummary, signal?: AbortSignal): Promise<MergedPrProof | null> {
+  async proveMerged(thread: CheckoutOwner, signal?: AbortSignal): Promise<MergedPrProof | null> {
     signal?.throwIfAborted();
     const project = thread.projectId === null ? null : this.core.journal.getProject(thread.projectId);
     if (!project || resolve(thread.cwd) === resolve(project.path) || !thread.branch || thread.branch === 'HEAD') return null;
@@ -415,7 +427,7 @@ export class PullRequests {
     };
   }
 
-  async #run(thread: ThreadSummary, cwd: string, command: string, args: string[], signal?: AbortSignal): Promise<string> {
+  async #run(thread: Pick<ThreadSummary, 'id'>, cwd: string, command: string, args: string[], signal?: AbortSignal): Promise<string> {
     const release = await this.#acquire(signal);
     const scope = `pull-request:${thread.id}:${++this.#sequence}`;
     try {

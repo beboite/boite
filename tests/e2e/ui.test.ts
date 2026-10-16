@@ -67,7 +67,7 @@ afterAll(async () => {
   await core?.stop();
   if (projectDir !== undefined) await removeDirectory(projectDir);
   if (worktreesDir !== undefined) await removeDirectory(worktreesDir);
-}, 15_000);
+}, 30_000);
 
 test('the core serves the production bundle: no fake client, no Svelte dev runtime', async () => {
   const index = await (await fetch(`${core.url}/`)).text();
@@ -416,7 +416,8 @@ test(
     // user bubble carries the thumbnail as a part of the journalled message.
     expect(await page.evaluate<number>(`document.querySelectorAll('${testid('composer-attachment')}').length`)).toBe(0);
     const assistant = await page.evaluate<string>(ASSISTANT_TEXT);
-    expect(assistant).toMatch(/\[image image\/png, \d+ bytes, square\.png\] what is this square/);
+    // Boite's own lines can sit between the image the echo names first and the text typed.
+    expect(assistant).toMatch(/\[image image\/png, \d+ bytes, square\.png\][\s\S]*what is this square/);
     const images = await page.evaluate<string[]>(
       `Array.from(document.querySelectorAll('${testid('message')}[data-role=user] ${testid('image-part')}')).map((img) => img.getAttribute('src').slice(0, 22))`,
     );

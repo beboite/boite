@@ -59,6 +59,7 @@ models` lists the choices.
 | `forEach` | A path to a list. The step runs once per item |
 | `when` | `{ "path", "equals" }`, `{ "path", "notEmpty": true }` or `{ "path", "empty": true }`. A false condition skips the step |
 | `output` | The JSON shape the step must return: `"string"`, `"number"`, `"boolean"`, `"any"`, `[shape]` or `{ "key": shape }` |
+| `worktree` | Optional. `true` runs the step in a git worktree of its own on a new branch from the conversation's HEAD, as `delegate spawn --worktree` does ([delegation](delegation.md#children-in-their-own-worktree)). The step's `worktree` record, `boite workflow show` and the run's summary name the branch to merge, or say it was removed with nothing in it |
 
 A path reads a step's structured output, or its final answer when it has none.
 On a fanned-out step, `review.bugs` collects the bugs of every item into one
@@ -86,7 +87,9 @@ it does not bypass the scheduler with a detached callback.
 
 The step's brief tells it where it sits in the run, that other steps share the
 checkout, and that its answer is collected automatically. Steps share the
-parent's working directory: give parallel steps distinct files.
+parent's working directory: give parallel steps distinct files, or set
+`worktree` on a step so it works on a branch of its own and is told to commit
+there. A step's result is collected once its worktree is kept or removed.
 
 ## Limits
 

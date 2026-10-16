@@ -5,13 +5,14 @@ import { strings } from './strings';
  * What a thread row says in place of its time: the agent works, needs the
  * user, failed, finished something not read yet, waits for a slot, ended its
  * turn waiting on the agents it delegated to, or ended it with work still
- * running in the background (a monitor, a shell). A delegated agent whose
+ * running in the background (a monitor, a shell), or watching a pull request
+ * that will wake it. A delegated agent whose
  * background work ended without waking it is `interrupted`. Null for a thread
  * at rest the user has seen, which shows when it was last used.
  */
-export type ThreadState = 'working' | 'waiting' | 'error' | 'interrupted' | 'done' | 'queued' | 'delegating' | 'monitoring' | 'background';
+export type ThreadState = 'working' | 'waiting' | 'error' | 'interrupted' | 'done' | 'queued' | 'delegating' | 'monitoring' | 'background' | 'watching';
 
-type StateFields = Pick<ThreadSummary, 'status' | 'unread' | 'backgroundWork' | 'openQuestions'> & Partial<Pick<ThreadSummary, 'backgroundWait'>>;
+type StateFields = Pick<ThreadSummary, 'status' | 'unread' | 'backgroundWork' | 'openQuestions'> & Partial<Pick<ThreadSummary, 'backgroundWait' | 'pullRequestWatches'>>;
 
 /**
  * The thread waits on the user: a card that stopped its turn, or a question
@@ -49,13 +50,15 @@ export function threadState(thread: StateFields, delegated = 0): ThreadState | n
       if (kinds.length > 0) return kinds.every(kind => kind === 'monitor') ? 'monitoring' : 'background';
       // The work ended a moment ago and its wake turn has not started yet.
       if (wait?.state === 'waiting') return 'background';
+      // A pull request it watches will wake it: not done yet, read or not.
+      if ((thread.pullRequestWatches?.length ?? 0) > 0) return 'watching';
       return thread.unread ? 'done' : null;
     }
   }
 }
 
 /** What a folded project says for the threads it hides, most urgent first: the user's turn, a failure, work, work waiting for a slot, then news. */
-const ROLLUP_ORDER: ThreadState[] = ['waiting', 'error', 'interrupted', 'working', 'delegating', 'monitoring', 'background', 'queued', 'done'];
+const ROLLUP_ORDER: ThreadState[] = ['waiting', 'error', 'interrupted', 'working', 'delegating', 'monitoring', 'background', 'watching', 'queued', 'done'];
 
 /**
  * The most urgent state among a project's threads and how many threads are in
