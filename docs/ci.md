@@ -153,9 +153,17 @@ The tested installer becomes the release artifact.
 | UI entry chunk | 593,000 |
 | UI files, excluding `.br` and `.gz` copies | 4,982,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,240,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,249,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-16, the browser recording and viewer changes (PR #529) merged with
+`origin/main` at `0f480824` measure 4,976,148 UI bytes and 4,246,309 core
+JavaScript bytes after fresh `bun run build:ui` and `bun run build:core` on
+Linux, against 4,975,415 and 4,237,867 for that main: the recorder's frame
+pacing and the per-width viewer screencasts add 8,442 core bytes. Windows CI
+measured 4,246,268. The core limit becomes 4,249,000; the other limits stay
+unchanged.
 
 On 2026-10-16, the dialog showing what a Claude thread sends (PR #501) merged
 with `origin/main` at `4eec5562` measures 4,975,415 UI bytes and 4,237,867 core
