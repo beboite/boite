@@ -5,7 +5,7 @@ import type { ForkedSession, SessionContext } from '../types.ts';
 import { exitWithin } from '../exit.ts';
 import { NativeForkUnsupported } from '../native-fork.ts';
 import { modelOf } from './mapping.ts';
-import { CLIENT_NAME, MODE_POLICY, NO_NATIVE_SUBAGENTS } from './protocol.ts';
+import { CLIENT_NAME, MODE_POLICY, NO_NATIVE_SUBAGENTS, NO_PLUGINS } from './protocol.ts';
 import { threadConfig } from './config.ts';
 import { CodexRpc, CodexRpcError } from './rpc.ts';
 
@@ -16,7 +16,7 @@ export async function forkSession(ctx: SessionContext, checkpoint: { sessionId: 
   const profile = profileFor(ctx.provider);
   const executable = profile === undefined ? null : resolveExecutable(profile);
   if (executable === null) throw unavailable(`no ${ctx.provider.id} executable on this machine`, { providerId: ctx.provider.id });
-  const args = [...(profile?.launch?.args ?? []), ...(ctx.thread.permissionMode === 'yolo' ? ['--config', 'features.hooks=false'] : []), ...NO_NATIVE_SUBAGENTS];
+  const args = [...(profile?.launch?.args ?? []), ...(ctx.thread.permissionMode === 'yolo' ? ['--config', 'features.hooks=false'] : []), ...NO_NATIVE_SUBAGENTS, ...NO_PLUGINS];
   const child = ctx.spawnChild(executable, args, { startup: true, cwd: ctx.thread.cwd, env: { ...process.env, ...ctx.accountEnv } });
   const exited = new Promise<number | null>(resolve => { child.once('exit', resolve); child.once('error', () => resolve(null)); });
   const rpc = new CodexRpc(child, {
@@ -42,7 +42,8 @@ export async function forkSession(ctx: SessionContext, checkpoint: { sessionId: 
     rpc.notify('initialized', {});
     const policy = MODE_POLICY[ctx.thread.permissionMode];
     const model = modelOf(ctx);
-    const config = await threadConfig(rpc, ctx.thread.cwd, (level, message) => ctx.log(level, message));
+    // Only this setup process skips the MCP servers: the fork resumes later in its own app-server.
+    const config = await threadConfig(rpc, ctx.thread.cwd, (level, message) => ctx.log(level, message), true);
     const answer = await rpc.request<{ thread: { id: string } }>('thread/fork', {
       threadId: checkpoint.sessionId,
       lastTurnId: checkpoint.entry,

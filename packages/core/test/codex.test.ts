@@ -3,7 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
-import type { MessagePart, PermissionMode, RpcEvents, Settings } from '@boite/contracts';
+import type { MessagePart, PermissionMode, QuotaReading, RpcEvents, Settings } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
 import { Core } from '../src/core.ts';
 import { getDriver, probedModelsOf } from '../src/drivers/index.ts';
@@ -654,19 +654,45 @@ describe('codex driver', () => {
     const threadId = await codexThread(client);
     const seen: MessagePart[] = [];
     client.on('message.part', (event) => { if (event.threadId === threadId) seen.push(event.part); });
-    await runTurn(client, threadId, 'Run [stream]');
+    await runTurn(client, threadId, 'Run [stream] [flood]');
     const live = seen.find((part) => part.type === 'tool' && part.status === 'running' && part.output === 'line one\n');
     expect(live).toBeDefined();
+    // 200 lines inside one beat: one running redraw carrying the last 4,000 characters.
+    const flood = seen.filter((part) => part.type === 'tool' && part.status === 'running' && part.output?.includes('x'.repeat(95)));
+    expect(flood).toHaveLength(1);
+    const tail = flood[0]?.type === 'tool' ? flood[0].output ?? '' : '';
+    expect(tail).toHaveLength(4_000);
+    expect(tail.startsWith('0160')).toBe(true);
+    expect(tail.endsWith(`0199${'x'.repeat(95)}\n`)).toBe(true);
     const parts = harness!.core.journal.listMessages(threadId).flatMap((m) => m.parts);
     const command = parts.find((part) => part.type === 'tool' && part.name === 'Bash');
     const sleep = parts.find((part) => part.type === 'tool' && part.name === 'Sleep');
     expect(command).toMatchObject({ status: 'done', output: 'line one\nline two\n' });
+    expect(parts.filter((part) => part.type === 'tool' && part.output === 'flood done')).toHaveLength(1);
     expect(sleep).toMatchObject({ status: 'done', input: { durationMs: 50 } });
     for (const part of [command, sleep]) {
       if (part?.type !== 'tool') throw new Error('no tool part');
       expect(typeof part.startedAt).toBe('number');
       expect(part.finishedAt! - part.startedAt!).toBeGreaterThanOrEqual(400);
     }
+  });
+
+  test('a running session forwards its rolling rate-limit updates as quota readings, merged into one full read', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    const observed: { accountId: string; reading: QuotaReading }[] = [];
+    spyOn(harness!.core.quotas, 'observe').mockImplementation((accountId, reading) => { observed.push({ accountId, reading }); });
+    await runTurn(client, threadId, 'Check [limits]');
+    const accountId = harness!.core.threads.require(threadId).accountId;
+    // The first update asks the live process for the full reading; the second, sparse one is merged into it.
+    expect(countLines('account/rateLimits/read {}')).toBe(1);
+    expect(observed.map(({ accountId: id }) => id)).toEqual([accountId, accountId]);
+    expect(observed[0]!.reading.windows.map(w => [w.id, w.usedPercent])).toEqual([['primary', 100]]);
+    expect(observed[1]!.reading).toMatchObject({
+      windows: [{ id: 'primary', usedPercent: 100 }, { id: 'secondary', label: 'Weekly', usedPercent: 35, resetsAt: 1_900_000_000_000 }],
+      resetCredits: { availableCount: 2 },
+      credits: { kind: 'balance', remaining: 42.5 },
+    });
   });
 
   test('a retry reports live progress without failing the turn or accepting an older native turn', async () => {
@@ -1692,7 +1718,7 @@ describe('codex driver', () => {
     expect(fakeLog()).not.toContain('model=default');
   });
 
-  test('the first turn is titled on an ephemeral read-only thread, on the small model at low effort', async () => {
+  test('the first turn is titled on an ephemeral read-only thread, on the small model at low effort, with no MCP server, hook or plugin', async () => {
     const client = await startCore();
     const { projectId, accountId } = await codexAccount(client);
     const thread = await client.call('threads.create', {
@@ -1725,6 +1751,9 @@ describe('codex driver', () => {
     expect(fakeLog()).toContain(`config/read cwd=${harness!.dataDir} noPlugins=true`);
     expect(countLines('config:thread/start {"mcp_servers":{"ssh":{"enabled":false},"blender.lab":{"enabled":false},"__proto__":{"enabled":false}}}')).toBe(1);
     expect(fakeLog()).toContain('config:thread/start {"tools.update_plan.enabled":true');
+    // Nor a hook or a native subagent.
+    const title = (await client.call('trace.get', { threadId: thread.id })).find(process => process.commandLine?.includes('features.apps=false'));
+    for (const flag of ['features.hooks=false', 'features.multi_agent=false']) expect(title?.commandLine).toContain(flag);
     // Its app-server is gone with the answer, traced under the thread.
     await waitFor(() => harness?.core.procs.liveCount(thread.id) === 0);
   });
@@ -1855,6 +1884,7 @@ describe('native Codex fork', () => {
       && harness!.core.providers.installs.leaseCount('codex-fake') === 0);
   }
   test('native boundary uses the recorded native turn, independent target session and runtime settings', async () => {
+    process.env['CODEX_FAKE_MCP'] = '{"ssh":{"command":"ssh-mcp"}}';
     const client = await startCore();
     const threadId = await codexThread(client);
     const provider = harness!.core.providers.require('codex-fake');
@@ -1876,7 +1906,8 @@ describe('native Codex fork', () => {
     expect(wire).toContain('approvalPolicy=on-request sandbox=workspace-write');
     expect(wire).toContain(`accountHome=${isolated.isolationDir}`);
     expect(wire).toContain('excludeTurns=true planEnabled=true');
-    expect(fakeLog()).toContain('config:thread/fork {"tools.update_plan.enabled":true,"mcp_optional_startup_grace_ms":10000}');
+    // The setup process skips the MCP servers; the fork's own session later keeps them.
+    expect(fakeLog()).toContain('config:thread/fork {"tools.update_plan.enabled":true,"mcp_optional_startup_grace_ms":10000,"mcp_servers":{"ssh":{"enabled":false}}}');
     expect(fakeLog()).toContain(`thread/turns/list threadId=${fork.sessionId} limit=1 sortDirection=desc`);
     // Windows may retain the trace row until its usage event or the 1 s fallback.
     await waitFor(() => harness!.core.procs.liveCount(fork.id) === 0);
@@ -1885,6 +1916,7 @@ describe('native Codex fork', () => {
     await client.call('threads.subscribe', { threadId: fork.id });
     await completed(client, fork.id, 'Fork continuation');
     expect(fakeLog()).toContain(`thread/resume ${fork.sessionId}`);
+    expect(fakeLog().split('\n').filter(line => line.includes('"mcp_servers"'))).toHaveLength(1);
   });
   test('native fork failure leaves source and journal thread count unchanged', async () => {
     const client = await startCore(); const threadId = await codexThread(client);

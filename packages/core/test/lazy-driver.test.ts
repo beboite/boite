@@ -21,7 +21,7 @@ const context: TurnContext = {
   },
   turn: { id: 'turn', threadId: 'thread', status: 'running', queuedAt: 1, startedAt: 1, finishedAt: null, usage: null, error: null },
   prompt: 'Fixture prompt', attachments: [], sessionId: 'previous-session', accountEnv: {}, warmProcessMinutes: 5,
-  emit: { startMessage: () => 'message', delta() {}, part() {}, complete() {} },
+  emit: { startMessage: () => 'message', delta() {}, part() {}, patchTool() {}, complete() {} },
   log() {}, commands() {}, context() {},
   requestPermission() { throw new Error('Unexpected permission request'); },
   askQuestion() { throw new Error('Unexpected question'); },

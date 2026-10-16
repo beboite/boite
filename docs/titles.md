@@ -19,7 +19,8 @@ can replace the prompt title during the first turn. It preserves manual names.
   app-server for an ephemeral thread, read-only sandbox, no approvals, `low`
   effort, no MCP server, plugin or app
   ([providers](providers.md#codex-startup)), and closes it after the answer; the thread's warm session is left
-  alone. Each attempt takes thirty seconds at most and is spawned under the thread so
+  alone. That app-server also runs without the user's hooks or native
+  subagents. Each attempt takes thirty seconds at most and is spawned under the thread so
   the trace carries them. The request includes the first message and its
   images when the title provider supports images. The model returns JSON
   with `title` and `needsRefinement`, plus an English `branch` slug when an

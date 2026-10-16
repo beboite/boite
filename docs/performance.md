@@ -80,6 +80,26 @@ turns. A team event looks for held workflow summaries only in a conversation
 the core knows has one, and the delegation tick neither parses result letters,
 which never expire, nor tries to deliver mail of a paused or disabled team.
 
+### What a Claude turn leaves behind
+
+Measured on 2026-10-15 with `bench/claude-turn-heap.ts`, a scripted turn of 20
+Write calls with 1 MiB results and a 5 MiB image on a warm session
+([results](../bench/results/2026-10-15-perf-drivers.md)). Once the turn ended,
+the core's heap stayed 33.7 MiB above its start: the session's query loop and
+its context kept the first turn, its tool outputs and the image. It now keeps
+1.8 MiB. A finished call's input and output live only in the stored part, and a
+late `tool_use_summary` patches that part, so a follow-up that cuts a running
+turn frees the cards it closed: 26.8 MiB held during the turn, now 1.6 MiB.
+
+### A running Codex command
+
+A running command's card is redrawn once a second with the last 4,000
+characters of its output; the completed item still carries all of it. Each
+redraw is a journal write and a `message.part` frame per client. For a 6 s
+command printing a line every 5 ms, `bench/codex-live-output.ts` measured 25
+redraws carrying 381,400 characters before, 7 carrying 28,000 now
+([results](../bench/results/2026-10-15-perf-drivers.md)).
+
 ## Concurrent agent stress
 
 ```sh
@@ -637,8 +657,14 @@ The core lists its providers twice before it listens (the registry loads, then
 the default accounts ask which ones are available), and again for every client
 that boots. Each listing looks up every candidate program on the PATH, with
 every PATHEXT extension on Windows. `packages/core/src/providers/which.ts`
-keeps each answer for two seconds, so a burst of listings scans the PATH once,
+keeps each answer for 30 seconds, so a burst of listings scans the PATH once,
 and forgets them all on a providers reload, an install or an agent update.
+An `npm` candidate's script and a managed install's release record are kept
+the same way: on 2026-10-15 a listing took 378 us instead of 486, and a
+listing plus pi's and OpenCode's summaries 40 file syscalls instead of 95
+(`bench/provider-list.ts`,
+[results](../bench/results/2026-10-15-perf-drivers.md)). Focusing a thread
+and preparing a draft resolve their one provider, not the list.
 `packages/core/test/providers-which.test.ts` counts the lookups.
 
 ## Shell startup
@@ -962,6 +988,9 @@ bun bench/ui-frames.ts --trace --only "typing,long thread scroll"   # layouts pe
 bun bench/ui-frames.ts --runs 5 --only "heavy thread scroll,heavy thread flick,heavy thread jumps,heavy scroll while streaming"
 bun bench/ui-frames.ts --gpu --only "heavy thread scroll"          # composited on the machine's GPU, never a software renderer
 bun bench/rpc-actions.ts --journal <journal.db> --runs 6   # latency, core CPU, bytes and RSS per RPC (Linux)
+bun bench/claude-turn-heap.ts                  # heap a scripted Claude turn leaves; STEER=1 IMAGE_MIB=0 for a follow-up cut
+bun bench/codex-live-output.ts                 # redraws and characters of one running Codex command's live output
+bun bench/provider-list.ts                     # time per providers list() and summary(); ONLY=1 under strace -c
 bun run bench/continuation.ts 100 1024 25 1100            # history a fresh session carries: messages, tool KiB, files, file KiB
 bun run bench/queue-admission.ts 1024 16                  # one scheduler pass over held child turns: turns, teams
 ```
@@ -999,6 +1028,7 @@ the core's own browser and has a paired phone client poll it on the viewer's
 schedule behind an added latency.
 
 Results: [bench/results/2026-10-15-perf-runtime.md](../bench/results/2026-10-15-perf-runtime.md),
+[bench/results/2026-10-15-perf-drivers.md](../bench/results/2026-10-15-perf-drivers.md),
 [bench/results/2026-10-05-rpc-actions.md](../bench/results/2026-10-05-rpc-actions.md),
 [bench/results/2026-10-05-remote-browser-frames.md](../bench/results/2026-10-05-remote-browser-frames.md),
 [bench/results/2026-10-03-remote-browser-frames.md](../bench/results/2026-10-03-remote-browser-frames.md),

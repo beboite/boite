@@ -96,6 +96,11 @@ export class MuseSession {
   private killTree: (() => void) | null = null;
   private quotaSink: SessionContext['quota'] | null = null;
   private contextSink: SessionContext['context'] | null = null;
+  /**
+   * The running turn's items, by id, for the deltas that name only the item.
+   * Item ids are per turn: the map is emptied when a turn ends, and an item of
+   * another turn is never recorded, so its deltas find nothing.
+   */
   private readonly items = new Map<string, { kind: string; revision: number }>();
   private readonly approvals = new Map<string, OpenApproval>();
   private readonly questions = new Map<string, OpenQuestion>();
@@ -323,6 +328,8 @@ export class MuseSession {
 
   private endTurn(turn: MuseTurn, drop: boolean): void {
     turn.settle();
+    // Turns run one at a time: what the map holds was this turn's.
+    this.items.clear();
     this.running = Math.max(0, this.running - 1);
     if (drop || this.closing || this.retention.idleMs(this.warmMs) <= 0) {
       this.drop();
@@ -493,6 +500,7 @@ export class MuseSession {
     for (const question of this.questions.values()) question.settle();
     this.questions.clear();
     this.approvals.clear();
+    this.items.clear();
     this.rpc?.fail('the muse session was closed');
     this.rpc = null;
     const child = this.child;
@@ -640,10 +648,10 @@ export class MuseSession {
     const revision = typeof item.revision === 'number' ? item.revision : 0;
     const seen = this.items.get(item.itemId);
     if (seen !== undefined && seen.revision >= revision && revision > 0) return;
-    this.items.set(item.itemId, { kind: item.kind, revision });
     const terminal = item.status !== undefined && item.status !== 'inProgress';
 
     if (item.kind === 'compaction') {
+      this.items.set(item.itemId, { kind: item.kind, revision });
       if (!terminal) return;
       if (item.outcome === 'failed') {
         const reason = item.reason ?? item.failureReason ?? 'Muse could not compact the context';
@@ -668,6 +676,7 @@ export class MuseSession {
 
     // Items of another turn (a queued one, a replay) are not this card's.
     if (item.turnId !== undefined && item.turnId !== null && item.turnId !== turn.turnId) return;
+    this.items.set(item.itemId, { kind: item.kind, revision });
     switch (item.kind) {
       case 'agentMessage':
         turn.appendSnapshot(item.itemId, 'text', 'text', item.text);
@@ -700,6 +709,7 @@ export class MuseSession {
     const itemId = textOf(params['itemId']);
     const delta = textOf(params['delta']);
     if (itemId.length === 0 || delta.length === 0) return;
+    if (typeof params['turnId'] === 'string' && params['turnId'] !== turn.turnId) return;
     const kind = this.items.get(itemId)?.kind;
     const field = typeof params['field'] === 'string' ? params['field'] : 'text';
     if (kind === 'agentMessage' && field === 'text') turn.appendDelta(itemId, field, 'text', delta);

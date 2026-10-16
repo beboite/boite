@@ -217,6 +217,7 @@ export class ClaudeSession {
       // The options the query opens on are this turn's: nothing to apply yet.
       this.applied = liveSetup(turn.ctx.thread);
       this.send(turn, turn.promptText(), turn.ctx.attachments);
+      this.forgetPrompt(turn);
       this.steerable.add(turn);
       void this.run(turn);
       return;
@@ -345,7 +346,21 @@ export class ClaudeSession {
     if (!(await this.applyLive(turn))) return;
     if (turn.isStopped || this.closing || this.ended) return;
     this.send(turn, turn.promptText(), turn.ctx.attachments);
+    this.forgetPrompt(turn);
     this.steerable.add(turn);
+  }
+
+  /**
+   * Once a turn's prompt is in the stream, the session keeps its callbacks and
+   * setup but not its prompt, images or `continuation`, which reads them: a
+   * warm or viewed session would otherwise hold the last photo until the next
+   * turn. The turn's own context stays whole, since a stranded turn pushes it
+   * again elsewhere; `thread` stays shared with it.
+   */
+  private forgetPrompt(turn: ClaudeTurn): void {
+    if (this.ctx !== turn.ctx) return;
+    const { prompt: _prompt, attachments: _attachments, continuation: _continuation, ...kept } = turn.ctx;
+    this.ctx = kept;
   }
 
   /**
@@ -466,6 +481,9 @@ export class ClaudeSession {
       const queryFn = await this.deps.loadQuery();
       // Loading the SDK is the first await of the session, so a stop can land here.
       if (!first?.isStopped && !this.closing) {
+        // This frame lives as long as the CLI: holding the first turn here would
+        // keep its tool outputs and images for the whole warm session.
+        first = undefined;
         this.query = queryFn({ prompt: this.prompts.stream(), options });
         // The next turn's setters have something to talk to from here on.
         this.markReady();

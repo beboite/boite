@@ -218,6 +218,13 @@ describe('muse driver', () => {
     ]);
   });
 
+  test("another turn's message streaming during this one stays out of its card", async () => {
+    const client = await startCore();
+    const threadId = await museThread(client);
+    expect((await runTurn(client, threadId, '[foreign]the answer')).status).toBe('done');
+    expect(await lastParts(client, threadId)).toEqual([{ type: 'text', text: 'the answer' }]);
+  });
+
   test('a shell tool call is one card, running then done with its output', async () => {
     const client = await startCore();
     const threadId = await museThread(client);

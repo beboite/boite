@@ -198,6 +198,7 @@ export type {
   TurnHandle,
   TurnResult,
   EmitSink,
+  ToolPatch,
   PermissionTicket,
   ProbeContext,
   ProbeFilter,

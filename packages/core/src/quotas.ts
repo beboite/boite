@@ -8,14 +8,14 @@ import type { Account, AccountQuota, QuotaReading, QuotaWindow } from '@boite/co
 import type { Core } from './core.ts';
 import { homePath } from './paths.ts';
 import { invalidParams } from './errors.ts';
-import { claudeQuotaDetails, claudeUsageAgent, codexQuotaDetails } from './quota-details.ts';
+import { claudeQuotaDetails, claudeUsageAgent, codexQuotaDetails, codexQuotaWindows, quotaWindow as window } from './quota-details.ts';
 import { consumeClaudeReset, QuotaResetStore, type QuotaResetConsumer } from './quota-resets.ts';
 import { ANTIGRAVITY_QUOTA_ID, readExtraQuota } from './quota-readers.ts';
 import type { ProbeContext } from './drivers/types.ts';
 import { activeSubscriptionProxy } from './subscription-proxy.ts';
 import { GatewayQuotas } from './subscription-proxy-quotas.ts';
 
-export { claudeUsageAgent } from './quota-details.ts';
+export { claudeUsageAgent, codexQuotaWindows } from './quota-details.ts';
 
 const cliAccount: Account = { id: ANTIGRAVITY_QUOTA_ID, providerId: 'antigravity', label: 'Antigravity CLI', isolationDir: null, status: 'unknown', identity: null, createdAt: 0 };
 
@@ -33,12 +33,6 @@ function object(value: unknown): ObjectValue {
   return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as ObjectValue : {};
 }
 
-function window(id: string, label: string, percent: unknown, reset: unknown): QuotaWindow | null {
-  if (typeof percent !== 'number' || !Number.isFinite(percent)) return null;
-  const at = typeof reset === 'number' ? reset * 1000 : typeof reset === 'string' ? Date.parse(reset) : NaN;
-  return { id, label, usedPercent: Math.max(0, Math.min(100, percent)), resetsAt: Number.isFinite(at) ? at : null };
-}
-
 export function claudeQuotaWindows(raw: unknown): QuotaWindow[] {
   const root = object(raw);
   const limits = object(root['rate_limits'] ?? root);
@@ -54,23 +48,6 @@ export function claudeQuotaWindows(raw: unknown): QuotaWindow[] {
     const entry = object(value);
     if (typeof entry['display_name'] !== 'string') continue;
     const mapped = window(`model:${entry['display_name']}`, `Weekly · ${entry['display_name']}`, entry['utilization'], entry['resets_at']);
-    if (mapped) windows.push(mapped);
-  }
-  return windows;
-}
-
-export function codexQuotaWindows(raw: unknown): QuotaWindow[] {
-  const root = object(raw);
-  const byId = object(root['rateLimitsByLimitId']);
-  const snapshot = object(byId['codex'] ?? root['rateLimits']);
-  if (snapshot['limitId'] && snapshot['limitId'] !== 'codex') return [];
-  const windows: QuotaWindow[] = [];
-  for (const id of ['primary', 'secondary']) {
-    const value = object(snapshot[id]);
-    const fallback = id === 'secondary' ? 10080 : ['free', 'go'].includes(String(snapshot['planType'])) ? 43200 : 300;
-    const minutes = typeof value['windowDurationMins'] === 'number' ? value['windowDurationMins'] : fallback;
-    const label = minutes >= 43200 ? 'Monthly' : minutes >= 10080 ? 'Weekly' : `${minutes / 60} hours`;
-    const mapped = window(id, label, value['usedPercent'], value['resetsAt']);
     if (mapped) windows.push(mapped);
   }
   return windows;

@@ -123,7 +123,7 @@ quota views update the label immediately while retaining their cached windows.
 | Source | Read behavior and limits |
 | --- | --- |
 | Claude | OAuth usage endpoint for file logins; Keychain, Credential Manager or expired-token logins fall back to asking the CLI for usage with `skipBehaviors: true`, no prompt queue, tools or hooks. Fallback can omit resets and paid usage. |
-| Codex | `account/rateLimits/read`, without opening a conversation |
+| Codex | `account/rateLimits/read`, without opening a conversation. A running session forwards its `account/rateLimits/updated` notifications, merged into one full read of that same process per minute |
 | Muse Code | Last `usage/changed` observation from an existing host supporting that event; no host or prompt starts to refresh limits |
 | Grok | Credit percentage or legacy credit amounts from the selected CLI login's billing endpoint |
 | OpenCode Go | Rolling, weekly and monthly limits from its Go usage API, using its own saved API login or the default account's `OPENCODE_API_KEY`. OpenCode 2 accounts read the key from their own database |

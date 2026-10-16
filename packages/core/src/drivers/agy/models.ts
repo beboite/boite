@@ -1,7 +1,7 @@
 /** The probe: what `agy models` lists, as the picker's models. */
 import type { EffortLevel, ModelInfo, ProviderDescriptor } from '@boite/contracts';
 import { messageOf, unavailable } from '../../errors.ts';
-import { agentEnv, launchPrefix, profileFor, resolveExecutable } from '../../providers/resolve.ts';
+import { agentEnv, profileFor, resolveLaunch } from '../../providers/resolve.ts';
 import type { ProbeContext } from '../types.ts';
 import { STDERR_MAX } from './events.ts';
 
@@ -109,11 +109,11 @@ export function modelsFromListing(provider: ProviderDescriptor, listed: AgyListe
  */
 export async function readModels(ctx: ProbeContext): Promise<ModelInfo[]> {
   const profile = profileFor(ctx.provider);
-  const executable = profile === undefined ? null : resolveExecutable(profile);
+  const launch = resolveLaunch(profile);
   const detail = { providerId: ctx.provider.id, accountId: ctx.accountId };
-  if (executable === null) throw unavailable(`no ${ctx.provider.id} executable on this machine`, detail);
+  if (launch === null) throw unavailable(`no ${ctx.provider.id} executable on this machine`, detail);
 
-  const child = ctx.spawnChild(executable, [...launchPrefix(profile), ...(profile?.launch?.args ?? []), 'models'], {
+  const child = ctx.spawnChild(launch.executable, [...launch.prefix, ...(profile?.launch?.args ?? []), 'models'], {
     cwd: ctx.cwd,
     env: agentEnv(ctx.provider, ctx.accountEnv),
   });

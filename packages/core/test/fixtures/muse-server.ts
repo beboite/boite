@@ -17,7 +17,7 @@
 import { appendFileSync } from 'node:fs';
 
 const DIRECTIVE =
-  /\[(agents|command|approve|edit|edit-out|edit-link|thought|usage|quota|tasks|slow|steer|crash|input|auth|server-request|close-idle)\]/g;
+  /\[(agents|command|approve|edit|edit-out|edit-link|thought|foreign|usage|quota|tasks|slow|steer|crash|input|auth|server-request|close-idle)\]/g;
 const CHUNKS = 3;
 const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
@@ -29,6 +29,7 @@ type Directive =
   | 'edit-out'
   | 'edit-link'
   | 'thought'
+  | 'foreign'
   | 'usage'
   | 'quota'
   | 'tasks'
@@ -217,6 +218,14 @@ async function runTurn(turnId: string, text: string): Promise<void> {
     });
   }
 
+  if (directives.includes('foreign')) {
+    // Another turn's message (a queued one, a replay) streaming while this one runs.
+    const itemId = nextItemId();
+    const other = 'another-turn';
+    notify('item/started', { item: { itemId, kind: 'agentMessage', turnId: other, revision: 1, status: 'inProgress', text: '' } });
+    notify('item/delta', { itemId, delta: 'not this turn', field: 'text' });
+  }
+
   say(turnId, plainOf(text));
 
   let usage: Record<string, number> | undefined;
@@ -343,6 +352,7 @@ async function runTurn(turnId: string, text: string): Promise<void> {
         });
         return;
       case 'thought':
+      case 'foreign':
       case 'close-idle':
         break;
     }

@@ -1,6 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { HarnessUpdate } from '@boite/contracts';
@@ -8,6 +8,7 @@ import type { CoreClient } from '../src/client.ts';
 import { Core } from '../src/core.ts';
 import { newToken } from '../src/ids.ts';
 import { npmInstallOf } from '../src/providers/npm.ts';
+import { resolveCommand } from '../src/providers/resolve.ts';
 import { compareVersions, inside, readVersion } from '../src/providers/updates.ts';
 import type { ServerUpdatePlatform } from '../src/server-update/types.ts';
 import { holdAccountTurns, echoThread, startTestCore, waitFor } from './harness.ts';
@@ -338,6 +339,39 @@ describe('harness updates', () => {
     expect(only(await changed)).toMatchObject({ current: '1.2.0', message: null });
     expect(readFileSync(state, 'utf8')).toBe('1.2.0');
     await waitFor(() => harness?.core.procs.liveCount('update:update-fake') === 0);
+  });
+
+  test.skipIf(process.platform === 'win32' || !['x64', 'arm64'].includes(process.arch))('codex installed by Bun updates through the launcher that names its install, while its sessions skip that launcher', async () => {
+    // `bun install -g @openai/codex`: the platform package hoisted beside the launcher, no `lib/node_modules`.
+    const root = join(tmpdir(), `boite-bun-codex-${newToken().slice(0, 8)}`);
+    const global = join(root, '.bun', 'install', 'global', 'node_modules', '@openai');
+    const os = process.platform === 'darwin' ? 'darwin' : 'linux';
+    const triple = `${process.arch === 'x64' ? 'x86_64' : 'aarch64'}-${os === 'darwin' ? 'apple-darwin' : 'unknown-linux-musl'}`;
+    const launcher = join(global, 'codex', 'bin', 'codex.js');
+    const binary = join(global, `codex-${os}-${process.arch}`, 'vendor', triple, 'bin', 'codex');
+    const bin = join(root, '.bun', 'bin');
+    for (const dir of [dirname(launcher), dirname(binary), bin]) mkdirSync(dir, { recursive: true });
+    // The launcher tells the binary how it was installed; the binary alone cannot tell.
+    writeFileSync(launcher, `#!/bin/sh\nFAKE_MANAGED_BY_NPM=1 exec '${process.execPath}' "$@"\n`);
+    writeFileSync(binary, `#!/bin/sh\nexec '${process.execPath}' "$@"\n`);
+    chmodSync(launcher, 0o755);
+    chmodSync(binary, 0o755);
+    symlinkSync('../install/global/node_modules/@openai/codex/bin/codex.js', join(bin, 'codex'));
+    const saved = process.env['PATH'];
+    process.env['PATH'] = [bin, saved].join(delimiter);
+    try {
+      const { client, state } = await start('command', 'update-launched', undefined, () => ({ kind: 'path', value: 'codex' }));
+      expect(resolveCommand({ detect: {}, executable: [{ kind: 'path', value: 'codex' }], isolation: {} })?.executable).toBe(realpathSync(binary));
+      await client.call('providers.updates', { refresh: true });
+      const changed = client.next('providers.updatesChanged', (list) => list[0]?.state === 'failed' || (list[0]?.state === 'idle' && list[0]?.current === '1.2.0'), 20000);
+      await client.call('providers.update', { providerId: 'update-fake' });
+      expect(only(await changed)).toMatchObject({ state: 'idle', current: '1.2.0', message: null });
+      expect(readFileSync(state, 'utf8')).toBe('1.2.0');
+      await waitFor(() => harness?.core.procs.liveCount('update:update-fake') === 0);
+    } finally {
+      process.env['PATH'] = saved;
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test.skipIf(!unixUser)('an npm install is updated into its own prefix, and one this user cannot write is refused before its updater runs', async () => {

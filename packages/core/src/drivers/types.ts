@@ -29,10 +29,20 @@ import type { SpawnedChild, SpawnedProcess, SpawnOptions } from '../procs.ts';
  * The only way a driver writes anything. It journals and emits in one call, so
  * no driver ever touches SQLite or a socket.
  */
+type ToolPart = Extract<MessagePart, { type: 'tool' }>;
+export type ToolPatch = Partial<Pick<ToolPart, 'name' | 'input' | 'inputText' | 'output' | 'status' | 'documents' | 'summary'>>;
+
 export interface EmitSink {
   startMessage(role: MessageRole): MessageId;
   delta(messageId: MessageId, partIndex: number, text: string): void;
   part(messageId: MessageId, partIndex: number, part: MessagePart): void;
+  /**
+   * Sets fields of a tool part already written and keeps the rest as stored,
+   * so a driver need not hold a finished call's input and output to label or
+   * correct its card. A field given as undefined is removed. Does nothing when
+   * that part is not a tool.
+   */
+  patchTool(messageId: MessageId, partIndex: number, fields: ToolPatch): void;
   complete(messageId: MessageId, state: Message['state']): void;
 }
 

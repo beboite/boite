@@ -18,6 +18,32 @@ function expires(value: unknown): number | null {
   const at = typeof value === 'number' ? value * 1000 : typeof value === 'string' ? Date.parse(value) : NaN;
   return Number.isFinite(at) ? at : null;
 }
+
+/** One usage window, its reset given in seconds or as a date. */
+export function quotaWindow(id: string, label: string, percent: unknown, reset: unknown): QuotaWindow | null {
+  if (typeof percent !== 'number' || !Number.isFinite(percent)) return null;
+  const at = typeof reset === 'number' ? reset * 1000 : typeof reset === 'string' ? Date.parse(reset) : NaN;
+  return { id, label, usedPercent: Math.max(0, Math.min(100, percent)), resetsAt: Number.isFinite(at) ? at : null };
+}
+
+/** Here rather than in quotas.ts, so the Codex driver maps a session's rolling update without importing the store. */
+export function codexQuotaWindows(raw: unknown): QuotaWindow[] {
+  const root = object(raw);
+  const byId = object(root['rateLimitsByLimitId']);
+  const snapshot = object(byId['codex'] ?? root['rateLimits']);
+  if (snapshot['limitId'] && snapshot['limitId'] !== 'codex') return [];
+  const windows: QuotaWindow[] = [];
+  for (const id of ['primary', 'secondary']) {
+    const value = object(snapshot[id]);
+    const fallback = id === 'secondary' ? 10080 : ['free', 'go'].includes(String(snapshot['planType'])) ? 43200 : 300;
+    const minutes = typeof value['windowDurationMins'] === 'number' ? value['windowDurationMins'] : fallback;
+    const label = minutes >= 43200 ? 'Monthly' : minutes >= 10080 ? 'Weekly' : `${minutes / 60} hours`;
+    const mapped = quotaWindow(id, label, value['usedPercent'], value['resetsAt']);
+    if (mapped) windows.push(mapped);
+  }
+  return windows;
+}
+
 function liveExpiration(value: unknown, now: number): boolean {
   if (value == null) return true;
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value)) return false;

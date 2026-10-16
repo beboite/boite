@@ -166,6 +166,8 @@ export class TurnAttempts {
         startMessage: role => sink.startMessage(role),
         delta: (messageId, partIndex, text) => { wrote = true; sink.delta(messageId, partIndex, text); },
         part: (messageId, partIndex, part) => { if (part.type !== 'error') wrote = true; sink.part(messageId, partIndex, part); },
+        // A patch changes a tool part already written.
+        patchTool: (messageId, partIndex, fields) => sink.patchTool(messageId, partIndex, fields),
         complete: (messageId, messageState) => sink.complete(messageId, messageState),
       };
       if (continuing) {

@@ -12,7 +12,7 @@ import type { OsProfile, PermissionMode, ProviderDescriptor, ProviderId, ModelIn
 import pkg from '../../../package.json';
 import { messageOf, unavailable } from '../../errors.ts';
 import type { SpawnedChild } from '../../procs.ts';
-import { agentEnv, launchPrefix, profileFor, resolveExecutable } from '../../providers/resolve.ts';
+import { agentEnv, profileFor, resolveLaunch } from '../../providers/resolve.ts';
 import { grokLaunchArgs } from '../grok.ts';
 import { stderrLines } from '../lines.ts';
 import { exitWithin } from '../exit.ts';
@@ -23,7 +23,7 @@ import { AGENT_OWN_MODEL } from './models.ts';
 import { canDeleteSessions, CLIENT_NAME, discardSession, EXIT_GRACE_MS, isGrok, STDERR_MAX, type AcpDeps, type Timer } from './protocol.ts';
 import { jsonLinesOnly } from './stdout.ts';
 import { commandsOf, imageBlocksOf, usdCostOf, type AcpTurn } from './turn.ts';
-import { answerPermission, drawUpdate } from './updates.ts';
+import { answerPermission, drawUpdate, sessionNotificationOf } from './updates.ts';
 import { errorCodeOf, noteReady } from '../driver-log.ts';
 import { SessionRetention } from '../session-retention.ts';
 
@@ -38,9 +38,9 @@ const STOP_GRACE_MS = 3_000;
  * line option rather than a `session/set_mode`. A probe has no thread and no
  * mode, so it launches the declared line untouched.
  */
-function launchArgs(profile: OsProfile | undefined, provider: ProviderDescriptor, mode: PermissionMode): string[] {
+function launchArgs(profile: OsProfile | undefined, prefix: string[], provider: ProviderDescriptor, mode: PermissionMode): string[] {
   const declared = profile?.launch?.args ?? [];
-  return [...launchPrefix(profile), ...(isGrok(provider) ? grokLaunchArgs(declared, mode) : declared)];
+  return [...prefix, ...(isGrok(provider) ? grokLaunchArgs(declared, mode) : declared)];
 }
 
 /**
@@ -462,12 +462,12 @@ export class AcpSession {
     // A stop while the SDK loaded: nothing may be spawned for a session that is over.
     if (this.ended) throw Object.assign(new Error('the acp session was closed before it started'), { abandoned: true });
     const profile = profileFor(ctx.provider);
-    const executable = profile === undefined ? null : resolveExecutable(profile);
-    if (executable === null) {
+    const launch = resolveLaunch(profile);
+    if (launch === null) {
       throw unavailable(`no ${ctx.provider.id} executable on this machine`, { providerId: ctx.provider.id });
     }
 
-    const child = ctx.spawnChild(executable, launchArgs(profile, ctx.provider, ctx.thread.permissionMode), {
+    const child = ctx.spawnChild(launch.executable, launchArgs(profile, launch.prefix, ctx.provider, ctx.thread.permissionMode), {
       cwd: ctx.thread.cwd,
       env: agentEnv(ctx.provider, ctx.accountEnv),
     });
@@ -483,8 +483,10 @@ export class AcpSession {
     );
     const connection = sdk
       .client({ name: CLIENT_NAME })
-      .onNotification('session/update', ({ params }) => {
-        this.onUpdate(params);
+      // Checked by hand rather than by the SDK's schema, which also parses
+      // every update once more on its own (see `sessionNotificationOf`).
+      .onNotification('session/update', sessionNotificationOf, ({ params }) => {
+        if (params !== null) this.onUpdate(params);
       })
       .onRequest('session/request_permission', ({ params }) => answerPermission(this.current, params))
       .connect(stream);

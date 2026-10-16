@@ -8,7 +8,7 @@ import { invalidParams, messageOf, notFound, refused, unavailable } from './erro
 import { runAcpLogin, type AcpLoginRun } from './drivers/acp/login.ts';
 import { probeThreadId } from './providers/probe.ts';
 import { activeSubscriptionProxy, subscriptionProxyEnv } from './subscription-proxy.ts';
-import { agentEnv, hostAgentsEnabled, launchPrefix, profileFor, resolveExecutable } from './providers/resolve.ts';
+import { agentEnv, hostAgentsEnabled, profileFor, resolveExecutable, resolveLaunch } from './providers/resolve.ts';
 import { sqliteHasRows } from './providers/sqlite-login.ts';
 import { browserNoopPath, browserNoopScript, currentOs, homePath } from './paths.ts';
 import { ISOLATION_DEFAULTS, shareKeys, shareProfile, unshareProfile, type ShareProblem } from './profile-share.ts';
@@ -253,8 +253,8 @@ export class AccountStore {
     if (!this.core.providers.enabled(provider.id)) return this.check(accountId);
     if (provider.protocol !== 'codex-appserver' && provider.protocol !== 'claude-sdk') return this.check(accountId);
     const profile = profileFor(provider);
-    const executable = profile ? resolveExecutable(profile) : null;
-    if (!executable) throw refused(`${provider.name} is not installed`, { accountId, field: 'executable' });
+    const launch = resolveLaunch(profile);
+    if (!launch) throw refused(`${provider.name} is not installed`, { accountId, field: 'executable' });
     const threadId = `check:${accountId}`;
     let result: Pick<Account, 'status' | 'identity'>;
     this.core.providers.installs.acquire(provider.id);
@@ -262,7 +262,7 @@ export class AccountStore {
       const read = provider.protocol === 'codex-appserver'
         ? (await import('./drivers/codex/auth.ts')).readCodexAccount
         : (await import('./drivers/claude/auth.ts')).readClaudeAccount;
-      result = await read({ executable, args: [...launchPrefix(profile), ...(profile?.launch?.args ?? [])],
+      result = await read({ executable: launch.executable, args: [...launch.prefix, ...(profile?.launch?.args ?? [])],
         cwd: account.isolationDir ?? this.core.dataDir, env: agentEnv(provider, this.accountEnv(account, provider)),
         spawnChild: (cmd, args, opts) => {
           this.require(accountId);
@@ -531,8 +531,8 @@ export class AccountStore {
   private acpLogin(account: Account, provider: ProviderDescriptor, methodId: string): { ok: true } {
     const accountId = account.id;
     const profile = profileFor(provider);
-    const executable = profile === undefined ? null : resolveExecutable(profile);
-    if (executable === null) {
+    const launch = resolveLaunch(profile);
+    if (launch === null) {
       throw refused(`${provider.name} is not installed on this machine yet`, {
         accountId,
         providerId: provider.id,
@@ -546,8 +546,8 @@ export class AccountStore {
     try {
       acp = runAcpLogin({
         methodId,
-        executable,
-        args: [...launchPrefix(profile), ...(profile?.launch?.args ?? [])],
+        executable: launch.executable,
+        args: [...launch.prefix, ...(profile?.launch?.args ?? [])],
         cwd: account.isolationDir ?? this.core.dataDir,
         env,
         spawnChild: (cmd, args, opts) => this.core.procs.spawnChild(loginThreadId(accountId), cmd, args, opts),
@@ -559,7 +559,7 @@ export class AccountStore {
       this.core.providers.installs.release(provider.id);
       throw refused(`the ${provider.name} agent did not start: ${messageOf(error)}`, {
         accountId,
-        command: executable,
+        command: launch.executable,
       });
     }
 
@@ -572,8 +572,8 @@ export class AccountStore {
 
   private codexLogin(account: Account, provider: ProviderDescriptor): { ok: true } {
     const profile = profileFor(provider);
-    const executable = profile ? resolveExecutable(profile) : null;
-    if (!executable) throw refused(`${provider.name} is not installed`, { accountId: account.id });
+    const launch = resolveLaunch(profile);
+    if (!launch) throw refused(`${provider.name} is not installed`, { accountId: account.id });
     const run: LoginRun = { spawned: null, acp: null, url: null, lastLine: '', done: Promise.resolve() };
     this.logins.set(account.id, run);
     this.core.providers.installs.acquire(provider.id);
@@ -583,7 +583,7 @@ export class AccountStore {
         const { runCodexLogin } = await import('./drivers/codex/auth.ts');
         // Cancellation may have arrived while the module loaded.
         if (run.cancelled) { this.logins.delete(account.id); this.emitLogin(account.id, 'failed', 'Sign-in cancelled', run, 1); return; }
-        const login = runCodexLogin({ executable, args: [...launchPrefix(profile), ...(profile?.launch?.args ?? [])],
+        const login = runCodexLogin({ executable: launch.executable, args: [...launch.prefix, ...(profile?.launch?.args ?? [])],
           cwd: account.isolationDir!, env: agentEnv(provider, this.accountEnv(account, provider)),
           spawnChild: (cmd, args, opts) => this.core.procs.spawnChild(loginThreadId(account.id), cmd, args, opts),
           onLine: line => this.onLoginLine(account.id, line),
