@@ -120,7 +120,9 @@ Messages carry the authenticated sender and appear as forwarded messages.
 Claude receives them at a tool boundary; Codex, Muse, pi and Grok can accept
 live steering. Drivers without steering receive a later turn.
 [Coordination](coordination.md#what-the-agent-receives) owns the protocol mapping. A waiting
-permission or question is never answered by a forwarded message. A delivery
+permission is never answered by a forwarded message; a parent's message to a
+child waiting on a question answers that question
+([questions from a child](#questions-from-a-child)). A delivery
 receipt means provider acceptance, not agreement or task completion. An
 uncertain submission is not retried automatically.
 
@@ -182,6 +184,7 @@ boite delegate spawn "List the parser's entry points. Do not edit files."
 boite delegate spawn "Review the parser changes. Do not edit files." --model codex/gpt-5.5 --effort high
 boite delegate spawn "Play the build and report what breaks." --model codex/gpt-6-luna --effort max --speed fast
 boite delegate spawn "Review the parser changes." --profile reviewer
+boite delegate spawn "Fix the parser bug and commit it." --worktree
 boite delegate list
 boite delegate send <child-thread-id> "Focus on malformed inputs."
 boite delegate result <child-thread-id> <turn-id>
@@ -244,8 +247,61 @@ completion message. Replies do not grant user permission or override the task.
 Only direct parent-child messages are allowed. Delegation has one level;
 children ask the parent when another worker is needed.
 
-Agents should name the files each child owns, because children share the
-checkout. Boite does not create a worktree per child or merge their edits.
+### Questions from a child
+
+A child can also ask through its own question tool (Claude's AskUserQuestion,
+Codex's requestUserInput, `boite ask`) or stop on a permission card. The
+parent learns of a question at once: a message with origin `question` names the
+child, its question, its options and whether it is blocked, and wakes an idle
+parent like a result does. A permission request reaches the parent only if it
+is still open after 30 seconds, since the user may be watching the child, and
+says that only the user can approve it, in the child's conversation. Settings
+cards are the owner's and never go to the parent.
+
+The parent's next `boite delegate send <child> "<answer>"` answers the child's
+blocking question instead of queuing a message. The text is an option label in
+any case, several labels separated by commas where the question takes several,
+or free text where it takes some; a text that fits none is refused with the
+options. A question asked without stopping takes the parent's text only when
+it names its options: the child is still working, so any other text stays an
+ordinary message. The answer is recorded as
+given by the parent agent, and the letter carries `answered` with the question
+id. A permission card is never answered this way: the message waits until the
+child runs again.
+
+A question message not yet delivered is withdrawn when the card closes first
+(the user answered it in the child, or its turn ended). A child that finishes
+its turn, unless it waits on its own background work, or that is stopped has
+its open asynchronous questions closed, so nothing is left asking on the
+parent's side. `delegate list` and `delegate wait` print each open card under
+the child (`asks (blocked): "..." options: ...` or `needs the user's
+approval: <tool>`), and the child's state reads `question` or `approval`.
+
+`delegate wait` returns as soon as a child it covers waits on a blocking
+question or a permission, with state `needs_input`, instead of holding until
+its timeout while the child's turn stays running. A question asked without
+stopping wakes the parent but does not end a wait.
+
+### Children in their own worktree
+
+Children share the parent's checkout by default, so agents should name the
+files each child owns. `boite delegate spawn --worktree` (and `"worktree":
+true` on a [workflow](workflows.md) step) gives the child a git worktree of its
+own on a new `boite/sub-<id>` branch, in the configured worktree folder. Its
+branch and folder are chosen at spawn and shown in the spawn output; the
+worktree itself is made from the parent's current HEAD just before the child's
+first turn. Uncommitted edits in the parent's checkout are not in it. A
+conversation outside a git repository is refused by name.
+
+The child is told to commit its work on that branch. When one of its turns ends
+(and it is not waiting on background work), Boite looks at the worktree: with
+no commit beyond its base and no uncommitted change, the worktree and its
+branch are removed and the result says so; otherwise both are kept and the
+result ends with `Worktree kept: <path> on branch <branch>, N commits beyond
+<base>`, uncommitted changes noted, and the `git merge <branch>` to run.
+Boite does not merge for the parent. A removed worktree is made again, from
+the parent's HEAD of that moment, if the child gets another turn.
+
 While a child works, the parent should do independent work or finish its turn.
 Waiting inside a tool keeps the parent busy and can delay delivery of results.
 

@@ -2,7 +2,7 @@
 import { RpcErrorCode, providerEnabled, type Account, type ModelInfo, type RpcResult } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { CLAUDE_MODELS } from './accounts-seed';
-import { MUSE_EFFORT, PROBE_MS, PROBED_MODELS, UPDATABLE_ID } from './providers';
+import { MUSE_EFFORT, PI_EFFORT, PROBE_MS, PROBED_MODELS, UPDATABLE_ID } from './providers';
 import { turnedOff } from './checks';
 import { DATA_DIR } from './shared';
 import type { FakeContext, FakeMethods } from './context';
@@ -64,7 +64,7 @@ export async function probe(ctx: FakeContext, providerId: string, accountId: str
   if (dynamic) {
     models = provider.protocol === 'claude-sdk' ? structuredClone(CLAUDE_MODELS) : provider.id === UPDATABLE_ID ? structuredClone(PROBED_MODELS) : [
       ...models,
-      { id: `${provider.id}-demo`, name: `${provider.name} demo model`, default: false, ...(provider.protocol === 'codex-appserver' ? { effort: { levels: [{ id: 'low', label: 'Low' }, { id: 'high', label: 'High' }], default: 'high' }, speeds: [{ id: 'fast', label: 'Fast' }, { id: 'ultrafast', label: 'Ultrafast' }] } : provider.protocol === 'muse' ? { effort: MUSE_EFFORT } : {}) }
+      { id: `${provider.id}-demo`, name: `${provider.name} demo model`, default: false, ...(provider.protocol === 'codex-appserver' ? { effort: { levels: [{ id: 'low', label: 'Low' }, { id: 'high', label: 'High' }], default: 'high' }, speeds: [{ id: 'fast', label: 'Fast' }, { id: 'ultrafast', label: 'Ultrafast' }] } : provider.protocol === 'muse' ? { effort: MUSE_EFFORT } : provider.protocol === 'pi' ? { effort: PI_EFFORT } : {}) }
     ];
     await new Promise((resolve) => setTimeout(resolve, PROBE_MS));
   }

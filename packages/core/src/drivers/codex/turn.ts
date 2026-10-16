@@ -1,5 +1,6 @@
 import type { MessageId, MessagePart, ToolStatus, Usage } from '@boite/contracts';
-import type { PromptCacheLife, TurnContext, TurnResult } from '../types.ts';
+import type { PromptCacheLife, TurnContext, TurnRefusal, TurnResult } from '../types.ts';
+import { codexRefusal } from './availability.ts';
 import type { CodexTokenCounts } from './mapping.ts';
 import type { CodexTurnRecord, ToolView } from './protocol.ts';
 
@@ -68,6 +69,11 @@ export class CodexTurn {
   settled = false;
   /** `thread/resume` said the Codex thread is gone. */
   sessionLost = false;
+  /** The code of the last `error` notification Codex sent without retrying, for a failure that carries none. */
+  lastErrorInfo: unknown = null;
+  /** When the account's spent window resets, from `account/rateLimits/updated`; null when none is spent or nothing was said. */
+  spentWindowResetsAt: number | null = null;
+  private refusal: TurnRefusal | undefined;
 
   constructor(readonly ctx: TurnContext) {
     this.sessionId = ctx.sessionId;
@@ -102,6 +108,7 @@ export class CodexTurn {
         this.status = 'stopped';
         break;
       case 'failed':
+        this.refusal = codexRefusal(record.error?.codexErrorInfo ?? this.lastErrorInfo, record.error?.message, this.spentWindowResetsAt);
         this.fail(record.error?.message ?? 'the codex agent failed the turn');
         return;
       default:
@@ -167,6 +174,7 @@ export class CodexTurn {
       ...(this.status === 'done' && this.sessionId && this.completedTurnId
         ? { checkpoint: { sessionId: this.sessionId, entry: this.completedTurnId } } : {}),
       ...(this.sessionLost ? { sessionLost: true } : {}),
+      ...(this.status === 'error' && this.refusal ? { refusal: this.refusal } : {}),
     });
   }
 
