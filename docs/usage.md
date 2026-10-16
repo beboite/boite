@@ -121,7 +121,7 @@ quota views update the label immediately while retaining their cached windows.
 | Source | Read behavior and limits |
 | --- | --- |
 | Claude | OAuth usage endpoint for file logins; Keychain, Credential Manager or expired-token logins fall back to asking the CLI for usage with `skipBehaviors: true`, no prompt queue, tools or hooks. Fallback can omit resets and paid usage. |
-| Codex | `account/rateLimits/read`, without opening a conversation |
+| Codex | `account/rateLimits/read`, without opening a conversation; a running session's `account/rateLimits/updated` refreshes it (below) |
 | Muse Code | Last `usage/changed` observation from an existing host supporting that event; no host or prompt starts to refresh limits |
 | Grok | Credit percentage or legacy credit amounts from the selected CLI login's billing endpoint |
 | OpenCode Go | Rolling, weekly and monthly limits from its Go usage API, using its own saved API login or the default account's `OPENCODE_API_KEY`. OpenCode 2 accounts read the key from their own database |
@@ -142,11 +142,15 @@ time, including over-quota readings. Before the first observation, after
 monitoring is disabled or with an older host, the source is unavailable. Its
 schema supplies no paid credit balance or banked resets.
 
-A Codex limits reading a running session reports goes through
-`QuotaStore.observe` and stands as a successful read of that account, timed at
-its observation: the next list returns it without starting an app-server until
-it is a minute old, and a later read replaces it. A reading older than the one
-held is ignored, and `quotas.updated` goes out only when the values changed.
+A running Codex session forwards each `account/rateLimits/updated` notification
+to `QuotaStore.observe`. The update is sparse, so it is merged into the last
+full read of that account: the windows it carries replace theirs, the others
+and the banked resets stay. The merged row stands as a successful read timed at
+its observation, so the next list returns it without starting an app-server
+until it is a minute old. Updates stand in for a read only within five minutes
+of the last full read and are dropped when no full read is held; the next list
+then reads again. A reading older than the one held is ignored, and
+`quotas.updated` goes out only when the values changed.
 
 ### Resets and paid allowances
 

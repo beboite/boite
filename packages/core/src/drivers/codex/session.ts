@@ -9,6 +9,7 @@ import { profileFor, resolveExecutable } from '../../providers/resolve.ts';
 import { subscriptionProxyCodexArgs } from '../../subscription-proxy.ts';
 import type { LiveTurnSettings, ProbeContext, QuestionAsk, SessionContext, TurnContext } from '../types.ts';
 import { preparedModels } from './models.ts';
+import { codexQuotaReading } from '../../quota-details.ts';
 import { exitWithin } from '../exit.ts';
 import {
   addCounts,
@@ -568,10 +569,9 @@ export class CodexSession {
       this.reportUsage(params);
       return;
     }
-    if (method === 'hook/completed') {
-      this.onHook(params['run'] as CodexHookRun | undefined);
-      return;
-    }
+    if (method === 'hook/completed') return this.onHook(params['run'] as CodexHookRun | undefined);
+    // The limits tab shows the account's limits from here without starting an app-server to read them.
+    if (method === 'account/rateLimits/updated') { const reading = codexQuotaReading(params); if (reading) this.opener?.quota?.(reading, Date.now()); return; }
     const turn = this.current;
     if (turn === null) return;
     if (typeof params['turnId'] === 'string' && turn.turnId !== null && params['turnId'] !== turn.turnId) return;

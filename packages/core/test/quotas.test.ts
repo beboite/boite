@@ -297,12 +297,16 @@ test('the standalone Antigravity source is opt-in, persists and never borrows an
   expect((await restored.list()).find((row) => row.accountId === 'quota:antigravity-cli')?.status).toBe('disabled');
 });
 
-test('a Codex session reading stands as a fresh read: no reader call, no older replacement, no repeated broadcast', async () => {
+test('a Codex session reading merges into the last full read and stands as a fresh one', async () => {
   harness = await startTestCore();
   const account = harness.core.accounts.add({ providerId: 'codex', label: 'Codex' });
   const accounts = spyOn(harness.core.accounts, 'list').mockReturnValue([account]);
   let calls = 0;
-  const store = new QuotaStore(harness.core, async () => { calls++; return [{ id: 'primary', label: '5 hours', usedPercent: 10, resetsAt: null }]; });
+  const store = new QuotaStore(harness.core, async () => {
+    calls++;
+    return { windows: [{ id: 'primary', label: '5 hours', usedPercent: 10, resetsAt: null }, { id: 'secondary', label: 'Weekly', usedPercent: 20, resetsAt: null }],
+      resetCredits: { availableCount: 2, nextExpiresAt: null } };
+  });
   let updates = 0;
   const off = harness.core.bus.onAny((name) => { if (name === 'quotas.updated') updates++; });
   let now = Date.now();
@@ -310,24 +314,33 @@ test('a Codex session reading stands as a fresh read: no reader call, no older r
   const observed = { windows: [{ id: 'primary', label: '5 hours', usedPercent: 42, resetsAt: null }] };
   const row = async () => (await store.list()).find((row) => row.accountId === account.id)!;
   try {
+    // With no full read held, a sparse update cannot stand for one: the list reads.
     store.observe(account.id, observed, now);
-    expect(updates).toBe(1);
-    expect(await row()).toMatchObject({ status: 'ready', source: 'observation', checkedAt: now, windows: observed.windows });
-    expect(calls).toBe(0);
-    // The same limits again change nothing a client shows.
+    expect(updates).toBe(0);
+    expect((await row()).windows[0]!.usedPercent).toBe(10);
+    expect(calls).toBe(1);
+    // The update replaces the window it carries; the other window and the banked resets stay.
     now += 5_000;
     store.observe(account.id, observed, now);
     expect(updates).toBe(1);
-    // Past the cache, the reader answers; a reading observed before it does not replace it.
-    now += 61_000;
-    const read = await row();
+    now += 50_000;
+    expect(await row()).toMatchObject({ status: 'ready', source: 'observation', checkedAt: now - 50_000, resetCredits: { availableCount: 2 },
+      windows: [observed.windows[0], { id: 'secondary', usedPercent: 20 }] });
     expect(calls).toBe(1);
-    expect(read.windows[0]!.usedPercent).toBe(10);
+    // The same limits again change nothing a client shows; an older reading does not replace a newer one.
+    store.observe(account.id, observed, now);
+    expect(updates).toBe(1);
     store.observe(account.id, { windows: [{ id: 'primary', label: '5 hours', usedPercent: 99, resetsAt: null }] }, now - 1_000);
+    expect((await row()).windows[0]!.usedPercent).toBe(42);
+    // Five minutes after the full read, updates stop standing in for it: the next list reads again.
+    now += 250_000;
+    store.observe(account.id, { windows: [{ id: 'primary', label: '5 hours', usedPercent: 50, resetsAt: null }] }, now);
+    now += 61_000;
     expect((await row()).windows[0]!.usedPercent).toBe(10);
+    expect(calls).toBe(2);
     // A reading with no limits, or for a disabled account, is not one.
     store.observe(account.id, { windows: [] }, now + 1);
-    expect((await row()).checkedAt).toBe(read.checkedAt);
+    expect((await row()).checkedAt).toBe(now);
     await store.configure(account.id, false);
     store.observe(account.id, observed, now + 2);
     expect((await row()).status).toBe('disabled');

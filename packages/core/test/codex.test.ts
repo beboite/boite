@@ -1057,6 +1057,20 @@ describe('codex driver', () => {
     expect(history.rows.map((row) => row.usage.inputTokens)).toEqual([11]);
   });
 
+  test('the limits a running session reports reach the account quota with no read', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    const { accountId } = harness!.core.threads.get(threadId);
+    const observe = spyOn(harness!.core.quotas, 'observe').mockImplementation(() => {});
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: '[limits]' });
+    expect((await finished).status).toBe('done');
+    expect(observe).toHaveBeenCalledTimes(1);
+    expect(observe.mock.calls[0]![0]).toBe(accountId!);
+    expect(observe.mock.calls[0]![1].windows).toEqual([{ id: 'primary', label: '5 hours', usedPercent: 37, resetsAt: null }]);
+    expect(fakeLog()).not.toContain('account/rateLimits/read');
+  });
+
   test('stopping a turn interrupts it and the agent process is gone', async () => {
     const client = await startCore();
     const threadId = await codexThread(client);

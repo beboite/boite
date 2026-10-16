@@ -26,11 +26,11 @@
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const DIRECTIVE = /\[(agents|command|command-failed|approve|thought|summary|usage|late-context|slow|crash|input|async|stream|elicit|elicit-url|permissions|time|hook-block)\]/g;
+const DIRECTIVE = /\[(agents|command|command-failed|approve|thought|summary|usage|limits|late-context|slow|crash|input|async|stream|elicit|elicit-url|permissions|time|hook-block)\]/g;
 const CHUNKS = 3;
 
 type Directive =
-  | 'command' | 'command-failed' | 'approve' | 'thought' | 'summary' | 'usage' | 'late-context' | 'slow' | 'crash' | 'input' | 'async' | 'stream'
+  | 'command' | 'command-failed' | 'approve' | 'thought' | 'summary' | 'usage' | 'limits' | 'late-context' | 'slow' | 'crash' | 'input' | 'async' | 'stream'
   | 'elicit' | 'elicit-url' | 'permissions' | 'time' | 'hook-block' | 'agents';
 
 let threadCounter = 0;
@@ -432,6 +432,10 @@ async function runTurn(turnId: string, text: string): Promise<void> {
         await Bun.sleep(80);
         notify('thread/tokenUsage/updated', { threadId, turnId, tokenUsage: { last: { inputTokens: 80, cachedInputTokens: 20, outputTokens: 10 }, modelContextWindow: 200000 } });
         return;
+      case 'limits':
+        // A rolling update is sparse: only the windows the last request touched.
+        notify('account/rateLimits/updated', { rateLimits: { limitId: 'codex', primary: { usedPercent: 37, windowDurationMins: 300, resetsAt: null }, secondary: null, credits: null, planType: null } });
+        break;
       case 'usage': {
         // Like a real turn: one update per model request, `last` for that
         // request alone, `total` cumulative over the thread's earlier turns

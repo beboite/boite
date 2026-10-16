@@ -52,6 +52,38 @@ export function codexNextResetCredit(raw: unknown, now = Date.now()): { id: stri
   return credits.reduce((next, credit) => (credit.expiresAt ?? Infinity) < (next.expiresAt ?? Infinity) ? credit : next);
 }
 
+export function quotaWindow(id: string, label: string, percent: unknown, reset: unknown): QuotaWindow | null {
+  if (typeof percent !== 'number' || !Number.isFinite(percent)) return null;
+  const at = typeof reset === 'number' ? reset * 1000 : typeof reset === 'string' ? Date.parse(reset) : NaN;
+  return { id, label, usedPercent: Math.max(0, Math.min(100, percent)), resetsAt: Number.isFinite(at) ? at : null };
+}
+
+export function codexQuotaWindows(raw: unknown): QuotaWindow[] {
+  const root = object(raw);
+  const byId = object(root['rateLimitsByLimitId']);
+  const snapshot = object(byId['codex'] ?? root['rateLimits']);
+  if (snapshot['limitId'] && snapshot['limitId'] !== 'codex') return [];
+  const windows: QuotaWindow[] = [];
+  for (const id of ['primary', 'secondary']) {
+    const value = object(snapshot[id]);
+    const fallback = id === 'secondary' ? 10080 : ['free', 'go'].includes(String(snapshot['planType'])) ? 43200 : 300;
+    const minutes = typeof value['windowDurationMins'] === 'number' ? value['windowDurationMins'] : fallback;
+    const label = minutes >= 43200 ? 'Monthly' : minutes >= 10080 ? 'Weekly' : `${minutes / 60} hours`;
+    const mapped = quotaWindow(id, label, value['usedPercent'], value['resetsAt']);
+    if (mapped) windows.push(mapped);
+  }
+  return windows;
+}
+
+/**
+ * The limits a running session's `account/rateLimits/updated` carries: a sparse
+ * update, with no banked resets. Null when it names no Codex window.
+ */
+export function codexQuotaReading(raw: unknown): QuotaReading | null {
+  const windows = codexQuotaWindows(raw);
+  return windows.length ? { windows, ...codexQuotaDetails(raw) } : null;
+}
+
 export function codexQuotaDetails(raw: unknown): Pick<QuotaReading, 'resetCredits' | 'credits'> {
   const root = object(raw);
   const bucket = object(object(root['rateLimitsByLimitId'])['codex'] ?? root['rateLimits']);

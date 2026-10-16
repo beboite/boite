@@ -21,7 +21,9 @@
   let frame = $state.raw<MobileDeviceFrame | null>(null), picture = $state<HTMLImageElement>();
   let paused = $state(false), busy = $state(false), error = $state(''), text = $state(''), areaWidth = $state(0);
   let alive = true, generation = 0, timer: ReturnType<typeof setTimeout> | undefined, pending = false, requestedAt = 0;
-  let roundTrip = 0, unchanged = 0, failures = 0;
+  // `pictureTrip` sets the JPEG quality and counts only answers that carried one: a quick `unchanged`
+  // must not change the quality, which would change the frame the core makes and its id.
+  let roundTrip = 0, pictureTrip = 0, unchanged = 0, failures = 0;
   let pointer: { x: number; y: number; at: number; frame: MobileDeviceFrame } | undefined;
   // A computer types, pastes and scrolls on the screen itself; the text field below is the phone's.
   const desk = hasKeyboard();
@@ -50,7 +52,7 @@
     const client = store.client, started = performance.now();
     try {
       if (!client || client.state !== 'ready') throw new Error(strings.remoteBrowser.reconnecting);
-      const maxWidth = frameMaxWidth(areaWidth, window.devicePixelRatio), quality = frameQuality(roundTrip);
+      const maxWidth = frameMaxWidth(areaWidth, window.devicePixelRatio), quality = frameQuality(pictureTrip);
       // The core answers `unchanged`, with no picture, while the screen still shows the frame named here.
       const previous = frame?.deviceId === target.deviceId ? frame.id : undefined;
       const next = await client.call('devices.frame', { threadId, deviceId: target.deviceId, ...(maxWidth ? { maxWidth } : {}), quality, ...(previous ? { previous } : {}) });
@@ -58,6 +60,7 @@
       if (!same && !next.unchanged) await decoded(next.base64);
       if (!alive || run !== generation) return;
       roundTrip = performance.now() - started; failures = 0;
+      if (!next.unchanged) pictureTrip = roundTrip;
       unchanged = same ? unchanged + 1 : 0;
       if (!next.unchanged) frame = next;
       error = '';

@@ -85,6 +85,30 @@ test('the panel opens an emulator, shows its screen once booted and taps in scre
   expect(document.querySelector('[data-testid=device-picker]')).not.toBeNull();
 });
 
+test('a still screen on a slow link keeps its quality and frame id after a quick unchanged answer', async () => {
+  vi.useFakeTimers();
+  // A picture takes 600 ms to arrive, an unchanged answer 50 ms: only a picture's trip sets the quality.
+  const real = client.call.bind(client) as (method: string, params: unknown) => Promise<unknown>;
+  const calls = vi.spyOn(client, 'call').mockImplementation((async (method: string, params: unknown) => {
+    const result = await real(method, params);
+    if (method === 'devices.frame') await new Promise(resolve => setTimeout(resolve, (result as { unchanged?: boolean }).unchanged ? 50 : 600));
+    return result;
+  }) as typeof client.call);
+  app = mount(DeviceSurface, { target: document.body, props: { store, threadId: thread } }); await settle();
+  document.querySelector<HTMLButtonElement>('[data-testid=device-open]')!.click(); await settle();
+  await vi.advanceTimersByTimeAsync(FAKE_BOOT_MS + 300); await settle();
+  document.querySelector<HTMLButtonElement>('[data-testid=device-show]')!.click(); await settle();
+  await vi.advanceTimersByTimeAsync(4000); await settle();
+  const polls = calls.mock.calls.filter(([method]) => method === 'devices.frame').map(([, params]) => params as { quality: number; previous?: string });
+  expect(polls.length).toBeGreaterThanOrEqual(4);
+  // The first frame came slowly at 55, so the second is made at 45; every later poll keeps 45 and names that frame.
+  expect(polls.slice(1).map(poll => poll.quality)).toEqual(polls.slice(1).map(() => 45));
+  expect(polls[2]!.previous).toMatch(/-45$/);
+  expect(polls.slice(2).every(poll => poll.previous === polls[2]!.previous)).toBe(true);
+  const pictures = await Promise.all(calls.mock.results.filter((_, index) => calls.mock.calls[index]![0] === 'devices.frame').map(result => result.value as Promise<{ unchanged?: boolean }>));
+  expect(pictures.filter(result => !result.unchanged)).toHaveLength(2);
+});
+
 test('a device the agent opens brings the Device tab forward, and its card is always offered', async () => {
   expect(offeredCards().some(card => card.kind === 'device')).toBe(true);
 

@@ -8,19 +8,21 @@ import type { Account, AccountQuota, QuotaReading, QuotaWindow } from '@boite/co
 import type { Core } from './core.ts';
 import { homePath } from './paths.ts';
 import { invalidParams } from './errors.ts';
-import { claudeQuotaDetails, claudeUsageAgent, codexQuotaDetails } from './quota-details.ts';
+import { claudeQuotaDetails, claudeUsageAgent, codexQuotaDetails, codexQuotaWindows, quotaWindow } from './quota-details.ts';
 import { consumeClaudeReset, QuotaResetStore, type QuotaResetConsumer } from './quota-resets.ts';
 import { ANTIGRAVITY_QUOTA_ID, readExtraQuota } from './quota-readers.ts';
 import type { ProbeContext } from './drivers/types.ts';
 import { activeSubscriptionProxy } from './subscription-proxy.ts';
 import { GatewayQuotas } from './subscription-proxy-quotas.ts';
 
-export { claudeUsageAgent } from './quota-details.ts';
+export { claudeUsageAgent, codexQuotaWindows } from './quota-details.ts';
 
 const cliAccount: Account = { id: ANTIGRAVITY_QUOTA_ID, providerId: 'antigravity', label: 'Antigravity CLI', isolationDir: null, status: 'unknown', identity: null, createdAt: 0 };
 
 const CACHE_MS = 60_000;
 const RETRY_MS = 300_000;
+/** A session's readings stand in for reads only this long after a full read, which alone reports banked resets. */
+const OBSERVED_MS = 300_000;
 /** A disabled spending budget alone does not report subscription usage. */
 function hasQuota(reading: QuotaReading): boolean {
   return reading.windows.length > 0 || reading.resetCredits !== undefined ||
@@ -33,12 +35,6 @@ function object(value: unknown): ObjectValue {
   return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as ObjectValue : {};
 }
 
-function window(id: string, label: string, percent: unknown, reset: unknown): QuotaWindow | null {
-  if (typeof percent !== 'number' || !Number.isFinite(percent)) return null;
-  const at = typeof reset === 'number' ? reset * 1000 : typeof reset === 'string' ? Date.parse(reset) : NaN;
-  return { id, label, usedPercent: Math.max(0, Math.min(100, percent)), resetsAt: Number.isFinite(at) ? at : null };
-}
-
 export function claudeQuotaWindows(raw: unknown): QuotaWindow[] {
   const root = object(raw);
   const limits = object(root['rate_limits'] ?? root);
@@ -47,34 +43,18 @@ export function claudeQuotaWindows(raw: unknown): QuotaWindow[] {
     if (!id.startsWith('five_hour') && !id.startsWith('seven_day')) continue;
     const entry = object(value);
     const label = id === 'five_hour' ? '5 hours' : id === 'seven_day' ? 'Weekly' : id.replaceAll('_', ' ');
-    const mapped = window(id, label, entry['utilization'], entry['resets_at']);
+    const mapped = quotaWindow(id, label, entry['utilization'], entry['resets_at']);
     if (mapped) windows.push(mapped);
   }
   for (const value of Array.isArray(limits['model_scoped']) ? limits['model_scoped'] : []) {
     const entry = object(value);
     if (typeof entry['display_name'] !== 'string') continue;
-    const mapped = window(`model:${entry['display_name']}`, `Weekly · ${entry['display_name']}`, entry['utilization'], entry['resets_at']);
+    const mapped = quotaWindow(`model:${entry['display_name']}`, `Weekly · ${entry['display_name']}`, entry['utilization'], entry['resets_at']);
     if (mapped) windows.push(mapped);
   }
   return windows;
 }
 
-export function codexQuotaWindows(raw: unknown): QuotaWindow[] {
-  const root = object(raw);
-  const byId = object(root['rateLimitsByLimitId']);
-  const snapshot = object(byId['codex'] ?? root['rateLimits']);
-  if (snapshot['limitId'] && snapshot['limitId'] !== 'codex') return [];
-  const windows: QuotaWindow[] = [];
-  for (const id of ['primary', 'secondary']) {
-    const value = object(snapshot[id]);
-    const fallback = id === 'secondary' ? 10080 : ['free', 'go'].includes(String(snapshot['planType'])) ? 43200 : 300;
-    const minutes = typeof value['windowDurationMins'] === 'number' ? value['windowDurationMins'] : fallback;
-    const label = minutes >= 43200 ? 'Monthly' : minutes >= 10080 ? 'Weekly' : `${minutes / 60} hours`;
-    const mapped = window(id, label, value['usedPercent'], value['resetsAt']);
-    if (mapped) windows.push(mapped);
-  }
-  return windows;
-}
 
 /**
  * One HTTP request when the login is a file Boite can read. Otherwise the CLI
@@ -166,8 +146,11 @@ export class QuotaStore {
   readonly resets: QuotaResetStore;
   /** The subscription gateway's own accounts, listed after this machine's. */
   readonly gateway: GatewayQuotas;
-  /** Backoff and freshness: when the next read may go out. Cleared by every invalidation. */
-  private cache = new Map<string, { value: AccountQuota; retryAt: number }>();
+  /**
+   * Backoff and freshness: when the next read may go out. Cleared by every invalidation.
+   * `readAt` is the time of the full read a session's readings were merged into.
+   */
+  private cache = new Map<string, { value: AccountQuota; retryAt: number; readAt?: number }>();
   /**
    * The last successful reading of each account, kept through invalidations so
    * a failed read shows it as stale instead of nothing. Forgotten only when it
@@ -238,9 +221,11 @@ export class QuotaStore {
   private isMuse(account: Account): boolean { return this.core.providers.get(account.providerId)?.protocol === 'muse'; }
   /**
    * Only running hosts contribute observations; listing never starts a Muse turn.
-   * A Codex session reports the limits a read would spawn an app-server for, so
-   * its reading stands as a fresh read: the next list returns it until it is
-   * `CACHE_MS` old. A read that lands later replaces it.
+   * A running Codex session reports the limits a read would spawn an app-server
+   * for, in a sparse update: it is merged into the last full read, and the
+   * merged row stands as a fresh read until it is `CACHE_MS` old. With no full
+   * read held, or one `OBSERVED_MS` old, the update is dropped and the next
+   * list reads again.
    */
   observe(accountId: string, reading: QuotaReading, observedAt: number): void {
     const account = this.core.accounts.list().find((row) => row.id === accountId);
@@ -255,11 +240,16 @@ export class QuotaStore {
   }
   private observeRead(account: Account, reading: QuotaReading, observedAt: number): void {
     const base = this.base(account);
-    if (base.status !== 'unavailable' || !hasQuota(reading)) return;
-    const previous = this.cache.get(account.id)?.value ?? this.kept(account);
-    if (previous?.checkedAt != null && previous.checkedAt > observedAt) return;
-    const value: AccountQuota = { ...base, ...reading, status: 'ready', source: 'observation', checkedAt: observedAt, error: null };
-    this.cache.set(account.id, { value, retryAt: Date.now() + 10_000 });
+    if (base.status !== 'unavailable' || !reading.windows.length) return;
+    const held = this.cache.get(account.id);
+    const previous = held?.value;
+    if (!previous || previous.status !== 'ready' || held.readAt === undefined || observedAt - held.readAt > OBSERVED_MS) return;
+    if (previous.checkedAt != null && previous.checkedAt > observedAt) return;
+    // A window the update leaves out keeps its last value; banked resets come only from a full read.
+    const windows = [...previous.windows.map((old) => reading.windows.find((row) => row.id === old.id) ?? old), ...reading.windows.filter((row) => !previous.windows.some((old) => old.id === row.id))];
+    const value: AccountQuota = { ...previous, label: base.label, providerName: base.providerName, windows, ...(reading.credits ? { credits: reading.credits } : {}),
+      status: 'ready', source: 'observation', checkedAt: observedAt, error: null };
+    this.cache.set(account.id, { value, retryAt: Date.now() + 10_000, readAt: held.readAt });
     this.lastGood.set(account.id, { value, identity: account.identity });
     const same = previous?.status === 'ready' && JSON.stringify([previous.windows, previous.resetCredits, previous.credits]) === JSON.stringify([value.windows, value.resetCredits, value.credits]);
     if (!same) this.core.bus.emit('quotas.updated', this.known());
@@ -353,7 +343,7 @@ export class QuotaStore {
         value = { ...(kept ?? base), label: base.label, providerName: base.providerName, status: 'unavailable', checkedAt: kept?.checkedAt ?? null,
           error: error instanceof Error ? error.message : 'Quota request failed.' };
       }
-      if (generation === this.generation && accountGeneration === (this.accountGenerations.get(account.id) ?? 0) && epoch === (this.epochs.get(account.id) ?? 0)) this.cache.set(account.id, { value, retryAt: Date.now() + (value.status === 'ready' ? 10_000 : RETRY_MS) });
+      if (generation === this.generation && accountGeneration === (this.accountGenerations.get(account.id) ?? 0) && epoch === (this.epochs.get(account.id) ?? 0)) this.cache.set(account.id, value.status === 'ready' ? { value, retryAt: Date.now() + 10_000, readAt: value.checkedAt! } : { value, retryAt: Date.now() + RETRY_MS });
       return value;
     })();
     this.pending.set(account.id, running);
