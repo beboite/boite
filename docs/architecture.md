@@ -37,7 +37,12 @@ under Advanced. The origin check only keeps arbitrary websites out: the first
 frame must still be `hello` with an accepted credential within five seconds, or
 the socket closes with `4001`.
 The owner token is 32 random bytes generated on first start and stored in
-`<dataDir>/core.json` with the port and PID.
+`<dataDir>/core.json` with the port, PID and start time, and on Linux a start
+key: the boot id and the start in clock ticks since boot. The shell takes a
+live PID for another process that got the number, not for the core, when its
+start key differs (Linux) or when it started more than two seconds after that
+time (Windows, macOS). The Linux start time follows every step of the wall
+clock, so it is never compared there. `core.lock` carries the same key.
 
 | Principal | Credential and authority |
 | --- | --- |

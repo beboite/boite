@@ -27,9 +27,11 @@ with mode `0600`; the owner requests a phone link through Settings or
 `pairing.grant`. Stop the scratch core before removing its directory.
 
 One core holds `<dataDir>/core.lock`. Another refuses to start on the same data.
-A dead holder can be replaced. Windows and Linux also compare process start
-time to reject a reused PID more than two seconds newer than the lock; macOS
-retains a lock while its recorded PID is alive.
+A dead holder can be replaced. Linux compares the holder's start key (boot id
+and start ticks) with the one in the lock, so a stepped wall clock never frees
+it; Windows compares process start time to reject a reused PID more than two
+seconds newer than the lock; macOS retains a lock while its recorded PID is
+alive.
 
 | Option | Meaning |
 | --- | --- |

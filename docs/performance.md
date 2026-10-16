@@ -577,7 +577,13 @@ and forgets them all on a providers reload, an install or an agent update.
 ## Shell startup
 
 The shell spawns the core before it builds the WebView2 window, and polls for
-`core.json` every 10 ms instead of every 120 ms.
+`core.json` every 10 ms instead of every 120 ms. `setup` starts the core as soon
+as its state exists, before the WebView version query and the second-launch
+listener; the `pre-setup` phase record times the process start to `setup`.
+
+On Windows the main page drops to WebView2's low memory level while the window
+waits in the tray, from a close or a login start, and returns to normal before
+it shows. Browser surfaces and a minimized window keep the normal level.
 
 The window is built hidden. It appears once the page has painted and either the
 core answered or two seconds passed, so a fast start shows no empty frame and a
