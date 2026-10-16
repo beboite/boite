@@ -1,10 +1,11 @@
-import { chmod, mkdir, readFile, stat, writeFile, rm, symlink, readlink, utimes } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, readdir, readFile, rename, stat, writeFile, rm, symlink, readlink, utimes } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import type { CoreClient } from '../src/client.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import { CodeCheckpoints } from '../src/threads/code-checkpoints.ts';
-import { restoreFiles } from '../src/threads/checkpoint-files.ts';
+import { restoreFiles, sharedBlob, snapshot } from '../src/threads/checkpoint-files.ts';
 import { git } from '../src/git/read.ts';
 import { startTestCore, waitFor, type TestCore } from './harness.ts';
 
@@ -385,4 +386,69 @@ test('an external edit to an affected file refuses the rewind without truncating
   expect(h.core.threads.get(threadId).messages).toEqual(before);
   expect(await readFile(join(cwd, 'app.ts'), 'utf8')).toBe('external');
   expect(await readFile(join(cwd, 'other.ts'), 'utf8')).toBe('agent');
+});
+
+const hashOf = (text: string) => createHash('sha256').update(text).digest('hex');
+
+test('threads on one folder share each blob, and a discarded thread\'s blobs are collected while the other still rewinds', async () => {
+  await mkdir(join(cwd, 'src', 'deep'), { recursive: true });
+  await writeFile(join(cwd, 'src', 'deep', 'app.ts'), 'initial');
+  await writeFile(join(cwd, 'only-first.ts'), 'first');
+  change = async () => { await writeFile(join(cwd, 'src', 'deep', 'app.ts'), 'agent'); };
+  await run('first');
+  const first = threadId;
+  await rm(join(cwd, 'only-first.ts'));
+  threadId = (await client.call('threads.create', { projectId: h.core.threads.require(first).projectId!, providerId: 'echo', accountId: h.core.threads.require(first).accountId })).id;
+  await writeFile(join(cwd, 'src', 'deep', 'app.ts'), 'initial');
+  const messageId = await run('second');
+  const shared = join(h.dataDir, 'checkpoints', 'objects');
+  for (const text of ['initial', 'agent']) {
+    const blob = await stat(sharedBlob(shared, hashOf(text)));
+    for (const thread of [first, threadId]) expect((await stat(join(h.dataDir, 'checkpoints', thread, 'objects', hashOf(text)))).ino).toBe(blob.ino);
+  }
+
+  await h.core.threads.codeCheckpoints.discard([first]);
+  // The unlink moved the blob's ctime, which a filesystem clock can put past a cutoff read in the same millisecond.
+  await Bun.sleep(10);
+  expect(await h.core.threads.codeCheckpoints.collect(0)).toBe(1);
+  await expect(stat(sharedBlob(shared, hashOf('first')))).rejects.toMatchObject({ code: 'ENOENT' });
+  expect((await stat(sharedBlob(shared, hashOf('initial')))).nlink).toBe(2);
+  expect((await client.call('threads.rewind', { threadId, messageId })).files).toEqual({ status: 'restored', count: 1 });
+  expect(await readFile(join(cwd, 'src', 'deep', 'app.ts'), 'utf8')).toBe('initial');
+  // A core restart keeps the shared store: startup cleanup never takes it for a thread.
+  await new CodeCheckpoints(h.core).collect(0);
+  expect((await stat(sharedBlob(shared, hashOf('initial')))).nlink).toBe(2);
+});
+
+test('a thread saved before the shared store still rewinds, and its next snapshot links its private copies', async () => {
+  await writeFile(join(cwd, 'app.ts'), 'initial');
+  change = async () => { await writeFile(join(cwd, 'app.ts'), 'agent'); };
+  const messageId = await run('change');
+  // The former layout: private copies in the thread folder and no shared store.
+  const objects = join(h.dataDir, 'checkpoints', threadId, 'objects');
+  for (const name of await readdir(objects)) {
+    await copyFile(join(objects, name), join(objects, `${name}.copy`));
+    await rename(join(objects, `${name}.copy`), join(objects, name));
+  }
+  await rm(join(h.dataDir, 'checkpoints', 'objects'), { recursive: true });
+  const restarted = new CodeCheckpoints(h.core);
+  await restarted.rewind(h.core.threads.require(threadId), [h.core.threads.get(threadId).turns[0]!.id], messageId, result => {
+    expect(result).toEqual({ status: 'restored', count: 1 });
+  });
+  expect(await readFile(join(cwd, 'app.ts'), 'utf8')).toBe('initial');
+  expect((await stat(join(objects, hashOf('initial')))).nlink).toBe(1);
+  await run('again');
+  expect((await stat(join(objects, hashOf('initial')))).ino).toBe((await stat(sharedBlob(join(h.dataDir, 'checkpoints', 'objects'), hashOf('initial')))).ino);
+});
+
+test('a short shared blob left by a crash is replaced instead of linked', async () => {
+  await writeFile(join(cwd, 'app.ts'), 'complete content');
+  const shared = join(h.dataDir, 'checkpoints', 'objects');
+  const hash = hashOf('complete content');
+  await mkdir(join(shared, hash.slice(0, 2)), { recursive: true });
+  await writeFile(sharedBlob(shared, hash), 'compl');
+  const objects = join(h.dataDir, 'checkpoints', threadId, 'objects');
+  expect((await snapshot(h.core, threadId, cwd, objects, undefined, shared))['app.ts']?.hash).toBe(hash);
+  expect(await readFile(join(objects, hash), 'utf8')).toBe('complete content');
+  expect(await readFile(sharedBlob(shared, hash), 'utf8')).toBe('complete content');
 });

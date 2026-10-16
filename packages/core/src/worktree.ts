@@ -55,6 +55,23 @@ interface WorktreePreparation {
 export class Worktrees {
   constructor(private readonly core: Core) {}
 
+  /** Whether a repository's config names `checkout.workers`, by project path, read once. */
+  private readonly workersSet = new Map<string, Promise<boolean>>();
+
+  /**
+   * What `git worktree add` is given so a new checkout writes its files with
+   * one worker per core: `checkout.workers=0`, unless the user's own config
+   * sets a number, which then stands. A read that fails counts as unset.
+   */
+  private async checkoutWorkers(threadId: ThreadId, repository: string, timeoutMs?: number): Promise<string[]> {
+    let set = this.workersSet.get(repository);
+    if (set === undefined) {
+      set = this.git(threadId, repository, ['config', '--get', 'checkout.workers'], timeoutMs).then((read) => read.code === 0, () => false);
+      this.workersSet.set(repository, set);
+    }
+    return (await set) ? [] : ['-c', 'checkout.workers=0'];
+  }
+
   pathFor(project: Project, branch: string): string {
     return join(worktreeRoot(project.path, this.core.settings.get().worktreeStorage, project.id), slugOf(branch.replace(/^boite\//, '')));
   }
@@ -81,7 +98,7 @@ export class Worktrees {
       // No live checkout uses this branch. One --force permits an obsolete registration,
       // but does not bypass a locked worktree or overwrite an existing directory.
       await this.exclude(threadId, project, path);
-      const added = await this.git(threadId, project.path, ['worktree', 'add', '--force', path, branch]);
+      const added = await this.git(threadId, project.path, [...await this.checkoutWorkers(threadId, project.path), 'worktree', 'add', '--force', path, branch]);
       if (added.code !== 0) throw refused(`cannot recover ${branch} at ${path}: ${added.stderr.trim()}`);
       return { path, branch };
     }
@@ -126,6 +143,8 @@ export class Worktrees {
         if (wanted !== undefined) throw refused(`${path} already exists: pick another branch name`, { path, branch });
         continue;
       }
+      const parallel = await this.checkoutWorkers(threadId, project.path, preparation?.timeoutMs);
+      preparation?.assertActive();
       const abandon = preparation?.beforeMutation({ branch, path });
       await this.exclude(threadId, project, path, preparation);
       // Exclusion lookup awaits git. A cancelled reservation must not start a late add.
@@ -142,7 +161,7 @@ export class Worktrees {
         preparation.assertActive();
       }
       const added = await this.git(threadId, project.path,
-        preparation ? ['worktree', 'add', path, branch] : ['worktree', 'add', '-b', branch, path, ...(base === undefined ? [] : [base])], preparation?.timeoutMs);
+        [...parallel, ...(preparation ? ['worktree', 'add', path, branch] : ['worktree', 'add', '-b', branch, path, ...(base === undefined ? [] : [base])])], preparation?.timeoutMs);
       if (added.code !== 0) {
         throw refused(`git worktree add failed in ${project.path}: ${added.stderr.trim() || `exit ${added.code}`}`, {
           path: project.path,

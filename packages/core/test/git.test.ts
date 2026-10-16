@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { DIFF_MAX_BYTES, RpcErrorCode } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
 import { parseNumstat, parseStatus } from '../src/git.ts';
-import { git as readGit } from '../src/git/read.ts';
+import { GIT_READ_SLOTS, git as readGit, SIDE_CEILING_BYTES } from '../src/git/read.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -146,6 +146,30 @@ describe('git.status', () => {
     }
   });
 
+  test('at most eight short reads run at once, and the wait for a slot does not count against a deadline', async () => {
+    const path = await fixture();
+    const threadId = await threadIn(path, 'repo');
+    let live = 0;
+    let most = 0;
+    const spawn = harness.core.procs.spawn.bind(harness.core.procs);
+    // Each stand-in git takes 400 ms; the deadline of 700 ms is shorter than two in a row.
+    const spy = spyOn(harness.core.procs, 'spawn').mockImplementation((scope, _command, _args, options) => {
+      live += 1;
+      most = Math.max(most, live);
+      const spawned = spawn(scope, process.execPath, ['-e', 'await Bun.sleep(400)'], options);
+      void spawned.exited.then(() => { live -= 1; });
+      return spawned;
+    });
+    try {
+      const reads = Array.from({ length: GIT_READ_SLOTS + 4 }, () => readGit(harness.core, threadId, path, ['status'], 700));
+      const answers = await Promise.all(reads);
+      expect(answers.every((answer) => answer.code === 0)).toBe(true);
+      expect(most).toBe(GIT_READ_SLOTS);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   test('a working directory outside a repository is refused by name', async () => {
     const path = join(harness.dataDir, 'plain');
     mkdirSync(path, { recursive: true });
@@ -188,6 +212,93 @@ describe('git.diff', () => {
     // A file with a NUL in it has no sides to show, whatever its extension.
     const binary = await client.call('git.diff', { threadId, path: 'pic.png' });
     expect(binary).toMatchObject({ binary: true, oldText: null, newText: null });
+  });
+
+  test('one git reads a diff when the client gives the origin from its status, two when the core must find it', async () => {
+    const path = await fixture();
+    const threadId = await threadIn(path, 'repo');
+    const spawned: string[] = [];
+    const spawn = harness.core.procs.spawn.bind(harness.core.procs);
+    const piped = harness.core.procs.spawnPiped.bind(harness.core.procs);
+    const spies = [
+      spyOn(harness.core.procs, 'spawn').mockImplementation((scope, command, args, options) => {
+        spawned.push(args.filter((arg) => !arg.startsWith('-') && !arg.includes('=')).slice(0, 1).join(''));
+        return spawn(scope, command, args, options);
+      }),
+      spyOn(harness.core.procs, 'spawnPiped').mockImplementation((scope, command, args, options) => {
+        spawned.push(args.filter((arg) => !arg.startsWith('-') && !arg.includes('=')).slice(0, 1).join(''));
+        return piped(scope, command, args, options);
+      }),
+    ];
+    const counted = async (params: { path: string; oldPath?: string | null }) => {
+      spawned.length = 0;
+      const diff = await client.call('git.diff', { threadId, ...params });
+      return { diff, spawned: [...spawned] };
+    };
+    try {
+      const walked = await counted({ path: 'moved.txt' });
+      expect(walked.spawned).toEqual(['status', 'cat-file']);
+      const given = await counted({ path: 'moved.txt', oldPath: 'keep.txt' });
+      expect(given.spawned).toEqual(['cat-file']);
+      expect(given.diff).toEqual(walked.diff);
+      const plain = await counted({ path: 'a.txt', oldPath: null });
+      expect(plain.spawned).toEqual(['cat-file']);
+      expect(plain.diff).toMatchObject({ oldPath: null, status: 'modified', oldText: 'one\ntwo\nthree\n', newText: 'one\ntwo\nthree\nfour\n' });
+      const deleted = await counted({ path: 'gone.txt', oldPath: null });
+      expect(deleted.diff).toMatchObject({ status: 'deleted', oldText: 'gone\n', newText: null });
+      const added = await counted({ path: 'new.txt', oldPath: null });
+      expect(added.diff).toMatchObject({ status: 'added', oldText: null, newText: 'brand new\n' });
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+    }
+    await expect(client.call('git.diff', { threadId, path: 'moved.txt', oldPath: '../keep.txt' }))
+      .rejects.toThrow("git.diff oldPath leaves the thread's working directory: ../keep.txt");
+    await expect(client.call('git.diff', { threadId, path: 'moved.txt', oldPath: 3 as unknown as string }))
+      .rejects.toThrow('git.diff oldPath must be a path, got number');
+  });
+
+  test('a git without `cat-file --batch -z` reads the side in three steps, and only asks once', async () => {
+    const path = await fixture();
+    const threadId = await threadIn(path, 'repo');
+    let batches = 0;
+    const piped = harness.core.procs.spawnPiped.bind(harness.core.procs);
+    // The answer an older git gives: an unknown option, exit 129.
+    const spy = spyOn(harness.core.procs, 'spawnPiped').mockImplementation((scope, command, args, options) => {
+      batches += 1;
+      return piped(scope, command, args.map((arg) => (arg === '-z' ? '--no-such-switch' : arg)), options);
+    });
+    try {
+      const first = await client.call('git.diff', { threadId, path: 'moved.txt', oldPath: 'keep.txt' });
+      expect(first).toMatchObject({ status: 'renamed', oldText: 'keep\n', newText: 'keep\n' });
+      const second = await client.call('git.diff', { threadId, path: 'a.txt' });
+      expect(second.oldText).toBe('one\ntwo\nthree\n');
+    } finally {
+      spy.mockRestore();
+    }
+    expect(batches).toBe(1);
+  });
+
+  test('a side at the ref past the ceiling is refused from its size, its git stopped before the bytes', async () => {
+    const path = await fixture();
+    const threadId = await threadIn(path, 'repo');
+    writeFileSync(join(path, 'huge.bin'), 'x'.repeat(SIDE_CEILING_BYTES + 1));
+    git(path, 'add', 'huge.bin');
+    git(path, 'commit', '-q', '-m', 'huge');
+    writeFileSync(join(path, 'huge.bin'), 'small now\n');
+    await expect(client.call('git.diff', { threadId, path: 'huge.bin', oldPath: null }))
+      .rejects.toThrow(`git.diff will not read huge.bin: it is over ${SIDE_CEILING_BYTES / (1024 * 1024)} MB on one side`);
+    await waitFor(() => harness.core.procs.liveCount(threadId) === 0);
+  });
+
+  test('a diff outside a repository is refused by name, with or without the origin', async () => {
+    const path = join(harness.dataDir, 'plain');
+    mkdirSync(path, { recursive: true });
+    writeFileSync(join(path, 'a.txt'), 'a\n');
+    const threadId = await threadIn(path, 'plain');
+    for (const params of [{}, { oldPath: null }]) {
+      await expect(client.call('git.diff', { threadId, path: 'a.txt', ...params }))
+        .rejects.toThrow(`the working directory of thread ${threadId} is not inside a git repository`);
+    }
   });
 
   test('malformed refs are refused while an empty ref defaults to HEAD', async () => {

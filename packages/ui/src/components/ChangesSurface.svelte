@@ -96,26 +96,43 @@
     if (id !== null) void refresh(id);
   });
 
+  /** The rename origin the list gives the selected row: null for none, undefined while the row is not in it. */
+  let origin = $derived(at < 0 ? undefined : (changes[at]?.oldPath ?? null));
+  /** The last diff request: which row, which round of triggers, with which origin. */
+  let reading: { key: string; round: string; from: string | null | undefined } | null = null;
+  /** Bumped by every diff request; an older answer that lands after a newer one is dropped. */
+  let diffSeq = 0;
+
   // The diff of the selected row, read on the same triggers as the status and
   // at the same time, not after it: the two reads do not depend on each other.
-  // A refresh of the same row keeps the old diff on screen until the new one
-  // replaces it; only another thread or another row starts from blank.
+  // The row's origin from the list goes with it, so the core skips a second
+  // status of its own. A refresh of the same row keeps the old diff on screen
+  // until the new one replaces it; only another thread or another row starts
+  // from blank.
   $effect(() => {
     const id = threadId;
     const path = selected;
-    void finished;
-    void asked;
+    const from = origin;
+    const round = `${finished}:${asked}`;
     const key = id === null || path === null ? null : `${id}\n${path}`;
     if (key !== shown) {
       shown = key;
       diff = null;
     }
-    if (id === null || path === null) return;
-    let cancelled = false;
-    void store.gitDiff(id, path).then((answer) => {
-      if (!cancelled) diff = answer;
+    if (id === null || path === null || key === null) {
+      reading = null;
+      diffSeq += 1;
+      return;
+    }
+    // A status that lands re-runs this. The read of this round still holds when
+    // it went out with the same origin, or with none (the core then asked git
+    // itself): only an origin that moved, a rename staged meanwhile, is read again.
+    if (reading !== null && reading.key === key && reading.round === round && (reading.from === from || reading.from === undefined || from === undefined)) return;
+    const mine = ++diffSeq;
+    reading = { key, round, from };
+    void store.gitDiff(id, path, undefined, from).then((answer) => {
+      if (mine === diffSeq) diff = answer;
     });
-    return () => { cancelled = true; };
   });
 </script>
 

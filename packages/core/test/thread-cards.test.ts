@@ -147,7 +147,7 @@ test('PR reads run one gh call per repository, two processes at a time, and matc
     expect(peak).toBe(2);
     // Three repositories, three lists; the second read of the first thread shared its call.
     expect(calls).toHaveLength(3);
-    expect(calls[0]).toContain('headRefName,number,url,state');
+    expect(calls[0]).toContain('number,url,state,headRefName,headRefOid,headRepository,headRepositoryOwner,isCrossRepository,mergedAt');
     await reader.read(ids[0]!);
     expect(calls).toHaveLength(3);
   } finally {
@@ -296,6 +296,30 @@ test('a full page asks for a missing branch alone, even when two of its pull req
   } finally {
     replacement.mockRestore();
   }
+});
+
+test('a failed git remote read is asked again after fifteen seconds, not five minutes', async () => {
+  const client = await harness.connect();
+  const repo = join(harness.dataDir, 'flaky-remote');
+  mkdirSync(join(repo, '.git'), { recursive: true });
+  const { threadId } = await echoThread(harness, client);
+  harness.core.journal.putThread({ ...harness.core.threads.require(threadId), cwd: repo, branch: 'topic-0' });
+  const spawn = harness.core.procs.spawn.bind(harness.core.procs);
+  let remoteReads = 0;
+  const replacement = spyOn(harness.core.procs, 'spawn').mockImplementation((scope, command, args, options) => {
+    if (command === 'gh') return spawn(scope, process.execPath, fakeGh([{ headRefName: 'topic-0', number: 7 }]), options);
+    // The first `git remote -v` fails, as one under build load or on a briefly missing folder would.
+    const script = ++remoteReads === 1 ? 'console.error("fatal: unable to read config"); process.exit(128)' : 'console.log("origin\\thttps://github.com/example/repo.git (fetch)")';
+    return spawn(scope, process.execPath, ['-e', script], options);
+  });
+  try {
+    const reader = new PullRequests(harness.core);
+    await expect(reader.read(threadId)).rejects.toThrow('unable to read config');
+    const clock = spyOn(Date, 'now').mockReturnValue(Date.now() + 16_000);
+    try { expect((await reader.read(threadId))?.number).toBe(7); }
+    finally { clock.mockRestore(); }
+    expect(remoteReads).toBe(2);
+  } finally { replacement.mockRestore(); }
 });
 
 test('a Forgejo project has no GitHub PR and never launches gh', async () => {

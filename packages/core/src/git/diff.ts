@@ -1,4 +1,4 @@
-import type { GitChange, GitDiff, RpcParams } from '@boite/contracts';
+import type { GitChangeStatus, GitDiff, RpcParams } from '@boite/contracts';
 import { DIFF_MAX_BYTES } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { refused } from '../errors.ts';
@@ -23,12 +23,11 @@ export async function gitDiff(core: Core, params: RpcParams<'git.diff'>): Promis
   const cwd = threadCwd(core, threadId);
   const found = resolveInside(cwd, params.path, 'git.diff path');
   const ref = checkRef(params.ref === undefined || params.ref === '' ? 'HEAD' : params.ref);
-  // Read the whole status so a rename retains its origin.
-  const status = await git(core, threadId, cwd, ['status', '--porcelain=v1', '-z']);
-  if (status.code === OUTSIDE_A_REPOSITORY) notARepository(threadId, status.stderr);
-  const change = parseStatus(status.stdout).changes.find((entry) => entry.path === found.relative) ?? null;
+  const change = await changeOf(core, params, cwd, found.relative);
   // Status paths are root-relative; an unchanged path is relative to cwd.
   const atRef = change?.oldPath ?? change?.path ?? `./${found.relative}`;
+  // The name goes to git as one NUL-ended record: a NUL inside it would end it early.
+  if (atRef.includes('\0')) throw refused(`git.diff refuses a path with a NUL in it: ${JSON.stringify(atRef)}`, { path: params.path });
   const oldSide = await readRefSide(core, threadId, cwd, ref, atRef);
   // Missing files remain valid inputs, but links and ancestors must stay inside cwd.
   if (!writeLandsInside(cwd, found.absolute)) {
@@ -50,7 +49,25 @@ export async function gitDiff(core: Core, params: RpcParams<'git.diff'>): Promis
   return renderDiff(found.relative, change, old, current);
 }
 
-function renderDiff(path: string, change: GitChange | null, old: Uint8Array | null, current: Uint8Array | null): GitDiff {
+/**
+ * What `git.status` says of the path. The client that read the status passes
+ * the rename origin it saw, null included, and no second walk of the whole
+ * tree runs; without it, the core asks git.
+ */
+async function changeOf(core: Core, params: RpcParams<'git.diff'>, cwd: string, relative: string): Promise<{ path: string; oldPath: string | null; status?: GitChangeStatus } | null> {
+  const given = params.oldPath;
+  if (given === null) return null;
+  if (given !== undefined) {
+    const origin = resolveInside(cwd, given, 'git.diff oldPath');
+    return { path: relative, oldPath: origin.relative, status: 'renamed' };
+  }
+  // Read the whole status so a rename retains its origin.
+  const status = await git(core, params.threadId, cwd, ['status', '--porcelain=v1', '-z']);
+  if (status.code === OUTSIDE_A_REPOSITORY) notARepository(params.threadId, status.stderr);
+  return parseStatus(status.stdout).changes.find((entry) => entry.path === relative) ?? null;
+}
+
+function renderDiff(path: string, change: { oldPath: string | null; status?: GitChangeStatus } | null, old: Uint8Array | null, current: Uint8Array | null): GitDiff {
   const binary = (old !== null && hasNul(old)) || (current !== null && hasNul(current));
   const oldSide = old === null || binary ? null : cut(old);
   const newSide = current === null || binary ? null : cut(current);

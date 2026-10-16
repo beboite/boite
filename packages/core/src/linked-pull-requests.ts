@@ -6,6 +6,12 @@ import { messageOf, refused } from './errors.ts';
 const PREFIX = 'linked-pull-requests:';
 const LIMIT = 20;
 
+/** Every URL the conversation linked, as stored: a new link changes it. */
+export function linkedPullRequestSignature(journal: Journal, threadId: string): string {
+  const stored = journal.getSetting(PREFIX + threadId);
+  return Array.isArray(stored) ? stored.map(entry => String((entry as { url?: unknown } | null)?.url ?? '')).join('\n') : '';
+}
+
 /**
  * The conversation's linked PR URLs in one GitHub repository (`host/owner/name`),
  * newest link first. Bad stored entries are skipped, never trusted.
@@ -57,9 +63,14 @@ export class LinkedPullRequests {
     return this.serialize(threadId, async () => {
       const list = this.stored(threadId);
       if (!list.length || (!refresh && Date.now() - (this.refreshed.get(threadId) ?? 0) < 60_000)) return list;
+      // A merged pull request stays merged: only the user's refresh reads it
+      // again. A closed one can reopen, so it is read like an open one.
+      const stale = (pr: LinkedPullRequest) => refresh || pr.state !== 'MERGED' || pr.error !== undefined;
+      if (!list.some(stale)) return list;
       this.refreshed.set(threadId, Date.now());
       if (this.refreshed.size > 500) this.refreshed.delete(this.refreshed.keys().next().value!);
       const updated = await Promise.all(list.map(async pr => {
+        if (!stale(pr)) return pr;
         try { return await this.fetch(threadId, pr.url); }
         catch (error) { return { ...pr, error: messageOf(error).slice(0, 500) }; }
       }));
