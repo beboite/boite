@@ -146,8 +146,8 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
     const thread = core.threads.get(params.threadId, params.after, params);
     if (!params.open) return thread;
     ctx.connection.subscriptions.add(params.threadId);
-    // Live tool parts reach this socket the way its pages do.
-    ctx.connection.transport = { compactTools: params.compactTools, compactToolParts: params.compactToolParts };
+    // Live tool parts, files and pictures reach this socket the way its pages do.
+    ctx.connection.transport = { compactTools: params.compactTools, compactToolParts: params.compactToolParts, compactFiles: params.compactFiles, compactImages: params.compactImages };
     if (params.open.previous && params.open.previous !== params.threadId) ctx.connection.subscriptions.delete(params.open.previous);
     if (params.open.markRead) { core.threads.markRead(params.threadId); thread.unread = false; }
     return { ...thread, opened: params.open.requests === false ? {} : {

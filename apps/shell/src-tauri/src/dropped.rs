@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use serde::Serialize;
 use tauri::ipc::Response;
-use tauri::{State, Webview};
+use tauri::{DragDropEvent, Manager, Runtime, State, Webview, WebviewEvent, WindowEvent};
 
 /// `ATTACHMENT_MAX_BYTES` in `packages/contracts/src/attachment-limits.ts`.
 const MAX_BYTES: u64 = 5 * 1024 * 1024;
@@ -18,16 +18,43 @@ const MAX_BYTES: u64 = 5 * 1024 * 1024;
 pub struct Dropped(Mutex<Vec<PathBuf>>);
 
 impl Dropped {
-    /// Called from the window's event handler, before the page hears of it.
-    pub(crate) fn remember(&self, paths: &[PathBuf]) {
+    /// Called from the drag listeners of `watch`, before the page can ask.
+    fn remember(&self, paths: &[PathBuf]) {
         if let Ok(mut held) = self.0.lock() {
             *held = paths.to_vec();
+        }
+    }
+
+    /// Keeps the paths an enter or a drop carries; over and leave carry none.
+    pub(crate) fn hear(&self, event: &DragDropEvent) {
+        if let DragDropEvent::Enter { paths, .. } | DragDropEvent::Drop { paths, .. } = event {
+            self.remember(paths);
         }
     }
 
     fn holds(&self, path: &Path) -> bool {
         self.0.lock().map(|held| held.iter().any(|known| known == path)).unwrap_or(false)
     }
+}
+
+/// Remembers the main window's drags before the page can ask about them. With
+/// Tauri's `unstable` feature, which `add_child` needs for the browser
+/// surfaces, the window's own page is a child webview: its drags come as
+/// webview events and never as window events. Both are heard, so the paths are
+/// known whichever way the runtime builds the window.
+pub(crate) fn watch<R: Runtime>(window: &tauri::WebviewWindow<R>) {
+    let app = window.app_handle().clone();
+    window.on_webview_event(move |event| {
+        if let WebviewEvent::DragDrop(drag) = event {
+            app.state::<Dropped>().hear(drag);
+        }
+    });
+    let app = window.app_handle().clone();
+    window.on_window_event(move |event| {
+        if let WindowEvent::DragDrop(drag) = event {
+            app.state::<Dropped>().hear(drag);
+        }
+    });
 }
 
 #[derive(Debug, Serialize, PartialEq)]
@@ -106,6 +133,22 @@ mod tests {
         assert!(known(&dropped, &dir.join("b.png").display().to_string()).is_err());
         dropped.remember(&[dir.join("b.png")]);
         assert!(known(&dropped, &dir.join("a.png").display().to_string()).is_err());
+    }
+
+    #[test]
+    fn enter_and_drop_replace_the_known_paths_over_and_leave_keep_them() {
+        let dropped = Dropped::default();
+        let dir = std::env::temp_dir();
+        let at = tauri::PhysicalPosition::new(0.0, 0.0);
+        let pdf = dir.join("ARCHIVES CHIEN.pdf");
+        dropped.hear(&DragDropEvent::Enter { paths: vec![pdf.clone()], position: at });
+        dropped.hear(&DragDropEvent::Over { position: at });
+        dropped.hear(&DragDropEvent::Leave);
+        assert!(known(&dropped, &pdf.display().to_string()).is_ok());
+        let png = dir.join("b.png");
+        dropped.hear(&DragDropEvent::Drop { paths: vec![png.clone()], position: at });
+        assert!(known(&dropped, &png.display().to_string()).is_ok());
+        assert!(known(&dropped, &pdf.display().to_string()).is_err());
     }
 
     #[test]

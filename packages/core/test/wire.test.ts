@@ -1,9 +1,9 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { RPC_CHUNK_BYTES, RPC_CHUNK_MARK, type MessageId, type RpcEvents } from '@boite/contracts';
+import { RPC_CHUNK_BYTES, RPC_CHUNK_MARK, RPC_MAX_FRAME_BYTES, type MessageId, type RpcEvents } from '@boite/contracts';
 import { connect } from '../src/client.ts';
 import { isLoopbackHost, ServerConnection, staticResponse } from '../src/server.ts';
 import { slices } from '../src/server/connection.ts';
@@ -89,6 +89,26 @@ describe('what a remote client is sent', () => {
     expect(sent).toHaveLength(1026);
     expect(sent[1024]!.frame.params?.text).toBe('x');
     expect(sent[1025]!.frame.id).toBe(1);
+    connection.close(1000);
+  });
+
+  test('held text leaves when its exact JSON, not an estimate of it, would pass the frame limit', () => {
+    const { connection, sent } = attached(true);
+    connection.sendEvent('message.delta', delta('a'));
+    let room = RPC_MAX_FRAME_BYTES - Buffer.byteLength(JSON.stringify({ jsonrpc: '2.0', method: 'message.delta', params: delta('a') }));
+    // Escaped characters weigh two bytes each in JSON, plain ones one.
+    const quoted = '"\\'.repeat(64 * 1024);
+    connection.sendEvent('message.delta', delta(quoted));
+    room -= 2 * quoted.length;
+    for (; room > 1024 * 1024; room -= 1024 * 1024) connection.sendEvent('message.delta', delta('x'.repeat(1024 * 1024)));
+    connection.sendEvent('message.delta', delta('x'.repeat(room)));
+    // Exactly at the limit: still held as one part.
+    expect(sent).toEqual([]);
+    connection.sendEvent('message.delta', delta('y'));
+    expect(sent).toHaveLength(1);
+    const frame = JSON.stringify(sent[0]!.frame);
+    expect(Buffer.byteLength(frame)).toBe(RPC_MAX_FRAME_BYTES);
+    expect(sent[0]!.frame.params?.text?.endsWith('x')).toBe(true);
     connection.close(1000);
   });
 
@@ -230,6 +250,56 @@ describe('static files', () => {
       expect(plain.headers.get('content-encoding')).toBeNull();
       expect(plain.headers.get('vary')).toBe('accept-encoding');
       expect(await plain.text()).toBe(body);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test('a revalidation that names the variant sent is a 304 without a body, and a stale or foreign tag gets the file', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'boite-static-'));
+    try {
+      const file = join(directory, 'index.html');
+      const body = '<!doctype html><title>Boite</title>\n'.repeat(40);
+      writeFileSync(file, body);
+      writeFileSync(`${file}.gz`, gzipSync(body));
+      writeFileSync(`${file}.br`, Bun.gzipSync(body));
+
+      const first = staticResponse(file, '/', 'gzip');
+      const etag = first.headers.get('etag')!;
+      expect(etag).toMatch(/^"[0-9a-z]+-[0-9a-z]+-gzip"$/);
+      expect(first.headers.get('last-modified')).toBe(new Date(Math.floor(statSync(`${file}.gz`).mtimeMs / 1000) * 1000).toUTCString());
+      // The two codings of one file never answer for each other, nor for the plain file.
+      expect(staticResponse(file, '/', 'br').headers.get('etag')).not.toBe(etag);
+      expect(staticResponse(file, '/', null).headers.get('etag')).not.toBe(etag);
+
+      const again = staticResponse(file, '/', 'gzip', new Headers({ 'if-none-match': `"old", W/${etag}` }));
+      expect(again.status).toBe(304);
+      expect(again.body).toBeNull();
+      // The 304 keeps what the shell's answer carries: its cache rule, its frame rule and its validators.
+      expect(again.headers.get('cache-control')).toBe('no-cache');
+      expect(again.headers.get('x-frame-options')).toBe('SAMEORIGIN');
+      expect(again.headers.get('vary')).toBe('accept-encoding');
+      expect(again.headers.get('etag')).toBe(etag);
+
+      // A gzip tag asked of a client that now reads br, and a tag of an older build, get the whole file.
+      expect(staticResponse(file, '/', 'br', new Headers({ 'if-none-match': etag })).status).toBe(200);
+      writeFileSync(`${file}.gz`, gzipSync(`${body}<p>new build</p>`));
+      const rebuilt = staticResponse(file, '/', 'gzip', new Headers({ 'if-none-match': etag }));
+      expect(rebuilt.status).toBe(200);
+      expect(new TextDecoder().decode(Bun.gunzipSync(new Uint8Array(await rebuilt.arrayBuffer())))).toContain('new build');
+
+      // Without a tag, the date decides; with one, the tag does even when the date would match.
+      const since = new Headers({ 'if-modified-since': rebuilt.headers.get('last-modified')! });
+      expect(staticResponse(file, '/', 'gzip', since).status).toBe(304);
+      expect(staticResponse(file, '/', 'gzip', new Headers({ 'if-modified-since': new Date(0).toUTCString() })).status).toBe(200);
+      since.set('if-none-match', etag);
+      expect(staticResponse(file, '/', 'gzip', since).status).toBe(200);
+
+      // A hashed asset is never revalidated, so it carries no validator.
+      expect(staticResponse(file, '/assets/index-ab.js', 'gzip').headers.get('etag')).toBeNull();
+      // Fonts and icons keep their names across builds: fresh for a day, then revalidated.
+      expect(staticResponse(file, '/fonts/Inter-latin.woff2', null).headers.get('cache-control')).toBe('public, max-age=86400, stale-while-revalidate=604800');
+      expect(staticResponse(file, '/icons/icon-192.png', null).headers.get('cache-control')).toBe('public, max-age=86400, stale-while-revalidate=604800');
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

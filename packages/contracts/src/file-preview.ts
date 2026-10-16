@@ -1,4 +1,4 @@
-import type { Message } from './index';
+import type { Message, MessagePart } from './index';
 import { imageSize } from './image-size.ts';
 
 /**
@@ -26,19 +26,25 @@ export function previewFileData(messages: Message[], previews?: ImagePreviews): 
   return messages.map(message => {
     let changed = false;
     const parts = message.parts.map((part, index) => {
-      if (part.type !== 'file' || part.dataDeferred) return part;
-      const picture = DRAWN_IMAGE.test(part.mimeType);
-      if (message.role !== 'user' && (picture ? part.data.length <= IMAGE_INLINE_CHARS : /^(image|video|audio)\//.test(part.mimeType) || part.mimeType === 'application/pdf')) return part;
-      changed = true;
-      const size = picture ? imageSize(part.data) : null;
-      const preview = picture ? previews?.(message.id, index, part.data) ?? null : null;
-      return {
-        ...part, data: '', bytes: base64Bytes(part.data), dataDeferred: true as const,
-        ...(size === null ? {} : size), ...(preview === null ? {} : { preview }),
-      };
+      const next = previewFilePart(part, message.role, message.id, index, previews);
+      if (next !== part) changed = true;
+      return next;
     });
     return changed ? { ...message, parts } : message;
   });
+}
+
+/** One part as `previewFileData` leaves it, for a message of `role`; the same part when it stays whole. */
+export function previewFilePart(part: MessagePart, role: Message['role'], messageId: string, index: number, previews?: ImagePreviews): MessagePart {
+  if (part.type !== 'file' || part.dataDeferred) return part;
+  const picture = DRAWN_IMAGE.test(part.mimeType);
+  if (role !== 'user' && (picture ? part.data.length <= IMAGE_INLINE_CHARS : /^(image|video|audio)\//.test(part.mimeType) || part.mimeType === 'application/pdf')) return part;
+  const size = picture ? imageSize(part.data) : null;
+  const preview = picture ? previews?.(messageId, index, part.data) ?? null : null;
+  return {
+    ...part, data: '', bytes: base64Bytes(part.data), dataDeferred: true as const,
+    ...(size === null ? {} : size), ...(preview === null ? {} : { preview }),
+  };
 }
 
 /** An image's data up to this many base64 characters stays in a page asked with `compactImages`. */
@@ -54,15 +60,21 @@ export function previewImageData(messages: Message[], inline = IMAGE_INLINE_CHAR
   return messages.map(message => {
     let changed = false;
     const parts = message.parts.map((part, index) => {
-      if (part.type !== 'image' || part.dataDeferred || part.data.length <= inline) return part;
-      changed = true;
-      const size = imageSize(part.data);
-      const preview = previews?.(message.id, index, part.data) ?? null;
-      return {
-        ...part, data: '', bytes: base64Bytes(part.data), dataDeferred: true as const,
-        ...(size === null ? {} : size), ...(preview === null ? {} : { preview }),
-      };
+      const next = previewImagePart(part, message.id, index, inline, previews);
+      if (next !== part) changed = true;
+      return next;
     });
     return changed ? { ...message, parts } : message;
   });
+}
+
+/** One part as `previewImageData` leaves it; the same part when it stays whole. */
+export function previewImagePart(part: MessagePart, messageId: string, index: number, inline = IMAGE_INLINE_CHARS, previews?: ImagePreviews): MessagePart {
+  if (part.type !== 'image' || part.dataDeferred || part.data.length <= inline) return part;
+  const size = imageSize(part.data);
+  const preview = previews?.(messageId, index, part.data) ?? null;
+  return {
+    ...part, data: '', bytes: base64Bytes(part.data), dataDeferred: true as const,
+    ...(size === null ? {} : size), ...(preview === null ? {} : { preview }),
+  };
 }

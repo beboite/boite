@@ -20,7 +20,7 @@ import { agentGuide, SHORT_ANSWERS } from '../agent-guide.ts';
 import { nativeSkillFiles } from '../brain.ts';
 import { takesSystemGuide } from '../drivers/index.ts';
 import { contextRulesBlock } from '@boite/contracts';
-import { prepareAttachments, fileReference } from '../attachments.ts';
+import { prepareAttachments, FileReferences } from '../attachments.ts';
 import { continuationInput } from '../continuation.ts';
 import type { Core } from '../core.ts';
 import type { EmitSink, PermissionTicket, ToolPatch, QuestionAsk, QuestionTicket, SessionContext, TurnContext } from '../drivers/types.ts';
@@ -48,7 +48,15 @@ export interface CarriedInput {
  * into every process it launches.
  */
 export class TurnContexts {
-  constructor(private readonly core: Core, private readonly threads: ThreadStore) {}
+  /** File lines of each thread's history, reused by its next fresh session. */
+  private readonly files: FileReferences;
+
+  constructor(private readonly core: Core, private readonly threads: ThreadStore) {
+    this.files = new FileReferences(core.dataDir);
+    core.bus.onCommitted((name, payload) => {
+      if (name === 'thread.removed') this.files.forget((payload as { threadId: ThreadId }).threadId);
+    });
+  }
 
   /**
    * Boite's guide for this thread's agent, or '' when a context mode without
@@ -292,7 +300,7 @@ export class TurnContexts {
     // No closure of this context may reach `input` or `prepared`: they share one
     // scope, and a driver keeps the callbacks of its session between turns.
     const input = resumePrompt !== undefined ? { prompt: resumePrompt, attachments: [] } : this.lastUserInput(threadId, turn.id);
-    const carry = carrier(this.core, threadId, resumePrompt !== undefined ? null : turn.id, input, provider);
+    const carry = carrier(this.core, this.files, threadId, resumePrompt !== undefined ? null : turn.id, input, provider);
     const fresh = !thread.agentSessionId && thread.sessionId === null && ((thread.sessionGeneration ?? 0) > 0 || resumePrompt !== undefined);
     const continued = fresh ? carry() : input;
     const prepared = prepareAttachments(this.core.dataDir, continued);
@@ -437,15 +445,8 @@ export class TurnContexts {
 
   /** What the agent session this turn resumes already used, summed over its recorded turns. */
   private sessionBefore(thread: ThreadSummary, turnId: TurnId): { costUsd: number; tokens: number } {
-    const before = { costUsd: 0, tokens: 0 };
-    if (thread.sessionId === null) return before;
-    for (const earlier of this.core.journal.listTurns(thread.id)) {
-      if (earlier.id === turnId || earlier.usage === null) continue;
-      if (earlier.execution?.sessionGeneration !== (thread.sessionGeneration ?? 0)) continue;
-      before.costUsd += earlier.usage.costUsdEquivalent ?? 0;
-      before.tokens += earlier.usage.inputTokens + earlier.usage.outputTokens + earlier.usage.cacheReadTokens + earlier.usage.cacheWriteTokens;
-    }
-    return before;
+    if (thread.sessionId === null) return { costUsd: 0, tokens: 0 };
+    return this.core.journal.sessionUsage(thread.id, thread.sessionGeneration ?? 0, turnId);
   }
 
   /**
@@ -454,13 +455,16 @@ export class TurnContexts {
    * filter only narrows: a prompt can quote the key, so each row is parsed.
    */
   private sentFromBefore(threadId: ThreadId, messageId: MessageId): SentFrom | null {
-    const rows = this.core.journal.db.query(`SELECT parts FROM messages WHERE thread_id = ? AND role = 'user' AND parts LIKE '%"sentFrom":%'
-      AND rowid < (SELECT rowid FROM messages WHERE id = ?) ORDER BY rowid DESC`).iterate(threadId, messageId) as Iterable<{ parts: string }>;
-    for (const row of rows) {
-      const part = (JSON.parse(row.parts) as MessagePart[]).find(p => p.type === 'text' && p.sentFrom !== undefined);
-      if (part?.type === 'text' && part.sentFrom) return part.sentFrom;
-    }
-    return null;
+    // Its own statement: the loop stops early, and a cached statement left mid-iteration fails its next use.
+    const statement = this.core.journal.db.prepare(`SELECT parts FROM messages WHERE thread_id = ? AND role = 'user' AND parts LIKE '%"sentFrom":%'
+      AND rowid < (SELECT rowid FROM messages WHERE id = ?) ORDER BY rowid DESC`);
+    try {
+      for (const row of statement.iterate(threadId, messageId) as Iterable<{ parts: string }>) {
+        const part = (JSON.parse(row.parts) as MessagePart[]).find(p => p.type === 'text' && p.sentFrom !== undefined);
+        if (part?.type === 'text' && part.sentFrom) return part.sentFrom;
+      }
+      return null;
+    } finally { statement.finalize(); }
   }
 
   /** The user message of the turn, read back from the journal: the text and the images it carried. */
@@ -500,9 +504,9 @@ type TurnInput = Parameters<typeof continuationInput>[3];
  * `makeContext`, so that only the context's `continuation` holds the input,
  * not every callback of the context.
  */
-function carrier(core: Core, threadId: ThreadId, turnId: TurnId | null, input: TurnInput, provider: ProviderDescriptor): () => { prompt: string; attachments: Attachment[] } {
+function carrier(core: Core, files: FileReferences, threadId: ThreadId, turnId: TurnId | null, input: TurnInput, provider: ProviderDescriptor): () => { prompt: string; attachments: Attachment[] } {
   const history = (): { prompt: string; attachments: Attachment[] } =>
-    continuationInput(core.journal, threadId, turnId, input, provider, part => fileReference(core.dataDir, part));
+    continuationInput(core.journal, threadId, turnId, input, provider, (part, place) => files.of(threadId, part, place));
   // Read once for a resume, before its note lands: a later fresh start would otherwise carry the note twice.
   const resumedHistory = turnId === null ? history() : null;
   return () => resumedHistory ?? history();

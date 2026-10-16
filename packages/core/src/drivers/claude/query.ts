@@ -50,7 +50,7 @@ export function liveSetup(thread: { model: string | null; effort: string | null;
   };
 }
 
-function userMessage(text: string, images: ImageAttachment[] = []): SDKUserMessage {
+function userMessage(uuid: string, text: string, images: ImageAttachment[] = []): SDKUserMessage {
   const content =
     images.length === 0
       ? text
@@ -61,7 +61,7 @@ function userMessage(text: string, images: ImageAttachment[] = []): SDKUserMessa
             source: { type: 'base64', media_type: image.mimeType, data: image.data },
           })),
         ];
-  return { type: 'user', message: { role: 'user', content }, parent_tool_use_id: null } as SDKUserMessage;
+  return { type: 'user', uuid, message: { role: 'user', content }, parent_tool_use_id: null } as SDKUserMessage;
 }
 
 /**
@@ -75,9 +75,16 @@ export class PromptQueue {
   private notify: (() => void) | null = null;
   private ended = false;
 
-  push(text: string, attachments: ImageAttachment[]): void {
-    this.items.push(attachments.length === 0 ? userMessage(text) : fitImages(attachments).then((images) => userMessage(text, images)));
+  /**
+   * Returns the message's uuid. The CLI lists it in `user_message_uuids` on
+   * the result that answers it, also when it folds the message into a run
+   * already going.
+   */
+  push(text: string, attachments: ImageAttachment[]): string {
+    const uuid = crypto.randomUUID();
+    this.items.push(attachments.length === 0 ? userMessage(uuid, text) : fitImages(attachments).then((images) => userMessage(uuid, text, images)));
     this.wake();
+    return uuid;
   }
 
   end(): void {

@@ -39,10 +39,13 @@ export function markQueuedStopped(core: Core, turnId: TurnId): void {
  */
 export function closeTools(core: Core, threadId: ThreadId, turnId: TurnId): number {
   let closed = 0;
-  // Read whole first: each close rewrites a row of the table being walked.
-  for (const { id: messageId, parts } of [...core.journal.walkTurnMessages(threadId, turnId)]) {
-    parts.forEach((part, partIndex) => {
-      if (part.type !== 'tool' || part.status !== 'running') return;
+  // Read whole first: each close rewrites a row of the table being walked. Large
+  // values stay in part_blobs until a running tool is found; only that part reads them back.
+  for (const { id: messageId, parts } of [...core.journal.walkTurnMessages(threadId, turnId, { blobs: false })]) {
+    parts.forEach((stored, partIndex) => {
+      if (stored.type !== 'tool' || stored.status !== 'running') return;
+      const part = core.journal.messagePart(messageId, partIndex)?.part;
+      if (part?.type !== 'tool') return;
       closed += 1;
       const payload = { messageId, partIndex, part: { ...part, status: 'error' as const } };
       core.journal.append({ type: 'message.part', threadId, version: 1, payload }, () => core.journal.setMessagePart(messageId, partIndex, payload.part));

@@ -141,8 +141,14 @@ real('a viewer on another device watches and drives the tab, and hears it come a
     expect(await evaluate('document.title')).toBe('clicked');
     // A computer's keyboard, mouse and clipboard: keys as key events, a paste, a selection read back.
     await Bun.sleep(150);
-    const live = await phone.call('browser.remoteFrame', { threadId, tabId });
-    const act = (input: Parameters<typeof phone.call<'browser.remoteInput'>>[1]['input']) => phone.call('browser.remoteInput', { threadId, frameId: live.id, input });
+    let live = await phone.call('browser.remoteFrame', { threadId, tabId });
+    // A frame takes input for 5 s; a viewer shows a newer one long before that, so this one does too.
+    const current = async () => {
+      if (Date.now() - live.at > 1500) { await Bun.sleep(150); live = await phone.call('browser.remoteFrame', { threadId, tabId }); }
+      return live.id;
+    };
+    const act = async (input: Parameters<typeof phone.call<'browser.remoteInput'>>[1]['input']) => phone.call('browser.remoteInput', { threadId, frameId: await current(), input });
+    const selection = async () => phone.call('browser.remoteSelection', { threadId, frameId: await current() });
     const at = (x: number, y: number) => ({ x: x / live.width, y: y / live.height, width: live.width, height: live.height });
     await evaluate('window.keys = []; addEventListener("keydown", e => keys.push(e.key))');
     await act({ kind: 'tap', ...at(150, 230) });
@@ -151,23 +157,23 @@ real('a viewer on another device watches and drives the tab, and hears it come a
     expect(await evaluate('keys.join(",")')).toBe('h,i, ,A,x,Backspace');
     await act({ kind: 'text', text: ' é\u{1F600} pasted' });
     expect(await evaluate('document.querySelector("#name").value')).toBe('hi A é\u{1F600} pasted');
-    expect(await phone.call('browser.remoteSelection', { threadId, frameId: live.id })).toEqual({ text: '', truncated: false });
+    expect(await selection()).toEqual({ text: '', truncated: false });
     await act({ kind: 'select-all' });
-    expect(await phone.call('browser.remoteSelection', { threadId, frameId: live.id })).toEqual({ text: 'hi A é\u{1F600} pasted', truncated: false });
+    expect(await selection()).toEqual({ text: 'hi A é\u{1F600} pasted', truncated: false });
     // A double click selects the word under it, and a key replaces the selection.
     await act({ kind: 'tap', ...at(104, 230) });
     await act({ kind: 'tap', ...at(104, 230), count: 2 });
-    expect((await phone.call('browser.remoteSelection', { threadId, frameId: live.id })).text.trim()).toBe('hi');
+    expect((await selection()).text.trim()).toBe('hi');
     await act({ kind: 'press', keys: ['Delete'] });
     expect(String(await evaluate('document.querySelector("#name").value')).trim()).toBe('A é\u{1F600} pasted');
     // A drag selects page text; a password field's selection is never read.
     await act({ kind: 'drag', from: { x: 100 / live.width, y: 369 / live.height }, to: { x: 480 / live.width, y: 369 / live.height }, width: live.width, height: live.height });
-    expect((await phone.call('browser.remoteSelection', { threadId, frameId: live.id })).text).toBe('Select these words');
+    expect((await selection()).text).toBe('Select these words');
     await evaluate('document.querySelector("#name").type = "password"');
     await act({ kind: 'tap', ...at(150, 230) });
     await act({ kind: 'select-all' });
     expect(await evaluate('document.querySelector("#name").selectionEnd > 0')).toBe(true);
-    expect(await phone.call('browser.remoteSelection', { threadId, frameId: live.id })).toEqual({ text: '', truncated: false });
+    expect(await selection()).toEqual({ text: '', truncated: false });
     await expect(act({ kind: 'press', keys: ['Hyper+a'] })).rejects.toThrow('remote press');
     await expect(phone.call('browser.remoteSelection', { threadId, frameId: 'unknown' })).rejects.toThrow('refresh');
     await expect(phone.call('browser.remoteInput', { threadId, frameId: small.id, input: { kind: 'navigate', url: 'javascript:alert(1)' } })).rejects.toThrow('HTTP');

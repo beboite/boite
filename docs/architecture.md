@@ -37,7 +37,12 @@ under Advanced. The origin check only keeps arbitrary websites out: the first
 frame must still be `hello` with an accepted credential within five seconds, or
 the socket closes with `4001`.
 The owner token is 32 random bytes generated on first start and stored in
-`<dataDir>/core.json` with the port and PID.
+`<dataDir>/core.json` with the port, PID and start time, and on Linux a start
+key: the boot id and the start in clock ticks since boot. The shell takes a
+live PID for another process that got the number, not for the core, when its
+start key differs (Linux) or when it started more than two seconds after that
+time (Windows, macOS). The Linux start time follows every step of the wall
+clock, so it is never compared there. `core.lock` carries the same key.
 
 | Principal | Credential and authority |
 | --- | --- |
@@ -74,7 +79,15 @@ of leaving an unanswered request behind.
 
 ## The journal is the truth, the tables are a projection
 
-`bun:sqlite` uses WAL mode. An append to
+`bun:sqlite` uses WAL mode with SQLite's automatic checkpoint off
+(`journal/wal-checkpoints.ts`). A Worker with its own connection, started at
+the first checkpoint after a write, runs a passive checkpoint once the WAL
+passes 4 MiB and truncates it after 30 s without writes. The main thread
+checkpoints when the Worker is unavailable or when the WAL reaches 16 MiB
+because writes kept landing during the Worker's passes, and it truncates the
+WAL at close. A write that binds more than 64 KiB, such as a message's parts,
+runs on a statement finalized after use (`journal/statements.ts`): a cached
+statement keeps its last bound values alive. An append to
 `events(id, thread_id, ts, type, version, payload)` and its projection changes
 commit in one transaction. Events have versions but are not replayed to rebuild
 the tables. Retention runs one minute after startup and daily, deleting events
@@ -99,7 +112,8 @@ A tool output, tool input text, file or image of 32 KiB or more is stored in
 reads only the first 1,024 characters of a finished tool's output, and sends
 them only for a call that failed or was refused; its resume proof hashes a
 digest of the whole value. A streaming message stores only the
-parts that changed since its last committed write. Rows written before schema
+parts that changed since its last committed write, and a value whose digest
+matches the stored one is not written again. Rows written before schema
 31 kept their values inline; three minutes after startup the core moves them
 one message per tick, pauses while a message streams, and records the last
 rowid done in the `part-blobs:moved-through` setting.
@@ -111,8 +125,12 @@ Schema 31 fills it once from the stored parts; writes keep it current.
 Text deltas coalesce per thread every 16 ms. Streaming message parts stay in
 memory and overlay stored rows on reads. Writes normally happen at most every
 500 ms, adapt to slow storage up to 5 seconds, and also happen on completion,
-turn end, explicit persistence and close. While writes succeed, a crash can lose
-the last write window. Failed background writes retain dirty parts and retry
+turn end, explicit persistence and close. A timed write puts only the changed
+parts in `streaming_parts`, one row per part; the message row is written whole
+on completion, at turn end, at close and every 30 seconds while the message
+streams, so a raw SQL reader of `messages.parts` lags by up to 30 seconds. At
+startup the core folds any `streaming_parts` rows a stopped core left into
+their messages. While writes succeed, a crash can lose the last write window. Failed background writes retain dirty parts and retry
 with exponential backoff up to 5 seconds. Buffered deltas for completed messages
 are dropped after three failed flushes, with a diagnostic. Thread activity is a
 settings row; detected project icons are derived rows that can be rebuilt.
