@@ -134,18 +134,23 @@ test('large snapshots stay out of JSON, seek over HTTP, renew, survive restart a
 });
 
 test('a journal write during the reference scan leads to a rescan, not to a pass that deletes nothing', async () => {
-  const directory = join(harness.dataDir, 'artifacts');
+  // A journal of its own: the test core's writes after its turn would interrupt the scans too.
+  const dataDir = join(harness.dataDir, 'retention');
+  const directory = join(dataDir, 'artifacts');
   mkdirSync(directory, { recursive: true });
+  const journal = new Journal(join(dataDir, 'journal.db'));
+  const core = { dataDir, journal } as unknown as typeof harness.core;
   const orphan = join(directory, 'cccccccc-cccc-cccc-cccc-cccccccccccc');
   writeFileSync(orphan, 'nobody references this');
-  const journal = harness.core.journal;
+  journal.db.run('CREATE TABLE scratch (n INTEGER)');
   const query = journal.db.query.bind(journal.db);
-  // Every check of the write counter after a scan sees a turn persisting its stream first.
+  // Every check of the write counter after a scan sees a turn persisting its stream first. Only the
+  // retention pass's reads count: the WAL checkpointer reads the counter too, on its own timer.
   let busy = 0, checks = 0;
   journal.db.query = ((sql: string) => {
-    if (sql.includes('total_changes') && (checks += 1) % 2 === 0 && busy > 0) {
+    if (sql === 'SELECT total_changes() AS count' && (checks += 1) % 2 === 0 && busy > 0) {
       busy -= 1;
-      query('UPDATE threads SET title = title WHERE id = ?').run(threadId);
+      query('INSERT INTO scratch (n) VALUES (1)').run();
     }
     return query(sql);
   }) as typeof journal.db.query;
@@ -153,13 +158,13 @@ test('a journal write during the reference scan leads to a rescan, not to a pass
   try {
     // Written over during the first scan only: the rescan deletes it in the same pass.
     busy = 1;
-    const done = await pruneArtifactSnapshots(harness.core, later);
+    const done = await pruneArtifactSnapshots(core, later);
     expect(readdirSync(directory)).not.toContain('cccccccc-cccc-cccc-cccc-cccccccccccc');
     expect(done).toBe(true);
     // Written over during both scans: nothing goes, and the pass says it left work for a retry.
     writeFileSync(orphan, 'nobody references this');
     busy = 2; checks = 0;
-    expect(await pruneArtifactSnapshots(harness.core, later)).toBe(false);
+    expect(await pruneArtifactSnapshots(core, later)).toBe(false);
     expect(readdirSync(directory)).toContain('cccccccc-cccc-cccc-cccc-cccccccccccc');
-  } finally { journal.db.query = query; }
+  } finally { journal.db.query = query; journal.close(); }
 });
