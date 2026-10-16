@@ -408,9 +408,8 @@ when the core advertises `chunkedAnswers`.
   and a thread keeps its newest 2,000 rows (`bun bench/process-rows.ts`).
 - A spawn of a bare name (`gh`, git when its lookup found no real binary)
   reuses the remembered PATH lookup (`bun bench/spawn-lookup.ts`).
-- On Windows the guard pump wakes once a second instead of ten times while a
-  traced process lives, new processes inside 100 ms share one audio-session
-  walk, and the jobs Worker drops the global job's copy of every start and exit.
+- On Windows new processes inside 100 ms share one audio-session walk, and
+  the jobs Worker drops the global job's copy of every start and exit.
 - A project names its icon by version or stack id only. The image, up to
   256 KB, is a `projects.icon` call made once per project and version, when a
   tile first draws it; a list never carries it ([project icons](project-icons.md)).
@@ -727,13 +726,13 @@ entry and core limits stay unchanged. Totals exclude precompressed copies, as
 
 ### Process load pacing and trace rows
 
-On 2026-10-15, after integrating `main` at `3202e281`, `bun run build:core`
-with Bun 1.4.2 on Linux measured 4,157,306 bytes of core JavaScript. Main
-measured 4,145,283 at that commit. The load pacer, the bare-name spawn
-resolver and Git launcher swap, the trace row pruning, the jobs packet filter
-and the guard pump wake add 12,023 bytes. The core JavaScript budget increases
-from 4,152,000 to 4,164,000 bytes, leaving 6,694 bytes of headroom; UI and
-core entry limits stay unchanged.
+On 2026-10-16, after integrating `main` at `68bbae8c`, `bun run build:core`
+with Bun 1.4.2 on Linux measured 4,240,724 bytes of core JavaScript. Main
+measured 4,231,749 at that commit. The load pacer, the bare-name spawn
+resolver, the trace row pruning, the jobs packet filter and the batched audio
+walk add 8,975 bytes. The core JavaScript budget increases from 4,233,000 to
+4,242,000 bytes, leaving 1,276 bytes of headroom; UI and core entry limits stay
+unchanged.
 
 ## The desktop browser on a phone
 

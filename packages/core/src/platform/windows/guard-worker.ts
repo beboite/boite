@@ -25,15 +25,13 @@ import { GuardLogic } from './guard-logic.ts';
 import type { ForegroundPushed, GuardWin32 } from './guard-logic.ts';
 import { MuteLogic } from './mute-logic.ts';
 import type { MuteEvent } from './mute-logic.ts';
-import { PUMP_POSTED, PUMP_STOP, PUMP_WAKEABLE, pumpWaitMs } from './guard-pump.ts';
 
 export interface GuardWorkerStart {
   kind: 'start';
-  /**
-   * `PUMP_SLOTS` Int32s (guard-pump.ts): the stop flag the main thread sets to
-   * 1, the count of commands it posted, and whether it wakes the pump.
-   */
-  control: SharedArrayBuffer;
+  /** One Int32: the main thread writes 1 to ask the pump to stop. */
+  stop: SharedArrayBuffer;
+  /** Milliseconds one bounded wait on the message queue lasts. */
+  waitMs: number;
   /** The focus guard's own setting. `mute` is the audio one. */
   enabled: boolean;
   mute: boolean;
@@ -48,8 +46,6 @@ export type GuardWorkerCommand =
 export type GuardWorkerMessage =
   /** `hook` is the `HWINEVENTHOOK` in decimal, never "0" once the hook is in. */
   | { kind: 'ready'; hook: string }
-  /** The pump's native thread, which now has a queue a `WM_NULL` can wake. */
-  | { kind: 'pump'; threadId: number }
   /** Nothing native can run: the Worker does nothing more and waits to be stopped. */
   | { kind: 'failed'; reason: string }
   /** The focus hook was refused; the pump and the audio mute run without it. */
@@ -162,8 +158,6 @@ const endpoint = new AudioEndpoint(openSessions);
 let comFailed = false;
 /** True between a `CoInitializeEx` that took and its matching `CoUninitialize`. */
 let comReady = false;
-/** Commands handled since `start`, against the count the main thread posted. */
-let handled = 0;
 
 function listSessions(skipped: (message: string) => void): AudioSession[] {
   return endpoint.list(skipped);
@@ -171,7 +165,6 @@ function listSessions(skipped: (message: string) => void): AudioSession[] {
 scope.onmessage = (event: { data: unknown }): void => {
   const command = event.data as GuardWorkerCommand;
   if (command.kind !== 'start') {
-    handled += 1;
     onCommand(command);
     return;
   }
@@ -241,7 +234,7 @@ scope.onmessage = (event: { data: unknown }): void => {
     send({ kind: 'audio-failed', message: error instanceof Error ? error.message : String(error) });
   }
 
-  const control = new Int32Array(command.control);
+  const stop = new Int32Array(command.stop);
   const message = new Uint8Array(MSG_SIZE);
   const messagePtr = ptr(message);
 
@@ -251,9 +244,8 @@ scope.onmessage = (event: { data: unknown }): void => {
    * `pid-add`, `pid-remove` and `set` would never reach this thread.
    */
   let nextWalk = 0;
-  let announced = false;
   const tick = (): void => {
-    if (Atomics.load(control, PUMP_STOP) !== 0) {
+    if (Atomics.load(stop, 0) !== 0) {
       if (hook !== 0n) {
         u32.UnhookWinEvent(hook);
         callback.close();
@@ -263,23 +255,12 @@ scope.onmessage = (event: { data: unknown }): void => {
       send({ kind: 'stopped' });
       return;
     }
-    const wait = pumpWaitMs({
-      posted: Atomics.load(control, PUMP_POSTED),
-      handled,
-      wakeable: Atomics.load(control, PUMP_WAKEABLE) === 1,
-      walkIn: audio.pendingWalkIn(),
-      pollIn: nextWalk - Date.now(),
-    });
-    u32.MsgWaitForMultipleObjects(0, null, 0, wait, QS_ALLINPUT);
+    // A walk a burst of new pids waits for ends the wait early.
+    const walkIn = audio.pendingWalkIn();
+    u32.MsgWaitForMultipleObjects(0, null, 0, walkIn === null ? command.waitMs : Math.min(command.waitMs, walkIn), QS_ALLINPUT);
     while (u32.PeekMessageW(messagePtr, 0n, 0, 0, PM_REMOVE) !== 0) {
       u32.TranslateMessage(messagePtr);
       u32.DispatchMessageW(messagePtr);
-    }
-    // The queue exists once it was read: from here a thread message wakes the
-    // wait, so the main thread can stop polling for commands.
-    if (!announced) {
-      announced = true;
-      send({ kind: 'pump', threadId: k32.GetCurrentThreadId() });
     }
     // The wait above returns early on any message, so the walk is on the clock
     // rather than on a count of turns. A pid that came inside a burst gets its

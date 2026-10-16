@@ -7,7 +7,6 @@ import type { GuardWin32, WindowOwner } from '../src/platform/windows/guard-logi
 import { AudioEndpoint, NO_ENDPOINT, NO_ENDPOINT_RETRY_MS } from '../src/platform/windows/audio-endpoint.ts';
 import type { AudioSessions } from '../src/platform/windows/audio-sessions.ts';
 import { MUTE_BATCH_MS, MuteLogic } from '../src/platform/windows/mute-logic.ts';
-import { PUMP_LONG_WAIT_MS, PUMP_SHORT_WAIT_MS, pumpWaitMs } from '../src/platform/windows/guard-pump.ts';
 import { jobsWorkerRunning, setJobsIdleGrace } from '../src/platform/windows/jobs.ts';
 import type { ThreadId, Turn } from '@boite/contracts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
@@ -453,21 +452,6 @@ class FakeDevice {
     };
   }
 }
-
-describe('the guard pump wait', () => {
-  const idle = { posted: 3, handled: 3, wakeable: false, walkIn: null, pollIn: 1000 };
-
-  test('it waits a second only once commands wake it, and never in front of one', () => {
-    expect(pumpWaitMs(idle)).toBe(PUMP_SHORT_WAIT_MS);
-    expect(pumpWaitMs({ ...idle, wakeable: true })).toBe(PUMP_LONG_WAIT_MS);
-    // A command posted but not handled yet: its WM_NULL may already be drained.
-    expect(pumpWaitMs({ ...idle, wakeable: true, posted: 4 })).toBe(0);
-    // A walk a burst of pids waits for, and the audio poll, both end the wait.
-    expect(pumpWaitMs({ ...idle, wakeable: true, walkIn: 40 })).toBe(40);
-    expect(pumpWaitMs({ ...idle, wakeable: true, pollIn: 250 })).toBe(250);
-    expect(pumpWaitMs({ ...idle, wakeable: true, pollIn: -5 })).toBe(0);
-  });
-});
 
 describe('the audio endpoint the mute walks', () => {
   test('a switch of the default output device moves the walk to the new device', () => {

@@ -99,8 +99,5 @@ counts below come from the fake-backed tests, not from timing.
   50 before, 1 after plus one shared walk at the end of the gap
   (`bun test test/guard.test.ts -t burst`; the old `MuteLogic` fails it with
   50 walks).
-- Guard pump wakeups while a traced process lives and nothing happens:
-  10 a second before (100 ms wait), 1 a second after once the pump reported
-  its thread (1,000 ms wait, ended early by a `WM_NULL` after each command).
 - Jobs Worker messages per agent process start or exit: 2 before (thread job
   and global job), 1 after; `OpenProcess` calls per start: 2 before, 1 after.

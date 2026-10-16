@@ -7,18 +7,16 @@
  * same way the Job Object one is, so a core that never launches a process never
  * pays for a Worker, a `user32.dll` handle, a system-wide hook or a COM
  * apartment. It is stopped again once nothing traced has run for a while, or
- * once both protections are off, so an idle core does not keep a pump waking at
- * all. While it runs, every command is followed by a `WM_NULL` to the pump's
- * thread, so the pump waits a second at a time rather than a tenth.
- * Other operating systems use the separate POSIX backend.
+ * once both protections are off, so an idle core does not keep a pump waking
+ * ten times a second. Other operating systems use the separate POSIX backend.
  */
 import { workerEntry } from './worker-entry.ts';
 import type { GuardWorkerCommand, GuardWorkerMessage } from './guard-worker.ts';
-import { PUMP_LONG_WAIT_MS, PUMP_POSTED, PUMP_SLOTS, PUMP_STOP, PUMP_WAKEABLE } from './guard-pump.ts';
-import { wakePump } from './guard-wake.ts';
 
 import type { GuardEventSink, GuardStatus } from '../types.ts';
 
+/** One bounded wait on the message queue before the stop flag is read again. */
+const WAIT_MS = 100;
 /**
  * How long the Worker outlives the last traced pid. Back-to-back turns keep the
  * same Worker and the same hook; a turn that starts later warms a new one first.
@@ -39,15 +37,11 @@ const nativeWorker = (): GuardWorkerHandle =>
 
 let createWorker: () => GuardWorkerHandle = nativeWorker;
 let idleStopMs = IDLE_STOP_MS;
-let wake: (threadId: number) => boolean = wakePump;
 
 let refCount = 0;
 let sink: GuardEventSink | null = null;
 let worker: GuardWorkerHandle | null = null;
-/** Shared with the Worker: stop flag, commands posted, wakeable (guard-pump.ts). */
-let control: Int32Array | null = null;
-/** The running Worker's pump thread, once it said which one it is. */
-let pumpThread: number | null = null;
+let stopFlag: Int32Array | null = null;
 let hook: string | null = null;
 /** The Worker could not run at all. No new one is built until the core's teardown. */
 let failure: string | null = null;
@@ -147,15 +141,10 @@ export function guardStatus(): GuardStatus {
   };
 }
 
-/** Test seams: a fake Worker, a shorter idle stop and a fake wake. All reset with `null`. */
-export function setGuardWorkerForTests(
-  factory: (() => GuardWorkerHandle) | null,
-  idleMs: number | null = null,
-  wakeFake: ((threadId: number) => boolean) | null = null,
-): void {
+/** Test seams: a fake Worker, and a shorter idle stop. Both reset with `null`. */
+export function setGuardWorkerForTests(factory: (() => GuardWorkerHandle) | null, idleMs: number | null = null): void {
   createWorker = factory ?? nativeWorker;
   idleStopMs = idleMs ?? IDLE_STOP_MS;
-  wake = wakeFake ?? wakePump;
 }
 
 function wanted(): boolean {
@@ -172,30 +161,14 @@ function settingsChanged(): void {
   ensureWorker();
 }
 
-function post(command: Exclude<GuardWorkerCommand, { kind: 'start' }>): void {
-  if (worker === null || control === null) return;
-  // Counted before it is sent: the pump never blocks while one is in flight.
-  Atomics.add(control, PUMP_POSTED, 1);
-  worker.postMessage(command);
-  wakeWorker();
-}
-
-/**
- * Ends the pump's wait so it hands the event loop over to the command. A wake
- * that fails puts the pump back on its short wait for the Worker's life.
- */
-function wakeWorker(): void {
-  if (pumpThread === null || control === null) return;
-  if (Atomics.load(control, PUMP_WAKEABLE) !== 1) return;
-  if (wake(pumpThread)) return;
-  Atomics.store(control, PUMP_WAKEABLE, 0);
-  pumpThread = null;
+function post(command: GuardWorkerCommand): void {
+  worker?.postMessage(command);
 }
 
 /** True when this call built the Worker and already told it every pid. */
 function ensureWorker(): boolean {
   if (worker !== null || failure !== null || !wanted()) return false;
-  const shared = new SharedArrayBuffer(4 * PUMP_SLOTS);
+  const shared = new SharedArrayBuffer(4);
   let created: GuardWorkerHandle;
   try {
     created = createWorker();
@@ -203,20 +176,15 @@ function ensureWorker(): boolean {
     fail(error instanceof Error ? error.message : String(error));
     return false;
   }
-  const slots = new Int32Array(shared);
-  control = slots;
-  pumpThread = null;
+  stopFlag = new Int32Array(shared);
   created.onmessage = (event: { data: unknown }): void => {
     onWorkerMessage(event.data as GuardWorkerMessage);
   };
   created.onerror = (event: unknown): void => {
     fail(describeWorkerError(event));
   };
-  created.postMessage({ kind: 'start', control: shared, enabled, mute: muteEnabled });
-  for (const [pid, threadId] of pids) {
-    Atomics.add(slots, PUMP_POSTED, 1);
-    created.postMessage({ kind: 'pid-add', threadId, pid });
-  }
+  created.postMessage({ kind: 'start', stop: shared, waitMs: WAIT_MS, enabled, mute: muteEnabled });
+  for (const [pid, threadId] of pids) created.postMessage({ kind: 'pid-add', threadId, pid });
   // The core exits on its own terms; a pump that is still waiting must never
   // be what keeps the process alive.
   created.unref?.();
@@ -241,16 +209,14 @@ function fail(reason: string): void {
   if (failure !== null) return;
   failure = reason;
   const running = worker;
-  const flag = control;
-  const thread = pumpThread;
+  const flag = stopFlag;
   const hooked = hook !== null;
   worker = null;
-  control = null;
-  pumpThread = null;
+  stopFlag = null;
   hook = null;
   cancelIdleStop();
   if (running !== null) {
-    if (hooked) track(stopWorker(running, flag, thread));
+    if (hooked) track(stopWorker(running, flag));
     else running.terminate();
   }
   sink?.note(`the focus guard is off: ${reason}`);
@@ -260,12 +226,6 @@ function onWorkerMessage(message: GuardWorkerMessage): void {
   switch (message.kind) {
     case 'ready':
       hook = message.hook;
-      return;
-    case 'pump':
-      // From here every command wakes the pump, which may wait a whole second.
-      if (control === null) return;
-      pumpThread = message.threadId;
-      Atomics.store(control, PUMP_WAKEABLE, 1);
       return;
     case 'hook-failed':
       hookFailure = message.reason;
@@ -320,17 +280,15 @@ function idleStop(): void {
   idleTimer = null;
   if (worker === null || (pids.size > 0 && wanted())) return;
   const running = worker;
-  const flag = control;
-  const thread = pumpThread;
+  const flag = stopFlag;
   worker = null;
-  control = null;
-  pumpThread = null;
+  stopFlag = null;
   hook = null;
   hookFailure = null;
   audioFailure = null;
   // The Worker gives back every session it holds on its way out.
   mutedPids.clear();
-  track(stopWorker(running, flag, thread));
+  track(stopWorker(running, flag));
 }
 
 function track(stop: Promise<void>): void {
@@ -341,11 +299,9 @@ function track(stop: Promise<void>): void {
 function teardown(): Promise<void> {
   cancelIdleStop();
   const running = worker;
-  const flag = control;
-  const thread = pumpThread;
+  const flag = stopFlag;
   worker = null;
-  control = null;
-  pumpThread = null;
+  stopFlag = null;
   hook = null;
   failure = null;
   hookFailure = null;
@@ -353,24 +309,17 @@ function teardown(): Promise<void> {
   pids.clear();
   mutedPids.clear();
   noted.clear();
-  if (running !== null) track(stopWorker(running, flag, thread));
+  if (running !== null) track(stopWorker(running, flag));
   return Promise.all([...stopping]).then(() => undefined);
 }
 
 /**
- * The pump leaves at once when the wake reaches it, else within one wait, then
- * unhooks, unmutes and posts 'stopped'. Terminating before that would leave the
- * system hook installed until the process exits and the sessions it held muted.
+ * The pump leaves within one wait, unhooks, unmutes and posts 'stopped'.
+ * Terminating before that would leave the system hook installed until the
+ * process exits and the sessions it held muted.
  */
-function stopWorker(running: GuardWorkerHandle, flag: Int32Array | null, thread: number | null): Promise<void> {
-  // A pump on its long wait that the wake did not reach leaves within that wait.
-  let fallbackMs = 1000;
-  if (flag !== null) {
-    Atomics.store(flag, PUMP_STOP, 1);
-    if (Atomics.load(flag, PUMP_WAKEABLE) === 1 && (thread === null || !wake(thread))) {
-      fallbackMs += PUMP_LONG_WAIT_MS;
-    }
-  }
+function stopWorker(running: GuardWorkerHandle, flag: Int32Array | null): Promise<void> {
+  if (flag !== null) Atomics.store(flag, 0, 1);
   return new Promise<void>((resolve) => {
     let released = false;
     const once = (): void => {
@@ -387,6 +336,6 @@ function stopWorker(running: GuardWorkerHandle, flag: Int32Array | null, thread:
       once();
     };
     // Not unref'd: this timer is what a shutdown awaits, and it is bounded.
-    const timer = setTimeout(once, fallbackMs);
+    const timer = setTimeout(once, 1000);
   });
 }

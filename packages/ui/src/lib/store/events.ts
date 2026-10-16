@@ -88,11 +88,10 @@ export function listen(ctx: StoreContext, client: Client): void {
   // A load sample alone: every copy of the row this client holds takes the new load and nothing else.
   on('thread.load', ({ threadId, load }) => {
     const row = threads.threads.find(t => t.id === threadId);
-    if (row) {
-      patchLoad(row, load);
-      // A read in flight would land an older load over this one, as it would an older `thread.updated`.
-      ctx.threadReads.change(threadId, { ...row, load });
-    }
+    if (row) patchLoad(row, load);
+    // A read in flight would land an older load over this one. It keeps the
+    // load alone: the rest of its fresh row is newer than the row held here.
+    ctx.threadReads.patch(threadId, { load });
     ctx.delegation.patchLoad(threadId, load);
     if (s.openThread?.id === threadId) patchLoad(s.openThread, load);
     if (s.delegationThread?.id === threadId) patchLoad(s.delegationThread, load);

@@ -339,12 +339,8 @@ The shared guard/audio Worker starts with a turn or traced process, stops after
 failures log once per core run; a refused focus hook can leave audio protection
 running and exposes its failure through `guardStatus()`.
 
-The pump waits on its message queue 100 ms at a time until it sends its native
-thread id. From then on the core posts a `WM_NULL` to that thread after every
-command and after the stop flag, and the pump waits up to one second, so a
-running Worker wakes about once a second instead of ten times. The pump never
-blocks while a command it was sent is still unhandled. A `PostThreadMessageW`
-that fails puts that Worker back on 100 ms waits.
+The pump waits on its message queue 100 ms at a time, less when a batched audio
+walk is due sooner.
 
 Logic tests use fake Win32 calls. `BOITE_E2E_GUARD=1` is the opt-in real-window
 case and briefly takes focus; ordinary automation must not enable it.
