@@ -540,6 +540,12 @@ export class Store {
   createThread(...args: Parameters<Threads['createThread']>) { return this.#ctx.threads.createThread(...args); }
   update(...args: Parameters<Threads['update']>) { return this.#ctx.threads.update(...args); }
   recoverTurn(...args: Parameters<Threads['recoverTurn']>) { return this.#ctx.threads.recoverTurn(...args); }
+  /** Gives up the retry the core planned for the thread; its row's `retry` clears with the core's update. */
+  async cancelRetry(threadId: ThreadId) {
+    const client = this.#ctx.client;
+    if (!client) return;
+    try { await client.call('turns.cancelRetry', { threadId }); } catch (error) { this.#ctx.fail(error); }
+  }
   threadCapabilities(...args: Parameters<Threads['capabilities']>) { return this.#ctx.threads.capabilities(...args); }
   /** What the thread's last Claude request carried, read from its transcript on this store's machine. */
   agentShape(threadId: ThreadId): Promise<AgentShape> {
@@ -709,6 +715,7 @@ export class Store {
   setTasks(...args: Parameters<Workbench['setTasks']>) { return this.#ctx.workbench.setTasks(...args); }
   loadTodos(...args: Parameters<Workbench['loadTodos']>) { return this.#ctx.workbench.loadTodos(...args); }
   addTodo(...args: Parameters<Workbench['addTodo']>) { return this.#ctx.workbench.addTodo(...args); }
+  unwatchPullRequest(...args: Parameters<Workbench['unwatchPullRequest']>) { return this.#ctx.workbench.unwatchPullRequest(...args); }
   updateTodo(...args: Parameters<Workbench['updateTodo']>) { return this.#ctx.workbench.updateTodo(...args); }
   removeTodo(...args: Parameters<Workbench['removeTodo']>) { return this.#ctx.workbench.removeTodo(...args); }
   refreshResources(...args: Parameters<Workbench['refreshResources']>) { return this.#ctx.workbench.refreshResources(...args); }

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { CircleAlert, CloudOff, LoaderCircle, Radar } from '@lucide/svelte';
+  import { CircleAlert, CloudOff, GitPullRequest, LoaderCircle, Radar } from '@lucide/svelte';
   import type { ThreadSummary } from '@boite/contracts';
   import { backgroundLabel } from '../lib/background';
   import { secondClock } from '../lib/clock.svelte';
@@ -15,7 +15,7 @@
    * `away`: its machine is not connected, so a turn it last saw at work may have
    * ended long ago. The row says so instead of spinning and counting time.
    */
-  let { thread, now, subagents = null, countSubagents = false, away = false }: { thread: Pick<ThreadSummary, 'status' | 'unread' | 'runningSince' | 'requestSince' | 'backgroundWork' | 'openQuestions' | 'lastUserMessageAt' | 'createdAt'> & Partial<Pick<ThreadSummary, 'backgroundWait'>>; now: number; subagents?: WorkingChildren | null; countSubagents?: boolean; away?: boolean } = $props();
+  let { thread, now, subagents = null, countSubagents = false, away = false }: { thread: Pick<ThreadSummary, 'status' | 'unread' | 'runningSince' | 'requestSince' | 'backgroundWork' | 'openQuestions' | 'lastUserMessageAt' | 'createdAt'> & Partial<Pick<ThreadSummary, 'backgroundWait' | 'pullRequestWatches'>>; now: number; subagents?: WorkingChildren | null; countSubagents?: boolean; away?: boolean } = $props();
 
   function earliest(a: number | null | undefined, b: number | null | undefined): number | null {
     return a == null ? b ?? null : b == null ? a : Math.min(a, b);
@@ -54,6 +54,11 @@
       const what = wait?.state === 'waiting' ? fill(strings.sidebar.state.awaiting, { what: wait.for }) : backgroundLabel(thread.backgroundWork?.kinds ?? []);
       return `${head}\n${what}`;
     }
+    if (kind === 'watching') {
+      const watches = thread.pullRequestWatches ?? [];
+      const head = watches.length === 1 ? strings.sidebar.state.watching : fill(strings.sidebar.state.watchingMany, { count: String(watches.length) });
+      return `${head}\n${watches.map(watch => `#${watch.number}`).join(', ')}`;
+    }
     if (kind === 'interrupted' && wait?.state === 'interrupted') {
       return `${strings.sidebar.state.interrupted}\n${fill(strings.sidebar.state.interruptedBy, { what: wait.for, reason: strings.sidebar.state.interruption[wait.reason] })}`;
     }
@@ -81,6 +86,7 @@
     {:else if kind === 'delegating'}<Radar size={11} class="pulse" aria-hidden="true" /><span class="ui-label" data-testid="thread-state-text">{delegatingText}</span>
     {:else if kind === 'monitoring'}<Radar size={11} class="pulse" aria-hidden="true" /><span class="ui-label">{spent ?? strings.sidebar.state.monitoring}</span>
     {:else if kind === 'background'}<span class="dot pulse" aria-hidden="true"></span><span class="ui-label">{spent ?? strings.sidebar.state.background}</span>
+    {:else if kind === 'watching'}<GitPullRequest size={11} class="pulse" aria-hidden="true" /><span class="ui-label">{(thread.pullRequestWatches ?? []).map(watch => `#${watch.number}`).join(' ')}</span>
     {:else if kind === 'interrupted'}<CircleAlert size={11} aria-hidden="true" /><span class="ui-label">{strings.sidebar.state.interrupted}</span>
     {:else}<span class="ui-label">{label}</span>{/if}
   </span>
@@ -123,7 +129,8 @@
   /* The turn ended, the agent did not: same colour as working, a slower sign. */
   .delegating,
   .monitoring,
-  .background {
+  .background,
+  .watching {
     color: var(--color-accent);
   }
   .dot {

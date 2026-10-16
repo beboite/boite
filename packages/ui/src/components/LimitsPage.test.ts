@@ -234,3 +234,18 @@ test('a failed Douane read shows once above its dimmed last bars', async () => {
   expect(document.body.textContent!.split(error)).toHaveLength(2);
   expect(document.querySelector('[data-testid="usage-limit-account"]')!.classList.contains('stale')).toBe(true);
 });
+test('the automatic resume switch saves the setting and a refusal puts it back', async () => {
+  const call = vi.fn(async () => [quota('Claude')]);
+  const saveSettings = vi.fn(async () => false);
+  const store = { client: { call, on: () => () => {} }, connection: 'ready', owner: true, endpointUrl: 'resume-core', accounts: [],
+    settings: { autoResumeLimitedThreads: false }, saveSettings } as unknown as Store;
+  mounted = mount(LimitsPage, { target: document.body, props: { store } });
+  await settle();
+  const toggle = document.querySelector<HTMLInputElement>('[data-testid="setting-auto-resume"]')!;
+  expect(toggle.checked).toBe(false);
+  expect(document.querySelector('#settings-limit-resume')?.textContent).toContain(strings.quotas.autoResume);
+  toggle.click();
+  await settle();
+  expect(saveSettings).toHaveBeenCalledWith({ autoResumeLimitedThreads: true });
+  expect(toggle.checked).toBe(false);
+});

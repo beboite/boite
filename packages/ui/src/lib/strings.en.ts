@@ -74,6 +74,7 @@ export const strings = {
       browserOrigins: 'Allowed browser origins',
       warmProcessMinutes: 'Keep an agent warm after its turn',
       autoCompact: 'Automatic compaction',
+      autoResumeLimitedThreads: 'Resume threads after a usage limit',
     },
     /** What 0 means for the settings where it is not a number. */
     zero: {
@@ -966,6 +967,9 @@ export const strings = {
       /** The turn ended, the agent still runs a shell, a subagent or a workflow. */
       background: 'In background',
       backgroundFor: 'In background for {elapsed}',
+      /** The turn ended, Boite watches pull requests for the agent and wakes it when they need it. */
+      watching: 'Watching PR',
+      watchingMany: 'Watching {count} PRs',
       /** A delegated agent's turn ended on its own background work, which wakes it: what it waits for. */
       awaiting: 'Waiting on {what}',
       /** That work ended without waking it: the agent stopped there, its result never came. */
@@ -1240,6 +1244,12 @@ export const strings = {
     recoveryTarget: 'Saved selection: {model} · {account}',
     recoveryResume: 'Resume prompt',
     recoveryDiscard: 'Remove from queue',
+    retryCapacityTitle: 'Model at capacity',
+    retryCapacityBody: 'Trying again in {time}, try {attempt} of {attempts}.',
+    retryCapacityCancel: 'Stop retrying',
+    retryLimitTitle: 'Usage limit reached',
+    retryLimitBody: 'Resumes at {time}, once the limit has reset, in {in}.',
+    retryLimitCancel: 'Do not resume',
     contextDetails: 'Context',
     contextInput: 'Input',
     contextCache: 'Cached input',
@@ -1828,7 +1838,21 @@ export const strings = {
     markDone: 'Confirm it is done',
     removeTodo: 'Remove this todo',
     collapse: 'Fold this section',
-    expand: 'Unfold this section'
+    expand: 'Unfold this section',
+    /** The pull requests the agent asked Boite to watch (`boite pr watch`). */
+    watchSection: 'Pull request watches',
+    noWatches: 'No pull request watched',
+    watchHint: 'Boite reads the pull request on GitHub about once a minute and wakes the agent when a check fails, the checks pass, a review or comment lands or the branch conflicts',
+    watchNotRead: 'Not read yet',
+    watchNoChecks: 'No checks',
+    watchChecks: '{total} checks',
+    watchRunning: '{count} running',
+    watchFailed: '{count} failed',
+    watchConflict: 'Conflicts with {base}',
+    watchRateLimited: 'GitHub rate limit, next read {time}',
+    watchUnreachable: 'GitHub out of reach, next read {time}',
+    stopWatch: 'Stop watching',
+    stopWatchOf: 'Stop watching #{number}'
   },
 
   /** The file tree and the file viewer, the two surfaces reading the working directory. */
@@ -2533,6 +2557,8 @@ export const strings = {
     slowHint: 'Antigravity can take up to two minutes to answer.',
     tracked: 'Tracked accounts',
     trackedHint: 'Boite only asks the accounts switched on here.',
+    autoResume: 'Resume threads after a usage limit',
+    autoResumeHint: 'A thread stopped by a subscription usage limit resumes by itself a minute after the limit resets, once per limit window. Stop, a new message or a changed model cancels it.',
     providers: 'Manage providers',
     unavailable: 'No quota reading available.',
     refresh: 'Refresh quotas',

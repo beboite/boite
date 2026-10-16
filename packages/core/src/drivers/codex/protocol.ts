@@ -84,6 +84,8 @@ type CodexTurnStatus = 'completed' | 'interrupted' | 'failed' | 'inProgress';
 /** `TurnError`. */
 export interface CodexTurnError {
   message?: string;
+  /** `CodexErrorInfo`: a code such as `serverOverloaded` or `usageLimitExceeded`, or a one-key object. */
+  codexErrorInfo?: unknown;
 }
 
 /** `Turn`, the fields an answer or a `turn/completed` is read for. */

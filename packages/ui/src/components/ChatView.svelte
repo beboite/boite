@@ -15,6 +15,7 @@
   import MessageList from './MessageList.svelte';
   import ThreadLoading from './ThreadLoading.svelte';
   import ThreadRecovery from './ThreadRecovery.svelte';
+  import ThreadRetry from './ThreadRetry.svelte';
   import ForkReturn from './ForkReturn.svelte';
   import ProjectTile from './ProjectTile.svelte';
   import DoneThreadNotice from './DoneThreadNotice.svelte';
@@ -138,7 +139,7 @@
     {/if}
 
     {#if thread}<AgentDock {store} threadId={thread.id} />{/if}
-    {#if thread}<ThreadRecovery {store} />{/if}
+    {#if thread}<ThreadRecovery {store} /><ThreadRetry {store} />{/if}
     {#if thread?.agentSessionId}
       <AgentOwnerBar {store} {thread} />
     {:else}
