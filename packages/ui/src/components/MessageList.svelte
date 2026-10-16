@@ -29,7 +29,7 @@
   import { TurnProgress } from '../lib/turn-progress.svelte';
   import { GAP, OVERSCAN, SlotTotals, WINDOW_FROM, atOrBefore, estimateSlot, gapChanged, measurable, reaches, sameView, slotGap, windowStats, type WindowView } from '../lib/message-window';
   import { TimelineRows, rowEstimate, rowIndexOf, seam, type TimelineRow } from '../lib/timeline-rows';
-  import { RangeAsk, gapHeight, wantedRange, withGaps } from '../lib/history-gaps';
+  import { GapRows, NO_GAPS, RangeAsk, gapHeight, loadKeepingReader, wantedRange } from '../lib/history-gaps';
   import TimelineGap from './TimelineGap.svelte';
   import WorkflowActivity from './WorkflowActivity.svelte';
   import { dockRoom } from '../lib/question-dock.svelte';
@@ -104,12 +104,12 @@
   const memoryPlacement = $derived(placeMemoryEvents(messages, store.openThread?.id === threadId ? store.openThread.memoryEvents ?? [] : store.delegationThread?.id === threadId ? store.delegationThread.memoryEvents ?? [] : []));
   const memoryRows = $derived(new Map(memoryPlacement.standalone.map((event, index) => [`memory:${event.at}:${event.kind}:${index}`, event])));
   /** What the window lists and measures: a row per message, several for the message of a long turn (lib/timeline-rows.ts). */
-  const cut = new TimelineRows();
+  const cut = new TimelineRows(), gapRows = new GapRows();
   /** Where the held messages sit in the thread, on a core that says so: each stretch missing between them is a gap row. */
   const placement = $derived(store.openThread?.id === threadId ? store.messagePlacement?.(threadId, messages) ?? null : null);
   const positional = $derived((placement?.first ?? null) !== null);
   const gapped = $derived.by(() => {
-    const placed = withGaps(cut.build(timeline, memoryPlacement.inline), messages, placement?.gaps ?? new Map());
+    const placed = gapRows.place(cut.build(timeline, memoryPlacement.inline), messages, placement?.gaps ?? NO_GAPS);
     // A row that grew or was cut weighs something else until it is measured.
     if (placed.at(cut.changedFrom) < slots.dirty) slots.dirty = placed.at(cut.changedFrom);
     return placed;
@@ -188,11 +188,7 @@
   let liftFrame = 0;
   let liftFrom = 0;
   let handledFocus = untrack(() => store.promptFocus);
-  function stopLift() {
-    cancelAnimationFrame(liftFrame);
-    liftFrame = 0;
-    lifting = false;
-  }
+  function stopLift() { cancelAnimationFrame(liftFrame); liftFrame = 0; lifting = false; }
   function releaseNavigation(event?: KeyboardEvent) {
     releaseAnchor(); navigationTarget = null;
     if (promptTarget) pinned = false;
@@ -595,7 +591,9 @@
   // On a core that places pages, the gap within a screen of the view is read where it is looked at (lib/history-gaps.ts).
   const asked = new RangeAsk();
   $effect(() => { void [measured, store.loadingRange, rows, viewHeight, pinned, scrollTop]; return asked.soon(() => { if (!gapped.gaps.length || store.loadingRange || glide.active || lifting) return null; const total = totals(rows), reach = Math.max(LOAD_AT, viewHeight), top = pinned ? (total[rows.length] ?? 0) - viewHeight : scrollTop;
-    return { top, range: wantedRange(total, gapped.gaps, top - reach, top + viewHeight + reach, MESSAGE_PAGE) }; }, (from, limit) => store.loadRange(from, limit)); });
+    return { top, range: wantedRange(total, gapped.gaps, top - reach, top + viewHeight + reach, MESSAGE_PAGE) }; }, (from, limit) =>
+      // A page landing above the reader can weigh more than its gap: the row at the top of the view stays where it was.
+      loadKeepingReader(landing => store.loadRange(from, limit, landing), () => pinned ? undefined : viewport, tick, top => { scrollTop = top; })); });
   // A list too short to scroll asks for the pages beside it, again after each lands (`fillShort`).
   $effect(() => { void rows.length; void viewHeight; fillShort(viewport, store.openThread?.id === threadId, () => !!(navigationTarget || promptTarget), LOAD_AT, box => { loadAbove(box); pullNewer(store, box, LOAD_AT); }); });
 

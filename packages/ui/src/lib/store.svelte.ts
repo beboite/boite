@@ -538,7 +538,7 @@ export class Store {
   /** Where `messages` of `threadId` sit in it and what is missing between them (`lib/store/message-positions`). */
   messagePlacement(threadId: string, messages: readonly Message[]) { return this.#ctx.positions.placement(threadId, messages); }
   get loadingRange() { return this.#ctx.positions.loading; }
-  loadRange(from: number, limit: number) { return this.#ctx.positions.loadRange(from, limit); }
+  loadRange(from: number, limit: number, landing?: () => void) { return this.#ctx.positions.loadRange(from, limit, landing); }
   loadAttachments(threadId: ThreadId, message: Message) { return loadAttachments(this.#ctx, threadId, message); }
   loadOlder(...args: Parameters<Threads['loadOlder']>) { return this.#ctx.threads.loadOlder(...args); }
   createThread(...args: Parameters<Threads['createThread']>) { return this.#ctx.threads.createThread(...args); }

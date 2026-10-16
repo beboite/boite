@@ -855,11 +855,33 @@ test('the scrollbar spans the whole thread, and a drag to the top reads the firs
   await settle();
   // What is on screen is a gap row, and the page asked for starts at the first message.
   expect(document.querySelector<HTMLElement>('[data-testid=timeline-gap]')?.dataset['from']).toBe('0');
-  await vi.waitFor(() => expect(asked).toHaveBeenCalledWith(0, 120));
+  await vi.waitFor(() => expect(asked).toHaveBeenCalledWith(0, 120, expect.any(Function)));
   await vi.waitFor(() => expect(live.openThread!.messages[0]?.id).toBe('m-long-0'));
   // No walk down the cursor: the pages between were never read.
   expect(older).not.toHaveBeenCalled();
   expect(live.openThread!.messages).toHaveLength(160);
+});
+
+test('with history still missing above, a streamed token rebuilds neither the rows nor the window', async ({ createStore }) => {
+  const { store: live, client } = createStore({ delayMs: 0, long: true });
+  live.attach(client);
+  await live.connect();
+  await live.open('t-long');
+  const thread = live.openThread!;
+  stubLayout(400 * ESTIMATE);
+  running = mount(MessageList, { target: document.body, props: { store: live, threadId: 't-long', get messages() { return thread.messages; } } });
+  await settle();
+  const last = thread.messages.at(-1)!;
+  const part = last.parts[0];
+  if (part?.type !== 'text') throw new Error('the long thread ends on a text part');
+  last.state = 'streaming';
+  await settle();
+  const before = { ...windowStats };
+  for (let delta = 0; delta < 100; delta += 1) { part.text += ' token'; flushSync(); }
+  await settle();
+  // The gap row in front of the 40 messages is the same row: a delta reads no slot and moves no window.
+  expect(windowStats.recomputes - before.recomputes).toBeLessThan(20);
+  expect(windowStats.slots - before.slots).toBeLessThan(20);
 });
 
 test('a thread whose first message is loaded asks for nothing at the top', async () => {

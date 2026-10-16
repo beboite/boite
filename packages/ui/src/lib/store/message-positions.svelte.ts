@@ -73,10 +73,11 @@ export class MessagePositions {
   /**
    * The messages from position `from` on, at most `limit` and a reading page's
    * bytes, laid into the open thread where they belong. One page is in flight
-   * at a time; a page that lands after the reader left is dropped. Returns how
-   * many messages landed.
+   * at a time; a page that lands after the reader left is dropped. `landing`
+   * runs right before the messages go in, for the timeline to note where the
+   * reader is. Returns how many messages landed.
    */
-  async loadRange(from: number, limit: number): Promise<number> {
+  async loadRange(from: number, limit: number, landing?: () => void): Promise<number> {
     const client = this.ctx.client;
     const open = this.ctx.threads.openThread;
     if (!client || !open || this.loading) return 0;
@@ -90,6 +91,7 @@ export class MessagePositions {
       const page = await client.call('messages.list', { threadId: open.id, from, limit, maxBytes: READING_PAGE_BYTES, ...lightPage(this.ctx) });
       const still = this.ctx.threads.openThread;
       if (!current() || !still || still.id !== open.id || still.messages !== window) return 0;
+      landing?.();
       this.note(open.id, page.messages, page.offset ?? from);
       return this.place(still, page.messages, page.turns ?? []);
     } catch (error) {

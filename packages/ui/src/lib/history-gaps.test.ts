@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from 'vitest';
 import type { Message } from '@boite/contracts';
-import { RangeAsk, gapHeight, wantedRange, withGaps } from './history-gaps';
+import { RangeAsk, gapHeight, loadKeepingReader, rowOnScreen, wantedRange, withGaps } from './history-gaps';
 import { TimelineRows } from './timeline-rows';
 import { ESTIMATE } from './message-window';
 
@@ -45,8 +45,8 @@ describe('history gaps', () => {
 
   test('a range is asked a frame later with the view as it is then, once per place the reader stands', async () => {
     const ask = new RangeAsk();
-    const load = vi.fn();
-    const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+    const load = vi.fn(async () => 1);
+    const frame = () => new Promise((resolve) => setTimeout(() => requestAnimationFrame(() => setTimeout(resolve, 0)), 0));
     let view: { top: number; range: { from: number; limit: number } | null } | null = { top: 0, range: { from: 0, limit: 120 } };
     ask.soon(() => view, load);
     // The list scrolled itself away before the frame: nothing is asked.
@@ -67,5 +67,56 @@ describe('history gaps', () => {
     ask.soon(() => ({ top: 80, range: { from: 0, limit: 120 } }), load)();
     await frame();
     expect(load).toHaveBeenCalledTimes(2);
+  });
+
+  test('a page that lands nothing is asked again after a pause that grows, never every frame', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'requestAnimationFrame', 'cancelAnimationFrame', 'performance'] });
+    try {
+      const ask = new RangeAsk();
+      const load = vi.fn(async () => 0);
+      const view = () => ({ top: 0, range: { from: 0, limit: 120 } });
+      ask.soon(view, load);
+      await vi.advanceTimersByTimeAsync(20);
+      expect(load).toHaveBeenCalledTimes(1);
+      // The effect runs again at once (the flight ended): nothing before the second.
+      ask.soon(view, load);
+      await vi.advanceTimersByTimeAsync(900);
+      expect(load).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(200);
+      expect(load).toHaveBeenCalledTimes(2);
+      ask.soon(view, load);
+      await vi.advanceTimersByTimeAsync(1_900);
+      expect(load).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(200);
+      expect(load).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test('two stretches around a message that draws no row keep a row each', () => {
+    const held = [message('m-10', 10), message('m-20', 20), message('m-30', 30)];
+    // m-20 draws nothing of its own (folded into a group): its rows are those of m-10 and m-30 only.
+    const rows = new TimelineRows().build([held[0]!, held[2]!]);
+    const gaps = new Map([['m-20', { from: 11, count: 9 }], ['m-30', { from: 21, count: 9 }]]);
+    expect(withGaps(rows, held, gaps).rows.map((row) => row.id)).toEqual(['m-10', 'gap:11:9', 'gap:21:9', 'm-30']);
+  });
+
+  test('a page landing above the reader moves the view by what the row drifted on screen, and only then', async () => {
+    const view = document.createElement('div');
+    const row = document.createElement('article');
+    row.dataset['mid'] = 'm-2';
+    view.append(row);
+    let rowTop = 20;
+    view.getBoundingClientRect = () => ({ top: 0, bottom: 600 }) as DOMRect;
+    row.getBoundingClientRect = () => ({ top: rowTop, bottom: rowTop + 80 }) as DOMRect;
+    expect(rowOnScreen(view)).toEqual({ id: 'm-2', offset: 20 });
+    const moved = vi.fn();
+    // The rows drawn above it pushed it 340 px down, and nothing anchored it: the view follows.
+    expect(await loadKeepingReader(async (landing) => { landing(); rowTop = 360; return 3; }, () => view, async () => {}, moved)).toBe(3);
+    expect(view.scrollTop).toBe(340);
+    // Anchored by the browser already: nothing moves.
+    expect(await loadKeepingReader(async (landing) => { landing(); return 3; }, () => view, async () => {}, moved)).toBe(3);
+    expect(moved).toHaveBeenCalledTimes(1);
   });
 });

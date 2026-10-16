@@ -692,6 +692,12 @@ export class Journal {
     return row.count;
   }
 
+  /** The id of the message at `position`, 0 being the thread's first, or null past the last. Walks the index, not the rows. */
+  messageIdAt(threadId: string, position: number): string | null {
+    const row = this.db.query('SELECT id FROM messages WHERE thread_id = ? ORDER BY rowid LIMIT 1 OFFSET ?').get(threadId, position) as { id: string } | null;
+    return row === null ? null : row.id;
+  }
+
   /** The rowid of the message at `position`, 0 being the thread's first, or null past the last. Walks the index, not the rows. */
   rowidAt(threadId: string, position: number): number | null {
     const row = this.db.query('SELECT rowid AS row FROM messages WHERE thread_id = ? ORDER BY rowid LIMIT 1 OFFSET ?').get(threadId, position) as { row: number } | null;

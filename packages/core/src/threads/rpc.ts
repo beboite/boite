@@ -155,7 +155,9 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
     } };
   });
   core.router.register('messages.list', async (params) => {
-    if (params.compactImages === true) await core.media.warm(params.threadId, params.before ?? params.after, params.limit);
+    // A page read by position warms the pictures around its own first message, not the thread's last page.
+    const near = Number.isSafeInteger(params.from) && params.from! >= 0 ? core.journal.messageIdAt(params.threadId, params.from!) : params.before ?? params.after;
+    if (params.compactImages === true && near !== null) await core.media.warm(params.threadId, near, params.limit);
     return core.threads.messages(params);
   });
   core.router.register('messages.toolOutput', (params) => readToolOutput(core, params));

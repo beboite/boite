@@ -14,6 +14,9 @@ import type { MissingStretch } from './store/message-positions.svelte';
  * like any message entering the window.
  */
 
+/** No stretch missing: one map, so a thread held whole never looks changed. */
+export const NO_GAPS: ReadonlyMap<MessageId, MissingStretch> = new Map();
+
 /** What a missing stretch weighs: every message at the estimate. */
 export function gapHeight(count: number): number {
   return count * ESTIMATE;
@@ -39,21 +42,24 @@ export function withGaps(rows: TimelineRow[], messages: readonly Message[], gaps
     if (at !== undefined) lastRow[at] = index;
   });
   for (let index = 1; index < lastRow.length; index += 1) lastRow[index] = Math.max(lastRow[index]!, lastRow[index - 1]!);
-  const before = new Map<number, MissingStretch>();
+  // Two stretches can meet at one place, around a held message that draws no row of its own: each keeps its row.
+  const before = new Map<number, MissingStretch[]>();
   for (const [id, stretch] of gaps) {
     const next = rank.get(id);
-    if (next !== undefined) before.set(next === 0 ? 0 : lastRow[next - 1]! + 1, stretch);
+    if (next === undefined) continue;
+    const at = next === 0 ? 0 : lastRow[next - 1]! + 1;
+    before.set(at, [...(before.get(at) ?? []), stretch]);
   }
   const out: TimelineRow[] = [];
   const found: GapAt[] = [];
   const moved: number[] = [];
   const place = (index: number) => {
-    const stretch = before.get(index);
-    if (!stretch) return;
-    const id = `gap:${stretch.from}:${stretch.count}`;
-    const message: Message = { id, threadId: '', turnId: id, role: 'system', parts: [], state: 'complete', createdAt: 0 };
-    found.push({ index: out.length, ...stretch });
-    out.push({ id, message, from: 0, to: 0, first: true, last: true, gap: stretch });
+    for (const stretch of before.get(index) ?? []) {
+      const id = `gap:${stretch.from}:${stretch.count}`;
+      const message: Message = { id, threadId: '', turnId: id, role: 'system', parts: [], state: 'complete', createdAt: 0 };
+      found.push({ index: out.length, ...stretch });
+      out.push({ id, message, from: 0, to: 0, first: true, last: true, gap: stretch });
+    }
   };
   rows.forEach((row, index) => {
     place(index);
@@ -62,6 +68,73 @@ export function withGaps(rows: TimelineRow[], messages: readonly Message[], gaps
   });
   place(rows.length);
   return { rows: out, gaps: found, at: index => moved[index] ?? out.length };
+}
+
+/**
+ * `withGaps` once per change of the rows or of the stretches: a streamed delta
+ * hands back the same rows and the same stretches, and so gets the very same
+ * answer, and nothing that reads the rows runs again.
+ */
+export class GapRows {
+  #rows: TimelineRow[] | null = null;
+  #gaps: ReadonlyMap<MessageId, MissingStretch> | null = null;
+  #last: ReturnType<typeof withGaps> | null = null;
+
+  place(rows: TimelineRow[], messages: readonly Message[], gaps: ReadonlyMap<MessageId, MissingStretch>): ReturnType<typeof withGaps> {
+    if (this.#last && rows === this.#rows && gaps === this.#gaps) return this.#last;
+    this.#rows = rows;
+    this.#gaps = gaps;
+    return this.#last = withGaps(rows, messages, gaps);
+  }
+}
+
+/**
+ * The row drawn at the top of `view` and how far its top is from the view's,
+ * read off the page: what a page landing above it must not move.
+ */
+export function rowOnScreen(view: HTMLElement): { id: string; offset: number } | null {
+  const top = view.getBoundingClientRect().top;
+  for (const node of view.querySelectorAll<HTMLElement>('[data-mid]')) {
+    const box = node.getBoundingClientRect();
+    if (box.bottom > top) return { id: node.dataset['mid']!, offset: box.top - top };
+  }
+  return null;
+}
+
+/**
+ * A range read with the reader kept on their row. Where it stands on screen is
+ * read as the page lands (`landing`), not when it was asked for, since the
+ * reader goes on scrolling meanwhile, and read again once the new rows are
+ * drawn (`drawn`): the view moves by the difference. A browser that anchors
+ * the scroll has often kept the row already, and then nothing moves; one that
+ * does not, or a list streaming with anchoring off, is put back here. Rows
+ * that land at their real height rather than the gap's estimate otherwise
+ * pushed the text down by hundreds of pixels. `box` is undefined while the
+ * list keeps to its bottom: it has no row to keep.
+ */
+export async function loadKeepingReader(
+  load: (landing: () => void) => Promise<number>,
+  box: () => HTMLElement | undefined,
+  drawn: () => Promise<void>,
+  moved: (top: number) => void
+): Promise<number> {
+  const reading: { kept: { id: string; offset: number } | null } = { kept: null };
+  const added = await load(() => {
+    const view = box();
+    reading.kept = view ? rowOnScreen(view) : null;
+  });
+  const kept = reading.kept;
+  if (!added || !kept) return added;
+  await drawn();
+  const view = box();
+  const node = view?.querySelector<HTMLElement>(`[data-mid="${CSS.escape(kept.id)}"]`);
+  if (!view || !node) return added;
+  const drift = node.getBoundingClientRect().top - view.getBoundingClientRect().top - kept.offset;
+  if (Math.abs(drift) > 1) {
+    view.scrollTop += drift;
+    moved(view.scrollTop);
+  }
+  return added;
 }
 
 /**
@@ -100,21 +173,33 @@ export function wantedRange(total: number[], gaps: readonly GapAt[], top: number
  * Asks for a range a frame after the view moved, with what the view is by
  * then: a scroll the list makes itself (a jump to the latest page, then its
  * glide down) has started before the frame, and asks for nothing on its way.
- * A page that failed or landed nothing is asked again only after the reader
- * moved, never in a loop. Answers the cancel, for the effect that asked.
+ * The same range from the same place is asked once. A page that landed
+ * nothing, failed or dropped because the window changed under it, is asked
+ * again after 1 s, then 2, 4, up to 30 s while it keeps landing nothing: a
+ * reader standing still gets it in the end, a core that refuses is not asked
+ * every frame. Answers the cancel, for the effect that asked.
  */
 export class RangeAsk {
   #last = '';
+  #misses = 0;
+  #quietUntil = 0;
 
-  soon(wanted: () => { top: number; range: { from: number; limit: number } | null } | null, load: (from: number, limit: number) => unknown): () => void {
-    const frame = requestAnimationFrame(() => {
+  soon(wanted: () => { top: number; range: { from: number; limit: number } | null } | null, load: (from: number, limit: number) => Promise<number>): () => void {
+    let frame = 0;
+    const run = () => {
       const next = wanted();
       if (!next?.range) return;
       const key = `${next.range.from}:${next.range.limit}:${Math.round(next.top)}`;
       if (key === this.#last) return;
       this.#last = key;
-      void load(next.range.from, next.range.limit);
-    });
-    return () => cancelAnimationFrame(frame);
+      void load(next.range.from, next.range.limit).then((added) => {
+        if (added > 0) { this.#misses = 0; return; }
+        this.#quietUntil = performance.now() + Math.min(30_000, 1_000 * 2 ** this.#misses++);
+        this.#last = '';
+      });
+    };
+    const wait = this.#quietUntil - performance.now();
+    const timer = setTimeout(() => { frame = requestAnimationFrame(run); }, Math.max(0, wait));
+    return () => { clearTimeout(timer); cancelAnimationFrame(frame); };
   }
 }
