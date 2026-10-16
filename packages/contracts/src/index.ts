@@ -1785,6 +1785,13 @@ export interface Thread extends ThreadSummary {
    * which is the only page live messages are appended to.
    */
   messagesAfter?: MessageId | null;
+  /**
+   * How many messages of the thread come before `messages[0]`, or before
+   * `messagesFrom` on a resume tail: with it, a client sizes the history it
+   * does not hold and reads any stretch of it with `messages.list` `from`.
+   * Cores without `features.messagePositions` leave it out.
+   */
+  messageOffset?: number;
   /** The turns `messages` refers to, plus any still queued or running; never the whole history. */
   turns: Turn[];
 }
@@ -2587,6 +2594,8 @@ export interface CoreInfo {
     chunkedAnswers?: boolean;
     /** `threads.get` takes `around` and `compactImages`; `messages.list` takes `after`. */
     readingPages?: boolean;
+    /** Pages say where they sit (`messageOffset`, `offset`) and `messages.list` reads from a position (`from`). */
+    messagePositions?: boolean;
     /** `threads.get` and `messages.list` take `compactToolParts`; `messages.toolPart` exists. No message is refused for its size then. */
     deferredToolParts?: boolean;
     /** A device of its group says hello with a signature of its own device key (`hello` `device`). */
@@ -4462,12 +4471,17 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * `after` instead of `before` asks for the messages written after it, the
    * page a reader scrolls down into from a page cut by `around`. The result's
    * `after` is then the next cursor, null once the page reaches the last
-   * message, and its `before` is null. Exactly one of the two is given.
+   * message, and its `before` is null. `from` instead asks for the messages
+   * from that position on, 0 being the thread's first, with `before` and
+   * `after` the cursors around the page (`features.messagePositions`). Exactly
+   * one of the three is given; a `from` that is not a whole number from 0 up is
+   * refused by name. `offset` is the position of the page's first message,
+   * left out by cores without that feature.
    * `maxBytes` lowers the byte budget as it does for `threads.get`.
    */
   'messages.list': {
-    params: { threadId: ThreadId; before?: MessageId; after?: MessageId; limit?: number; maxBytes?: number; compactTools?: boolean; compactFiles?: boolean; compactImages?: boolean; compactToolParts?: boolean };
-    result: { messages: Message[]; before: MessageId | null; after?: MessageId | null; turns?: Turn[] };
+    params: { threadId: ThreadId; before?: MessageId; after?: MessageId; from?: number; limit?: number; maxBytes?: number; compactTools?: boolean; compactFiles?: boolean; compactImages?: boolean; compactToolParts?: boolean };
+    result: { messages: Message[]; before: MessageId | null; after?: MessageId | null; turns?: Turn[]; offset?: number };
   };
   /** The full output of a tool already visible in this conversation. No filesystem path is accepted. */
   'messages.toolOutput': {

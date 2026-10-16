@@ -32,6 +32,8 @@ export interface TimelineRow {
   /** Whether this is the first, and the last, row of its message. */
   first: boolean;
   last: boolean;
+  /** Set on a row that stands for a stretch of the thread not held yet (`lib/history-gaps.ts`). */
+  gap?: { from: number; count: number };
 }
 
 /**

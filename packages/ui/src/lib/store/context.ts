@@ -16,6 +16,7 @@ import { Requests } from './requests.svelte';
 import { CoreSettings } from './settings.svelte';
 import { Terminals } from './terminals.svelte';
 import { Threads } from './threads.svelte';
+import { MessagePositions } from './message-positions.svelte';
 import { Workbench } from './workbench.svelte';
 import { Workflows } from './workflows.svelte';
 import { ServerUpdater } from './server-update.svelte';
@@ -53,6 +54,7 @@ export class StoreContext {
   readonly accounts: Accounts;
   readonly projects: Projects;
   readonly threads: Threads;
+  readonly positions: MessagePositions;
   readonly displayImages: DisplayImages;
   readonly imports: Imports;
   readonly composer: Composer;
@@ -74,6 +76,7 @@ export class StoreContext {
     this.accounts = new Accounts(this);
     this.projects = new Projects(this);
     this.threads = new Threads(this);
+    this.positions = new MessagePositions(this);
     this.displayImages = new DisplayImages(this);
     this.imports = new Imports(this);
     this.composer = new Composer(this);

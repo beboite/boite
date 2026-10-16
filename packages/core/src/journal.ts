@@ -686,6 +686,18 @@ export class Journal {
     return { messages, sent: out, after: newer ? (messages.at(-1)?.id ?? null) : null };
   }
 
+  /** How many messages of the thread sit before `rowid`: the position of that message. An index count, no row is read. */
+  countMessagesBefore(threadId: string, rowid: number): number {
+    const row = this.db.query('SELECT count(*) AS count FROM messages WHERE thread_id = ? AND rowid < ?').get(threadId, rowid) as { count: number };
+    return row.count;
+  }
+
+  /** The rowid of the message at `position`, 0 being the thread's first, or null past the last. Walks the index, not the rows. */
+  rowidAt(threadId: string, position: number): number | null {
+    const row = this.db.query('SELECT rowid AS row FROM messages WHERE thread_id = ? ORDER BY rowid LIMIT 1 OFFSET ?').get(threadId, position) as { row: number } | null;
+    return row === null ? null : row.row;
+  }
+
   /** How many messages of the thread sit at `fromRowid` or after it: an index count, no row is read. */
   countMessagesFrom(threadId: string, fromRowid: number): number {
     const row = this.db.query('SELECT count(*) AS count FROM messages WHERE thread_id = ? AND rowid >= ?').get(threadId, fromRowid) as { count: number };

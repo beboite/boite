@@ -30,7 +30,7 @@ export type RewoundMessage = Omit<ThreadRewind, 'thread'>;
 
 /** The row part of a thread, without what only an open thread carries. */
 function summaryOf(thread: Thread): ThreadSummary {
-  const { memoryEvents: _memoryEvents, messages: _messages, turns: _turns, commands: _commands, background: _background, backgroundHistory: _history, activity: _activity, messagesBefore: _before, messagesAfter: _after, messagesFrom: _from, messagesSync: _sync, messagesUnchanged: _unchanged, ...summary } = thread;
+  const { memoryEvents: _memoryEvents, messages: _messages, turns: _turns, commands: _commands, background: _background, backgroundHistory: _history, activity: _activity, messagesBefore: _before, messagesAfter: _after, messagesFrom: _from, messagesSync: _sync, messagesUnchanged: _unchanged, messageOffset: _offset, ...summary } = thread;
   return summary;
 }
 
@@ -235,7 +235,7 @@ export class Threads {
 
   /** The thread as `threads.rewind` left it, over every copy this client holds. */
   applyRewound(thread: Thread): void {
-    this.upsertThread(summaryOf(thread));
+    this.upsertThread(summaryOf(thread)); this.ctx.positions.note(thread.id, thread.messages, thread.messageOffset);
     // A cached visit holds the removed messages: the next open reads the thread again.
     this.readingThreads.delete(thread.id);
     for (const held of this.threadSnapshots(thread.id)) {
@@ -259,7 +259,7 @@ export class Threads {
     for (const thread of this.threadSnapshots(threadId)) {
       const index = lastIndexById(thread.messages, messageId);
       if (index < 0) {
-        if (thread.messagesBefore !== null) stale = true;
+        if (thread.messagesBefore !== null || this.ctx.positions.hasGap(thread)) stale = true;
         continue;
       }
       const gone = new Set(thread.messages.slice(index).map((message) => message.turnId));
@@ -279,6 +279,7 @@ export class Threads {
       // The page a first visit reads: what the copies held cannot be patched, so they start over.
       const fresh = await client.call('threads.get', { threadId, limit: INITIAL_MESSAGE_PAGE, maxBytes: INITIAL_PAGE_BYTES, ...lightPage(this.ctx) });
       if (!this.ctx.currentClient(client, clientGeneration)) return;
+      this.ctx.positions.note(threadId, fresh.messages, fresh.messageOffset);
       for (const held of this.threadSnapshots(threadId)) {
         held.messages = fresh.messages;
         held.turns = fresh.turns;
@@ -524,6 +525,7 @@ export class Threads {
       const page = await client.call('messages.list', { threadId: open.id, before: cursor, maxBytes: READING_PAGE_BYTES, ...lightPage(this.ctx) });
       const still = this.openThread;
       if (!current() || !still || still.id !== open.id || still.messagesBefore !== cursor) return 0;
+      this.ctx.positions.note(open.id, page.messages, page.offset);
       const known = new Set(still.messages.map((m) => m.id));
       const older = page.messages.filter((m) => !known.has(m.id));
       still.messages.unshift(...older);

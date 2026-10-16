@@ -71,6 +71,8 @@ export function askPage(ctx: StoreContext, opener: Opener, client: Client, threa
     // The loading view counts the page in as the core slices it.
     onProgress: (received, total) => { if (current() && opener.loadingThreadId === threadId) opener.loadingBytes = { threadId, received, total }; }
   });
+  // Where the page sits, noted as it lands, whichever open or press ends up using it.
+  void fetched.then((thread) => ctx.positions.note(threadId, thread.messages, thread.messageOffset), () => undefined);
   return { subscribed, fetched, around };
 }
 
