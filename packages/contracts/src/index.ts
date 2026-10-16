@@ -2397,6 +2397,63 @@ export interface ImportableSession {
   threadId: ThreadId | null;
 }
 
+/** The longest text of one system block `threads.agentShape` sends; the rest stays on disk. */
+export const AGENT_SHAPE_BLOCK_MAX = 32_000;
+/** The text of every system block together, after which blocks keep their size but lose their text. */
+export const AGENT_SHAPE_TEXT_BUDGET = 200_000;
+/** System blocks and tools listed by `threads.agentShape`; the rest are counted in the totals only. */
+export const AGENT_SHAPE_ITEMS_MAX = 256;
+
+/** One block of the system prompt the agent sent. */
+export interface AgentShapeBlock {
+  /** Its length in characters, whole. */
+  chars: number;
+  /** Its text, cut at `AGENT_SHAPE_BLOCK_MAX` or by `AGENT_SHAPE_TEXT_BUDGET`. */
+  text: string;
+  truncated: boolean;
+}
+
+/** One tool definition the agent sent. */
+export interface AgentShapeTool {
+  name: string;
+  descriptionChars: number;
+  /** The whole definition as JSON: name, description and input schema. */
+  chars: number;
+}
+
+/**
+ * What the agent's last API request started with: the system prompt and tool
+ * definitions Claude Code wrote into its session transcript (CLI 2.1.300 and
+ * later), and the request's parameters. `status` says why the rest is empty:
+ * `no-session` before the first turn, `no-transcript` when the file is gone,
+ * `unrecorded` when the CLI wrote no request shape (older than 2.1.300).
+ * Sizes are characters; `estimatedTokens` is characters divided by four, an
+ * estimate and not the provider's count.
+ */
+export interface AgentShape {
+  threadId: ThreadId;
+  status: 'ready' | 'no-session' | 'no-transcript' | 'unrecorded';
+  sessionId: string | null;
+  /** The Claude Code version that wrote the request. */
+  version: string | null;
+  /** When the request was sent. */
+  at: Timestamp | null;
+  model: string | null;
+  effort: string | null;
+  /** The `thinking` type, with its token budget when it has one. */
+  thinking: string | null;
+  betas: string[];
+  maxTokens: number | null;
+  /** In the order they were sent. */
+  system: AgentShapeBlock[];
+  /** Largest first. */
+  tools: AgentShapeTool[];
+  /** System blocks and tools past `AGENT_SHAPE_ITEMS_MAX`, counted in `chars` but not listed. */
+  omitted: { system: number; tools: number };
+  chars: { system: number; tools: number };
+  estimatedTokens: number;
+}
+
 /** What `<dataDir>/keybindings.json` says, as the core last read it. */
 export interface Keybindings {
   /** The file itself, which may not exist yet. */
@@ -4348,6 +4405,8 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   /** Transfer one validated attachment before Send. The lease belongs to this connection. */
   'attachments.upload': { params: { attachment: Attachment }; result: { id: string } };
   'attachments.release': { params: { ids: string[] }; result: { ok: true } };
+  /** The system prompt, tools and parameters of a Claude thread's last request, read from its transcript. Refused on other providers. */
+  'threads.agentShape': { params: { threadId: ThreadId }; result: AgentShape };
   /** Supported operations and their current availability for this thread. */
   'threads.capabilities': { params: { threadId: ThreadId }; result: ThreadCapabilities };
   /**

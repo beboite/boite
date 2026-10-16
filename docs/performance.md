@@ -726,12 +726,12 @@ entry and core limits stay unchanged. Totals exclude precompressed copies, as
 
 ### Process load pacing and trace rows
 
-On 2026-10-16, after integrating `main` at `4eec5562`, `bun run build:core`
-with Bun 1.4.2 on Linux measured 4,240,724 bytes of core JavaScript. Main
-measured 4,231,749 at that commit. The load pacer, the bare-name spawn
+On 2026-10-16, after integrating `main` at `0f480824`, `bun run build:core`
+with Bun 1.4.2 on Linux measured 4,246,842 bytes of core JavaScript. Main
+measured 4,237,867 at that commit. The load pacer, the bare-name spawn
 resolver, the trace row pruning, the jobs packet filter and the batched audio
-walk add 8,975 bytes. The core JavaScript budget increases from 4,233,000 to
-4,242,000 bytes, leaving 1,276 bytes of headroom; UI and core entry limits stay
+walk add 8,975 bytes. The core JavaScript budget increases from 4,240,000 to
+4,249,000 bytes, leaving 2,158 bytes of headroom; UI and core entry limits stay
 unchanged.
 
 ## The desktop browser on a phone

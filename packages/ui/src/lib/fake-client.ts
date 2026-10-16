@@ -46,6 +46,7 @@ import { DEVICE_METHODS } from './fake-client/shared';
 import { speechMethods } from './fake-client/speech';
 import { terminalMethods } from './fake-client/terminals';
 import { capabilityMethods } from './fake-client/capabilities';
+import { agentShapeMethods } from './fake-client/agent-shape';
 import { deleteExpiredDoneThreads, purgeDeletedThreads, threadMethods } from './fake-client/threads';
 import { threadMoveMethods } from './fake-client/thread-move';
 import { spawnMethods } from './fake-client/spawn';
@@ -429,6 +430,7 @@ export class FakeClient implements ObservableClient {
       ...threads,
       ...startupMethods(ctx, threads),
       ...capabilityMethods(ctx),
+      ...agentShapeMethods(ctx),
       ...forkReturnMethods(ctx),
       ...journalInspectionMethods(ctx),
       ...threadMoveMethods(ctx),
