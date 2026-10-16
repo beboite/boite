@@ -7,8 +7,9 @@
  * The audio mute rides the same thread and the same pid set. There is no
  * notification to hook for it: registering `IAudioSessionNotification` would
  * need an MTA thread and a JS COM object, so the sessions of the default render
- * endpoint are polled every second and right after every pid, and a session of
- * a traced pid is muted until that pid exits.
+ * endpoint are polled every second and right after a new pid (one walk per
+ * 100 ms burst of them), and a session of a traced pid is muted until that pid
+ * exits.
  *
  * It lives in a Worker because the hook is delivered on the thread that
  * installed it and only while that thread pumps messages: the main thread must
@@ -254,15 +255,18 @@ scope.onmessage = (event: { data: unknown }): void => {
       send({ kind: 'stopped' });
       return;
     }
-    u32.MsgWaitForMultipleObjects(0, null, 0, command.waitMs, QS_ALLINPUT);
+    // A walk a burst of new pids waits for ends the wait early.
+    const walkIn = audio.pendingWalkIn();
+    u32.MsgWaitForMultipleObjects(0, null, 0, walkIn === null ? command.waitMs : Math.min(command.waitMs, walkIn), QS_ALLINPUT);
     while (u32.PeekMessageW(messagePtr, 0n, 0, 0, PM_REMOVE) !== 0) {
       u32.TranslateMessage(messagePtr);
       u32.DispatchMessageW(messagePtr);
     }
     // The wait above returns early on any message, so the walk is on the clock
-    // rather than on a count of turns.
+    // rather than on a count of turns. A pid that came inside a burst gets its
+    // walk at the end of the burst's gap.
     const now = Date.now();
-    if (now >= nextWalk) {
+    if (now >= nextWalk || audio.pendingWalkIn() === 0) {
       nextWalk = now + AUDIO_INTERVAL_MS;
       audio.tick();
     }
@@ -306,7 +310,7 @@ function onCommand(command: Exclude<GuardWorkerCommand, GuardWorkerStart>): void
     default:
       return;
   }
-  // `addPid` walks the sessions on the spot, so its events are here already and
-  // waiting for the next pump tick would delay them by a whole wait.
+  // `addPid` walks the sessions on the spot outside a burst, so its events are
+  // here already and waiting for the next pump tick would delay them.
   if (mute !== null) for (const muted of mute.takeEvents()) send(muted);
 }

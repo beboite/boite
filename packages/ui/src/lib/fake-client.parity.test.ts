@@ -117,12 +117,12 @@ test('a paired device hears only the device events, as access.ts mayReceiveEvent
   const owner = await fake();
   const phone = await fake({ principal: 'session' });
   const ownerLog = heard(owner, ['core.log']);
-  const phoneLog = heard(phone, ['core.log', 'thread.updated']);
+  const phoneLog = heard(phone, ['core.log', 'thread.load']);
   owner.emitCoreLog('error', 'scheduler failed');
   phone.emitCoreLog('error', 'scheduler failed');
   phone.sampleLoad('t-trace');
   expect(ownerLog).toHaveLength(1);
-  expect(phoneLog.map((line) => line.split(' ')[0])).toEqual(['thread.updated']);
+  expect(phoneLog.map((line) => line.split(' ')[0])).toEqual(['thread.load']);
 });
 
 

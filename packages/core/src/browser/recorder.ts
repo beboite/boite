@@ -57,7 +57,8 @@ const RECORDER_SCRIPT = `window.__boiteRecorder = (() => {
   const decode = async () => {
     while (waiting) {
       const next = waiting; waiting = null;
-      const bytes = Uint8Array.from(atob(next), c => c.charCodeAt(0));
+      // Native base64 decoding is about a hundred times faster than a callback per byte; older engines lack it.
+      const bytes = Uint8Array.fromBase64 ? Uint8Array.fromBase64(next) : Uint8Array.from(atob(next), c => c.charCodeAt(0));
       const bitmap = await createImageBitmap(new Blob([bytes], { type: 'image/jpeg' })).catch(() => null);
       if (!bitmap) continue;
       if (page) page.close();
@@ -115,11 +116,27 @@ const RECORDER_SCRIPT = `window.__boiteRecorder = (() => {
 
 interface Helper { contextId: string; targetId: string; sessionId: string }
 
+/** Chrome draws no new picture while this many wait for an acknowledgement. */
+const IN_FLIGHT_MAX = 2;
+/** After a held-back stretch, the screencast has this long to send a picture before it is restarted. */
+const CATCH_UP_MS = 150;
+
 export class TabRecorder {
   #helper: Helper | null = null;
   #offFrames: (() => void) | null = null;
   #forwarding = false;
   #pending: string | null = null;
+  /** The take's frame interval, a little short so a frame on time is never held back, and when the last frame left. */
+  #interval = 0;
+  #lastForward = 0;
+  /** The screencast's options, its id in Chrome and the pictures of it nobody acknowledged yet. */
+  #screencastParams: Record<string, unknown> | null = null;
+  #screencast = -1;
+  #unacked = 0;
+  /** Pictures received since the take began, and their count when the page last had to draw a new one. */
+  #received = 0;
+  #expected = 0;
+  #catchUp?: ReturnType<typeof setTimeout>;
   #result: BrowserRecording | null = null;
   #finish: Promise<BrowserRecording> | null = null;
   #disposed = false;
@@ -157,6 +174,7 @@ export class TabRecorder {
       const size = recordingSize(Math.round(metrics.cssVisualViewport.clientWidth), Math.round(metrics.cssVisualViewport.clientHeight));
       await this.#evaluate(`__boiteRecorder.start(${JSON.stringify(shot.data)}, ${size.width}, ${size.height}, ${JSON.stringify(type)}, ${recordingBitrate(size.width, size.height, frameRate)})`);
       const started = Date.now();
+      this.#interval = 1000 / frameRate - 4;
       this.#finish = (async () => {
         // Settles when the recorder stops: asked to, at the size limit or on an encoder error. No duration limit.
         const raw = await this.#evaluate<{ bytes: number; durationMs: number; frames: number; reason: BrowserRecording['reason']; error?: string; mimeType: string }>('__boiteRecorder.ended()', 2 ** 31 - 1);
@@ -169,24 +187,39 @@ export class TabRecorder {
       this.#finish.then(result => { this.#result = result; void this.#stopFrames(); }, () => { void this.#stopFrames(); });
       this.#offFrames = this.cdp.on('Page.screencastFrame', (params, sessionId) => {
         if (sessionId !== this.pageSession) return;
-        void this.cdp.send('Page.screencastFrameAck', { sessionId: params.sessionId }, this.pageSession).catch(() => {});
+        const screencast = Number(params.sessionId);
+        if (screencast > this.#screencast) { this.#screencast = screencast; this.#unacked = 0; }
+        if (screencast === this.#screencast) this.#unacked++;
+        this.#received++;
         this.#forward(String(params.data));
       });
-      await this.cdp.send('Page.startScreencast', { format: 'jpeg', quality: 80, maxWidth: 1920, maxHeight: 1080, everyNthFrame: 1 }, this.pageSession);
+      // Every picture the page draws: a video or animation at 30 Hz or less keeps all of them.
+      // Acknowledged when its slot comes (`#release`), so Chrome encodes no faster than the take.
+      this.#screencastParams = { format: 'jpeg', quality: 80, maxWidth: 1920, maxHeight: 1080, everyNthFrame: 1 };
+      await this.cdp.send('Page.startScreencast', this.#screencastParams, this.pageSession);
     } catch (error) {
       await this.dispose();
       throw error;
     }
   }
 
-  /** Only the newest frame waits while one is drawn: a slow encoder drops frames, never falls behind. */
+  /**
+   * Only the newest frame waits while one is drawn: a slow encoder drops frames, never falls behind.
+   * Frames leave at most at the take's rate, so a compositor faster than 60 Hz sends no extra ones;
+   * one that came too early waits its turn rather than being lost, so the last picture of a motion is kept.
+   * Pictures are acknowledged when one leaves, not when they arrive: one that waits holds Chrome back.
+   */
   #forward(data: string): void {
     this.#pending = data;
     if (this.#forwarding) return;
     this.#forwarding = true;
     void (async () => {
       while (this.#pending && !this.#disposed && this.#helper) {
+        const early = this.#lastForward + this.#interval - performance.now();
+        if (early > 0) { await new Promise(resolve => setTimeout(resolve, early)); continue; }
         const next = this.#pending; this.#pending = null;
+        this.#lastForward = performance.now();
+        this.#release();
         const live = await this.#evaluate<boolean>(`__boiteRecorder.frame(${JSON.stringify(next)})`).catch(() => false);
         if (!live) break;
       }
@@ -194,7 +227,38 @@ export class TabRecorder {
     })();
   }
 
+  /**
+   * A picture left: Chrome may draw the next. Held back, one picture stays
+   * unacknowledged, so Chrome encodes one picture per slot rather than two.
+   * Chrome skips the paints it makes while held back, so a page that stops
+   * then would end on an older picture: a restart, which sends the page as it
+   * is, follows when no picture comes (`#awaitPicture`).
+   */
+  #release(): void {
+    const count = this.#unacked;
+    if (!count) return;
+    const release = count < IN_FLIGHT_MAX ? count : count - 1;
+    this.#unacked = count - release;
+    for (let i = 0; i < release; i++) void this.cdp.send('Page.screencastFrameAck', { sessionId: this.#screencast }, this.pageSession).catch(() => {});
+    if (count >= IN_FLIGHT_MAX) this.#awaitPicture();
+  }
+
+  #awaitPicture(): void {
+    this.#expected = this.#received;
+    if (this.#catchUp !== undefined) return;
+    this.#catchUp = setTimeout(() => {
+      this.#catchUp = undefined;
+      if (!this.#offFrames || this.#disposed || this.#received !== this.#expected) return;
+      void (async () => {
+        await this.cdp.send('Page.stopScreencast', {}, this.pageSession);
+        if (this.#offFrames && this.#screencastParams) await this.cdp.send('Page.startScreencast', this.#screencastParams, this.pageSession);
+      })().catch(() => {});
+    }, CATCH_UP_MS);
+    (this.#catchUp as { unref?: () => void }).unref?.();
+  }
+
   async #stopFrames(): Promise<void> {
+    clearTimeout(this.#catchUp); this.#catchUp = undefined;
     this.#offFrames?.(); this.#offFrames = null;
     await this.cdp.send('Page.stopScreencast', {}, this.pageSession).catch(() => {});
   }

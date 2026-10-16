@@ -423,6 +423,17 @@ describe('providers', () => {
     expect(candidate?.value.toLowerCase()).toEndWith('opencode.exe');
   });
 
+  test('a windows claude installed by npm is found under the npm root, after the managed and native copies', () => {
+    // npm leaves only a `.cmd` and a `.ps1` shim on PATH, which Bun cannot start; the real exe sits in the package.
+    const executable = harness.core.providers.require('claude').profiles.windows?.executable ?? [];
+    expect(executable.map((candidate) => candidate.kind)).toEqual(['file', 'file', 'file', 'path']);
+    expect(executable[0]?.value).toContain(join('agents', 'claude'));
+    expect(executable[2]?.value).toStartWith('{npmRoot}');
+    expect(executable[2]?.value).toContain(join('@anthropic-ai', 'claude-code', 'bin'));
+    expect(executable[2]?.value.toLowerCase()).toEndWith('claude.exe');
+    expect(executable[3]).toEqual({ kind: 'path', value: 'claude' });
+  });
+
   test('the shipped antigravity descriptor carries its release, its environment and its acp login', async () => {
     const client = await harness.connect();
     const { loaded, rejected } = await client.call('providers.list', {});

@@ -61,8 +61,12 @@ export function watchPage(
     const details = params.exceptionDetails as { text?: string; exception?: { description?: string }; url?: string };
     note({ kind: 'exception', level: 'error', text: details.exception?.description ?? details.text ?? 'exception', ...(details.url ? { url: bareUrl(details.url) } : {}) });
   });
+  // The desktop app relays only these fields of the network events (`HOST_PAGE_EVENTS` in packages/ui/src/lib/browser-host.ts): read another, compact it there too.
   on('Network.requestWillBeSent', params => {
-    tab.requests.set(String(params.requestId), String((params.request as { url: string }).url));
+    const url = String((params.request as { url: string }).url);
+    // An inline `data:` or `blob:` address can weigh megabytes, and a failure there names no server.
+    if (url.startsWith('data:') || url.startsWith('blob:')) return;
+    tab.requests.set(String(params.requestId), bareUrl(url));
     if (tab.requests.size > 500) tab.requests.delete(tab.requests.keys().next().value!);
   });
   on('Network.responseReceived', params => {
@@ -72,6 +76,6 @@ export function watchPage(
   on('Network.loadingFailed', params => {
     if (params.canceled) return;
     const url = tab.requests.get(String(params.requestId));
-    note({ kind: 'network', level: 'error', text: String(params.errorText ?? 'request failed'), ...(url ? { url: bareUrl(url) } : {}) });
+    note({ kind: 'network', level: 'error', text: String(params.errorText ?? 'request failed'), ...(url ? { url } : {}) });
   });
 }

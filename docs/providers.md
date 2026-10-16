@@ -321,7 +321,7 @@ session protocol either.
   already names its package (`packages/core/src/providers/versions.ts`).
 - A `file` candidate that starts with `{npmRoot}` is looked for under each
   global npm `node_modules` directory, the same list an `npm` candidate walks,
-  with the profile's `path` names as the bin hints. That is how Codex and
+  with the profile's `path` names as the bin hints. That is how Claude, Codex and
   OpenCode find the program their npm package vendors under nvm-windows, fnm,
   scoop or a custom prefix, where the shim on PATH is a `.cmd`. The token is
   expanded at each resolution, not at load, and only at the start of a `file`

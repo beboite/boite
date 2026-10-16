@@ -42,7 +42,7 @@ import { clearRequestsOf, requestMethods } from './fake-client/requests';
 import { resourceMethods } from './fake-client/resources';
 import { seed } from './fake-client/seed';
 import { settingsMethods } from './fake-client/settings';
-import { DEVICE_METHODS, toSummary } from './fake-client/shared';
+import { DEVICE_METHODS } from './fake-client/shared';
 import { speechMethods } from './fake-client/speech';
 import { terminalMethods } from './fake-client/terminals';
 import { capabilityMethods } from './fake-client/capabilities';
@@ -297,6 +297,7 @@ export class FakeClient implements ObservableClient {
     }
     if (bus.principal === 'session' && method === 'agents.message.send' && (params as RpcParams<'agents.message.send'>).threadId !== undefined) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'agents.message.send: paired devices must omit threadId and speak as the user' });
     if (bus.principal === 'session' && method === 'git.diff' && ![undefined, '', 'HEAD'].includes((params as RpcParams<'git.diff'>).ref)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'git.diff: paired devices compare the working tree with HEAD only' });
+    if (bus.principal === 'session' && (method === 'quotas.list' || method === 'subscriptionProxy.quotas') && (params as { refresh?: unknown }).refresh === true) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method}: paired devices read the last reading; refresh must be false or absent` });
     const result = await bus.hold(this.#dispatch(method, params)) as RpcResult<M>;
     if (this.#ctx.rttMs > 0) {
       // An answer still on its way back when the socket changed never arrives.
@@ -323,14 +324,13 @@ export class FakeClient implements ObservableClient {
 
   /**
    * One tick of the core's load sampler (`packages/core/src/procs.ts`): the
-   * thread's summary with a fresh `load` and the timestamp it already had,
-   * pushed once a second for every thread with a live process. It is not a
-   * `touch`: a load sample moves no row in the sidebar.
+   * thread's fresh `load` alone, as `thread.load`, which this client's hello
+   * accepts. It is not a `touch`: a load sample moves no row in the sidebar.
    */
   sampleLoad(threadId: ThreadId, processes = 1): void {
     const thread = this.#ctx.thread(threadId);
     thread.load = { processes, cpuPercent: 12, memoryBytes: 48 * 1024 * 1024 };
-    this.#ctx.emit('thread.updated', structuredClone(toSummary(thread)));
+    this.#ctx.emit('thread.load', { threadId, load: structuredClone(thread.load) });
   }
 
   /** A line of the core's own log, as `core.log` carries it: a failed scheduler, a guard at work. */

@@ -36,14 +36,14 @@ core; its card can rename it.
 Voice shows the connected core's dictation readiness. Engine installation and
 API credentials stay in desktop Voice settings, including for owner sessions.
 Usage shows the connected core's tokens and API cost per day, provider and
-model; its subscription limits need an owner session ([usage.md](usage.md)).
+model; Limits draws the core's subscription bars, read-only ([usage.md](usage.md)).
 
 Provider accounts, keyboard shortcuts, plugins, resource limits, adding and
 removing devices and server configuration stay in desktop settings. This smaller
 phone menu also applies to owner sessions; it does not change RPC permissions.
 
 Device sessions receive only events corresponding to the state they may read.
-Account login output, process traces, plugin state, quotas and core diagnostics
+Account login output, process traces, plugin state and core diagnostics
 remain owner-only. Event permissions are deny-by-default in
 `packages/contracts/src/access.ts`, just like RPC permissions, and `?fake=1`
 with `principal=session` withholds the same events.
@@ -647,8 +647,10 @@ one at a time: the next as soon as the last has arrived, at most four a second
 while the page moves, slower on a still page or a slow link, sized to the
 phone's screen (at most twice its CSS width) and lighter when frames take long
 to arrive. Each frame is decoded before it replaces the one shown. The browser
-shrinks the capture itself: headless, a smaller capture flashes nothing. A
-failed frame is retried with a growing pause up to eight seconds. Pause, Hide,
+shrinks the frame itself. Each request names the frame shown; on a still page
+the core holds it for a second and answers `unchanged`, so the phone downloads
+nothing until the page draws, and the time the core held a request is not
+counted as a slow link. A failed frame is retried with a growing pause up to eight seconds. Pause, Hide,
 closing the view or hiding the app stops those requests; returning to the
 app, regaining the network or reconnecting resumes them at once. This is a
 periodically refreshed preview, not a video stream with audio.

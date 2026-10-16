@@ -51,8 +51,9 @@ estimate](#the-api-estimate)).
   reads again whether the switch went on or off.
 - Providers refresh independently, with up to two accounts per provider in
   flight. Each `quotas.progress` event carries the request ID and one account's
-  result; the final response retains the account order. Both events and calls
-  remain owner-only.
+  result; the final response retains the account order. A paired device may
+  call `quotas.list` and receives both events; `refresh: true` stays the
+  owner's, as do `quotas.configure` and `quotas.reset`.
 - In the tray and the limits tab, existing bars lose saturation while their
   account is pending. Each answer updates its bars and restores their colour
   with a transition. A slow provider does not hold up the others. Cache and
@@ -91,9 +92,10 @@ failure. It never quotes the body, which can echo a credential.
 - The cadence is the native one. A list within a minute of the last read
   reuses it, and the refresh button reads again. `subscriptionProxy.quotas`
   returns the gateway's state (`ready`, `unavailable`, `unsupported` or `off`)
-  and `subscriptionProxy.quotasUpdated` follows it. Both are owner-only, like
-  `quotas.list`. A phone with full control gets the rows from its core and
-  never reaches the gateway.
+  and `subscriptionProxy.quotasUpdated` follows it. A paired device reads both,
+  without `refresh: true`. A phone gets the rows from its core and never
+  reaches the gateway, so it draws the same native bars as the desktop instead
+  of embedding the dashboard.
 - Limits shows one heading per provider the gateway reports, then one card per
   entry. Each card has its window bars, reset times, plan, status and credits.
   An `average` entry is named by its provider and account count, such as
@@ -394,9 +396,11 @@ call both, since cancelling spends nothing. `?fake=1&retry=capacity` and
 A phone may call `usage.history`: it returns sums over the same finished turns
 a device can already open, and the thread titles it names are the ones
 `threads.list` shows it. The reason sits beside the entry in
-`packages/core/src/access.ts`. `quotas.list` stays owner-only, so on a device
-the Limits tab says the limits are read on the computer that runs Boite. On a
-phone both pages are under Settings > Machines, as Usage and Limits.
+`packages/core/src/access.ts`. A device also reads `quotas.list` and
+`subscriptionProxy.quotas` with the bars the core holds: no refresh button, no
+monitoring switch, no reset. A core older than that refuses the read, and the
+Limits tab asks to update Boite on that machine. On a phone both pages are under
+Settings > Machines, as Usage and Limits.
 
 ## The fake client
 

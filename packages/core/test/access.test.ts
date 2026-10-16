@@ -63,6 +63,21 @@ describe('the access gate', () => {
     } finally { phone.close(); }
   });
 
+  test('paired phones read the limit bars the core holds, but never make it ask the providers', async () => {
+    const owner = await harness.connect();
+    const phone = await pairedDevice();
+    try {
+      expect(await phone.call('quotas.list', {})).toEqual(await owner.call('quotas.list', {}));
+      expect(await phone.call('quotas.list', { refresh: false })).toBeArray();
+      expect((await phone.call('subscriptionProxy.quotas', {})).status).toBe('off');
+      await expect(phone.call('quotas.list', { refresh: true })).rejects.toThrow('quotas.list: paired devices read the last reading; refresh must be false or absent');
+      await expect(phone.call('subscriptionProxy.quotas', { refresh: true })).rejects.toThrow('refresh must be false or absent');
+      const account = (await owner.call('accounts.list', {}))[0]!;
+      await expect(phone.call('quotas.configure', { accountId: account.id, enabled: false })).rejects.toThrow('owner only');
+      await expect(phone.call('quotas.reset', { accountId: account.id, confirmed: true })).rejects.toThrow('owner only');
+    } finally { phone.close(); }
+  });
+
   test('paired phones can focus a conversation, but agent sockets cannot', async () => {
     const owner = await harness.connect();
     const { threadId } = await echoThread(harness, owner);
@@ -102,7 +117,7 @@ describe('the access gate', () => {
     } finally { agent.close(); }
   });
 
-  test('device sockets receive readable state, but no login output, trace or diagnostics', async () => {
+  test('device sockets receive readable state and limits, but no login output, trace or diagnostics', async () => {
     const owner = await harness.connect();
     const { threadId } = await echoThread(harness, owner);
     const phone = await pairedDevice();
@@ -126,7 +141,7 @@ describe('the access gate', () => {
       expect(await scheduler).toEqual(harness.core.scheduler.state());
       await phone.call('settings.get', {});
       // Startup can also deliver a coalesced scheduler snapshot during this fixture.
-      expect(seen.filter(name => name !== 'scheduler.updated')).toEqual(['settings.updated', 'delegation.changed']);
+      expect(seen.filter(name => name !== 'scheduler.updated')).toEqual(['quotas.updated', 'quotas.progress', 'settings.updated', 'delegation.changed']);
     } finally { phone.close(); }
   });
 

@@ -27,6 +27,9 @@
  * threads.archive lets a paired phone mark an idle conversation done under the
  * owner's retention policy. Direct removal and policy changes stay owner-only;
  * restoring an archive cancels its expiry before recoverable cleanup.
+ * quotas.list and subscriptionProxy.quotas let a phone draw the same limit bars
+ * as the owner without a dashboard embed; a forced refresh reaches the
+ * providers and stays the owner's, as do monitoring switches and resets.
  */
 
 import { AGENT_EVENTS, DEVICE_EVENTS, DEVICE_METHODS, type RpcEventName, type RpcMethodName } from '@boite/contracts';
@@ -177,6 +180,9 @@ export function assertAllowed(method: RpcMethodName, connection: Connection, par
   if (method === 'agents.message.send' && (params as { threadId?: unknown } | null | undefined)?.threadId !== undefined) throw refused('agents.message.send: paired devices must omit threadId and speak as the user');
   if (method === 'git.diff' && !deviceDiffRef((params as { ref?: unknown } | null | undefined)?.ref)) {
     throw refused('git.diff: paired devices compare the working tree with HEAD only', { method, principal: identity.principal });
+  }
+  if ((method === 'quotas.list' || method === 'subscriptionProxy.quotas') && (params as { refresh?: unknown } | null | undefined)?.refresh === true) {
+    throw refused(`${method}: paired devices read the last reading; refresh must be false or absent`, { method, principal: identity.principal });
   }
   if (isDeviceMethod(method)) return;
   throw refused(`${method} is for the owner only`, { method, principal: identity.principal });

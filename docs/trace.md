@@ -25,11 +25,16 @@ than importing OS backends. Unsupported protections remain off even if saved
 settings enable them.
 
 The registry owns spawn, exit, journal process rows and thread events. A process
-row is written at start and exit, without copying it into the operational event
-journal. Thread rows remain until thread/project removal. Synthetic operations
-without a real thread lose their rows when the registry forgets them, 30 seconds
-after the last process exits. Existing rows from older cores are not retroactively
-cleaned by that rule.
+row is written whole at start; the exit updates its exit columns only, without
+copying it into the operational event journal. A thread keeps its newest 2,000
+rows, every live row and the rows a process agent card reads (the agent CLI and
+its parent, `native-agents.ts`). Older rows are deleted when a finished turn's
+sweep runs, when the registry forgets an idle thread, and every 500 exits of a
+thread that never goes idle (`journal/processes.ts`). The rest stays until
+thread/project removal. Synthetic operations without a real thread lose their
+rows when the registry forgets them, 30 seconds after the last process exits.
+Existing rows from older cores are pruned the first time their thread runs a
+process again.
 
 The shell has a separate native boundary under
 `apps/shell/src-tauri/src/platform/` for core ownership, launch flags, data paths,
@@ -41,11 +46,26 @@ toasts and appbar queries. Shared IPC commands still check their callers.
 `packages/core/src/procs.ts` own process creation. Bypassing them loses registry
 tracking and protections.
 
+A bare command name (`git`, `gh`) is resolved to an absolute path through the
+remembered PATH lookup, with the child's own PATH, so Bun and node do not walk
+PATH and PATHEXT again on each spawn (`spawn-command.ts`). A Windows `.cmd`,
+`.bat` or `.ps1` shim and a name PATH does not find are passed on unchanged.
+Git is resolved first by `launchOf` (`git/command.ts`), which on Windows
+already swaps Git for Windows' launcher for its real binary; this lookup leaves
+that absolute path alone. A resolved path that is gone
+(ENOENT) forgets the lookups: `spawn` and `spawnPiped` start the bare name once,
+`spawnChild` reports the error and its next spawn looks again. The trace row
+keeps the name the caller gave.
+
 Windows creates an unnamed per-thread Job Object nested in an unnamed global
 job. Both use `KILL_ON_JOB_CLOSE`, with no `BREAKAWAY_OK`. Children are assigned
 immediately after spawn and use `windowsHide: true`. Closing the core's jobs
 ends their member processes. An empty thread job is forgotten after 30 seconds;
-a job that still reports members remains held.
+a job that still reports members remains held. A pid that could not join its
+job, or any pid of a thread with no job, is stopped by `taskkill /T /F` started
+asynchronously, so the core keeps serving while it starts. The child's own kill
+runs once taskkill ends, since `/T` needs the root alive to find the tree, and
+`killAll` at shutdown waits for both.
 
 Codex initialization can temporarily use normal priority for at most 30 seconds.
 The driver restores below-normal priority on ready, failure or Stop; the registry
@@ -57,7 +77,9 @@ boost. Other threads and POSIX scheduling retain their existing behavior.
 A completion-port Worker reads tree membership events, grandchildren included.
 It starts on a turn or the first traced PID and sleeps until a packet arrives.
 After 30 seconds with no occupied jobs it stops; the port remains open for the
-next Worker. Process handles are opened when packets arrive. A process that
+next Worker. Process handles are opened when packets arrive. Each process also
+belongs to the global job on the same port; the Worker drops that job's copy of
+every start and exit and posts only its memory budget alert. A process that
 already exited may have no readable identity and stay outside the trace while
 its CPU remains in job totals. Console hosts are similarly excluded from trace
 rows and load while remaining in totals. Terminating a job requires explicit
@@ -75,6 +97,18 @@ executable, command line, timestamps, exit code, CPU time, peak memory and I/O.
 | `resources.usage` | Agent identity and cached CPU, memory, storage and TCP readings, without process arguments or paths |
 | `resources.killTree` | Stops the registered thread tree or groups; wait for live count zero before treating exits as observed |
 | `ThreadLoad` | Sampled process count, CPU percentage and memory on each thread summary |
+| `thread.load` | A thread's new `ThreadLoad` alone, sent to a connection whose `hello` `accepts` it; any other connection gets the whole row as `thread.updated` |
+
+The load tick samples every live scope once a second while a turn runs, a
+`resources.usage` lease is held, memory is under pressure, a startup boost is
+pending or the previous tick saw a thread at 2% CPU or more or a changed process
+count. Otherwise it waits four seconds. A `turn.started` or a new lease brings
+the next tick forward to one second. A tick with no live process and memory
+`ok` reads nothing. A load is sent when it moved by more than 1% CPU, 1 MiB or a
+process; a scope with no thread behind it (a terminal, the devices) asks the
+thread table again only then. A thread whose processes never all exit forgets
+each exited pid 30 seconds after its exit, so late job events are still
+recognized while its history stays bounded.
 
 Manual archive also cancels temporary side questions throughout the retained
 family. Their retired requests cannot publish answers after restoration.
@@ -309,13 +343,18 @@ The shared guard/audio Worker starts with a turn or traced process, stops after
 failures log once per core run; a refused focus hook can leave audio protection
 running and exposes its failure through `guardStatus()`.
 
+The pump waits on its message queue 100 ms at a time, less when a batched audio
+walk is due sooner.
+
 Logic tests use fake Win32 calls. `BOITE_E2E_GUARD=1` is the opt-in real-window
 case and briefly takes focus; ordinary automation must not enable it.
 
 ## The audio mute
 
 The same Windows Worker initializes COM and polls the default render endpoint
-once per second and after a new PID. It mutes unmuted sessions belonging to
+once per second and after a new PID. A PID that comes less than 100 ms after
+the last walk waits for one shared walk at the end of those 100 ms, so a build
+that starts hundreds of processes walks at most ten times a second. It mutes unmuted sessions belonging to
 traced processes and holds their volume interfaces. Unreadable sessions are
 reported once; a failed or changed endpoint is reopened. With no endpoint it
 retries every 30 seconds. A COM startup refusal disables this half for that
@@ -323,7 +362,8 @@ Worker's lifetime.
 
 On process exit, setting disable or Worker shutdown, it restores only mutes it
 applied and releases interfaces. User-muted sessions remain muted. Core shutdown
-waits up to one second for release so Windows' persistent session mute does not
+waits up to one second for release (two when the wake failed and the pump may
+be in a one-second wait) so Windows' persistent session mute does not
 carry into a later launch. `process.muted` identifies the thread and PID.
 Logic tests use a fake endpoint; the native audio test opens a session with two
 seconds of zeroed PCM, without audible content.
@@ -348,10 +388,12 @@ without grandchild events. Bun provides exit usage for its subprocesses; the
 Node path supplies no POSIX exit usage. `TraceCapability.mode: 'poll'` names
 this fallback, not complete process-tree event tracking.
 
-Linux samples procfs every second for registered processes and their descendants.
+Linux samples procfs on each load tick for registered processes and their descendants.
 CPU uses `/proc/<pid>/stat`; memory uses `RssAnon + RssShmem`, falling back to
 `VmRSS` on older kernels. The latter includes shared library mappings and can
-overcount a parallel workload. macOS uses `proc_pid_rusage` physical footprint
+overcount a parallel workload. A process name is read from `/proc/<pid>/comm`
+once per birth and again only when the stat line's name changes, as after an
+`exec`; the boot time from `/proc/stat` is read once. macOS uses `proc_pid_rusage` physical footprint
 for each direct child and reports CPU as zero. The automatic memory guard can
 stop the heaviest child tree when a thread exceeds its share. CPU job caps,
 focus guard and audio mute remain Windows-only.
@@ -366,9 +408,11 @@ its signal; a missing or changed birth is skipped. These procfs checks and
 PID signals are separate operations, rather than a held native process handle.
 
 Linux also reads the cgroup of each thread's root agent process on the same
-one-second sample: the `0::<path>` line of `/proc/<pid>/cgroup`, then
+sample: the `0::<path>` line of `/proc/<pid>/cgroup`, then
 `memory.events`, `memory.pressure`, `memory.high`, `memory.max` and
-`memory.current` under `/sys/fs/cgroup<path>`. Past `memory.high` the kernel
+`memory.current` under `/sys/fs/cgroup<path>`. The path, `memory.high` and
+`memory.max` are kept per process for 30 seconds, so a limit an admin changes
+lands within that; a tick reads the three counters. Past `memory.high` the kernel
 fails nothing; every process of the group stalls near 0% CPU while the `high`
 count of `memory.events` climbs. That count alone proves no stall: a group
 whose charge is mostly clean page cache reaches the limit during any large

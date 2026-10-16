@@ -2597,6 +2597,8 @@ export interface CoreInfo {
     attachmentUploads?: boolean;
     /** `ui.reveal` takes `coreId` on a thread or an agent target and opens it on that machine. An older core drops the field and opens this core's. */
     revealMachines?: boolean;
+    /** A load sample reaches a client whose hello `accepts` `thread.load` as that event alone, not as a whole `thread.updated` row. */
+    loadEvents?: boolean;
     /** `core.desktopUpdateReport`, `core.desktopUpdateStatus` and `core.updateEverything` `app`: the desktop app of this machine updates on another machine's click. */
     desktopUpdates?: boolean;
   };
@@ -4000,6 +4002,13 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
       device?: DeviceHello | { publicKey: string; name?: string; sig: string };
       protocolVersion: number;
       client: { name: string; version: string; device?: string };
+      /**
+       * Events this client handles that an older client would not, so the
+       * core sends them in place of their older form. `thread.load`: a load
+       * sample arrives as that event instead of a whole `thread.updated` row.
+       * An older core ignores the field.
+       */
+      accepts?: HelloAccepted[];
     };
     result: {
       core: CoreInfo;
@@ -4769,6 +4778,13 @@ export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents, BrowserR
 
   'thread.created': ThreadSummary;
   'thread.updated': ThreadSummary;
+  /**
+   * A thread's load sample alone, at most once a second while it moves: the
+   * client patches `load` on the row it holds and nothing else. Sent only to
+   * a connection whose hello `accepts` it; any other receives the whole row
+   * as `thread.updated`.
+   */
+  'thread.load': { threadId: ThreadId; load: ThreadLoad };
   'thread.removed': { threadId: ThreadId; undoable?: boolean };
   /** The owner-only deletion list changed, including purge and removal with a project. */
   'thread.deletionsUpdated': Record<string, never>;
@@ -4995,6 +5011,10 @@ export const PAIRING_ROLES: readonly PairingRole[] = ['device', 'owner'];
  */
 export const CLIENT_NAMES = ['shell', 'pwa', 'cli', 'plugin', 'test', 'bench'] as const;
 export type ClientName = (typeof CLIENT_NAMES)[number];
+
+/** What a hello's `accepts` may name. Anything else is ignored. */
+export const HELLO_ACCEPTED = ['thread.load'] as const;
+export type HelloAccepted = (typeof HELLO_ACCEPTED)[number];
 
 export { attachmentError, answerAttachmentError } from './attachment-validation.ts';
 export { AUTO_COMPACT_MOMENTS, AUTO_COMPACT_TOKENS, BROWSER_ORIGINS_MAX, MODEL_FAVORITES_MAX, checkSettingsPatch, compareModelFavorites, keepLaterFavorites, type AutoCompact, type AutoCompactMoment, type SettingsPatchCheck } from './settings-validation.ts';
