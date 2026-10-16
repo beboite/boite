@@ -22,19 +22,20 @@ const page = `<!doctype html><meta charset=utf-8><title>bench</title><style>body
 .spin{width:300px;height:300px;background:conic-gradient(red,yellow,lime,cyan,blue,magenta,red);border-radius:50%;animation:s 1s linear infinite}@keyframes s{to{transform:rotate(1turn)}}
 p{width:1700px}</style><div class=hero></div><div class=spin></div><p>${'Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor '.repeat(30)}</p>`;
 
-/** Mean milliseconds per frame of each decode, in the page: the old per-byte copy, the native decoder, and a data URL fetch. */
+/** Mean milliseconds per frame of each decode, in the page: the old per-byte copy, the native decoder when the engine has it, and a data URL fetch. */
 const DECODE_TIMING = `(async () => {
   const canvas = document.createElement('canvas'); canvas.width = 1920; canvas.height = 1080;
   const ctx = canvas.getContext('2d');
   for (let i = 0; i < 4000; i++) { ctx.fillStyle = 'hsl(' + (i * 37 % 360) + ',70%,' + (30 + i % 40) + '%)'; ctx.fillRect((i * 97) % 1920, (i * 53) % 1080, 40 + i % 60, 20 + i % 40); }
   const base64 = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+  const native = typeof Uint8Array.fromBase64 === 'function';
   const ways = {
     'atob + Uint8Array.from': async b => createImageBitmap(new Blob([Uint8Array.from(atob(b), c => c.charCodeAt(0))], { type: 'image/jpeg' })),
-    'Uint8Array.fromBase64': async b => createImageBitmap(new Blob([Uint8Array.fromBase64(b)], { type: 'image/jpeg' })),
+    ...(native ? { 'Uint8Array.fromBase64': async b => createImageBitmap(new Blob([Uint8Array.fromBase64(b)], { type: 'image/jpeg' })) } : {}),
     'fetch(data:) blob': async b => createImageBitmap(await (await fetch('data:image/jpeg;base64,' + b)).blob()),
   };
   const out = { base64Chars: base64.length };
-  for (const [name, bytes] of Object.entries({ 'bytes atob + Uint8Array.from': b => Uint8Array.from(atob(b), c => c.charCodeAt(0)), 'bytes Uint8Array.fromBase64': b => Uint8Array.fromBase64(b) })) {
+  for (const [name, bytes] of Object.entries({ 'bytes atob + Uint8Array.from': b => Uint8Array.from(atob(b), c => c.charCodeAt(0)), ...(native ? { 'bytes Uint8Array.fromBase64': b => Uint8Array.fromBase64(b) } : {}) })) {
     bytes(base64);
     const at = performance.now();
     for (let i = 0; i < 20; i++) bytes(base64);

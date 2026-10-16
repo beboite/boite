@@ -154,7 +154,7 @@ browser would (`packages/ui/src/lib/browser-host.ts`): a page command goes to
 that webview's own DevTools channel, which WebView2 hands to the app without
 any port; `Target.createTarget`, `attachToTarget` and `closeTarget` create,
 name and close webviews; a page's events, its address and title, and the
-windows it opens come back with `browser.hostReply`. Network events cross cut
+windows it opens come back with `browser.hostReply`. Network events are cut
 to what the core reads: a request's address, and a response only when it
 failed, with its status and address (`compactPageEvent`). The shell lets an agent
 webview (an id starting with `agent-`) take the Page, Runtime, Input,
