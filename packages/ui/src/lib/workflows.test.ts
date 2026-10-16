@@ -80,6 +80,20 @@ test('a failed step fails the run and only the owner retries it', async ({ creat
   await until(() => client.call('workflows.get', { threadId: 't-trace', runId: run.id }), value => value.status === 'failed');
 });
 
+test('retrying one of two failed steps names the other and leaves the run as it was', async ({ createClient }) => {
+  const client = await createClient({ delayMs: 0, delegationDemo: true });
+  const pair: WorkflowPlan = { name: 'Pair', limits: { maxConcurrent: 2 }, steps: [{ id: 'left', profile: 'implementer', task: 'Please fail now.' }, { id: 'right', profile: 'implementer', task: 'Please fail now.' }] };
+  const run = await client.call('workflows.start', { threadId: 't-trace', plan: pair, requestId: 'pair' });
+  const failed = await until(() => client.call('workflows.get', { threadId: 't-trace', runId: run.id }), value => value.status !== 'running');
+  expect(failed.nodes.map(node => node.status)).toEqual(['failed', 'failed']);
+  await expect(client.call('workflows.control', { threadId: 't-trace', runId: run.id, action: 'retry', stepId: 'left' }))
+    .rejects.toMatchObject({ code: RpcErrorCode.Refused, message: 'the run stays stopped while right has failed; retry that step too, or retry the whole run without naming a step' });
+  const unchanged = await client.call('workflows.get', { threadId: 't-trace', runId: run.id });
+  expect([unchanged.status, ...unchanged.nodes.map(node => node.status)]).toEqual(['failed', 'failed', 'failed']);
+  const retried = await client.call('workflows.control', { threadId: 't-trace', runId: run.id, action: 'retry' });
+  expect(retried.status).toBe('running');
+});
+
 test('a failed step stops what never launched, and a paused run still ends its running steps', async ({ createClient }) => {
   const client = await createClient({ delayMs: 0, delegationDemo: true });
   const narrow: WorkflowPlan = { name: 'Narrow', limits: { maxConcurrent: 1 }, steps: [{ id: 'try', profile: 'implementer', task: 'Please fail now.' }, { id: 'side', profile: 'reviewer', task: 'Waits its turn.' }] };

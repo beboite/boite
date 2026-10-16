@@ -1,4 +1,4 @@
-import type { ThreadId, ThreadProgress, TurnId } from '@boite/contracts';
+import type { ThreadId, ThreadProgress, Turn, TurnId } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { withLoad } from './records.ts';
 
@@ -6,23 +6,35 @@ import { withLoad } from './records.ts';
 export class ProgressState {
   private readonly latest = new Map<ThreadId, ThreadProgress>();
   private readonly published = new Map<ThreadId, number>();
+  /**
+   * The turns `latest` names that the journal last wrote as running. Every
+   * status change goes through `putTurn`, so a delta checks this set instead of
+   * reading its turn row back.
+   */
+  private readonly running = new Set<TurnId>();
 
-  constructor(private readonly core: Core) {}
+  constructor(private readonly core: Core) {
+    core.journal.onTurnWritten(turn => this.written(turn));
+  }
 
   begin(threadId: ThreadId, turnId: TurnId): void {
+    const old = this.latest.get(threadId);
+    if (old) this.running.delete(old.turnId);
     this.latest.set(threadId, { turnId, phase: 'starting', detail: null, at: Date.now() });
     this.published.delete(threadId);
+    // A turn starts queued and turns running in a later write; one already running is read once here.
+    if (this.core.journal.getTurn(turnId)?.status === 'running') this.running.add(turnId);
   }
 
   get(threadId: ThreadId): ThreadProgress | null {
     const progress = this.latest.get(threadId);
-    return progress && this.core.journal.getTurn(progress.turnId)?.status === 'running' ? progress : null;
+    return progress && this.running.has(progress.turnId) ? progress : null;
   }
 
   report(threadId: ThreadId, turnId: TurnId, phase: ThreadProgress['phase'], detail: string | null = null): void {
     const old = this.latest.get(threadId);
     // A late SDK callback must never overwrite the next turn or revive an ended one.
-    if (old?.turnId !== turnId || this.core.journal.getTurn(turnId)?.status !== 'running') return;
+    if (old?.turnId !== turnId || !this.running.has(turnId)) return;
     const at = Date.now();
     const short = detail?.replace(/\s+/g, ' ').trim().slice(0, 300) || null;
     this.latest.set(threadId, { turnId, phase, detail: short, at, providerAt: at });
@@ -37,6 +49,7 @@ export class ProgressState {
     if (this.latest.get(threadId)?.turnId !== turnId) return;
     this.latest.delete(threadId);
     this.published.delete(threadId);
+    this.running.delete(turnId);
   }
 
   contact(threadId: ThreadId, turnId: TurnId): void {
@@ -49,5 +62,11 @@ export class ProgressState {
     if (!thread) return;
     this.published.set(threadId, now);
     this.core.bus.emit('thread.updated', withLoad(this.core, thread));
+  }
+
+  /** A write that ends the turn is final even if its transaction rolls back: a late callback is dropped, never let through. */
+  private written(turn: Turn): void {
+    if (turn.status !== 'running') this.running.delete(turn.id);
+    else if (this.latest.get(turn.threadId)?.turnId === turn.id) this.running.add(turn.id);
   }
 }

@@ -151,19 +151,29 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 593,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,986,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,989,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,240,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,267,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
-On 2026-10-16, the reading cache, display image and pull request polling
-changes (PR #525) merged with `origin/main` at `0f480824` measure 4,978,898 UI
-bytes after `bun run build:ui` on Linux with Bun 1.4.2, against 4,975,415 for
-that main; core JavaScript is unchanged at 4,237,867. The shared pull request
-timer, the reading cache's size accounting, the bounded display image cache and
-the per-project sidebar lists add 3,483 bytes. The UI limit becomes 4,986,000,
-this growth rounded up to the next thousand; the other limits stay unchanged.
+On 2026-10-16, `main` at `7ccb238d` measures 4,982,096 UI bytes and 4,263,703
+core JavaScript bytes after fresh `bun run build:ui` and `bun run build:core` on
+Linux, above its 4,982,000 and 4,244,000 limits. Nine pull requests merged that
+day each fit the limits alone; together they add 6,681 UI bytes and 25,836 core
+bytes over `9c5c1849`. Measured after each merge: #521 10,828 core bytes, #520
+6,273 UI bytes, #519 5,070 core and 125 UI, #528 4,287 core and 283 UI, #516
+3,693 core, #523 814, #531 518, #514 318 and #530 308 core bytes. The limits
+rise by the growth they did not yet count, every byte but #516's 3,693 core
+bytes, to 4,989,000 and 4,267,000; the entry and `main.js` limits stay
+unchanged.
+
+On 2026-10-16, the runtime optimization pass (PR #516) merged with `origin/main`
+at `0f480824` measures 4,241,560 core JavaScript bytes after fresh `bun run build:core`
+on Linux, against 4,237,867 for that main: the bounded journal walks, the copy
+memo, the per-pump delegation config map and the undelivered-run set add 3,693
+bytes. The core limit becomes 4,244,000; the UI measures 4,975,415 bytes on both
+and its limits stay unchanged.
 
 On 2026-10-16, the dialog showing what a Claude thread sends (PR #501) merged
 with `origin/main` at `4eec5562` measures 4,975,415 UI bytes and 4,237,867 core

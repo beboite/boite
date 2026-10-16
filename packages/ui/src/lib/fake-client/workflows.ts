@@ -461,14 +461,17 @@ export class FakeWorkflows {
         if (run.status === 'paused' && principal !== 'owner') throw refusal('the run is paused; the owner resumes it');
         const nodes = params.stepId === undefined ? run.nodes.filter(n => broken(n.status) || n.instances.some(i => broken(i.status))) : run.nodes.filter(n => n.id === params.stepId);
         if (params.stepId !== undefined && !nodes.length) throw invalid(`stepId: no step ${params.stepId} in this run`);
-        this.#resumeTeam(run.rootThreadId);
-        for (const node of run.nodes) {
-          const target = nodes.includes(node);
+        // Work on a copy: a refused retry leaves the run as it was, as the core does.
+        const next = structuredClone(run);
+        const targets = new Set(nodes.map(node => node.id));
+        const gone: ThreadId[] = [];
+        for (const node of next.nodes) {
+          const target = targets.has(node.id);
           for (const inst of node.instances) if (target && broken(inst.status)) {
             // An archived step conversation takes no turn: the retry gets a new one.
-            const gone = inst.threadId !== null && this.#archived(inst.threadId);
-            if (gone) this.#steps.delete(inst.threadId!);
-            Object.assign(inst, { status: 'waiting', finishedAt: null, ...(gone ? { threadId: null } : {}) });
+            const archived = inst.threadId !== null && this.#archived(inst.threadId);
+            if (archived) gone.push(inst.threadId!);
+            Object.assign(inst, { status: 'waiting', finishedAt: null, ...(archived ? { threadId: null } : {}) });
           }
           // Stopped only because another step failed, it never ran: it waits again with the retried one.
           else if (inst.status === 'stopped' && inst.error === NOT_STARTED) Object.assign(inst, { status: 'waiting', error: null, finishedAt: null });
@@ -476,8 +479,11 @@ export class FakeWorkflows {
           else if (node.instances.some(i => i.status === 'waiting')) Object.assign(node, { status: 'running', error: null, finishedAt: null });
           else if (node.status === 'stopped' && !node.instances.length) Object.assign(node, { status: 'waiting', error: null, startedAt: null, finishedAt: null });
         }
-        if (this.#halted(run)) throw refusal('nothing to retry in that step; retry the step that failed');
-        Object.assign(run, { status: 'running', error: null, finishedAt: null, delivered: false });
+        const holding = next.nodes.filter(node => broken(node.status) || node.instances.some(i => broken(i.status))).map(node => node.id);
+        if (holding.length) throw refusal(`the run stays stopped while ${holding.join(', ')} ${holding.length === 1 ? 'has' : 'have'} failed; retry ${holding.length === 1 ? 'that step' : 'those steps'} too, or retry the whole run without naming a step`);
+        this.#resumeTeam(run.rootThreadId);
+        for (const threadId of gone) this.#steps.delete(threadId);
+        Object.assign(run, next, { status: 'running', error: null, finishedAt: null, delivered: false });
         break;
       }
       default:
