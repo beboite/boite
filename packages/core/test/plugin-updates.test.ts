@@ -142,7 +142,7 @@ describe('an update source', () => {
   test('a manifest for another plugin, or one that changes what the owner reviewed, is ignored', async () => {
     const t = await setup();
     const cases: [Record<string, unknown> | string | null, string][] = [
-      [release('1.1.0', { id: 'kebacc-switcher' }), 'is for "kebacc-switcher", not "seat-pool"'],
+      [release('1.1.0', { id: 'bots' }), 'is for "bots", not "seat-pool"'],
       [release('1.1.0', { name: 'Official Boite security' }), 'changes name from "Seat pool"'],
       [release('1.1.0', { homepage: 'https://elsewhere.example.invalid' }), 'changes homepage'],
       [release('1.1.0', { executable: 'other' }), 'changes executable'],
@@ -226,7 +226,7 @@ describe('an update source', () => {
 
   test('only a recommended plugin naming a source is checked, and a paired device reaches none of it', async () => {
     const t = await setup();
-    await expect(t.client.call('plugins.checkUpdates', { id: 'kebacc-switcher' })).rejects.toThrow('plugin kebacc-switcher has no update source');
+    await expect(t.client.call('plugins.checkUpdates', { id: 'pool-switcher' })).rejects.toThrow('plugin pool-switcher has no update source');
     expect(t.store.state('seat-pool').updates?.source).toEqual(SOURCE);
     t.store.updateSources = {};
     expect(t.store.state('seat-pool').updates).toBeNull();

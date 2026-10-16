@@ -296,7 +296,6 @@ export class FakeContext {
       create: (agent, sessionId, work) => createAgentSession(this, agent, sessionId, work),
       start: (threadId, prompt, agent) => { Object.assign(this.thread(threadId), agent.selection); return this.startTurn(threadId, prompt); },
       stop: threadId => { void this.stopTurn(threadId); },
-      protocol: providerId => this.providers.find(p => p.id === providerId)?.protocol,
       thread: threadId => this.threads.get(threadId),
       goal: (threadId, objective) => {
         const methods = activityMethods(this);

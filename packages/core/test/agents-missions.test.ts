@@ -19,7 +19,7 @@ async function fixture(h: TestCore) {
   }
   const project = await client.call('projects.add', { path, name: 'Prototype' });
   const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
-  const agent = await client.call('agents.profile.save', { value: { name: 'Builder', domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' }, status: 'active', tools: ['missions', 'artifacts', 'decisions'], accountIntegration: 'provider' } });
+  const agent = await client.call('agents.profile.save', { value: { name: 'Builder', domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' }, status: 'active', tools: ['missions', 'artifacts', 'decisions'] } });
   // The subagent guide and memory passes would fill the echo driver's 2,000-token window and compact mid-scenario.
   await quiet(client, agent);
   const mission = await client.call('agents.mission.save', { value: { title: 'Prototype', objective: 'Build it', expectedResult: 'Source and checks', agentIds: [agent.id], teamId: null, projectId: project.id, status: 'open', maxTurns: 10, maxDurationMs: 60000, maxTokens: null, resourceIds: [] } });

@@ -716,7 +716,7 @@ Real-provider tests use CLI logins and spend tokens. Run selected cases from
 | `BOITE_E2E_PI=1` | `test/pi.live.test.ts`: turn and resume |
 | `BOITE_E2E_AGY=1` | `test/agy.live.test.ts`: model discovery and one cold default-account turn |
 | `BOITE_E2E_INSTALLS=1` | `test/shipped-installs.live.test.ts`: pinned Codex/OpenCode downloads and versions |
-| `BOITE_E2E_KEBACC_INSTALL=1` | `test/plugins.install.live.test.ts`: native plugin install/version/uninstall |
+| `BOITE_E2E_PLUGIN_INSTALL=1` | `test/plugins.install.live.test.ts`: native plugin install/version/uninstall |
 | `BOITE_E2E_ANTIGRAVITY_INSTALL=1` | `test/antigravity.install.live.test.ts`: managed archive integrity and ACP initialization, without login |
 | `BOITE_E2E_ANTIGRAVITY=1` | `test/antigravity.live.test.ts`: interactive sign-in and turn; requires a person |
 | `BOITE_BENCH_CLAUDE=1` | Real Claude turn in `bun run bench` |

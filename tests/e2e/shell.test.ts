@@ -307,7 +307,7 @@ shellTest('a resident core finishes agent work after shell exit, is adopted, and
     found = await waitForHealthyCore(ownDataDir);
     client = await connect(`http://127.0.0.1:${found.port}`, found.token);
     const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
-    const agent = await client.call('agents.profile.save', { value: { name: 'Background worker', domain: '', instructions: '', avatar: '', status: 'active', tools: ['messages'], accountIntegration: 'provider', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' } } });
+    const agent = await client.call('agents.profile.save', { value: { name: 'Background worker', domain: '', instructions: '', avatar: '', status: 'active', tools: ['messages'], selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' } } });
     ownPage = await BrowserPage.attach(port); await ownPage.waitFor(TAURI_READY);
     await ownPage.waitFor(`document.querySelector('.app.ready') && document.querySelector('[data-testid=titlebar] .close')`);
     const started = client.next('turn.started', () => true, 10000);

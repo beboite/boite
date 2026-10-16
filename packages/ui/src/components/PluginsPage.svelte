@@ -2,7 +2,7 @@
   import { errorText } from '../lib/errors';
   import InfoTip from './InfoTip.svelte';
   import { onMount } from 'svelte';
-  import { Download, Play, Puzzle, RefreshCw, RotateCw, ShieldAlert, Square, TriangleAlert } from '@lucide/svelte';
+  import { Download, ExternalLink, Play, Puzzle, RefreshCw, RotateCw, ShieldAlert, Square, TriangleAlert } from '@lucide/svelte';
   import type { PluginAppState, PluginPool, PluginPreview, PluginRejected, PluginState, PluginUpdates, RpcParams } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
@@ -14,7 +14,6 @@
   const t = strings.plugins;
 
   let plugins = $state<PluginState[]>([]);
-  let loaded = $state(false);
   let pools = $state<Record<string, PluginPool[]>>({});
   let busy = $state<Record<string, boolean>>({});
   let checking = $state<Record<string, boolean>>({});
@@ -169,7 +168,8 @@
       case 'installing': return `${t.stateInstalling} · ${plugin.progress}%`;
       case 'error': return t.stateError;
       case 'rejected': return t.stateRejected;
-      default: return plugin.origin === 'recommended' ? t.recommendedBy : t.stateAvailable;
+      // Not installed needs no word: the Install button says it.
+      default: return '';
     }
   }
 
@@ -211,11 +211,9 @@
     void client.call('plugins.list', {}).then(async (rows) => {
       if (disposed) return;
       plugins = rows;
-      loaded = true;
       await Promise.all(rows.filter((plugin) => plugin.status === 'installed' && plugin.pools.length > 0).map((plugin) => loadPools(plugin.id)));
     }).catch((cause) => {
       error = messageOf(cause);
-      loaded = true;
     });
     return () => { disposed = true; off(); };
   });
@@ -234,15 +232,25 @@
 
 {#snippet row(plugin: PluginState)}
   {@const working = busy[plugin.id] === true}
+  {@const state = stateLine(plugin)}
   <div class="plugin" data-testid="plugin-row" data-plugin={plugin.id} data-status={plugin.status}>
     <div class="line">
       <span class="glyph" aria-hidden="true"><Puzzle size={16} strokeWidth={1.75} /></span>
       <div class="who">
-        <h3>{plugin.name}{#if plugin.version ?? plugin.availableVersion}<span class="version">v{plugin.version ?? plugin.availableVersion}</span>{/if}</h3>
-        <p class="state">
-          <span class="dot" class:ok={plugin.status === 'installed'} class:live={plugin.status === 'installing'}
-            class:bad={plugin.status === 'error' || plugin.status === 'rejected'}></span><span class="ui-label">{stateLine(plugin)}</span>
-        </p>
+        <h3>
+          <span class="name">{plugin.name}</span>
+          {#if plugin.version ?? plugin.availableVersion}<span class="version">v{plugin.version ?? plugin.availableVersion}</span>{/if}
+          {#if plugin.homepage && !plugin.source}
+            <a class="home" href={plugin.homepage} target="_blank" rel="noreferrer" title={t.source} aria-label={t.source} data-testid="plugin-home"><ExternalLink size={13} /></a>
+          {/if}
+        </h3>
+        {#if state}
+          <p class="state">
+            <span class="dot" class:ok={plugin.status === 'installed'} class:live={plugin.status === 'installing'}
+              class:bad={plugin.status === 'error' || plugin.status === 'rejected'}></span><span class="ui-label">{state}</span>
+          </p>
+        {/if}
+        {#if plugin.description}<p class="description">{plugin.description}</p>{/if}
       </div>
       <div class="act">
         {#if plugin.status === 'installing'}
@@ -251,10 +259,15 @@
           <button class="primary small" data-testid="plugin-install" data-plugin={plugin.id} disabled={working || plugin.artifact === null} onclick={() => void change(plugin, 'plugins.install')}><Download size={14} /><span class="ui-label">{t.install}</span></button>
         {:else}
           {#if plugin.status === 'installed' && plugin.availableVersion && plugin.availableVersion !== plugin.version}
-            <button class="small" data-testid="plugin-update" data-plugin={plugin.id} disabled={working} onclick={() => void change(plugin, 'plugins.install')}><span class="ui-label">{fill(t.update, { version: `v${plugin.availableVersion}` })}</span></button>
+            <button class="primary small" data-testid="plugin-update" data-plugin={plugin.id} disabled={working} onclick={() => void change(plugin, 'plugins.install')}><span class="ui-label">{fill(t.update, { version: `v${plugin.availableVersion}` })}</span></button>
           {/if}
           {#if plugin.status === 'error' || (plugin.status === 'rejected' && plugin.origin === 'recommended')}
             <button class="small" data-testid="plugin-retry" data-plugin={plugin.id} disabled={working} onclick={() => void change(plugin, 'plugins.install')}><RefreshCw size={14} /><span class="ui-label">{plugin.status === 'error' ? strings.common.retry : t.reinstall}</span></button>
+          {/if}
+          {#if plugin.updates && plugin.version !== null}
+            {@const looking = plugin.updates.checking || checking[plugin.id] === true}
+            <button class="ghost small icon" class:spinning={looking} data-testid="plugin-check-updates" data-plugin={plugin.id} title={t.checkUpdates} aria-label={t.checkUpdates}
+              disabled={working || looking} onclick={() => void checkUpdates(plugin)}><RefreshCw size={14} /></button>
           {/if}
           <button class="ghost small" data-testid="plugin-uninstall" data-plugin={plugin.id} disabled={working} onclick={() => void change(plugin, 'plugins.uninstall')}><span class="ui-label">{t.remove}</span></button>
         {/if}
@@ -265,25 +278,17 @@
         <span class="bar" style:width="{plugin.progress}%"></span>
       </div>
     {/if}
-    {#if plugin.description}<p class="description">{plugin.description}</p>{/if}
     {#if plugin.source}
       <p class="meta">
         <a href={plugin.homepage ?? plugin.source.url} target="_blank" rel="noreferrer">{bare(plugin.source.url)}</a>
         <span class="mono">{fill(t.atCommit, { ref: plugin.source.ref, commit: short(plugin.source.commit) })}</span>
       </p>
-    {:else if plugin.origin === 'recommended' && plugin.homepage && plugin.version !== null}
-      <p class="meta">{t.recommendedBy} · <a href={plugin.homepage} target="_blank" rel="noreferrer">{t.source}</a></p>
-    {:else if plugin.homepage}
-      <p class="meta"><a href={plugin.homepage} target="_blank" rel="noreferrer">{t.source}</a></p>
     {/if}
     {#if plugin.updates && plugin.version !== null}
-      {@const updates = plugin.updates}
-      {@const line = updatesLine(updates)}
-      <div class="updates" data-testid="plugin-updates" data-plugin={plugin.id} data-available={updates.available?.version ?? ''}>
-        {#if line}<p class="hint" data-testid="plugin-updates-line">{line}</p>{/if}
-        <button class="quiet small" data-testid="plugin-check-updates" data-plugin={plugin.id} disabled={working || updates.checking || checking[plugin.id] === true || plugin.status === 'installing'}
-          onclick={() => void checkUpdates(plugin)}><RefreshCw size={14} /><span class="ui-label">{t.checkUpdates}</span></button>
-      </div>
+      {@const line = updatesLine(plugin.updates)}
+      {#if line}
+        <p class="hint" data-testid="plugin-updates" data-plugin={plugin.id} data-available={plugin.updates.available?.version ?? ''}><span data-testid="plugin-updates-line">{line}</span></p>
+      {/if}
     {/if}
     {#if plugin.error}<p class="bad" role="alert">{plugin.error}</p>{/if}
     {#if errors[plugin.id]}<p class="bad" role="alert">{errors[plugin.id]}</p>{/if}
@@ -291,19 +296,16 @@
     {#if plugin.status === 'installed' && plugin.app}
       {@const app = plugin.app}
       {@const live = app.status === 'running' || app.status === 'starting'}
-      <div class="app" data-testid="plugin-app" data-plugin={plugin.id} data-app-status={app.status}>
+      <div class="desktop-app" data-testid="plugin-app" data-plugin={plugin.id} data-app-status={app.status}>
         <div class="app-head">
-          <div class="who">
-            <h4 class="section-label"><span class="ui-label">{t.app}</span></h4>
-            <p class="state" data-testid="plugin-app-state">
-              <span class="dot" class:ok={app.status === 'running'} class:live={app.status === 'starting'}
-                class:bad={app.status === 'crashed' || app.status === 'unavailable'}></span><span class="ui-label">{appLine(app)}</span>
-            </p>
-          </div>
+          <p class="state" data-testid="plugin-app-state">
+            <span class="dot" class:ok={app.status === 'running'} class:live={app.status === 'starting'}
+              class:bad={app.status === 'crashed' || app.status === 'unavailable'}></span><span class="ui-label app-name">{t.app}</span><span aria-hidden="true">·</span><span class="ui-label">{appLine(app)}</span>
+          </p>
           <div class="act">
             {#if live}
-              <button class="small" data-testid="plugin-app-restart" data-plugin={plugin.id} disabled={working} onclick={() => void appAction(plugin, 'restart')}><RotateCw size={14} /><span class="ui-label">{t.appRestart}</span></button>
-              <button class="ghost small" data-testid="plugin-app-stop" data-plugin={plugin.id} disabled={working} onclick={() => void appAction(plugin, 'stop')}><Square size={14} /><span class="ui-label">{t.appStop}</span></button>
+              <button class="quiet small" data-testid="plugin-app-restart" data-plugin={plugin.id} disabled={working} onclick={() => void appAction(plugin, 'restart')}><RotateCw size={14} /><span class="ui-label">{t.appRestart}</span></button>
+              <button class="quiet small" data-testid="plugin-app-stop" data-plugin={plugin.id} disabled={working} onclick={() => void appAction(plugin, 'stop')}><Square size={14} /><span class="ui-label">{t.appStop}</span></button>
             {:else}
               <button class="small" data-testid="plugin-app-start" data-plugin={plugin.id} disabled={working || app.status === 'unavailable'} onclick={() => void appAction(plugin, 'start')}><Play size={14} /><span class="ui-label">{t.appStart}</span></button>
             {/if}
@@ -353,41 +355,32 @@
   <header><div><h1 class="ui-label-box"><span class="ui-label">{t.heading}</span><InfoTip topic={t.heading} text={t.intro} /></h1></div></header>
   {#if error}<p class="bad" role="alert">{error}</p>{/if}
 
-  <section aria-labelledby="plugins-installed" data-testid="plugins-installed">
-    <h2 id="plugins-installed" class="section-label"><span class="ui-label">{t.installedHeading}</span></h2>
-    {#if installed.length === 0}
-      <p class="hint empty-note">{loaded ? t.installedEmpty : ''}</p>
-    {:else}
+  {#if installed.length > 0}
+    <section aria-labelledby="plugins-installed" data-testid="plugins-installed">
+      <h2 id="plugins-installed" class="section-label"><span class="ui-label">{t.installedHeading}</span></h2>
       <div class="card list">
         {#each installed as plugin (plugin.id)}{@render row(plugin)}{/each}
       </div>
-    {/if}
-  </section>
+    </section>
+  {/if}
 
-  <section aria-labelledby="plugins-recommended" data-testid="plugins-recommended">
-    <h2 id="plugins-recommended" class="section-label"><span class="ui-label">{t.recommendedHeading}</span></h2>
-    {#if recommended.length === 0}
-      <p class="hint empty-note">{loaded ? t.recommendedAllInstalled : ''}</p>
-    {:else}
+  {#if recommended.length > 0}
+    <section aria-labelledby="plugins-recommended" data-testid="plugins-recommended">
+      <h2 id="plugins-recommended" class="section-label"><span class="ui-label">{t.recommendedHeading}</span></h2>
       <div class="card list">
         {#each recommended as plugin (plugin.id)}{@render row(plugin)}{/each}
       </div>
-    {/if}
-  </section>
+    </section>
+  {/if}
 
   <section aria-labelledby="plugins-add" data-testid="plugins-add">
     <h2 id="plugins-add" class="section-label"><span class="ui-label">{t.addHeading}</span><InfoTip topic={t.addHeading} text={t.addHint} /></h2>
     <div class="card add">
       <form onsubmit={inspect}>
-        <label class="url">
-          <span>{t.urlLabel}</span>
-          <input data-testid="plugin-url" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false"
-            placeholder={t.urlPlaceholder} bind:value={url} />
-        </label>
-        <label class="ref">
-          <span>{t.refLabel}</span>
-          <input data-testid="plugin-ref" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder={t.refPlaceholder} bind:value={ref} />
-        </label>
+        <input class="url" data-testid="plugin-url" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false"
+          aria-label={t.urlLabel} placeholder={t.urlPlaceholder} bind:value={url} />
+        <input class="ref" data-testid="plugin-ref" autocomplete="off" autocapitalize="off" spellcheck="false"
+          aria-label={t.refLabel} title={t.refLabel} placeholder={t.refPlaceholder} bind:value={ref} />
         <button type="submit" data-testid="plugin-inspect" disabled={url.trim() === '' || inspecting}><span class="ui-label">{inspecting ? t.inspecting : t.inspect}</span></button>
       </form>
       {#if inspectError}<p class="bad" role="alert" data-testid="plugin-inspect-error">{inspectError}</p>{/if}
@@ -442,21 +435,24 @@
 <style>
   .page { container-type: inline-size; }
   section { max-width: var(--settings-width); margin-bottom: 24px; }
-  section > h2 { margin: 0 0 8px; }
+  section > h2 { margin: 0 0 8px; display: flex; align-items: center; gap: 6px; }
   .hint { margin: 0; font-size: var(--text-sm); color: var(--color-muted-foreground); line-height: 1.5; }
-  .empty-note { min-height: 1.5em; }
   .bad { margin: 0; font-size: var(--text-sm); color: var(--color-danger); overflow-wrap: anywhere; }
 
   /* One card per section, one row per plugin, like the Providers checklist. */
   .page .list { padding: 0; overflow: hidden; }
-  .plugin { display: grid; gap: 8px; padding: 12px 16px; animation: rise var(--dur-3) var(--ease-out-quint); }
+  .plugin { display: grid; gap: 8px; padding: 14px 16px; animation: rise var(--dur-3) var(--ease-out-quint); }
   .plugin + .plugin { border-top: 1px solid var(--color-border); }
+  /* Everything under the head lines up with the name, not the glyph. */
+  .plugin > :not(.line) { margin-left: 44px; }
 
-  .line { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .line { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
   .glyph { flex: none; display: grid; place-items: center; width: 32px; height: 32px; border-radius: var(--radius-md); background: var(--color-surface-2); color: var(--color-muted-foreground); }
-  .who { flex: 1; min-width: 0; display: grid; gap: 2px; }
-  h3 { margin: 0; display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: var(--text-base); font-weight: 600; overflow-wrap: anywhere; }
+  .who { flex: 1; min-width: 0; display: grid; gap: 3px; padding-top: 1px; }
+  h3 { margin: 0; display: flex; align-items: center; gap: 8px; min-width: 0; font-size: var(--text-base); font-weight: 600; overflow-wrap: anywhere; }
   .version { font-family: var(--font-mono); font-size: var(--text-xs); font-weight: 400; color: var(--color-muted-foreground); }
+  .home { display: inline-grid; place-items: center; color: var(--color-muted-foreground); border-radius: var(--radius-sm); transition: color var(--dur-1) var(--ease-out-quint); }
+  .home:hover, .home:focus-visible { color: var(--color-foreground); }
   .state { margin: 0; display: flex; align-items: center; gap: 6px; font-size: var(--text-sm); color: var(--color-muted-foreground); font-variant-numeric: tabular-nums; }
 
   /* Hue is for status only: green once installed, amber while downloading, red when refused. */
@@ -465,22 +461,20 @@
   .dot.live { background: var(--color-live); }
   .dot.bad { background: var(--color-danger); }
 
-  .act { display: flex; align-items: center; gap: 6px; flex: none; flex-wrap: wrap; justify-content: flex-end; }
+  .act { display: flex; align-items: center; gap: 4px; flex: none; flex-wrap: wrap; justify-content: flex-end; }
+  .spinning :global(svg) { animation: spin 0.9s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
   .act.end { justify-content: flex-end; }
-  .act button, .pools button, .account-actions button, .app button { gap: 6px; }
+  .act button, .pools button, .account-actions button { gap: 6px; }
 
   .track { height: 2px; border-radius: 999px; background: var(--color-surface-3); overflow: hidden; }
   .bar { display: block; height: 100%; background: var(--color-foreground); transition: width var(--dur-2) var(--ease-out-quint); }
 
-  .description { margin: 0; font-size: var(--text-sm); line-height: 1.5; }
+  .description { margin: 0; font-size: var(--text-sm); line-height: 1.5; color: var(--color-muted-foreground); }
   .meta { margin: 0; display: flex; flex-wrap: wrap; gap: 4px 8px; font-size: var(--text-sm); color: var(--color-muted-foreground); }
   .meta a { color: var(--color-muted-foreground); overflow-wrap: anywhere; }
   .meta a:hover { color: var(--color-foreground); }
   .meta .mono { font-size: var(--text-xs); }
-  /* The update source's last word and the button that asks again, quiet whatever it says. */
-  .updates { display: flex; align-items: center; justify-content: space-between; gap: 4px 12px; flex-wrap: wrap; }
-  .updates .hint { flex: 1 1 220px; min-width: 0; overflow-wrap: anywhere; }
-  .updates button { gap: 6px; margin-left: auto; }
 
   .refusal { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--color-danger) 35%, var(--color-border)); border-radius: var(--radius-md); background: color-mix(in srgb, var(--color-danger) 6%, transparent); }
   .refusal-title { margin: 0; display: flex; align-items: center; gap: 6px; font-size: var(--text-sm); font-weight: 600; color: var(--color-danger); }
@@ -494,9 +488,10 @@
   .commands li { padding-left: 2ch; text-indent: -2ch; }
 
   .pools { display: grid; gap: 10px; margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--color-border); }
-  /* The desktop app's own strip: what it is doing, and the buttons that change it. */
-  .app { display: grid; gap: 6px; margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--color-border); }
+  /* The desktop app's own strip: one line of what it is doing, and the buttons that change it. */
+  .desktop-app { display: grid; gap: 6px; padding: 6px 6px 6px 12px; border-radius: var(--radius-md); background: var(--color-surface-2); }
   .app-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .app-name { color: var(--color-foreground); font-weight: 500; }
   .pools-head .section-label { display: flex; align-items: center; gap: 6px; }
   .pools-head, .pool-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   h4 { margin: 0; }
@@ -510,8 +505,8 @@
   .account-actions { display: flex; margin-left: auto; gap: 4px; flex: none; }
 
   /* The card sits inside a section, where the page's card padding does not reach. */
-  .add { display: grid; gap: 12px; padding: var(--settings-padding); }
-  form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 180px) auto; align-items: end; gap: 8px; }
+  .add { display: grid; gap: 12px; padding: 12px; }
+  form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 160px) auto; align-items: center; gap: 8px; }
   form input { width: 100%; }
   /* The button lines up with the fields beside it. */
   form button { height: var(--input); }
@@ -523,11 +518,12 @@
   @container (max-width: 560px) {
     .line { flex-wrap: wrap; }
     .line .act { width: 100%; justify-content: flex-start; padding-left: 44px; }
+    .plugin > :not(.line) { margin-left: 0; }
     form { grid-template-columns: minmax(0, 1fr); }
     form button { justify-self: start; }
     .facts { grid-template-columns: minmax(0, 1fr); gap: 2px; }
     .facts dd + dt { margin-top: 8px; }
     .pools-head { align-items: flex-start; }
   }
-  @media (prefers-reduced-motion: reduce) { .plugin, .preview { animation: none; } }
+  @media (prefers-reduced-motion: reduce) { .plugin, .preview, .spinning :global(svg) { animation: none; } }
 </style>

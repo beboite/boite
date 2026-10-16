@@ -26,7 +26,7 @@ test('an agent entrusted with a project shows on its header and on its threads, 
     const first = (await store.client.call('agents.snapshot', {})).profiles.find(agent => agent.status === 'active');
     const agent = first?.projectIds?.includes('p-boite') ? first
       : await store.client.call('agents.profile.save', { value: first ? { ...first, projectIds: [...(first.projectIds ?? []), 'p-boite'] }
-        : { name: 'Mira', domain: 'Looks after boite', instructions: '', avatar: '', status: 'active', tools: [], accountIntegration: 'provider', projectIds: ['p-boite'],
+        : { name: 'Mira', domain: 'Looks after boite', instructions: '', avatar: '', status: 'active', tools: [], projectIds: ['p-boite'],
           selection: { providerId: 'claude', accountId: 'a-claude-main', model: null, effort: null, permissionMode: 'default' } } });
     const thread = store.threads.find(t => t.projectId === 'p-boite' && !t.archived && !t.agentSessionId && !t.parentThreadId);
     await window.__boiteTest.workspace.select(store, thread.id);

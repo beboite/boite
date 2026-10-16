@@ -4,8 +4,6 @@ import { DATA_DIR } from './shared.ts';
 /** A fake plugin install ticks this many times, INSTALL_STEP_MS apart. */
 export const PLUGIN_STEPS = 8;
 
-const KEBACC_RELEASE = 'https://github.com/kebab1337420/kebacc-switch/releases/download/kebacc-v2.0.1';
-
 /** The account pool command lines the core shows, `<pool>` and `<email>` standing for the values. */
 export function poolCommands(executable: string): string[] {
   return [
@@ -32,10 +30,9 @@ export const FAKE_RELEASES: Record<string, { version: string; commit: string; ar
 
 /**
  * Every state the Plugins page draws, in the order the core lists them: Bots,
- * recommended first, installed and running as a desktop app, with an update
- * source a check finds 0.1.10 at; kebacc-switcher,
- * recommended and not installed yet; then one added from a URL and installed,
- * one stuck mid-download, and one whose installed.json the core refuses.
+ * the one recommended plugin, installed and running as a desktop app, with an
+ * update source a check finds 0.1.10 at; then one added from a URL and
+ * installed, one stuck mid-download, and one whose installed.json the core refuses.
  */
 export function fakePlugins(): PluginState[] {
   const base = { platform: 'win32-x64', progress: 0, error: null, rejected: null, app: null };
@@ -53,13 +50,6 @@ export function fakePlugins(): PluginState[] {
         checkedAt: Date.parse('2026-10-10T08:01:00Z'), nextCheckAt: Date.parse('2026-10-10T14:01:00Z'),
         available: null, ignored: null, error: null
       }
-    },
-    {
-      ...base, id: 'kebacc-switcher', name: 'kebacc-switcher', origin: 'recommended',
-      description: 'Save and switch Claude, Codex and Antigravity CLI logins, with quota readings for each saved account.',
-      homepage: 'https://github.com/kebab1337420/kebacc-switch', version: null, availableVersion: '2.0.1', status: 'not-installed', source: null,
-      artifact: { url: `${KEBACC_RELEASE}/kebacc-x86_64-pc-windows-msvc.exe`, sha256: '9edc5c3af1db76e97a9c07e2fd1c3399ad8c9db22e0ad2684a1b885e33acc538' },
-      commands: poolCommands('kebacc'), pools: ['claude', 'codex', 'antigravity']
     },
     {
       ...base, id: 'seat-pool', name: 'Seat pool', origin: 'url',
@@ -87,12 +77,6 @@ export function fakePlugins(): PluginState[] {
 
 export function fakePluginPools(): Record<string, PluginPool[]> {
   return {
-    'kebacc-switcher': ['claude', 'codex', 'antigravity'].map((provider) => ({
-      provider, accounts: [
-        { email: 'work@example.com', active: true, checkedSecondsAgo: 10, windows: [{ id: 'fiveHour', label: '5 hours', usedPercent: 32, resetsAt: null }, { id: 'sevenDay', label: 'Weekly', usedPercent: 74, resetsAt: null }] },
-        { email: 'personal@example.com', active: false, checkedSecondsAgo: 10, windows: [{ id: 'fiveHour', label: '5 hours', usedPercent: 8, resetsAt: null }] },
-      ]
-    })),
     'seat-pool': [{
       provider: 'opencode', accounts: [
         { email: 'team@example.com', active: true, checkedSecondsAgo: 42, windows: [{ id: 'fiveHour', label: '5 hours', usedPercent: 18, resetsAt: null }, { id: 'sevenDay', label: 'Weekly', usedPercent: 51, resetsAt: null }] },
