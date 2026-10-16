@@ -18,7 +18,16 @@ export class SnapshotReads<T extends { id: string }> {
   }
 
   change(id: string, row: T | null): void {
-    for (const read of this.#reads) read.changes.set(id, row);
+    for (const read of this.#reads) { read.changes.set(id, row); read.patches.delete(id); }
+  }
+
+  /** Some fields of a row changed: a read in flight lands them over its fresh row and keeps the rest of that row. */
+  patch(id: string, fields: Partial<T>): void {
+    for (const read of this.#reads) {
+      const changed = read.changes.get(id);
+      if (changed) read.changes.set(id, { ...changed, ...fields });
+      else if (changed === undefined) read.patches.set(id, { ...read.patches.get(id), ...fields });
+    }
   }
 
   clear(): void { for (const read of this.#reads) read.cancel(); }
@@ -26,6 +35,7 @@ export class SnapshotReads<T extends { id: string }> {
 
 export class SnapshotRead<T extends { id: string }> {
   readonly changes = new Map<string, T | null>();
+  readonly patches = new Map<string, Partial<T>>();
   readonly protected = new Map<string, { pending: Set<number>; applied: boolean }>();
   active = true;
   constructor(readonly scope: string, readonly sequence: number, private readonly group: (row: T) => string, private readonly close: (applied: boolean) => void) {}
@@ -54,6 +64,10 @@ export class SnapshotRead<T extends { id: string }> {
       if (row && (!owned(row) || protectedRow(row))) continue;
       if (changed) rows.set(id, changed); else rows.delete(id);
     }
+    for (const [id, fields] of this.patches) {
+      const row = rows.get(id);
+      if (row && owned(row) && !protectedRow(row)) rows.set(id, { ...row, ...fields });
+    }
     this.#finish(true);
     return [...rows.values()];
   }
@@ -64,6 +78,7 @@ export class SnapshotRead<T extends { id: string }> {
     this.active = false;
     this.close(applied);
     this.changes.clear();
+    this.patches.clear();
     this.protected.clear();
   }
 }

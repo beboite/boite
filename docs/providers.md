@@ -321,17 +321,25 @@ session protocol either.
   already names its package (`packages/core/src/providers/versions.ts`).
 - A `file` candidate that starts with `{npmRoot}` is looked for under each
   global npm `node_modules` directory, the same list an `npm` candidate walks,
-  with the profile's `path` names as the bin hints. That is how Codex and
+  with the profile's `path` names as the bin hints. That is how Claude, Codex and
   OpenCode find the program their npm package vendors under nvm-windows, fnm,
   scoop or a custom prefix, where the shim on PATH is a `.cmd`. The token is
   expanded at each resolution, not at load, and only at the start of a `file`
   value.
 - A PATH lookup, for a candidate, a `detect.command` or the npm roots, is
   remembered for 30 seconds per name and PATH, so the provider list and each
-  turn start do not walk PATH again. A remembered program that is gone is looked
-  up again. A reload, a managed install or uninstall and an update forget every
-  lookup; a program installed outside Boite shows up within 30 seconds, or at
-  once on a reload.
+  turn start do not walk PATH again. What an `npm` candidate resolves to is
+  remembered the same way, per spec, PATH and npm prefix variables. A
+  remembered program or script that is gone is looked up again. A reload, a
+  managed install or uninstall and an update forget every lookup; a program
+  installed outside Boite shows up within 30 seconds, or at once on a reload.
+- On Linux and macOS, a `codex` that PATH resolves to npm's
+  `@openai/codex/bin/codex.js` launcher is replaced by the executable vendor
+  binary the launcher would start (the platform package beside it, or the
+  launcher's own `vendor/`). The updater still runs the launcher, which tells
+  `codex update` which package manager owns the install. The launcher is a
+  Node process that otherwise stays up beside each Codex process. A wrapper script in front of it, which may set limits of its
+  own, is still what runs (`packages/core/src/providers/codex-launcher.ts`).
 - `launch.args` put the agent into the mode Boite speaks to. The `agy` driver
   adds its print-mode flags itself, because the same binary also answers
   `agy models` for the probe, so the Antigravity CLI declares none; anything a
@@ -675,8 +683,12 @@ provider on, runs a turn, resumes it on a new process and moves the session to
 local stand-in for the gateway, which received the turn on its Chat
 Completions route with the key and the gateway's own model id; no turn went
 through a real Douane or CLIProxyAPI. Not verified either: Windows and macOS,
-an OAuth sign-in, and image attachments, which is why `capabilities.images` is
-false.
+and an OAuth sign-in. Images are on: 2.0.30 answers `initialize` with
+`promptCapabilities.image` true, and an ACP image block reached a stand-in
+gateway, declared with the same provider block Boite writes, as a Chat
+Completions `image_url` part. OpenCode 1 stays at `images: false`: 1.19.2 also
+advertises images, but replaces one with an error text for a gateway model
+that declares no image input, which is every model the gateway block lists.
 
 ## Turning a provider off
 
@@ -750,7 +762,10 @@ Otherwise it spawns one short-lived process under the synthetic thread
 a Job Object and in the trace like any other, then asks the protocol's own question:
 
 - Claude: SDK `supportedModels()` without a user prompt, with
-  `settings.disableAllHooks` so no `SessionStart` hook fires. Effort levels, adaptive
+  `settings.disableAllHooks` so no `SessionStart` hook fires, and
+  `strictMcpConfig` with no servers so it starts none of the user's MCP servers
+  (an empty `mcpServers` alone passes no flag). The CLI quota read, titles and
+  side questions do the same. Effort levels, adaptive
   thinking and Fast support come from each returned model. Descriptor effort
   controls stay hidden until that account has answered.
 - ACP: `initialize` and `session/new`, then whichever of two answers the agent
@@ -767,8 +782,22 @@ a Job Object and in the trace like any other, then asks the protocol's own quest
   for the model it lands on, and a failed read keeps the list already cached.
   A model's scale is read once, even when the agent names none for it. The
   config options a turn's own `session/new` or `session/load` answers are kept
-  for the account too, so a later process that resumes a session seeds its
-  controls from them instead of opening a discovery `session/new` every time.
+  for the account too. A process that resumes a session loads it first and
+  opens a discovery `session/new` only when the load answered no options and
+  nothing is cached; both OpenCode majors answer them on load. A probe or a
+  discovery session is deleted with `session/delete` when the agent advertises
+  `sessionCapabilities.delete` (OpenCode 2 does), so none of them stays in the
+  agent's own session list. A refresh drops cached catalogs but keeps the one
+  a session still opening reads: the composer refreshes as the app opens while
+  the draft's process starts, and that answer is as fresh as a probe's.
+- ACP controls on a running session: a model, effort or mode goes out only
+  when the session's own last answer does not already report it. OpenCode 2
+  puts the effort back on `default` with any model change, so the effort goes
+  again after one; a thread with no effort sends `default` when the agent lists
+  it, and a thread back on the agent's own model asks for the model the
+  session opened on. A value the agent refuses is not asked again in that
+  process: an injected gateway model it never takes costs one round of retries,
+  not one per turn.
 - Codex: `initialize`, the `initialized` notification, then `model/list` until no
   cursor comes back. Each model carries its own efforts and its own default, so
   two models on one account can offer two different scales. `serviceTiers` supplies
@@ -1100,7 +1129,9 @@ process here goes through `procs.spawnChild`. The driver refuses a host whose
   `turn/start`, so an item that arrives before the answer still finds its turn.
 - An item notification carries the whole item so far. Text already written from
   `item/delta` is remembered per item and field, and a snapshot only adds what
-  lies past it, so an answer is drawn once whichever way it arrived.
+  lies past it, so an answer is drawn once whichever way it arrived. Only the
+  running turn's items are recorded, and the record is emptied when the turn
+  ends: a delta of another turn's item (a queued one, a replay) is dropped.
 - Text sent while a turn runs, an asynchronous answer or a coordination
   message, goes out as `turn/steer` naming that turn in `expectedTurnId`. A
   host whose turn already ended refuses it, and the text waits for the next turn.

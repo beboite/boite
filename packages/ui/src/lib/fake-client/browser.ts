@@ -7,7 +7,7 @@ type Methods = 'browser.command' | 'browser.importCookies' | 'browser.remoteFram
 
 /** `selected`: the typed text is selected, by a double click or select-all, until the next click or key. */
 interface Tab extends FakePage { tabId: string; profile: string; history: string[]; historyIndex: number; at: number; selected?: boolean }
-interface Browser { tabs: Tab[]; active: string | null; frames: (RemoteBrowserFrame & { taken: number })[]; requestedAt: number }
+interface Browser { tabs: Tab[]; active: string | null; frames: (RemoteBrowserFrame & { taken: number; drawn: string })[]; requestedAt: number }
 
 const VIEWPORT = { width: 1280, height: 800 };
 /** A 1×1 PNG: what `screenshot` hands the agent here. */
@@ -152,9 +152,9 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
       const tabs = tabsOf(browsers.get(threadId));
       return { live: tabs.length > 0, tabs, available: true };
     },
-    'browser.remoteFrame': async ({ threadId, tabId, maxWidth, quality }) => {
+    'browser.remoteFrame': async ({ threadId, tabId, maxWidth, quality, after }) => {
       watching(threadId);
-      const options = { ...(maxWidth === undefined ? {} : { maxWidth }), ...(quality === undefined ? {} : { quality }) };
+      const options = { ...(maxWidth === undefined ? {} : { maxWidth }), ...(quality === undefined ? {} : { quality }), ...(after === undefined ? {} : { after }) };
       const problem = remoteFrameOptionsError(options);
       if (problem) throw refusal(problem);
       const browser = browsers.get(threadId);
@@ -162,8 +162,13 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
       if (!browser || !tab) throw refusal(tabId ? 'that browser tab is closed' : 'the agent has no browser tab open in this conversation');
       if (Date.now() - browser.requestedAt < 220) throw refusal('wait before requesting another browser frame');
       browser.requestedAt = Date.now();
+      // What the page shows, as `fakeBrowserScreen` draws it.
+      const drawn = JSON.stringify([tab.url, tab.title, tab.width, tab.height, tab.taps, tab.text, tab.scrollY]);
+      // The page drew nothing new since the frame the viewer shows: it keeps it, still valid for input. The core waits a second first.
+      const held = after === undefined ? undefined : browser.frames.find(one => one.id === after && one.tabId === tab.tabId && Date.now() - one.taken < 5000);
+      if (held && held.drawn === drawn) { held.taken = Date.now(); return { unchanged: true, id: held.id, tabId: tab.tabId, at: Date.now(), waitedMs: 0 }; }
       const frame: RemoteBrowserFrame = { id: crypto.randomUUID(), tabId: tab.tabId, title: tab.title, width: tab.width, height: tab.height, base64: fakeBrowserScreen(tab), at: Date.now(), url: tab.url };
-      browser.frames = [...browser.frames.filter(one => Date.now() - one.taken < 5000).slice(-7), { ...frame, base64: '', taken: Date.now() }];
+      browser.frames = [...browser.frames.filter(one => Date.now() - one.taken < 5000).slice(-7), { ...frame, base64: '', taken: Date.now(), drawn }];
       return frame;
     },
     'browser.remoteInput': async ({ threadId, frameId, input }) => {

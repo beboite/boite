@@ -320,3 +320,26 @@ test('a compact refresh cannot certify a hydrated output from its matching prefi
     expect(fresh).not.toHaveProperty('outputDeferred');
   } finally { spy.mockRestore(); }
 });
+
+test('a return to a visit kept as plain data repaints the tail that came while away, over the copy it painted', async ({ ready }) => {
+  const { store, client } = await ready({ delayMs: 0, long: true });
+  await store.open('t-long');
+  await store.open('t-bench');
+  // The idle pass after the leave keeps the visit as plain data, not as the proxy it was drawn from.
+  await new Promise(resolve => setTimeout(resolve, 400));
+  await client.call('turns.start', { threadId: 't-long', prompt: 'while you were away' });
+  await vi.waitFor(async () => {
+    const tail = await client.call('threads.get', { threadId: 't-long', limit: 2 });
+    expect(tail.messages.at(-1)?.role).toBe('assistant');
+    expect(tail.messages.at(-1)?.state).toBe('complete');
+  });
+  const opening = store.open('t-long');
+  const painted = store.openThread!;
+  const first = painted.messages[0];
+  expect(painted.messages.some(message => message.parts.some(part => part.type === 'text' && part.text === 'while you were away'))).toBe(false);
+  await opening;
+  // The resume tail lands in the copy on screen: the timeline keeps its rows and draws the new ones.
+  expect(store.openThread).toBe(painted);
+  expect(store.openThread!.messages[0]).toBe(first);
+  expect(store.openThread!.messages.some(message => message.parts.some(part => part.type === 'text' && part.text === 'while you were away'))).toBe(true);
+});

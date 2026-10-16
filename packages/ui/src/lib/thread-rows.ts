@@ -1,4 +1,4 @@
-import type { MessageId, ProjectId, Thread, ThreadId, ThreadSummary } from '@boite/contracts';
+import type { MessageId, ProjectId, Thread, ThreadId, ThreadLoad, ThreadSummary } from '@boite/contracts';
 import { resumeAnchor, threadBusy } from '@boite/contracts';
 export { resumeAnchor } from '@boite/contracts';
 
@@ -31,11 +31,27 @@ function same(a: unknown, b: unknown): boolean {
  * a deep `$state` array, so a load tick then signals `row.load` alone: the
  * project lists, which read ids, projects and flags, do not run again.
  */
+/** A `thread.load` on one held copy of the row: written only when it moved, so an unchanged sample re-renders nothing. */
+export function patchLoad(row: Pick<ThreadSummary, 'load'>, load: ThreadLoad): void {
+  if (!same(row.load, load)) row.load = load;
+}
+
 export function patchRow(row: ThreadSummary, next: ThreadSummary): void {
   const target = row as unknown as Record<string, unknown>;
-  const source = next as unknown as Record<string, unknown>;
-  for (const key of Object.keys(target)) if (!(key in source)) delete target[key];
-  for (const [key, value] of Object.entries(source)) if (!same(target[key], value)) target[key] = value;
+  for (const key of Object.keys(target)) if (!(key in next)) delete target[key];
+  patchFields(row, next);
+}
+
+/**
+ * `Object.assign` of a summary over a held thread, without the writes that
+ * change nothing. The open thread is a deep `$state` proxy: assigning a load
+ * tick whole gave `load`, the usage and the context new proxies each second,
+ * and every reaction reading them ran again. Nothing is deleted, since a
+ * thread holds messages, turns and pages a summary does not carry.
+ */
+export function patchFields<T extends object>(held: T, next: Partial<T>): void {
+  const target = held as Record<string, unknown>;
+  for (const [key, value] of Object.entries(next)) if (!same(target[key], value)) target[key] = value;
 }
 
 /**

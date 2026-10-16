@@ -137,6 +137,7 @@ export class Store {
     const ctx = this.#ctx;
     this.detach();
     ctx.threads.readingThreads.clear();
+    ctx.displayImages.clear();
     this.readingPositions.clear();
     ctx.composer.pendingSends.clear();
     ctx.composer.staged = {};

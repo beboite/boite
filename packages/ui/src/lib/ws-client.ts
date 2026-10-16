@@ -411,7 +411,9 @@ export class WsClient implements ObservableClient {
     return {
       ...credential,
       protocolVersion: PROTOCOL_VERSION,
-      client: { name: this.#options.clientName, version: this.#options.version, ...(device ? { device } : {}) }
+      client: { name: this.#options.clientName, version: this.#options.version, ...(device ? { device } : {}) },
+      // Load samples as `thread.load` alone; an older core ignores this and sends whole rows.
+      accepts: ['thread.load']
     };
   }
 
@@ -419,7 +421,9 @@ export class WsClient implements ObservableClient {
    * Whether anything at all arrives on `socket` within `deadlineMs`. The
    * question is a `hello`, which the core answers on an authenticated
    * connection with its info and nothing else, for every principal; any frame,
-   * an event included, counts as the answer.
+   * an event included, counts as the answer. The core reads no params on that
+   * hello, so it carries no credential: no device signature every 25 s, no
+   * token repeated on the wire.
    */
   #probeSocket(socket: SocketLike, deadlineMs: number): Promise<boolean> {
     if (this.#probe?.socket === socket) return this.#probe.result;
@@ -433,7 +437,7 @@ export class WsClient implements ObservableClient {
       };
     });
     this.#probe = { socket, result, settle };
-    void this.#send(socket, 'hello', this.#helloParams()).catch(() => undefined);
+    void this.#send(socket, 'hello', { protocolVersion: PROTOCOL_VERSION, client: { name: this.#options.clientName, version: this.#options.version } }).catch(() => undefined);
     return result;
   }
 

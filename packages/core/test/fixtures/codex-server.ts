@@ -26,12 +26,12 @@
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const DIRECTIVE = /\[(agents|command|command-failed|approve|thought|summary|usage|late-context|slow|crash|input|async|stream|elicit|elicit-url|permissions|time|hook-block)\]/g;
+const DIRECTIVE = /\[(agents|command|command-failed|approve|thought|summary|usage|late-context|slow|crash|input|async|stream|elicit|elicit-url|permissions|time|hook-block|limits|flood)\]/g;
 const CHUNKS = 3;
 
 type Directive =
   | 'command' | 'command-failed' | 'approve' | 'thought' | 'summary' | 'usage' | 'late-context' | 'slow' | 'crash' | 'input' | 'async' | 'stream'
-  | 'elicit' | 'elicit-url' | 'permissions' | 'time' | 'hook-block' | 'agents';
+  | 'elicit' | 'elicit-url' | 'permissions' | 'time' | 'hook-block' | 'agents' | 'limits' | 'flood';
 
 let threadCounter = 0;
 let turnCounter = 0;
@@ -56,6 +56,9 @@ function logConfig(method: string, params: Record<string, unknown>): void {
  * rather than dropped: the driver sends one the instant it learns the turn id.
  */
 const interrupted = new Set<string>();
+/** Resolved by the next `account/rateLimits/read`, so a rolling update can follow it. */
+let rateLimitsRead: (() => void) | null = null;
+
 const waiting = new Map<string, () => void>();
 
 function awaitInterrupt(turnId: string): Promise<void> {
@@ -445,9 +448,35 @@ async function runTurn(turnId: string, text: string): Promise<void> {
         notify('item/started', { item: commandItem(itemId, 'inProgress', null), threadId, turnId, startedAtMs: Date.now() });
         notify('item/commandExecution/outputDelta', { threadId, turnId, itemId, delta: 'line one\n' });
         notify('item/started', { item: { type: 'sleep', id: 'sleep-1', durationMs: 50 }, threadId, turnId, startedAtMs: Date.now() });
-        await Bun.sleep(600);
+        // Longer than one redraw beat, so the running card is drawn once.
+        await Bun.sleep(1_200);
         notify('item/completed', { item: { type: 'sleep', id: 'sleep-1', durationMs: 50 }, threadId, turnId, completedAtMs: Date.now() });
         notify('item/completed', { item: commandItem(itemId, 'completed', 'line one\nline two\n'), threadId, turnId, completedAtMs: Date.now() });
+        break;
+      }
+      case 'limits': {
+        // Sparse rolling updates: only the weekly window, and no reset credits.
+        const update = (usedPercent: number) => notify('account/rateLimits/updated', { rateLimits: {
+          limitId: 'codex', limitName: null, primary: null, secondary: { usedPercent, windowDurationMins: 10080, resetsAt: 1_900_000_000 },
+          credits: null, planType: null, rateLimitReachedType: null, individualLimit: null, spendControlReached: null, normalModelSlug: null } });
+        const read = new Promise<void>((resolve) => { rateLimitsRead = resolve; });
+        update(30);
+        await read;
+        await Bun.sleep(50);
+        update(35);
+        await Bun.sleep(50);
+        break;
+      }
+      case 'flood': {
+        // A chatty command: 200 deltas of 100 characters, faster than one redraw beat.
+        itemCounter += 1;
+        const itemId = `item-${itemCounter}`;
+        notify('item/started', { item: commandItem(itemId, 'inProgress', null), threadId, turnId, startedAtMs: Date.now() });
+        for (let index = 0; index < 200; index++) {
+          notify('item/commandExecution/outputDelta', { threadId, turnId, itemId, delta: `${String(index).padStart(4, '0')}${'x'.repeat(95)}\n` });
+        }
+        await Bun.sleep(1_300);
+        notify('item/completed', { item: commandItem(itemId, 'completed', 'flood done'), threadId, turnId, completedAtMs: Date.now() });
         break;
       }
       case 'late-context':
@@ -543,6 +572,8 @@ function handle(method: string, raw: unknown): unknown {
       };
     case 'account/rateLimits/read':
       log(`account/rateLimits/read ${JSON.stringify(params)}`);
+      rateLimitsRead?.();
+      rateLimitsRead = null;
       return { rateLimits: { limitId: 'codex', primary: { usedPercent: 100, windowDurationMins: 300 },
         credits: { hasCredits: true, unlimited: false, balance: '42.5' } },
         rateLimitResetCredits: process.env['CODEX_FAKE_RESET_CREDITS']

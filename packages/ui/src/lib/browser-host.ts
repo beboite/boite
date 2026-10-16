@@ -46,6 +46,25 @@ export const HOST_PAGE_EVENTS = [
   'Network.requestWillBeSent', 'Network.responseReceived', 'Network.loadingFailed', 'Log.entryAdded',
 ] as const;
 
+/**
+ * A page's network events, cut to what the core reads of them
+ * (`packages/core/src/browser/page-events.ts`): a request's address, and a
+ * response only when it failed. Headers and initiator stacks never cross the
+ * loopback link. `null` drops the event. Read another field there, keep it here.
+ */
+export function compactPageEvent(method: string, params: Record<string, unknown>): Record<string, unknown> | null {
+  if (method === 'Network.requestWillBeSent') {
+    const request = params.request as { url?: unknown } | undefined;
+    return { requestId: params.requestId, request: { url: request?.url } };
+  }
+  if (method === 'Network.responseReceived') {
+    const response = params.response as { status?: unknown; statusText?: unknown; url?: unknown } | undefined;
+    if (typeof response?.status !== 'number' || response.status < 400) return null;
+    return { requestId: params.requestId, response: { status: response.status, statusText: response.statusText, url: response.url } };
+  }
+  return params;
+}
+
 /** Every agent webview's id starts so; the shell gives those the agent's DevTools methods (`browser_control.rs`). */
 export const AGENT_VIEW_PREFIX = 'agent-';
 
@@ -171,7 +190,8 @@ export class BrowserHostRelay {
     this.bridge.create(target.id, url, profile === DEFAULT_BROWSER_PROFILE ? undefined : profile);
     try {
       const off = await this.bridge.events(target.id, HOST_PAGE_EVENTS, (method, params) => {
-        if (this.#targets.has(target.id)) this.#send(target.relay, { method, params, sessionId: target.id });
+        const compact = this.#targets.has(target.id) ? compactPageEvent(method, params) : null;
+        if (compact) this.#send(target.relay, { method, params: compact, sessionId: target.id });
       });
       if (this.#targets.has(target.id)) target.off = off; else off();
     } catch (cause) {

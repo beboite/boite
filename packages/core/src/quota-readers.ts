@@ -104,7 +104,11 @@ export async function readExtraQuota(core: Core, account: Account): Promise<Quot
     const login = obj(auth['opencode-go']);
     if (login['type'] === 'api' && typeof login['key'] === 'string') token = login['key'];
   }
-  if (!token) throw new Error('Connect OpenCode Go with opencode auth login, then refresh.');
+  if (!token) {
+    throw new Error(account.providerId === OPENCODE_V2
+      ? 'Connect OpenCode Go with opencode2 auth login --standalone, then refresh.'
+      : 'Connect OpenCode Go with opencode auth login, then refresh.');
+  }
   return openCodeQuotaWindows(await request('https://opencode.ai/zen/go/v1/usage', token, 'OpenCode Go'));
 }
 

@@ -28,14 +28,18 @@ export const platform: ProcessPlatform = {
   terminate: jobs.terminateThreadJob,
   terminateProcess: jobs.terminateJobProcess,
   terminateUnassigned(pid) {
-    // Only a pid captured by the registry may reach this fallback.
+    // Only a pid captured by the registry may reach this fallback. Not through
+    // procs.spawn: taskkill must not join the thread it stops. Async, so its
+    // start (tens to hundreds of ms) does not hold the event loop.
     try {
-      Bun.spawnSync({
+      const taskkill = Bun.spawn({
         cmd: ['taskkill', '/T', '/F', '/PID', String(pid)],
-        stdout: 'ignore', stderr: 'ignore', windowsHide: true,
+        stdin: 'ignore', stdout: 'ignore', stderr: 'ignore', windowsHide: true,
       });
+      return taskkill.exited.catch(() => undefined);
     } catch {
       // The registry also calls the child's own kill method.
+      return undefined;
     }
   },
   sample: jobs.sampleThreadJob,

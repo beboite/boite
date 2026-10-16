@@ -31,7 +31,8 @@ export async function readClaudeQuota(ctx: ProbeContext, deps: ClaudeDeps = {
       cwd: ctx.cwd, pathToClaudeCodeExecutable: executable, abortController,
       env: childEnv(ctx.accountEnv), settingSources: ['user'], persistSession: false,
       settings: { disableAllHooks: true },
-      tools: [], mcpServers: {},
+      // Without the strict flag an empty `mcpServers` adds no `--mcp-config`, and the CLI starts the user's servers.
+      tools: [], mcpServers: {}, strictMcpConfig: true,
       spawnClaudeCodeProcess: (options: SdkSpawnOptions): SpawnedChild => {
         const child = ctx.spawnChild(options.command, options.args, { cwd: options.cwd, env: options.env });
         child.stderr.resume(); return child;

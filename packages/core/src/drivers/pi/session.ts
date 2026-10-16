@@ -2,7 +2,7 @@ import { logMessageOf } from '../../log-errors.ts';
 import { mkdirSync } from 'node:fs';
 import { messageOf, unavailable } from '../../errors.ts';
 import type { SpawnedChild } from '../../procs.ts';
-import { launchPrefix, profileFor, resolveExecutable } from '../../providers/resolve.ts';
+import { profileFor, resolveLaunch } from '../../providers/resolve.ts';
 import type { LiveTurnSettings, SessionContext, TurnContext } from '../types.ts';
 import { exitWithin } from '../exit.ts';
 import {
@@ -418,8 +418,8 @@ export class PiSession {
   private async open(ctx: SessionContext): Promise<void> {
     if (this.ended) throw new Error('the pi session was closed before it started');
     const profile = profileFor(ctx.provider);
-    const executable = profile === undefined ? null : resolveExecutable(profile);
-    if (executable === null) {
+    const launch = resolveLaunch(profile);
+    if (launch === null) {
       throw unavailable(`no ${ctx.provider.id} executable on this machine`, { providerId: ctx.provider.id });
     }
 
@@ -436,7 +436,7 @@ export class PiSession {
     }
 
     const args = [
-      ...launchPrefix(profile),
+      ...launch.prefix,
       ...(profile?.launch?.args ?? []),
       '--session-id',
       sessionId,
@@ -444,7 +444,7 @@ export class PiSession {
       sessionDir,
       ...modelArgs(ctx),
     ];
-    const child = ctx.spawnChild(executable, args, {
+    const child = ctx.spawnChild(launch.executable, args, {
       cwd: ctx.thread.cwd,
       env: agentEnv(ctx.accountEnv),
     });

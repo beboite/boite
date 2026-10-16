@@ -95,7 +95,8 @@ export interface ProcessPlatform {
   terminate(threadId: string): boolean;
   /** A held Windows handle, or a matching registered/sampled Linux birth. */
   terminateProcess(threadId: string, pid: number, startedAt?: number | null): boolean;
-  terminateUnassigned(pid: number): void;
+  /** Windows' fallback tree kill, for a pid outside the job: `killAll` waits for a returned promise. */
+  terminateUnassigned(pid: number): void | Promise<unknown>;
   sample(threadId: string): ProcessSample | null;
   /** Toggle optional detailed counters without changing protection sampling. */
   watchResources?(active: boolean): void;

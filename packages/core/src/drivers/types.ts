@@ -29,10 +29,20 @@ import type { SpawnedChild, SpawnedProcess, SpawnOptions } from '../procs.ts';
  * The only way a driver writes anything. It journals and emits in one call, so
  * no driver ever touches SQLite or a socket.
  */
+type ToolPart = Extract<MessagePart, { type: 'tool' }>;
+export type ToolPatch = Partial<Pick<ToolPart, 'name' | 'input' | 'inputText' | 'output' | 'status' | 'documents' | 'summary'>>;
+
 export interface EmitSink {
   startMessage(role: MessageRole): MessageId;
   delta(messageId: MessageId, partIndex: number, text: string): void;
   part(messageId: MessageId, partIndex: number, part: MessagePart): void;
+  /**
+   * Sets fields of a tool part already written and keeps the rest as stored,
+   * so a driver need not hold a finished call's input and output to label or
+   * correct its card. A field given as undefined is removed. Does nothing when
+   * that part is not a tool.
+   */
+  patchTool(messageId: MessageId, partIndex: number, fields: ToolPatch): void;
   complete(messageId: MessageId, state: Message['state']): void;
 }
 
@@ -339,6 +349,12 @@ export interface TitleContext {
 export interface ProbeFilter {
   providerId?: ProviderId;
   accountId?: AccountId;
+  /**
+   * The user asked to read the catalog again: nothing about the agent or the
+   * account changed. A driver drops what it cached, but a live session that is
+   * still opening reads a catalog as fresh as the refresh itself.
+   */
+  refresh?: true;
 }
 
 /** A native fork is unpublished until the caller validates its source and writes the branch. */

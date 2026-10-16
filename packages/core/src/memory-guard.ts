@@ -62,6 +62,11 @@ export class MemoryGuard {
     }
   }
 
+  /** A tick with no agent process while the state is `ok`: nothing to read or decide. */
+  rest(): void {
+    this.agentBytes = 0;
+  }
+
   memoryLimit(threadId: string | null, kind: 'thread-cap' | 'budget'): void {
     if (!this.enabled) return;
     this.bus.emit('resources.memory', { threadId, kind, state: this.state, at: Date.now() });

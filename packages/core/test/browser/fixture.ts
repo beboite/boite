@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:te
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { RemoteBrowserFrame, RemoteBrowserUnchanged } from '@boite/contracts';
 import { connect, type CoreClient } from '../../src/client.ts';
 import { chromiumArgs, findChromium, waitForEndpoint } from '../../src/browser/chromium.ts';
 import { echoThread, startTestCore, type TestCore } from '../harness.ts';
@@ -49,6 +50,8 @@ export function createBrowserFixture() {
       if (path === '/later/done') { later.complete(); return new Response('done'); }
       if (path === '/sent') return new Response(`<title>Sent</title><h1>Thanks ${new URL(request.url).searchParams.get('name')}</h1>`, { headers: { 'content-type': 'text/html' } });
       if (path === '/popup') return new Response('<title>Popup</title>popup', { headers: { 'content-type': 'text/html' } });
+      // Draws `hz` times a second, like a video or an animation slower than the screen.
+      if (path === '/ticking') return new Response(`<title>Ticking</title><div id=box style="width:80px;height:80px;background:red;position:absolute"></div><script>let x=0;setInterval(()=>{x=(x+7)%600;box.style.left=x+"px"},${1000 / Number(new URL(request.url).searchParams.get('hz') ?? 10)})</script>`, { headers: { 'content-type': 'text/html' } });
       if (path === '/moving') return new Response('<title>Moving</title><div id=box style="width:80px;height:80px;background:red;position:absolute"></div><script>let x=0;setInterval(()=>{x=(x+7)%600;box.style.left=x+"px"},16)</script>', { headers: { 'content-type': 'text/html' } });
       return new Response('missing', { status: 404 });
     } });
@@ -89,7 +92,7 @@ export function createBrowserFixture() {
    * answers as the app's webviews would. The app's own translation (one webview
    * per target) is tested in the UI; this is the core's side of the relay.
    */
-  async function fakeHost(name = 'shell') {
+  async function fakeHost(name = 'shell', extraArgs: string[] = []) {
     const dir = mkdtempSync(join(tmpdir(), 'boite-host-'));
     let browser: Bun.Subprocess | undefined, socket: WebSocket | undefined, app: CoreClient | undefined;
     let closing: Promise<void> | undefined;
@@ -122,7 +125,7 @@ export function createBrowserFixture() {
     hosts.add(close);
     try {
       const args = chromiumArgs(dir, 'linux').filter(arg => arg !== '--remote-debugging-pipe');
-      browser = Bun.spawn([findChromium().path!, ...args, '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1'], { stdout: 'ignore', stderr: 'ignore' });
+      browser = Bun.spawn([findChromium().path!, ...args, '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1', ...extraArgs], { stdout: 'ignore', stderr: 'ignore' });
       const connectedSocket = socket = new WebSocket(await waitForEndpoint(dir, browser.exited));
       await new Promise<void>((resolve, reject) => {
         const finish = (error?: Error) => {
@@ -161,6 +164,13 @@ export function createBrowserFixture() {
     get agent() { return agent; },
     get threadId() { return threadId; },
   };
+}
+
+/** A frame answer that carries a picture: a request without `after` never gets `unchanged`. */
+export async function picture(answer: Promise<RemoteBrowserFrame | RemoteBrowserUnchanged>): Promise<RemoteBrowserFrame> {
+  const frame = await answer;
+  if ('unchanged' in frame) throw new Error(`expected a frame, got unchanged ${frame.id}`);
+  return frame;
 }
 
 /** The pixel size a JPEG declares in its start-of-frame segment. */

@@ -80,6 +80,26 @@ turns. A team event looks for held workflow summaries only in a conversation
 the core knows has one, and the delegation tick neither parses result letters,
 which never expire, nor tries to deliver mail of a paused or disabled team.
 
+### What a Claude turn leaves behind
+
+Measured on 2026-10-15 with `bench/claude-turn-heap.ts`, a scripted turn of 20
+Write calls with 1 MiB results and a 5 MiB image on a warm session
+([results](../bench/results/2026-10-15-perf-drivers.md)). Once the turn ended,
+the core's heap stayed 33.7 MiB above its start: the session's query loop and
+its context kept the first turn, its tool outputs and the image. It now keeps
+1.8 MiB. A finished call's input and output live only in the stored part, and a
+late `tool_use_summary` patches that part, so a follow-up that cuts a running
+turn frees the cards it closed: 26.8 MiB held during the turn, now 1.6 MiB.
+
+### A running Codex command
+
+A running command's card is redrawn once a second with the last 4,000
+characters of its output; the completed item still carries all of it. Each
+redraw is a journal write and a `message.part` frame per client. For a 6 s
+command printing a line every 5 ms, `bench/codex-live-output.ts` measured 25
+redraws carrying 381,400 characters before, 7 carrying 28,000 now
+([results](../bench/results/2026-10-15-perf-drivers.md)).
+
 ## Concurrent agent stress
 
 ```sh
@@ -314,7 +334,14 @@ when the core advertises `chunkedAnswers`.
   subscription, unread acknowledgement and fresh snapshot run in the background.
   Unchanged messages and turns keep their identities through revalidation.
   The cache retains up to 16 visits, at most 4 MiB of text per thread and
-  16 MiB in total, with a 2,000-message bound per thread.
+  16 MiB in total, with a 2,000-message bound per thread. A leave counts the
+  thread it leaves and keeps that size beside the entry, so it never measures
+  the other visits again (`ReadingCache` in `reading-cache.ts`). Once the page
+  is idle, a plain copy replaces the deep `$state` proxy the timeline drew,
+  which weighed several times its data.
+- A summary written over the open thread (`thread.updated`, a load tick)
+  writes only the fields that changed (`patchFields`), so a tick that moves
+  `load` alone wakes only what reads `load`.
 - Cores advertising `threadSnapshots` receive one `threads.get` for an open.
   Its receipt includes pending cards, subscribes this socket, replaces the
   previous subscription and acknowledges unread content after a successful read.
@@ -388,7 +415,9 @@ when the core advertises `chunkedAnswers`.
   smaller, but Bun's Linux build cannot encode it. A GIF, a copy that would not
   be lighter and any other file come as they are. A click opens the original
   in the viewer, and a download or an edit also fetches the original
-  (`store/display-images.ts`).
+  (`store/display-images.ts`). The client keeps 120 copies and 24 M characters
+  of them at most, since a GIF or an original can weigh several MB, and drops
+  them when the Store switches to another machine.
 - A light read first makes the blurs of the messages around its page that no
   read looked at before, waiting 1.5 s at most. It does this before the page is
   read, never between the read and the answer, so the answer still holds every
@@ -455,10 +484,30 @@ when the core advertises `chunkedAnswers`.
   so the missed text does not wait for the slowest of them. The fresh
   `threads.list` is laid over the rows already held: a row keeps its object and
   only the fields that changed are written, so the sidebar redraws the rows that
-  moved and no others. A `thread.updated` load tick patches its row the same way.
+  moved and no others. A `thread.load` sample patches the row's `load` alone,
+  about 4x fewer bytes than the whole row an older client still gets.
 - A streamed delta, part or turn looks up its message or turn from the end of
   the loaded timeline, where the item being written sits.
 - The trace is read when the trace surface is on screen, not on every open.
+- Sidebar cards ask for their pull request when they mount or change branch,
+  then on one timer per connection: every 15 seconds while the thread works,
+  every 60 seconds at rest, above the core's 15-second cache of a repository's
+  list, so a round of idle cards runs `gh` at most once per repository. A
+  hidden page skips its rounds; back in view, it runs one if a round is due.
+  The rounds skip a merged pull request; a mount, a reconnect, a status change
+  and Refresh PR still ask, so a new PR on the same branch shows when the turn
+  ends (`watchPullRequests` in `pull-request.ts`).
+- An open Done or Archived fold reads the archive again only when a project's
+  archive count, the listed projects or a connection change, not when a prompt
+  re-sorts the list, and keeps its rows on screen while it reads.
+- The sidebar sorts each project's rows once, for its section and for
+  Alt+1 to Alt+9, and a change in one project sorts that project alone.
+- A process exit updates five columns of its trace row instead of rewriting it,
+  and a thread keeps its newest 2,000 rows (`bun bench/process-rows.ts`).
+- A spawn of a bare name (`gh`, git when its lookup found no real binary)
+  reuses the remembered PATH lookup (`bun bench/spawn-lookup.ts`).
+- On Windows new processes inside 100 ms share one audio-session walk, and
+  the jobs Worker drops the global job's copy of every start and exit.
 - A project names its icon by version or stack id only. The image, up to
   256 KB, is a `projects.icon` call made once per project and version, when a
   tile first draws it; a list never carries it ([project icons](project-icons.md)).
@@ -473,7 +522,9 @@ Phone navigation reveals the conversation immediately after selection.
 `bun bench/thread-switch.ts --delay 300 --runs 7` measures an optimized fixture
 bundle with 400 messages and delayed thread RPC replies. Use `--phone --cpu 4`
 for a 390 px viewport and slower CPU, or `--ui <checkout>/packages/ui` for a
-baseline checkout. The [2026-10-02 measurements](../bench/results/2026-10-02-thread-switching.md)
+baseline checkout. `--cached 16` first reads 16 more threads of 400 messages
+to the top, then reports the synchronous leave time of each click and the JS
+heap after a forced collection. The [2026-10-02 measurements](../bench/results/2026-10-02-thread-switching.md)
 record samples, reading-position drift and the subsequent t3code comparison.
 `tests/e2e/thread-switch.test.ts` separately exercises the production UI with
 a real temporary core, a 750 ms snapshot delay and a large folded tool output.
@@ -643,8 +694,14 @@ The core lists its providers twice before it listens (the registry loads, then
 the default accounts ask which ones are available), and again for every client
 that boots. Each listing looks up every candidate program on the PATH, with
 every PATHEXT extension on Windows. `packages/core/src/providers/which.ts`
-keeps each answer for two seconds, so a burst of listings scans the PATH once,
+keeps each answer for 30 seconds, so a burst of listings scans the PATH once,
 and forgets them all on a providers reload, an install or an agent update.
+An `npm` candidate's script and a managed install's release record are kept
+the same way: on 2026-10-15 a listing took 378 us instead of 486, and a
+listing plus pi's and OpenCode's summaries 40 file syscalls instead of 95
+(`bench/provider-list.ts`,
+[results](../bench/results/2026-10-15-perf-drivers.md)). Focusing a thread
+and preparing a draft resolve their one provider, not the list.
 `packages/core/test/providers-which.test.ts` counts the lookups.
 
 ## Shell startup
@@ -692,6 +749,12 @@ limits expensive work while streaming, typing and scrolling:
 - The composer uses `field-sizing: content` where supported; IndexedDB draft
   writes wait for a typing pause. Bottom following runs after layout and before
   paint through `ResizeObserver`.
+- On a phone, the chat behind the thread or activity list gets
+  `content-visibility: hidden` once the exits the cover started have ended
+  (`--dur-whip`): a stream keeps writing to it without layout or paint, and it
+  comes back at the same position. Skipped content advances no animation, so
+  E2E captures wait through `settleAnimations()`, which ignores it. The "phone
+  streaming behind list" scenario measures it.
 
 ### A long turn is many rows
 
@@ -811,6 +874,16 @@ increases from 4,872,000 to 4,898,000 bytes, leaving 9,174 bytes of headroom;
 entry and core limits stay unchanged. Totals exclude precompressed copies, as
 `bun scripts/ci/budgets.ts` does.
 
+### Process load pacing and trace rows
+
+On 2026-10-16, after integrating `main` at `0f480824`, `bun run build:core`
+with Bun 1.4.2 on Linux measured 4,246,842 bytes of core JavaScript. Main
+measured 4,237,867 at that commit. The load pacer, the bare-name spawn
+resolver, the trace row pruning, the jobs packet filter and the batched audio
+walk add 8,975 bytes. The core JavaScript budget increases from 4,240,000 to
+4,249,000 bytes, leaving 2,158 bytes of headroom; UI and core entry limits stay
+unchanged.
+
 ## The desktop browser on a phone
 
 A paired phone watching the desktop's browser tab, before the agent's browser
@@ -833,6 +906,14 @@ Linux container `boite`, a moving page gave 4.0 frames a second with no added
 latency, 3.4 with 80 ms and 2.5 with 200 ms; the capture in the core's browser
 takes about 200 ms a frame for that page
 ([results](../bench/results/2026-10-05-remote-browser-frames.md)).
+
+Since 2026-10-15 the frames come from a screencast of the tab on its own
+DevTools session ([the agent's browser](browser.md#watching-it)). Chrome sends a picture
+only when the page draws, and a viewer naming the frame it shows gets
+`unchanged` on a still page. On a still page a viewer went from 163 to 15 KiB/s
+of base64 and the core's Chrome from 8 % to 0 % of a core; on a moving page the
+trip lost about 72 ms at the same four frames a second and the same Chrome CPU
+([results](../bench/results/2026-10-15-perf-browser.md)).
 
 ## Browser recordings
 
@@ -926,6 +1007,16 @@ keeps the video. `BOITE_RECORDING_PRESET` sizes the page,
 `BOITE_RECORDING_NOISE=1` records noise to reach the cap, and
 `BOITE_RECORDING_PLAY` lists other videos (`;`-separated) to play in chat.
 
+The core's own recorder (`browser/recorder.ts`, a tab of the agent's browser)
+paces frames to the take's rate and acknowledges each when it leaves, so
+Chrome encodes about one picture per slot of the take. Its helper page decodes each frame's base64 with
+`Uint8Array.fromBase64`: 0.2 ms instead of 18 ms for a 1920 × 1080 frame. On
+2026-10-15, a 10 s 30 fps take of a moving 1920 × 1080 page went from 19.7 to
+29.4 frames a second by ffprobe, and the core's Chrome from 453 % to 339 % of
+a core ([results](../bench/results/2026-10-15-perf-browser.md)), with a
+version that asked every second frame; the late acknowledgement that replaced
+it has not been measured.
+
 ## Benches
 
 ```sh
@@ -940,6 +1031,9 @@ bun bench/ui-frames.ts --trace --only "typing,long thread scroll"   # layouts pe
 bun bench/ui-frames.ts --runs 5 --only "heavy thread scroll,heavy thread flick,heavy thread jumps,heavy scroll while streaming"
 bun bench/ui-frames.ts --gpu --only "heavy thread scroll"          # composited on the machine's GPU, never a software renderer
 bun bench/rpc-actions.ts --journal <journal.db> --runs 6   # latency, core CPU, bytes and RSS per RPC (Linux)
+bun bench/claude-turn-heap.ts                  # heap a scripted Claude turn leaves; STEER=1 IMAGE_MIB=0 for a follow-up cut
+bun bench/codex-live-output.ts                 # redraws and characters of one running Codex command's live output
+bun bench/provider-list.ts                     # time per providers list() and summary(); ONLY=1 under strace -c
 bun run bench/continuation.ts 100 1024 25 1100            # history a fresh session carries: messages, tool KiB, files, file KiB
 bun run bench/queue-admission.ts 1024 16                  # one scheduler pass over held child turns: turns, teams
 ```
@@ -977,6 +1071,7 @@ the core's own browser and has a paired phone client poll it on the viewer's
 schedule behind an added latency.
 
 Results: [bench/results/2026-10-15-perf-runtime.md](../bench/results/2026-10-15-perf-runtime.md),
+[bench/results/2026-10-15-perf-drivers.md](../bench/results/2026-10-15-perf-drivers.md),
 [bench/results/2026-10-05-rpc-actions.md](../bench/results/2026-10-05-rpc-actions.md),
 [bench/results/2026-10-05-remote-browser-frames.md](../bench/results/2026-10-05-remote-browser-frames.md),
 [bench/results/2026-10-03-remote-browser-frames.md](../bench/results/2026-10-03-remote-browser-frames.md),

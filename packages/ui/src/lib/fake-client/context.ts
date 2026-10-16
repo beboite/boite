@@ -97,6 +97,8 @@ export interface FakeClientOptions {
   chunkSize?: number;
   /** Seeds one thread of 400 messages, what `?fake=1&long=1` opens the list on. */
   long?: boolean;
+  /** Seeds this many more threads of 400 messages, `t-long-1` and on: what `?fake=1&long=1&copies=16` fills the reading cache with. */
+  longCopies?: number;
   /** Seeds one thread of forty messages and 11.5 MiB of tool calls, what `?fake=1&heavy=1` opens the list on. */
   heavy?: boolean;
   /** A fresh machine with no agents, accounts or projects, for the setup flow. */
@@ -272,6 +274,7 @@ export class FakeContext {
   readonly rttMs: number;
   readonly chunkSize: number | undefined;
   readonly long: boolean;
+  readonly longCopies: number;
   readonly heavy: boolean;
   readonly quotaExtras: boolean;
   /**
@@ -327,6 +330,7 @@ export class FakeContext {
     this.rttMs = options.rttMs ?? roundTrip();
     this.chunkSize = options.chunkSize ?? tokenStream();
     this.long = options.long ?? false;
+    this.longCopies = options.longCopies ?? 0;
     this.heavy = options.heavy ?? false;
     const coreId = options.coreId ?? `fake-core-${secureId()}`;
     if (options.desktopApp) {
@@ -359,7 +363,7 @@ export class FakeContext {
       version: '2.0.0-beta.1',
       coreId,
       protocolVersion: PROTOCOL_VERSION,
-      features: { draftPreparation: true, attachmentUploads: true, threadSnapshots: true, chunkedAnswers: true, readingPages: true, deferredToolParts: true, deviceKeys: true, revealMachines: true, desktopUpdates: true },
+      features: { draftPreparation: true, attachmentUploads: true, threadSnapshots: true, chunkedAnswers: true, readingPages: true, deferredToolParts: true, deviceKeys: true, revealMachines: true, loadEvents: true, desktopUpdates: true },
       os: 'windows',
       channel: 'stable',
       pid: 4242,

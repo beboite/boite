@@ -1,19 +1,29 @@
 // Validates remote viewers and owns their captures, saved frames and page input.
 import {
-  remoteBrowserInputError, remoteFrameOptionsError, REMOTE_SELECTION_MAX,
-  type AgentBrowserStatus, type RemoteBrowserFrame, type RemoteBrowserSelection, type RpcParams, type ThreadId,
+  remoteBrowserInputError, remoteFrameOptionsError, REMOTE_SELECTION_MAX, REMOTE_URL_MAX,
+  type AgentBrowserStatus, type RemoteBrowserFrame, type RemoteBrowserSelection, type RemoteBrowserUnchanged, type RpcParams, type ThreadId,
 } from '@boite/contracts';
 import type { Connection } from '../router.ts';
 import { refused } from '../errors.ts';
-import { captureFrame, type PageInfo } from './frames.ts';
+import { captureFrame, ViewerStream, type PageInfo, type StreamOptions } from './frames.ts';
 import { EDITABLE_SCRIPT, KEY_CODES, PAGE_INFO_SCRIPT, selectionScript } from './scripts.ts';
 import { press } from './automation.ts';
 import type { Tab } from './types.ts';
 
 const FRAME_REUSE_MS = 150;
 const FRAME_LIFE_MS = 5000;
+/** A viewer holding the newest frame waits this long for the page to draw something new. */
+const UNCHANGED_WAIT_MS = 1000;
+/** A viewer with no frame of the tab waits this long, twice, for the screencast's first picture. */
+const FIRST_FRAME_WAIT_MS = 3000;
+/** A tab's screencast stops when no viewer has asked for this long. */
+const STREAM_IDLE_MS = 3000;
 
-interface Viewer { requestedAt: number; frames: Array<{ frame: RemoteBrowserFrame; page: PageInfo }> }
+interface Saved { frame: RemoteBrowserFrame; page: PageInfo; seq: number }
+interface Viewer { requestedAt: number; tabId: string; options: StreamOptions; frames: Saved[] }
+interface StreamEntry { tabId: string; options: StreamOptions; stream: ViewerStream; asking: number; idle?: ReturnType<typeof setTimeout> }
+
+const streamKey = (tabId: string, options: StreamOptions) => `${tabId}:${options.maxWidth ?? 0}:${options.quality}`;
 
 interface RemoteDriveContext {
   require(threadId: ThreadId): { archived: boolean };
@@ -27,10 +37,48 @@ interface RemoteDriveContext {
 
 export class RemoteDrive {
   #viewers = new Map<string, Viewer>();
+  /**
+   * Per tab of the core's own browser and per size and quality its viewers
+   * asked, the screencast they are shown (`ViewerStream`), and when it stops:
+   * a phone on a slow link is never sent the desktop's wider, heavier frames.
+   */
+  #streams = new Map<string, StreamEntry>();
   constructor(private context: RemoteDriveContext) {}
 
   dropTab(id: string): void {
     for (const viewer of this.#viewers.values()) viewer.frames = viewer.frames.filter(saved => saved.frame.tabId !== id);
+    for (const [key, entry] of this.#streams) if (entry.tabId === id) this.#stopStream(key);
+  }
+
+  /** The tab moved to another document, size or color scheme: no viewer is shown what it was before. */
+  stale(tab: Tab): void {
+    tab.frame = null;
+    for (const entry of this.#streams.values()) if (entry.tabId === tab.id) entry.stream.forget();
+  }
+
+  #stopStream(key: string): void {
+    const entry = this.#streams.get(key);
+    if (!entry) return;
+    this.#streams.delete(key);
+    clearTimeout(entry.idle);
+    entry.stream.close();
+  }
+
+  /** Whether a viewer that asked within `withinMs` is shown this screencast. */
+  #watched(key: string, withinMs = Infinity): boolean {
+    for (const viewer of this.#viewers.values()) if (streamKey(viewer.tabId, viewer.options) === key && Date.now() - viewer.requestedAt < withinMs) return true;
+    return false;
+  }
+
+  /** Stops the screencast once no viewer has asked for `STREAM_IDLE_MS` and none waits. */
+  #idle(key: string): void {
+    const entry = this.#streams.get(key);
+    if (!entry) return;
+    clearTimeout(entry.idle);
+    entry.idle = setTimeout(() => {
+      if (entry.asking > 0 || this.#watched(key, STREAM_IDLE_MS)) this.#idle(key); else this.#stopStream(key);
+    }, STREAM_IDLE_MS);
+    (entry.idle as { unref?: () => void }).unref?.();
   }
 
   #viewer(threadId: ThreadId, connection: Connection): void {
@@ -46,9 +94,9 @@ export class RemoteDrive {
     return this.context.screen(tab, () => captureFrame(tab.id, { evaluate: (script, ms) => this.context.evaluate(tab, script, ms), send: (method, params, ms) => tab.engine.cdp.send(method, params ?? {}, tab.sessionId, ms) }, maxWidth, quality));
   }
 
-  async remoteFrame({ threadId, tabId, maxWidth, quality }: RpcParams<'browser.remoteFrame'>, connection: Connection): Promise<RemoteBrowserFrame> {
+  async remoteFrame({ threadId, tabId, maxWidth, quality, after }: RpcParams<'browser.remoteFrame'>, connection: Connection): Promise<RemoteBrowserFrame | RemoteBrowserUnchanged> {
     this.#viewer(threadId, connection);
-    const options = { ...(maxWidth === undefined ? {} : { maxWidth }), ...(quality === undefined ? {} : { quality }) };
+    const options = { ...(maxWidth === undefined ? {} : { maxWidth }), ...(quality === undefined ? {} : { quality }), ...(after === undefined ? {} : { after }) };
     const problem = remoteFrameOptionsError(options);
     if (problem) throw refused(problem);
     const key = `${connection.id}:${threadId}`, previous = this.#viewers.get(key);
@@ -56,8 +104,10 @@ export class RemoteDrive {
     for (const [id, value] of this.#viewers) if (Date.now() - value.requestedAt > 10_000) this.#viewers.delete(id);
     if (this.#viewers.size >= 32 && !previous) throw refused('too many remote browser viewers');
     const tab = this.context.tabOf(threadId, tabId);
-    const viewer: Viewer = { requestedAt: Date.now(), frames: previous?.frames ?? [] };
+    const viewer: Viewer = { requestedAt: Date.now(), tabId: tab.id, options: { maxWidth, quality: quality ?? 55 }, frames: previous?.frames ?? [] };
     this.#viewers.set(key, viewer);
+    // The desktop app's webviews have one DevTools session each, the agent's: no second one to stream on.
+    if (!tab.engine.hosted) return this.#streamed(tab, viewer, after);
     const wanted = `${maxWidth ?? 0}:${quality ?? 55}`;
     if (!tab.frame || tab.frame.key !== wanted || Date.now() - tab.frame.at > FRAME_REUSE_MS) {
       const promise = this.#capture(tab, maxWidth, quality ?? 55);
@@ -68,9 +118,61 @@ export class RemoteDrive {
     const captured = await tab.frame.promise;
     // Each viewer gets its own frame id: input names the frame it was aimed at.
     const frame = { ...captured.frame, id: crypto.randomUUID(), at: Date.now() };
-    viewer.frames.push({ frame: { ...frame, base64: '' }, page: captured.page });
-    viewer.frames = viewer.frames.filter(saved => Date.now() - saved.frame.at < FRAME_LIFE_MS).slice(-8);
+    this.#keep(viewer, { frame: { ...frame, base64: '' }, page: captured.page, seq: -1 });
     return frame;
+  }
+
+  #keep(viewer: Viewer, saved: Saved): void {
+    viewer.frames.push(saved);
+    viewer.frames = viewer.frames.filter(entry => Date.now() - entry.frame.at < FRAME_LIFE_MS).slice(-8);
+  }
+
+  /** A frame of the tab's screencast newer than the one the viewer holds, or `unchanged` when the page drew nothing new. */
+  async #streamed(tab: Tab, viewer: Viewer, after: string | undefined): Promise<RemoteBrowserFrame | RemoteBrowserUnchanged> {
+    const key = streamKey(tab.id, viewer.options);
+    let entry = this.#streams.get(key);
+    if (!entry) {
+      const stream = new ViewerStream(tab.engine.cdp, tab.targetId, async () => await this.context.evaluate(tab, PAGE_INFO_SCRIPT, 5000) as PageInfo | null);
+      this.#streams.set(key, entry = { tabId: tab.id, options: viewer.options, stream, asking: 0 });
+    }
+    const { stream, options } = entry, started = Date.now();
+    // A screencast that could not start is not kept: the next request starts another.
+    const configure = (force = false) => stream.configure(options, force).catch(error => {
+      if (this.#streams.get(key) === entry) this.#stopStream(key);
+      throw error;
+    });
+    entry.asking++;
+    try {
+      await configure();
+      const held = after === undefined ? undefined : viewer.frames.find(saved => saved.frame.id === after && saved.frame.tabId === tab.id && saved.seq >= 0);
+      let next = await stream.next(held?.seq ?? -1, held ? UNCHANGED_WAIT_MS : FIRST_FRAME_WAIT_MS);
+      if (stream.closed) throw refused('that browser tab is closed');
+      if (!next && held) {
+        // Input aimed at the frame it still shows stays valid.
+        held.frame.at = Date.now();
+        return { unchanged: true, id: held.frame.id, tabId: tab.id, at: Date.now(), waitedMs: Date.now() - started };
+      }
+      if (!next) {
+        // A screencast that drew nothing yet sends its first picture when started again.
+        await configure(true);
+        next = await stream.next(-1, FIRST_FRAME_WAIT_MS);
+      }
+      if (stream.closed) throw refused('that browser tab is closed');
+      const page = next ? await stream.info(next) : null;
+      // Looked at, even unusable: Chrome draws the next one.
+      if (next) stream.take();
+      // Between two documents the page answers nothing yet.
+      if (!next || !page) throw refused('the page is loading; ask for the next frame');
+      const frame: RemoteBrowserFrame = {
+        id: crypto.randomUUID(), tabId: tab.id, title: String(page.title ?? '').slice(0, 200), width: page.width, height: page.height,
+        base64: next.data, at: Date.now(), url: String(page.href ?? '').slice(0, REMOTE_URL_MAX), waitedMs: Date.now() - started,
+      };
+      this.#keep(viewer, { frame: { ...frame, base64: '' }, page, seq: next.seq });
+      return frame;
+    } finally {
+      entry.asking--;
+      this.#idle(key);
+    }
   }
 
   async remoteInput({ threadId, frameId, input }: RpcParams<'browser.remoteInput'>, connection: Connection): Promise<{ ok: true }> {
@@ -81,7 +183,7 @@ export class RemoteDrive {
     if (!saved) throw refused('refresh the live browser before interacting');
     const tab = this.context.tabOf(threadId, saved.frame.tabId);
     const changed = () => refused('the page changed; wait for a fresh frame before interacting');
-    const retire = () => { tab.frame = null; for (const viewer of this.#viewers.values()) viewer.frames = viewer.frames.filter(entry => entry.frame.tabId !== tab.id); };
+    const retire = () => { this.stale(tab); for (const viewer of this.#viewers.values()) viewer.frames = viewer.frames.filter(entry => entry.frame.tabId !== tab.id); };
     switch (input.kind) {
       case 'navigate': retire(); await this.context.send(tab, 'Page.navigate', { url: input.url }); return { ok: true };
       case 'reload': retire(); await this.context.send(tab, 'Page.reload'); return { ok: true };
@@ -98,11 +200,12 @@ export class RemoteDrive {
       case 'reset-viewport': retire(); await this.context.screen(tab, () => this.context.send(tab, 'Emulation.clearDeviceMetricsOverride'), true); tab.preset = null; return { ok: true };
       default: break;
     }
+    // The size the viewer aimed at is known without the page: a tap on another one is refused before a read of it.
+    if ((input.kind === 'tap' || input.kind === 'drag') && (input.width !== saved.frame.width || input.height !== saved.frame.height)) throw refused('the browser viewport changed; refresh before tapping');
     // Read in turn with captures: a scaled one in flight resizes the page for its shot.
     const page = await this.context.screen(tab, () => this.context.evaluate(tab, PAGE_INFO_SCRIPT, 5000), true) as PageInfo;
     const same = page.width === saved.page.width && page.height === saved.page.height && page.href === saved.page.href && page.origin === saved.page.origin;
     if (!same) throw changed();
-    if ((input.kind === 'tap' || input.kind === 'drag') && (input.width !== saved.frame.width || input.height !== saved.frame.height)) throw refused('the browser viewport changed; refresh before tapping');
     const at = (x: number, y: number) => ({ x: Math.min(page.width - 1, x * page.width), y: Math.min(page.height - 1, y * page.height) });
     switch (input.kind) {
       case 'tap': await this.#click(tab, at(input.x, input.y), input.count ?? 1, input.shift === true); break;
@@ -163,5 +266,11 @@ export class RemoteDrive {
 
   disconnect(connectionId: string): void {
     for (const id of this.#viewers.keys()) if (id.startsWith(`${connectionId}:`)) this.#viewers.delete(id);
+    // A screencast nobody else watches stops now, not at its idle timer.
+    for (const [key, entry] of this.#streams) if (!entry.asking && !this.#watched(key)) this.#stopStream(key);
+  }
+
+  close(): void {
+    for (const key of [...this.#streams.keys()]) this.#stopStream(key);
   }
 }

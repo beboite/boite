@@ -213,6 +213,17 @@ test('ACP releasing during SDK loading cannot spawn a late process', async () =>
   expect(fixture.core.procs.liveCount(fixture.ctx.thread.id)).toBe(0);
 });
 
+test('ACP a refresh asked while the draft session opens takes its catalog instead of another process', async () => {
+  const fixture = await setup(cases[0]!);
+  // The composer refreshes the cached list as the app opens, while the draft's own process starts.
+  const preparation = driver!.prepare!(fixture.ctx);
+  driver!.forgetProbes!({ providerId: fixture.probe.provider.id, accountId: fixture.probe.accountId, refresh: true });
+  const catalog = await driver!.probe!(fixture.probe);
+  await preparation;
+  expect(catalog.models.length).toBeGreaterThan(1);
+  expect(fixture.log().split('initialize').length - 1).toBe(1);
+});
+
 test('ACP catalog requests share pending preparation and probe another model without changing its selected settings', async () => {
   const fixture = await setup(cases[0]!);
   fixture.ctx.thread.model = 'fake-smart';

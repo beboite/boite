@@ -8,9 +8,13 @@ import type { CodexTurnRecord, ToolView } from './protocol.ts';
 // The turn and what it draws
 // ---------------------------------------------------------------------------
 
-/** How much of a running command's output the card carries, and how often it is redrawn. */
-const LIVE_OUTPUT_MAX = 16_000;
-const LIVE_OUTPUT_BEAT_MS = 250;
+/**
+ * How much of a running command's output the card carries, and how often it
+ * is redrawn: each redraw is a journal write and a part frame to every client.
+ * The completed item carries the whole output anyway.
+ */
+const LIVE_OUTPUT_MAX = 4_000;
+const LIVE_OUTPUT_BEAT_MS = 1_000;
 
 interface ToolEntry {
   exitCode?: number | null;
@@ -20,6 +24,17 @@ interface ToolEntry {
   input: unknown;
   output: string | null;
   status: ToolStatus;
+  /** Output deltas since the last redraw, joined into `output` once per beat. */
+  pending?: { pieces: string[]; length: number };
+}
+
+/** Folds the deltas waiting since the last redraw into the kept tail, with one join. */
+function foldOutput(entry: ToolEntry): void {
+  const pending = entry.pending;
+  if (pending === undefined) return;
+  entry.pending = undefined;
+  const output = (entry.output ?? '') + pending.pieces.join('');
+  entry.output = output.length > LIVE_OUTPUT_MAX ? output.slice(output.length - LIVE_OUTPUT_MAX) : output;
 }
 
 /**
@@ -229,6 +244,11 @@ export class CodexTurn {
     this.part(entry.index, { type: 'text', text, complete: true });
   }
 
+  /** A thinking part is open: its deltas already report the `thinking` phase. */
+  get thinkingOpen(): boolean {
+    return this.thinkingIndex !== null;
+  }
+
   /**
    * The reasoning deltas, which the UI folds. Their own part, like the text.
    * `section` names the reasoning item and its summary or content index: the
@@ -258,8 +278,11 @@ export class CodexTurn {
   appendOutput(itemId: string, delta: string): void {
     const entry = this.tools.get(itemId);
     if (entry === undefined || entry.status !== 'running' || delta.length === 0) return;
-    const output = (entry.output ?? '') + delta;
-    entry.output = output.length > LIVE_OUTPUT_MAX ? output.slice(output.length - LIVE_OUTPUT_MAX) : output;
+    const pending = entry.pending ??= { pieces: [], length: 0 };
+    pending.pieces.push(delta);
+    pending.length += delta.length;
+    // A flood between two beats is folded early, so the pieces stay bounded.
+    if (pending.length > LIVE_OUTPUT_MAX * 4) foldOutput(entry);
     this.dirty.add(itemId);
     if (this.flushTimer !== null) return;
     this.flushTimer = setTimeout(() => this.flushOutput(), LIVE_OUTPUT_BEAT_MS);
@@ -271,7 +294,9 @@ export class CodexTurn {
     this.flushTimer = null;
     for (const itemId of this.dirty) {
       const entry = this.tools.get(itemId);
-      if (entry !== undefined && entry.status === 'running') this.drawTool(itemId, entry);
+      if (entry === undefined || entry.status !== 'running') continue;
+      foldOutput(entry);
+      this.drawTool(itemId, entry);
     }
     this.dirty.clear();
   }
@@ -285,6 +310,7 @@ export class CodexTurn {
       output: null,
       status: 'running' as ToolStatus,
     };
+    foldOutput(entry);
     entry.name = view.name;
     if (view.input !== undefined) entry.input = view.input;
     if (view.output !== null) entry.output = view.output;

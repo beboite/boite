@@ -363,6 +363,23 @@ describe('a thread load on Linux', () => {
     ] });
   });
 
+  test('a process name is read once per birth, and again after an exec renames it', () => {
+    const proc = new FakeProc();
+    proc.set(100, 10, 0, 1000, 'sh');
+    proc.files.set('/proc/100/task/100/children', '');
+    proc.files.set('/proc/100/comm', 'sh\n');
+    let comms = 0;
+    const load = new LinuxLoad(2, path => { if (path.endsWith('/comm')) comms += 1; return proc.read(path); }, proc.now);
+    load.add('thr', 100);
+    for (let tick = 0; tick < 3; tick++) expect(load.sample('thr')?.workingSets).toEqual([{ pid: 100, bytes: 1000 * 1024, exe: 'sh' }]);
+    expect(comms).toBe(1);
+    // `exec node` keeps the pid and the birth; the stat line's name says it changed.
+    proc.set(100, 10, 0, 1000, 'node');
+    proc.files.set('/proc/100/comm', 'node\n');
+    expect(load.sample('thr')?.workingSets).toEqual([{ pid: 100, bytes: 1000 * 1024, exe: 'node' }]);
+    expect(comms).toBe(2);
+  });
+
   test('a pid vanishing during the walk does not hide its surviving sibling', () => {
     const proc = new FakeProc();
     proc.set(100, 10, 0, 1000);

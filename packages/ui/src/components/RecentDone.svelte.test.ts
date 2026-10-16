@@ -181,3 +181,24 @@ test('a done thread is deleted from its own menu, opened by right click or a lon
   props.entries = entries(); await settle();
   expect(document.querySelector('[data-testid=done-thread]')).toBeNull();
 });
+
+test('an open fold keeps its rows and skips the read when only the entry list is rebuilt, and reads again when the archive count moves', async () => {
+  const source = await ready('first');
+  const call = vi.spyOn(source.client, 'call');
+  const reads = () => call.mock.calls.filter(([method]) => method === 'threads.list').length;
+  const props = $state({ entries: entries(), now: Date.now(), header: false, open: true });
+  mounted = mount(RecentDone, { target: document.body, props });
+  await settle();
+  expect(reads()).toBe(1);
+  // A prompt in a live thread re-sorts the Recent groups: a new array of new entries for the same projects.
+  props.entries = entries(); flushSync();
+  expect(document.querySelectorAll('[data-testid=done-thread]')).toHaveLength(1);
+  await settle();
+  expect(reads()).toBe(1);
+  // A thread marked done elsewhere moves the project's count: the fold reads again, and keeps its rows until the answer.
+  const project = source.store.projects.find(p => p.id === 'p-boite')!;
+  project.doneThreads = (project.doneThreads ?? 0) + 1; flushSync();
+  expect(document.querySelectorAll('[data-testid=done-thread]')).toHaveLength(1);
+  await settle();
+  expect(reads()).toBe(2);
+});
