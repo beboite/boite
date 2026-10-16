@@ -101,6 +101,22 @@ async function settled() {
   await page.evaluate(`Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])`);
 }
 async function capture(name: string) { await settled(); await page.screenshot(join(import.meta.dir, '.artifacts', name)); }
+/**
+ * Clicks `target`, then reads where the list and the card beside it stand on
+ * every frame, for 400 ms from the first frame that draws `rail` (longer than
+ * the fold's slide), so a motion that settles back in place still shows.
+ */
+async function framesAfter(target: string, rail: string) {
+  return page.evaluate<{ rail: number; card: number }[]>(`new Promise((resolve) => {
+    const rows = []; let start; const t0 = performance.now();
+    const read = () => {
+      const now = performance.now(); const list = document.querySelector('${rail}'); const card = document.querySelector('.body main');
+      if (list && card) { start ??= now; rows.push({ rail: Math.round(list.getBoundingClientRect().left), card: Math.round(card.getBoundingClientRect().left) }); }
+      if (now - t0 < 5000 && (start === undefined || now - start < 400)) requestAnimationFrame(read); else resolve(rows);
+    };
+    document.querySelector('${target}').click(); requestAnimationFrame(read);
+  })`);
+}
 
 test('create, converse, configure the resident engine and follow background work on desktop and phone', async () => {
   // The Agents list is the thread list's column: same place, same width, same
@@ -112,8 +128,11 @@ test('create, converse, configure the resident engine and follow background work
   await settled();
   const threads = await page.evaluate<{ rail?: number[]; card?: number[]; fold: boolean }>(layout);
   expect(threads.rail?.[2]).toBeGreaterThan(0);
-  await page.click('[data-testid="view-agents"]');
-  await page.waitFor(`document.querySelector('[data-testid="agents-page"]')`);
+  // The switch changes the rows and the card's content, nothing else: the new
+  // list does not slide in from the window's edge with the card in tow.
+  const switching = await framesAfter('[data-testid="view-agents"]', '.agents-rail');
+  expect(switching.length).toBeGreaterThan(2);
+  expect([...new Set(switching.map(f => `${f.rail} ${f.card}`))]).toEqual([`${threads.rail![0]} ${threads.card![0]}`]);
   await settled();
   expect(await page.evaluate(layout)).toEqual(threads);
   // Folding from the title bar hides the Agents list as it hides the thread list.
@@ -121,7 +140,9 @@ test('create, converse, configure the resident engine and follow background work
   await page.waitFor(`getComputedStyle(document.querySelector('.agents-rail')).display === 'none'`);
   // One fold for both lists: the thread list comes back folded too.
   expect(await page.evaluate(`window.__boiteTest.workspace.active.sidebarCollapsed`)).toBe(true);
-  await page.click('[data-testid="sidebar-toggle"]');
+  // Unfolding still slides the list in from the window's edge.
+  const unfolding = await framesAfter('[data-testid="sidebar-toggle"]', '.agents-rail');
+  expect(Math.min(...unfolding.map(f => f.rail))).toBeLessThan(threads.rail![0]!);
   await page.waitFor(`getComputedStyle(document.querySelector('.agents-rail')).display !== 'none'`);
   await settled();
   expect(await page.evaluate(layout)).toEqual(threads);

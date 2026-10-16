@@ -5,7 +5,8 @@
  * reads like a thread. Its cards, hints and rows speak the settings grammar
  * of app.css.
  */
-.agents-page { flex: 1; min-width: 0; min-height: 0; display: flex; animation: rise var(--dur-3) var(--ease-out-quint); }
+/* No entrance of its own: the list beside the card stays put through a switch from the threads, and only the card's content fades in (`.agents-body`). */
+.agents-page { flex: 1; min-width: 0; min-height: 0; display: flex; }
 /* The same gap as between the thread list and the chat card (App.svelte's `.body`). */
 @media (min-width: 721px) { .agents-page { gap: var(--frame-gap); } }
 
@@ -277,7 +278,7 @@ html[data-motion='reduced'] .typing-bubble .dots i { animation: none; opacity: 0
 .routine-card .agent-actions button, .routine-last button { gap: 6px; }
 
 /* No agent yet: one icon, one line, one button. */
-.agent-welcome { margin: auto; padding: 40px 24px; display: flex; flex-direction: column; align-items: center; gap: 16px; text-align: center; color: var(--color-muted-foreground); }
+.agent-welcome { margin: auto; padding: 40px 24px; display: flex; flex-direction: column; align-items: center; gap: 16px; text-align: center; color: var(--color-muted-foreground); animation: fade var(--dur-2) var(--ease-out-quint); }
 .agent-welcome > svg { box-sizing: content-box; padding: 16px; border-radius: 50%; background: var(--color-surface-2); color: var(--color-foreground); }
 .agent-welcome > p { font-size: var(--text-base); }
 
