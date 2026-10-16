@@ -296,7 +296,7 @@ test('the parent learns dynamic workflows and coordination within a compact prom
   await owner.call('turns.start', { threadId, prompt: 'Review the parser' });
   const prompt = runs.get(threadId)!.ctx.prompt;
   for (const command of ['boite agents list', 'boite agents send', 'boite agents reply', 'boite delegate spawn', 'boite delegate send', 'boite workflow help', 'boite workflow check', 'boite workflow run', 'boite workflow extend', 'forEach', 'when']) expect(prompt).toContain(command);
-  expect(prompt).toContain('boite delegate spawn "<brief>" [--model <provider/model>] [--effort <level>] [--speed <tier>] [--context light|neutral]:');
+  expect(prompt).toContain('boite delegate spawn "<brief>" [--model <provider/model>] [--effort <level>] [--speed <tier>] [--context light|neutral] [--worktree]:');
   // 2600 before the line that names `boite view`, about 220 bytes, then 80 for `[--speed <tier>]` and its default,
   // then about 100 for the `boite settings` line.
   expect(prompt).toContain('standard speed without --speed (tiers: boite delegate models)');
@@ -307,7 +307,8 @@ test('the parent learns dynamic workflows and coordination within a compact prom
   // Then about 110 for "Markdown" and "not in a terminal", and the line on clickable `path:line` references.
   // Then about 440 for the two other built-in skills, boite-prove-it and boite-visual: a header,
   // then each name, description and path, once a session.
-  expect(Buffer.byteLength(prompt.replaceAll(h.dataDir, '<data>'))).toBeLessThan(3800);
+  // Then 81 for `[--worktree]` and what it gives: a child on a branch of its own (3869 measured 2026-10-15).
+  expect(Buffer.byteLength(prompt.replaceAll(h.dataDir, '<data>'))).toBeLessThan(3880);
   runs.get(threadId)!.finish();
   await waitFor(() => h.core.threads.require(threadId).status === 'idle');
   await owner.call('turns.start', { threadId, prompt: 'Continue' });

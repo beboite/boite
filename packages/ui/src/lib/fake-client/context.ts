@@ -23,6 +23,7 @@ import {
   type CoreInfo,
   type CoreLogRecord,
   type DelegationConfig,
+  type DelegationWorktree,
   type HarnessUpdate,
   type HooksStatus,
   type ImportableSession,
@@ -196,6 +197,8 @@ export class FakeContext {
   readonly delegationLetters = new Map<ThreadId, AgentLetter[]>();
   readonly delegationTurns = new Map<ThreadId, number>();
   readonly delegationRequests = new Map<string, { fingerprint: string; threadId: ThreadId }>();
+  /** A child's own worktree, as `delegation.spawn` with `worktree` records it. */
+  readonly delegationWorktrees = new Map<ThreadId, DelegationWorktree>();
   readonly delegationSendRequests = new Map<string, { fingerprint: string; letter: AgentLetter }>();
   readonly letters = new Map<ThreadId, AgentLetter[]>();
   readonly peers = new Map<string, CoordinationPeer>();

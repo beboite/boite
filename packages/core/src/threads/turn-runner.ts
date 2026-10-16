@@ -95,6 +95,9 @@ export class TurnRunner {
         setThreadStatus(this.core, threadId, 'running');
       })());
       started = true;
+      // A delegated agent with a worktree of its own: made from its parent's HEAD before the agent starts in it.
+      const entering = this.core.delegation.worktrees.enter(threadId);
+      if (entering) await entering;
       this.core.workforce.resident.assertThreadRoute(threadId, state.thread);
       const provider = this.core.providers.require(state.thread.providerId);
       const account = this.core.accounts.require(state.thread.accountId);
