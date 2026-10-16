@@ -2804,10 +2804,10 @@ export const strings = {
       video: 'Trade offer meme',
       basic: 'NO! Just the basic counters',
       basicDefault: '(default)',
-      basicHint: 'Anonymous counters, new IDs every day.',
+      basicHint: 'Anonymous counters, no profile.',
       deal: 'DEAL',
       dealHint: 'Also the models and settings you use. Thank you!',
-      details: 'Basic: active installs, launches, conversations and turn outcomes, under IDs that change every day. No profile. Deal adds the public models you pick, reasoning level, speed and permission modes, durations and token volumes, under a stable random ID; private models count as "other". The app works the same either way, and Settings changes it anytime.',
+      details: 'Basic: active installs under a hashed random ID, and launches, conversations and turn outcomes under IDs that change every day. No profile. Deal adds the public models you pick, reasoning level, speed and permission modes, durations and token volumes, under a stable random ID; private models count as "other". The app works the same either way, and Settings changes it anytime.',
       optOut: "If you REALLY don't want to help Boite:",
       offLabel: 'turn everything off :c',
       doc: 'What is collected'

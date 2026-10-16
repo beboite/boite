@@ -2665,10 +2665,10 @@ export const fr: Translation = {
       video: 'Mème Trade Offer',
       basic: 'NON ! Juste les compteurs de base',
       basicDefault: '(par défaut)',
-      basicHint: 'Des compteurs anonymes, nouveaux identifiants chaque jour.',
+      basicHint: 'Des compteurs anonymes, aucun profil.',
       deal: 'MARCHÉ CONCLU',
       dealHint: 'Aussi les modèles et réglages utilisés. Merci !',
-      details: "De base : installations actives, lancements, conversations et résultats des tours, sous des identifiants qui changent chaque jour. Aucun profil. Marché conclu ajoute les modèles publics choisis, le niveau de raisonnement, les modes de vitesse et de permission, les durées et les volumes de jetons, sous un identifiant aléatoire stable ; les modèles privés comptent comme « autre ». L'application marche pareil dans tous les cas, et les réglages le changent quand vous voulez.",
+      details: "De base : installations actives sous un identifiant aléatoire haché, et lancements, conversations et résultats des tours sous des identifiants qui changent chaque jour. Aucun profil. Marché conclu ajoute les modèles publics choisis, le niveau de raisonnement, les modes de vitesse et de permission, les durées et les volumes de jetons, sous un identifiant aléatoire stable ; les modèles privés comptent comme « autre ». L'application marche pareil dans tous les cas, et les réglages le changent quand vous voulez.",
       optOut: 'Si vous ne voulez VRAIMENT pas aider Boite :',
       offLabel: 'tout désactiver :c',
       doc: 'Ce qui est collecté'
