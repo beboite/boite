@@ -151,19 +151,29 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 593,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,964,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,986,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,161,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,240,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
 On 2026-10-16, the reading cache, display image and pull request polling
-changes (PR #525) merged with `origin/main` at `4eec5562` measure 4,962,264 UI
-bytes after `bun run build:ui` on Linux with Bun 1.4.2, against 4,958,781 for
-that main. The shared pull request timer, the reading cache's size accounting,
-the bounded display image cache and the per-project sidebar lists add 3,483
-bytes. The UI limit becomes 4,964,000; the entry and core limits stay
-unchanged.
+changes (PR #525) merged with `origin/main` at `0f480824` measure 4,978,898 UI
+bytes after `bun run build:ui` on Linux with Bun 1.4.2, against 4,975,415 for
+that main; core JavaScript is unchanged at 4,237,867. The shared pull request
+timer, the reading cache's size accounting, the bounded display image cache and
+the per-project sidebar lists add 3,483 bytes. The UI limit becomes 4,986,000,
+this growth rounded up to the next thousand; the other limits stay unchanged.
+
+On 2026-10-16, the dialog showing what a Claude thread sends (PR #501) merged
+with `origin/main` at `4eec5562` measures 4,975,415 UI bytes and 4,237,867 core
+JavaScript bytes after fresh `bun run build:ui` and `bun run build:core` on
+Linux, against 4,958,781 and 4,231,749 for that main: the dialog, its strings in
+both languages and the store add 16,634 UI bytes, the reader of the recorded
+request 6,118 core bytes. On `d11f6d16` Windows CI measured the UI about 5,000
+bytes above Linux. The limits become 4,982,000 and 4,240,000; the entry and
+`main.js` limits stay unchanged. The core row before this showed 4,161,000
+while `budgets.json` held the 4,233,000 PR #505 set.
 
 On 2026-10-15, views placed inside an answer (PR #502), merged with PR #503,
 measure 4,938,784 UI bytes and 4,151,081 core JavaScript bytes after fresh
