@@ -137,6 +137,13 @@ describe('group links', () => {
       window.dispatchEvent(new Event('online'));
       await vi.advanceTimersByTimeAsync(0);
       expect(attempts()).toBe(3);
+      // Shown again within the minute after a try: the next comes at once too.
+      hidden.mockReturnValue(true);
+      await vi.advanceTimersByTimeAsync(10_000);
+      hidden.mockReturnValue(false);
+      document.dispatchEvent(new Event('visibilitychange'));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(attempts()).toBe(4);
     } finally {
       stop();
       vi.useRealTimers();

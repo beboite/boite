@@ -174,6 +174,7 @@ export class GroupLinks {
     const shown = (): void => {
       if (document.hidden) return;
       this.#failures.clear();
+      this.#attempts.clear();
       void this.reconcile();
     };
     // Back on a network: whatever was out of reach is tried now, without the minute's wait.
