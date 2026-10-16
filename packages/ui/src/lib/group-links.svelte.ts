@@ -121,6 +121,8 @@ export class GroupLinks {
   #routes = new Map<string, string>();
   #movedAt = new Map<string, number>();
   #running = new Set<string>();
+  /** Cores whose attempt was under way when the page came back or the network did: a failure tries again at once. */
+  #again = new Set<string>();
   #reach: (addresses: string[]) => Promise<string | null>;
   #secure: () => boolean;
   #now: () => number;
@@ -175,12 +177,14 @@ export class GroupLinks {
       if (document.hidden) return;
       this.#failures.clear();
       this.#attempts.clear();
+      for (const coreId of this.#running) this.#again.add(coreId);
       void this.reconcile();
     };
     // Back on a network: whatever was out of reach is tried now, without the minute's wait.
     const online = (): void => {
       this.#failures.clear();
       this.#attempts.clear();
+      for (const coreId of this.#running) this.#again.add(coreId);
       void this.reconcile();
     };
     const stop = $effect.root(() => {
@@ -503,8 +507,14 @@ export class GroupLinks {
       this.states = states;
       // The addresses changed under the attempt: the member is reached where they stand now, without
       // the minute's wait. Once a minute at most, or rosters made to flip would have tickets asked for without end.
+      const again = this.#again.delete(coreId) && !settled;
       if (moved && this.#now() - (this.#movedAt.get(coreId) ?? -RETRY_MS) >= RETRY_MS) {
         this.#movedAt.set(coreId, this.#now());
+        this.#attempts.delete(coreId);
+        void this.reconcile();
+      } else if (again) {
+        // The page came back or the network did while this ran: the reconcile then passed this machine by.
+        this.#failures.delete(coreId);
         this.#attempts.delete(coreId);
         void this.reconcile();
       }

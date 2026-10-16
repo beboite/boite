@@ -151,6 +151,35 @@ describe('group links', () => {
     }
   });
 
+  it('an attempt still running when the network comes back is tried again as soon as it fails', async () => {
+    vi.useFakeTimers();
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+    const a = machine('http://10.0.0.1:1', { group: group('a', members) });
+    const { workspace: ws } = workspace([a]);
+    let release = (): void => {};
+    const first = new Promise<string | null>((resolve) => { release = () => resolve(null); });
+    const reach = vi.fn(async (_addresses: string[]): Promise<string | null> => (reach.mock.calls.length === 1 ? first : null));
+    const links = new GroupLinks(ws, { reach, secure: () => false, now: () => Date.now() });
+    const attempts = () => reach.mock.calls.filter(([addresses]) => addresses[0] === 'http://100.64.0.2:1').length;
+    const stop = links.start();
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(attempts()).toBe(1);
+      // Back online while that attempt still waits: the pass leaves the running attempt alone.
+      window.dispatchEvent(new Event('online'));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(attempts()).toBe(1);
+      // It fails: the machine is tried again now, not at the minute's pass.
+      release();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(attempts()).toBe(2);
+    } finally {
+      stop();
+      vi.useRealTimers();
+      hidden.mockRestore();
+    }
+  });
+
   it('sends a key only where the transport says who answers', async () => {
     const all = ['https://b.example', 'http://b.tail:1', 'http://100.64.0.2:1', 'http://[fd7a:115c:a1e0::2]:1'];
     // A machine with an HTTPS address is reached there and nowhere else, even from a page that could open HTTP.

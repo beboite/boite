@@ -542,9 +542,12 @@ test('a member that stops answering waits longer each time, unless the roster ch
     await settle();
     expect(offers).toBeGreaterThan(before);
     expect(await round()).toBe(0);
-    // b speaks, signed: a takes it as up and offers it the roster on its next round.
+    // b speaks, signed, past its quota: turned away, it is still up, and a offers it the roster on its next round.
     down = false;
-    await b.core.coordination.request(b.core.group.peers().find((peer) => peer.coreId === id(a))!, 'directory', {});
+    const rates = (a.core.coordination as unknown as { rates: Map<string, { since: number; count: number }> }).rates;
+    rates.set(id(b), { since: Date.now(), count: 120 });
+    await expect(b.core.coordination.request(b.core.group.peers().find((peer) => peer.coreId === id(a))!, 'directory', {})).rejects.toThrow();
+    rates.set(id(b), { since: Date.now(), count: 0 });
     await settle();
     expect(await round()).toBe(1);
     await waitFor(() => b.core.group.view('owner')?.name === 'Office');
