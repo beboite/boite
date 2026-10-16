@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount, tick, untrack } from 'svelte';
   import { ArrowDown } from '@lucide/svelte';
-  import type { Message, Turn } from '@boite/contracts';
+  import { MESSAGE_PAGE, type Message, type Turn } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import MessageTurnSummary from './MessageTurnSummary.svelte';
@@ -29,6 +29,8 @@
   import { TurnProgress } from '../lib/turn-progress.svelte';
   import { GAP, OVERSCAN, SlotTotals, WINDOW_FROM, atOrBefore, estimateSlot, gapChanged, measurable, reaches, sameView, slotGap, windowStats, type WindowView } from '../lib/message-window';
   import { TimelineRows, rowEstimate, rowIndexOf, seam, type TimelineRow } from '../lib/timeline-rows';
+  import { GapRows, NO_GAPS, RangeAsk, gapHeight, loadKeepingReader, wantedRange } from '../lib/history-gaps';
+  import TimelineGap from './TimelineGap.svelte';
   import WorkflowActivity from './WorkflowActivity.svelte';
   import { dockRoom } from '../lib/question-dock.svelte';
   import { glides } from '../lib/motion';
@@ -102,14 +104,18 @@
   const memoryPlacement = $derived(placeMemoryEvents(messages, store.openThread?.id === threadId ? store.openThread.memoryEvents ?? [] : store.delegationThread?.id === threadId ? store.delegationThread.memoryEvents ?? [] : []));
   const memoryRows = $derived(new Map(memoryPlacement.standalone.map((event, index) => [`memory:${event.at}:${event.kind}:${index}`, event])));
   /** What the window lists and measures: a row per message, several for the message of a long turn (lib/timeline-rows.ts). */
-  const cut = new TimelineRows();
-  const rows = $derived.by(() => {
-    const built = cut.build(timeline, memoryPlacement.inline);
+  const cut = new TimelineRows(), gapRows = new GapRows();
+  /** Where the held messages sit in the thread, on a core that says so: each stretch missing between them is a gap row. */
+  const placement = $derived(store.openThread?.id === threadId ? store.messagePlacement?.(threadId, messages) ?? null : null);
+  const positional = $derived((placement?.first ?? null) !== null);
+  const gapped = $derived.by(() => {
+    const placed = gapRows.place(cut.build(timeline, memoryPlacement.inline), messages, placement?.gaps ?? NO_GAPS);
     // A row that grew or was cut weighs something else until it is measured.
-    if (cut.changedFrom < slots.dirty) slots.dirty = cut.changedFrom;
-    return built;
+    if (placed.at(cut.changedFrom) < slots.dirty) slots.dirty = placed.at(cut.changedFrom);
+    return placed;
   });
-  const timelineOrder = $derived.by(() => { void rows; return cut.order; });
+  const rows = $derived(gapped.rows);
+  const timelineOrder = $derived.by(() => { void rows; return gapped.gaps.length ? rows.map(row => row.id).join('\0') : cut.order; });
   const savedReading = untrack(() => store.readingPositions?.get(threadId));
 
   /** How often the bottom message's height is allowed to speak to the pin. */
@@ -125,9 +131,7 @@
     const at = timeline.findIndex((message) => message.id === seenLast);
     return at < 0 ? 0 : timeline.length - 1 - at;
   });
-  function markSeen() {
-    seenLast = timeline.at(-1)?.id ?? null;
-  }
+  function markSeen() { seenLast = timeline.at(-1)?.id ?? null; }
   let shown = savedReading ? untrack(() => threadId) : '';
 
   /** Measured slot heights by message id. What is not in here is worth its estimate. */
@@ -139,7 +143,7 @@
   /** One observer for the viewport's height and for every rendered message. */
   let boxes: ResizeObserver | undefined;
 
-  const slots = new SlotTotals<TimelineRow>(heights, row => rowEstimate(row, estimateSlot(row.message)));
+  const slots = new SlotTotals<TimelineRow>(heights, row => row.gap ? gapHeight(row.gap.count) : rowEstimate(row, estimateSlot(row.message)));
   /** Where the reader is, and the rows on the page by id (lib/reading-anchor.ts). */
   const anchors = new ReadingAnchor(savedReading);
   const savedTop = untrack(() => {
@@ -184,11 +188,7 @@
   let liftFrame = 0;
   let liftFrom = 0;
   let handledFocus = untrack(() => store.promptFocus);
-  function stopLift() {
-    cancelAnimationFrame(liftFrame);
-    liftFrame = 0;
-    lifting = false;
-  }
+  function stopLift() { cancelAnimationFrame(liftFrame); liftFrame = 0; lifting = false; }
   function releaseNavigation(event?: KeyboardEvent) {
     releaseAnchor(); navigationTarget = null;
     if (promptTarget) pinned = false;
@@ -248,9 +248,7 @@
   /** A move the user made, said at the foot of the thread until the prompt that tells the agent goes. */
   const pendingMove = $derived(cutBelow || isSending(timeline.at(-1) ?? { id: '' }) ? null : pendingMoveOf(store.openThread, threadId));
 
-  function totals(list: TimelineRow[]): number[] {
-    return slots.totals(list, timelineOrder);
-  }
+  function totals(list: TimelineRow[]): number[] { return slots.totals(list, timelineOrder); }
 
   const promptInset = $derived(Math.min(96, Math.max(48, viewHeight * 0.12)));
   const promptLead = $derived.by(() => {
@@ -442,9 +440,7 @@
     }, wait);
   }
 
-  $effect(() => () => {
-    if (tailTimer) clearTimeout(tailTimer);
-  });
+  $effect(() => () => { if (tailTimer) clearTimeout(tailTimer); });
 
   /**
    * Every rendered message reports its height here and says which id it is. The
@@ -527,9 +523,7 @@
     };
   });
 
-  function atBottom(box: HTMLDivElement): boolean {
-    return box.scrollHeight - box.scrollTop - box.clientHeight < 80;
-  }
+  function atBottom(box: HTMLDivElement): boolean { return box.scrollHeight - box.scrollTop - box.clientHeight < 80; }
 
   let scrolledHeight = 0;
   function onscroll() {
@@ -592,8 +586,14 @@
   /** How close to the top the viewport gets before the page above it is asked for. */
   const LOAD_AT = 400;
 
-  /** The page above the window, its height put back into the scroll position (`pullOlder`). */
-  const loadAbove = (box: HTMLElement) => pullOlder(store, box, LOAD_AT, rows[0]?.id, head => totals(rows)[Math.max(0, head ? rows.findIndex(row => row.id === head) : rows.length)] ?? 0, () => { scrollTop = box.scrollTop; }, id => anchors.nodes.get(id));
+  /** The page above the window, its height put back into the scroll position (`pullOlder`), on a core that pages by cursor alone. */
+  const loadAbove = (box: HTMLElement) => positional ? undefined : pullOlder(store, box, LOAD_AT, rows[0]?.id, head => totals(rows)[Math.max(0, head ? rows.findIndex(row => row.id === head) : rows.length)] ?? 0, () => { scrollTop = box.scrollTop; }, id => anchors.nodes.get(id));
+  // On a core that places pages, the gap within a screen of the view is read where it is looked at (lib/history-gaps.ts).
+  const asked = new RangeAsk();
+  $effect(() => { void [measured, store.loadingRange, rows, viewHeight, pinned, scrollTop]; return asked.soon(() => { if (!gapped.gaps.length || store.loadingRange || glide.active || lifting) return null; const total = totals(rows), reach = Math.max(LOAD_AT, viewHeight), top = pinned ? (total[rows.length] ?? 0) - viewHeight : scrollTop;
+    return { top, range: wantedRange(total, gapped.gaps, top - reach, top + viewHeight + reach, MESSAGE_PAGE) }; }, (from, limit) =>
+      // A page landing above the reader can weigh more than its gap: the row at the top of the view stays where it was.
+      loadKeepingReader(landing => store.loadRange(from, limit, landing), () => pinned ? undefined : viewport, tick, top => { scrollTop = top; })); });
   // A list too short to scroll asks for the pages beside it, again after each lands (`fillShort`).
   $effect(() => { void rows.length; void viewHeight; fillShort(viewport, store.openThread?.id === threadId, () => !!(navigationTarget || promptTarget), LOAD_AT, box => { loadAbove(box); pullNewer(store, box, LOAD_AT); }); });
 
@@ -750,7 +750,7 @@
       rowOf={(id, part) => rows[rowIndexOf(rows, id, part)] ?? { id, from: 0 }} onclose={() => (store.findOpen = false)} />
   {/if}
   {#if !narrow.current}<MessageOutline {messages} active={activePrompt} jump={id => void jumpToMessage(id)}
-    hasOlder={store.messagesBefore !== null} loading={store.loadingOlder} loadOlder={() => { if (viewport) { releaseNavigation(); viewport.scrollTop = 0; pinned = false; loadAbove(viewport); } }} />{/if}
+    hasOlder={store.messagesBefore !== null} loading={store.loadingOlder} loadOlder={() => { if (viewport) { releaseNavigation(); viewport.scrollTop = rows[0]?.gap ? Math.max(0, (totals(rows)[1] ?? 0) - viewport.clientHeight) : 0; pinned = false; loadAbove(viewport); } }} />{/if}
   <!-- Input releases restored and navigation anchors; programmatic corrections keep them. -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="timeline" bind:this={viewport} use:watchWheel={onwheel} use:selectionClicks {onscroll} ontouchstart={press} onpointerdown={press} onpointerover={(event) => { pointed = pointedTurn(event); }} onpointerleave={() => { pointed = null; }} onkeydown={releaseNavigation} style:padding-top="{20 + promptLead}px" style:overflow-anchor={timeline.at(-1)?.state === 'streaming' ? 'none' : undefined} data-testid="timeline" data-media-gallery>
@@ -761,6 +761,7 @@
         <div class="spacer" data-testid="timeline-above" style="height: {view.above}px"></div>
       {/if}
       {#each rendered as row, index (row.id)}
+        {#if row.gap}<TimelineGap {...row.gap} />{:else}
         {@const message = row.message}
         {@const group = grouped.groups.get(message.id)}
         {@const turn = store.openThread?.turns.find(turn => turn.id === message.turnId)}
@@ -810,6 +811,7 @@
             </MessageTurnSummary>
           {/if}
         </article>
+        {/if}
       {/each}
       {#if view.below > 0}
         <div class="spacer" data-testid="timeline-below" style="height: {view.below}px"></div>
@@ -860,9 +862,7 @@
   }
 
   /* What a long thread's unrendered messages weigh, above and below the window. */
-  .spacer {
-    flex: 0 0 auto;
-  }
+  .spacer { flex: 0 0 auto; }
 
   /* paging: one muted line at the top while the page above is being read. */
   .loading-older { flex: 0 0 auto; text-align: center; color: var(--color-muted-foreground); font-size: var(--text-sm); }
@@ -873,9 +873,7 @@
     animation: rise var(--dur-3) var(--ease-out-quint);
   }
 
-  .message.user {
-    align-items: flex-end;
-  }
+  .message.user { align-items: flex-end; }
 
   /* The rest of a cut message: the gap its first paragraph takes inside a message, and no rise of its own. */
   .message.rest {

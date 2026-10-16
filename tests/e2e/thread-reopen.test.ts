@@ -82,10 +82,16 @@ function reveal(id: string, options: { top?: boolean; near?: string } = {}): str
       if (near) return box.bottom <= view.top && box.bottom > view.top - 300 ? box.bottom - view.top : null;
       return box.bottom > view.top && box.top < view.bottom ? box.top - view.top : null;
     };
+    // Pages read by position fill a screen ahead of the reader, so a message already held can sit
+    // below the view: the steps go down to it then, and up to anything else.
+    const index = (mid) => ${STORE}.openThread.messages.findIndex((message) => message.id === mid);
+    const shown = () => [...timeline.querySelectorAll('[data-mid]')].find((node) => node.getBoundingClientRect().bottom > timeline.getBoundingClientRect().top)?.dataset.mid.split('#')[0] ?? '';
     for (let step = 0; step < 1500 && offset() === null; step += 1) {
-      timeline.scrollTop = Math.max(0, timeline.scrollTop - (near ? 100 : 200));
+      const below = index('${id}') >= 0 && index(shown()) >= 0 && index('${id}') > index(shown());
+      timeline.scrollTop = Math.max(0, timeline.scrollTop + (below ? 1 : -1) * (near ? 100 : 200));
       timeline.dispatchEvent(new Event('scroll'));
-      await settle(${STORE}.loadingOlder ? 300 : 40);
+      // A stretch not read yet is on screen or on its way: its page lands before the next step.
+      await settle(${STORE}.loadingOlder || ${STORE}.loadingRange || timeline.querySelector('[data-testid=timeline-gap]') ? 300 : 40);
     }
     for (let nudge = 0; ${options.top === true} && nudge < 10 && offset() !== null && Math.abs(offset()) > 2; nudge += 1) {
       timeline.scrollTop += offset();
@@ -111,17 +117,18 @@ function landingDrift(): string {
     const top = (id) => timeline.querySelector('[data-mid="' + id + '"]')?.getBoundingClientRect().top - timeline.getBoundingClientRect().top;
     let head = '', before = 0;
     // Up as a reader scrolls, until the step that sends the page: its first drawn row is the one held.
-    for (let step = 0; step < 400 && !${STORE}.loadingOlder && ${STORE}.openThread.messages.length === count; step += 1) {
+    for (let step = 0; step < 400 && !${STORE}.loadingOlder && !${STORE}.loadingRange && ${STORE}.openThread.messages.length === count; step += 1) {
       timeline.scrollTop = Math.max(0, timeline.scrollTop - 200);
       timeline.dispatchEvent(new Event('scroll'));
-      head = timeline.querySelector('[data-mid]').dataset.mid;
-      before = top(head);
+      // A screen of rows still being read has no row to follow yet.
+      head = timeline.querySelector('[data-mid]')?.dataset.mid ?? head;
+      before = head ? top(head) : before;
       await settle(60);
     }
     for (let wait = 0; wait < 300 && ${STORE}.openThread.messages.length === count; wait += 1) await settle(50);
     await settle(800);
     const after = top(head);
-    return ${STORE}.openThread.messages.length > count && Number.isFinite(after) ? Math.round(after - before) : 'no page landed under ' + head;
+    return ${STORE}.openThread.messages.length > count && Number.isFinite(after) ? Math.round(after - before) || 0 : 'no page landed under ' + head;
   })()`;
 }
 

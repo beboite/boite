@@ -358,6 +358,21 @@ when the core advertises `chunkedAnswers`.
   read by 850 px at 1280x900 (`pullOlder`). A cached visit allows up to 200
   messages to catch up before falling back to a page. These limits affect the
   displayed window; the journal retains the history.
+- Every page a core with `messagePositions` sends says where its first message
+  sits (`messageOffset`, `offset`), and the store keeps each held message's
+  position (`lib/store/message-positions.svelte.ts`). The timeline then sizes
+  every stretch it does not hold as one row worth 80 px per missing message,
+  so the scrollbar spans the whole thread from the first 40 messages on and a
+  drag to the top lands on the first one. A frame after the view moves, the
+  stretch within a screen of it is read with `messages.list` `from`, 120
+  messages and 256 KiB at most: the thread's first page for a drag to the top,
+  the page right above the first message held for a scroll up, never the pages
+  in between. A page replaces rows worth what its messages weigh before they
+  are measured, so it moves nothing on screen; a wheel up 15,000 px of a
+  400-message thread on 2026-10-16 moved the message being read by no more
+  than 2 px per step while pages landed. A glide to the latest page asks for
+  nothing on its way down. A core without positions keeps the cursor paging
+  above (`lib/history-gaps.ts`).
 - A history page sends a successful call's output only up to 256 characters
   (`TOOL_OUTPUT_FOLDED_CHARS`): its folded card draws none of it. A longer one
   arrives empty with `outputDeferred`, and opening the card fetches it. A

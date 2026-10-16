@@ -1533,6 +1533,48 @@ describe('Store', () => {
     expect(store.modelsOf('echo', 'a-echo').map((m) => m.id)).toEqual(['echo-1']);
   });
 
+  test('a long thread is placed whole on open, and any stretch of it fills by position', async ({ createStore }) => {
+    const { client, store } = createStore({ delayMs: 0, long: true });
+    store.attach(client);
+    await store.connect();
+    await store.open('t-long');
+    const ids = () => (store.openThread?.messages ?? []).map((message) => Number(message.id.replace('m-long-', '')));
+    const placement = () => store.messagePlacement('t-long', store.openThread!.messages);
+
+    // The first forty, and the 360 above them sized without being read.
+    expect(placement().first).toBe(360);
+    // Straight to the top, without the pages in between.
+    expect(await store.loadRange(0, 120)).toBe(120);
+    expect(ids().slice(0, 2)).toEqual([0, 1]);
+    expect(store.messagesBefore).toBeNull();
+    expect([...placement().gaps]).toEqual([['m-long-360', { from: 120, count: 240 }]]);
+    // A stretch in the middle splits the gap in two.
+    expect(await store.loadRange(200, 60)).toBe(60);
+    expect([...placement().gaps]).toEqual([['m-long-200', { from: 120, count: 80 }], ['m-long-360', { from: 260, count: 100 }]]);
+    // The cursor still works under it: a page above the first message held lands where it belongs.
+    await store.loadRange(120, 80);
+    await store.loadRange(260, 100);
+    expect(ids()).toEqual(Array.from({ length: 400 }, (_, index) => index));
+    expect(placement().gaps.size).toBe(0);
+    // In journal order, the latest turn still last.
+    expect(store.openThread!.turns.at(-1)?.queuedAt).toBe(Math.max(...store.openThread!.turns.map((turn) => turn.queuedAt)));
+    expect(store.loadingRange).toBe(false);
+  });
+
+  test('a rewind elsewhere of a message inside a missing stretch reads the thread again', async ({ createStore }) => {
+    const { client, store } = createStore({ delayMs: 0, long: true });
+    store.attach(client);
+    await store.connect();
+    await store.open('t-long');
+    await store.loadRange(0, 40);
+    expect(store.messagesBefore).toBeNull();
+    // Another client rewinds m-long-100, inside the gap between 40 and 360: what is held after it
+    // can no longer be vouched for, so the thread is read again rather than kept with a hole.
+    await client.call('threads.rewind', { threadId: 't-long', messageId: 'm-long-100' });
+    await vi.waitFor(() => expect(store.openThread?.messages.at(-1)?.id).toBe('m-long-99'));
+    expect(store.openThread?.messages.at(0)?.id).toBe('m-long-60');
+  });
+
   test('a long thread opens on its last page and loadOlder walks back in order', async ({ createStore }) => {
     const { client, store } = createStore({ delayMs: 0, long: true });
     store.attach(client);

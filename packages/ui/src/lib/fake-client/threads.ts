@@ -310,8 +310,10 @@ export function threadMethods(ctx: FakeContext) {
       const proof = anchor === null ? undefined : { from: anchor, hash: snapshotHash(page.messages.slice(page.messages.findIndex(message => message.id === anchor)), params) };
       const known = params.sync && params.sync !== true ? params.sync : undefined;
       const unchanged = tail !== null && params.after !== undefined && known?.from === params.after && known.hash === (proof?.from === params.after ? proof.hash : snapshotHash(tail, params));
+      // As the core: where the page's first message sits, or the resume tail's `after`.
+      const first = tail !== null ? params.after : page.messages[0]?.id;
       const snapshot = { ...thread, turns, messages: unchanged ? [] : page.messages.map(project), messagesBefore: page.before,
-        ...(page.after === null ? {} : { messagesAfter: page.after }),
+        ...(page.after === null ? {} : { messagesAfter: page.after }), messageOffset: Math.max(0, thread.messages.findIndex(message => message.id === first)),
         ...(tail !== null ? { messagesFrom: params.after } : {}), ...(proof ? { messagesSync: proof } : {}), ...(unchanged ? { messagesUnchanged: true as const } : {}) };
       if (!params.open) return pagingReply(snapshot);
       ctx.bus.subscribed.add(thread.id);
@@ -328,9 +330,19 @@ export function threadMethods(ctx: FakeContext) {
     'messages.list': async (params) => {
       const thread = ctx.thread(params.threadId);
       const cursor = params.before ?? params.after;
-      if ((params.before === undefined) === (params.after === undefined)) throw refusal('messages.list takes exactly one cursor: before, for older messages, or after, for newer ones');
+      if ([params.before, params.after, params.from].filter(value => value !== undefined).length !== 1) throw refusal('messages.list takes exactly one of before, for older messages, after, for newer ones, or from, a position');
       const bad = pageBytesProblem(params.maxBytes);
       if (bad) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `messages.list.${bad.field}: expected ${bad.expected}`, data: bad });
+      const offsetOf = (page: { messages: Message[] }) => Math.max(0, thread.messages.findIndex(message => message.id === page.messages[0]?.id));
+      if (params.from !== undefined) {
+        const from = params.from;
+        if (!Number.isSafeInteger(from) || from < 0) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'messages.list.from: expected a whole number from 0 up, the position of a message in the thread', data: { field: 'from', expected: 'a whole number from 0 up' } });
+        const limit = Math.min(Math.max(1, Math.trunc(params.limit ?? MESSAGE_PAGE)), MESSAGE_PAGE_MAX);
+        const project = projection(params);
+        const page = forwardOf(thread.messages, from, limit, project, pageBytes(params.maxBytes));
+        const named = new Set(page.messages.map((message) => message.turnId));
+        return pagingReply({ messages: page.messages.map(project), before: from > 0 ? (page.messages[0]?.id ?? null) : null, after: page.messages.length ? page.after : null, offset: from, turns: thread.turns.filter((turn) => named.has(turn.id)) });
+      }
       const at = thread.messages.findIndex((message) => message.id === cursor);
       if (at < 0) {
         throw new RpcFailure({
@@ -344,9 +356,10 @@ export function threadMethods(ctx: FakeContext) {
       const project = projection(params);
       const maxBytes = pageBytes(params.maxBytes);
       const page = params.before === undefined ? { ...forwardOf(thread.messages, at + 1, limit, project, maxBytes), before: null } : pageOf(thread.messages, at, limit, project, maxBytes);
+      const offset = offsetOf(page);
       page.messages = page.messages.map(project);
       const turns = new Set(page.messages.map((message) => message.turnId));
-      return pagingReply({ ...page, turns: thread.turns.filter((turn) => turns.has(turn.id)) });
+      return pagingReply({ ...page, offset, turns: thread.turns.filter((turn) => turns.has(turn.id)) });
     },
     'messages.toolOutput': async (params) => ({ output: toolOf(ctx.thread(params.threadId), params).output }),
     'messages.toolPart': async (params) => pagingReply({ part: toolOf(ctx.thread(params.threadId), params) }),
@@ -665,7 +678,7 @@ export function threadMethods(ctx: FakeContext) {
         else if (part.type === 'file') attachments.push({ kind: 'file', mimeType: part.mimeType, data: part.data, name: part.name });
       }
       const page = pageOf(thread.messages, thread.messages.length, MESSAGE_PAGE);
-      return pagingReply({ thread: { ...thread, messages: page.messages, messagesBefore: page.before }, prompt, attachments, previewReferences, session: 'seeded' as const, files: { status: 'unchanged' as const, count: 0 } });
+      return pagingReply({ thread: { ...thread, messages: page.messages, messagesBefore: page.before, messageOffset: thread.messages.length - page.messages.length }, prompt, attachments, previewReferences, session: 'seeded' as const, files: { status: 'unchanged' as const, count: 0 } });
     },
     'threads.fork': async (params) => {
       const source = ctx.thread(params.threadId);
