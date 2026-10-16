@@ -277,22 +277,31 @@ export function viewTitleOf(html: string): string | null {
 }
 
 /** One line in the guide every agent reads when its session starts. */
-export const VIEW_GUIDE_LINE = '`boite view <file.html>` draws an HTML page under your answer: diagram, chart, animated SVG, simulator. Use it when asked for a visual or a schema, or when a picture explains better than text. Read `boite view help` first.';
+export const VIEW_GUIDE_LINE = '`boite view <file.html>` draws an HTML page beside the text it explains: diagram, chart, animated SVG, simulator. Use it when asked for a visual or a schema, or when a picture explains better than text. Read `boite view help` first.';
 
 /** `boite view help`: everything an agent needs to write a page that looks like part of the app. */
-export const VIEW_HELP = `boite view <file.html> [--title <text>]   draw the page at the end of your answer
+export const VIEW_HELP = `boite view <file.html> [--title <text>]   publish a page to draw in your answer
 boite view example                        a complete page in the app's look, to start from
 
-Write one HTML file per visual, for instance .boite/views/orbit.html, then run
-\`boite view\` on it. The user sees it under your final text once your turn ends,
-so write the answer as if the visual were already under it: do not announce it,
-say where it is, or repeat what it shows.
+Write one HTML file per visual, for instance .boite/views/orbit.html, run
+\`boite view\` on it, then place it in your answer with a line of its own that
+names the file as an image:
 
-Several visuals: one file each and one command each. They stack in the order
-you published them. Running the command again on the same file in the same
-turn replaces that visual, so fix a page in place instead of making a copy.
-Split what is read separately; keep in one page what is compared side by side
-or driven by the same controls.
+  ![Orbit](.boite/views/orbit.html)
+
+The answer is cut there: the text above, the page, the text under. Put each
+visual right after the paragraph it explains, so the reader meets it with that
+paragraph instead of after the whole answer. A page no line places is drawn
+under your final text once your turn ends. Either way, write the answer as if
+the visual were already in it: do not announce it, say where it is, or repeat
+what it shows.
+
+Several visuals: one file each, one command each and one line each. An answer
+that walks through several points reads best with a small visual beside each
+point rather than one big page at the end. Running the command again on the
+same file in the same turn replaces that visual, so fix a page in place
+instead of making a copy. Split what is read separately; keep in one page what
+is compared side by side or driven by the same controls.
 
 The page
 - Self-contained: inline <style> and <script>. A local file named by a

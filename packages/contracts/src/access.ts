@@ -130,6 +130,8 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'turns.stop',
   // A paired phone can resume or discard the same retained prompt as the owner.
   'turns.recover',
+  // Cancelling a planned retry spends nothing and does less than turns.stop, which a phone already has.
+  'turns.cancelRetry',
   // The point of carrying the phone: answering the agent from anywhere.
   'permissions.list',
   'permissions.answer',

@@ -24,7 +24,7 @@ beforeAll(async () => {
   url = `http://127.0.0.1:${port}/?fake=1&open=recent`;
   page = await BrowserPage.launch({ url });
 }, 60_000);
-afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
+afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
 test('main colours can be edited, survive reload and keep separate light and dark palettes', async () => {
   await appearance();

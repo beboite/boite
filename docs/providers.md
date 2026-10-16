@@ -792,7 +792,13 @@ a Job Object and in the trace like any other, then asks the protocol's own quest
   suffix, stays as listed.
 - pi: `get_state`, `get_available_models` and `get_available_thinking_levels`.
   Each model id carries its provider prefix, because that is what pi's `--model`
-  takes and two providers can ship a name. An unauthenticated pi answers with
+  takes and two providers can ship a name. The thinking level `get_state` reports
+  is the default effort of the model the probe's session is on, and of no other:
+  pi does not say which level it would run another model on, so those models
+  carry their scale without a default. A thread that picks one sends no level,
+  pi keeps its own clamped to that model, and the reasoning chip reads Default
+  until a level is picked. On such a model the reasoning popover, and the
+  phone's options sheet, offer Default to hand a picked level back to pi. An unauthenticated pi answers with
   nothing, so the descriptor's models are left standing rather than replaced by an
   empty list.
 
@@ -847,6 +853,12 @@ remaining approval requests; ACP has no standard hook-disable call. Antigravity
 uses its permission-skip flag. Questions seeking input still ask for real
 answers; YOLO does not invent form values or complete a device sign-in.
 
+- Claude takes a changed mode in place through the SDK's `setPermissionMode`,
+  sent before the next prompt and only when the mode moved. Claude can also move
+  by itself: EnterPlanMode puts it in `plan`, and an ExitPlanMode the user
+  refuses or stops leaves it there. The driver records the mode each `init`
+  and `status` frame reports, so the next turn on the same process sees the
+  drift and puts the thread's mode back before its prompt goes in.
 - ACP standardises the call, `session/set_mode`, and standardises none of the ids
   inside `availableModes`: the same mode is spelled `acceptEdits`,
   `accept_edits` and `auto_edit` by three different agents. So each Boite mode
@@ -927,6 +939,12 @@ Send takes the card's picks with the text and files
 paste or a drop, with its caps and image reduction, and a file alone is a valid
 answer. Ignore on that line sets the thread's questions aside, and the composer
 sends ordinary messages again; the card's "Answer in writing" brings it back.
+A question never takes a composer the user is writing in. One that arrives
+while its thread's composer holds text or files stays out of it until that
+composer is empty, so Enter still sends the draft as a message; one that
+arrives within 1.5 s of a keystroke waits for that pause. "Answer in writing"
+takes it at once, draft included. Once a question has the composer, typing
+again does not give it back.
 No protocol carries an image in
 a question's answer (Claude's `AskUserQuestion` takes strings, Codex's
 `requestUserInput` and Muse's `userInput` take text, pi's dialogs a value), so
@@ -935,6 +953,34 @@ and appends their paths to the answer text, with the note prompts use; the
 agent reads them with its own tools (Read, `view_image`). The journalled answer
 and the card keep only each file's kind, type, name and size, never its bytes
 or path. ACP and Antigravity questions offer options only, so they take no files.
+
+## Claude's system prompt
+
+Without a `systemPrompt` option the Agent SDK sends an empty one, and the CLI
+then gives the model one identity line. The driver asks for Claude Code's own
+prompt instead (`preset: 'claude_code'`), the one Anthropic tunes per model, and
+appends Boite's guide to it. Measured on 2026-10-15 with Claude Code 2.1.300
+against a local fake API server, with memory off and the dynamic sections moved
+out, the preset adds these characters to the system prompt:
+
+| Model | Characters | What it adds |
+| --- | --- | --- |
+| Opus 5.5, Sonnet 5.5 | 3,260 | Harness rules, safety, code style, confirmation of hard-to-reverse actions, honest reports, context management |
+| Haiku 5.5 | 6,052 | The same, plus a section on finishing a turn's work before asking |
+| Fable 5.1 | 9,332 | The same, plus rules for scope and for the final message |
+
+`excludeDynamicSections` moves the working directory and memory path to the
+first message, so threads in different worktrees share one cached system
+prompt. `autoMemoryEnabled: false` keeps the preset's file-based memory out:
+memory belongs to the user's brain and Boite's own notes. A context mode keeps
+the preset, which carries Haiku's section, and drops only Boite's guide when it
+drops guides.
+
+The CLI records a session's system prompt on its first request and sends that
+record until compaction, even when a later launch passes different text. A
+thread started before this change keeps its empty prompt until it compacts or
+starts a new session; a change to the guide reaches a running session the same
+way.
 
 ## Reasoning and tool summaries
 
@@ -956,6 +1002,15 @@ the driver sets the flag rather than the SDK's `thinking` option. The API
 refuses `highlights` (one title per stretch of thinking) for a subscription
 login: `thinking.adaptive.display: Input should be 'summarized', 'omitted'`, and
 the CLI falls back to `omitted` for the rest of the process.
+
+Claude 5.1 and later write the short line they put ahead of a tool call ("Now
+I'll run the tests.") as a thinking block, not as text. When two non-empty
+thinking blocks of one API message come right before a tool call, the driver
+turns the second into a text part in place, so it reads as the agent's
+narration between tool groups; the first stays folded as reasoning. One
+thinking block before a call is reasoning, and a model before 5.1 (the model
+of the stream's `message_start`, else the thread's) writes its updates as text,
+so its consecutive thinking blocks share one part as before.
 
 Each tool summary is one request the CLI sends to Haiku after a batch of calls
 finished (`source=tool_use_summary_generation` in its debug log), on the
@@ -998,6 +1053,31 @@ and failures after initialization end the turn without an automatic retry.
 Each retry is logged, and a third failure keeps the agent's exit error visible.
 An initialization RPC error waits up to 2 seconds for process closure and remaining
 stderr before the retry decision, so a process that stays alive cannot stall it.
+
+Every `thread/start`, `thread/resume` and `thread/fork` sends
+`mcp_optional_startup_grace_ms: 10000` in its per-thread configuration, unless
+`config/read` shows the user set that key, `0` included (Codex then waits for
+each server's own `startup_timeout_sec`). Codex
+waits that long for the MCP servers of `config.toml` before the first model
+request and leaves out any server still starting; its default of about a second
+is too short for a cold `npx` or `uvx` server, whose tools would then be missing
+from the first turn of each new process. A server that hangs delays only that
+first turn, by 10 seconds.
+
+A thread archived in the Codex app or CLI, which share the default account's
+history, makes `thread/resume` answer `session <id> is archived`. Boite then calls
+`thread/unarchive` on it and resumes once more, so the thread keeps its native
+history instead of failing every turn. A rollout that is gone is different: the
+turn starts a new native thread and carries the conversation in its prompt.
+
+The app-server that writes a title or a branch name starts with
+`features.plugins=false` and `features.apps=false`, reads the effective
+configuration of the thread's folder with `config/read`, and opens its ephemeral
+thread with every MCP server listed there set to `enabled = false`. Without it,
+each title would start the user's MCP servers and plugins, and a server could act
+on the prompt. A Codex that refuses `config/read` writes no title: the attempt
+fails with that reason rather than start the servers, and the thread keeps the
+title it has.
 
 ### Codex task tracking
 

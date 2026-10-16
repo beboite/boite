@@ -10,10 +10,10 @@
  * The decisions are pure functions; the canvas work is behind `ImageCodec` so
  * a test can drive the whole path without a browser.
  */
-import { ATTACHMENT_MAX_BYTES, IMAGE_MIME_TYPES } from '@boite/contracts';
+import { ATTACHMENT_MAX_BYTES, IMAGE_MAX_EDGE, IMAGE_MIME_TYPES } from '@boite/contracts';
 
-/** The long edge an image is brought to, T3 Code's and Claude's comfortable size. */
-export const IMAGE_MAX_EDGE = 2048;
+/** The long edge an image is brought to: past it Claude refuses a request carrying many images. */
+export { IMAGE_MAX_EDGE };
 export const JPEG_QUALITY = 0.85;
 /** Over this an image is not even decoded: a phone's canvas would not hold it. */
 export const IMAGE_SOURCE_MAX_BYTES = 50 * 1024 * 1024;

@@ -35,6 +35,15 @@ export function projectMethods(ctx: FakeContext) {
       ctx.emit('project.updated', summary);
       return summary;
     },
+    'projects.setAutoRemoveWorktrees': async (params) => {
+      const project = ctx.projects.find(project => project.id === params.projectId);
+      if (!project) throw ctx.notFound('project', params.projectId);
+      if (typeof params.enabled !== 'boolean') throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'projects.setAutoRemoveWorktrees.enabled must be a boolean', data: { field: 'enabled', expected: 'true or false' } });
+      project.autoRemoveWorktrees = params.enabled;
+      const summary = describedProject(ctx, project);
+      ctx.emit('project.updated', summary);
+      return summary;
+    },
     'projects.setWorktreeDefault': async (params) => {
       const project = ctx.projects.find(p => p.id === params.projectId);
       if (!project) throw ctx.notFound('project', params.projectId);

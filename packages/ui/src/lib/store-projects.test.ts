@@ -51,6 +51,36 @@ test('archiving the open project lands elsewhere, and another client hears the f
   }
 });
 
+test('a project archived while its machine is away stays archived and reaches the machine on reconnect', async ({ createStore }) => {
+  window.localStorage.clear();
+  const { store, client } = createStore({ delayMs: 0 });
+  store.attach(client);
+  await store.connect();
+  const archives = vi.spyOn(client, 'call');
+  client.drop();
+  expect(store.connection).not.toBe('ready');
+
+  expect(await store.archiveProject('p-notes', true)).toBe(true);
+  expect(store.projects.find((p) => p.id === 'p-notes')?.archived).toBe(true);
+  expect(archives.mock.calls.some(([method]) => method === 'projects.archive')).toBe(false);
+
+  await client.restore();
+  await store.reload();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(archives.mock.calls.filter(([method]) => method === 'projects.archive')).toEqual([['projects.archive', { projectId: 'p-notes', archived: true }]]);
+  expect(store.projects.find((p) => p.id === 'p-notes')?.archived).toBe(true);
+  const listed = await client.call('projects.list', {});
+  expect(listed.find((p) => p.id === 'p-notes')?.archived).toBe(true);
+
+  // Sent once: the next reconnect asks nothing again.
+  archives.mockClear();
+  client.drop();
+  await client.restore();
+  await store.reload();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(archives.mock.calls.some(([method]) => method === 'projects.archive')).toBe(false);
+});
+
 test('worktree defaults follow the project on both clients and saved or explicit draft choices survive', async ({ createStore }) => {
   window.localStorage.clear();
   const { store, client } = createStore({ delayMs: 0 });

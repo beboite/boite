@@ -36,6 +36,40 @@ describe('claude driver', () => {
     expect((await client.call('accounts.list', {})).find(account => account.id === accountId)?.status).toBe('unauthenticated');
   });
 
+  test.each([
+    { status: 403, labelled: true, account: 'ok', said: 'Failed to authenticate. API Error: 403 Your organization does not have access to this model.' },
+    { status: 401, labelled: true, account: 'unauthenticated', said: 'Failed to authenticate. API Error: 401 invalid x-api-key' },
+    // A 401 the CLI reports in its result alone, in words the text matcher does not know.
+    { status: 401, labelled: false, account: 'unauthenticated', said: 'invalid x-api-key' },
+  ])('an HTTP $status result (labelled $labelled) leaves the account $account', async ({ status, labelled, account, said }) => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    const accountId = harness.core.threads.require(threadId).accountId;
+    const session = `sess-${status}`;
+    scripted(fake => {
+      // CLI 2.1.288 labels a 403 authentication_failed, as it does a 401; only the result names the status.
+      if (labelled) fake.emit(sdk({ ...(assistant(session, []) as object), error: 'authentication_failed' }));
+      fake.emit(sdk({ ...(success(session) as object), is_error: true, result: said, api_error_status: status }));
+      fake.end();
+    });
+    expect(await runTurn(client, threadId, 'go')).toBe('error');
+    expect(harness.core.accounts.require(accountId).status).toBe(account);
+    const error = harness.core.journal.listTurns(threadId).at(-1)?.error;
+    if (status === 403) {
+      // The API's own words, and no "sign in again" a new login cannot answer.
+      expect(error).toBe('Claude refused this request; the account is still signed in. API Error: 403 Your organization does not have access to this model.');
+      // The next turn on the account is not refused as signed out.
+      scripted(fake => {
+        fake.emit(assistant('sess-next', [{ type: 'text', text: 'fine' }]));
+        fake.emit(success('sess-next'));
+        fake.end();
+      });
+      expect(await runTurn(client, threadId, 'again')).toBe('done');
+    } else {
+      expect(error).toBe(labelled ? 'Claude could not authenticate this account. Sign in again to reconnect.' : said);
+    }
+  });
+
   test('an API error keeps the reason the CLI wrote with it', async () => {
     const client = await harness.connect();
     const threadId = await claudeThread(client);

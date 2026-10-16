@@ -26,7 +26,9 @@ const MODEL_FAMILIES = [
 export function publicModel(value: unknown): string {
   if (value === null || value === undefined || value === '' || value === 'default') return 'default';
   if (typeof value !== 'string') return 'other';
-  const name = value.toLowerCase().split('/').at(-1)!.replace(/\[1m\]$/, '').replace(/-\d{8}$/, '');
+  // Antigravity puts the effort in the model ID (`gemini-3.8-flash-high`,
+  // `claude-opus-4-6-thinking`); the effort is reported on its own field.
+  const name = value.toLowerCase().split('/').at(-1)!.replace(/\[1m\]$/, '').replace(/-\d{8}$/, '').replace(/-(minimal|low|medium|high|thinking)$/, '');
   return name.length <= 40 && MODEL_FAMILIES.some((family) => family.test(name)) ? name : 'other';
 }
 
@@ -56,4 +58,15 @@ export function enhancedDetails(fields: Record<string, unknown>): EnhancedDetail
     if (typeof value === 'number' && Number.isFinite(value) && value >= 0) result[key] = Math.min(10000000, Math.round(value / 100) * 100);
   }
   return result;
+}
+
+/**
+ * The host's OS release as the OS itself names it ("Windows 11 Pro 26200",
+ * "macOS 15.1", "ubuntu 24.04"). The host builds it from fixed system fields;
+ * the relay only bounds its shape, so a modified client cannot smuggle a path,
+ * an address or a long string through it.
+ */
+export function publicOsVersion(value: unknown): string | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  return typeof value === 'string' && /^[A-Za-z][\w .+()-]{0,47}$/.test(value) ? value : 'other';
 }

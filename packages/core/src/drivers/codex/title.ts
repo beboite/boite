@@ -6,8 +6,9 @@ import type { TitleContext } from '../types.ts';
 import { subscriptionProxyCodexArgs } from '../../subscription-proxy.ts';
 import { imageInputsOf, textOf } from './mapping.ts';
 import type { CodexThreadOpened, CodexTurnRecord, Timer } from './protocol.ts';
-import { AGENT_OWN_MODEL, CLIENT_NAME, STDERR_MAX } from './protocol.ts';
+import { AGENT_OWN_MODEL, CLIENT_NAME, NO_PLUGINS, STDERR_MAX } from './protocol.ts';
 import { CodexRpc } from './rpc.ts';
+import { mcpServersOff, readConfig } from './config.ts';
 
 /** How long one title call may take before its app-server is dropped. */
 const TITLE_TIMEOUT_MS = 30_000;
@@ -15,7 +16,10 @@ const TITLE_TIMEOUT_MS = 30_000;
 /**
  * One short-lived `codex app-server` on an ephemeral thread: nothing is written
  * to Codex's own history, the sandbox is read-only, nothing is asked, and the
- * effort is low. The agent message of that one turn is the title, as the model
+ * effort is low. No MCP server, plugin or app starts for it: the user's
+ * servers would otherwise launch with every title, branch name and retitle,
+ * and could act on the prompt. A Codex that cannot list them through
+ * `config/read` writes no title. The agent message of that one turn is the title, as the model
  * wrote it; the core applies its one cleaning rule. A turn that fails is
  * thrown with Codex's own sentence.
  */
@@ -27,7 +31,7 @@ export async function titleTurn(ctx: TitleContext): Promise<string | null> {
   }
 
   let lastStderr = '';
-  const child = ctx.spawnChild(executable, subscriptionProxyCodexArgs(profile?.launch?.args ?? [], ctx.accountEnv), {
+  const child = ctx.spawnChild(executable, [...subscriptionProxyCodexArgs(profile?.launch?.args ?? [], ctx.accountEnv), ...NO_PLUGINS], {
     cwd: ctx.thread.cwd,
     env: { ...process.env, ...ctx.accountEnv },
   });
@@ -82,12 +86,19 @@ export async function titleTurn(ctx: TitleContext): Promise<string | null> {
         capabilities: null,
       });
       rpc.notify('initialized', {});
+      // No answer means no way to turn the servers off: the title fails rather
+      // than start them, and the thread keeps the title it has.
+      const config = await readConfig(rpc, ctx.thread.cwd).catch((error: unknown) => {
+        throw new Error(`codex did not answer config/read, so its MCP servers could not be kept off for a title: ${messageOf(error)}`);
+      });
+      const servers = mcpServersOff(config);
       const opened = await rpc.request<CodexThreadOpened>('thread/start', {
         cwd: ctx.thread.cwd,
         approvalPolicy: 'never',
         sandbox: 'read-only',
         ephemeral: true,
         ...(model === null ? {} : { model }),
+        ...(servers === null ? {} : { config: { mcp_servers: servers } }),
       });
       const started = await rpc.request<{ turn: CodexTurnRecord }>('turn/start', {
         threadId: opened.thread.id,
