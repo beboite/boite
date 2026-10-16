@@ -88,6 +88,8 @@ export interface ApplyOptions {
 
 /** The worker's last word: its result is written and the service is in its final state. */
 const FINISHED = 'finished';
+/** Written before a rollback touches anything: the new version was rejected and must not be kept. */
+const ROLLING_BACK = 'rolling-back';
 const backupOf = (plan: ServerUpdatePlan) => join(dirname(plan.installation.directory), `.boite-backup-${plan.id}`);
 const writeResult = (plan: ServerUpdatePlan, error: string | null) =>
   writeFileSync(join(plan.dataDir, 'server-update-result.json'), JSON.stringify({ version: plan.version, error, at: Date.now() }), { mode: 0o600 });
@@ -146,6 +148,7 @@ async function rollBack(plan: ServerUpdatePlan, directory: string, platform: Ser
   // The staged directory leaves the operation only to become the installation.
   const installed = !existsSync(join(directory, 'stage'));
   const touched = installed || existsSync(backup);
+  writeFileSync(join(directory, ROLLING_BACK), '', { mode: 0o600 });
   // An admitted core exits by itself, and a start sent before it has would be lost.
   // A process the service started on its own is left as it is.
   if (touched || await platform.mainPid(service) === plan.originalPid) await platform.control(service, 'stop');
@@ -236,7 +239,7 @@ export async function recoverServerUpdate(file: string, platform: ServerUpdatePl
     } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
     if (!lstatSync(admitted).isFile() || readFileSync(admitted, 'utf8') !== plan.id) { rmSync(directory, { recursive: true, force: true }); return; }
     const root = plan.installation.directory;
-    if (!existsSync(join(directory, 'stage')) && !existsSync(join(directory, 'failed-installation')) && existsSync(root)) {
+    if (!existsSync(join(directory, 'stage')) && !existsSync(join(directory, ROLLING_BACK)) && existsSync(root)) {
       // The new version is in place; the worker may only have lacked the time to see it healthy.
       if (await platform.mainPid(plan.installation.service) === 0) await platform.control(plan.installation.service, 'start');
       if (await becomesHealthy(plan, platform, options)) {

@@ -300,6 +300,8 @@ const KILLED_AT = {
   copy: 'during the snapshot copy',
   switch: 'between moving the installation aside and moving the new one in',
   health: 'while the new version was starting, and it never became healthy',
+  // A version the worker rejected stays rejected, even if it answers health once restarted.
+  rejected: 'between stopping the rejected version and moving it aside',
   restore: 'during its own rollback, once the restored data had been copied',
 } as const;
 for (const point of Object.keys(KILLED_AT) as (keyof typeof KILLED_AT)[]) test(`the recovery of a worker killed ${KILLED_AT[point]} restores the previous version and starts it`, async () => {
@@ -320,8 +322,11 @@ for (const point of Object.keys(KILLED_AT) as (keyof typeof KILLED_AT)[]) test(`
         renameSync(join(f.operation, 'stage'), f.install);
         await f.platform.control(f.plan.installation.service, 'start');
       }
-      if (point === 'restore') {
+      if (point === 'rejected' || point === 'restore') {
+        writeFileSync(join(f.operation, 'rolling-back'), '');
         await f.platform.control(f.plan.installation.service, 'stop');
+      }
+      if (point === 'restore') {
         renameSync(f.install, join(f.operation, 'failed-installation'));
         renameSync(join(f.backup, 'installation'), f.install);
         const restored = `${f.data}.restore-${f.id}`;
@@ -331,7 +336,7 @@ for (const point of Object.keys(KILLED_AT) as (keyof typeof KILLED_AT)[]) test(`
       }
     }
     f.controls.length = 0;
-    await recoverServerUpdate(f.file, f.platform, { pollMs: 5, healthTimeoutMs: 35, health: async () => null,
+    await recoverServerUpdate(f.file, f.platform, { pollMs: 5, healthTimeoutMs: 35, health: async () => point === 'rejected' ? { ok: true, version: '2.1.0', pid: 456 } : null,
       env: { SERVICE_RESULT: 'oom-kill', EXIT_CODE: 'killed', EXIT_STATUS: 'KILL' } });
     f.expectPrevious();
     expect(f.controls.at(-1)).toBe('start');
