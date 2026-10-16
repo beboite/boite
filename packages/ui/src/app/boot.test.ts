@@ -24,6 +24,10 @@ test('the app mounts against the fake core, lists the seeded threads and opens t
 
 test('Alt+digit reaches the history unfolded under an idle project, after the listed projects', async ({ app: _app }) => {
   try {
+    // The digits follow the rows as drawn, sorted once for both.
+    const drawn = () => [...document.querySelectorAll<HTMLElement>('[data-testid=thread-row]')].map(row => row.dataset.threadId);
+    await waitFor(() => sidebarRows.list.length === drawn().length);
+    expect(sidebarRows.list.map(entry => entry.threadId)).toEqual(drawn());
     await store.open('t-trace');
     await store.archive('t-descriptors', true);
     projectThreadView.shelfOpen = true;

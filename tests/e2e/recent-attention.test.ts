@@ -20,7 +20,7 @@ const phoneToggle = (kind: 'done' | 'archived' | 'working') => `${id('mobile-lis
 const captures = process.env.BOITE_RECENT_CAPTURES ?? join(import.meta.dir, '.artifacts');
 
 async function capture(name: string): Promise<void> {
-  await page.evaluate('Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])');
+  await page.settleAnimations();
   await page.screenshot(join(captures, name));
 }
 async function phone(): Promise<void> {

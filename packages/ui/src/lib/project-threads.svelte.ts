@@ -64,3 +64,30 @@ export function projectThreadLists(entry: ProjectEntry, threads: ThreadSummary[]
       : sorted
   };
 }
+
+type ThreadLists = ReturnType<typeof projectThreadLists>;
+
+/** One project's drawn lists, sorted once for its rows and for Alt+digit; it reads only its own project's threads. */
+export class ProjectLists {
+  readonly entry: ProjectEntry;
+  readonly lists: ThreadLists = $derived.by(() => projectThreadLists(this.entry, this.entry.machine.store.threadsOf(this.entry.project.id), projectThreadView.isOpen(this.entry, 'working')));
+  constructor(entry: ProjectEntry) { this.entry = entry; }
+}
+
+/**
+ * Maps each listed project to its lists. A project whose entry is the same object
+ * keeps its lists, so a change in one project's threads sorts that project alone.
+ */
+export function projectListMap(): (entries: readonly ProjectEntry[]) => Map<string, ProjectLists> {
+  let previous = new Map<string, ProjectLists>();
+  return entries => {
+    const next = new Map<string, ProjectLists>();
+    for (const entry of entries) {
+      const key = projectKey(entry);
+      const known = previous.get(key);
+      next.set(key, known?.entry === entry ? known : new ProjectLists(entry));
+    }
+    previous = next;
+    return next;
+  };
+}

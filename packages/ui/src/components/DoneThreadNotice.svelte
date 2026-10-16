@@ -4,6 +4,7 @@
   import type { Store } from '../lib/store.svelte';
   import { ThreadRestore } from '../lib/thread-restore.svelte';
   import { strings } from '../lib/strings';
+  import { patchFields } from '../lib/thread-rows';
 
   let { store, threadId }: { store: Store; threadId: ThreadId } = $props();
   const lock = new ThreadRestore();
@@ -12,7 +13,7 @@
     const owner = store;
     const id = threadId;
     const summary = await lock.restore(owner, id);
-    if (summary && owner.openThread?.id === id) Object.assign(owner.openThread, summary);
+    if (summary && owner.openThread?.id === id) patchFields(owner.openThread, summary);
   }
 </script>
 
