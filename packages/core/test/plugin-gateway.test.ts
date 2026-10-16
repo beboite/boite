@@ -86,6 +86,7 @@ async function core(version = '0.3.0', bytes = new Uint8Array([1, 2, 3])): Promi
 const state = async (owner: CoreClient): Promise<PluginState> => (await owner.call('plugins.list', {})).find((plugin) => plugin.id === 'douane')!;
 const gatewayIs = (owner: CoreClient, status: string, what = `the gateway ${status}`) =>
   until(() => state(owner), (plugin) => plugin.gateway?.status === status, what);
+/** On Windows the job reports an exit a moment after it happened: wait for this count, never read it once after a stop. */
 const live = () => harness!.core.procs.liveCount('plugin:douane:gateway');
 
 test('the recommended list ships Douane as a gateway plugin with an update source', () => {
@@ -140,7 +141,7 @@ test('a crash starts it again; Stop keeps it off across core starts; uninstall k
 
   const stopped = await owner.call('plugins.gateway', { id: 'douane', action: 'stop' });
   expect(stopped.gateway).toMatchObject({ status: 'stopped', enabled: false });
-  expect(live()).toBe(0);
+  await until(live, (count) => count === 0, 'no gateway process left');
   // What a core start does: an owner's Stop holds.
   harness!.core.plugins.startApps();
   await Bun.sleep(200);
@@ -148,7 +149,7 @@ test('a crash starts it again; Stop keeps it off across core starts; uninstall k
   expect((await owner.call('plugins.gateway', { id: 'douane', action: 'start' })).gateway).toMatchObject({ status: 'running', enabled: true });
 
   await owner.call('plugins.uninstall', { id: 'douane' });
-  expect(live()).toBe(0);
+  await until(live, (count) => count === 0, 'no gateway process left');
   expect(existsSync(join(harness!.dataDir, 'plugins', 'douane'))).toBe(false);
   expect(existsSync(join(harness!.dataDir, 'douane', 'auth'))).toBe(true);
   expect(existsSync(join(harness!.dataDir, 'douane', 'douane.toml'))).toBe(true);
