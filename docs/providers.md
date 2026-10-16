@@ -675,8 +675,12 @@ provider on, runs a turn, resumes it on a new process and moves the session to
 local stand-in for the gateway, which received the turn on its Chat
 Completions route with the key and the gateway's own model id; no turn went
 through a real Douane or CLIProxyAPI. Not verified either: Windows and macOS,
-an OAuth sign-in, and image attachments, which is why `capabilities.images` is
-false.
+and an OAuth sign-in. Images are on: 2.0.30 answers `initialize` with
+`promptCapabilities.image` true, and an ACP image block reached a stand-in
+gateway, declared with the same provider block Boite writes, as a Chat
+Completions `image_url` part. OpenCode 1 stays at `images: false`: 1.19.2 also
+advertises images, but replaces one with an error text for a gateway model
+that declares no image input, which is every model the gateway block lists.
 
 ## Turning a provider off
 

@@ -198,7 +198,7 @@ export function seedAccounts() {
         approvals: true,
         hooks: true,
         checkpoint: false,
-        images: false,
+        images: true,
         planMode: true,
         resume: true
       }

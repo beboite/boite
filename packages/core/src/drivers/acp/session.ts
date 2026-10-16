@@ -363,6 +363,10 @@ export class AcpSession {
         prompt: [{ type: 'text', text: prompt }, ...imageBlocksOf(attachments)],
       });
       if (turn.isStopped) this.cancel();
+      // The agent is up and holds the prompt. Until its first update the wait
+      // is the model's: OpenCode retries a refused provider for a minute and
+      // more without a word on the wire, which must not read as a start.
+      else turn.ctx.reportProgress?.('waiting');
       response = await pending;
     } catch (error) {
       this.current = null;

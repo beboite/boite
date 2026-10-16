@@ -45,6 +45,16 @@ test('ACP takes an effort change while its prompt runs, as the same config optio
   await waitFor(() => harness!.core.journal.getTurn(turn.id)?.status === 'stopped');
 });
 
+test('ACP reads as waiting for the provider once its prompt is out, not as starting', async () => {
+  const client = await startCore();
+  const threadId = await acpThread(client);
+  const turn = await client.call('turns.start', { threadId, prompt: '[slow]' });
+  await waitFor(() => fakeLog().includes('waiting for cancel'));
+  expect(harness!.core.threads.get(threadId).progress).toMatchObject({ turnId: turn.id, phase: 'waiting' });
+  await client.call('turns.stop', { threadId });
+  await waitFor(() => harness!.core.journal.getTurn(turn.id)?.status === 'stopped');
+});
+
 let harness: TestCore | null = null;
 let logFile = '';
 let restoreDriver: (() => void) | null = null;
