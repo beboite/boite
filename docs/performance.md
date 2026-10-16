@@ -726,7 +726,7 @@ entry and core limits stay unchanged. Totals exclude precompressed copies, as
 
 ### Process load pacing and trace rows
 
-On 2026-10-16, after integrating `main` at `68bbae8c`, `bun run build:core`
+On 2026-10-16, after integrating `main` at `4eec5562`, `bun run build:core`
 with Bun 1.4.2 on Linux measured 4,240,724 bytes of core JavaScript. Main
 measured 4,231,749 at that commit. The load pacer, the bare-name spawn
 resolver, the trace row pruning, the jobs packet filter and the batched audio
