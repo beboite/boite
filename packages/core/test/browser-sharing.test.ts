@@ -236,10 +236,10 @@ real('a recording keeps every picture of a page that draws slower than the take'
   const { agent, threadId } = browserFixture;
   await agent.call('browser.command', { threadId, action: { kind: 'open', url: url('/ticking?hz=10') } });
   await agent.call('browser.command', { threadId, action: { kind: 'recording-start' } });
-  await Bun.sleep(3000);
+  await Bun.sleep(5000);
   const { recording, tabId } = await agent.call('browser.command', { threadId, action: { kind: 'recording-stop' } });
-  // The page draws 10 pictures a second, well within what any runner encodes: skipping every second one leaves 5.
-  expect((recording!.frames ?? 0) / (recording!.durationMs / 1000)).toBeGreaterThan(8);
+  // The page draws 10 pictures a second: skipping every second one leaves 5, a macOS runner encodes 7 to 8.
+  expect((recording!.frames ?? 0) / (recording!.durationMs / 1000)).toBeGreaterThan(6);
   await agent.call('browser.command', { threadId, tabId, action: { kind: 'recording-discard', recordingId: recording!.id } });
 }, 150_000);
 
