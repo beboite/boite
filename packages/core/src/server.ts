@@ -15,6 +15,7 @@ import { parseRelayPath, RelayHub, type RelaySocketData } from './group/relay.ts
 import type { Connection } from './router.ts';
 import type { EventFrames, SocketData } from './server/connection.ts';
 import { OUTBOUND_MAX_BUFFERED_BYTES, ServerConnection } from './server/connection.ts';
+import { loadRowSender } from './server/load-rows.ts';
 import { clientField, logConnectionClosed } from './server/connection-log.ts';
 import { handleFrame } from './server/frame.ts';
 import { authenticateToken } from './server/hello.ts';
@@ -819,6 +820,7 @@ export function startServer(options: ServerOptions): RunningServer {
       // trace panel reads it.
       name.startsWith('process.');
     const threadId = eventThreadId(payload);
+    const loadRow = name === 'thread.load' ? loadRowSender(core, payload as RpcEvents['thread.load']) : null;
     // Serialized once per projection, not once per socket.
     const frames: EventFrames = new Map();
     for (const connection of connections) {
@@ -834,6 +836,7 @@ export function startServer(options: ServerOptions): RunningServer {
       // A shell's bytes go to the windows that attached it. Its exit still goes to every owner window: one
       // that lays the pane out without having attached it, a background tab say, drops the pane then.
       if (name === 'terminal.output' && !core.terminals.watches((payload as RpcEvents['terminal.output']).id, connection.id)) continue;
+      if (loadRow && !connection.accepts.has('thread.load')) { loadRow(connection); continue; }
       connection.sendEvent(name, payload, frames);
     }
     if (name === 'terminal.exited') core.terminals.exitSent((payload as RpcEvents['terminal.exited']).id);

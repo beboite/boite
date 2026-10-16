@@ -24,6 +24,7 @@ import {
   type BrowserAction,
   type BrowserReply,
   type RemoteBrowserFrame,
+  type RemoteBrowserUnchanged,
   type RemoteBrowserSelection,
   type RpcParams,
   type Settings,
@@ -72,6 +73,9 @@ export class AgentBrowser {
   #threads = new Map<ThreadId, { order: string[]; active: string | null }>();
   /** Commands of one conversation run one at a time, in order. */
   #queues = new Map<ThreadId, Promise<unknown>>();
+  /** Tabs being attached, by conversation and in all: attaching takes several round trips, and the limits count them. */
+  #attaching = new Map<ThreadId, number>();
+  #attachingAll = 0;
   #announce = new Map<ThreadId, ReturnType<typeof setTimeout>>();
   #closed = false;
   /** Browsers started to check a page (`probe`): no conversation lists them, so they are closed by name. */
@@ -182,10 +186,15 @@ export class AgentBrowser {
     const on = (method: string, listener: (params: Record<string, unknown>) => void) =>
       tab.off.push(engine.cdp.on(method, (params, session) => { if (session === sessionId) listener(params); }));
     watchPage(tab, on, (accept, promptText) => void engine.cdp.send('Page.handleJavaScriptDialog', { accept, ...(promptText === undefined ? {} : { promptText }) }, sessionId).catch(() => {}),
-      url => { tab.url = url; tab.frame = null; this.#changed(threadId); this.#engines.saveCookiesSoon(engine); });
+      url => { tab.url = url; this.#remote.stale(tab); this.#changed(threadId); this.#engines.saveCookiesSoon(engine); });
     // Before its first request: the page, its workers and its requests say what a browser with a window says.
     if (engine.identity) await engine.cdp.send('Emulation.setUserAgentOverride', { userAgent: engine.identity.userAgent, userAgentMetadata: engine.identity.metadata }, sessionId).catch(() => {});
-    await Promise.all(['Page.enable', 'Runtime.enable', 'Network.enable'].map(method => engine.cdp.send(method, {}, sessionId)));
+    // Nothing reads response bodies (`Network.getResponseBody`): Chromium keeps none for this tab.
+    await Promise.all([
+      engine.cdp.send('Page.enable', {}, sessionId),
+      engine.cdp.send('Runtime.enable', {}, sessionId),
+      engine.cdp.send('Network.enable', { maxTotalBufferSize: 0, maxResourceBufferSize: 0 }, sessionId),
+    ]);
     // A window opened by a page may have navigated before it was attached: its address is read once now.
     const current = await engine.cdp.send<{ targetInfo: { url: string; title: string } }>('Target.getTargetInfo', { targetId }).catch(() => null);
     if (current) { tab.url = current.targetInfo.url || tab.url; tab.title = current.targetInfo.title.slice(0, 200); }
@@ -199,17 +208,37 @@ export class AgentBrowser {
     return tab;
   }
 
+  /** Which limit a new tab of `threadId` would cross, counting the tabs still attaching. */
+  #full(threadId: ThreadId): 'thread' | 'machine' | null {
+    if ((this.#threads.get(threadId)?.order.length ?? 0) + (this.#attaching.get(threadId) ?? 0) >= TABS_PER_THREAD) return 'thread';
+    if (this.#tabs.size + this.#attachingAll >= TABS_MAX) return 'machine';
+    return null;
+  }
+
+  /** Holds a tab's place from the limit check until it is attached or failed: a burst of windows sees each other. */
+  #reserve(threadId: ThreadId): () => void {
+    this.#attaching.set(threadId, (this.#attaching.get(threadId) ?? 0) + 1); this.#attachingAll++;
+    let held = true;
+    return () => {
+      if (!held) return;
+      held = false; this.#attachingAll--;
+      const left = (this.#attaching.get(threadId) ?? 1) - 1;
+      if (left > 0) this.#attaching.set(threadId, left); else this.#attaching.delete(threadId);
+    };
+  }
+
   /** A window a tab opened joins its conversation as a new tab, or is closed when it has no room. */
   async #adopt(engine: Engine, info: { targetId: string; type: string; openerId?: string; url: string }): Promise<void> {
     if (info.type !== 'page' || !info.openerId) return;
     const opener = [...engine.tabs].map(id => this.#tabs.get(id)).find(tab => tab?.targetId === info.openerId);
     if (!opener) return;
-    const state = this.#thread(opener.threadId);
-    if (state.order.length >= TABS_PER_THREAD || this.#tabs.size >= TABS_MAX) {
+    if (this.#full(opener.threadId)) {
       await engine.cdp.send('Target.closeTarget', { targetId: info.targetId }).catch(() => {});
       return;
     }
-    await this.#attach(engine, opener.threadId, info.targetId, info.url).catch(() => {});
+    const release = this.#reserve(opener.threadId);
+    try { await this.#attach(engine, opener.threadId, info.targetId, info.url).catch(() => {}); }
+    finally { release(); }
   }
 
   #info(engine: Engine, info: { targetId: string; url: string; title: string }): void {
@@ -327,14 +356,18 @@ export class AgentBrowser {
     const { profiles, defaultId } = browserProfilesOf(this.#core.settings.get());
     const profile = action.profile === undefined ? defaultId : findBrowserProfile(profiles, action.profile);
     if (profile === null) throw refused(`no browser profile is named ${action.profile}; browser profiles lists them`);
-    if ((this.#threads.get(threadId)?.order.length ?? 0) >= TABS_PER_THREAD) throw refused(`a conversation has at most ${TABS_PER_THREAD} browser tabs; close one first`);
-    if (this.#tabs.size >= TABS_MAX) throw refused(`this machine's agent browser has ${TABS_MAX} tabs open; close one first`);
-    const engine = await this.#engines.get(profile);
-    clearTimeout(engine.idle);
-    const { targetId } = await engine.cdp.send<{ targetId: string }>('Target.createTarget', { url: 'about:blank' });
+    const full = this.#full(threadId);
+    if (full === 'thread') throw refused(`a conversation has at most ${TABS_PER_THREAD} browser tabs; close one first`);
+    if (full === 'machine') throw refused(`this machine's agent browser has ${TABS_MAX} tabs open; close one first`);
+    const release = this.#reserve(threadId);
     let tab: Tab;
-    try { tab = await this.#attach(engine, threadId, targetId, 'about:blank'); }
-    catch (error) { await engine.cdp.send('Target.closeTarget', { targetId }).catch(() => {}); this.#engines.idle(engine); throw error; }
+    try {
+      const engine = await this.#engines.get(profile);
+      clearTimeout(engine.idle);
+      const { targetId } = await engine.cdp.send<{ targetId: string }>('Target.createTarget', { url: 'about:blank' });
+      try { tab = await this.#attach(engine, threadId, targetId, 'about:blank'); }
+      catch (error) { await engine.cdp.send('Target.closeTarget', { targetId }).catch(() => {}); this.#engines.idle(engine); throw error; }
+    } finally { release(); }
     return { ...await this.#command(tab, action, () => this.#navigate(tab, action.url)), profile };
   }
 
@@ -383,20 +416,20 @@ export class AgentBrowser {
       // The page takes a few frames to reach a new size: the next command meets it laid out.
       case 'resize':
         await this.#screen(tab, () => this.#send(tab, 'Emulation.setDeviceMetricsOverride', { width: action.width, height: action.height, deviceScaleFactor: 1, mobile: false }), true);
-        tab.preset = null; tab.frame = null; await this.#settle(tab); return done();
+        tab.preset = null; this.#remote.stale(tab); await this.#settle(tab); return done();
       case 'reset-viewport':
         await this.#screen(tab, () => this.#send(tab, 'Emulation.clearDeviceMetricsOverride'), true);
-        tab.preset = null; tab.frame = null; await this.#settle(tab); return done();
+        tab.preset = null; this.#remote.stale(tab); await this.#settle(tab); return done();
       case 'preset': {
         const size = browserPresetSize(action.preset, action.orientation);
         await this.#screen(tab, () => this.#send(tab, 'Emulation.setDeviceMetricsOverride', { ...size, deviceScaleFactor: 1, mobile: false }), true);
-        tab.preset = action.preset; tab.orientation = size.width > size.height ? 'landscape' : 'portrait'; tab.frame = null;
+        tab.preset = action.preset; tab.orientation = size.width > size.height ? 'landscape' : 'portrait'; this.#remote.stale(tab);
         await this.#settle(tab);
         return done(size);
       }
       case 'appearance':
         await this.#send(tab, 'Emulation.setEmulatedMedia', { features: action.colorScheme === 'system' ? [] : [{ name: 'prefers-color-scheme', value: action.colorScheme }] });
-        tab.colorScheme = action.colorScheme; tab.frame = null; return done();
+        tab.colorScheme = action.colorScheme; this.#remote.stale(tab); return done();
       case 'screenshot': {
         const shot = await this.#screen(tab, () => this.#send(tab, 'Page.captureScreenshot', { format: 'png', captureBeyondViewport: false })) as { data?: string };
         if (typeof shot.data !== 'string') throw refused('the browser did not return a PNG screenshot');
@@ -516,7 +549,7 @@ export class AgentBrowser {
     return takeTurn(tab.screen, strict, run, SCREEN_TURN_MS);
   }
 
-  remoteFrame(params: RpcParams<'browser.remoteFrame'>, connection: Connection): Promise<RemoteBrowserFrame> {
+  remoteFrame(params: RpcParams<'browser.remoteFrame'>, connection: Connection): Promise<RemoteBrowserFrame | RemoteBrowserUnchanged> {
     return this.#remote.remoteFrame(params, connection);
   }
 
@@ -564,6 +597,7 @@ export class AgentBrowser {
     for (const off of this.#off) off();
     for (const timer of this.#announce.values()) clearTimeout(timer);
     this.#probes.close();
+    this.#remote.close();
     const engines = await Promise.all([...this.#engines.pending.values()].map(pending => pending.catch(() => null)));
     await Promise.all(engines.map(engine => engine ? this.#engines.shut(engine) : undefined));
   }

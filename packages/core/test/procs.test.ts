@@ -2,6 +2,10 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { DEFAULT_DELEGATION_CONFIG } from '@boite/contracts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
+import { Bus } from '../src/bus.ts';
+import { ProcRegistry } from '../src/procs.ts';
+import { createPosixPlatform } from '../src/platform/posix.ts';
+import type { ProcessPlatform } from '../src/platform/types.ts';
 
 const LONG_CHILD = process.platform === 'win32' ? 'ping -n 30 127.0.0.1' : 'exec sleep 30';
 /** POSIX tracks direct children only, so explicitly replace the fixture shell. */
@@ -212,5 +216,31 @@ describe('procs', () => {
     }
     expect(client.core.trace.mode).toBe('poll');
     expect(client.core.trace.note).toContain('Windows-only');
+  });
+
+  test.skipIf(process.platform === 'win32')('a fallback tree kill runs before the child is stopped, and shutdown waits for it', async () => {
+    // Windows' taskkill fallback, for a pid outside the job: async, so the core is not held while it starts.
+    const fallback = Promise.withResolvers<void>();
+    const asked: number[] = [];
+    const platform: ProcessPlatform = { ...createPosixPlatform('linux', null), terminate: () => false, terminateUnassigned(pid) {
+      asked.push(pid);
+      return fallback.promise;
+    } };
+    const procs = new ProcRegistry(harness.core.journal, new Bus(), platform);
+    try {
+      const { proc } = procs.spawn('fallback-kill', 'sleep', ['30']);
+      let stopped = false;
+      const all = procs.killAll().then(() => { stopped = true; });
+      expect(asked).toEqual([proc.pid]);
+      await Bun.sleep(50);
+      // taskkill /T walks the tree from the root: the root's own kill waits for it.
+      expect(isRunning(proc.pid)).toBe(true);
+      expect(stopped).toBe(false);
+      fallback.resolve();
+      await all;
+      expect(await proc.exited).not.toBe(0);
+    } finally {
+      await procs.close();
+    }
   });
 });

@@ -411,7 +411,9 @@ export class WsClient implements ObservableClient {
     return {
       ...credential,
       protocolVersion: PROTOCOL_VERSION,
-      client: { name: this.#options.clientName, version: this.#options.version, ...(device ? { device } : {}) }
+      client: { name: this.#options.clientName, version: this.#options.version, ...(device ? { device } : {}) },
+      // Load samples as `thread.load` alone; an older core ignores this and sends whole rows.
+      accepts: ['thread.load']
     };
   }
 

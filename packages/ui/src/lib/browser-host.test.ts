@@ -112,6 +112,23 @@ test('the app answers the core as a browser: a target is a webview, its session 
   expect(shell.destroyed).toContain(popup.params.targetInfo.targetId);
 });
 
+test('network events reach the core cut to what it reads: the address of a request, and only failed responses', async () => {
+  const shell = fakeBridge(), core = fakeClient();
+  const relay = new BrowserHostRelay(core.client, shell.bridge);
+  await relay.start();
+  const { result: { targetId } } = await core.answer('work', core.send('work', 'Target.createTarget', { url: 'about:blank' }));
+  const page = shell.listeners.get(targetId)!;
+  page('Network.requestWillBeSent', { requestId: 'r1', request: { url: 'https://example.com/a.js', headers: { cookie: 'sid=1' } }, initiator: { stack: { callFrames: [] } } });
+  page('Network.responseReceived', { requestId: 'r1', response: { status: 200, statusText: 'OK', url: 'https://example.com/a.js', headers: {} } });
+  page('Network.responseReceived', { requestId: 'r2', response: { status: 404, statusText: 'Not Found', url: 'https://example.com/missing', headers: { server: 'x' } } });
+  await settle(); await settle();
+  expect(core.replies('work').filter(reply => String(reply.method).startsWith('Network.'))).toEqual([
+    { method: 'Network.requestWillBeSent', params: { requestId: 'r1', request: { url: 'https://example.com/a.js' } }, sessionId: targetId },
+    { method: 'Network.responseReceived', params: { requestId: 'r2', response: { status: 404, statusText: 'Not Found', url: 'https://example.com/missing' } }, sessionId: targetId },
+  ]);
+  relay.stop();
+});
+
 test('a burst of answers leaves in one call per profile, in order', async () => {
   const shell = fakeBridge(), core = fakeClient();
   const relay = new BrowserHostRelay(core.client, shell.bridge);

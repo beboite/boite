@@ -9,6 +9,13 @@
 import type { AudioSession } from './audio-sessions.ts';
 
 /**
+ * The shortest gap between two walks a new pid can cause. The first pid of a
+ * burst is walked for at once; the others share one walk at the end of the gap,
+ * so a build that starts 500 processes does not walk the endpoint 500 times.
+ */
+export const MUTE_BATCH_MS = 100;
+
+/**
  * One mute, one distinct failure of the walk, or one distinct session the walk
  * went past, on its way to the main thread. A skipped session leaves the mute
  * on for every other one, so it is a note, never a failure.
@@ -37,11 +44,16 @@ export class MuteLogic {
   readonly #reported = new Set<string>();
 
   #enabled: boolean;
+  /** When the last walk ran, on `now`'s clock. */
+  #lastWalk = Number.NEGATIVE_INFINITY;
+  /** A pid came inside the batch gap and waits for the walk at its end. */
+  #pending = false;
 
   constructor(
     /** One walk. A session it could not read goes to `skipped` and the walk goes on. */
     private readonly listSessions: (skipped: (message: string) => void) => AudioSession[],
     enabled: boolean,
+    private readonly now: () => number = Date.now,
   ) {
     this.#enabled = enabled;
   }
@@ -50,8 +62,18 @@ export class MuteLogic {
     if (pid <= 0) return;
     this.#pids.set(pid, threadId);
     // A process that opens its session in its first milliseconds would otherwise
-    // play until the next poll.
-    this.tick();
+    // play until the next poll. Inside a burst it waits for the batch walk.
+    if (this.now() - this.#lastWalk >= MUTE_BATCH_MS) this.tick();
+    else this.#pending = true;
+  }
+
+  /**
+   * Milliseconds until the walk a recent pid is waiting for may run, 0 when it
+   * is due now, null when no pid waits. The pump walks when this reaches 0.
+   */
+  pendingWalkIn(): number | null {
+    if (!this.#pending || !this.#enabled || this.#pids.size === 0) return null;
+    return Math.max(0, this.#lastWalk + MUTE_BATCH_MS - this.now());
   }
 
   removePid(pid: number): void {
@@ -82,7 +104,9 @@ export class MuteLogic {
    * from an earlier pass or the user's own choice, and both are left alone.
    */
   tick(): void {
+    this.#pending = false;
     if (!this.#enabled || this.#pids.size === 0) return;
+    this.#lastWalk = this.now();
 
     let sessions: AudioSession[];
     try {

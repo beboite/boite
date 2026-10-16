@@ -31,9 +31,10 @@
   let gateway = $derived(gatewayReader(store.endpointUrl ?? 'here'));
   /**
    * Douane serving its quotas: its entries are native bars like any account's.
-   * CLIProxyAPI, or a Douane without the route, keeps its dashboard.
+   * CLIProxyAPI, or a Douane without the route, keeps its dashboard. A paired
+   * phone reads the same bars as the owner.
    */
-  const gatewayNative = $derived(proxyEnabled && proxy?.kind === 'douane' && store.owner && gateway.state?.status !== 'unsupported');
+  const gatewayNative = $derived(proxyEnabled && proxy?.kind === 'douane' && gateway.state?.status !== 'unsupported');
   const dashboard = $derived(proxyEnabled && !gatewayNative && !native);
   const gatewayError = $derived(gatewayNative && gateway.state?.status === 'unavailable' ? gateway.state.error : null);
 
@@ -57,7 +58,7 @@
     const current = reader;
     // A call before the socket is up is refused at once: read when it becomes
     // ready, and again after a reconnect. A failure shows on `reader.error`.
-    if (!client || !store.owner || store.connection !== 'ready' || dashboard) return;
+    if (!client || store.connection !== 'ready' || dashboard) return;
     const off = client.on('quotas.updated', (value) => current.accept(value));
     untrack(() => void current.read(client).catch(() => {}));
     return off;
@@ -67,14 +68,15 @@
   $effect(() => {
     const client = store.client;
     const current = gateway;
-    if (!client || !store.owner || store.connection !== 'ready' || !proxyEnabled || proxy?.kind !== 'douane' || !proxy.baseUrl) return;
+    if (!client || store.connection !== 'ready' || !proxyEnabled || proxy?.kind !== 'douane' || !proxy.baseUrl) return;
     const off = client.on('subscriptionProxy.quotasUpdated', (value) => current.accept(value));
     untrack(() => void current.read(client));
     return off;
   });
 
+  /** A paired device reads again what the core holds; only the owner makes it ask the providers. */
   function refresh() {
-    if (store.client) void reader.read(store.client, true).catch(() => {});
+    if (store.client) void reader.read(store.client, store.owner).catch(() => {});
   }
 
   /** A switch saves when it flips; a refusal puts it back. */
@@ -105,7 +107,7 @@
   {#if proxyEnabled && !gatewayNative}<div class="actions proxy-switch"><button type="button" class="ghost small" onclick={() => native = false} data-testid="subscription-proxy-show-dashboard"><span class="ui-label">{strings.subscriptionProxy.showDashboard}</span></button></div>
   {:else if gatewayNative && proxy}<div class="actions proxy-switch"><button type="button" class="ghost small" onclick={() => void openExternal(proxy!.dashboardUrl)} data-testid="subscription-proxy-open"><ExternalLink size={15} /><span class="ui-label">{strings.subscriptionProxy.openDashboard}</span></button></div>{/if}
 
-  {#if store.owner && reader.error}
+  {#if reader.error}
     <div class="card failed" role="alert" data-testid="limits-error">
       <p>{fill(strings.quotas.readFailed, { error: reader.error })}</p>
       <button type="button" class="ghost small" disabled={reader.loading} data-testid="limits-retry" onclick={refresh}><span class="ui-label">{strings.common.retry}</span></button>
@@ -128,8 +130,8 @@
       <p class="muted gateway-empty" data-testid="gateway-quotas-empty">{fill(strings.subscriptionProxy.quotasEmpty, { name: proxyName })}</p>
     {/if}
   {/if}
-  {#if !store.owner}
-    <p class="muted" data-testid="usage-limits-owner">{strings.usage.limitsOwner}</p>
+  {#if reader.outdated}
+    <p class="muted" data-testid="limits-outdated">{strings.quotas.outdated}</p>
   {:else if rows === null}
     <div class="skeleton" role="status" aria-label={strings.quotas.loading}>
       {#each [0, 1] as index (index)}<div class="card ghost-card"></div>{/each}
@@ -140,11 +142,11 @@
     <!-- A failed read never passes for "no provider connected". -->
     {#if !reader.error}<div class="card empty" data-testid="limits-empty">
       <p>{strings.quotas.empty}</p>
-      <button type="button" onclick={() => store.showSettings('accounts')}><span class="ui-label">{strings.settings.connectProvider}</span></button>
+      {#if store.owner}<button type="button" onclick={() => store.showSettings('accounts')}><span class="ui-label">{strings.settings.connectProvider}</span></button>{/if}
     </div>{/if}
   {:else}
     {#if rows.length > 0}<UsageLimits {rows} {store} loading={reader.busy} completed={reader.landed} />{/if}
-    <section class="card tracked" data-testid="limits-tracked">
+    {#if store.owner}<section class="card tracked" data-testid="limits-tracked">
       <h2 class="ui-label-box"><span class="ui-label">{strings.quotas.tracked}</span><InfoTip topic={strings.quotas.tracked} text={strings.quotas.trackedHint} /></h2>
       {#each tracked as row (row.accountId)}
         {@const account = row.accountId.startsWith('quota:') ? strings.quotas.cliSource : row.label}
@@ -158,7 +160,7 @@
           {#if entry}<AccountRename {store} account={entry} />{/if}
         </div>
       {/each}
-    </section>
+    </section>{/if}
   {/if}
   {#if store.owner && store.settings && !dashboard}
     <section class="card resume" id="settings-limit-resume">
