@@ -13,7 +13,7 @@
  * leaving other apps alone. Bump the version whenever the strategy below
  * changes, so a dev server's unstamped worker moves on too.
  */
-const CACHE = 'boite-ui-v4';
+const CACHE = 'boite-ui-v3';
 const SHELL = '/';
 const MANIFEST = '/manifest.webmanifest';
 const WORKER = '/sw.js';
@@ -34,10 +34,7 @@ self.addEventListener('install', (event) => {
       const shell = await fetch(SHELL, { cache: 'reload' });
       if (!shell.ok) throw new Error('the app shell could not be cached');
       const html = await shell.clone().text();
-      // Only what the document itself loads: a `src` or `href`. The locale map
-      // in an inline script names every catalogue, and a device reading English
-      // has no use for the French one; a French device stores it on first use.
-      const assets = [...new Set([...html.matchAll(/(?:src|href)="\.?(\/assets\/[^"]+)"/g)].map((found) => found[1]))];
+      const assets = [...new Set(html.match(/\/assets\/[^\s"'<>]+/g) ?? [])];
       await cache.addAll([...assets, MANIFEST, '/icons/icon-192.png', '/fonts/Inter-latin.woff2', '/fonts/GeistMono-Variable.woff2']);
       await cache.put(SHELL, shell);
       await self.skipWaiting();

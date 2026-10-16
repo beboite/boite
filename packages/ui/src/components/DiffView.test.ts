@@ -1,7 +1,6 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import DiffView from './DiffView.svelte';
-import highlighter from 'highlight.js/lib/core';
 import { diffPrefs, setDiffPref } from '../lib/diff-prefs.svelte';
 
 let running: Record<string, unknown> | null = null;
@@ -67,19 +66,4 @@ test('a narrow box offers no side-by-side view and draws one column', () => {
   flushSync();
   expect(document.querySelector('[data-testid=diff-split]')).toBeNull();
   expect(document.querySelector('[data-testid=diff-view]')!.getAttribute('data-layout')).toBe('unified');
-});
-
-test('a pure addition highlights only its new side, and the same diff mounted again highlights nothing', async () => {
-  const highlight = vi.spyOn(highlighter, 'highlight');
-  const props = { path: 'src/fresh.ts', oldText: '', newText: 'export const fresh = 1;\n' };
-  running = mount(DiffView, { target: document.body, props });
-  flushSync();
-  await vi.waitFor(() => expect(document.querySelector('.row.add .hljs-keyword')).not.toBeNull());
-  expect(highlight).toHaveBeenCalledTimes(1);
-  unmount(running, { outro: false });
-  running = mount(DiffView, { target: document.body, props });
-  flushSync();
-  await vi.waitFor(() => expect(document.querySelector('.row.add .hljs-keyword')).not.toBeNull());
-  expect(highlight).toHaveBeenCalledTimes(1);
-  highlight.mockRestore();
 });

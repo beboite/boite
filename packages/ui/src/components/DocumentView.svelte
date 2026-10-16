@@ -10,7 +10,7 @@
 
 <div class="document" data-testid="tool-document" data-kind={doc.kind}>
   {#if doc.kind === 'diff'}
-    <DiffView path={doc.path} oldText={doc.oldText} newText={doc.newText} {doc} />
+    <DiffView path={doc.path} oldText={doc.oldText} newText={doc.newText} />
   {:else if doc.kind === 'markdown'}
     {#if doc.title !== null}
       <div class="section-label">{doc.title}</div>

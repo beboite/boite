@@ -82,54 +82,8 @@ function linesOf(html: string): string[] {
 
 /** Large files stay editable without sending megabytes through a grammar on each edit. */
 export const HIGHLIGHT_LIMIT = 200_000;
-
-/**
- * Highlighted lines by grammar and text. A diff the window mounts again, the
- * same diff in the turn's files card or a file opened twice is not run through
- * the grammar a second time, and two views of one text wait on one run.
- * Bounded by the characters it holds, texts and results, oldest first.
- */
-const highlighted = new Map<string, { lines: Promise<string[] | null>; chars: number }>();
-const HIGHLIGHTED_CHARS = 2_000_000;
-let highlightedChars = 0;
-
-function trimHighlighted(): void {
-  for (const [oldest, entry] of highlighted) {
-    if (highlightedChars <= HIGHLIGHTED_CHARS || highlighted.size === 1) break;
-    highlighted.delete(oldest);
-    highlightedChars -= entry.chars;
-  }
-}
-
-export function highlightCode(text: string, language: Language | null): Promise<string[] | null> {
-  if (!language || text.length > HIGHLIGHT_LIMIT) return Promise.resolve(null);
-  const key = `${language}\0${text}`;
-  const known = highlighted.get(key);
-  if (known) {
-    highlighted.delete(key);
-    highlighted.set(key, known);
-    return known.lines;
-  }
-  const entry = { lines: highlightNow(text, language), chars: key.length };
-  highlighted.set(key, entry);
-  highlightedChars += entry.chars;
-  trimHighlighted();
-  entry.lines.then(lines => {
-    if (highlighted.get(key) !== entry || !lines) return;
-    const added = lines.reduce((sum, line) => sum + line.length, 0);
-    entry.chars += added;
-    highlightedChars += added;
-    trimHighlighted();
-  }, () => {
-    // A grammar that failed to load is tried again by the next view.
-    if (highlighted.get(key) !== entry) return;
-    highlighted.delete(key);
-    highlightedChars -= entry.chars;
-  });
-  return entry.lines;
-}
-
-async function highlightNow(text: string, language: Language): Promise<string[]> {
+export async function highlightCode(text: string, language: Language | null): Promise<string[] | null> {
+  if (!language || text.length > HIGHLIGHT_LIMIT) return null;
   await load(language);
   // HTML-like templates can contain both script and style blocks.
   if (language === 'xml') await Promise.all([load('javascript'), load('typescript'), load('css')]);

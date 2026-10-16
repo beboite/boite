@@ -19,8 +19,8 @@ function pathSql(field: string): string {
   if (!/^[A-Za-z]+$/.test(field)) throw new Error(`unsupported agent record field ${field}`);
   return `json_extract(data, '$.${field}')`;
 }
-/** A list of values bound as one JSON array: one cached statement whatever its length, and no bound-parameter limit. */
-const IN_LIST = 'IN (SELECT value FROM json_each(?))';
+/** Bound parameters per IN list, well under SQLite's limit. */
+const CHUNK = 500;
 /**
  * The expression index behind each targeted read. Without ANALYZE statistics
  * SQLite can prefer the primary key's `kind` prefix and walk the whole kind, so
@@ -75,14 +75,18 @@ export class AgentsRepository {
 
   withStatus<K extends 'run' | 'work'>(kind: K, statuses: AgentEntities[K]['status'][]): AgentEntities[K][] {
     if (!statuses.length) return [];
-    return this.rows<K>(`SELECT data FROM agent_entities INDEXED BY agent_${kind}_status WHERE ${kindSql(kind)} AND json_extract(data, '$.status') ${IN_LIST} ORDER BY created_at, rowid`, JSON.stringify(statuses));
+    return this.rows<K>(`SELECT data FROM agent_entities INDEXED BY agent_${kind}_status WHERE ${kindSql(kind)} AND json_extract(data, '$.status') IN (${statuses.map(() => '?').join(',')}) ORDER BY created_at, rowid`, ...statuses);
   }
 
   /** Records whose `field` is one of `values`, through that field's expression index. */
   find<K extends AgentEntityKind>(kind: K, field: keyof AgentEntities[K] & string, values: readonly string[]): AgentEntities[K][] {
     const index = indexFor(LOOKUP, `${kind}.${field}`);
-    if (values.length === 0) return [];
-    return this.rows<K>(`SELECT data FROM agent_entities INDEXED BY ${index} WHERE ${kindSql(kind)} AND ${pathSql(field)} ${IN_LIST} ORDER BY created_at, rowid`, JSON.stringify(values));
+    const out: AgentEntities[K][] = [];
+    for (let i = 0; i < values.length; i += CHUNK) {
+      const chunk = values.slice(i, i + CHUNK);
+      out.push(...this.rows<K>(`SELECT data FROM agent_entities INDEXED BY ${index} WHERE ${kindSql(kind)} AND ${pathSql(field)} IN (${chunk.map(() => '?').join(',')}) ORDER BY created_at, rowid`, ...chunk));
+    }
+    return out;
   }
 
   /** Every run of an episode: its work through `agent_work_episode`, then their runs through `agent_run_work`. */

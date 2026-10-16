@@ -18,7 +18,7 @@
   import InlineView from './InlineView.svelte';
   import ToolGroup from './ToolGroup.svelte';
   import { activityShown, runKey, type ActivityPart } from '../lib/tool-groups';
-  import { MessageRuns } from '../lib/memory-timeline';
+  import { memoryPartRuns } from '../lib/memory-timeline';
   import { chatPrefs } from '../lib/chat-prefs.svelte';
   import { shownText as shownTextOf } from '../lib/timeline-rows';
   import MemoryRow from './MemoryRow.svelte';
@@ -64,9 +64,7 @@
     store.openThread?.progress?.turnId === message.turnId && store.openThread.progress.phase === 'compacting');
   const caretAt = $derived(message.state === 'streaming' ? lastTextIndex(message) : -1);
   const end = $derived(to ?? message.parts.length);
-  // A run over the same parts stays the same object, so a new part does not redraw the groups above it.
-  const runList = new MessageRuns();
-  const runs = $derived(runList.build(message.parts, memoryEvents, from, end, chatPrefs.groupChanges));
+  const runs = $derived(memoryPartRuns(message.parts, memoryEvents, from, end, chatPrefs.groupChanges));
   const toolRunning = $derived(message.parts.some(part => part.type === 'tool' && part.status === 'running') ||
     latestInTurn && store.openThread?.messages.some(current => current.turnId === message.turnId && current.role === 'assistant' && current.parts.some(part => part.type === 'tool' && part.status === 'running')));
   const isBackground = (toolId: string) => store.openThread?.background?.some((task) => task.toolId === toolId) ?? false;

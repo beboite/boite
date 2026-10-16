@@ -70,7 +70,7 @@
       <pre class="mono subject" data-testid="permission-subject">{subjectBlock}</pre>
     {/if}
     {#if described.change}
-      <DiffView path={described.change.path} oldText={described.change.oldText} newText={described.change.newText} doc={described.change} />
+      <DiffView path={described.change.path} oldText={described.change.oldText} newText={described.change.newText} />
     {/if}
     {#if request?.description && request.description !== subjectBlock}
       <p class="muted description">{request.description}</p>

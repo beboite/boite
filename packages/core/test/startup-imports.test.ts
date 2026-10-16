@@ -1,6 +1,5 @@
 import { expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 
 /**
  * What evaluating the core's module graph loads, in a fresh process: the test
@@ -25,34 +24,3 @@ test('the core starts without the unzip library, which only installs use', async
   expect(loaded.length).toBeGreaterThan(20);
   expect(loaded.filter((path) => path.replaceAll('\\', '/').includes('/fflate/'))).toEqual([]);
 }, 30_000);
-
-/**
- * Every module the core's static imports reach from `entry`, with the
- * built-in modules each one imports. Built-ins never enter `require.cache`,
- * so the graph is read from the sources; `await import()` stays out of it.
- */
-function staticBuiltins(entry: string): Map<string, string[]> {
-  const transpiler = new Bun.Transpiler({ loader: 'ts' });
-  const builtins = new Map<string, string[]>();
-  const seen = new Set<string>();
-  const queue = [entry];
-  while (queue.length > 0) {
-    const file = queue.pop()!;
-    if (seen.has(file) || !/\.tsx?$/.test(file)) continue;
-    seen.add(file);
-    for (const { kind, path } of transpiler.scanImports(readFileSync(file, 'utf8'))) {
-      if (kind !== 'import-statement') continue;
-      if (/^(node|bun):/.test(path)) { builtins.set(path, [...(builtins.get(path) ?? []), file]); continue; }
-      const resolved = Bun.resolveSync(path, dirname(file));
-      if (!resolved.replaceAll('\\', '/').includes('/node_modules/')) queue.push(resolved);
-    }
-  }
-  expect(seen.size).toBeGreaterThan(100);
-  return builtins;
-}
-
-test('the core starts without node:util or node:dns, which cost 9 and 2 MiB for two parsers and a tailnet lookup', () => {
-  const builtins = staticBuiltins(join(import.meta.dir, '../src/core.ts'));
-  expect(builtins.has('node:fs')).toBe(true);
-  for (const name of ['node:util', 'node:dns', 'node:dns/promises']) expect([name, builtins.get(name) ?? []]).toEqual([name, []]);
-});

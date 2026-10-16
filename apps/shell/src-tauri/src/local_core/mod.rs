@@ -46,9 +46,6 @@ struct Slot {
     endpoint: Option<CoreEndpoint>,
     /// The process behind `endpoint`, to notice once it has exited.
     pid: Option<u32>,
-    /// How that core started, as `core.json` says: a process that started
-    /// later wears its number only because the core exited.
-    start: health::CoreStart,
     error: Option<String>,
     done: bool,
     /// Bumped each time a new resolution starts, so that of several callers
@@ -104,10 +101,6 @@ pub struct CoreState {
     child: Mutex<Option<Spawned>>,
     /// Held for the life of the shell process: see `job::CoreJob`.
     job: Mutex<Option<CoreJob>>,
-    /// The core this shell adopted rather than started. On Windows the open
-    /// handle pins its pid, as the `Child` does for a started core, so once
-    /// it exits no other process can wear the number while the shell holds it.
-    adopted: Mutex<Option<platform::process::Watched>>,
     launch: Launch,
     /// Set while an update installs: the core was stopped so the installer can
     /// replace its files, and nothing may start it again from the old ones.
@@ -126,7 +119,6 @@ impl CoreState {
             slot: (Mutex::new(Slot::default()), Condvar::new()),
             child: Mutex::new(None),
             job: Mutex::new(None),
-            adopted: Mutex::new(None),
             launch,
             held: AtomicBool::new(false),
         }
@@ -192,16 +184,14 @@ pub(crate) async fn core_endpoint(app: AppHandle, webview: Webview) -> Result<Co
 struct Settled {
     outcome: Result<CoreEndpoint, String>,
     pid: Option<u32>,
-    start: health::CoreStart,
     generation: u64,
 }
 
 impl Settled {
     /// A failed start, or a core whose process has since exited: a crash, a
-    /// kill, "Stop this core". Either way a new resolution is due. A pid that
-    /// another process got since then is the same exit, not a live core.
+    /// kill, "Stop this core". Either way a new resolution is due.
     fn stale(&self) -> bool {
-        self.outcome.is_err() || self.pid.is_some_and(|pid| !health::same_core(pid, &self.start))
+        self.outcome.is_err() || self.pid.is_some_and(|pid| !platform::process::alive(pid))
     }
 }
 
@@ -253,18 +243,13 @@ fn claim(slot: &(Mutex<Slot>, Condvar), generation: u64) -> bool {
     true
 }
 
-/// What a resolution settled on: the endpoint, and the process behind it with
-/// how it started when known.
-pub(super) type Resolved = (CoreEndpoint, Option<u32>, health::CoreStart);
-
-fn publish(slot: &(Mutex<Slot>, Condvar), outcome: Result<Resolved, String>) {
+fn publish(slot: &(Mutex<Slot>, Condvar), outcome: Result<(CoreEndpoint, Option<u32>), String>) {
     let (lock, ready) = slot;
     if let Ok(mut guard) = lock.lock() {
         match outcome {
-            Ok((endpoint, pid, start)) => {
+            Ok((endpoint, pid)) => {
                 guard.endpoint = Some(endpoint);
                 guard.pid = pid;
-                guard.start = start;
             }
             Err(error) => guard.error = Some(error),
         }
@@ -299,7 +284,7 @@ fn wait_for_endpoint(slot: &(Mutex<Slot>, Condvar), patience: Duration) -> Resul
         (None, Some(error)) => Err(error.clone()),
         (None, None) => Err("the core resolved to nothing".to_string()),
     };
-    Ok(Settled { outcome, pid: guard.pid, start: guard.start.clone(), generation: guard.generation })
+    Ok(Settled { outcome, pid: guard.pid, generation: guard.generation })
 }
 
 /// The first resolution, started with the app, and the timers that show the

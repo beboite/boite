@@ -346,17 +346,14 @@ export class Core {
     this.worktrees = new Worktrees(this);
     this.keybindings = new KeybindingStore(this);
     this.imports = new ImportStore(this);
-    // One scan of visible thread JSON serves activity and coordination recovery. It runs
-    // where activity's own check ran, so a corrupt thread still fails before any recovery write.
-    this.journal.validateVisibleThreadJson();
-    this.activity = new ActivityStore(this, true);
+    this.activity = new ActivityStore(this);
     this.push = new PushStore(this);
     this.speech = new SpeechStore(this);
     this.telemetry = new Telemetry(this);
     this.updates = new HarnessUpdates(this);
     this.serverUpdates = new ServerUpdates(this, options.serverUpdates);
     this.desktopUpdates = new DesktopUpdates(this);
-    this.coordination = new Coordination(this, true);
+    this.coordination = new Coordination(this);
     this.group = new GroupStore(this);
     this.group.restore();
     this.delegation = new Delegation(this);

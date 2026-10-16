@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from 'bun:test';
 import { connect } from '../../packages/core/src/client.ts';
@@ -15,9 +15,6 @@ test('desktop and paired phone upload files, preserve bytes and show downloadabl
     const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account.id, title: 'Review attachments' });
     for (const mobile of [false, true]) {
       page = await BrowserPage.launch({ url: mobile ? await mintPairing(core) : pairingUrlOf(core) });
-      const downloads = join(core.dataDir, mobile ? 'phone-downloads' : 'desktop-downloads');
-      mkdirSync(downloads);
-      await page.send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: downloads });
       await page.waitFor('document.querySelector("[data-testid=status-connection]")?.dataset.state === "ready"');
       await page.click(`[data-thread-id="${thread.id}"]`);
       // The app opens on a draft with its own composer; wait for the thread's.
@@ -61,11 +58,8 @@ test('desktop and paired phone upload files, preserve bytes and show downloadabl
       const reference = JSON.parse(referenceLine!);
       expect(reference).toMatchObject({ name, bytes: Buffer.byteLength(body) });
       expect(readFileSync(reference.path).toString()).toBe(body);
-      // A live prompt reaches a window as its history page does, without its bytes: the link fetches them when clicked.
-      await page.evaluate(`Array.from(document.querySelectorAll('[data-testid=file-part]')).find(el => el.download === ${JSON.stringify(name)}).click()`);
-      const downloaded = join(downloads, name);
-      for (const deadline = Date.now() + 10_000; !(existsSync(downloaded) && statSync(downloaded).size === Buffer.byteLength(body)) && Date.now() < deadline;) await Bun.sleep(50);
-      expect(readFileSync(downloaded).toString()).toBe(body);
+      const download = await page.evaluate<string>(`Array.from(document.querySelectorAll('[data-testid=file-part]')).find(el => el.download === ${JSON.stringify(name)}).href`);
+      expect(Buffer.from(download.split(',')[1]!, 'base64').toString()).toBe(body);
       await page.evaluate('Promise.all(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {})))');
       await page.screenshot(join(import.meta.dir, '.artifacts', `files-${mobile ? 'phone' : 'desktop'}-sent.png`));
       await page.close();

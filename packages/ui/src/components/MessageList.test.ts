@@ -4,7 +4,6 @@ import { flushSync, mount, unmount } from 'svelte';
 import { DEFAULT_DELEGATION_CONFIG, type AgentLetter, type Message } from '@boite/contracts';
 import MessageList from './MessageList.svelte';
 import { windowStats } from '../lib/message-window';
-import { TurnFileCache } from '../lib/turn-files';
 import { turnProgressStats } from '../lib/turn-progress.svelte';
 import { findHits } from '../lib/find';
 import type { Store } from '../lib/store.svelte';
@@ -330,30 +329,6 @@ test('the footer follows outgoing mail at the end of an ordinary answer', async 
   expect(articles().map(node => node.getAttribute('data-mid'))).toEqual(['msg-answer-with-mail', 'coordination:tail-mail']);
   expect(document.querySelectorAll('[data-testid=turn-summary]')).toHaveLength(1);
   expect(group.compareDocumentPosition(footer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-});
-
-test('a call finished in the running turn rereads only that turn files, never a finished one', async ({ createStore }) => {
-  window.localStorage.clear();
-  const { store: owner, client } = createStore({ delayMs: 0 });
-  owner.attach(client); await owner.connect(); await owner.open('t-trace');
-  const thread = owner.openThread!;
-  const done = { ...thread.turns[0]!, startedAt: 1, finishedAt: 15, status: 'done' as const };
-  const live = { ...done, id: 'turn-live', startedAt: 20, finishedAt: null, status: 'running' as const };
-  const write = (path: string) => ({ type: 'tool' as const, toolId: path, name: 'Write', input: { file_path: path, content: 'x' }, output: null, status: 'done' as const });
-  thread.memoryEvents = [];
-  thread.turns = [done, live];
-  thread.messages = [
-    { id: 'answer-done', threadId: thread.id, turnId: done.id, role: 'assistant', state: 'complete', createdAt: 10, parts: [write('a.ts')] },
-    { id: 'answer-live', threadId: thread.id, turnId: live.id, role: 'assistant', state: 'streaming', createdAt: 20, parts: [write('b.ts')] }
-  ];
-  running = mount(MessageList, { target: document.body, props: { store: owner, threadId: thread.id, messages: thread.messages } });
-  flushSync();
-  await vi.waitFor(() => expect(document.querySelectorAll('[data-testid=turn-files]')).toHaveLength(2));
-  const read = vi.spyOn(TurnFileCache.prototype, 'read');
-  onTestFinished(() => read.mockRestore());
-  thread.messages[1]!.parts.push(write('c.ts'));
-  flushSync();
-  expect(read.mock.calls.map(call => call[0])).toEqual([live.id]);
 });
 
 test('delegation mail opens its messages tab with local family identity, without duplicating coordination mail', async () => {

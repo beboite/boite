@@ -5,7 +5,7 @@
   import { ParagraphScan } from '../lib/message-display';
   import { strings } from '../lib/strings';
   import { elapsed } from '../lib/format';
-  import { ThoughtTitleScan } from '../lib/tool-groups';
+  import { thoughtTitle } from '../lib/tool-groups';
 
   let { text, live = false, startedAt = null, finishedAt = null }: { text: string; live?: boolean; startedAt?: number | null; finishedAt?: number | null } = $props();
 
@@ -15,9 +15,7 @@
   let open = $state(false);
   const empty = $derived(text.trim().length === 0);
   // What the step is about ("Inspecting the driver"), the plain word while it has none.
-  // The scan resumes where the last delta left off.
-  const titles = new ThoughtTitleScan();
-  const label = $derived(titles.title(text) ?? strings.chat.thinking);
+  const label = $derived(thoughtTitle(text) ?? strings.chat.thinking);
   const shown = $derived(open && !empty);
 
   // Built on the first open, then folded rather than thrown away: that is what

@@ -31,7 +31,6 @@ import type { ServerWebSocket } from 'bun';
 import { FILE_ROUTE, GROUP_RELAY_ROUTE, PROTOCOL_VERSION, RPC_PATH, RpcErrorCode, VIEW_ROUTE } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { messageOf } from '../errors.ts';
-import { OUTBOUND_CONGESTION_TIMEOUT_MS, OUTBOUND_MAX_BUFFERED_BYTES } from '../server/connection.ts';
 import { ticketAddresses } from './addresses.ts';
 
 /** One address of the other member gets this long to open before the next is tried. */
@@ -96,8 +95,6 @@ export interface RelayBounds {
   helloTimeoutMs: number;
   /** The largest first frame read from a socket nobody has authenticated. */
   helloMaxBytes: number;
-  /** How long the client may leave the relay's buffer unread before it is told to reconnect. */
-  congestionTimeoutMs?: number;
 }
 
 export class RelayHub implements RelaySink {
@@ -157,13 +154,10 @@ export class RelayHub implements RelaySink {
     return new Response('that machine does not answer', { status: 502 });
   }
 
-  /**
-   * A pipe for a socket the server is about to upgrade; `peer` is the address its hello wait counts under, as for the server's own.
-   * `remote` when the client asked for a host that is not loopback: its frames are deflated, as a direct remote socket's are.
-   */
-  pipe(coreId: string, peer: string | null, remote = false): RelayPipe {
+  /** A pipe for a socket the server is about to upgrade; `peer` is the address its hello wait counts under, as for the server's own. */
+  pipe(coreId: string, peer: string | null): RelayPipe {
     this.arm();
-    const pipe = new RelayPipe(this.core, this, coreId, peer, this.authenticate, this.bounds, remote);
+    const pipe = new RelayPipe(this.core, this, coreId, peer, this.authenticate, this.bounds);
     this.pipes.add(pipe);
     return pipe;
   }
@@ -222,7 +216,6 @@ export class RelayPipe {
   private helloSeen = false;
   private closed = false;
   private helloTimer: ReturnType<typeof setTimeout> | null = null;
-  private congestionTimer: ReturnType<typeof setTimeout> | null = null;
   /** The client's key for this machine was checked: from then on it no longer counts as waiting for its hello. */
   authenticated = false;
   /** The session that key belongs to, null for the owner's token: revoking it closes this pipe. */
@@ -235,7 +228,6 @@ export class RelayPipe {
     readonly peer: string | null,
     private readonly authenticate: RelayAuthenticator,
     private readonly bounds: RelayBounds,
-    readonly remote = false,
   ) {}
 
   attach(socket: ServerWebSocket<RelaySocketData>): void {
@@ -320,8 +312,13 @@ export class RelayPipe {
     }
     this.upstream = upstream;
     upstream.onmessage = (event) => {
+      if (this.closed || this.socket === null) return;
       const data = event.data;
-      this.forward(typeof data === 'string' ? data : Buffer.from(data as ArrayBuffer));
+      try {
+        this.socket.send(typeof data === 'string' ? data : Buffer.from(data as ArrayBuffer));
+      } catch {
+        this.close(1011, 'the connection dropped');
+      }
     };
     upstream.onclose = (event) => this.close(SENDABLE(event.code) ? event.code : 1011, event.reason || 'the other machine closed the connection');
     upstream.onerror = () => this.close(1011, 'the other machine dropped the connection');
@@ -339,46 +336,6 @@ export class RelayPipe {
     }
     this.queue = [];
     this.queued = 0;
-  }
-
-  /**
-   * One frame of the other member's to the client, under the budget a direct
-   * socket keeps. The other member sees this machine read at tailnet speed,
-   * so its own limits never fire for a slow client: here, a client that falls
-   * 32 MiB behind, stays congested for 10 s or has a frame dropped is told to
-   * reconnect, and loads a fresh snapshot, rather than missing frames on a
-   * socket that stays open.
-   */
-  private forward(data: string | Buffer): void {
-    const socket = this.socket;
-    if (this.closed || socket === null) return;
-    const bytes = typeof data === 'string' ? Buffer.byteLength(data) : data.length;
-    try {
-      if (socket.getBufferedAmount() + bytes > OUTBOUND_MAX_BUFFERED_BYTES) {
-        this.close(1013, 'connection exceeded outgoing buffer limit; reconnect');
-        return;
-      }
-      const sent = socket.send(data, this.remote);
-      if (sent === 0) {
-        this.close(1013, 'connection dropped a frame; reconnect');
-        return;
-      }
-      if (sent < 0 || socket.getBufferedAmount() > 0) this.congested();
-    } catch {
-      this.close(1011, 'the connection dropped');
-    }
-  }
-
-  private congested(): void {
-    this.congestionTimer ??= setTimeout(() => this.close(1013, 'connection remained congested; reconnect'), this.bounds.congestionTimeoutMs ?? OUTBOUND_CONGESTION_TIMEOUT_MS);
-  }
-
-  /** The client read some of what waited: the congestion clock starts again, or stops once nothing waits. */
-  drained(): void {
-    if (this.closed) return;
-    if (this.congestionTimer !== null) clearTimeout(this.congestionTimer);
-    this.congestionTimer = null;
-    if ((this.socket?.getBufferedAmount() ?? 0) > 0) this.congested();
   }
 
   /** The first address of the other member that opens a socket, or null. */
@@ -435,8 +392,6 @@ export class RelayPipe {
     if (this.closed) return;
     this.closed = true;
     if (this.helloTimer !== null) clearTimeout(this.helloTimer);
-    if (this.congestionTimer !== null) clearTimeout(this.congestionTimer);
-    this.congestionTimer = null;
     this.queue = [];
     const upstream = this.upstream;
     this.upstream = null;

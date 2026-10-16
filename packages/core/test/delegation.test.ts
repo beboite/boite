@@ -201,12 +201,6 @@ test('native results survive message pagination and restart without using delega
   const id = run.ctx.emit.startMessage('assistant');
   run.ctx.emit.part(id, 0, { type: 'tool', toolId: 'native-review', name: 'Agent', input: { prompt: 'Review parsing', model: 'reviewer' }, output: null, status: 'running' });
   const rawParts = (messageId: string) => (h.core.journal.db.query('SELECT parts FROM messages WHERE id = ?').get(messageId) as { parts: string }).parts;
-  // What a restart reads: a streaming message's timed writes land in streaming_parts beside its row.
-  const diskParts = (messageId: string) => {
-    const parts = JSON.parse(rawParts(messageId)) as unknown[];
-    for (const row of h.core.journal.db.query('SELECT part_index AS i, json FROM streaming_parts WHERE message_id = ?').all(messageId) as { i: number; json: string }[]) parts[row.i] = JSON.parse(row.json);
-    return parts;
-  };
   // A Team read must show live tools without persisting this or other streams.
   expect(h.core.delegation.get(threadId).nativeAgents[0]).toMatchObject({ task: 'Review parsing', status: 'running' });
   expect(rawParts(id)).toBe('[]');
@@ -216,15 +210,15 @@ test('native results survive message pagination and restart without using delega
   expect(rawParts(id)).toBe('[]');
   expect(rawParts(unrelatedId)).toBe('[]');
   h.core.journal.persistMessages();
-  expect(diskParts(id)[0]).toMatchObject({ output: 'Checked', status: 'done' });
-  expect(diskParts(unrelatedId)).toEqual([{ type: 'text', text: 'Unrelated streamed text' }]);
+  expect(JSON.parse(rawParts(id))[0]).toMatchObject({ output: 'Checked', status: 'done' });
+  expect(JSON.parse(rawParts(unrelatedId))).toEqual([{ type: 'text', text: 'Unrelated streamed text' }]);
   // A stale persisted tool cannot override its newer live update in the merge.
   run.ctx.emit.part(id, 0, { type: 'tool', toolId: 'native-review', name: 'Agent', input: { prompt: 'Review parsing', model: 'reviewer' }, output: null, status: 'running' });
   const live = h.core.delegation.get(threadId).nativeAgents;
   expect(live).toHaveLength(1);
   expect(live[0]).toMatchObject({ status: 'running' });
   expect(live[0]?.result).toBeUndefined();
-  expect(diskParts(id)[0]).toMatchObject({ output: 'Checked', status: 'done' });
+  expect(JSON.parse(rawParts(id))[0]).toMatchObject({ output: 'Checked', status: 'done' });
   run.ctx.emit.part(id, 0, { type: 'tool', toolId: 'native-review', name: 'Agent', input: { prompt: 'Review parsing', model: 'reviewer' }, output: 'Checked', status: 'done' });
   run.ctx.emit.complete(id, 'complete');
   await changed;
@@ -863,24 +857,6 @@ test('a finished child wakes an idle parent at once, without waiting for the tic
   // The tick runs every second: 100 ms leaves it a 10 % chance to be the one that delivered.
   await new Promise(resolve => setTimeout(resolve, 100));
   expect(h.core.journal.listTurns(threadId).map(turn => turn.execution?.operation)).toEqual(['delegation']);
-  expect(runs.get(threadId)?.ctx.prompt).toContain('Checked src/example.ts');
-});
-
-test('a paused team keeps its results until the owner resumes it, then they wake the parent at once', async () => {
-  const runs = scripted(); const { h, owner, threadId, spawn, config } = await setup();
-  const child = await spawn();
-  runs.get(child.thread.id)!.finish();
-  await waitFor(() => runs.has(threadId));
-  runs.get(threadId)!.finish();
-  await waitFor(() => h.core.threads.require(threadId).status === 'idle');
-  // What a restart leaves: the result still to deliver, and the team paused until its owner resumes it.
-  h.core.journal.db.query("UPDATE delegation_messages SET status = 'received', data = json_set(data, '$.status', 'received') WHERE root_id = ?").run(threadId);
-  h.core.journal.setSetting(`delegation:${threadId}`, { ...config, paused: true });
-  runs.delete(threadId);
-  await owner.call('delegation.configure', { threadId, config });
-  // The tick runs every second: 100 ms leaves it a 10 % chance to be the one that delivered.
-  await new Promise(resolve => setTimeout(resolve, 100));
-  expect(h.core.journal.listTurns(threadId).map(turn => turn.execution?.operation)).toEqual(['delegation', 'delegation']);
   expect(runs.get(threadId)?.ctx.prompt).toContain('Checked src/example.ts');
 });
 

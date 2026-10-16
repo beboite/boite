@@ -1,12 +1,10 @@
-import type { AccountId, DelegationConfig, ProviderId, SchedulerState, ThreadId, Timestamp, Turn, TurnId } from '@boite/contracts';
+import type { AccountId, ProviderId, SchedulerState, ThreadId, Timestamp, Turn, TurnId } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { logMessageOf } from './log-errors.ts';
 
 interface Entry {
   turnId: TurnId;
   threadId: ThreadId;
-  /** Read once at enqueue: a thread's parent never changes, and a pump over held turns then reads no thread row. */
-  parentThreadId: ThreadId | null;
   accountId: AccountId;
   /** The provider the accepted turn runs on, whatever the thread selects since. */
   providerId: ProviderId | undefined;
@@ -43,8 +41,7 @@ export class Scheduler {
 
   enqueue(turn: Turn, accountId: AccountId): void {
     if (this.running.get(turn.threadId)?.turnId === turn.id) return;
-    const parentThreadId = this.core.journal.getThread(turn.threadId)?.parentThreadId ?? null;
-    const entry = { turnId: turn.id, threadId: turn.threadId, parentThreadId, accountId, providerId: turn.execution?.providerId, queuedAt: turn.queuedAt, reportedQueued: false, queueHold: turn.queueHold };
+    const entry = { turnId: turn.id, threadId: turn.threadId, accountId, providerId: turn.execution?.providerId, queuedAt: turn.queuedAt, reportedQueued: false, queueHold: turn.queueHold };
     this.queue.set(turn.id, entry);
     this.pump([entry]);
     this.emitUpdated();
@@ -112,10 +109,8 @@ export class Scheduler {
     if (this.core.stopping) return;
     // Settings and completions repump held entries; enqueue checks only its new turn.
     // Broad Map iteration still follows a reentrant start's additions and removals.
-    // Team settings are read once per root per pump: a change made since the last pump still counts.
-    const configs = new Map<ThreadId, DelegationConfig>();
     for (const entry of entries) {
-      const waiting = this.waitReason(entry, configs);
+      const waiting = this.waitReason(entry);
       if (waiting !== null) {
         if (entry.waiting !== waiting) {
           entry.waiting = waiting;
@@ -129,9 +124,9 @@ export class Scheduler {
   }
 
   /** Why a queued turn cannot start now, in words; null when it can. */
-  private waitReason(entry: Entry, configs: Map<ThreadId, DelegationConfig>): string | null {
+  private waitReason(entry: Entry): string | null {
     if (entry.queueHold) return `held until the user resumes it (${entry.queueHold.reason})`;
-    if (!this.core.delegation.canRun(entry.threadId, entry.parentThreadId, configs)) return 'its team or parent is paused';
+    if (!this.core.delegation.canRun(entry.threadId)) return 'its team or parent is paused';
     if (this.core.plugins.blocksAccount(entry.accountId)) return 'a plugin is changing the saved login of its account';
     // A program being replaced cannot start a turn; it starts once the updater is done.
     if (this.core.updates.holds(entry.providerId)) return `${entry.providerId ?? 'its provider'} is being updated`;

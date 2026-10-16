@@ -27,11 +27,9 @@ with mode `0600`; the owner requests a phone link through Settings or
 `pairing.grant`. Stop the scratch core before removing its directory.
 
 One core holds `<dataDir>/core.lock`. Another refuses to start on the same data.
-A dead holder can be replaced. Linux compares the holder's start key (boot id
-and start ticks) with the one in the lock, so a stepped wall clock never frees
-it; Windows compares process start time to reject a reused PID more than two
-seconds newer than the lock; macOS retains a lock while its recorded PID is
-alive.
+A dead holder can be replaced. Windows and Linux also compare process start
+time to reject a reused PID more than two seconds newer than the lock; macOS
+retains a lock while its recorded PID is alive.
 
 | Option | Meaning |
 | --- | --- |
@@ -875,8 +873,7 @@ When every call of the run carries the agent's own `summary` (Claude's
 git", or the thought being written) and its clock ticks. A reasoning step reads
 as its last bold heading (Codex) or the first sentence of its last paragraph
 (Claude's summary, a raw chain of thought), and as "Thinking" while it has no
-words (`thoughtTitle` in `lib/tool-groups.ts`; a live step keeps a
-`ThoughtTitleScan` that reads only the lines each delta adds). Reasoning with no words that
+words (`thoughtTitle` in `lib/tool-groups.ts`). Reasoning with no words that
 took under a second is not drawn. The core
 records each block's first appearance and the next part or message completion
 for every driver, so durations survive a reload. Older and imported blocks
@@ -941,9 +938,7 @@ way (`questions.answer` `attachments`); see [Providers](providers.md).
 
 The core validates bytes and writes sanitized, content-addressed copies under
 `<dataDir>/attachments/`. Copies survive resume and are currently not removed
-by archive or project removal. A copy the core wrote or compared is not read
-again while its size, mtime and inode stay the same; an agent's edit changes
-them, and the next reference gets a fresh copy. Timeline cards download those copies. Composer
+by archive or project removal. Timeline cards download those copies. Composer
 `[Image N]` references follow attachment order, preview inline and renumber after
 removal. A tile opens its picture large above the box; a second click on the
 tile, or a click on the large picture, puts it away. Copying or cutting a reference carries its picture

@@ -16,7 +16,7 @@ interface FramePage {
  * A scaled clip makes Chrome set the page's size for the shot and restore the
  * size it found afterwards, so a preset or resize applied while a capture runs
  * is undone when it finishes. The caller runs captures and size changes of a
- * tab in turn (`takeTurn`).
+ * tab in turn (`AgentBrowser.#screen`).
  */
 export async function captureFrame(tabId: string, page: FramePage, maxWidth: number | undefined, quality: number): Promise<{ frame: RemoteBrowserFrame; page: PageInfo }> {
   const info = await page.evaluate(PAGE_INFO_SCRIPT, 5000) as PageInfo | null;
@@ -36,26 +36,4 @@ export async function captureFrame(tabId: string, page: FramePage, maxWidth: num
   if (typeof shot.data !== 'string') throw refused('the browser returned no frame');
   const frame: RemoteBrowserFrame = { id: crypto.randomUUID(), tabId, title: String(info.title ?? '').slice(0, 200), width: info.width, height: info.height, base64: shot.data, at: Date.now(), url: String(info.href ?? '').slice(0, REMOTE_URL_MAX) };
   return { frame, page: info };
-}
-
-/** A tab's queue of captures and size changes: `start` lets the next capture go, `idle` settles once every queued one has ended. */
-export interface ScreenTurns { start: Promise<void>; idle: Promise<void> }
-
-export function screenTurns(): ScreenTurns { return { start: Promise.resolve(), idle: Promise.resolve() }; }
-
-/**
- * Runs `run` in its turn on the tab's screen. A capture still running after
- * `lateMs` lets the next capture go, so one stuck in the browser never freezes
- * the frames. A `strict` turn (a size change, or a read of the page's size)
- * waits for every turn before it to end, however late, and nothing starts
- * before it ends: a scaled capture puts back the size it found when its shot
- * ends, and the size a capture in flight shows is the shot's. Each step of a
- * capture has a DevTools deadline, so a strict turn waits a bounded time.
- */
-export function takeTurn<T>(turns: ScreenTurns, strict: boolean, run: () => Promise<T>, lateMs: number): Promise<T> {
-  const next = (strict ? turns.idle : turns.start).then(run);
-  const ended = next.then(() => {}, () => {});
-  turns.idle = Promise.all([turns.idle, ended]).then(() => {});
-  turns.start = strict ? ended : Promise.race([ended, Bun.sleep(lateMs)]);
-  return next;
 }

@@ -29,26 +29,27 @@
   /** The last read's failure, cleared by the next read that lands. */
   let failed = $state('');
 
+  /** A paired device reads what the core holds: forcing the providers is the owner's. */
   function read(refresh = false) {
     const client = store.client;
     if (!client) return;
     const current = reader;
-    void current.read(client, refresh).then(() => { if (current === reader) failed = ''; }, (error) => { if (current === reader) failed = errorText(error); });
+    void current.read(client, refresh && store.owner).then(() => { if (current === reader) failed = ''; }, (error) => { if (current === reader) failed = current.outdated ? '' : errorText(error); });
   }
 
   $effect(() => {
     const client = store.client;
     const current = reader;
-    if (!popover.open || !client || !store.owner) return;
+    if (!popover.open || !client) return;
     const off = client.on('quotas.updated', (value) => current.accept(value));
     untrack(() => read());
     return off;
   });
 
-  /** The Douane an owner reads, by address: a press goes to its bars or to its dashboard. */
+  /** The Douane this machine reads, by address: a press goes to its bars or to its dashboard. */
   let douane = $derived.by(() => {
     const proxy = store.settings?.subscriptionProxy;
-    return store.owner && proxy?.enabled && proxy.kind === 'douane' ? proxy.baseUrl : null;
+    return proxy?.enabled && proxy.kind === 'douane' ? proxy.baseUrl : null;
   });
 
   // Known before the first press, and kept current, since it decides where that press goes.
@@ -96,14 +97,10 @@
     store.showSettings(tab);
   }
 
-  /**
-   * A gateway without native quotas has only its dashboard, on the Limits page,
-   * and so does a paired device, which cannot read the gateway's quotas.
-   */
+  /** A gateway without native quotas has only its dashboard, on the Limits page. */
   async function open() {
     if (popover.open) { close(); return; }
     const proxy = store.settings?.subscriptionProxy;
-    if (proxy?.enabled && !store.owner) { page('limits'); return; }
     const client = store.client;
     // A slow gateway does not hold the press: the glance opens, and the effect above
     // moves it to the page if the answer turns out to be `unsupported`.
@@ -118,8 +115,8 @@
 {#if popover.shown}
   <div class="glance" class:closing={popover.closing} bind:this={content} role="dialog" tabindex="-1" aria-label={strings.quotas.glance} data-testid="limits-glance" {onkeydown}
     use:popover.attach onanimationend={popover.end} use:floating={{ anchor: () => trigger ?? null, dismiss: close, cap: 460 }}>
-    <QuotaPopup {rows} loading={reader.busy} completed={reader.landed} error={failed} owner={store.owner}
-      order={store.settings?.quotaOrder ?? []} reorder={(quotaOrder) => store.saveSettings({ quotaOrder })}
+    <QuotaPopup {rows} loading={reader.busy} completed={reader.landed} error={failed} outdated={reader.outdated} owner={store.owner}
+      order={store.settings?.quotaOrder ?? []} reorder={store.owner ? (quotaOrder) => store.saveSettings({ quotaOrder }) : undefined}
       refresh={() => read(true)} connect={() => page('accounts')} settings={() => page('limits')} {close} testPrefix="limits-glance">
       {#snippet title()}<QuotaMachineScope {store} />{/snippet}
     </QuotaPopup>

@@ -1,4 +1,4 @@
-import { ATTACHMENTS_PER_TURN, type Attachment, type ImageAttachment, type Message, type MessagePart, type ProviderDescriptor } from '@boite/contracts';
+import { ATTACHMENTS_PER_TURN, type Attachment, type ImageAttachment, type MessagePart, type ProviderDescriptor } from '@boite/contracts';
 import type { Journal } from './journal.ts';
 import { refused } from './errors.ts';
 
@@ -26,21 +26,10 @@ function textPart(part: MessagePart): string {
   }
 }
 
-/** Where a file part sits, so a caller can reuse what it made for the same part before. */
-export interface PartPlace { messageId: string; partIndex: number }
-
 /**
  * Fresh native session, same visible conversation. Historical output is never
  * executed. The history stops before `upTo`, the turn being sent; `null` keeps
  * every message, the work of a turn that goes on after a pause included.
- *
- * The prompt keeps the opening messages up to `FIRST_LIMIT` characters and the
- * latest ones up to `RECENT_LIMIT`, so only those messages are read whole. A
- * first pass reads the stored parts without their large values (`part_blobs`)
- * to count the messages in between, find the move notes and place the
- * historical images; a forward walk then builds the opening and a backward
- * walk the recent end. Only the kept images are read. `fileReference` must
- * return a non-empty line: the first pass counts every file part as text.
  */
 export function continuationInput(
   journal: Journal,
@@ -48,63 +37,44 @@ export function continuationInput(
   upTo: string | null,
   input: { prompt: string; attachments: Attachment[]; moved?: true },
   provider: ProviderDescriptor,
-  fileReference: (file: Extract<MessagePart, { type: 'file' }>, place: PartPlace) => string = file => `[File: ${file.name ?? 'attachment'}]`,
+  fileReference: (file: Extract<MessagePart, { type: 'file' }>) => string = file => `[File: ${file.name ?? 'attachment'}]`,
 ): { prompt: string; attachments: Attachment[] } {
-  const keep = ATTACHMENTS_PER_TURN - input.attachments.length;
-  const kept: PartPlace[] = [];
+  const first: string[] = [];
+  const recent: string[] = [];
+  let firstSize = 0;
+  let recentSize = 0;
+  let omitted = 0;
+  const images: ImageAttachment[] = [];
   let imageCount = 0;
   let moved = input.moved === true;
-  let entries = 0;
-  let end: number | undefined;
-  for (const message of journal.walkMessages(threadId, { blobs: false })) {
-    if (upTo !== null && message.turnId === upTo) { end = journal.messageRowid(threadId, message.id)!; break; }
+  for (const message of journal.walkMessages(threadId)) {
+    if (upTo !== null && message.turnId === upTo) break;
     if (message.parts.some((part) => part.type === 'text' && part.moved !== undefined)) moved = true;
-    message.parts.forEach((part, partIndex) => {
-      if (part.type !== 'image') return;
+    for (const part of message.parts) {
+      if (part.type !== 'image') continue;
       imageCount += 1;
-      kept.push({ messageId: message.id, partIndex });
-      if (kept.length > keep) kept.shift();
-    });
-    // Large values only fill tool and file fields, which always give text.
-    if (message.parts.some(part => part.type === 'file' || part.type === 'tool' || textPart(part) !== '')) entries += 1;
-  }
-  const entry = (message: Message): string | null => {
-    const text = message.parts.map((part, partIndex) => part.type === 'file' ? fileReference(part, { messageId: message.id, partIndex }) : textPart(part)).filter(Boolean).map((part) => excerpt(part, ENTRY_LIMIT)).join('\n');
-    return text ? `[${message.role}, ${message.state}]\n${excerpt(text, ENTRY_LIMIT)}` : null;
-  };
-  const first: string[] = [];
-  let firstSize = 0;
-  let overflow: { id: string; entry: string } | undefined;
-  for (const message of journal.walkMessages(threadId, { before: end })) {
-    const next = entry(message);
-    if (next === null) continue;
-    if (firstSize + next.length > FIRST_LIMIT) { overflow = { id: message.id, entry: next }; break; }
-    first.push(next);
-    firstSize += next.length;
-  }
-  // The longest run of latest messages within `RECENT_LIMIT`, and at least one.
-  const recent: string[] = [];
-  let recentSize = 0;
-  if (overflow) {
-    const after = journal.messageRowid(threadId, overflow.id)! - 1;
-    for (const message of journal.walkMessages(threadId, { after, before: end, newestFirst: true })) {
-      const next = message.id === overflow.id ? overflow.entry : entry(message);
-      if (next === null) continue;
-      if (recent.length > 0 && recentSize + next.length > RECENT_LIMIT) break;
-      recent.push(next);
-      recentSize += next.length;
+      images.push({ kind: 'image', mimeType: part.mimeType, data: part.data, name: part.alt });
+      if (images.length > ATTACHMENTS_PER_TURN - input.attachments.length) images.shift();
     }
-    recent.reverse();
+    const text = message.parts.map(part => part.type === 'file' ? fileReference(part) : textPart(part)).filter(Boolean).map((part) => excerpt(part, ENTRY_LIMIT)).join('\n');
+    if (!text) continue;
+    const entry = `[${message.role}, ${message.state}]\n${excerpt(text, ENTRY_LIMIT)}`;
+    if (firstSize + entry.length <= FIRST_LIMIT && recent.length === 0 && omitted === 0) {
+      first.push(entry);
+      firstSize += entry.length;
+    } else {
+      recent.push(entry);
+      recentSize += entry.length;
+      while (recentSize > RECENT_LIMIT && recent.length > 1) {
+        recentSize -= recent.shift()!.length;
+        omitted += 1;
+      }
+    }
   }
-  const omitted = entries - first.length - recent.length;
   if (imageCount > 0 && !provider.capabilities.images) {
     throw refused(`${provider.name} cannot continue this conversation with its historical images; choose an image-capable model`, { threadId });
   }
   if (first.length === 0 && recent.length === 0) return input;
-  const images: ImageAttachment[] = kept.map(({ messageId, partIndex }) => {
-    const part = journal.messagePart(messageId, partIndex)?.part as Extract<MessagePart, { type: 'image' }>;
-    return { kind: 'image', mimeType: part.mimeType, data: part.data, name: part.alt };
-  });
   const gap = omitted ? `\n[${omitted} older messages omitted between the opening and recent exchanges.]\n` : '\n';
   const imageNote = imageCount > 0
     ? `\n${images.length} of ${imageCount} historical images follow, oldest to newest, then the current prompt's attachments. Other image placeholders are references only.\n`

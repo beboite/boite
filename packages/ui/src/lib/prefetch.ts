@@ -26,17 +26,13 @@ export function prefetchNames<Name extends string>(names: Name[], device: { tour
   return names.filter((name) => !(name === 'Onboarding' && device.tourSeen) && !(name === 'TerminalView' && !device.owner));
 }
 
-/**
- * Runs `task` once the page is idle, after the first paint, or after `timeout`
- * ms at the latest. Safari has no requestIdleCallback: it waits `fallback` ms
- * instead. Returns the cancel.
- */
-export function whenIdle(task: () => void, { timeout = 1500, fallback = 300 } = {}): () => void {
+/** Runs `task` once the page is idle, after the first paint. Safari has no requestIdleCallback. Returns the cancel. */
+export function whenIdle(task: () => void): () => void {
   if (typeof requestIdleCallback === 'function') {
-    const id = requestIdleCallback(task, { timeout });
+    const id = requestIdleCallback(task, { timeout: 1500 });
     return () => cancelIdleCallback(id);
   }
-  const id = setTimeout(task, fallback);
+  const id = setTimeout(task, 300);
   return () => clearTimeout(id);
 }
 

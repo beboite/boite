@@ -84,10 +84,9 @@ function excerpts(db: Database, threadId: string, words: string[]): string[] {
 /**
  * The newest `limit` entries before `before`, oldest first, and whether older
  * ones remain. Only those rows are read: a long thread's tool output is never
- * loaded whole. `held` gives the current parts of a message still streaming,
- * whose row can be up to 30 seconds behind.
+ * loaded whole.
  */
-export function transcript(db: Database, threadId: string, limit: number, before: number | undefined, held?: (messageId: string) => Message | undefined): { entries: AgentTranscriptEntry[]; more: boolean } {
+export function transcript(db: Database, threadId: string, limit: number, before: number | undefined): { entries: AgentTranscriptEntry[]; more: boolean } {
   const entries: AgentTranscriptEntry[] = [];
   const cursor = before ?? Number.MAX_SAFE_INTEGER;
   let skip = 0;
@@ -98,7 +97,7 @@ export function transcript(db: Database, threadId: string, limit: number, before
       if (entries.length === limit) break;
       skip += 1;
       if (row.created_at >= (before ?? Number.MAX_SAFE_INTEGER)) continue;
-      const parts = held?.(row.id)?.parts ?? JSON.parse(row.parts) as MessagePart[];
+      const parts = JSON.parse(row.parts) as MessagePart[];
       const text = spoken(parts);
       const tools = parts.flatMap(part => part.type === 'tool' ? [part.name] : []);
       if (text.length === 0 && tools.length === 0) continue;

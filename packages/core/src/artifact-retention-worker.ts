@@ -14,10 +14,8 @@ scope.onmessage = ({ data: path }): void => {
   let db: Database | undefined;
   try {
     db = new Database(path, { readonly: true });
-    // A streaming message keeps its latest parts in streaming_parts until its row is written whole.
-    const rows = db.query(`SELECT json_extract(part.value, '$.id') AS id
-      FROM messages, json_each(messages.parts) AS part WHERE json_extract(part.value, '$.type') = 'artifact'
-      UNION SELECT json_extract(json, '$.id') FROM streaming_parts WHERE json_extract(json, '$.type') = 'artifact'`)
+    const rows = db.query(`SELECT DISTINCT json_extract(part.value, '$.id') AS id
+      FROM messages, json_each(messages.parts) AS part WHERE json_extract(part.value, '$.type') = 'artifact'`)
       .all() as { id: string }[];
     scope.postMessage({ ids: rows.map(row => row.id) });
   } catch (error) {

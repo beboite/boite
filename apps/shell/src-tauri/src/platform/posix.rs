@@ -49,9 +49,6 @@ pub(crate) fn appimage_scrub(appdir: &std::path::Path, data_dirs: Option<std::ff
 /// The OS gives no session-wide idle time the shell can read everywhere here.
 pub(crate) fn idle_ms() -> Option<u64> { None }
 
-/// WebKitGTK and WKWebView offer no memory level for one page.
-pub(crate) fn memory_level<R: tauri::Runtime>(_webview: &tauri::Webview<R>, _low: bool) {}
-
 pub(crate) fn foreground(window: &tauri::Window) -> bool {
     window.is_focused().unwrap_or(false)
 }

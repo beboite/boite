@@ -1,4 +1,4 @@
-import { RPC_CHUNK_BYTES, RPC_CHUNK_MARK, RPC_MAX_FRAME_BYTES, RpcErrorCode, projectLiveMessage, projectLivePart, type RpcError, type RpcEventName, type RpcEvents, type SentFrom, type ThreadId, type TransportOptions } from '@boite/contracts';
+import { RPC_CHUNK_BYTES, RPC_CHUNK_MARK, RPC_MAX_FRAME_BYTES, RpcErrorCode, previewToolPart, type MessagePart, type RpcError, type RpcEventName, type RpcEvents, type SentFrom, type ThreadId, type TransportOptions } from '@boite/contracts';
 import type { ServerWebSocket } from 'bun';
 import type { Core } from '../core.ts';
 import { newId } from '../ids.ts';
@@ -17,32 +17,6 @@ export interface SocketData {
   /** The address its hello wait is counted under; null for the owner's own machine. */
   peer: string | null;
 }
-
-/** An event serialized once, with its UTF-8 size. */
-export interface EventFrame {
-  text: string;
-  bytes: number;
-}
-
-/**
- * One event's frames during a broadcast, by `ServerConnection.variant`:
- * every socket that projects it the same way sends the same text, so a large
- * event is stringified and measured once rather than once per window.
- */
-export type EventFrames = Map<string, EventFrame>;
-
-/** The JSON of `text` as a string value, quotes excluded, in UTF-8 bytes. */
-function jsonTextBytes(text: string): number {
-  return Buffer.byteLength(JSON.stringify(text)) - 2;
-}
-
-/** A delta frame's UTF-8 bytes. */
-function deltaFrameBytes(delta: RpcEvents['message.delta']): number {
-  return Buffer.byteLength(JSON.stringify({ jsonrpc: '2.0', method: 'message.delta', params: delta }));
-}
-
-/** No UTF-16 unit takes more than this in JSON: `\u001f`, or a lone surrogate's `\udc00`. */
-const JSON_BYTES_PER_UNIT = 6;
 
 interface OutgoingResponse {
   jsonrpc: '2.0';
@@ -73,11 +47,7 @@ export class ServerConnection implements Connection {
   private congestionTimer: ReturnType<typeof setTimeout> | null = null;
   /** What the socket held at the last write or drain that left it congested: a later drain below it took bytes. */
   private congestionMark = 0;
-  /** UTF-8 bytes of the held deltas, except the texts merged into them that `unmeasured` holds. */
   private pacedBytes = 0;
-  /** Texts merged into held deltas and not counted yet, with their upper bound in `unmeasuredBound`. */
-  private unmeasured: string[] = [];
-  private unmeasuredBound = 0;
   private catchUpBytes = 0;
   private readonly catchUp = new Set<string>();
   private readonly paced = new Map<string, RpcEvents['message.delta']>();
@@ -98,68 +68,28 @@ export class ServerConnection implements Connection {
     if (!this.closed) this.socket = socket;
   }
 
-  /**
-   * `frames` is shared by the sockets one broadcast reaches: the first socket
-   * of each variant serializes the event and the others send that text.
-   */
-  sendEvent<E extends RpcEventName>(name: E, payload: RpcEvents[E], frames?: EventFrames): void {
+  sendEvent<E extends RpcEventName>(name: E, payload: RpcEvents[E]): void {
     if (this.closed) return;
+    if (name === 'message.part') payload = this.livePart(payload as RpcEvents['message.part']) as RpcEvents[E];
     if (name === 'message.delta' && this.remote && !this.congested) {
       this.pace(payload as RpcEvents['message.delta']);
       return;
     }
     this.flushPaced();
-    if (this.closed) return;
-    if (name === 'message.delta' && this.congested) {
-      this.queueCatchUp(payload as RpcEvents['message.delta']);
-      return;
-    }
-    const key = this.variant(name, payload);
-    let frame = frames?.get(key);
-    if (frame === undefined) {
-      const text = JSON.stringify({ jsonrpc: '2.0', method: name, params: this.live(name, payload) });
-      frame = { text, bytes: Buffer.byteLength(text) };
-      frames?.set(key, frame);
-    }
-    this.sendNow(name, payload, frame);
-  }
-
-  /** What changes how this socket projects the event: two sockets with the same variant receive the same frame. */
-  private variant<E extends RpcEventName>(name: E, payload: RpcEvents[E]): string {
-    const { compactTools, compactToolParts, compactFiles, compactImages } = this.transport;
-    if (name === 'message.started') return `${compactFiles ? 'f' : ''}${compactImages ? 'i' : ''}`;
-    if (name !== 'message.part') return '';
-    const kind = (payload as RpcEvents['message.part']).part.type;
-    if (kind === 'tool') return `${compactTools ? 't' : ''}${compactToolParts ? 'p' : ''}`;
-    if (kind === 'file') return compactFiles ? 'f' : '';
-    if (kind === 'image') return compactImages ? 'i' : '';
-    return '';
+    this.sendNow(name, payload);
   }
 
   /**
-   * A live part or prompt as this socket's pages send it. A 30 MB tool output
-   * reaches the client as its preview, and the card fetches the rest with
-   * `messages.toolPart` when it opens: sent whole, it would cost the frame
-   * limit and close the socket. A prompt's or an artifact's files and large
-   * pictures stay on the core and are read with `messages.attachment`; a
-   * picture goes without its blur, which is queued for the next page. A part
-   * is projected as an assistant's, the rule that keeps the most.
+   * A finished tool call as this socket's pages send it: a 30 MB output or
+   * Write reaches the client as its preview, and the card fetches the rest
+   * with `messages.toolPart` when it opens. Sent whole, it would cost the
+   * frame limit and close the socket.
    */
-  private live<E extends RpcEventName>(name: E, payload: RpcEvents[E]): RpcEvents[E] {
-    const transport = this.transport;
-    if (name === 'message.part') {
-      const event = payload as RpcEvents['message.part'];
-      const kind = event.part.type;
-      if (kind !== 'tool' && kind !== 'file' && kind !== 'image') return payload;
-      const previews = kind === 'tool' ? undefined : this.core.media.lookup(event.threadId);
-      const part = projectLivePart(event.part, transport, 'assistant', event.messageId, event.partIndex, previews);
-      return (part === event.part ? event : { ...event, part }) as RpcEvents[E];
-    }
-    if (name === 'message.started' && (transport.compactFiles || transport.compactImages)) {
-      const message = payload as RpcEvents['message.started'];
-      return projectLiveMessage(message, transport, this.core.media.lookup(message.threadId)) as RpcEvents[E];
-    }
-    return payload;
+  private livePart(event: RpcEvents['message.part']): RpcEvents['message.part'] {
+    const part = event.part;
+    if (part.type !== 'tool' || !(this.transport.compactTools || this.transport.compactToolParts)) return event;
+    const light: MessagePart = previewToolPart(part, { inputs: !!this.transport.compactToolParts });
+    return light === part ? event : { ...event, part: light };
   }
 
   /**
@@ -174,34 +104,19 @@ export class ServerConnection implements Connection {
   private pace(delta: RpcEvents['message.delta']): void {
     const key = `${delta.messageId}|${delta.partIndex}`;
     let held = this.paced.get(key);
-    // Merged text counts as its upper bound until the bounds could cross the
-    // frame limit; then everything held is counted exactly, so the flush
-    // falls where an exact count puts it.
-    let exact = !held;
-    let bytes = held ? delta.text.length * JSON_BYTES_PER_UNIT : deltaFrameBytes(delta);
-    if (this.pacedBytes + this.unmeasuredBound + bytes > RPC_MAX_FRAME_BYTES) {
-      this.measurePaced();
-      if (held) { exact = true; bytes = jsonTextBytes(delta.text); }
-    }
-    if (this.pacedBytes + this.unmeasuredBound + bytes > RPC_MAX_FRAME_BYTES || (!held && this.paced.size >= OUTBOUND_MAX_PENDING_PARTS)) {
+    const bytes = held ? Buffer.byteLength(JSON.stringify(delta.text)) - 2
+      : Buffer.byteLength(JSON.stringify({ jsonrpc: '2.0', method: 'message.delta', params: delta }));
+    if (this.pacedBytes + bytes > RPC_MAX_FRAME_BYTES || (!held && this.paced.size >= OUTBOUND_MAX_PENDING_PARTS)) {
       this.flushPaced();
       if (this.closed) return;
       if (this.congested) { this.queueCatchUp(delta); return; }
-      if (held) { held = undefined; exact = true; bytes = deltaFrameBytes(delta); }
+      held = undefined;
     }
     if (held) held.text += delta.text;
     else this.paced.set(key, { ...delta });
-    if (exact) this.pacedBytes += bytes;
-    else { this.unmeasured.push(delta.text); this.unmeasuredBound += bytes; }
+    this.pacedBytes += held ? bytes : Buffer.byteLength(JSON.stringify({ jsonrpc: '2.0', method: 'message.delta', params: delta }));
     if (this.pacedBytes > RPC_MAX_FRAME_BYTES) { this.flushPaced(); return; }
     this.paceTimer ??= setTimeout(() => this.flushPaced(), REMOTE_DELTA_WINDOW_MS);
-  }
-
-  /** Counts the merged texts held by their bound, once. */
-  private measurePaced(): void {
-    for (const text of this.unmeasured) this.pacedBytes += jsonTextBytes(text);
-    this.unmeasured = [];
-    this.unmeasuredBound = 0;
   }
 
   private flushPaced(): void {
@@ -213,19 +128,16 @@ export class ServerConnection implements Connection {
     const held = [...this.paced.values()];
     this.paced.clear();
     this.pacedBytes = 0;
-    this.unmeasured = [];
-    this.unmeasuredBound = 0;
     for (const delta of held) this.sendNow('message.delta', delta);
   }
 
-  /** `frame` is the event already serialized for this socket; without it, `payload` is. */
-  private sendNow<E extends RpcEventName>(name: E, payload: RpcEvents[E], frame?: EventFrame): void {
+  private sendNow<E extends RpcEventName>(name: E, payload: RpcEvents[E]): void {
     if (this.closed) return;
     if (name === 'message.delta' && this.congested) {
       this.queueCatchUp(payload as RpcEvents['message.delta']);
       return;
     }
-    const sent = frame ? this.write(null, frame.text, frame.bytes) : this.write({ jsonrpc: '2.0', method: name, params: payload });
+    const sent = this.write({ jsonrpc: '2.0', method: name, params: payload });
     if (sent > 0) return;
     if (sent === 0) {
       this.close(1013, 'connection dropped a frame; reconnect');
@@ -341,8 +253,6 @@ export class ServerConnection implements Connection {
     this.catchUp.clear();
     this.catchUpBytes = 0;
     this.pacedBytes = 0;
-    this.unmeasured = [];
-    this.unmeasuredBound = 0;
     this.outbox = null;
     this.outboxBytes = 0;
     const socket = this.socket;
@@ -368,11 +278,10 @@ export class ServerConnection implements Connection {
     this.congestionMark = 0;
   }
 
-  /** `bytes` is `serialized`'s UTF-8 size when the caller counted it already. */
-  private write(frame: unknown, serialized?: string, counted?: number): number {
+  private write(frame: unknown, serialized?: string): number {
     if (this.closed || this.socket === null) return 0;
     const text = serialized ?? JSON.stringify(frame);
-    const bytes = serialized !== undefined && counted !== undefined ? counted : Buffer.byteLength(text);
+    const bytes = Buffer.byteLength(text);
     if (bytes > RPC_MAX_FRAME_BYTES) {
       this.close(1009, 'event exceeds the 16 MiB frame limit');
       return 0;
@@ -459,7 +368,7 @@ export class ServerConnection implements Connection {
       const sent = this.write({
         jsonrpc: '2.0',
         method: 'message.part',
-        params: this.live('message.part', { threadId: message.threadId, messageId, partIndex, part }),
+        params: this.livePart({ threadId: message.threadId, messageId, partIndex, part }),
       });
       if (sent === 0) { this.close(1013, 'catch-up dropped; reconnect'); return; }
       // -1 is queued, not lost: Bun delivers it. The keys left wait for the next drain.

@@ -78,8 +78,8 @@ export class ThreadRecovery {
         source: 'startup', event: 'startup.turns-recovered', data: { total: stuck.length, ...counts },
       });
     }
-    for (const thread of this.core.journal.listThreadsWithStatus(['queued', 'running', 'waiting'])) {
-      if (!waiting.has(thread.id)) {
+    for (const thread of this.core.journal.listThreads()) {
+      if (['queued', 'running', 'waiting'].includes(thread.status) && !waiting.has(thread.id)) {
         saveThread(this.core, { ...thread, status: 'idle' }, 'thread.finished');
       }
     }
@@ -120,7 +120,7 @@ export class ThreadRecovery {
   /** A turn the previous core was handing over when it was killed: stopped, with no error part. */
   private closeHandedOver(turn: Turn): void {
     const threadId = turn.threadId;
-    for (const message of this.core.journal.walkTurnMessages(threadId, turn.id, { blobs: false })) {
+    for (const message of this.core.journal.walkTurnMessages(threadId, turn.id)) {
       if (message.state !== 'streaming') continue;
       this.core.journal.append(
         { type: 'message.completed', threadId, version: 1, payload: { messageId: message.id, state: 'complete' } },
@@ -148,7 +148,7 @@ export class ThreadRecovery {
       // blinking on a message nobody will ever write to again is the visible half
       // of this bug.
       // Through the turn index: the rest of the thread, images included, is never parsed.
-      const streaming = Array.from(this.core.journal.walkTurnMessages(threadId, turn.id, { blobs: false }))
+      const streaming = Array.from(this.core.journal.walkTurnMessages(threadId, turn.id))
         .filter((message) => message.state === 'streaming');
       const carrier = streaming.at(-1) ?? this.openRecoveryMessage(turn);
       const index = carrier.parts.length;

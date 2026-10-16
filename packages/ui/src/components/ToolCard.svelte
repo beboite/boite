@@ -8,7 +8,7 @@
   import { familyOf, liveLabel, runSummary, toolLine, type ToolPart } from '../lib/tool-groups';
   import { describeTool, fileName } from '../lib/tool-summary';
   import { toolErrorPreview } from '../lib/tool-error';
-  import { diffCountsOf } from '../lib/diff';
+  import { diffCounts, diffRows } from '../lib/diff';
   import DiffView from './DiffView.svelte';
   import DocumentView from './DocumentView.svelte';
   import { chatPrefs } from '../lib/chat-prefs.svelte';
@@ -113,13 +113,13 @@
     // A cut input would spell out a cut change.
     if (attached.length > 0 || streaming || failed || inputDeferred) return attached;
     const change = describeTool(name, input).change;
-    return change ? [change] : [];
+    return change ? [{ kind: 'diff', ...change }] : [];
   });
   let others = $derived(documents.filter((doc) => doc.kind !== 'diff'));
   let compact = $derived(!nested && documents.length === 0 && diffs.length === 0);
   let label = $derived(streaming ? liveLabel(part) : compact ? status === 'running' ? liveLabel(part) : runSummary([part]) : line.text);
   let counts = $derived(documentsDeferred ? { added: 0, removed: 0 } : diffs.reduce((sum, doc) => {
-    const one = diffCountsOf(doc);
+    const one = diffCounts(diffRows(doc.oldText, doc.newText));
     return { added: sum.added + one.added, removed: sum.removed + one.removed };
   }, { added: 0, removed: 0 }));
   /**
@@ -213,7 +213,7 @@
             {/if}
             <div class="diffs">
               {#each diffs as doc, index (index)}
-                <div data-testid="tool-document" data-kind="diff"><DiffView path={doc.path} oldText={doc.oldText} newText={doc.newText} {doc} {headless} /></div>
+                <div data-testid="tool-document" data-kind="diff"><DiffView path={doc.path} oldText={doc.oldText} newText={doc.newText} {headless} /></div>
               {/each}
             </div>
             {#if others.length > 0}

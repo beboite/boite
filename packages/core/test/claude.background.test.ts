@@ -291,47 +291,6 @@ describe('claude driver: questions and background work', () => {
     harness.core.settings.set({ warmProcessMinutes: 0 });
   });
 
-  test('a prompt the CLI folds into the run a monitor event started ends with that run, stopped tasks and all', async () => {
-    const client = await harness.connect();
-    const threadId = await claudeThread(client);
-    const sessionId = 'sess-bg-folded';
-    harness.core.settings.set({ warmProcessMinutes: 5 });
-    scripted((fake) => {
-      fake.emit(init(sessionId));
-      fake.emit(sdk({ type: 'system', subtype: 'task_started', session_id: sessionId, task_id: 'mon-pr', description: 'watch PR', task_type: 'monitor' }));
-      fake.emit(sdk({ type: 'system', subtype: 'background_tasks_changed', session_id: sessionId, tasks: [{ task_id: 'mon-pr', task_type: 'monitor', description: 'watch PR' }] }));
-      fake.emit(assistant(sessionId, [{ type: 'text', text: 'watching' }]));
-      fake.emit(success(sessionId));
-    });
-    expect(await runTurn(client, threadId, 'first')).toBe('done');
-    // A monitor event starts a run of the CLI's own; the core hears of it as
-    // the next turn comes in.
-    const fake = queries[0]!;
-    const threads = harness.core.threads.deferred;
-    const wake = threads.wake.bind(threads);
-    const woken = Promise.withResolvers<void>();
-    threads.wake = () => woken.resolve();
-    fake.emit(init(sessionId));
-    fake.emit(assistant(sessionId, [{ type: 'tool_use', id: 'toolu_gh', name: 'Bash', input: { command: 'gh pr checks' } }]));
-    await woken.promise;
-    threads.wake = wake;
-    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
-    await client.call('turns.start', { threadId, prompt: 'answer in json' });
-    await waitFor(() => calls[0]?.prompts.length === 2);
-    // The CLI takes the prompt between tool rounds, stops its monitor and
-    // answers: one result, which names the prompt it folded in.
-    fake.emit(toolResult(sessionId, 'toolu_gh', 'pending'));
-    fake.emit(assistant(sessionId, [{ type: 'tool_use', id: 'toolu_stop', name: 'TaskStop', input: { task_id: 'mon-pr' } }]));
-    fake.emit(sdk({ type: 'system', subtype: 'task_notification', session_id: sessionId, task_id: 'mon-pr', status: 'stopped', output_file: '', summary: 'stopped' }));
-    fake.emit(sdk({ type: 'system', subtype: 'background_tasks_changed', session_id: sessionId, tasks: [] }));
-    fake.emit(toolResult(sessionId, 'toolu_stop', 'Successfully stopped task: mon-pr'));
-    fake.emit(assistant(sessionId, [{ type: 'text', text: '{"status":"pending"}' }]));
-    fake.emit(sdk({ ...(success(sessionId) as object), user_message_uuid: calls[0]!.ids[1], user_message_uuids: [calls[0]!.ids[1]] }));
-    expect((await finished).status).toBe('done');
-    expect((await client.call('threads.get', { threadId })).status).not.toBe('running');
-    harness.core.settings.set({ warmProcessMinutes: 0 });
-  });
-
   test('Stop on an idle thread ends the work it still runs in the background', async () => {
     const client = await harness.connect();
     const threadId = await claudeThread(client);

@@ -59,7 +59,7 @@ export class ThreadTitles {
   /** Recover persisted refinement decisions after the core has restored its accounts and turns. */
   recover(): void {
     if (this.abort.signal.aborted || this.core.journal.isClosed()) return;
-    for (const thread of this.core.journal.listThreadsWithTitleState()) {
+    for (const thread of this.core.journal.listThreads()) {
       if (thread.titleState?.needsRefinement) this.autoRefine(thread.id);
     }
   }

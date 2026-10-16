@@ -299,7 +299,7 @@ export class AgentRuntime {
       const work = this.r.get('work', run.workId);
       if (work.runId !== run.id || work.status !== 'running') return;
       if (turn.status !== 'done') { this.fail(work, turn.error ?? 'Execution stopped.', turn.status === 'stopped' ? 'paused' : 'error'); return; }
-      const answer = Array.from(this.core.journal.walkTurnMessages(turn.threadId, turn.id, { blobs: false })).filter(m => m.role === 'assistant');
+      const answer = Array.from(this.core.journal.walkTurnMessages(turn.threadId, turn.id)).filter(m => m.role === 'assistant');
       const result = answer.flatMap(m => m.parts.flatMap(p => p.type === 'text' ? [p.text] : [])).join('\n').slice(0, 32000);
       // What it attached with boite attach rides with its answer, read from its own thread.
       const files: AgentMessageFile[] = answer.flatMap(m => m.parts.flatMap(part => part.type === 'artifact' ? [{ threadId: turn.threadId, messageId: m.id, part }] : [])).slice(0, REPLY_FILES);

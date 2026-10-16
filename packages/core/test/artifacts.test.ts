@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { writeFileSync, rmSync, openSync, ftruncateSync, closeSync, readdirSync, utimesSync, mkdirSync } from 'node:fs';
+import { writeFileSync, rmSync, openSync, ftruncateSync, closeSync, readdirSync, utimesSync } from 'node:fs';
 import { join } from 'node:path';
 import { AGENT_ENV, ARTIFACT_MAX_BYTES, FILE_TICKET_TTL_MS } from '@boite/contracts';
 import { Journal } from '../src/journal.ts';
@@ -119,47 +119,13 @@ test('large snapshots stay out of JSON, seek over HTTP, renew, survive restart a
   const abandoned = join(harness.dataDir, 'artifacts', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.partial');
   writeFileSync(abandoned, 'incomplete');
   utimesSync(abandoned, 1, 1);
-  // A view's gzipped copy goes with its snapshot; one whose snapshot nobody references goes too.
-  writeFileSync(join(harness.dataDir, 'artifacts', `${part.id}.gz`), 'copy');
-  writeFileSync(join(harness.dataDir, 'artifacts', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb.gz'), 'orphan');
   // Retention keeps a snapshot still referenced by a fork, even after its original message is gone.
   const clone = { ...sent, id: 'msg_fork_fixture', threadId: other.threadId };
   harness.core.journal.putMessage(clone);
   harness.core.journal.db.query('DELETE FROM messages WHERE id = ?').run(sent.id);
   await pruneArtifactSnapshots(harness.core, Date.now() + 2 * 86_400_000);
-  expect(readdirSync(join(harness.dataDir, 'artifacts')).sort()).toEqual([part.id, `${part.id}.gz`]);
+  expect(readdirSync(join(harness.dataDir, 'artifacts'))).toEqual([part.id]);
   harness.core.journal.db.query('DELETE FROM messages WHERE id = ?').run(clone.id);
   await pruneArtifactSnapshots(harness.core, Date.now() + 2 * 86_400_000);
   expect(readdirSync(join(harness.dataDir, 'artifacts'))).toEqual([]);
-});
-
-test('a journal write during the reference scan leads to a rescan, not to a pass that deletes nothing', async () => {
-  const directory = join(harness.dataDir, 'artifacts');
-  mkdirSync(directory, { recursive: true });
-  const orphan = join(directory, 'cccccccc-cccc-cccc-cccc-cccccccccccc');
-  writeFileSync(orphan, 'nobody references this');
-  const journal = harness.core.journal;
-  const query = journal.db.query.bind(journal.db);
-  // Every check of the write counter after a scan sees a turn persisting its stream first.
-  let busy = 0, checks = 0;
-  journal.db.query = ((sql: string) => {
-    if (sql.includes('total_changes') && (checks += 1) % 2 === 0 && busy > 0) {
-      busy -= 1;
-      query('UPDATE threads SET title = title WHERE id = ?').run(threadId);
-    }
-    return query(sql);
-  }) as typeof journal.db.query;
-  const later = Date.now() + 2 * 86_400_000;
-  try {
-    // Written over during the first scan only: the rescan deletes it in the same pass.
-    busy = 1;
-    const done = await pruneArtifactSnapshots(harness.core, later);
-    expect(readdirSync(directory)).not.toContain('cccccccc-cccc-cccc-cccc-cccccccccccc');
-    expect(done).toBe(true);
-    // Written over during both scans: nothing goes, and the pass says it left work for a retry.
-    writeFileSync(orphan, 'nobody references this');
-    busy = 2; checks = 0;
-    expect(await pruneArtifactSnapshots(harness.core, later)).toBe(false);
-    expect(readdirSync(directory)).toContain('cccccccc-cccc-cccc-cccc-cccccccccccc');
-  } finally { journal.db.query = query; }
 });

@@ -162,8 +162,8 @@ export class FakeQuery {
 }
 
 export const queries: FakeQuery[] = [];
-/** What the driver handed the SDK, query by query: the options, every prompt it pushed and that prompt's uuid. */
-export const calls: { options: Options; prompts: string[]; ids: (string | undefined)[] }[] = [];
+/** What the driver handed the SDK, query by query: the options and every prompt it pushed. */
+export const calls: { options: Options; prompts: string[] }[] = [];
 
 /**
  * `script` runs when the driver opens a query, `reply` on every user message it
@@ -177,10 +177,10 @@ export function scripted(
   calls.length = 0;
   const query: QueryFn = ({ prompt, options }) => {
     const fake = new FakeQuery();
-    const call = { options, prompts: [] as string[], ids: [] as (string | undefined)[] };
+    const call = { options, prompts: [] as string[] };
     queries.push(fake);
     calls.push(call);
-    void readPrompts(prompt, call, fake, reply);
+    void readPrompts(prompt, call.prompts, fake, reply);
     script(fake, options);
     return fake as unknown as Query;
   };
@@ -190,16 +190,15 @@ export function scripted(
 /** The CLI exits when its input closes, so the fake ends with the prompt stream. */
 async function readPrompts(
   stream: AsyncIterable<SDKUserMessage>,
-  into: { prompts: string[]; ids: (string | undefined)[] },
+  into: string[],
   fake: FakeQuery,
   reply?: (fake: FakeQuery, prompt: string, index: number) => void,
 ): Promise<void> {
   for await (const message of stream) {
     const content = message.message.content;
     const text = typeof content === 'string' ? content : JSON.stringify(content);
-    reply?.(fake, text, into.prompts.length);
-    into.prompts.push(text);
-    into.ids.push(message.uuid);
+    reply?.(fake, text, into.length);
+    into.push(text);
   }
   fake.end();
 }

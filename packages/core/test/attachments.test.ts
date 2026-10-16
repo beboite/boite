@@ -5,7 +5,7 @@ import type { Attachment, FileAttachment } from '@boite/contracts';
 import { ATTACHMENT_MAX_BYTES, RpcErrorCode } from '@boite/contracts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 import { checkAttachments } from '../src/threads/inputs.ts';
-import { FileReferences, fileReference, prepareAttachments } from '../src/attachments.ts';
+import { fileReference, prepareAttachments } from '../src/attachments.ts';
 import { continuationInput } from '../src/continuation.ts';
 
 let harness: TestCore;
@@ -50,16 +50,6 @@ test('re-uploading a file does not reuse an agent-modified copy', async () => {
   const next = JSON.parse(fileReference(harness.dataDir, file));
   expect(readFileSync(next.path).toString()).toBe('%PDF-test');
   expect(readFileSync(first.path).toString()).toBe('changed by an agent');
-  // A thread's remembered line is dropped once the copy it names changes.
-  const references = new FileReferences(harness.dataDir);
-  const part = { type: 'file' as const, name: 'notes.txt', mimeType: 'text/plain', data: Buffer.from('notes').toString('base64') };
-  const place = { messageId: 'msg', partIndex: 0 };
-  const line = references.of('thr', part, place);
-  expect(references.of('thr', part, place)).toBe(line);
-  writeFileSync(JSON.parse(line).path, 'edited');
-  const fresh = JSON.parse(references.of('thr', part, place));
-  expect(fresh.path).not.toBe(JSON.parse(line).path);
-  expect(readFileSync(fresh.path).toString()).toBe('notes');
 });
 
 test('only images depend on provider image support; malformed and oversized files are refused', () => {

@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { MAX_EDITS, diffCounts, diffCountsOf, diffRows, diffRowsOf, splitRows } from './diff';
+import { MAX_EDITS, diffCounts, diffRows, splitRows } from './diff';
 
 test('a changed middle line is one remove and one add between the context lines', () => {
   const rows = diffRows('one\ntwo\nthree\n', 'one\nTWO\nthree\n');
@@ -149,16 +149,4 @@ test('side by side faces each removal run with the additions after it', () => {
   const far = splitRows(diffRows(Array.from({ length: 20 }, (_, i) => `l${i}`).join('\n'), Array.from({ length: 20 }, (_, i) => i === 10 ? 'x' : `l${i}`).join('\n')));
   expect(far[0]).toEqual({ kind: 'gap', hidden: 7 });
   expect(far.at(-1)).toEqual({ kind: 'gap', hidden: 6 });
-});
-
-test('a document is diffed once per whitespace mode, and again only when its texts change', () => {
-  const doc = { oldText: 'if (a) {\n  run();\n}\n', newText: 'if (a) {\n    run();\n}\n' };
-  const plain = diffRowsOf(doc);
-  expect(plain).toEqual(diffRows(doc.oldText, doc.newText));
-  expect(diffRowsOf(doc)).toBe(plain);
-  expect(diffRowsOf(doc, true)).toEqual([]);
-  expect(diffCountsOf(doc)).toEqual({ added: 1, removed: 1 });
-  doc.newText = 'if (a) {\n  run();\n  stop();\n}\n';
-  expect(diffRowsOf(doc)).not.toBe(plain);
-  expect(diffCountsOf(doc)).toEqual({ added: 1, removed: 0 });
 });

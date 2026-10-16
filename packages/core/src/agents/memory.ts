@@ -172,7 +172,7 @@ export class MemoryKeeper {
 
   /** The whole answer of the pass's turn: `delegation.result` cuts at 4,000 characters, a memory file runs longer. */
   private answer(turn: Turn): string {
-    return Array.from(this.core.journal.walkTurnMessages(turn.threadId, turn.id, { blobs: false })).filter(m => m.role === 'assistant')
+    return Array.from(this.core.journal.walkTurnMessages(turn.threadId, turn.id)).filter(m => m.role === 'assistant')
       .flatMap(m => m.parts.flatMap(p => p.type === 'text' ? [p.text] : [])).join('\n');
   }
 

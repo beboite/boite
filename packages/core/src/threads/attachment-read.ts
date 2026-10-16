@@ -6,11 +6,6 @@ import { invalidParams, notFound } from '../errors';
 export async function readMessageAttachment(core: Core, params: RpcParams<'messages.attachment'>): Promise<{ data: string; mimeType?: string }> {
   core.threads.require(params.threadId);
   if (!Number.isSafeInteger(params.partIndex) || params.partIndex < 0) throw invalidParams('messages.attachment.partIndex: expected a nonnegative integer', { field: 'partIndex', expected: 'a nonnegative integer' });
-  // A kept copy answers without hydrating the original, often megabytes of base64.
-  if (params.display === true) {
-    const kept = core.media.keptDisplay(params.threadId, params.messageId, params.partIndex);
-    if (kept !== null) return kept;
-  }
   const found = core.journal.messagePart(params.messageId, params.partIndex);
   if (!found || found.message.threadId !== params.threadId) throw notFound(`message ${params.messageId} is not a message of thread ${params.threadId}`, { threadId: params.threadId, messageId: params.messageId });
   const part = found.part;

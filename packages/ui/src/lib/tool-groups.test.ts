@@ -1,7 +1,6 @@
 import { expect, test } from 'vitest';
 import type { MessagePart } from '@boite/contracts';
-import { MessageRuns } from './memory-timeline';
-import { activityShown, agentSummary, liveLabel, partRuns, programOf, runSpan, runSummary, thinkingShown, ThoughtTitleScan, thoughtTitle, toolLine, unwrapCommand, type ToolPart } from './tool-groups';
+import { activityShown, agentSummary, liveLabel, partRuns, programOf, runSpan, runSummary, thinkingShown, thoughtTitle, toolLine, unwrapCommand, type ToolPart } from './tool-groups';
 
 function tool(name: string, input: unknown, extra: Partial<ToolPart> = {}): ToolPart {
   return { type: 'tool', toolId: `${name}-${JSON.stringify(input)}`, name, input, output: 'ok', status: 'done', ...extra };
@@ -64,51 +63,6 @@ test('a thought reads as its latest heading, else the first sentence of where it
   expect(thoughtTitle('  \n\n ')).toBeNull();
 });
 
-/** thoughtTitle as it read the whole text on every call, the rule the scan must keep. */
-function wholeTitle(text: string): string | null {
-  const heading = [...text.matchAll(/^[\t ]*\*\*([^*\r\n]+)\*\*[\t ]*\r?$/gm)].at(-1)?.[1]?.trim();
-  if (heading) return heading;
-  const paragraph = text.split(/\n[\t ]*\n/).map((block) => block.trim()).filter(Boolean).at(-1);
-  if (!paragraph) return null;
-  const line = (paragraph.split('\n')[0] ?? '').replace(/\*\*|__|`/g, '').replace(/^[#>*\-\s]+/, '').trim();
-  const end = line.search(/[.!?](\s|$)/);
-  const sentence = (end === -1 ? line : line.slice(0, end + 1)).replace(/\.$/, '').trim();
-  return sentence || null;
-}
-
-test('a thought read one character at a time has the title of its whole text at every length', () => {
-  const texts = [
-    '**Inspecting the driver**\n\nThe session reads options.\n\n**Checking the tests**\n\nThere are three.',
-    'Testing N=1 gives one prime, so that fails. Trying N=2 next.',
-    'First idea.\n\nThe rows live in data.txt and rules.md hold the rule? Probably',
-    '- Reading `turn.ts` for the **thinking** path',
-    '  \n\n ',
-    '**A**\r\n\r\nWords.\r\n**  **\r\nAfter the blank heading',
-    'One.\n\n\n\nTwo\n \n\t\nThree\n\r\nstill three\n\n',
-    'x\r**Under a carriage return**\nthen\u2028**Past a line separator**\u2029tail'
-  ];
-  // Short random texts over the characters every rule turns on, from a fixed seed.
-  let seed = 7;
-  const alphabet = ['*', '*', '\n', '\n', '\r', ' ', '\t', 'a', '.', '#', '-', '`', '\u2028', '\u00a0'];
-  for (let count = 0; count < 300; count += 1) {
-    let text = '';
-    for (let length = 0; length < 40; length += 1) {
-      seed = (seed * 1103515245 + 12345) % 2147483648;
-      text += alphabet[seed % alphabet.length];
-    }
-    texts.push(text);
-  }
-  for (const text of texts) {
-    const scan = new ThoughtTitleScan();
-    for (let length = 0; length <= text.length; length += 1) {
-      const prefix = text.slice(0, length);
-      expect(scan.title(prefix), JSON.stringify(prefix)).toBe(wholeTitle(prefix));
-    }
-    // A text that does not extend the last one starts over.
-    expect(scan.title('Another thought.')).toBe('Another thought');
-  }
-});
-
 test('a call reads as its command, or as a sentence in the tense it is in', () => {
   expect(toolLine(tool('Bash', { command: `pwsh -Command 'git status'` }))).toMatchObject({ text: 'git status', mono: true });
   expect(toolLine(tool('Read', { file_path: 'packages/ui/src/app.css' }))).toMatchObject({ text: 'Read app.css', mono: false, title: 'packages/ui/src/app.css' });
@@ -135,23 +89,6 @@ test('calls fold into runs that text, a question or a produced document breaks',
     { kind: 'activity', indices: [6] },
     { kind: 'activity', indices: [7] }
   ]);
-});
-
-test('runs never read the streaming last text, and keep their objects while parts arrive', () => {
-  const streaming = { type: 'text' as const, get text(): string { throw new Error('the last text was read'); } };
-  const parts: MessagePart[] = [tool('Read', { file_path: 'a' }), tool('Read', { file_path: 'b' }), streaming];
-  expect(partRuns(parts)).toEqual([{ kind: 'activity', indices: [0, 1] }, { kind: 'part', index: 2 }]);
-
-  const list = new MessageRuns();
-  const settled: MessagePart[] = [tool('Read', { file_path: 'a' }), { type: 'text', text: 'Found it.' }, tool('Read', { file_path: 'b' })];
-  const first = list.build(settled, []);
-  expect(list.build(settled, [])).toBe(first);
-  settled.push(tool('Read', { file_path: 'c' }));
-  const grown = list.build(settled, []);
-  expect(grown).toEqual([{ kind: 'activity', indices: [0] }, { kind: 'part', index: 1 }, { kind: 'activity', indices: [2, 3] }]);
-  expect(grown[0]).toBe(first[0]);
-  expect(grown[1]).toBe(first[1]);
-  expect(grown[2]).not.toBe(first[2]);
 });
 
 test('successful file changes stand alone while failed attempts stay in their run', () => {

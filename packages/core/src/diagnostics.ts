@@ -141,7 +141,7 @@ export class Diagnostics {
     const keep = (record: CoreLogRecord): boolean => logMatches(record, { minLevel: query.minLevel, origin: query.origin, since: query.since, search: query.search })
       && (family === null || (record.threadId === undefined ? query.scope !== 'thread' : family.has(record.threadId)));
     const anonymizer = this.anonymizer();
-    return (await this.core.logs.select(keep, query.limit, query.since)).map(record => anonymizer.record(record));
+    return (await this.core.logs.select(keep, query.limit)).map(record => anonymizer.record(record));
   }
 
   async summary(params: { threadId?: string; since?: number }, connection?: Connection): Promise<DiagnosticSummary> {
@@ -150,7 +150,7 @@ export class Diagnostics {
     const since = typeof params.since === 'number' && Number.isFinite(params.since) ? params.since : Date.now() - DAY_MS;
     const family = this.reach(params.threadId);
     const anonymizer = this.anonymizer();
-    const records = (await this.core.logs.select(record => record.at >= since && within(record, family), EXPORT_LIMIT, since)).map(record => anonymizer.record(record));
+    const records = (await this.core.logs.select(record => record.at >= since && within(record, family), EXPORT_LIMIT)).map(record => anonymizer.record(record));
     return this.summarize(records, since, anonymizer, family);
   }
 
@@ -219,7 +219,7 @@ export class Diagnostics {
     // An agent exports its own family whatever it names; the owner may focus on one.
     const family = agent ? this.reach(params.threadId) : params.focusThreadId ? this.family(params.focusThreadId, this.core.journal.listThreads()) : null;
     const anonymizer = this.anonymizer();
-    const records = (await this.core.logs.select(record => record.at >= since && within(record, family), limit, since))
+    const records = (await this.core.logs.select(record => record.at >= since && within(record, family), limit))
       .map(record => anonymizer.record(record));
     const summary = await this.summarize(records, since, anonymizer, family);
     // The raw console of the core can name any conversation: the owner's export only.

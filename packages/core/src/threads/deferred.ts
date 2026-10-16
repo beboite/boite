@@ -42,7 +42,7 @@ export class DeferredInput {
     this.defer(threadId, text);
     const handle = this.threads.runner.handles.get(threadId);
     if (handle?.steer && !this.threads.runner.steering.has(threadId)) {
-      const turnId = this.core.journal.runningTurn(threadId)?.id;
+      const turnId = this.core.journal.listTurns(threadId).findLast(turn => turn.status === 'running')?.id;
       this.threads.runner.steering.add(threadId);
       let recorded = false;
       const accepted = () => {
@@ -135,7 +135,7 @@ export class DeferredInput {
     if (this.threads.runner.steering.has(threadId)) return null;
     const held = this.deferredAnswers.get(threadId);
     if (held === undefined) return null;
-    const turnId = this.core.journal.runningTurn(threadId)?.id;
+    const turnId = this.core.journal.listTurns(threadId).findLast(turn => turn.status === 'running')?.id;
     if (turnId) this.threads.runner.answerAfter.set(turnId, this.recordAnswer(threadId, turnId, held.join('\n\n')));
     this.deferredAnswers.delete(threadId);
     this.changed(threadId);

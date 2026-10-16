@@ -311,8 +311,9 @@ export class ThreadCards {
 
   /** An asynchronous card drawn in the running turn, or under the last one, in a message of its own. */
   drawAsync(thread: ThreadSummary, ask: QuestionAsk): { questionId: RequestId } {
-    const turn = this.core.journal.runningTurn(thread.id) ?? this.core.journal.lastTurn(thread.id);
-    if (turn === null) throw refused('the thread has no turn to ask in yet', { threadId: thread.id });
+    const turns = this.core.journal.listTurns(thread.id);
+    const turn = turns.find(t => t.status === 'running') ?? turns.at(-1);
+    if (turn === undefined) throw refused('the thread has no turn to ask in yet', { threadId: thread.id });
     const ticket = this.askQuestion(thread, turn, ask);
     const part: Extract<MessagePart, { type: 'question' }> = { type: 'question', questionId: ticket.questionId, ...ask, answer: null };
     const message: Message = { id: newId('msg_'), threadId: thread.id, turnId: turn.id, role: 'assistant', parts: [part], state: 'complete', createdAt: Date.now() };
@@ -413,7 +414,7 @@ export class ThreadCards {
     let restored = 0;
     for (const request of this.core.journal.openAsyncQuestions()) {
       if (this.questions.has(request.id) || this.core.journal.getThread(request.threadId)?.archived !== false) continue;
-      for (const message of this.core.journal.walkTurnMessages(request.threadId, request.turnId, { blobs: false })) {
+      for (const message of this.core.journal.walkTurnMessages(request.threadId, request.turnId)) {
         const partIndex = message.parts.findIndex(part => part.type === 'question' && part.questionId === request.id && (part.answer ?? null) === null);
         if (partIndex < 0) continue;
         const part = message.parts[partIndex] as Extract<MessagePart, { type: 'question' }>;

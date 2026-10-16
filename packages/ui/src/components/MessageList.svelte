@@ -1,12 +1,12 @@
 <script lang="ts">
   import { onDestroy, onMount, tick, untrack } from 'svelte';
   import { ArrowDown } from '@lucide/svelte';
-  import type { Message, Turn } from '@boite/contracts';
+  import type { Message } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import MessageTurnSummary from './MessageTurnSummary.svelte';
   import TurnFiles from './TurnFilesLoader.svelte';
-  import { TurnFileCache, answersByTurn, showsTurnFiles, type TurnFilesData } from '../lib/turn-files';
+  import { TurnFileCache, visibleTurnFiles, type TurnFilesData } from '../lib/turn-files';
   import { chatPrefs } from '../lib/chat-prefs.svelte';
   import MessageOutline from './MessageOutline.svelte';
   import AgentMessageGroup from './AgentMessageGroup.svelte';
@@ -707,17 +707,16 @@
     for (const message of timeline) result.set(message.turnId, message.id);
     return result;
   });
-  /** Each turn's answers, rebuilt when a message comes or goes, never on a part or a delta. */
-  const answers = $derived(answersByTurn(messages));
+  /** Visible turn ends, kept as a stable string so scrolling within the same turns does not reread files. */
+  const closingTurns = $derived(rendered.filter(row => row.last && lastInTurn.get(row.message.turnId) === row.message.id).map(row => row.message.turnId).join('\0'));
+  /** One file summary at the turn's end, updated during work when changes are grouped. */
   const fileCache = new TurnFileCache();
-  /** A turn end's file summary, derived per closing row: a part on the running turn rereads no finished turn. */
-  function filesOf(turn: Turn): TurnFilesData | null {
+  const filesByTurn = $derived.by(() => {
     const thread = store.openThread;
-    if (!thread || thread.id !== threadId || !showsTurnFiles(turn, chatPrefs.groupChanges)) return null;
+    if (!thread || thread.id !== threadId || closingTurns === '') return new Map<string, TurnFilesData>();
     windowStats.turnFiles += 1;
-    const data = fileCache.read(turn.id, answers.get(turn.id) ?? [], thread.cwd, turn.status === 'running');
-    return data.files.length ? data : null;
-  }
+    return visibleTurnFiles(messages, thread.turns, new Set(closingTurns.split('\0')), thread.cwd, chatPrefs.groupChanges, fileCache);
+  });
 
   /**
    * Edit, retry and fork go through the core's rewind and fork, which a
@@ -794,9 +793,9 @@
             <AssistantMessage {store} {threadId} {message} from={row.from} to={row.to} {signedOut} showModel={row.first && firstAssistantInTurn.get(message.turnId) === message.id}
               latestInTurn={lastInTurn.get(message.turnId) === message.id} memoryEvents={memoryPlacement.inline.get(message.id) ?? []} views={views.get(message.turnId)} />
           {/if}
-          {#if turn && closes}
-            {@const files = filesOf(turn)}
-            {#if files}<TurnFiles {store} {...files} loadDiffs={() => Promise.all(files.deferred.map(source => store.loadToolOutput(threadId, source.messageId, source.toolId))).then(() => {})} />{/if}
+          {#if turn && closes && filesByTurn.has(turn.id)}
+            <TurnFiles {store} {...filesByTurn.get(turn.id)!}
+              loadDiffs={() => Promise.all(filesByTurn.get(turn.id)!.deferred.map(source => store.loadToolOutput(threadId, source.messageId, source.toolId))).then(() => {})} />
           {/if}
           {#if turn && closes}
             <MessageTurnSummary {store} {threadId} {turn} turns={shownTurns} message={source ?? message} {messages} pointed={pointed === turn.id}>

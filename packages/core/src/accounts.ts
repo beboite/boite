@@ -1,9 +1,9 @@
 import { chmodSync, existsSync, lstatSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { stripVTControlCharacters } from 'node:util';
 import { dirname, join, resolve } from 'node:path';
 import type { Account, AccountId, ProviderDescriptor, ProviderId, RpcEvents, TerminalState } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { newId } from './ids.ts';
-import { stripAnsi } from './ansi.ts';
 import { invalidParams, messageOf, notFound, refused, unavailable } from './errors.ts';
 import { runAcpLogin, type AcpLoginRun } from './drivers/acp/login.ts';
 import { probeThreadId } from './providers/probe.ts';
@@ -720,7 +720,7 @@ export class AccountStore {
 
   /** One line of a login's output, whichever form it takes. */
   private onLoginLine(accountId: AccountId, line: string): void {
-    line = stripAnsi(line).trim();
+    line = stripVTControlCharacters(line).trim();
     const run = this.logins.get(accountId);
     if (run === undefined || line.length === 0) return;
     run.lastLine = line;
@@ -834,11 +834,8 @@ export function registerAccountMethods(core: Core): void {
   core.router.register('accounts.check', (params) => params.refresh === true ? core.accounts.verify(params.accountId) : core.accounts.check(params.accountId));
   core.router.register('accounts.login', (params) => core.accounts.login(params.accountId));
   core.router.register('accounts.logins', () => core.accounts.loginStates());
-  core.router.register('accounts.loginTerminal', (params, ctx) => {
-    const state = core.accounts.loginTerminal(params.accountId, params.cols, params.rows);
-    core.terminals.watch(state.id, ctx.connection.id);
-    return state;
-  });
+  core.router.register('accounts.loginTerminal', (params) =>
+    core.accounts.loginTerminal(params.accountId, params.cols, params.rows));
   core.router.register('accounts.loginCancel', (params) => core.accounts.loginCancel(params.accountId));
   core.router.register('accounts.loginInput', (params) => {
     if (typeof params.text !== 'string') throw invalidParams('a login input needs text', { field: 'text' });

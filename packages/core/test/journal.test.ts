@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import type { Message, Turn } from '@boite/contracts';
+import type { Message } from '@boite/contracts';
 import { MESSAGE_PAGE_MAX_BYTES, RPC_MAX_FRAME_BYTES } from '@boite/contracts';
 import { Journal } from '../src/journal.ts';
 import { JournalTooNewError, SCHEMA_VERSION } from '../src/journal/schema.ts';
@@ -507,46 +507,4 @@ describe('journal', () => {
     expect(journal.getThread('thr_pending')?.branchNamingPending).toBe(true);
     expect(journal.listThreads()[0]?.branchNamingPending).toBe(true);
   });
-});
-
-test('single-turn reads and the session sum pick what a scan of every turn picked', () => {
-  const usage = (cost: number | null, tokens: number): NonNullable<Turn['usage']> => ({ inputTokens: tokens, outputTokens: 1, cacheReadTokens: 2, cacheWriteTokens: 3, costUsdEquivalent: cost });
-  const execution = (sessionGeneration: number | undefined, operation?: string) => ({
-    providerId: 'echo', accountId: 'acct', model: null, effort: null, permissionMode: 'default', sessionId: 'ses', selectionVersion: 0,
-    ...(sessionGeneration === undefined ? {} : { sessionGeneration }), ...(operation ? { operation } : {}),
-  }) as unknown as NonNullable<Turn['execution']>;
-  const rows: [Turn['status'], Turn['usage'], Turn['execution']][] = [
-    ['done', usage(0.1, 10), execution(1)],
-    ['running', null, execution(1)],
-    ['error', usage(null, 20), execution(1)],
-    ['done', usage(0.2, 30), execution(2)],
-    ['done', usage(0.4, 40), execution(undefined)],
-    ['done', usage(0.8, 50), undefined],
-    ['queued', null, execution(1, 'coordination')],
-    ['stopped', usage(1.6, 60), execution(1)],
-    ['queued', null, execution(1, 'coordination')],
-    ['queued', null, execution(1)],
-  ];
-  rows.forEach(([status, turnUsage, turnExecution], index) => journal.putTurn({
-    id: `trn_${index}`, threadId: 'thr_many', status, queuedAt: index, startedAt: index, finishedAt: null, usage: turnUsage, error: null,
-    ...(turnExecution ? { execution: turnExecution } : {}),
-  }));
-  journal.putTurn({ id: 'trn_other', threadId: 'thr_other', status: 'running', queuedAt: 0, startedAt: 0, finishedAt: null, usage: usage(5, 5), error: null, execution: execution(1) });
-  const all = journal.listTurns('thr_many');
-  expect(journal.runningTurn('thr_many')).toEqual(all.findLast(turn => turn.status === 'running')!);
-  expect(journal.lastTurn('thr_many')).toEqual(all.at(-1)!);
-  expect(journal.lastEndedTurn('thr_many')).toEqual(all.findLast(turn => turn.status !== 'queued' && turn.status !== 'running')!);
-  expect(journal.queuedTurn('thr_many', 'coordination')).toEqual(all.find(turn => turn.status === 'queued' && turn.execution?.operation === 'coordination')!);
-  expect([journal.runningTurn('thr_none'), journal.lastTurn('thr_none'), journal.queuedTurn('thr_other', 'coordination')]).toEqual([null, null, null]);
-  for (const [generation, except] of [[1, 'trn_7'], [1, ''], [2, ''], [0, '']] as const) {
-    const scanned = { costUsd: 0, tokens: 0 };
-    for (const turn of all) {
-      if (turn.id === except || turn.usage === null || turn.execution?.sessionGeneration !== generation) continue;
-      scanned.costUsd += turn.usage.costUsdEquivalent ?? 0;
-      scanned.tokens += turn.usage.inputTokens + turn.usage.outputTokens + turn.usage.cacheReadTokens + turn.usage.cacheWriteTokens;
-    }
-    const summed = journal.sessionUsage('thr_many', generation, except);
-    expect(summed.tokens).toBe(scanned.tokens);
-    expect(summed.costUsd).toBeCloseTo(scanned.costUsd, 12);
-  }
 });

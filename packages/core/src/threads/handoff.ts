@@ -231,7 +231,7 @@ export class RestartHandoff {
    */
   private resumePrompt(turn: Turn): string {
     const opening = turn.execution?.operation === 'resume'
-      ? Array.from(this.core.journal.walkTurnMessages(turn.threadId, turn.id, { blobs: false })).find(message => message.role === 'system') ?? null
+      ? Array.from(this.core.journal.walkTurnMessages(turn.threadId, turn.id)).find(message => message.role === 'system') ?? null
       : this.core.journal.lastUserMessage(turn.threadId, turn.id);
     const text = (opening?.parts ?? []).map(part => part.type === 'text' ? part.text : '').join('').trim();
     // A second restart over a resumed turn sends the same note, not a note about a note.

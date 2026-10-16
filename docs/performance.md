@@ -49,36 +49,13 @@ that reads screenshots back keeps each PNG as base64 in its tool output; one
 message held 33.5 MiB. Large values now live in `part_blobs`
 ([architecture](architecture.md)), so a streaming message rewrites only the
 parts that changed: 20 s of text on top of 93 stored screenshots spent 396 ms
-in writes instead of 3,838 ms. Between whole-row writes, a streaming message
-writes only its changed parts to `streaming_parts`: 60 s of text on a row of
-100 tool parts wrote 4.2 MiB of WAL instead of 95.7 MiB
-([results](../bench/results/2026-10-15-perf-journal.md)). WAL checkpoints run
-in a Worker instead of inside whichever commit crossed 1,000 pages, and the
-statement cache holds 128 statements instead of Bun's 20. `delegation.get` reads the messages that
+in writes instead of 3,838 ms. `delegation.get` reads the messages that
 `native_agent_messages` names instead of every part of the thread: 30 ms
 instead of 1,051 ms on a 115 MiB thread. Partial indexes on the events read
 back took the core's start on that journal from 1.9 s to 0.38 s once settled,
 and peak core RSS over the bench from 1,023 MiB to 370 MiB. The first start
 after the upgrade migrates once (7.9 s there), and the move of older inline
 values held the event loop for up to 2.1 s on its largest row.
-
-A fresh session (model switch, resume after an update) carries the opening
-12,000 and the latest 64,000 characters of the thread. `continuationInput`
-reads only the stored parts of the rest, without their `part_blobs` values,
-to count them, then reads whole the messages it keeps and the images it
-sends. Files keep their reference line per thread, so a later fresh session
-checks each copy with one `lstat` instead of hashing and reading it again.
-On 2026-10-15, `bench/continuation.ts` took 345 ms to 29 ms with 100 tool
-outputs of 1 MiB and 25 files of 1.1 MB, and 83 ms to 4.6 ms with 200 of
-200 KiB ([results](../bench/results/2026-10-15-perf-runtime.md)).
-
-Held turns cost one pass over the queue each time a turn ends anywhere. The
-scheduler keeps each queued turn's parent from enqueue and reads a team's
-setting once per pass, so the pass reads no thread row: on 2026-10-15
-`bench/queue-admission.ts` took one pass from 46 ms to 2.0 ms at 1,024 held
-turns. A team event looks for held workflow summaries only in a conversation
-the core knows has one, and the delegation tick neither parses result letters,
-which never expire, nor tries to deliver mail of a paused or disabled team.
 
 ## Concurrent agent stress
 
@@ -249,35 +226,17 @@ that frame's serialized UTF-8 size fits within 32 MiB. Events also obey the
 `threads.get` with `open` asked for `compactTools` or `compactToolParts`
 receives each finished tool call's `message.part` the way its pages carry it,
 so a call that ends with a 30 MB output or Write reaches it as a preview
-instead of closing it. With `compactFiles` or `compactImages`, the files and
-large pictures of a live `message.started` (a prompt, an artifact) and of a
-`message.part` are deferred the same way. A picture goes without its blur,
-which is queued for the next page. A remote window opened this way received
-4,273 bytes for a prompt with a 1 MiB picture, against 1,057,351 before
-(`bun bench/fanout.ts`, 2026-10-15). A broadcast serializes each event once
-per projection rather than once per socket: a 1 MiB tool output took 9.1 ms
-to emit to four local sockets, against 19.0 ms before. A backed-up socket
+instead of closing it. A backed-up socket
 closes with reconnectable 1013 after 10 seconds without draining, or before
 a frame would exceed the byte budget. Further sends are ignored and timers
 and pending parts are cleared. This closes only that client; the journal and
 other connections continue. Reconnecting clients load a fresh thread snapshot.
-The server's `backpressureLimit` is set to the same 32 MiB, so Bun never drops
-a frame (its default is 16 MiB) below the budget the code enforces.
-
-A relayed socket (`/group/relay/<core id>/rpc`) keeps the same budget: past
-32 MiB unread, a dropped send or 10 seconds without a drain, it closes with
-1013. It is deflated when its Host is not loopback, as a direct remote socket
-is. `terminal.output` goes only to the connections that attached that shell
-with `terminals.open` or `accounts.loginTerminal`; `terminal.exited` still
-reaches every owner window.
 
 When a socket backs up (Bun's `send` returns -1), subsequent frames stay queued
 within these limits except `message.delta`, which is dropped. Catch-up tracks
 at most 1,024 distinct parts and 16 MiB of UTF-8 keys before closing with 1013.
 Pacing flushes at 1,024 parts or 16 MiB of serialized held frames, preserving
-wire order without an additional transport queue. Text merged into a held
-delta counts as 6 bytes per UTF-16 unit until that bound could cross 16 MiB;
-only then is what is held serialized and counted exactly. On `drain` the core resends the text
+wire order without an additional transport queue. On `drain` the core resends the text
 parts those deltas belonged to, one `message.part` each, and nothing else: a
 finished tool output in the same message never goes out twice. Deltas the bus
 still holds are dispatched before that resend, so they fold into the part
@@ -369,9 +328,7 @@ when the core advertises `chunkedAnswers`.
   `messages.attachment` with `display` answers a WebP at quality 80, at most
   1,280 px on its longer side, made once on Bun's image worker and kept in
   `media_displays`. Six 1,541 to 2,467 KB PNG screenshots measured 51 to
-  130 KB this way on 2026-10-07, about 130 ms each to make. A kept copy is
-  read by message, part and thread before anything else, so it answers without
-  loading the original's base64. AVIF would be
+  130 KB this way on 2026-10-07, about 130 ms each to make. AVIF would be
   smaller, but Bun's Linux build cannot encode it. A GIF, a copy that would not
   be lighter and any other file come as they are. A click opens the original
   in the viewer, and a download or an edit also fetches the original
@@ -498,14 +455,6 @@ The UI build writes a `.br` and a `.gz` beside every text file of 1 KB or more
 never compresses anything itself. A browser only offers `br` over https, so a
 phone on the LAN gets the gzip.
 
-Every static answer outside `/assets/` carries an `ETag` and a `Last-Modified` of the variant sent,
-so revalidating the shell, `sw.js` or the manifest is a 304 without a body.
-Fonts and icons are fresh for a day: a phone on plain http has no service
-worker and would otherwise fetch the two default faces, 144 KB, on every load.
-A view is gzipped once when it is published and sent compressed to a client
-that reads gzip. The [2026-10-15 report](../bench/results/2026-10-15-perf-media.md)
-has the bytes before and after.
-
 The command palette, the project picker, the import dialog and the right panel
 are separate chunks. They load when first asked for, and all of them once the
 app has booted and the page is idle, so a PWA that goes offline later still has
@@ -602,12 +551,8 @@ port refusal, the compiled binary and graceful lock release.
 
 Activity restoration selects threads with saved activities. Coordination
 recovery selects active threads and threads with potentially pending letters.
-The core validates visible thread JSON once, where activity's own check ran,
-so both keep the original error order, archived-thread handling and recovery
-writes; each still validates when built on its own. Delegation reads child
-threads and pending roots, turn recovery the queued, running and waiting
-threads, and title recovery the threads with a title state, not every thread
-(`bench/journal-reads.ts`).
+Both validate visible thread JSON before recovery and retain the original
+error order, archived-thread handling and recovery writes.
 
 Claude and ACP join the other native drivers behind a lazy factory. Listing
 providers, capabilities or cached models does not load their protocol runtime.
@@ -619,12 +564,7 @@ process. `packages/core/test/lazy-driver.test.ts` covers these boundaries.
 runtime, is imported where it unzips. Evaluating it builds its Huffman tables,
 about 8 ms per core start measured on 2026-09-25, for code most starts never
 run. `packages/core/test/startup-imports.test.ts` fails if a static import
-brings it back. The same test keeps `node:util` and `node:dns` out of the
-static graph: terminal escapes are stripped by `packages/core/src/ansi.ts`, and
-the MagicDNS lookup imports its resolver when it runs. The recommended plugin
-list is parsed on the first plugins call. The compiled Linux server carries
-ESM bytecode like the desktop sidecar. Measurements:
-`bench/results/2026-10-15-perf-media.md`.
+brings it back.
 
 The core lists its providers twice before it listens (the registry loads, then
 the default accounts ask which ones are available), and again for every client
@@ -637,13 +577,7 @@ and forgets them all on a providers reload, an install or an agent update.
 ## Shell startup
 
 The shell spawns the core before it builds the WebView2 window, and polls for
-`core.json` every 10 ms instead of every 120 ms. `setup` starts the core as soon
-as its state exists, before the WebView version query and the second-launch
-listener; the `pre-setup` phase record times the process start to `setup`.
-
-On Windows the main page drops to WebView2's low memory level while the window
-waits in the tray, from a close or a login start, and returns to normal before
-it shows. Browser surfaces and a minimized window keep the normal level.
+`core.json` every 10 ms instead of every 120 ms.
 
 The window is built hidden. It appears once the page has painted and either the
 core answered or two seconds passed, so a fast start shows no empty frame and a
@@ -658,12 +592,7 @@ limits expensive work while streaming, typing and scrolling:
 - Window-wide scrims use `--color-scrim`; backdrop blur stays on bounded
   floating surfaces such as the composer, activity panel and notifications.
 - Endless animations use opacity or transforms, apart from the small repainting
-  boxes named in `render-cost.test.ts`; the running group's shimmer moves in 30
-  steps a sweep, so it repaints 30 times in 2.2 s instead of every frame. Outer
-  app containers avoid `:has()`.
-- A closed fold's body skips its content once the close transition has run
-  (`content-visibility: hidden`), so a group opened once no longer weighs on
-  every layout of its row.
+  boxes named in `render-cost.test.ts`. Outer app containers avoid `:has()`.
 - Entrance animations run for arriving messages, rather than history remounts.
 - The outline rail updates once per frame and animates transforms. Message
   heights come from `ResizeObserver`; reading anchors are captured after the
@@ -671,11 +600,8 @@ limits expensive work while streaming, typing and scrolling:
 - Wheel listeners are passive: they release bottom following without
   cancelling browser scrolling. `MessageList.test.ts` guards the listener
   options.
-- Icon shapes and locale date formatters are reused. Markdown links are found
-  in one pass over a line, however many `[` it holds. Finished Markdown markup
-  has a four-million-character cache bound, highlighted code a
-  two-million-character one shared by every view of the same text. A diff
-  document's rows are computed once per whitespace mode and kept with it.
+- Icon shapes and locale date formatters are reused. Finished Markdown markup
+  has a four-million-character cache bound.
 - The composer uses `field-sizing: content` where supported; IndexedDB draft
   writes wait for a typing pause. Bottom following runs after layout and before
   paint through `ResizeObserver`.
@@ -696,17 +622,10 @@ for the files card. `?fake=1&heavy=1` seeds that shape: forty messages,
   row keeps the 12 px a paragraph takes inside a message. The window measures,
   anchors and estimates rows; the first row keeps the message's id.
 - A part arriving on a streaming message changes its last row only: the rows
-  above stay the same objects and draw nothing again. Inside a row, a run over
-  the same parts stays the same object, and the runs never read the streaming
-  last text, so a text delta rebuilds no run and no group. A live thought's
-  title resumes after its last complete line.
+  above stay the same objects and draw nothing again.
 - The window hands back the same object while it covers the same rows, and
-  the files card reads tool calls only for a turn whose last row is drawn: a
-  scroll inside the rows on the page runs neither. Each turn end reads its own
-  turn, so a part arriving on the running turn rereads no finished one. A
-  finished turn compares its part objects, and fields only for a deferred
-  call. The last 24 turns read stay cached, so a turn end that scrolls back
-  reads nothing.
+  the files card reads tool calls only for a finished turn whose last row is
+  drawn: a scroll inside the rows on the page runs neither.
 - A reading position saves the message and the row of it on top; a find hit
   names its part, and opens the row that draws it.
 - An anchor is read from the rows by id instead of searching every node, a
@@ -927,8 +846,6 @@ bun bench/ui-frames.ts --trace --only "typing,long thread scroll"   # layouts pe
 bun bench/ui-frames.ts --runs 5 --only "heavy thread scroll,heavy thread flick,heavy thread jumps,heavy scroll while streaming"
 bun bench/ui-frames.ts --gpu --only "heavy thread scroll"          # composited on the machine's GPU, never a software renderer
 bun bench/rpc-actions.ts --journal <journal.db> --runs 6   # latency, core CPU, bytes and RSS per RPC (Linux)
-bun run bench/continuation.ts 100 1024 25 1100            # history a fresh session carries: messages, tool KiB, files, file KiB
-bun run bench/queue-admission.ts 1024 16                  # one scheduler pass over held child turns: turns, teams
 ```
 
 `bench/bandwidth.ts` puts a TCP relay between the client and the core, counts
@@ -963,8 +880,7 @@ settings are pointed at the temporary directory first.
 the core's own browser and has a paired phone client poll it on the viewer's
 schedule behind an added latency.
 
-Results: [bench/results/2026-10-15-perf-runtime.md](../bench/results/2026-10-15-perf-runtime.md),
-[bench/results/2026-10-05-rpc-actions.md](../bench/results/2026-10-05-rpc-actions.md),
+Results: [bench/results/2026-10-05-rpc-actions.md](../bench/results/2026-10-05-rpc-actions.md),
 [bench/results/2026-10-05-remote-browser-frames.md](../bench/results/2026-10-05-remote-browser-frames.md),
 [bench/results/2026-10-03-remote-browser-frames.md](../bench/results/2026-10-03-remote-browser-frames.md),
 [bench/results/2026-09-19-wire-and-startup.md](../bench/results/2026-09-19-wire-and-startup.md),

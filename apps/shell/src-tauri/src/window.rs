@@ -307,7 +307,6 @@ pub(crate) fn show_main<R: Runtime>(app: &AppHandle<R>) {
             serde_json::json!({ "wasVisible": window.is_visible().unwrap_or(false), "wasMinimized": window.is_minimized().unwrap_or(false) }));
         let _ = window.unminimize();
         let _ = window.set_skip_taskbar(false);
-        main_memory(app, false);
         let _ = window.show();
         browser::unpark_all(app);
         let _ = window.set_focus();
@@ -321,17 +320,6 @@ pub(crate) fn hide_main<R: Runtime>(app: &AppHandle<R>) {
         browser::park_all(app);
         let _ = window.hide();
         let _ = window.set_skip_taskbar(true);
-        main_memory(app, true);
-    }
-}
-
-/// The main page's memory level: low while the window waits in the tray,
-/// normal before it shows. Browser surfaces keep theirs, since a hidden one
-/// may still be recording. A minimized window keeps the normal level: it comes
-/// back from the taskbar often, and nothing should have to page back in.
-pub(crate) fn main_memory<R: Runtime>(app: &AppHandle<R>, low: bool) {
-    if let Some(page) = app.get_webview(MAIN_LABEL) {
-        crate::platform::memory_level(&page, low);
     }
 }
 

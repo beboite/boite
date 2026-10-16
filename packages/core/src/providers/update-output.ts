@@ -1,4 +1,4 @@
-import { stripAnsi } from '../ansi.ts';
+import { stripVTControlCharacters } from 'node:util';
 
 /**
  * Reading what an agent's updater printed: its output, kept within bounds,
@@ -25,7 +25,7 @@ export async function capture(reader: { read(): Promise<{ done: boolean; value?:
 
 /** stderr carries the failure; stdout often only announces the updater. */
 export function failureSummary(stdout: string, stderr: string): string | undefined {
-  const lines = (output: string): string[] => stripAnsi(output).split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const lines = (output: string): string[] => stripVTControlCharacters(output).split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const errors = lines(stderr);
   const output = errors.length > 0 ? errors : lines(stdout);
   // npm ends with its log location, after the error explaining the failed operation.
@@ -39,7 +39,7 @@ export function failureSummary(stdout: string, stderr: string): string | undefin
  * when its output is not a Unicode terminal, and closes with `Done`.
  */
 export function stuckReason(output: string): string | undefined {
-  const lines = stripAnsi(output).split(/\r?\n/)
+  const lines = stripVTControlCharacters(output).split(/\r?\n/)
     .map((line) => line.trim().replace(/^[^\p{L}\p{N}]+/u, '').replace(/^[xoT]\s{2,}/, '').trim())
     .filter((line) => /[\p{L}\p{N}]/u.test(line) && !/^done\.?$/i.test(line));
   // An errno such as EBUSY or EPERM counts in capitals only: `exit` is no error code.

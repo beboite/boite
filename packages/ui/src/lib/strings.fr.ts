@@ -2038,7 +2038,6 @@ export const fr: Translation = {
     unpriced: 'Aucun prix pour {providers} : ni tarif public, ni coût rapporté.',
     unreported: "{count} tours n'ont rapporté aucune consommation. Ils comptent seulement comme des tours.",
     limits: 'Limites',
-    limitsOwner: "Les limites d'abonnement sont lues sur l'ordinateur qui fait tourner Boite. Ouvrez cette page là-bas pour les voir.",
     refresh: 'Actualiser la consommation',
     loading: 'Lecture de la consommation',
     failed: 'Lecture de la consommation impossible : {error}',
@@ -2381,6 +2380,7 @@ export const fr: Translation = {
 
   quotas: {
     machineAccounts: 'Limites des comptes de {machine}',
+    outdated: 'Mettez à jour Boite sur cette machine pour voir ses limites sur cet appareil.',
     usingCredits: 'Crédits utilisés',
     reorder: 'Réordonner {name}. Glissez ou utilisez les flèches du clavier.',
     bankedReset: '{count} reset en réserve',

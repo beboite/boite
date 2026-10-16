@@ -3,7 +3,7 @@
   import { Bot, Brain, ChevronRight, FilePen, FileText, Globe, Search, SquareTerminal, TriangleAlert, Wrench } from '@lucide/svelte';
   import { fill, strings } from '../lib/strings';
   import { elapsed } from '../lib/format';
-  import { agentSummary, familyOf, liveLabel, runSpan, runSummary, thinkingShown, ThoughtTitleScan, type ActivityPart, type ThinkingStep, type ToolPart } from '../lib/tool-groups';
+  import { agentSummary, familyOf, liveLabel, runSpan, runSummary, thinkingShown, thoughtTitle, type ActivityPart, type ThinkingStep, type ToolPart } from '../lib/tool-groups';
   import ThinkingPart from './ThinkingPart.svelte';
   import ToolCard from './ToolCard.svelte';
 
@@ -45,9 +45,7 @@
   let issueLabel = $derived(fill(issues === 1 ? strings.chat.toolIssueOne : strings.chat.toolIssueMany, { count: String(issues) }));
   // Live, the thought being written; otherwise the last one that has words.
   let thought = $derived(thinking ? parts.at(-1) as ThinkingStep : parts.findLast((part): part is ThinkingStep => part.type === 'thinking' && part.text.trim() !== ''));
-  // A text that does not extend the last one starts the scan over: another thought needs no reset.
-  const titles = new ThoughtTitleScan();
-  let label = $derived(running ? liveLabel(running) : thinking || tools.length === 0 ? titles.title(thought?.text ?? '') ?? strings.chat.thinking : agentSummary(tools) ?? runSummary(tools));
+  let label = $derived(running ? liveLabel(running) : thinking || tools.length === 0 ? thoughtTitle(thought?.text ?? '') ?? strings.chat.thinking : agentSummary(tools) ?? runSummary(tools));
   let Glyph = $derived(running ? ICONS[familyOf(running)] : thinking || tools.length === 0 ? Brain : ICONS[familyOf(tools.at(-1)!)]);
   let busy = $derived(tools.some((part) => isBackground(part.toolId)));
 
@@ -190,14 +188,13 @@
     text-align: left;
   }
 
-  /* A light passing over the words while a call runs. It moves in 30 steps a
-     sweep: the text clipped gradient repaints on each step, not on every frame. */
+  /* A light passing over the words while a call runs. */
   .label.shimmer {
     background: linear-gradient(90deg, var(--color-muted-foreground) 35%, var(--color-foreground) 50%, var(--color-muted-foreground) 65%) 0 0 / 300% 100%;
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
-    animation: shimmer 2.2s steps(30) infinite;
+    animation: shimmer 2.2s linear infinite;
   }
 
   @keyframes shimmer {

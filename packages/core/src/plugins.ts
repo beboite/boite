@@ -53,17 +53,12 @@ const RUN_TIMEOUT_MS = 60_000;
 const PREVIEW_TTL_MS = 10 * 60_000;
 const PREVIEW_MAX = 16;
 
-let recommendedEntries: ReturnType<typeof parseRecommendedEntry>[] | undefined;
-/** The recommended entries, parsed on the first plugins call rather than at every start. A bad entry fails the core's own tests. */
-function parsedRecommended(): ReturnType<typeof parseRecommendedEntry>[] {
-  return recommendedEntries ??= (recommendedList as unknown[]).map((raw, index) => parseRecommendedEntry(raw, `recommended.json[${index}]`));
-}
-/** The recommended plugins. */
-export function recommendedPlugins(): PluginManifest[] { return parsedRecommended().map((entry) => entry.manifest); }
+/** The recommended plugins, read when the core loads. A bad entry fails the core's own tests. */
+const RECOMMENDED_ENTRIES = (recommendedList as unknown[]).map((raw, index) => parseRecommendedEntry(raw, `recommended.json[${index}]`));
+export const RECOMMENDED: readonly PluginManifest[] = RECOMMENDED_ENTRIES.map((entry) => entry.manifest);
 /** Where an entry's newer releases are published, by id, for the entries that name one. */
-export function recommendedUpdates(): Record<string, UpdateSource> {
-  return Object.fromEntries(parsedRecommended().flatMap((entry) => (entry.updates === null ? [] : [[entry.manifest.id, entry.updates]])));
-}
+export const RECOMMENDED_UPDATES: Readonly<Record<string, UpdateSource>> = Object.fromEntries(
+  RECOMMENDED_ENTRIES.flatMap((entry) => (entry.updates === null ? [] : [[entry.manifest.id, entry.updates]])));
 
 export function verifyPluginDownload(bytes: Uint8Array, digest: string, name = 'plugin'): void {
   if (createHash('sha256').update(bytes).digest('hex') !== digest) {
@@ -160,14 +155,10 @@ async function removeTree(path: string): Promise<void> {
 }
 
 export class PluginStore {
-  #recommended: PluginManifest[] | undefined;
-  #updateSources: Record<string, UpdateSource> | undefined;
   /** The manifests `plugins.list` offers. Tests swap an entry to point an install at a fixture. */
-  get recommended(): PluginManifest[] { return this.#recommended ??= recommendedPlugins(); }
-  set recommended(value: PluginManifest[]) { this.#recommended = value; }
+  recommended: PluginManifest[] = [...RECOMMENDED];
   /** The update source of each recommended entry that names one. Tests swap it like `recommended`. */
-  get updateSources(): Record<string, UpdateSource> { return this.#updateSources ??= recommendedUpdates(); }
-  set updateSources(value: Record<string, UpdateSource>) { this.#updateSources = value; }
+  updateSources: Record<string, UpdateSource> = { ...RECOMMENDED_UPDATES };
   /** Lets `plugins.inspect` read a repository by its path on disk. Tests only; no client can set it. */
   allowLocalSources = false;
   /** Test seam: how an update source is read. The git path of `plugins.inspect` otherwise. */

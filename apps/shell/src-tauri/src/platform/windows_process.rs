@@ -1,9 +1,9 @@
 //! One process the shell did not start, named by the pid `core.json` gave.
 use std::time::Duration;
 
-use windows_sys::Win32::Foundation::{CloseHandle, FILETIME, HANDLE, WAIT_OBJECT_0};
+use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0};
 use windows_sys::Win32::System::Threading::{
-    GetProcessTimes, OpenProcess, TerminateProcess, WaitForSingleObject, PROCESS_QUERY_LIMITED_INFORMATION,
+    OpenProcess, TerminateProcess, WaitForSingleObject, PROCESS_QUERY_LIMITED_INFORMATION,
     PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
 };
 
@@ -53,30 +53,4 @@ impl Watched {
 /// behind it, so no connection to its port is worth attempting.
 pub fn alive(pid: u32) -> bool {
     Watched::open(pid).is_some_and(|process| !process.exited_within(Duration::ZERO))
-}
-
-/// When the process wearing `pid` started, in milliseconds since the epoch,
-/// to tell the core `core.json` named from a later process given its number.
-/// `None` when no process has it or this account may not query it.
-pub fn started_at(pid: u32) -> Option<u64> {
-    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
-    if handle.is_null() {
-        return None;
-    }
-    let zero = FILETIME { dwLowDateTime: 0, dwHighDateTime: 0 };
-    let (mut created, mut exited, mut kernel, mut user) = (zero, zero, zero, zero);
-    let read = unsafe { GetProcessTimes(handle, &mut created, &mut exited, &mut kernel, &mut user) };
-    unsafe { CloseHandle(handle) };
-    if read == 0 {
-        return None;
-    }
-    // 100 ns intervals since 1601-01-01; the epoch is 11,644,473,600 s later.
-    let intervals = (u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime);
-    (intervals / 10_000).checked_sub(11_644_473_600_000)
-}
-
-/// Windows gives an absolute creation time, which `started_at` reads, so it
-/// needs no key of its own to tell runs apart.
-pub fn start_key(_pid: u32) -> Option<String> {
-    None
 }

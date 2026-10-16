@@ -11,10 +11,9 @@ describe('describeTool', () => {
     expect(describeTool('Edit', { file_path: 'C:/repo/src/run.ts', old_string: 'a', new_string: 'b' })).toEqual({
       family: 'edit',
       subject: 'C:/repo/src/run.ts',
-      change: { kind: 'diff', path: 'C:/repo/src/run.ts', oldText: 'a', newText: 'b' }
+      change: { path: 'C:/repo/src/run.ts', oldText: 'a', newText: 'b' }
     });
     expect(describeTool('Write', { file_path: '/tmp/notes.md', content: '# Notes' }).change).toEqual({
-      kind: 'diff',
       path: '/tmp/notes.md',
       oldText: '',
       newText: '# Notes'

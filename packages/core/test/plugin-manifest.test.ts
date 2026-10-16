@@ -6,7 +6,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { ManifestRefused, POOL_PROVIDERS, commandsOf, parseManifest, parseManifestText } from '../src/plugins/manifest.ts';
 import { checkRef, normalizeSourceUrl } from '../src/plugins/source.ts';
-import { recommendedPlugins, recommendedUpdates } from '../src/plugins.ts';
+import { RECOMMENDED, RECOMMENDED_UPDATES } from '../src/plugins.ts';
 import { startTestCore, type TestCore } from './harness.ts';
 
 const SHA = 'a'.repeat(64);
@@ -120,11 +120,11 @@ describe('the plugin manifest', () => {
 
 describe('the recommended list', () => {
   test('Bots comes first, then kebacc-switcher', () => {
-    expect(recommendedPlugins().map((manifest) => manifest.id)).toEqual(['bots', 'kebacc-switcher']);
+    expect(RECOMMENDED.map((manifest) => manifest.id)).toEqual(['bots', 'kebacc-switcher']);
   });
 
   test('Bots is a desktop app, from its v0.1.9 release assets and digests', () => {
-    const bots = recommendedPlugins().find((manifest) => manifest.id === 'bots')!;
+    const bots = RECOMMENDED.find((manifest) => manifest.id === 'bots')!;
     expect(bots.version).toBe('0.1.9');
     expect(bots.executable).toBe('bots');
     expect(bots.provides).toEqual({ desktopApp: {} });
@@ -138,11 +138,11 @@ describe('the recommended list', () => {
   });
 
   test('Bots finds its newer releases on its own repository, and kebacc-switcher names no source', () => {
-    expect(recommendedUpdates()).toEqual({ bots: { url: 'https://github.com/beboite/bots', ref: 'main' } });
+    expect(RECOMMENDED_UPDATES).toEqual({ bots: { url: 'https://github.com/beboite/bots', ref: 'main' } });
   });
 
   test('kebacc-switcher keeps the release assets and digests it always had', () => {
-    const kebacc = recommendedPlugins().find((manifest) => manifest.id === 'kebacc-switcher')!;
+    const kebacc = RECOMMENDED.find((manifest) => manifest.id === 'kebacc-switcher')!;
     expect(kebacc.version).toBe('2.0.1');
     expect(kebacc.executable).toBe('kebacc');
     expect(kebacc.provides.accountPools?.providers).toEqual(['claude', 'codex', 'antigravity']);

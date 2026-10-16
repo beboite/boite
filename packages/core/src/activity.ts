@@ -29,9 +29,8 @@ export class ActivityStore {
   private readonly reviewing = new Map<string, ReviewRun>();
   private closed = false;
 
-  /** `threadJsonChecked`: the core validated visible thread JSON just before, with nothing written since. */
-  constructor(private readonly core: Core, threadJsonChecked = false) {
-    if (!threadJsonChecked) core.journal.validateVisibleThreadJson();
+  constructor(private readonly core: Core) {
+    core.journal.validateVisibleThreadJson();
     const savedThreads = core.journal.db.query(`SELECT threads.id FROM threads JOIN settings ON settings.key = 'activity:' || threads.id
       WHERE threads.id NOT IN (SELECT thread_id FROM thread_deletions) ORDER BY threads.rowid`).all() as { id: string }[];
     for (const thread of savedThreads) {
@@ -261,12 +260,12 @@ export class ActivityStore {
 
   /** The turn's assistant text without goal markers. */
   private answer(turn: Pick<Turn, 'threadId' | 'id'>): string {
-    return activityResult(Array.from(this.core.journal.walkTurnMessages(turn.threadId, turn.id, { blobs: false })).filter(message => message.role === 'assistant').flatMap(message => message.parts.filter(part => part.type === 'text').map(part => part.text)).join('\n'));
+    return activityResult(Array.from(this.core.journal.walkTurnMessages(turn.threadId, turn.id)).filter(message => message.role === 'assistant').flatMap(message => message.parts.filter(part => part.type === 'text').map(part => part.text)).join('\n'));
   }
 
   private goalResult(turn: Turn): 'complete' | 'blocked' | null {
     let result: 'complete' | null = null;
-    for (const message of this.core.journal.walkTurnMessages(turn.threadId, turn.id, { blobs: false })) {
+    for (const message of this.core.journal.walkTurnMessages(turn.threadId, turn.id)) {
       if (message.role !== 'assistant') continue;
       for (const part of message.parts) {
         if (part.type !== 'text') continue;

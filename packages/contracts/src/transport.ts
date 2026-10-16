@@ -1,5 +1,5 @@
 import type { Message, MessagePart } from './index';
-import { IMAGE_INLINE_CHARS, previewFileData, previewFilePart, previewImageData, previewImagePart, type ImagePreviews } from './file-preview.ts';
+import { previewFileData, previewImageData, type ImagePreviews } from './file-preview.ts';
 import { longerThan, previewToolPart } from './message-preview.ts';
 
 /** What a client asks a page, and its live events, to leave on the core until it is looked at. */
@@ -136,31 +136,4 @@ export function projectMessage(message: Message, options: TransportOptions, prev
 export function forTransport(messages: Message[], options: TransportOptions, previews?: ImagePreviews): Message[] {
   if (!compacts(options)) return messages;
   return messages.map(message => projectMessage(message, options, previews));
-}
-
-/**
- * A part a live event carries, as a socket whose pages asked these options
- * receives it. A finished tool call keeps the output its open card shows
- * (not folded, unlike a page). A file or a large picture is left on the core
- * as a page leaves it, so a 10 MiB prompt does not reach every open window
- * whole. `role` is its message's: a user's files are all deferred.
- */
-export function projectLivePart(part: MessagePart, options: TransportOptions, role: Message['role'], messageId: string, index: number, previews?: ImagePreviews): MessagePart {
-  if (part.type === 'tool') return options.compactTools || options.compactToolParts ? previewToolPart(part, { inputs: !!options.compactToolParts }) : part;
-  if (part.type === 'file') return options.compactFiles ? previewFilePart(part, role, messageId, index, previews) : part;
-  if (part.type === 'image') return options.compactImages ? previewImagePart(part, messageId, index, IMAGE_INLINE_CHARS, previews) : part;
-  return part;
-}
-
-/** A started message as a socket with these options receives it: its files and large pictures deferred as on a page. */
-export function projectLiveMessage(message: Message, options: TransportOptions, previews?: ImagePreviews): Message {
-  if (!options.compactFiles && !options.compactImages) return message;
-  let changed = false;
-  const parts = message.parts.map((part, index) => {
-    if (part.type !== 'file' && part.type !== 'image') return part;
-    const next = projectLivePart(part, options, message.role, message.id, index, previews);
-    if (next !== part) changed = true;
-    return next;
-  });
-  return changed ? { ...message, parts } : message;
 }

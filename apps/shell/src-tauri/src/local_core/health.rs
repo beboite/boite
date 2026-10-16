@@ -22,15 +22,6 @@ pub(crate) struct CoreFile {
     pub(crate) token: String,
     #[serde(default)]
     pub(crate) pid: Option<u32>,
-    /// When the core started, in milliseconds since the epoch: with `pid`, what
-    /// tells that core from a process that later got its number.
-    #[serde(default, rename = "startedAt")]
-    pub(crate) started_at: Option<u64>,
-    /// How the OS itself names that run of the core where its start time is
-    /// not absolute (Linux: boot id and start ticks); equal or not, nothing
-    /// in between.
-    #[serde(default, rename = "startKey")]
-    pub(crate) start_key: Option<String>,
 }
 
 impl CoreFile {
@@ -39,20 +30,6 @@ impl CoreFile {
     pub(super) fn identity(&self) -> (Option<u32>, u16) {
         (self.pid, self.port)
     }
-
-    pub(super) fn start(&self) -> CoreStart {
-        CoreStart { at: self.started_at, key: self.start_key.clone() }
-    }
-}
-
-/// What `core.json` recorded about the start of its core, to tell it from a
-/// process that later got its pid.
-#[derive(Clone, Debug, Default)]
-pub(crate) struct CoreStart {
-    /// The core's clock at start, in milliseconds since the epoch.
-    pub(crate) at: Option<u64>,
-    /// `platform::process::start_key` of the core, read by the core itself.
-    pub(crate) key: Option<String>,
 }
 
 pub(crate) fn read_core_file(path: &Path) -> Result<Option<CoreFile>, String> {
@@ -126,47 +103,10 @@ fn judge(answer: Option<HealthBody>, version: &str, bundle_hash: Option<&str>) -
 /// would spend its whole timeout on it.
 pub(super) fn probe(file: &CoreFile, version: &str, bundle_hash: Option<&str>) -> Probe {
     let Some(pid) = file.pid else { return Probe::Absent };
-    if !same_core(pid, &file.start()) {
+    if !platform::process::alive(pid) {
         return Probe::Absent;
     }
     judge(health(file.port, pid), version, bundle_hash)
-}
-
-/// How far a process may seem to have started after the core recorded its own
-/// start and still be that core: the two clocks are read differently.
-const START_MARGIN_MS: u64 = 2000;
-
-/// Whether `pid` still names the core that recorded `start`. A process that
-/// exited is not; nor is one that started after the core did, which got the
-/// number once the core had exited (Windows reuses numbers soon, and a reboot
-/// hands them all out again). Where the OS names a run with a key, the key
-/// decides alone: a Linux start time is rebuilt from a boot time that moves
-/// with every step of the wall clock, so it cannot be compared with the
-/// core's clock. An unknown start on either side keeps the answer of
-/// `alive`, the rule before starts were compared.
-pub(super) fn same_core(pid: u32, start: &CoreStart) -> bool {
-    if !platform::process::alive(pid) {
-        return false;
-    }
-    if let (Some(recorded), Some(current)) = (start.key.as_deref(), platform::process::start_key(pid)) {
-        return recorded == current;
-    }
-    match (start.at, platform::process::started_at(pid)) {
-        (Some(core), Some(process)) => process <= core.saturating_add(START_MARGIN_MS),
-        _ => true,
-    }
-}
-
-/// The start this test's own process would have recorded as a core, and
-/// one a core that exited before it started would have: what each platform
-/// reads, so no platform passes without a reading.
-#[cfg(test)]
-pub(super) fn own_start_and_an_earlier_one() -> (CoreStart, CoreStart) {
-    let pid = std::process::id();
-    let own = CoreStart { at: platform::process::started_at(pid), key: platform::process::start_key(pid) };
-    assert!(own.at.is_some() || own.key.is_some(), "this platform reads no start of a process");
-    let earlier = CoreStart { at: own.at.map(|at| at - 60_000), key: own.key.as_ref().map(|key| format!("{key}0")) };
-    (own, earlier)
 }
 
 /// A bound on how much of a `/health` response is ever read, so a local
@@ -295,41 +235,10 @@ mod tests {
         gone.wait().unwrap();
         drop(gone);
         let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
-        let file = CoreFile { port, host: None, token: "t".to_string(), pid: Some(pid), started_at: None, start_key: None };
+        let file = CoreFile { port, host: None, token: "t".to_string(), pid: Some(pid) };
         let started = Instant::now();
         assert_eq!(probe(&file, "2.0.0", None), Probe::Absent);
         // A refused connection alone takes HEALTH_TIMEOUT (500 ms) on Windows.
         assert!(started.elapsed() < Duration::from_millis(100), "probing a dead core took {:?}", started.elapsed());
-    }
-
-    #[test]
-    fn a_core_json_whose_pid_now_names_a_later_process_costs_no_connection() {
-        // This test's own process stands for the stranger that got the number:
-        // it is alive, and it is not the run the core `core.json` describes.
-        let pid = std::process::id();
-        let (own, earlier) = own_start_and_an_earlier_one();
-        // A port that accepts and never answers: a connection would wait out HEALTH_TIMEOUT.
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let file = CoreFile { port, host: None, token: "t".to_string(), pid: Some(pid), started_at: earlier.at, start_key: earlier.key };
-        let started = Instant::now();
-        assert_eq!(probe(&file, "2.0.0", None), Probe::Absent);
-        assert!(started.elapsed() < Duration::from_millis(100), "probing a reused pid took {:?}", started.elapsed());
-        assert!(same_core(pid, &own), "the process that wrote the start is that core");
-        // An unknown start keeps the bare liveness answer.
-        assert!(same_core(pid, &CoreStart::default()));
-        drop(listener);
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn a_wall_clock_step_after_the_core_started_leaves_it_the_same_core() {
-        // The core wrote Date.now() before NTP stepped the clock forward: its
-        // recorded time is now far behind what btime and its start ticks give.
-        let pid = std::process::id();
-        let key = platform::process::start_key(pid).expect("procfs gives a start key");
-        assert!(same_core(pid, &CoreStart { at: Some(1), key: Some(key) }));
-        // A core.json written before start keys existed falls back to liveness on Linux.
-        assert!(same_core(pid, &CoreStart { at: Some(1), key: None }));
     }
 }

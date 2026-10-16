@@ -1,7 +1,5 @@
 import { expect, spyOn, test } from 'bun:test';
-import type { Message, MessagePart, Turn } from '@boite/contracts';
 import { getDriver } from '../src/drivers/index.ts';
-import { closeTools } from '../src/threads/turn-settlement.ts';
 import { echoThread, holdAccountTurns, startTestCore, waitFor } from './harness.ts';
 
 test('terminal persistence recovers twice without replaying the provider or publishing twice', async () => {
@@ -153,39 +151,4 @@ test.each(['queued', 'held', 'running'] as const)('an accepted %s turn finishes 
       expect(finished[key]).toEqual(selected[key]);
     }
   } finally { release(); provider.mockRestore(); await h.stop(); }
-});
-
-test('progress reads no turn row per report, and any write that ends the turn drops a later report', async () => {
-  const h = await startTestCore();
-  try {
-    const { threadId } = await echoThread(h, await h.connect());
-    const queued: Turn = { id: 'trn_progress', threadId, status: 'queued', queuedAt: 1, startedAt: null, finishedAt: null, usage: null, error: null };
-    h.core.journal.putTurn(queued);
-    h.core.threads.progress.begin(threadId, queued.id);
-    h.core.threads.progress.report(threadId, queued.id, 'tool', 'before it runs');
-    expect(h.core.threads.progress.get(threadId)).toBeNull();
-    h.core.journal.putTurn({ ...queued, status: 'running', startedAt: 2 });
-    const reads = spyOn(h.core.journal, 'getTurn');
-    for (let delta = 0; delta < 50; delta++) h.core.threads.progress.report(threadId, queued.id, 'working', null);
-    h.core.threads.progress.contact(threadId, queued.id);
-    expect(reads).not.toHaveBeenCalled();
-    reads.mockRestore();
-    expect(h.core.threads.progress.get(threadId)).toMatchObject({ turnId: queued.id, phase: 'working' });
-    // Recovery, a move or a stop writes the turn without the runner: the next callback is late.
-    h.core.journal.putTurn({ ...queued, status: 'stopped', startedAt: 2, finishedAt: 3 });
-    h.core.threads.progress.report(threadId, queued.id, 'tool', 'late callback');
-    expect(h.core.threads.progress.get(threadId)).toBeNull();
-  } finally { await h.stop(); }
-});
-
-test('closing a running tool on a turn that ended keeps its large values', async () => {
-  const h = await startTestCore();
-  try {
-    const { threadId } = await echoThread(h, await h.connect());
-    const tool = (toolId: string, status: 'running' | 'done'): MessagePart => ({ type: 'tool', toolId, name: 'Bash', input: { command: 'cat' }, inputText: `${toolId} input `.repeat(4000), output: `${toolId} output `.repeat(5000), status });
-    const message: Message = { id: 'msg_tools', threadId, turnId: 'trn_tools', role: 'assistant', state: 'complete', createdAt: 1, parts: [tool('cut', 'running'), tool('kept', 'done')] };
-    h.core.journal.putMessage(message);
-    expect(closeTools(h.core, threadId, 'trn_tools')).toBe(1);
-    expect(h.core.journal.getMessage('msg_tools')?.parts).toEqual([{ ...message.parts[0]!, status: 'error' } as MessagePart, message.parts[1]!]);
-  } finally { await h.stop(); }
 });
