@@ -366,6 +366,29 @@ describe('claude driver', () => {
     ]);
   });
 
+  test('a plan mode Claude entered by itself is put back to the thread mode before the next turn', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    await client.call('settings.set', { warmProcessMinutes: 5 });
+    const answer = answerEach('sess-drift');
+    scripted(() => undefined, (fake, prompt, index) => {
+      if (index === 0) {
+        // EnterPlanMode, then an ExitPlanMode the user refused: the CLI stays in plan.
+        fake.emit(sdk({ type: 'system', subtype: 'status', status: null, permissionMode: 'plan', session_id: 'sess-drift' }));
+      }
+      answer(fake, prompt, index);
+    });
+
+    expect(await runTurn(client, threadId, 'first')).toBe('done');
+    expect(await runTurn(client, threadId, 'second')).toBe('done');
+    expect(await runTurn(client, threadId, 'third')).toBe('done');
+
+    expect(queries).toHaveLength(1);
+    expect(harness.core.threads.require(threadId).permissionMode).toBe('default');
+    // Once, before the second prompt; the third finds the CLI where the thread wants it.
+    expect(queries[0]?.setters).toEqual(['setPermissionMode default']);
+  });
+
   test('warm queries apply Auto and YOLO in place and restore configured hooks', async () => {
     const client = await harness.connect();
     const threadId = await claudeThread(client);

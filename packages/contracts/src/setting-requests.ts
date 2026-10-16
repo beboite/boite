@@ -54,6 +54,7 @@ export const REQUESTABLE_SETTINGS = {
   browserOrigins: { page: 'advanced', section: 'origins', sensitive: true },
   warmProcessMinutes: { page: 'advanced', section: 'execution', sensitive: false },
   autoCompact: { page: 'advanced', section: 'auto-compact', sensitive: false },
+  autoResumeLimitedThreads: { page: 'limits', section: 'limit-resume', sensitive: false },
 } as const satisfies Partial<Record<keyof Settings, SettingPlace>>;
 
 export type RequestableSetting = keyof typeof REQUESTABLE_SETTINGS;
@@ -114,6 +115,7 @@ export type SettingRequestParams = { threadId: ThreadId; reason: string } & (
 /** What a missing key means, for the keys the core's defaults leave out. */
 const MISSING: Partial<Record<RequestableSetting, unknown>> = {
   asyncQuestions: true,
+  autoResumeLimitedThreads: false,
   shortAnswers: true,
   titleModel: null,
   autoCompact: null,

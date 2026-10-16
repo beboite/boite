@@ -346,6 +346,61 @@ its cost.
 On a subscription the figure is what the same tokens would cost on the API, not
 money spent.
 
+## When a provider refuses a turn
+
+Two refusals mean the provider is unavailable, not that the request is wrong.
+The driver reports them as `TurnResult.refusal`, only when the agent names
+them without doubt; any other failure ends the turn as before.
+
+| Driver | Model at capacity | Usage limit, with its reset |
+| --- | --- | --- |
+| Codex | `codexErrorInfo` `serverOverloaded`, or "Selected model is at capacity" | `usageLimitExceeded`; the reset is the latest spent window of `account/rateLimits/updated` |
+| Claude | assistant error `overloaded` (HTTP 529, after the CLI's own retries) | assistant error `rate_limit`; the reset is the `rate_limit_event` marked `rejected` |
+| echo | `[capacity:n]` | `[usage-limit:<ms>]` |
+
+ACP agents, pi, Grok, Antigravity and Muse report neither: their failures
+are never retried here.
+
+### Model at capacity
+
+The same turn tries again three times, after 30 s, 2 min and 5 min
+(`CAPACITY_RETRY` in `threads/turn-attempts.ts`). The thread stays running and
+its row carries `retry` (`kind: 'capacity'`, the try's number and time), which
+the conversation shows above the composer with a countdown and Stop retrying.
+An attempt that wrote nothing but the error sends the same input again. Once
+any attempt of the turn wrote text, reasoning or a tool call, the next try
+resumes the same native session with a short continue prompt and no
+attachments, so paid work is not redone. Stop ends the wait as a stopped turn;
+`turns.cancelRetry` ends it as the failure it was. After the third try the
+turn fails with the provider's sentence, as it did before. A core restart
+during a wait fails the turn the usual way.
+
+### Usage limit
+
+Settings > Limits has "Resume threads after a usage limit"
+(`autoResumeLimitedThreads`, off by default). With it on, a turn that failed
+on a usage limit plans one resume a minute after the window resets
+(`threads/limit-resume.ts`). The reset is the one the agent reported, else the
+latest window at 100 % in a fresh `quotas` read of the turn's account; with
+neither, nothing is planned. The plan sits in the journal setting
+`limit-resumes`, so a restart arms it again, and the row shows it as `retry`
+(`kind: 'usage-limit'`, `at`, `resetsAt`) with Do not resume.
+
+Nothing is planned for a failure whose window already reset (no retry loop),
+for a window the thread already resumed after, for a sub-thread or persistent
+agent, or for a compaction or wake turn. When the plan fires, it is dropped
+instead if the setting went off, the thread was archived, answered, stopped or
+is busy, its provider, account, model or session generation changed, a card
+waits for the user, or its subagent team is paused. A plan a core caught while
+dispatching is dropped at the next start, since its turn may have gone out.
+The resume is a `resume` turn with the request id `limit-resume_<turnId>`,
+labelled "Resumed after the usage limit reset", whose prompt asks the agent to
+continue without repeating work.
+
+`turns.cancelRetry` and `turns.stop` cancel either kind; a paired phone may
+call both, since cancelling spends nothing. `?fake=1&retry=capacity` and
+`?fake=1&retry=usage-limit` put each banner on a fake thread.
+
 ## Paired devices
 
 A phone may call `usage.history`: it returns sums over the same finished turns
@@ -367,6 +422,16 @@ so a reload shows the same history. Turns finished in the fake session are
 added on top, and the uninstalled mode (`?fake=1&uninstalled=1`) starts empty.
 
 ## Tests
+
+- `packages/core/test/turn-availability.test.ts`: capacity retries with the
+  same input and with the continue prompt, the three-try limit, Stop and
+  Cancel during a wait; usage limit resumes off, once per window, never for a
+  reset window, cancelled by a message, Stop, Cancel or a changed model, and
+  armed again after a restart.
+- `packages/core/test/codex.test.ts` and `claude.availability.test.ts`: each
+  driver's capacity and usage limit signals end to end.
+- `packages/ui/src/components/ThreadRetry.test.ts` and `LimitsPage.test.ts`:
+  the banner's countdown and cancel, and the switch.
 
 - `packages/core/test/usage-history.test.ts`: edge boundaries, the provider and
   model split, turns without usage, the Codex cache subtraction, pricing at

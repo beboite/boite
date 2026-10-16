@@ -74,6 +74,7 @@ export const strings = {
       browserOrigins: 'Allowed browser origins',
       warmProcessMinutes: 'Keep an agent warm after its turn',
       autoCompact: 'Automatic compaction',
+      autoResumeLimitedThreads: 'Resume threads after a usage limit',
     },
     /** What 0 means for the settings where it is not a number. */
     zero: {
@@ -875,7 +876,8 @@ export const strings = {
     groupWorkingRow: 'Working threads',
     groupIdleRow: 'Idle projects',
     customOrderShort: 'Custom',
-    autoArchiveMergedPrHint: 'A worktree conversation leaves the list for Done once its branch is merged. Its worktree, branch and history stay. Applies to this project.',
+    autoArchiveMergedPrHint: 'A worktree conversation leaves the list for Done once its branch is merged. Its history stays. Applies to this project.',
+    autoRemoveWorktreesHint: 'An hour after every conversation in a worktree is done or archived, Boite deletes the worktree if nothing would be lost: its last commit is on another branch, or a merged pull request has that exact commit. A merged branch goes too. Uncommitted changes always stay. Applies to this project.',
     noActiveProjects: 'No conversations need attention.',
     markDone: 'Mark done',
     doneToast: 'Marked "{title}" done',
@@ -887,6 +889,16 @@ export const strings = {
     reopenThread: 'Move to Recent',
     reopenNamedThread: 'Move "{title}" to Recent',
     doneNotice: 'This thread is done. Move it to Recent to continue.',
+    /** Above the composer, or the done notice, of a thread whose worktree Boite removed. */
+    worktreeGone: {
+      title: 'Worktree removed',
+      merged: 'Boite removed this thread\'s worktree {when}, after #{number} was merged.',
+      clean: 'Boite removed this thread\'s worktree {when}: every commit in it was already on another branch.',
+      branchDeleted: 'Branch {branch} was deleted.',
+      branchKept: 'Branch {branch} is still there.',
+      archived: 'Moved to Recent, this thread has no folder to work in.',
+      live: 'A new message here has no folder to run in. Start a new thread to keep working.'
+    },
     allProjects: 'All projects',
     filterProject: 'Filter by project',
     recentOrder: 'Recent activity',
@@ -910,6 +922,7 @@ export const strings = {
     manageProject: 'Manage project',
     worktreeDefault: 'Worktree by default',
     autoArchiveMergedPr: 'Hide merged PR conversations',
+    autoRemoveWorktrees: 'Remove settled worktrees',
     backToProjectMenu: 'Back',
     viewArchivedThreads: 'View archived threads',
     importSession: 'Import a Claude Code session',
@@ -954,6 +967,9 @@ export const strings = {
       /** The turn ended, the agent still runs a shell, a subagent or a workflow. */
       background: 'In background',
       backgroundFor: 'In background for {elapsed}',
+      /** The turn ended, Boite watches pull requests for the agent and wakes it when they need it. */
+      watching: 'Watching PR',
+      watchingMany: 'Watching {count} PRs',
       /** A delegated agent's turn ended on its own background work, which wakes it: what it waits for. */
       awaiting: 'Waiting on {what}',
       /** That work ended without waking it: the agent stopped there, its result never came. */
@@ -1200,6 +1216,12 @@ export const strings = {
     recoveryTarget: 'Saved selection: {model} · {account}',
     recoveryResume: 'Resume prompt',
     recoveryDiscard: 'Remove from queue',
+    retryCapacityTitle: 'Model at capacity',
+    retryCapacityBody: 'Trying again in {time}, try {attempt} of {attempts}.',
+    retryCapacityCancel: 'Stop retrying',
+    retryLimitTitle: 'Usage limit reached',
+    retryLimitBody: 'Resumes at {time}, once the limit has reset, in {in}.',
+    retryLimitCancel: 'Do not resume',
     contextDetails: 'Context',
     contextInput: 'Input',
     contextCache: 'Cached input',
@@ -1667,6 +1689,9 @@ export const strings = {
     installInSettings: 'Install in Settings',
     effortTitle: 'Reasoning effort',
     speed: 'Response speed',
+    /** The reasoning chip of a model whose agent keeps its own level until one is picked. */
+    effortDefault: 'Default',
+    effortDefaultHint: 'Let the agent pick its own level for this model',
     standardSpeed: 'Standard speed',
     favorites: 'Favorites',
     favorite: 'Add to favorites',
@@ -1785,7 +1810,21 @@ export const strings = {
     markDone: 'Confirm it is done',
     removeTodo: 'Remove this todo',
     collapse: 'Fold this section',
-    expand: 'Unfold this section'
+    expand: 'Unfold this section',
+    /** The pull requests the agent asked Boite to watch (`boite pr watch`). */
+    watchSection: 'Pull request watches',
+    noWatches: 'No pull request watched',
+    watchHint: 'Boite reads the pull request on GitHub about once a minute and wakes the agent when a check fails, the checks pass, a review or comment lands or the branch conflicts',
+    watchNotRead: 'Not read yet',
+    watchNoChecks: 'No checks',
+    watchChecks: '{total} checks',
+    watchRunning: '{count} running',
+    watchFailed: '{count} failed',
+    watchConflict: 'Conflicts with {base}',
+    watchRateLimited: 'GitHub rate limit, next read {time}',
+    watchUnreachable: 'GitHub out of reach, next read {time}',
+    stopWatch: 'Stop watching',
+    stopWatchOf: 'Stop watching #{number}'
   },
 
   /** The file tree and the file viewer, the two surfaces reading the working directory. */
@@ -2490,6 +2529,8 @@ export const strings = {
     slowHint: 'Antigravity can take up to two minutes to answer.',
     tracked: 'Tracked accounts',
     trackedHint: 'Boite only asks the accounts switched on here.',
+    autoResume: 'Resume threads after a usage limit',
+    autoResumeHint: 'A thread stopped by a subscription usage limit resumes by itself a minute after the limit resets, once per limit window. Stop, a new message or a changed model cancels it.',
     providers: 'Manage providers',
     unavailable: 'No quota reading available.',
     refresh: 'Refresh quotas',
