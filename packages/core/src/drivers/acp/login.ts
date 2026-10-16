@@ -1,11 +1,14 @@
-/** The login: `initialize` then `authenticate`, for an agent that has no CLI. */
+/**
+ * The login: `initialize` then `authenticate`, for an agent that has no CLI,
+ * then one session that lists the account's models.
+ */
 import { Readable, Writable } from 'node:stream';
 import type { ClientConnection } from '@agentclientprotocol/sdk';
 import pkg from '../../../package.json';
 import { messageOf } from '../../errors.ts';
 import type { SpawnedChild, SpawnOptions } from '../../procs.ts';
 import { stderrDrained, stderrLines } from '../lines.ts';
-import { CLIENT_NAME, MINUTE_MS, preferExit, STDERR_MAX, type Timer } from './protocol.ts';
+import { canDeleteSessions, CLIENT_NAME, discardSession, MINUTE_MS, preferExit, STDERR_MAX, type Timer } from './protocol.ts';
 import { jsonLinesOnly } from './stdout.ts';
 
 export interface AcpLoginInput {
@@ -18,6 +21,20 @@ export interface AcpLoginInput {
   spawnChild(cmd: string, args: string[], opts?: SpawnOptions): SpawnedChild;
   /** Every line the agent wrote outside the ndjson stream, the sign-in link included. */
   onLine(line: string): void;
+  /**
+   * An empty directory to open one session in once `authenticate` answered,
+   * so the models the account may run are read by the process already
+   * started. Absent: the login opens no session.
+   */
+  catalogCwd?: string;
+}
+
+/** What the session opened after the sign-in said, or why there is none. */
+export interface AcpLoginCatalog {
+  /** The raw `session/new` answer, null when no session was read. */
+  created: unknown;
+  /** Why no session was read; null when one was, or none was asked for. */
+  error: string | null;
 }
 
 export interface AcpLoginRun {
@@ -27,10 +44,53 @@ export interface AcpLoginRun {
   done: Promise<void>;
   /** The process and the connection go, on success and on failure alike. */
   kill(): void;
+  /**
+   * The catalog session, settled before `done` resolves. It never fails the
+   * sign-in: an account signed in whose session did not open is still signed in.
+   */
+  catalog?: Promise<AcpLoginCatalog>;
 }
 
 /** How long the whole sign-in has to finish, the user's time at the Google page included. */
 const LOGIN_TIMEOUT_MS = 5 * MINUTE_MS;
+/** How long the agent, already signed in and running, has to open the catalog session. */
+const CATALOG_TIMEOUT_MS = 30_000;
+
+/**
+ * One `session/new` on a signed-in agent, then the session goes. Every failure,
+ * the process exiting included, becomes the answer's `error`.
+ */
+async function readCatalog(
+  agent: ClientConnection['agent'],
+  canDelete: boolean,
+  cwd: string,
+  child: SpawnedChild,
+): Promise<AcpLoginCatalog> {
+  let timer: Timer | null = null;
+  const died = new Promise<never>((_resolve, reject) => {
+    child.once('exit', (code) => reject(new Error(`the agent exited with code ${code ?? 'unknown'}`)));
+  });
+  died.catch(() => undefined);
+  try {
+    const read = (async () => {
+      const created = await agent.request('session/new', { cwd, mcpServers: [] });
+      await discardSession(agent, canDelete, created.sessionId);
+      return created;
+    })();
+    const expired = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error(`the agent did not open a session within ${CATALOG_TIMEOUT_MS / 1000} s`));
+      }, CATALOG_TIMEOUT_MS);
+      timer.unref?.();
+    });
+    const created: unknown = await Promise.race([read.catch((error: unknown) => preferExit(died, error)), died, expired]);
+    return { created, error: null };
+  } catch (error) {
+    return { created: null, error: messageOf(error) };
+  } finally {
+    if (timer !== null) clearTimeout(timer);
+  }
+}
 
 /**
  * One agent process whose only job is the protocol's `authenticate`. It is
@@ -90,6 +150,7 @@ export function runAcpLogin(input: AcpLoginInput): AcpLoginRun {
     }
   };
 
+  let catalog: AcpLoginCatalog = { created: null, error: null };
   const done = (async (): Promise<void> => {
     const sdk = await import('@agentclientprotocol/sdk');
     const expired = new Promise<never>((_resolve, reject) => {
@@ -106,7 +167,7 @@ export function runAcpLogin(input: AcpLoginInput): AcpLoginRun {
     const open = sdk.client({ name: CLIENT_NAME }).connect(stream);
     connection = open;
 
-    const run = (async (): Promise<void> => {
+    const run = (async (): Promise<boolean> => {
       const init = await open.agent.request('initialize', {
         protocolVersion: sdk.PROTOCOL_VERSION,
         clientCapabilities: {},
@@ -117,14 +178,19 @@ export function runAcpLogin(input: AcpLoginInput): AcpLoginRun {
         throw new Error(`the agent offers no ${input.methodId} sign-in, only ${offered.join(', ')}`);
       }
       await open.agent.request('authenticate', { methodId: input.methodId });
+      return canDeleteSessions(init);
     })();
 
+    let canDelete: boolean;
     try {
-      await Promise.race([run.catch((error: unknown) => preferExit(died, error)), died, expired]);
+      canDelete = await Promise.race([run.catch((error: unknown) => preferExit(died, error)), died, expired]);
     } finally {
       if (timer !== null) clearTimeout(timer);
     }
+    // Signed in. A second launch would unpack and start the whole agent again
+    // to list the models; this one is already running.
+    if (input.catalogCwd !== undefined) catalog = await readCatalog(open.agent, canDelete, input.catalogCwd, child);
   })();
 
-  return { done, kill, exited };
+  return { done, kill, exited, catalog: done.then(() => catalog, () => ({ created: null, error: null })) };
 }

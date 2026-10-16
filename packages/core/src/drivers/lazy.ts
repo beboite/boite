@@ -1,4 +1,4 @@
-import type { AccountId, ModelInfo, Protocol, ProviderId, ThreadId } from '@boite/contracts';
+import type { AccountId, ModelInfo, Protocol, ProviderDescriptor, ProviderId, ThreadId } from '@boite/contracts';
 import type { Driver, ProbeContext, ProbeFilter, TurnHandle, TurnResult } from './types.ts';
 
 interface PendingLoad {
@@ -125,6 +125,9 @@ export function lazyDriver(
     probedModels(providerId: ProviderId, accountId: AccountId): ModelInfo[] | null {
       return loaded?.probedModels?.(providerId, accountId) ?? null;
     },
+    // The sign-in that read the session may be the first use of this protocol.
+    rememberSession: (provider: ProviderDescriptor, accountId: AccountId, created: unknown): Promise<ModelInfo[] | null> =>
+      ready().then(driver => driver.rememberSession?.(provider, accountId, created) ?? null),
     forgetProbes(filter: ProbeFilter = {}) {
       for (const entry of pending) {
         if (entry.probe && (filter.providerId === undefined || filter.providerId === entry.probe.provider.id)

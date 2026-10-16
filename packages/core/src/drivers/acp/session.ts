@@ -13,6 +13,7 @@ import pkg from '../../../package.json';
 import { messageOf, unavailable } from '../../errors.ts';
 import type { SpawnedChild } from '../../procs.ts';
 import { agentEnv, profileFor, resolveLaunch } from '../../providers/resolve.ts';
+import { launchTemp } from '../launch-temp.ts';
 import { grokLaunchArgs } from '../grok.ts';
 import { stderrLines } from '../lines.ts';
 import { exitWithin } from '../exit.ts';
@@ -467,10 +468,23 @@ export class AcpSession {
       throw unavailable(`no ${ctx.provider.id} executable on this machine`, { providerId: ctx.provider.id });
     }
 
-    const child = ctx.spawnChild(launch.executable, launchArgs(profile, launch.prefix, ctx.provider, ctx.thread.permissionMode), {
-      cwd: ctx.thread.cwd,
-      env: agentEnv(ctx.provider, ctx.accountEnv),
-    });
+    const temp = launchTemp(ctx.provider, ctx.account.isolationDir);
+    let child: SpawnedChild;
+    try {
+      child = ctx.spawnChild(launch.executable, launchArgs(profile, launch.prefix, ctx.provider, ctx.thread.permissionMode), {
+        cwd: ctx.thread.cwd,
+        env: agentEnv(ctx.provider, temp === null ? ctx.accountEnv : { ...ctx.accountEnv, ...temp.env }),
+      });
+    } catch (error) {
+      void temp?.dispose();
+      throw error;
+    }
+    // The directory the agent unpacked into goes with its last process.
+    if (temp !== null) {
+      const dispose = (): void => void temp.dispose((message) => ctx.log('warn', `acp session: ${message}`));
+      child.once('close', dispose);
+      child.once('error', dispose);
+    }
     this.child = child;
     this.killTree = ctx.killTree ?? null;
     this.watch(child, ctx);

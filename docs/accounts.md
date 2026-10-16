@@ -199,7 +199,9 @@ The other shape is `login.acp`, for an ACP agent whose sign-in is the protocol's
 own `authenticate` call rather than a command. The core starts the agent itself
 under the same `login:<accountId>` thread, sends `initialize` then `authenticate`
 with the descriptor's method id, refuses a method the agent does not advertise,
-and gives up after five minutes. The sign-in link arrives as a line on the agent's
+and gives up after five minutes. Once signed in, the same process opens one
+session in an empty folder to list the account's models, so no second launch
+is needed to read them ([providers](providers.md#the-models-probe)). The sign-in link arrives as a line on the agent's
 stdout that is not JSON, and reaches the page the same way, in `url`. The agent
 holds a loopback listener for the redirect, so a browser on the core's machine
 finishes the flow on its own; from a phone, the redirect URL pasted into

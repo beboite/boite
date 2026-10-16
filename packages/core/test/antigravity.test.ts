@@ -9,7 +9,10 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, test } from 'bun:test';
+import type { Settings } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
+import { probeTimeoutMs } from '../src/drivers/acp/probe.ts';
+import { LAUNCH_TEMP_DIR } from '../src/drivers/launch-temp.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -29,8 +32,8 @@ afterEach(async () => {
   if (open !== null) await open.stop();
 });
 
-async function startCore(): Promise<CoreClient> {
-  const started = await startTestCore();
+async function startCore(settings?: Partial<Settings>): Promise<CoreClient> {
+  const started = await startTestCore(settings === undefined ? {} : { settings });
   harness = started;
   logFile = join(started.dataDir, 'agy-fake.log');
   process.env['AGY_FAKE_LOG'] = logFile;
@@ -209,4 +212,90 @@ describe('antigravity', () => {
     const accounts = await client.call('accounts.list', {});
     expect(accounts.find((entry) => entry.id === account.id)?.status).toBe('ok');
   }, 40000);
+
+  test('the sign-in lists the models from its own process, which unpacks in a folder that goes with it', async () => {
+    const client = await startCore();
+    const account = await agyAccount(client);
+    // What a core stopped mid-launch left in the account's launch folders.
+    const stale = join(account.isolationDir, LAUNCH_TEMP_DIR, 'run-stale');
+    mkdirSync(stale, { recursive: true });
+    writeFileSync(join(stale, 'base_library.zip'), 'unpacked');
+
+    const probed = client.next('providers.probed', (event) => event.accountId === account.id, 20_000);
+    const states: string[] = [];
+    client.on('account.login', (event) => {
+      if (event.accountId === account.id) states.push(event.state);
+    });
+    await client.call('accounts.login', { accountId: account.id });
+    await waitFor(() => fakeLog().includes('callback:'), 20_000);
+    const callback = fakeLog().split('\n').find((line) => line.startsWith('callback:'))?.slice('callback:'.length) ?? '';
+    await client.call('accounts.loginInput', { accountId: account.id, text: callback });
+    await waitFor(() => states.includes('done') || states.includes('failed'), 20_000);
+    expect(states.at(-1)).toBe('done');
+
+    // The models came from the sign-in, and a probe after it starts nothing:
+    // on a slow machine one launch of the real agent is a minute of unpacking.
+    const ids = ['default', 'gemini-3.8-flash-high', 'gemini-3.7-flash-high', 'gemini-pro-agent'];
+    expect((await probed).models.map((model) => model.id)).toEqual(ids);
+    const probe = await client.call('providers.probe', { providerId: 'agy-fake', accountId: account.id });
+    expect(probe.models.map((model) => model.id)).toEqual(ids);
+    expect(fakeLog().split('\n').filter((line) => line === 'initialize')).toHaveLength(1);
+
+    // That session opened in an empty folder, not the account's home.
+    const sessionCwd = fakeLog().split('\n').find((line) => line.startsWith('new:'))?.slice('new:'.length) ?? '';
+    expect(sessionCwd.length).toBeGreaterThan(0);
+    expect(sessionCwd).not.toBe(account.isolationDir);
+
+    // Every name a temp folder is read from points at this launch's own
+    // folder, and that folder, the session's and the stale one all go.
+    const temp = loggedEnv('TEMP') ?? '';
+    expect(temp.startsWith(join(account.isolationDir, LAUNCH_TEMP_DIR, 'run-'))).toBe(true);
+    expect([loggedEnv('TMP'), loggedEnv('TMPDIR')]).toEqual([temp, temp]);
+    await waitFor(() => !existsSync(temp) && !existsSync(sessionCwd) && !existsSync(stale), 10_000);
+  }, 40000);
+
+  test('a probe of a signed-in account unpacks in its own folder, gone once it answered', async () => {
+    const client = await startCore();
+    const account = await agyAccount(client);
+    const token = join(account.isolationDir, 'antigravity-acp', 'acp_token.json');
+    writeFileSync(token, JSON.stringify({ access_token: 'fake', expiry: 0 }), 'utf8');
+    expect((await client.call('accounts.check', { accountId: account.id })).status).toBe('ok');
+
+    const probe = await client.call('providers.probe', { providerId: 'agy-fake', accountId: account.id });
+    expect(probe.models.map((model) => model.id)).toContain('gemini-pro-agent');
+    const temp = loggedEnv('TEMP') ?? '';
+    expect(temp.startsWith(join(account.isolationDir, LAUNCH_TEMP_DIR, 'run-'))).toBe(true);
+    await waitFor(() => !existsSync(temp), 10_000);
+  }, 30000);
+
+  test('a turn unpacks in its own folder, which goes with the process', async () => {
+    // No warm process: the session's process ends with its turn.
+    const client = await startCore({ warmProcessMinutes: 0 });
+    const account = await agyAccount(client);
+    writeFileSync(join(account.isolationDir, 'antigravity-acp', 'acp_token.json'), JSON.stringify({ access_token: 'fake', expiry: 0 }), 'utf8');
+    expect((await client.call('accounts.check', { accountId: account.id })).status).toBe('ok');
+    const projectDir = join(harness!.dataDir, 'project');
+    mkdirSync(projectDir, { recursive: true });
+    const project = await client.call('projects.add', { path: projectDir, name: 'agy' });
+    const thread = await client.call('threads.create', { projectId: project.id, providerId: 'agy-fake', accountId: account.id, cwd: projectDir, title: 'agy' });
+    await client.call('threads.subscribe', { threadId: thread.id });
+
+    const finished = client.next('turn.finished', (turn) => turn.threadId === thread.id, 20_000);
+    await client.call('turns.start', { threadId: thread.id, prompt: 'ping' });
+    const done = await finished;
+    expect(done.error).toBeNull();
+    expect(fakeLog()).toContain('prompt:');
+    const temp = loggedEnv('TEMP') ?? '';
+    expect(temp.startsWith(join(account.isolationDir, LAUNCH_TEMP_DIR, 'run-'))).toBe(true);
+    await waitFor(() => !existsSync(temp), 10_000);
+  }, 30000);
+
+  test('an agent that unpacks itself first gets longer to list its models than one that starts at once', async () => {
+    const client = await startCore();
+    await agyAccount(client);
+    const unpacking = harness!.core.providers.require('agy-fake');
+    // The real one took 45 to 54 s before its server read a line on an 8 GB laptop.
+    expect(probeTimeoutMs(unpacking)).toBeGreaterThanOrEqual(90_000);
+    expect(probeTimeoutMs({ ...unpacking, quirks: [] })).toBe(20_000);
+  });
 });

@@ -10,9 +10,21 @@ import type { ProbeContext, ProbeResult } from '../types.ts';
 import { agentModelsOf, categoryOption, effortFrom, modelsFrom, selectValues, type AgentModels } from './models.ts';
 import { canDeleteSessions, CLIENT_NAME, discardSession, isGrok, preferExit, STDERR_MAX, type AcpDeps, type Timer } from './protocol.ts';
 import { jsonLinesOnly } from './stdout.ts';
+import { unpacksAtLaunch } from '../launch-temp.ts';
 
 /** How long a probe waits for the agent to answer `initialize` and `session/new`. */
 const PROBE_TIMEOUT_MS = 20_000;
+/**
+ * The same wait for an agent that unpacks itself first. Antigravity's 1.2 GB
+ * unpack took 45 to 54 s on an 8 GB laptop with 600 MB free (2026-10-16,
+ * from the start of its launcher to the start of its server) before the server
+ * read a line, so 20 s stopped every probe there before it began.
+ */
+const UNPACKING_PROBE_TIMEOUT_MS = 90_000;
+
+export function probeTimeoutMs(provider: ProbeContext['provider']): number {
+  return unpacksAtLaunch(provider) ? UNPACKING_PROBE_TIMEOUT_MS : PROBE_TIMEOUT_MS;
+}
 
 /** What one probe session read: the list, and the named model's own effort scale when one was asked for. */
 export interface ProbeReading {
@@ -68,13 +80,14 @@ export async function readModels(ctx: ProbeContext, deps: AcpDeps, noteOptions: 
         }));
       });
     });
+    const timeoutMs = probeTimeoutMs(ctx.provider);
     const expired = new Promise<never>((_resolve, reject) => {
       timer = setTimeout(() => {
-        reject(unavailable(say(`the ${ctx.provider.id} agent did not list its models in ${PROBE_TIMEOUT_MS / 1000} s`), {
+        reject(unavailable(say(`the ${ctx.provider.id} agent did not list its models in ${timeoutMs / 1000} s`), {
           providerId: ctx.provider.id,
           accountId: ctx.accountId,
         }));
-      }, PROBE_TIMEOUT_MS);
+      }, timeoutMs);
       timer.unref?.();
     });
 

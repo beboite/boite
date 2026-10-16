@@ -8,16 +8,32 @@
  * Run as `bun <this file>`. `AGY_FAKE_LOG` names a file it appends to:
  * `initialize`, `env <NAME>=<value>` for the variables the account is supposed
  * to carry, `callback:<url>` with the redirect URL a test is meant to paste,
- * `fetched:<path>` when that URL is hit, and `authenticated`. The session token
- * lands under `GEMINI_HOME`, which is how the account is rechecked.
+ * `fetched:<path>` when that URL is hit, `authenticated`, `new:<cwd>` for
+ * each session it opens with its model list, and `prompt:<sessionId>` for a
+ * prompt, answered with one word. The session token lands under
+ * `GEMINI_HOME`, which is how the account is rechecked.
  */
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import { agent, ndJsonStream, PROTOCOL_VERSION } from '@agentclientprotocol/sdk';
 
-/** The variables a test asserts on: the isolation, the harness and the browser suppression. */
-const WATCHED = ['GEMINI_HOME', 'AGY_ACP_FORCE_FILE_STORAGE', 'ANTIGRAVITY_HARNESS_PATH', 'BROWSER', 'GEMINI_API_KEY'];
+/** The variables a test asserts on: the isolation, the harness, the browser suppression and where it unpacks. */
+const WATCHED = ['GEMINI_HOME', 'AGY_ACP_FORCE_FILE_STORAGE', 'ANTIGRAVITY_HARNESS_PATH', 'BROWSER', 'GEMINI_API_KEY', 'TEMP', 'TMP', 'TMPDIR'];
+
+/** The model option the real server answers `session/new` with, cut to three entries. */
+const MODEL_OPTION = {
+  type: 'select' as const,
+  id: 'model',
+  category: 'model' as const,
+  name: 'Model',
+  currentValue: 'gemini-3.7-flash-high',
+  options: [
+    { value: 'gemini-3.8-flash-high', name: 'Gemini 3.8 Flash (High)' },
+    { value: 'gemini-3.7-flash-high', name: 'Gemini 3.7 Flash (High)' },
+    { value: 'gemini-pro-agent', name: 'Gemini 3.1 Pro (High)' },
+  ],
+};
 
 function log(line: string): void {
   const file = process.env['AGY_FAKE_LOG'];
@@ -86,6 +102,18 @@ const app = agent({ name: 'agy-fake' })
     writeToken();
     log('authenticated');
     return {};
+  })
+  .onRequest('session/new', ({ params }) => {
+    log(`new:${params.cwd}`);
+    return { sessionId: `agy-fake-${crypto.randomUUID().slice(0, 8)}`, configOptions: [MODEL_OPTION] };
+  })
+  .onRequest('session/prompt', async ({ params, client }) => {
+    log(`prompt:${params.sessionId}`);
+    await client.notify('session/update', {
+      sessionId: params.sessionId,
+      update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'pong' } },
+    });
+    return { stopReason: 'end_turn' as const };
   });
 
 app.connect(
