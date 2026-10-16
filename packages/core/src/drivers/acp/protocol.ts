@@ -41,3 +41,27 @@ export async function preferExit(died: Promise<never>, error: unknown): Promise<
   ]);
   throw error;
 }
+
+/** The agent advertised `sessionCapabilities.delete`: a session Boite opened only to read controls can go. */
+export function canDeleteSessions(init: { agentCapabilities?: { sessionCapabilities?: { delete?: unknown } | null } | null }): boolean {
+  const capability = init.agentCapabilities?.sessionCapabilities?.delete;
+  return capability !== undefined && capability !== null;
+}
+
+/**
+ * Deletes a session opened only to read the agent's controls, so a probe or a
+ * discovery leaves no empty conversation in the agent's own list (OpenCode 2
+ * keeps each one in its database). A refusal changes nothing for the caller.
+ */
+export async function discardSession(
+  agent: { request(method: 'session/delete', params: { sessionId: string }): Promise<unknown> },
+  canDelete: boolean,
+  sessionId: string,
+): Promise<void> {
+  if (!canDelete) return;
+  try {
+    await agent.request('session/delete', { sessionId });
+  } catch {
+    // An agent that will not delete it keeps one empty session, as before.
+  }
+}

@@ -56,6 +56,8 @@ const MODE_CANDIDATES: Record<PermissionMode, readonly string[]> = {
 
 /** How long to wait before each new try of a model the agent takes without listing it: 3.25 s in all. */
 const INJECTED_MODEL_RETRY_MS: readonly number[] = [250, 500, 1000, 1500];
+/** The effort value OpenCode 2 lists beside its levels for "the model's own". */
+const AGENT_DEFAULT_EFFORT = 'default';
 
 /** Mode ids are spelled every way there is: match without case, `_` or `-`. */
 function normalizeModeId(id: string): string {
@@ -101,6 +103,18 @@ export class SessionControls {
    */
   private appliedModel: string | null | undefined = undefined;
   private appliedEffort: string | null | undefined = undefined;
+  /**
+   * The model the agent opened its first new session on: what "the agent's own
+   * model" is when a thread goes back to it on a session that was moved off it.
+   */
+  private ownModel: string | null = null;
+  /**
+   * The options came from this session's own answers, not from another
+   * session's seed: only then does a current value say what this one is on.
+   */
+  private ownOptions = false;
+  /** Values this process refused, by category: asked again, they cost the same wait and the same warning. */
+  private readonly refused = new Set<string>();
   /** What the last `session/new` or `session/load` said the agent can be in. */
   private modes: SessionMode[] = [];
   /** The mode the agent is in, as it last told us: an answer or a drift it announced. */
@@ -111,6 +125,14 @@ export class SessionControls {
 
   seed(options: SessionConfigOption[]): void {
     if (this.configOptions.length === 0) this.configOptions = structuredClone(options);
+    this.noteOwnModel(options);
+  }
+
+  /** The model option's value in a `session/new` answer, the first one kept. */
+  noteOwnModel(options: SessionConfigOption[] | null): void {
+    if (this.ownModel !== null) return;
+    const option = categoryOption(options, 'model');
+    if (option?.type === 'select' && typeof option.currentValue === 'string' && option.currentValue.length > 0) this.ownModel = option.currentValue;
   }
 
   catalog(ctx: SessionContext): ModelInfo[] | null {
@@ -155,7 +177,10 @@ export class SessionControls {
     answer: unknown,
   ): void {
     this.noteModes(modes);
-    if (options !== null && options.length > 0) this.configOptions = options;
+    if (options !== null && options.length > 0) {
+      this.configOptions = options;
+      this.ownOptions = true;
+    }
     const listed = agentModelsOf(answer);
     if (listed !== null) this.agentModels = listed;
   }
@@ -278,7 +303,10 @@ export class SessionControls {
     try {
       const answer = await agent.request('session/set_config_option', { sessionId, configId: option.id, value: modeId });
       const listed = (answer as { configOptions?: SessionConfigOption[] | null }).configOptions ?? null;
-      if (listed !== null && listed.length > 0) this.configOptions = listed;
+      if (listed !== null && listed.length > 0) {
+        this.configOptions = listed;
+        this.ownOptions = true;
+      }
       return true;
     } catch (error) {
       ctx.log('warn', `acp: the agent refused the session mode ${modeId}: ${messageOf(error)}`);
@@ -301,7 +329,17 @@ export class SessionControls {
     if (this.configOptions.length === 0) return;
     const model = ctx.thread.model;
     const effort = ctx.thread.effort;
-    if (model !== this.appliedModel && (await this.setOption(ctx, 'model', model))) this.appliedModel = model;
+    if (model !== this.appliedModel) {
+      // Back to the agent's own model on a session moved off it: that model
+      // has to be asked for, or the session stays on the last one.
+      const wanted = model === AGENT_OWN_MODEL && this.appliedModel !== undefined && this.ownModel !== null ? this.ownModel : model;
+      if (await this.setOption(ctx, 'model', wanted)) {
+        // OpenCode 2 puts the effort back to its default with any other model:
+        // what the answer now reports decides whether the effort goes again.
+        if (this.appliedModel !== model) this.appliedEffort = undefined;
+        this.appliedModel = model;
+      }
+    }
     if (effort !== this.appliedEffort && (await this.setOption(ctx, 'thought_level', effort))) {
       this.appliedEffort = effort;
     }
@@ -336,12 +374,23 @@ export class SessionControls {
   ): Promise<boolean> {
     const { agent, sessionId } = this.target();
     if (agent === null || sessionId === null) return false;
+    // No effort set: an agent that lists `default` among its levels (OpenCode
+    // 2) is put back on it, since it keeps the last level it was asked for.
+    if ((wanted === null || wanted.length === 0) && category === 'thought_level') {
+      const option = categoryOption(this.configOptions, category);
+      if (option === null || !selectValues(option).includes(AGENT_DEFAULT_EFFORT)) return true;
+      wanted = AGENT_DEFAULT_EFFORT;
+    }
     // Nothing to ask for: the agent keeps whatever it is configured with.
     if (wanted === null || wanted.length === 0) return true;
     if (category === 'model' && wanted === AGENT_OWN_MODEL) return true;
     const listed = this.configOptions.find(
       (entry) => entry.category === category && selectValues(entry).includes(wanted),
     );
+    // Already the value this session last reported: nothing to send.
+    if (this.ownOptions && listed?.type === 'select' && String(listed.currentValue) === wanted) return true;
+    const refusal = `${category}\0${wanted}`;
+    if (this.refused.has(refusal)) return false;
     const option = listed ?? this.injectedModelOption(ctx, category, wanted);
     if (option === undefined) {
       if (!this.configWarned) {
@@ -366,12 +415,16 @@ export class SessionControls {
         });
         // The answer carries the options as they now stand, current values included.
         const options = (answer as { configOptions?: SessionConfigOption[] | null }).configOptions ?? null;
-        if (options !== null && options.length > 0) this.configOptions = options;
+        if (options !== null && options.length > 0) {
+          this.configOptions = options;
+          this.ownOptions = true;
+        }
         return true;
       } catch (error) {
         const wait = waits[attempt];
         if (wait === undefined) {
           ctx.log('warn', `acp: the agent refused the ${category} ${wanted}: ${messageOf(error)}`);
+          this.refused.add(refusal);
           return false;
         }
         await new Promise<void>((resolve) => { setTimeout(resolve, wait); });

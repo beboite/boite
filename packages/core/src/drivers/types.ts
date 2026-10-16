@@ -339,6 +339,12 @@ export interface TitleContext {
 export interface ProbeFilter {
   providerId?: ProviderId;
   accountId?: AccountId;
+  /**
+   * The user asked to read the catalog again: nothing about the agent or the
+   * account changed. A driver drops what it cached, but a live session that is
+   * still opening reads a catalog as fresh as the refresh itself.
+   */
+  refresh?: true;
 }
 
 /** A native fork is unpublished until the caller validates its source and writes the branch. */
