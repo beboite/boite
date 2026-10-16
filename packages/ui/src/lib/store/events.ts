@@ -8,7 +8,7 @@ import { revealRequested } from '../reveal';
 import { appUpdateRequested } from '../desktop-update.svelte';
 import { rightPanel } from '../right-panel.svelte';
 import { undo } from '../undo.svelte';
-import { lastIndexById, patchLoad } from '../thread-rows';
+import { lastIndexById, patchFields, patchLoad } from '../thread-rows';
 import { strings } from '../strings';
 import { installStatesOf } from './accounts.svelte';
 import { observable } from './connection.svelte';
@@ -80,10 +80,10 @@ export function listen(ctx: StoreContext, client: Client): void {
     threads.upsertThread(summary);
     ctx.delegation.patchThread(summary);
     const open = s.openThread;
-    if (open && open.id === summary.id) Object.assign(open, summary);
+    if (open && open.id === summary.id) patchFields(open, summary);
     // Archived from another client: nothing here can show it again.
     else if (summary.archived) threads.forgetThread(summary.id, summary.archiveReason?.type === 'pr-merged');
-    if (s.delegationThread?.id === summary.id) Object.assign(s.delegationThread, summary);
+    if (s.delegationThread?.id === summary.id) patchFields(s.delegationThread, summary);
   });
   // A load sample alone: every copy of the row this client holds takes the new load and nothing else.
   on('thread.load', ({ threadId, load }) => {

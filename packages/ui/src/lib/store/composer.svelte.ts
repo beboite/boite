@@ -6,6 +6,7 @@ import { restorePreviewMentions } from '../preview-mentions';
 import { activityCommand, isActivityCommand } from '../activity-command';
 import { RpcFailure, readyAgain, wasUnanswered, type Client } from '../client';
 import { titleFrom } from '../format';
+import { patchFields } from '../thread-rows';
 import { DRAFT_STASH_KEY } from '../prefs';
 import { editPreviewMentions, insertPreviewMention } from '../preview-mentions';
 import { showPreviewReference } from '../preview-navigation';
@@ -746,7 +747,7 @@ export class Composer {
     // moved off idle yet: waiting is what the composer must do.
     const row: ThreadSummary = threadActive(thread.status) ? thread : { ...thread, status: 'running' };
     this.ctx.threads.upsertThread(row);
-    if (s.openThread?.id === row.id) Object.assign(s.openThread, row);
+    if (s.openThread?.id === row.id) patchFields(s.openThread, row);
     this.composerStates[row.id] ??= { text: '', attachments: [], queued: [], sending: false, paused: false };
   }
 

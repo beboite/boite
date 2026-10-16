@@ -18,7 +18,7 @@
   import { work } from '../lib/work-prefs.svelte';
   import { projectActivity, projectKey, projectView, type ProjectEntry } from '../lib/project-view.svelte';
   import { projectDrag, startProjectDrag } from '../lib/project-drag.svelte';
-  import { activeProject, archiveCount, projectThreadLists, projectThreadView, type ArchiveKind } from '../lib/project-threads.svelte';
+  import { activeProject, archiveCount, projectListMap, projectThreadView, type ArchiveKind } from '../lib/project-threads.svelte';
   import ProjectViews from './ProjectViews.svelte';
   import RecentGroup from './RecentGroup.svelte';
   import RecentDone from './RecentDone.svelte';
@@ -104,17 +104,27 @@
   }
   let working = $derived(recentPreferences.groupWorking ? recent.filter(({ machine, thread }) => groupWorkingThread(machine.store, thread)) : []);
   let attention = $derived(recentPreferences.groupWorking ? recent.filter(({ machine, thread }) => !groupWorkingThread(machine.store, thread)) : recent);
+  const listsFor = projectListMap();
+  /** Each listed project's sorted rows, shared by its section and by Alt+digit. */
+  let projectLists = $derived(listsFor(activeGroups));
+  /** The rows of the listed projects in drawn order, read only as far as the ninth: projects below it cost nothing. */
+  function projectRows(): { store: Store; threadId: ThreadId }[] {
+    const rows: { store: Store; threadId: ThreadId }[] = [];
+    for (const entry of activeGroups) {
+      if (rows.length >= 9) break;
+      if (entry.machine.store.isCollapsed(entry.project.id)) continue;
+      const open = projectThreadView.isOpen(entry, 'working');
+      const { lists } = projectLists.get(projectKey(entry))!;
+      for (const thread of open ? [...lists.attention, ...lists.working] : lists.attention) rows.push({ store: entry.machine.store, threadId: thread.id });
+      for (const kind of ['done', 'archived'] as const) if (projectThreadView.isOpen(entry, kind)) rows.push(...projectDoneRows[JSON.stringify([kind, projectKey(entry)])] ?? []);
+    }
+    return rows;
+  }
   // Alt+1 to Alt+9 count the rows as drawn: this view, open projects, then unfolded idle history.
   $effect(() => {
     sidebarRows.list = (workspace.view === 'recent'
       ? [...attention, ...(workingOpen ? working : [])].map(({ machine, thread }) => ({ store: machine.store, threadId: thread.id })).concat(doneRows, archivedRows)
-      : activeGroups.flatMap(entry => {
-          if (entry.machine.store.isCollapsed(entry.project.id)) return [];
-          const open = projectThreadView.isOpen(entry, 'working');
-          const lists = projectThreadLists(entry, entry.machine.store.threadsOf(entry.project.id), open);
-          return [...lists.attention, ...(open ? lists.working : [])].map(thread => ({ store: entry.machine.store, threadId: thread.id }))
-            .concat(...(['done', 'archived'] as const).map(kind => projectThreadView.isOpen(entry, kind) ? projectDoneRows[JSON.stringify([kind, projectKey(entry)])] ?? [] : []));
-        }).concat(idleRows)
+      : projectRows().concat(idleRows)
     ).slice(0, 9);
   });
   function addProject() {
@@ -180,7 +190,7 @@
         {@const workingOpen = projectThreadView.isOpen(entry, 'working')}
         {@const doneOpen = archiveCount(project, 'done') > 0 && projectThreadView.isOpen(entry, 'done')}
         {@const archivedOpen = archiveCount(project, 'archived') > 0 && projectThreadView.isOpen(entry, 'archived')}
-        {@const lists = projectThreadLists(entry, owner.threadsOf(project.id), workingOpen)}
+        {@const { lists } = projectLists.get(projectKey(entry))!}
         {@const controls = `sidebar-project-${encodeURIComponent(projectKey(entry))}`}
         {@const collapsed = owner.isCollapsed(project.id)}
         {@const away = owner.connection !== 'ready'}
