@@ -153,7 +153,9 @@ export function createAcpDriver(deps: AcpDeps): Driver {
     },
 
     forgetProbes(filter: ProbeFilter = {}): void {
-      probeRevision += 1;
+      // A refresh changes nothing about the agent: what a session still opening
+      // answers may seed the next one.
+      if (filter.refresh !== true) probeRevision += 1;
       for (const session of sessions.values()) session.forgetCatalog(filter);
       // A reloaded or updated agent may count its cost differently.
       if (filter.accountId === undefined) {

@@ -771,8 +771,22 @@ a Job Object and in the trace like any other, then asks the protocol's own quest
   for the model it lands on, and a failed read keeps the list already cached.
   A model's scale is read once, even when the agent names none for it. The
   config options a turn's own `session/new` or `session/load` answers are kept
-  for the account too, so a later process that resumes a session seeds its
-  controls from them instead of opening a discovery `session/new` every time.
+  for the account too. A process that resumes a session loads it first and
+  opens a discovery `session/new` only when the load answered no options and
+  nothing is cached; both OpenCode majors answer them on load. A probe or a
+  discovery session is deleted with `session/delete` when the agent advertises
+  `sessionCapabilities.delete` (OpenCode 2 does), so none of them stays in the
+  agent's own session list. A refresh drops cached catalogs but keeps the one
+  a session still opening reads: the composer refreshes as the app opens while
+  the draft's process starts, and that answer is as fresh as a probe's.
+- ACP controls on a running session: a model, effort or mode goes out only
+  when the session's own last answer does not already report it. OpenCode 2
+  puts the effort back on `default` with any model change, so the effort goes
+  again after one; a thread with no effort sends `default` when the agent lists
+  it, and a thread back on the agent's own model asks for the model the
+  session opened on. A value the agent refuses is not asked again in that
+  process: an injected gateway model it never takes costs one round of retries,
+  not one per turn.
 - Codex: `initialize`, the `initialized` notification, then `model/list` until no
   cursor comes back. Each model carries its own efforts and its own default, so
   two models on one account can offer two different scales. `serviceTiers` supplies

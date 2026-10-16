@@ -18,9 +18,9 @@ import { stderrLines } from '../lines.ts';
 import { exitWithin } from '../exit.ts';
 import type { LiveTurnSettings, ProbeContext, ProbeFilter, SessionContext } from '../types.ts';
 import { SessionControls } from './controls.ts';
-import { loadRefusal, LoadRefused, rpcReason, rpcRefusal } from './load.ts';
+import { failureText, loadRefusal, LoadRefused, rpcReason, rpcRefusal } from './load.ts';
 import { AGENT_OWN_MODEL } from './models.ts';
-import { CLIENT_NAME, EXIT_GRACE_MS, isGrok, STDERR_MAX, type AcpDeps, type Timer } from './protocol.ts';
+import { canDeleteSessions, CLIENT_NAME, discardSession, EXIT_GRACE_MS, isGrok, STDERR_MAX, type AcpDeps, type Timer } from './protocol.ts';
 import { jsonLinesOnly } from './stdout.ts';
 import { commandsOf, imageBlocksOf, usdCostOf, type AcpTurn } from './turn.ts';
 import { answerPermission, drawUpdate } from './updates.ts';
@@ -81,6 +81,8 @@ export class AcpSession {
 
   private sessionId: string | null = null;
   private canLoad = false;
+  /** The agent deletes sessions on request: a discovery session does not outlive its reading. */
+  private canDelete = false;
   /** This process resumed the thread's session with `session/load`, rather than creating one. */
   private loaded = false;
   /**
@@ -146,6 +148,11 @@ export class AcpSession {
     if (this.ctx === null) return;
     if (filter.providerId !== undefined && filter.providerId !== this.ctx.provider.id) return;
     if (filter.accountId !== undefined && filter.accountId !== this.ctx.account.id) return;
+    // A session still opening reads its options after the refresh asked: they
+    // are the fresh catalog. The composer asks for one as the app opens, while
+    // the draft's own process starts, and a catalog lost here costs the first
+    // prompt one more agent process (2.6 s for OpenCode 2 2.0.30).
+    if (filter.refresh === true && this.sessionId === null && !this.ended) return;
     this.catalogValid = false;
   }
 
@@ -306,7 +313,7 @@ export class AcpSession {
         // An agent that exits while it starts takes the connection with it,
         // and its exit code and last stderr line say more than that.
         const code = await exitWithin(this.exited, EXIT_GRACE_MS);
-        turn.fail(code === undefined ? messageOf(error) : this.exitSentence(code), code === undefined ? logMessageOf(error) : this.exitSentence(code, true));
+        turn.fail(code === undefined ? failureText(error) : this.exitSentence(code), code === undefined ? logMessageOf(error) : this.exitSentence(code, true));
       }
       this.endTurn(turn, true);
       return;
@@ -377,7 +384,7 @@ export class AcpSession {
         // A child that died takes the connection with it, and its exit says more
         // than "the connection closed": give it a moment to be reported.
         const code = await exitWithin(this.exited, EXIT_GRACE_MS);
-        turn.fail(code === undefined ? messageOf(error) : this.exitSentence(code), code === undefined ? logMessageOf(error) : this.exitSentence(code, true));
+        turn.fail(code === undefined ? failureText(error) : this.exitSentence(code), code === undefined ? logMessageOf(error) : this.exitSentence(code, true));
       }
       this.endTurn(turn, true);
       return;
@@ -492,6 +499,7 @@ export class AcpSession {
       clientInfo: { name: CLIENT_NAME, version: pkg.version },
     });
     this.canLoad = init.agentCapabilities?.loadSession === true;
+    this.canDelete = canDeleteSessions(init);
     this.imagesSupported = init.agentCapabilities?.promptCapabilities?.image === true;
     // The agent binary fills these: only text and numbers reach the log.
     const scalar = (value: unknown): string | null => typeof value === 'string' ? value : typeof value === 'number' ? String(value) : null;
@@ -501,16 +509,6 @@ export class AcpSession {
     });
 
     if (ctx.sessionId !== null && this.canLoad) {
-      // A fresh core has no probe cache, and session/load may omit controls.
-      // Discover them before loading so the resumed session stays the active
-      // one. What it finds is kept for the account, so the next cold turn of
-      // any thread does not open a throwaway session again.
-      if (!isGrok(ctx.provider) && !this.controls.hasOptions()
-        && (ctx.thread.model !== AGENT_OWN_MODEL || ctx.thread.effort !== null)) {
-        const discovered = await connection.agent.request('session/new', { cwd: ctx.thread.cwd, mcpServers: [] });
-        this.seedConfig(discovered.configOptions ?? []);
-        this.onOptions(discovered.configOptions ?? []);
-      }
       // Every `session/update` of a load is history replay: `current` is null,
       // so the update handler drops them, all but a running cost.
       const refusedKey = `${ctx.provider.id}\0${ctx.sessionId}`;
@@ -550,6 +548,17 @@ export class AcpSession {
       this.sessionId = ctx.sessionId;
       this.loaded = true;
       this.controls.noteSession(loaded.modes, loaded.configOptions ?? null, loaded);
+      // A load may omit its controls; both OpenCode majors answer them, so no
+      // empty session is opened for nothing. With no probe cache either, a
+      // throwaway session reads them once for the account, and the next cold
+      // turn of any thread starts from what it found.
+      if (!isGrok(ctx.provider) && !this.controls.hasOptions()
+        && (ctx.thread.model !== AGENT_OWN_MODEL || ctx.thread.effort !== null)) {
+        const discovered = await connection.agent.request('session/new', { cwd: ctx.thread.cwd, mcpServers: [] });
+        this.seedConfig(discovered.configOptions ?? []);
+        this.onOptions(discovered.configOptions ?? []);
+        await discardSession(connection.agent, this.canDelete, discovered.sessionId);
+      }
       return;
     }
     if (ctx.sessionId !== null) {
@@ -566,6 +575,7 @@ export class AcpSession {
     });
     this.sessionId = created.sessionId;
     this.controls.noteSession(created.modes, created.configOptions ?? null, created);
+    this.controls.noteOwnModel(created.configOptions ?? null);
     this.onOptions(created.configOptions ?? []);
   }
 

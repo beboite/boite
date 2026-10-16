@@ -34,7 +34,7 @@
       "launch": { "args": ["acp"] },
       "env": { "OPENCODE_CONFIG_CONTENT": "{\"permissions\":[{\"action\":\"subagent\",\"resource\":\"*\",\"effect\":\"deny\"}]}" },
       "isolation": { "XDG_DATA_HOME": "{isolationDir}", "XDG_CONFIG_HOME": "{isolationDir}", "XDG_STATE_HOME": "{isolationDir}/state" },
-      "close": { "processes": ["opencode"] }
+      "close": { "processes": ["opencode.exe", "opencode2"] }
     },
     "macos": {
       "detect": {},
@@ -49,7 +49,7 @@
       "launch": { "args": ["acp"] },
       "env": { "OPENCODE_CONFIG_CONTENT": "{\"permissions\":[{\"action\":\"subagent\",\"resource\":\"*\",\"effect\":\"deny\"}]}" },
       "isolation": { "XDG_DATA_HOME": "{isolationDir}", "XDG_CONFIG_HOME": "{isolationDir}", "XDG_STATE_HOME": "{isolationDir}/state" },
-      "close": { "processes": ["opencode"] }
+      "close": { "processes": ["opencode.exe", "opencode2"] }
     }
   },
   "auth": { "kind": "oauth-cli", "sqlite": { "file": "opencode/opencode.db", "tables": ["credential", "account", "control_account"] } },

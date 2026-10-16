@@ -155,7 +155,7 @@ export function forgetProbes(filter: ProbeFilter = {}): void {
 export function refreshProbes(protocol: Protocol, providerId: ProviderId, accountId: AccountId): void {
   const current = probedModelsOf(protocol, providerId, accountId);
   externalModels.delete(JSON.stringify([protocol, providerId, accountId]));
-  for (const driver of DRIVERS.values()) driver.forgetProbes?.({ providerId, accountId });
+  for (const driver of DRIVERS.values()) driver.forgetProbes?.({ providerId, accountId, refresh: true });
   if (current !== null) refreshing.set(refreshKey(providerId, accountId), { providerId, accountId, models: current });
 }
 
