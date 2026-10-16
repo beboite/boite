@@ -1,4 +1,5 @@
 import { RpcErrorCode, type DesktopUpdateStatus, type ProviderId, type ServerUpdateStatus } from '@boite/contracts';
+import { updateDouane } from './douane';
 import { RpcFailure } from '../client';
 import type { FakeContext, FakeMethods } from './context';
 import { updateHarness } from './provider-installs';
@@ -76,7 +77,7 @@ export function serverUpdateMethods(ctx: FakeContext): Pick<FakeMethods, 'core.u
     'core.updateStatus': async ({ refresh }) => refresh ? move({ checkedAt: Date.now() }) : structuredClone(ctx.serverUpdate),
     'core.updateInstall': async ({ version }) => install(version),
     // The real core's order, without its restart: the agents first, then Boite's download.
-    'core.updateEverything': async ({ agents, server, app }) => {
+    'core.updateEverything': async ({ agents, server, app, douane }) => {
       const started: ProviderId[] = [];
       const failed: { providerId: ProviderId; message: string }[] = [];
       for (const providerId of agents) {
@@ -90,7 +91,12 @@ export function serverUpdateMethods(ctx: FakeContext): Pick<FakeMethods, 'core.u
         try { install(server, true); } catch (error) { serverError = error instanceof Error ? error.message : String(error); }
       }
       const appError = app == null ? null : installDesktop(app, started);
-      return { agents: started, failed, server: structuredClone(ctx.serverUpdate), serverError, app: structuredClone(ctx.desktopUpdate), appError };
+      let douaneError: string | null = null;
+      if (douane === true) {
+        try { updateDouane(ctx); } catch (error) { douaneError = error instanceof Error ? error.message : String(error); }
+      }
+      return { agents: started, failed, server: structuredClone(ctx.serverUpdate), serverError, app: structuredClone(ctx.desktopUpdate), appError,
+        ...(douane === true ? { douane: structuredClone(ctx.douane), douaneError } : {}) };
     },
     // The fake stands for another machine's core: its window's report is what the seed already holds.
     'core.desktopUpdateReport': async ({ status }) => {

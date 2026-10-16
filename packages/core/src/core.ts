@@ -61,6 +61,7 @@ import { HookLedger } from './hooks.ts';
 import { TerminalStore } from './terminals.ts';
 import { ServerUpdates, type ServerUpdateOptions } from './server-update.ts';
 import { DesktopUpdates } from './desktop-update.ts';
+import { LocalDouane } from './douane-local.ts';
 
 export { CORE_VERSION } from './version.ts';
 
@@ -169,6 +170,8 @@ export class Core {
   /** Where the `boite` shim is, prepended to the PATH of every process a thread launches. */
   readonly cliDir: string | null = resolveCliDir();
   readonly speech: SpeechStore;
+  /** Douane run on this machine for the subscription proxy's local mode. */
+  readonly douane: LocalDouane;
   readonly telemetry: Telemetry;
   readonly updates: HarnessUpdates;
   readonly serverUpdates: ServerUpdates;
@@ -350,6 +353,7 @@ export class Core {
     this.activity = new ActivityStore(this, true);
     this.push = new PushStore(this);
     this.speech = new SpeechStore(this);
+    this.douane = new LocalDouane(this);
     this.telemetry = new Telemetry(this);
     this.updates = new HarnessUpdates(this);
     this.serverUpdates = new ServerUpdates(this, options.serverUpdates);
@@ -402,6 +406,7 @@ export class Core {
     this.worktreeCleanup = new WorktreeCleanup(this);
     this.worktreeCleanup.start();
     this.pullRequestWatches.start();
+    this.douane.start();
     this.logs.record('info', `Core ${this.version} started in ${Date.now() - this.startedAt} ms, ${process.platform} ${process.arch}, Bun ${process.versions.bun ?? 'unknown'}`, {
       source: 'core', event: 'core.started', durationMs: Date.now() - this.startedAt,
       data: { version: this.version, channel: this.channel, os: process.platform, arch: process.arch, bun: process.versions.bun ?? null, pid: process.pid, cliShim: this.cliDir !== null, trace: this.procs.capability().mode },
@@ -525,6 +530,7 @@ export class Core {
     await this.coordination.close();
     await this.group.close();
     await this.speech.close();
+    await this.douane.close();
     await this.push.close();
     await this.plugins.close();
     this.providers.installs.stop();

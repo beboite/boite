@@ -33,6 +33,20 @@ export const fr: Translation = {
     entryStatus: { ready: 'Prêt', cooldown: 'En pause', error: 'Erreur', disabled: 'Désactivé' },
     creditOf: '{remaining} sur {limit}',
     creditUsed: '{used} utilisés',
+    where: 'Où tourne la passerelle',
+    remote: 'Passerelle distante', local: 'Douane sur cette machine',
+    localHint: 'Boite télécharge Douane depuis ses versions publiées, le lance sur cette machine sur un port local, le relance après un plantage et le met à jour avec vos agents. Revenir à une passerelle distante l\'arrête et garde ses comptes.',
+    localState: {
+      off: 'Éteint', unavailable: 'Pas encore disponible', installing: 'Installation', starting: 'Démarrage', running: 'En marche',
+      updating: 'Mise à jour', stopped: 'Arrêté', failed: 'Arrêté par une erreur'
+    },
+    localVersion: 'Version {version}',
+    localAvailable: 'Version {version}, {available} disponible',
+    localPort: '127.0.0.1:{port}',
+    localDevelopment: 'Exécutable de développement',
+    localRestartAt: 'Redémarre à {time}',
+    localDownloaded: '{percent} % téléchargés',
+    start: 'Démarrer', stop: 'Arrêter', update: 'Mettre à jour',
   },
   settingRequest: {
     heading: 'Réglage suggéré',

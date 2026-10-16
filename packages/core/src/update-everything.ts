@@ -25,7 +25,7 @@ function agentsOf(value: unknown): ProviderId[] {
  * install it, and the install restarts this core, so it is handed to that
  * window once every agent started here has finished (`DesktopUpdates`).
  */
-export async function updateEverything(core: Core, params: { agents?: unknown; server?: unknown; app?: unknown } | null): Promise<UpdateEverythingResult> {
+export async function updateEverything(core: Core, params: { agents?: unknown; server?: unknown; app?: unknown; douane?: unknown } | null): Promise<UpdateEverythingResult> {
   const agents = agentsOf(params?.agents);
   const server = params?.server ?? null;
   if (server !== null && (typeof server !== 'string' || server === '')) {
@@ -35,6 +35,8 @@ export async function updateEverything(core: Core, params: { agents?: unknown; s
   if (app !== null && (typeof app !== 'string' || app === '' || app.length > 80)) {
     throw refused('core.updateEverything.app must be the desktop app\'s offered version or null', { field: 'app' });
   }
+  const douane = params?.douane ?? false;
+  if (typeof douane !== 'boolean') throw refused('core.updateEverything.douane must be a boolean', { field: 'douane' });
 
   const started: ProviderId[] = [];
   const failed: UpdateEverythingResult['failed'] = [];
@@ -48,6 +50,11 @@ export async function updateEverything(core: Core, params: { agents?: unknown; s
       failed.push({ providerId: requested, message: messageOf(error) });
     }
   }));
+  let douaneError: string | null = null;
+  if (douane) {
+    try { await core.douane.update(); }
+    catch (error) { douaneError = messageOf(error); }
+  }
   let serverError: string | null = null;
   if (server !== null) {
     try { core.serverUpdates.install(server); }
@@ -62,7 +69,8 @@ export async function updateEverything(core: Core, params: { agents?: unknown; s
   failed.sort((a, b) => order(a.providerId) - order(b.providerId));
   core.logs.info(`Update everything: ${started.length} agents started, ${failed.length} refused, Boite ${server === null ? 'not asked' : serverError === null ? `to ${server}` : 'refused'}, desktop app ${app === null ? 'not asked' : appError === null ? `to ${app}` : 'refused'}`, {
     source: 'updates', event: 'update-everything.started',
-    data: { agents: started.join(','), failed: failed.map((entry) => entry.providerId).join(','), server, serverError, app, appError },
+    data: { agents: started.join(','), failed: failed.map((entry) => entry.providerId).join(','), server, serverError, app, appError, douane, douaneError },
   });
-  return { agents: started, failed, server: core.serverUpdates.snapshot(), serverError, app: core.desktopUpdates.snapshot(), appError };
+  return { agents: started, failed, server: core.serverUpdates.snapshot(), serverError, app: core.desktopUpdates.snapshot(), appError,
+    ...(douane ? { douane: core.douane.status(), douaneError } : {}) };
 }

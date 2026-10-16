@@ -2,6 +2,7 @@ import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp.ts';
 import { startDevUi } from './lib/ui.ts';
+import { mobileAction } from './lib/mobile.ts';
 import { pairingUrlOf, startCore } from './lib/core.ts';
 import { connect } from '../../packages/core/src/client.ts';
 
@@ -182,6 +183,53 @@ test('phone Limits opens the same gateway and disabling it restores the native p
   expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
   await capture('boite-proxy-disabled-native-limits-phone.png');
   expect(page.errors()).toEqual([]);
+}, 30_000);
+
+test('Douane on this machine: the two-choice control starts it, shows its state at desktop and phone widths, and Stop holds it', async () => {
+  const local = await BrowserPage.launch({ url: `${origin}/?fake=1&open=recent`, windowSize: { width: 1280, height: 900 } });
+  const shot = async (name: string) => {
+    await local.evaluate('Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])');
+    await local.screenshot(join(process.env.BOITE_CAPTURE_DIR ?? join(import.meta.dir, '.artifacts'), name));
+  };
+  try {
+    await local.waitFor('document.querySelector("[data-testid=nav-settings]")');
+    await local.click('[data-testid="nav-settings"]');
+    await local.click('[data-testid="settings-tab-accounts"]');
+    await local.waitFor('document.querySelector("[data-testid=subscription-proxy-settings]")');
+    await local.click('[data-testid="subscription-proxy-local"]');
+    await local.waitFor('document.querySelector("[data-testid=subscription-proxy-url]") === null');
+    await local.click('[data-testid="subscription-proxy-enabled"]');
+    await local.click('[data-testid="subscription-proxy-save"]');
+    await local.waitFor('document.querySelector("[data-testid=douane-local]")?.dataset.state === "running"');
+    expect(await local.text('[data-testid=douane-local-version]')).toBe('Version 0.3.0, 0.3.1 available');
+    await local.evaluate('document.querySelector("[data-testid=subscription-proxy-settings]").scrollIntoView({ block: "center" })');
+    await shot('boite-douane-local-desktop.png');
+
+    await local.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+    await local.waitFor('document.querySelector("[data-testid=mobile-menu]")');
+    if (!await local.evaluate('!!document.querySelector("[data-testid=douane-local]")')) {
+      await mobileAction(local, 'mobile-settings');
+      await local.waitFor('document.querySelector("[data-testid=mobile-settings-home]")');
+      // On the phone the proxy card folds under Limits' Configure proxy.
+      await local.click('[data-testid="settings-tab-limits"]');
+      await local.waitFor('document.querySelector("[data-testid=subscription-proxy-settings]")');
+      await local.evaluate('document.querySelector("[data-testid=subscription-proxy-settings]").closest("details").open = true');
+    }
+    await local.waitFor('document.querySelector("[data-testid=douane-local]")?.dataset.state === "running"');
+    // The list above can still grow as limits land: scroll until the card stays in view.
+    const inView = '(() => { const card = document.querySelector("[data-testid=douane-local]"); card.scrollIntoView({ block: "center" }); const box = card.getBoundingClientRect(); return box.top >= 0 && box.bottom <= innerHeight; })()';
+    await local.waitFor(inView);
+    expect(await local.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+    expect(await local.evaluate('document.querySelector("[data-testid=douane-local]").getBoundingClientRect().right <= innerWidth')).toBe(true);
+    await local.waitFor(inView);
+    await shot('boite-douane-local-phone.png');
+    await local.click('[data-testid="douane-local-stop"]');
+    await local.waitFor('document.querySelector("[data-testid=douane-local]")?.dataset.state === "stopped"');
+    await local.waitFor('document.querySelector("[data-testid=douane-local-start]")');
+    await local.waitFor(inView);
+    await shot('boite-douane-local-stopped-phone.png');
+    expect(local.errors()).toEqual([]);
+  } finally { await local.close(); }
 }, 30_000);
 
 test('production desktop and phone embed the dashboard through the real core without the fake bridge', async () => {

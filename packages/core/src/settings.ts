@@ -48,6 +48,9 @@ export class SettingsStore {
       }
       storage.directory = resolve(storage.directory);
     }
+    // Local mode: Douane's kind and this core's loopback URLs, whatever the client sent.
+    const proxy = checked.patch.subscriptionProxy;
+    if (proxy?.mode === 'local') checked.patch.subscriptionProxy = this.core.douane.localProxy(proxy);
     const titleModel = checked.patch.titleModel;
     if (titleModel !== undefined && titleModel !== null) {
       const provider = this.core.providers.get(titleModel.providerId);
@@ -88,6 +91,7 @@ export class SettingsStore {
       }
     }
     this.core.group.settingsChanged();
+    if (checked.subscriptionProxy !== undefined) this.core.douane.settingsChanged();
     return next;
   }
 }

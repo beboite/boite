@@ -148,9 +148,17 @@ export function checkSettingsPatch(patch: Partial<Settings>): SettingsPatchCheck
         return `${url.origin}${dashboard ? url.pathname : url.pathname.replace(/\/$/, '')}${dashboard ? url.hash : ''}`;
       } catch { return null; }
     };
+    const mode: unknown = (proxy as { mode?: unknown }).mode;
+    if (mode !== undefined && mode !== 'remote' && mode !== 'local') {
+      return { ok: false, field: 'subscriptionProxy', message: 'subscriptionProxy.mode must be remote, local or absent' };
+    }
+    if (mode === 'local' && proxy.kind !== 'douane') {
+      return { ok: false, field: 'subscriptionProxy', message: 'subscriptionProxy.mode local runs Douane: kind must be douane' };
+    }
     const baseUrl = address(proxy.baseUrl, false), dashboardUrl = address(proxy.dashboardUrl, true);
     if (!baseUrl || !dashboardUrl) return { ok: false, field: 'subscriptionProxy', message: 'subscriptionProxy URLs must be HTTP or HTTPS addresses without credentials or query; only the dashboard may have a fragment' };
-    next.subscriptionProxy = { enabled: proxy.enabled, kind: proxy.kind, baseUrl, dashboardUrl };
+    // Absent stays absent: settings saved before the local mode read as remote and compare unchanged.
+    next.subscriptionProxy = { enabled: proxy.enabled, kind: proxy.kind, baseUrl, dashboardUrl, ...(mode === undefined ? {} : { mode }) };
   }
   // Older clients and saved settings may still carry the retired launch limits.
   Reflect.deleteProperty(next, 'maxConcurrentTurns');

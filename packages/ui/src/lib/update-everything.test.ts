@@ -142,3 +142,19 @@ test("a release another PC's core took waits there for its agents, then follows 
   // A newer release than the one asked for is offered again.
   expect(part({ desktop: { ...app, version: '2.2.0' } })).toMatchObject({ state: 'offered', startable: true });
 });
+
+test('offers the Douane a machine runs beside its agents, follows its update, and never a development executable', () => {
+  const running = { state: 'running', version: '0.3.0', available: '0.3.1', port: 8787 } as const;
+  const [offered] = planOf([machine('m2', { server: null, douane: running })], null);
+  expect(offered?.parts).toEqual([expect.objectContaining({ id: 'douane', name: 'Douane', from: '0.3.0', version: '0.3.1', state: 'offered', startable: true })]);
+  expect(offerKeys(planOf([machine('m2', { server: null, douane: running })], null))).toEqual(['m2/douane@0.3.1']);
+
+  const downloading = planOf([machine('m2', { server: null, douane: { ...running, state: 'updating', progress: { receivedBytes: 25, totalBytes: 100 } } })], null);
+  expect(downloading[0]?.parts[0]).toMatchObject({ id: 'douane', state: 'downloading', percent: 25, startable: false });
+  const waiting = planOf([machine('m2', { server: null, douane: { ...running, state: 'updating' } })], null);
+  expect(waiting[0]?.parts[0]).toMatchObject({ state: 'updating', startable: false });
+
+  expect(planOf([machine('m2', { server: null, douane: { ...running, available: null } })], null)).toEqual([]);
+  expect(planOf([machine('m2', { server: null, douane: { ...running, development: true } })], null)).toEqual([]);
+  expect(planOf([machine('m2', { server: null, douane: { ...running, state: 'off' } })], null)).toEqual([]);
+});

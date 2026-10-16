@@ -65,6 +65,63 @@ cross-site cookies; those dashboards remain available through Open dashboard.
 Show account limits opens the native limits and monitoring switches for agents
 that keep their own configuration; Show proxy dashboard returns to the gateway.
 
+### Douane on this machine
+
+The proxy card's first choice is where the gateway runs: Remote gateway (the
+URLs above, typed by the user) or Douane on this machine, for someone with no
+server. Settings store it as `subscriptionProxy.mode`, `remote` or `local`;
+settings saved before the choice existed have no `mode` and read as remote,
+unchanged. In local mode the kind is Douane and the core writes both URLs
+itself: `baseUrl` `http://127.0.0.1:<port>/v1`, `dashboardUrl`
+`http://127.0.0.1:<port>/admin/`, and the proxy key stays the placeholder, since
+a loopback Douane asks clients for no key. `subscriptionProxyOf`, model
+discovery, the gateway account view and Limits then work as with a remote
+Douane.
+
+The core (`packages/core/src/douane-local.ts`) runs Douane while the mode is
+local, whether or not the proxy switch is on, so its dashboard can take
+accounts before agents move to it:
+
+- Install: the newest release named by
+  `https://github.com/beboite/douane/releases/latest/download/VERSION`, its
+  `manifest.json` entry for this OS and CPU (`windows-x64`, `macos-arm64`,
+  `macos-x64`, `linux-x64`, `linux-arm64`) and that executable, checked against
+  the manifest's SHA-256 and size by the [managed installer](#managed-installs).
+  It lands in `<dataDir>/douane/program/releases/<version>/`, `current` pointing at
+  it. A release not published yet, or one without this platform, reads as
+  `unavailable` ("not available yet") and nothing retries until Start or
+  Check for updates. `BOITE_DOUANE_BINARY=<path>` runs that executable instead
+  and never downloads or updates it; a `.ts` or `.js` path runs with the Bun
+  running the core, which is how the tests' fake Douane starts.
+- Data: `<dataDir>/douane/douane.toml`, written once, then only its `listen`
+  line moves, because Douane saves its own settings into the same file;
+  `auth/` and `douane.sqlite` beside it. Turning the mode off, Stop and an
+  update keep them; nothing in Boite deletes `auth/`.
+- Port: 127.0.0.1 only. The port remembered from the last start when it is
+  free, 8787 otherwise, any free port last; a new port is remembered and
+  written into the proxy settings, so agents follow it.
+- Process: spawned through the process registry under `system:douane` (traced,
+  a Job Object on Windows), its output lines in the core log (`source:
+  douane`). It is ready once `GET /health` answers `status: ok` within 30 s.
+  After a crash it starts again after 1, 2, 5, 15, 30 then 60 s; a run that
+  stayed up a minute resets the delay. Stop holds it until Start or the next
+  core start. A core that died without closing can leave Douane running off
+  Windows: on Linux the next start stops that process when its command line
+  names this data directory's `douane.toml` (`douane.pid`).
+- Updates: Check for updates on the machine's agents reads Douane's newest
+  release too, and Update all (`core.updateEverything` with `douane: true`) or
+  `douane.update` installs it beside the running one. The swap waits until
+  `GET /admin/api/summary` reports `in_flight: 0` (15 minutes at most, then
+  the new release waits for Douane's next start). The previous release stays
+  on disk until the new one answers `/health`; when it does not, `current`
+  points back at the previous release, which starts again.
+
+`douane.status` and the `douane.updated` event carry the state (`off`,
+`unavailable`, `installing` with progress, `starting`, `running` with version
+and port, `updating`, `stopped`, `failed` with the reason and the restart time)
+to every client, a paired phone included; `douane.start`, `douane.stop`,
+`douane.check` and `douane.update` are the owner's.
+
 Which agents the proxy serves is decided per provider, not per protocol
 (`subscriptionProxyServes` in the contract): the Claude and Codex protocols
 whole, and both OpenCode versions by their ids, because ACP is also what

@@ -57,6 +57,7 @@ import { devicesMethods } from './fake-client/devices';
 import { pullRequestMethods } from './fake-client/pull-requests';
 import { worktreeMethods } from './fake-client/worktrees';
 import { serverUpdateMethods } from './fake-client/server-update';
+import { douaneMethods } from './fake-client/douane';
 import { planRetry, retryMethods, seedRetry } from './fake-client/retry';
 import { closeSideQuestions } from './fake-client/side-questions';
 import { holdAfterRestart } from './fake-client/recovery';
@@ -423,6 +424,7 @@ export class FakeClient implements ObservableClient {
       ...brainMethods(ctx),
       ...logMethods(ctx),
       ...serverUpdateMethods(ctx),
+      ...douaneMethods(ctx),
       ...retryMethods(ctx),
       ...hookMethods(ctx),
       ...pairingMethods(ctx),

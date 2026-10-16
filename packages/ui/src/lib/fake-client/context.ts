@@ -48,6 +48,7 @@ import {
   type Settings,
   type ServerUpdateStatus,
   type DesktopUpdateStatus,
+  type LocalDouaneStatus,
   type SpeechConfig,
   type SpeechStatus,
   type TelemetryState,
@@ -161,6 +162,10 @@ export class FakeContext {
   serverUpdate: ServerUpdateStatus = initialServerUpdate();
   /** The desktop app's updater as this machine's window reported it; null with no window, or on a server. */
   desktopUpdate: DesktopUpdateStatus | null = null;
+  /** Douane as this fake core runs it in the proxy's local mode (`douane.ts`). */
+  douane: LocalDouaneStatus = { state: 'off', version: null, available: null, port: 8787 };
+  /** Bumped by every Douane start, stop and update, so a step scheduled before one lands nowhere. */
+  douaneGeneration = 0;
   readonly bus: FakeBus;
   readonly agents: FakeAgents;
   /** A settle of the agent setting cards is queued after the current change. */

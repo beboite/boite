@@ -16,6 +16,7 @@ import { registerTailscaleMethods } from './tailscale.ts';
 import { registerFirewallMethods } from './firewall.ts';
 import { registerSettingsMethods } from './settings.ts';
 import { registerSubscriptionProxy } from './subscription-proxy.ts';
+import { registerLocalDouane } from './douane-local.ts';
 import { registerThreadMethods } from './threads/rpc.ts';
 import { registerTraceMethods } from './trace.ts';
 import { registerUsageMethods } from './usage.ts';
@@ -103,6 +104,7 @@ export function registerModules(core: Core): void {
   registerUsageMethods(core);
   registerSettingsMethods(core);
   registerSubscriptionProxy(core);
+  registerLocalDouane(core);
   registerKeybindingMethods(core);
   registerSessionMethods(core);
   registerTailscaleMethods(core);

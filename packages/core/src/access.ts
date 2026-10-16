@@ -30,6 +30,8 @@
  * quotas.list and subscriptionProxy.quotas let a phone draw the same limit bars
  * as the owner without a dashboard embed; a forced refresh reaches the
  * providers and stays the owner's, as do monitoring switches and resets.
+ * douane.status lets a phone see whether this machine runs Douane, its version
+ * and port, which Settings shows; starting, stopping and updating it stay the owner's.
  */
 
 import { AGENT_EVENTS, DEVICE_EVENTS, DEVICE_METHODS, type RpcEventName, type RpcMethodName } from '@boite/contracts';

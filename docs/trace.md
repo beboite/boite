@@ -105,8 +105,9 @@ pending or the previous tick saw a thread at 2% CPU or more or a changed process
 count. Otherwise it waits four seconds. A `turn.started` or a new lease brings
 the next tick forward to one second. A tick with no live process and memory
 `ok` reads nothing. A load is sent when it moved by more than 1% CPU, 1 MiB or a
-process; a scope with no thread behind it (a terminal, the devices) asks the
-thread table again only then. A thread whose processes never all exit forgets
+process; a scope with no thread behind it (a terminal, the devices, the
+Douane the core runs under `system:douane`) asks the thread table again only
+then. A thread whose processes never all exit forgets
 each exited pid 30 seconds after its exit, so late job events are still
 recognized while its history stays bounded.
 

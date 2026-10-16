@@ -4,6 +4,7 @@ import { RpcFailure } from '../client';
 import type { FakeContext, FakeMethods } from './context';
 import { gatewayQuotas } from './accounts';
 import { settleSettings } from './requests';
+import { douaneSettingsChanged, localProxy } from './douane';
 
 export function settingsMethods(ctx: FakeContext) {
   return {
@@ -16,8 +17,12 @@ export function settingsMethods(ctx: FakeContext) {
       if (key !== undefined && key !== null && (typeof key !== 'string' || key.length > 4096 || !key.trim() || /[\u0000-\u0020\u007f]/.test(key))) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'subscriptionProxy.key must be null or a non-empty token without whitespace' });
       const checked = checkSettingsPatch({ subscriptionProxy });
       if (!checked.ok) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: checked.message, data: { field: checked.field } });
+      // As the core: local mode stores this machine's loopback URLs, whatever was sent.
+      const proxy = checked.patch.subscriptionProxy;
+      if (proxy?.mode === 'local') checked.patch.subscriptionProxy = localProxy(ctx, proxy);
       ctx.settings = { ...ctx.settings, ...checked.patch };
       ctx.emit('settings.updated', { ...ctx.settings });
+      douaneSettingsChanged(ctx);
       // As the core: another gateway starts its quotas over.
       ctx.emit('subscriptionProxy.quotasUpdated', gatewayQuotas(ctx));
       return { ...ctx.settings };

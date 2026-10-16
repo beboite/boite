@@ -42,7 +42,7 @@ export function upToDate(current: string | null, install: ProviderInstall): bool
 
 export type FetchText = (url: string, signal: AbortSignal) => Promise<string>;
 
-async function fetchText(url: string, signal: AbortSignal): Promise<string> {
+export async function fetchText(url: string, signal: AbortSignal): Promise<string> {
   const response = await fetch(url, { signal, redirect: 'follow' });
   // The manifest names the digest the download is checked against: a redirect off https would let anyone on the path name it.
   if (!response.url.startsWith('https://')) throw new Error(`${url} redirected to ${response.url}; a publisher stays on https`);

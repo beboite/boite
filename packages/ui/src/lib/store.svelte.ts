@@ -420,6 +420,8 @@ export class Store {
   set installStates(value) { this.#ctx.accounts.installStates = value; }
   get harnessUpdates() { return this.#ctx.accounts.harnessUpdates; }
   set harnessUpdates(value) { this.#ctx.accounts.harnessUpdates = value; }
+  get douane() { return this.#ctx.accounts.douane; }
+  set douane(value) { this.#ctx.accounts.douane = value; }
   get accounts() { return this.#ctx.accounts.accounts; }
   set accounts(value) { this.#ctx.accounts.accounts = value; }
   get logins() { return this.#ctx.accounts.logins; }
@@ -449,6 +451,8 @@ export class Store {
   reloadProviders(...args: Parameters<Accounts['reloadProviders']>) { return this.#ctx.accounts.reloadProviders(...args); }
   loadHarnessUpdates(...args: Parameters<Accounts['loadHarnessUpdates']>) { return this.#ctx.accounts.loadHarnessUpdates(...args); }
   updateHarness(...args: Parameters<Accounts['updateHarness']>) { return this.#ctx.accounts.updateHarness(...args); }
+  loadDouane(...args: Parameters<Accounts['loadDouane']>) { return this.#ctx.accounts.loadDouane(...args); }
+  douaneAction(...args: Parameters<Accounts['douaneAction']>) { return this.#ctx.accounts.douaneAction(...args); }
   skipHarnessUpdate(...args: Parameters<Accounts['skipHarnessUpdate']>) { return this.#ctx.accounts.skipHarnessUpdate(...args); }
   installProvider(...args: Parameters<Accounts['installProvider']>) { return this.#ctx.accounts.installProvider(...args); }
   cancelInstall(...args: Parameters<Accounts['cancelInstall']>) { return this.#ctx.accounts.cancelInstall(...args); }

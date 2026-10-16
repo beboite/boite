@@ -2,6 +2,7 @@ import { RpcErrorCode, providerEnabled, subscriptionProxyName, subscriptionProxy
 import type {
   Account,
   HarnessUpdate,
+  LocalDouaneStatus,
   ProviderId,
   ProviderInstallState,
   ProviderRejected,
@@ -53,6 +54,8 @@ export class Accounts {
   installStates = $state<Record<ProviderId, ProviderInstallState>>({});
   /** Where each agent of this machine stands against its newest release, the core's own reading. */
   harnessUpdates = $state<HarnessUpdate[]>([]);
+  /** Douane run by this machine's core for the proxy's local mode; null before an answer, or from a core without it. */
+  douane = $state<LocalDouaneStatus | null>(null);
   #accounts = $state<Account[]>([]);
   get accounts(): Account[] { return this.#accounts; }
   set accounts(value: Account[]) {
@@ -321,6 +324,34 @@ export class Accounts {
       }
       if (refresh) this.ctx.fail(error);
       else console.warn('reading the agent updates failed', error);
+    }
+  }
+
+  /** Paired devices read it too; a core from before the local mode answers MethodNotFound and has none. */
+  async loadDouane(): Promise<void> {
+    const client = this.ctx.client;
+    if (!client) return;
+    const generation = this.ctx.clientGeneration;
+    try {
+      const status = await client.call('douane.status', {});
+      if (this.ctx.currentClient(client, generation)) this.douane = status;
+    } catch (error) {
+      if (!this.ctx.currentClient(client, generation)) return;
+      this.douane = null;
+      if (!(error instanceof RpcFailure && error.code === RpcErrorCode.MethodNotFound)) console.warn('reading Douane\'s state failed', error);
+    }
+  }
+
+  /** The owner's Start, Stop, Check and Update of the Douane this machine runs; the answer is its new state. */
+  async douaneAction(action: 'start' | 'stop' | 'check' | 'update'): Promise<void> {
+    const client = this.ctx.client;
+    if (!client || !this.ctx.store.owner) return;
+    const generation = this.ctx.clientGeneration;
+    try {
+      const status = await client.call(`douane.${action}`, {});
+      if (this.ctx.currentClient(client, generation)) this.douane = status;
+    } catch (error) {
+      if (this.ctx.currentClient(client, generation)) this.ctx.fail(error);
     }
   }
 

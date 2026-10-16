@@ -2261,6 +2261,40 @@ export interface SubscriptionProxy {
   baseUrl: string;
   /** User-facing quotas page, opened inside Boite. Never contains a token. */
   dashboardUrl: string;
+  /**
+   * Where the gateway runs. Missing or `remote`: at the URLs above, which the
+   * user typed. `local`: Douane run by this core on this machine (`douane.*`);
+   * the kind is `douane` and the core writes both URLs from its loopback port.
+   */
+  mode?: SubscriptionProxyMode;
+}
+
+export type SubscriptionProxyMode = 'remote' | 'local';
+
+/**
+ * Douane as the core runs it on this machine, for the subscription proxy's
+ * local mode. `off`: the mode is remote or the proxy unset, nothing runs.
+ * `unavailable`: no release for this machine yet (an unpublished release, a
+ * platform Douane does not build), with the reason. `installing` carries the
+ * download's progress, `updating` a newer release waiting for Douane to finish
+ * the requests it serves. `stopped`: the owner pressed Stop; the next core start
+ * or Start runs it again. `failed`: the last start or install failed, with the
+ * reason and, after a crash, when the core starts it again.
+ */
+export interface LocalDouaneStatus {
+  state: 'off' | 'unavailable' | 'installing' | 'starting' | 'running' | 'updating' | 'stopped' | 'failed';
+  /** The release on disk, or the one a development binary reported. Null before the first install. */
+  version: string | null;
+  /** The newest published release when it is newer than `version`, else null. */
+  available: string | null;
+  /** The loopback port it listens on, or will at its next start. */
+  port: number;
+  progress?: { receivedBytes: number; totalBytes: number };
+  message?: string;
+  /** After a crash: when the core starts it again. */
+  restartAt?: Timestamp;
+  /** `BOITE_DOUANE_BINARY` names the executable: nothing is downloaded or updated. */
+  development?: boolean;
 }
 
 /** The protocols whose every agent a subscription proxy serves. */
@@ -3748,6 +3782,10 @@ export interface UpdateEverythingResult {
   app?: DesktopUpdateStatus | null;
   /** Why the desktop app's release was not handed to its window, null when it was or was not asked for. */
   appError?: string | null;
+  /** Douane run by this core once `douane` was asked for; absent when it was not. */
+  douane?: LocalDouaneStatus;
+  /** Why Douane's update did not start, null when it did. */
+  douaneError?: string | null;
 }
 
 export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, BrowserRpcMethods, PullRequestsRpcMethods, MobileDevicesRpcMethods, DiagnosticsRpcMethods {
@@ -3776,9 +3814,10 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * leaves the others running. `app` names the desktop app's offered
    * release: once the agents named here finished, the core hands it to this
    * machine's own window, which installs it and restarts; `appError` says
-   * when no window is open to do it.
+   * when no window is open to do it. `douane` updates the Douane this core
+   * runs (`douane.update`).
    */
-  'core.updateEverything': { params: { agents: ProviderId[]; server: string | null; app?: string | null }; result: UpdateEverythingResult };
+  'core.updateEverything': { params: { agents: ProviderId[]; server: string | null; app?: string | null; douane?: boolean }; result: UpdateEverythingResult };
   /**
    * Owner only, and only from this machine's own desktop window (the core
    * token on loopback): its updater's state, sent again on every change. A
@@ -4734,6 +4773,16 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'subscriptionProxy.configure': { params: { subscriptionProxy: SubscriptionProxy; key?: string | null }; result: Settings };
   /** Owner-only. The core reads the gateway's quotas route itself; `quotas.list` carries the same entries. */
   'subscriptionProxy.quotas': { params: { refresh?: boolean }; result: SubscriptionProxyQuotas };
+  /** Douane run by this core for the local mode. Paired devices read it; only the owner changes it. */
+  'douane.status': { params: Record<string, never>; result: LocalDouaneStatus };
+  /** Owner-only. Installs Douane when missing, then starts it; refused unless the proxy's mode is `local`. */
+  'douane.start': { params: Record<string, never>; result: LocalDouaneStatus };
+  /** Owner-only. Stops Douane until Start or the next core start; its data stays. */
+  'douane.stop': { params: Record<string, never>; result: LocalDouaneStatus };
+  /** Owner-only. Reads Douane's newest release; `available` names it when newer. */
+  'douane.check': { params: Record<string, never>; result: LocalDouaneStatus };
+  /** Owner-only. Installs the newer release and swaps it in once Douane serves no request. */
+  'douane.update': { params: Record<string, never>; result: LocalDouaneStatus };
   'settings.set': { params: Partial<Settings>; result: Settings };
   /** The keybindings file as last read: the path, the entries it names, and what it got wrong. */
   'keybindings.get': { params: Record<string, never>; result: Keybindings };
@@ -4785,6 +4834,8 @@ export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents, BrowserR
   'quotas.progress': { requestId: string; quota: AccountQuota };
   /** Owner-only. Every answer or failure of the gateway's quotas route, whoever asked. */
   'subscriptionProxy.quotasUpdated': SubscriptionProxyQuotas;
+  /** Douane run by this core, after any change of its state. */
+  'douane.updated': LocalDouaneStatus;
   /** One plugin after any change. A `url` plugin that comes back `not-installed` is gone from the list. */
   'plugins.updated': PluginState;
   /** Owner connections only: show this thread or agent in the desktop window. */

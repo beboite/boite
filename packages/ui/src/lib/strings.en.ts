@@ -24,6 +24,21 @@ export const strings = {
     entryStatus: { ready: 'Ready', cooldown: 'Cooling down', error: 'Error', disabled: 'Disabled' },
     creditOf: '{remaining} of {limit}',
     creditUsed: '{used} used',
+    /** Where the gateway runs: a URL the user types, or Douane run by this machine's core. */
+    where: 'Where the gateway runs',
+    remote: 'Remote gateway', local: 'Douane on this machine',
+    localHint: 'Boite downloads Douane from its releases, runs it on this machine on a loopback port, starts it again after a crash and updates it with your agents. Switching back to a remote gateway stops it and keeps its accounts.',
+    localState: {
+      off: 'Off', unavailable: 'Not available yet', installing: 'Installing', starting: 'Starting', running: 'Running',
+      updating: 'Updating', stopped: 'Stopped', failed: 'Stopped by an error'
+    },
+    localVersion: 'Version {version}',
+    localAvailable: 'Version {version}, {available} available',
+    localPort: '127.0.0.1:{port}',
+    localDevelopment: 'Development executable',
+    localRestartAt: 'Starts again at {time}',
+    localDownloaded: '{percent}% downloaded',
+    start: 'Start', stop: 'Stop', update: 'Update',
   },
   /** A settings card an agent put in the conversation (`boite settings request|open`). */
   settingRequest: {
