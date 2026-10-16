@@ -167,6 +167,12 @@ describe('antigravity', () => {
     // driver kept it out of the protocol stream and handed it to the client.
     await waitFor(() => urls.length > 0, 20000);
     expect(urls[0]).toContain('https://accounts.google.com/');
+    // The whole link, whichever stream brought it first: one cut at 400
+    // characters asked Google for the scope `https://www.googleapis.`.
+    expect(new URL(urls[0] ?? '').searchParams.get('scope')).toBe(
+      'https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile',
+    );
+    expect(urls[0]).toEndWith('&access_type=offline');
     expect(lines.some((line) => line.startsWith('Open the following link'))).toBe(true);
 
     // The agent carries the account's home, the flags it needs and none of the
@@ -223,11 +229,15 @@ describe('antigravity', () => {
 
     const probed = client.next('providers.probed', (event) => event.accountId === account.id, 20_000);
     const states: string[] = [];
+    let announced = false;
     client.on('account.login', (event) => {
-      if (event.accountId === account.id) states.push(event.state);
+      if (event.accountId !== account.id) return;
+      states.push(event.state);
+      if (event.url !== null) announced = true;
     });
     await client.call('accounts.login', { accountId: account.id });
-    await waitFor(() => fakeLog().includes('callback:'), 20_000);
+    // The core takes a redirect only once it has the link the agent printed.
+    await waitFor(() => announced && fakeLog().includes('callback:'), 20_000);
     const callback = fakeLog().split('\n').find((line) => line.startsWith('callback:'))?.slice('callback:'.length) ?? '';
     await client.call('accounts.loginInput', { accountId: account.id, text: callback });
     await waitFor(() => states.includes('done') || states.includes('failed'), 20_000);

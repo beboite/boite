@@ -35,6 +35,13 @@ const MODEL_OPTION = {
   ],
 };
 
+/** The scopes of the real sign-in link: the third is the one a cut link loses. */
+const SCOPES = [
+  'https://www.googleapis.com/auth/cloud-platform',
+  'https://www.googleapis.com/auth/userinfo.email',
+  'https://www.googleapis.com/auth/userinfo.profile',
+];
+
 function log(line: string): void {
   const file = process.env['AGY_FAKE_LOG'];
   if (file === undefined || file.length === 0) return;
@@ -92,11 +99,16 @@ const app = agent({ name: 'agy-fake' })
     log(`authenticate ${params.methodId}`);
     const callback = waitForCallback();
     log(`callback:${callback.url}`);
-    // Not JSON, and on stdout: the line the driver has to keep out of the
-    // protocol stream and hand to the Accounts page instead.
-    process.stdout.write(
-      `Open the following link to authenticate the ACP server: https://accounts.google.com/o/oauth2/v2/auth?client_id=fake&redirect_uri=${encodeURIComponent(callback.url)}\n`,
-    );
+    // As long as the real one: three scopes, a state and a PKCE challenge put
+    // it well past 400 characters.
+    const link = `https://accounts.google.com/o/oauth2/auth?response_type=code&client_id=${'1'.repeat(12)}-${'a'.repeat(32)}.apps.googleusercontent.com`
+      + `&redirect_uri=${encodeURIComponent(callback.url)}`
+      + `&scope=${encodeURIComponent(SCOPES.join(' '))}&state=fake-state&code_challenge=${'c'.repeat(43)}&code_challenge_method=S256&access_type=offline`;
+    // The real server writes it to stderr first, then, not JSON, on stdout: the
+    // line the driver keeps out of the protocol stream for the Accounts page.
+    process.stderr.write(`Open the following link to authenticate the ACP server: ${link}\n`);
+    await Bun.sleep(50);
+    process.stdout.write(`Open the following link to authenticate the ACP server: ${link}\n`);
     await callback.hit;
     callback.stop();
     writeToken();

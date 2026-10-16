@@ -108,7 +108,9 @@ export function runAcpLogin(input: AcpLoginInput): AcpLoginRun {
   let lastStderr = '';
   stderrLines(child.stderr, (text) => {
     lastStderr = text.slice(0, STDERR_MAX);
-    input.onLine(lastStderr);
+    // Whole: Antigravity prints its sign-in link here too, and a link cut at
+    // the error message's length asks Google for a scope that ends mid-URL.
+    input.onLine(text);
   });
   // Listened for before the SDK loads: an agent that exits at once would
   // otherwise be gone before anyone heard it.
