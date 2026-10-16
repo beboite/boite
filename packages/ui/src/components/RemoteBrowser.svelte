@@ -58,17 +58,27 @@
     try {
       if (!client || client.state !== 'ready') throw new Error(strings.remoteBrowser.reconnecting);
       const maxWidth = frameMaxWidth(frame ? frame.width * previewScale : areaWidth, window.devicePixelRatio), quality = frameQuality(roundTrip);
-      const next = await client.call('browser.remoteFrame', { threadId, ...(tabId ? { tabId } : {}), ...(maxWidth ? { maxWidth } : {}), ...(quality !== 55 ? { quality } : {}) });
+      // The frame shown: the core answers with a newer one, or that the page drew nothing new within a second.
+      const after = frame && frameClient === client ? frame.id : undefined;
+      const next = await client.call('browser.remoteFrame', { threadId, ...(tabId ? { tabId } : {}), ...(maxWidth ? { maxWidth } : {}), ...(quality !== 55 ? { quality } : {}), ...(after ? { after } : {}) });
+      const changed = 'unchanged' in next ? null : next;
       // Decoded off the main thread before it replaces the shown frame: a drag stays smooth and Safari never paints a half-loaded image.
-      if (next.base64 !== frame?.base64) await decoded(next.base64);
+      if (changed && changed.base64 !== frame?.base64) await decoded(changed.base64);
       if (!alive || run !== generation) return;
-      if (client === store.client) {
-        roundTrip = performance.now() - started; failures = 0;
-        unchanged = frame && next.base64 === frame.base64 && next.width === frame.width && next.height === frame.height ? unchanged + 1 : 0;
-        receivedAt.set(next, performance.now()); frameClient = client; frame = next; error = ''; fresh = true;
-        if (!editingAddress) address = next.url ?? '';
+      if (client !== store.client) { frame = null; frameClient = null; error = strings.remoteBrowser.reconnecting; }
+      else {
+        // The core's wait for the page is not the link's.
+        roundTrip = Math.max(0, performance.now() - started - (next.waitedMs ?? 0)); failures = 0;
+        if (!changed) {
+          // The frame shown is still the page, and input aimed at it is still valid.
+          if (frame && next.id === frame.id) { unchanged++; receivedAt.set(frame, performance.now()); error = ''; fresh = true; }
+        } else {
+          // A core from before `after` sends every frame again: identical ones count as unchanged.
+          unchanged = frame && changed.base64 === frame.base64 && changed.width === frame.width && changed.height === frame.height ? unchanged + 1 : 0;
+          receivedAt.set(changed, performance.now()); frameClient = client; frame = changed; error = ''; fresh = true;
+          if (!editingAddress) address = changed.url ?? '';
+        }
       }
-      else { frame = null; frameClient = null; error = strings.remoteBrowser.reconnecting; }
     } catch (cause) {
       if (alive && run === generation) {
         const reason = errorText(cause);

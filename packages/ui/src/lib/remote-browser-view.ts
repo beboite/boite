@@ -37,7 +37,7 @@ export function frameQuality(roundTrip: number): number {
 export interface PollState {
   /** Milliseconds the last frame took to arrive. */
   roundTrip: number;
-  /** Frames in a row identical to the one before: nothing is moving on the page. */
+  /** Answers in a row that showed nothing new (`unchanged`, or a frame identical to the one before): nothing is moving on the page. */
   unchanged: number;
   /** Failed requests in a row. */
   failures: number;
