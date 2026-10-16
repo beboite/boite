@@ -331,6 +331,33 @@ describe('opening where the reader was', () => {
     expect(walked).toHaveLength(300 - (100 - half));
   });
 
+  test('every page says where it sits, and any stretch reads by position without walking to it', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    seed(threadId, 300);
+
+    expect((await client.call('threads.get', { threadId })).messageOffset).toBe(180);
+    expect((await client.call('threads.get', { threadId, around: 'msg_0100' })).messageOffset).toBe(100 - Math.floor(MESSAGE_PAGE / 2));
+    const resumed = await client.call('threads.get', { threadId, after: 'msg_0290' });
+    expect(resumed.messagesFrom).toBe('msg_0290');
+    expect(resumed.messageOffset).toBe(290);
+    expect((await client.call('messages.list', { threadId, before: 'msg_0180' })).offset).toBe(60);
+    expect((await client.call('messages.list', { threadId, after: 'msg_0010', limit: 2 })).offset).toBe(11);
+
+    const top = await client.call('messages.list', { threadId, from: 0, limit: 3 });
+    expect(ids(top.messages)).toEqual(['msg_0000', 'msg_0001', 'msg_0002']);
+    expect([top.before, top.after, top.offset]).toEqual([null, 'msg_0002', 0]);
+    const middle = await client.call('messages.list', { threadId, from: 150, limit: 2 });
+    expect(ids(middle.messages)).toEqual(['msg_0150', 'msg_0151']);
+    expect([middle.before, middle.after, middle.offset]).toEqual(['msg_0150', 'msg_0151', 150]);
+    const end = await client.call('messages.list', { threadId, from: 298 });
+    expect([ids(end.messages), end.after]).toEqual([['msg_0298', 'msg_0299'], null]);
+    expect((await client.call('messages.list', { threadId, from: 400 })).messages).toEqual([]);
+    // The offset is a count on the index: the rowid scan the planner picks reads no message row.
+    const plan = harness.core.journal.db.query('EXPLAIN QUERY PLAN SELECT rowid FROM messages WHERE thread_id = ? ORDER BY rowid LIMIT 1 OFFSET ?').all(threadId, 10) as { detail: string }[];
+    expect(plan.map((row) => row.detail).join(' | ')).toContain('messages_by_thread');
+  });
+
   test('a message the last page holds, or one the thread does not, opens on the last page', async () => {
     const client = await harness.connect();
     const { threadId } = await echoThread(harness, client);
@@ -348,9 +375,12 @@ describe('opening where the reader was', () => {
     const client = await harness.connect();
     const { threadId } = await echoThread(harness, client);
     seed(threadId, 5);
-    const expected = 'messages.list takes exactly one cursor: before, for older messages, or after, for newer ones';
+    const expected = 'messages.list takes exactly one of before, for older messages, after, for newer ones, or from, a position';
     expect(await refusal(client.call('messages.list', { threadId, before: 'msg_0003', after: 'msg_0001' }))).toBe(expected);
+    expect(await refusal(client.call('messages.list', { threadId, before: 'msg_0003', from: 0 }))).toBe(expected);
     expect(await refusal(client.call('messages.list', { threadId }))).toBe(expected);
+    expect(await refusal(client.call('messages.list', { threadId, from: -1 }))).toContain('messages.list.from: expected a whole number');
+    expect(await refusal(client.call('messages.list', { threadId, from: 1.5 }))).toContain('messages.list.from: expected a whole number');
     expect(await refusal(client.call('messages.list', { threadId, after: 'msg_nope' }))).toBe(`message msg_nope is not a message of thread ${threadId}`);
   });
 

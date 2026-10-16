@@ -84,6 +84,7 @@ export class NewerPages {
       const page = await client.call('messages.list', { threadId: open.id, after: cursor, maxBytes: READING_PAGE_BYTES, ...lightPage(this.ctx) });
       const still = this.ctx.threads.openThread;
       if (!current() || !still || still.id !== open.id || still.messagesAfter !== cursor) return 0;
+      this.ctx.positions.note(open.id, page.messages, page.offset);
       const known = new Set(still.messages.map((message) => message.id));
       const newer = page.messages.filter((message) => !known.has(message.id));
       still.messages.push(...newer);
@@ -111,6 +112,7 @@ export class NewerPages {
       const fresh = await client.call('threads.get', { threadId: open.id, limit: INITIAL_MESSAGE_PAGE, maxBytes: INITIAL_PAGE_BYTES, ...lightPage(this.ctx) });
       const still = this.ctx.threads.openThread;
       if (!current() || !still || still.id !== open.id) return;
+      this.ctx.positions.note(open.id, fresh.messages, fresh.messageOffset);
       still.messages = fresh.messages;
       still.turns = fresh.turns;
       still.messagesBefore = fresh.messagesBefore;
