@@ -11,7 +11,8 @@ const { real, url, evaluate, fakeHost } = browserFixture;
 
 real('a viewer watching while the agent changes the page size never puts the old size back', async () => {
   const { owner, agent, threadId } = browserFixture;
-  const { tabId } = await agent.call('browser.command', { threadId, action: { kind: 'open', url: url() } });
+  // A page that keeps drawing: the screencast sends a picture only when Chrome draws one, and on macOS a still page draws few while it is resized.
+  const { tabId } = await agent.call('browser.command', { threadId, action: { kind: 'open', url: url('/moving') } });
   await owner.call('threads.subscribe', { threadId });
   // The panel on the browser's own machine pulls shrunken frames the whole time.
   let watching = true, frames = 0;
@@ -29,8 +30,7 @@ real('a viewer watching while the agent changes the page size never puts the old
       expect(await evaluate('[innerWidth, innerHeight]', tabId)).toEqual([852, 393]);
     }
   } finally { watching = false; await watch; }
-  // The race needs frames actually taken while the sizes changed. The screencast
-  // sends a picture when Chrome draws one, and it draws few during quick resizes.
+  // The race needs frames actually taken while the sizes changed.
   expect(frames).toBeGreaterThan(2);
 }, 150_000);
 

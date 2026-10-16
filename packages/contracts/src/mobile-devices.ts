@@ -56,13 +56,27 @@ export interface MobileDeviceList {
   sessions: MobileDeviceSession[];
 }
 
-/** One JPEG of a device's screen. `width` and `height` are the screen's pixels, the space input coordinates use. */
+/**
+ * One JPEG of a device's screen. `width` and `height` are the screen's pixels, the space input coordinates use.
+ * `id` names the screen's content at one size and quality: the same picture asked for the same way keeps its id.
+ */
 export interface MobileDeviceFrame {
   id: string;
   deviceId: string;
   width: number;
   height: number;
   base64: string;
+  at: number;
+  unchanged?: never;
+}
+
+/** The answer to a `devices.frame` whose `previous` is still what the screen shows: no picture is sent. */
+export interface MobileDeviceFrameUnchanged {
+  id: string;
+  deviceId: string;
+  width: number;
+  height: number;
+  unchanged: true;
   at: number;
 }
 
@@ -94,7 +108,14 @@ export interface MobileDevicesRpcMethods {
    * for the agent and the owner; a paired device is not sent host paths.
    */
   'devices.sessions': { params: { threadId: string }; result: { sessions: MobileDeviceSession[]; control?: Record<string, string[]> } };
-  'devices.frame': { params: { threadId: string; deviceId: string; maxWidth?: number; quality?: number }; result: MobileDeviceFrame };
+  /**
+   * With `previous`, the id of the frame the caller shows, a screen that has not changed since is answered
+   * `unchanged` with no picture. A core that predates `previous` ignores it and sends the frame.
+   */
+  'devices.frame': {
+    params: { threadId: string; deviceId: string; maxWidth?: number; quality?: number; previous?: string };
+    result: MobileDeviceFrame | MobileDeviceFrameUnchanged;
+  };
   'devices.input': { params: { threadId: string; deviceId: string; input: MobileDeviceInput }; result: { ok: true } };
   /** The full-size PNG. Without `deviceId`, the conversation's only open device. */
   'devices.screenshot': { params: { threadId: string; deviceId?: string; hostId?: string }; result: { deviceId: string; width: number; height: number; base64: string } };
