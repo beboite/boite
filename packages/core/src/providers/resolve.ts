@@ -2,7 +2,7 @@ import { accessSync, constants, existsSync, statSync } from 'node:fs';
 import { delimiter, normalize } from 'node:path';
 import type { ExecutableCandidate, Os, OsProfile, ProviderDescriptor } from '@boite/contracts';
 import { currentOs } from '../paths.ts';
-import { CODEX_NPM_ENV, codexBehindLauncher } from './codex-launcher.ts';
+import { codexBehindLauncher } from './codex-launcher.ts';
 import { substituteHome } from './expand.ts';
 import { globalRoots, resolveNpm } from './npm.ts';
 import { majorAt } from './versions.ts';
@@ -101,9 +101,11 @@ function takesScripts(profile: OsProfile): boolean {
 /**
  * `ask` false resolves from what is already known and starts no program: a
  * candidate that names a major and has no reading yet stays unresolved. It is
- * how a provider that is turned off is listed.
+ * how a provider that is turned off is listed. `launcher` true keeps npm's
+ * Codex launcher instead of the binary behind it: the binary's updater reads
+ * how it was installed from the environment that launcher sets.
  */
-export function resolveCommand(profile: OsProfile, ask = true): ResolvedCommand | null {
+export function resolveCommand(profile: OsProfile, ask = true, launcher = false): ResolvedCommand | null {
   if (HOST_CANDIDATES.has(profile.executable)) return null;
   const scripts = takesScripts(profile);
   for (const candidate of profile.executable) {
@@ -111,12 +113,11 @@ export function resolveCommand(profile: OsProfile, ask = true): ResolvedCommand 
     if (candidate.kind === 'path') {
       const found = whichProgram(candidate.value, scripts);
       if (found === null) continue;
-      const native = candidate.value === 'codex' ? codexBehindLauncher(found) : null;
-      const program = native ?? found;
+      const program = (!launcher && candidate.value === 'codex' ? codexBehindLauncher(found) : null) ?? found;
       const fits = atMajor(candidate, program, profile, ask);
       // Not known yet: a later candidate must not stand in for the one that may well be right.
       if (fits === undefined) return null;
-      if (fits) return { executable: program, prefix: [], shown: found, updateEnv: native === null ? updateEnv : { ...CODEX_NPM_ENV, ...updateEnv } };
+      if (fits) return { executable: program, prefix: [], shown: found, updateEnv };
     } else if (candidate.kind === 'file') {
       for (const path of filePaths(candidate.value, profile)) {
         if (!runnableFile(path)) continue;

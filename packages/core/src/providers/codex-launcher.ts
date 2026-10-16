@@ -63,6 +63,3 @@ const vendors = new Remembered<string | null>();
 export function codexBehindLauncher(found: string): string | null {
   return vendors.get(found, () => vendorBinary(found), (binary) => binary === null || executableFile(binary));
 }
-
-/** What npm's launcher tells the binary, kept for the updater as on Windows. */
-export const CODEX_NPM_ENV: Record<string, string> = { CODEX_MANAGED_BY_NPM: '1' };

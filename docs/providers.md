@@ -336,9 +336,9 @@ session protocol either.
 - On Linux and macOS, a `codex` that PATH resolves to npm's
   `@openai/codex/bin/codex.js` launcher is replaced by the executable vendor
   binary the launcher would start (the platform package beside it, or the
-  launcher's own `vendor/`), with `CODEX_MANAGED_BY_NPM=1` for the updater as on
-  Windows. The launcher is a Node process that otherwise stays up beside each
-  Codex process. A wrapper script in front of it, which may set limits of its
+  launcher's own `vendor/`). The updater still runs the launcher, which tells
+  `codex update` which package manager owns the install. The launcher is a
+  Node process that otherwise stays up beside each Codex process. A wrapper script in front of it, which may set limits of its
   own, is still what runs (`packages/core/src/providers/codex-launcher.ts`).
 - `launch.args` put the agent into the mode Boite speaks to. The `agy` driver
   adds its print-mode flags itself, because the same binary also answers

@@ -73,7 +73,10 @@ started or skipped the servers.
 
 Three runs each, identical. A per-server dotted key (`mcp_servers.<name>.enabled`)
 fails `thread/start` on a name with a dot, so the driver sends the nested
-table. The fork setup sends the same table with its `thread/fork`.
+table. The fork setup sends the same table with its `thread/fork`. Since
+6e4c5aff, `main` turns the servers off for titles by itself; this branch keeps
+its stricter rule (no `config/read`, no title) and adds the hooks, native
+subagents and the fork setup.
 
 ## Live output of a running command
 
@@ -154,6 +157,18 @@ An idle `codex app-server` with a temporary `CODEX_HOME`, `ps -o rss` after
 82,616 to 84,508 KB binary, which the binary alone keeps. On this machine the
 `codex` first on PATH is a cgroup wrapper script, which the core keeps running,
 so the saving applies to installs where PATH reaches the launcher itself.
+`codex update` still runs through the launcher, which names the package
+manager that owns the install and the package root.
+
+## Core bundle size
+
+`bun run build:core`, then the sum of the `.js` files under
+`packages/core/dist`, on 2026-10-16: `main` at 68bbae8c 4,204,351 bytes, this
+branch merged with it 4,215,329 bytes (+10,978). The growth is the ACP
+`session/update` parser written by hand, the Codex rate-limit forwarding, the
+Codex launcher lookup and the provider lookup memo. `coreJavaScript` in
+`scripts/ci/budgets.json` goes from 4,233,000 to 4,244,000 bytes by that
+growth: `main` itself measured 4,231,749 bytes at 4eec5562.
 
 ## Not measured
 

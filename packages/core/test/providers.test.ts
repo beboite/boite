@@ -1,5 +1,5 @@
 import { currentOs } from '../src/paths.ts';
-import { chmodSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import type { Account } from '@boite/contracts';
 import { assertDriverRunnable } from '../src/drivers/index.ts';
 import { resolveCommand } from '../src/providers/resolve.ts';
@@ -87,7 +87,8 @@ describe('providers', () => {
     const saved = process.env['PATH'];
     try {
       process.env['PATH'] = join(prefix, 'bin');
-      expect(resolveCommand(profile)).toEqual({ executable: vendor, prefix: [], shown: shim, updateEnv: { CODEX_MANAGED_BY_NPM: '1' } });
+      // Through links, as the launcher finds it: macOS's `/var` is `/private/var`.
+      expect(resolveCommand(profile)).toEqual({ executable: realpathSync(vendor), prefix: [], shown: shim, updateEnv: {} });
 
       process.env['PATH'] = [wrappers, join(prefix, 'bin')].join(delimiter);
       expect(resolveCommand(profile)?.executable).toBe(join(wrappers, 'codex'));
