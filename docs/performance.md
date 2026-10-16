@@ -598,7 +598,12 @@ limits expensive work while streaming, typing and scrolling:
 - Window-wide scrims use `--color-scrim`; backdrop blur stays on bounded
   floating surfaces such as the composer, activity panel and notifications.
 - Endless animations use opacity or transforms, apart from the small repainting
-  boxes named in `render-cost.test.ts`. Outer app containers avoid `:has()`.
+  boxes named in `render-cost.test.ts`; the running group's shimmer moves in 30
+  steps a sweep, so it repaints 30 times in 2.2 s instead of every frame. Outer
+  app containers avoid `:has()`.
+- A closed fold's body skips its content once the close transition has run
+  (`content-visibility: hidden`), so a group opened once no longer weighs on
+  every layout of its row.
 - Entrance animations run for arriving messages, rather than history remounts.
 - The outline rail updates once per frame and animates transforms. Message
   heights come from `ResizeObserver`; reading anchors are captured after the
@@ -606,8 +611,11 @@ limits expensive work while streaming, typing and scrolling:
 - Wheel listeners are passive: they release bottom following without
   cancelling browser scrolling. `MessageList.test.ts` guards the listener
   options.
-- Icon shapes and locale date formatters are reused. Finished Markdown markup
-  has a four-million-character cache bound.
+- Icon shapes and locale date formatters are reused. Markdown links are found
+  in one pass over a line, however many `[` it holds. Finished Markdown markup
+  has a four-million-character cache bound, highlighted code a
+  two-million-character one shared by every view of the same text. A diff
+  document's rows are computed once per whitespace mode and kept with it.
 - The composer uses `field-sizing: content` where supported; IndexedDB draft
   writes wait for a typing pause. Bottom following runs after layout and before
   paint through `ResizeObserver`.
@@ -628,10 +636,17 @@ for the files card. `?fake=1&heavy=1` seeds that shape: forty messages,
   row keeps the 12 px a paragraph takes inside a message. The window measures,
   anchors and estimates rows; the first row keeps the message's id.
 - A part arriving on a streaming message changes its last row only: the rows
-  above stay the same objects and draw nothing again.
+  above stay the same objects and draw nothing again. Inside a row, a run over
+  the same parts stays the same object, and the runs never read the streaming
+  last text, so a text delta rebuilds no run and no group. A live thought's
+  title resumes after its last complete line.
 - The window hands back the same object while it covers the same rows, and
-  the files card reads tool calls only for a finished turn whose last row is
-  drawn: a scroll inside the rows on the page runs neither.
+  the files card reads tool calls only for a turn whose last row is drawn: a
+  scroll inside the rows on the page runs neither. Each turn end reads its own
+  turn, so a part arriving on the running turn rereads no finished one. A
+  finished turn compares its part objects, and fields only for a deferred
+  call. The last 24 turns read stay cached, so a turn end that scrolls back
+  reads nothing.
 - A reading position saves the message and the row of it on top; a find hit
   names its part, and opens the row that draws it.
 - An anchor is read from the rows by id instead of searching every node, a
