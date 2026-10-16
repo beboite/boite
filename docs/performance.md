@@ -62,6 +62,24 @@ and peak core RSS over the bench from 1,023 MiB to 370 MiB. The first start
 after the upgrade migrates once (7.9 s there), and the move of older inline
 values held the event loop for up to 2.1 s on its largest row.
 
+A fresh session (model switch, resume after an update) carries the opening
+12,000 and the latest 64,000 characters of the thread. `continuationInput`
+reads only the stored parts of the rest, without their `part_blobs` values,
+to count them, then reads whole the messages it keeps and the images it
+sends. Files keep their reference line per thread, so a later fresh session
+checks each copy with one `lstat` instead of hashing and reading it again.
+On 2026-10-15, `bench/continuation.ts` took 345 ms to 29 ms with 100 tool
+outputs of 1 MiB and 25 files of 1.1 MB, and 83 ms to 4.6 ms with 200 of
+200 KiB ([results](../bench/results/2026-10-15-perf-runtime.md)).
+
+Held turns cost one pass over the queue each time a turn ends anywhere. The
+scheduler keeps each queued turn's parent from enqueue and reads a team's
+setting once per pass, so the pass reads no thread row: on 2026-10-15
+`bench/queue-admission.ts` took one pass from 46 ms to 2.0 ms at 1,024 held
+turns. A team event looks for held workflow summaries only in a conversation
+the core knows has one, and the delegation tick neither parses result letters,
+which never expire, nor tries to deliver mail of a paused or disabled team.
+
 ## Concurrent agent stress
 
 ```sh
@@ -909,6 +927,8 @@ bun bench/ui-frames.ts --trace --only "typing,long thread scroll"   # layouts pe
 bun bench/ui-frames.ts --runs 5 --only "heavy thread scroll,heavy thread flick,heavy thread jumps,heavy scroll while streaming"
 bun bench/ui-frames.ts --gpu --only "heavy thread scroll"          # composited on the machine's GPU, never a software renderer
 bun bench/rpc-actions.ts --journal <journal.db> --runs 6   # latency, core CPU, bytes and RSS per RPC (Linux)
+bun run bench/continuation.ts 100 1024 25 1100            # history a fresh session carries: messages, tool KiB, files, file KiB
+bun run bench/queue-admission.ts 1024 16                  # one scheduler pass over held child turns: turns, teams
 ```
 
 `bench/bandwidth.ts` puts a TCP relay between the client and the core, counts
@@ -943,7 +963,8 @@ settings are pointed at the temporary directory first.
 the core's own browser and has a paired phone client poll it on the viewer's
 schedule behind an added latency.
 
-Results: [bench/results/2026-10-05-rpc-actions.md](../bench/results/2026-10-05-rpc-actions.md),
+Results: [bench/results/2026-10-15-perf-runtime.md](../bench/results/2026-10-15-perf-runtime.md),
+[bench/results/2026-10-05-rpc-actions.md](../bench/results/2026-10-05-rpc-actions.md),
 [bench/results/2026-10-05-remote-browser-frames.md](../bench/results/2026-10-05-remote-browser-frames.md),
 [bench/results/2026-10-03-remote-browser-frames.md](../bench/results/2026-10-03-remote-browser-frames.md),
 [bench/results/2026-09-19-wire-and-startup.md](../bench/results/2026-09-19-wire-and-startup.md),

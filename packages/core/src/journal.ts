@@ -590,14 +590,13 @@ export class Journal {
     } finally { statement.finalize(); }
   }
 
-  /** Stream history for a continuation without loading images from every message at once. */
-  *walkMessages(threadId: string): Iterable<Message> {
-    // A caller may stop at its current turn. Do not leave a partially consumed
-    // cached statement for the next continuation to reuse.
+  /** History one message at a time between exclusive rowids, never from a cached statement a caller could leave half read.
+   * `blobs: false` leaves the `part_blobs` values unread, empty and `$blob` marked; `messagePart` reads one. */
+  *walkMessages(threadId: string, { after = -1, before = Number.MAX_SAFE_INTEGER, newestFirst = false, blobs = true } = {}): Iterable<Message> {
     this.flushDeltas();
-    const statement = this.db.prepare('SELECT * FROM messages WHERE thread_id = ? ORDER BY rowid');
+    const statement = this.db.prepare(`SELECT * FROM messages WHERE thread_id = ? AND rowid > ? AND rowid < ? ORDER BY rowid${newestFirst ? ' DESC' : ''}`);
     try {
-      for (const row of statement.iterate(threadId)) yield this.currentMessage(row as MessageRow);
+      for (const row of statement.iterate(threadId, after, before) as Iterable<MessageRow>) yield blobs ? this.currentMessage(row) : this.stream.openCopy(row.id) ?? toMessage(row);
     } finally { statement.finalize(); }
   }
 

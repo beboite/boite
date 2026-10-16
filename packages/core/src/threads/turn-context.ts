@@ -20,7 +20,7 @@ import { agentGuide, SHORT_ANSWERS } from '../agent-guide.ts';
 import { nativeSkillFiles } from '../brain.ts';
 import { takesSystemGuide } from '../drivers/index.ts';
 import { contextRulesBlock } from '@boite/contracts';
-import { prepareAttachments, fileReference } from '../attachments.ts';
+import { prepareAttachments, FileReferences } from '../attachments.ts';
 import { continuationInput } from '../continuation.ts';
 import type { Core } from '../core.ts';
 import type { EmitSink, PermissionTicket, QuestionAsk, QuestionTicket, SessionContext, TurnContext } from '../drivers/types.ts';
@@ -48,7 +48,15 @@ export interface CarriedInput {
  * into every process it launches.
  */
 export class TurnContexts {
-  constructor(private readonly core: Core, private readonly threads: ThreadStore) {}
+  /** File lines of each thread's history, reused by its next fresh session. */
+  private readonly files: FileReferences;
+
+  constructor(private readonly core: Core, private readonly threads: ThreadStore) {
+    this.files = new FileReferences(core.dataDir);
+    core.bus.onCommitted((name, payload) => {
+      if (name === 'thread.removed') this.files.forget((payload as { threadId: ThreadId }).threadId);
+    });
+  }
 
   /**
    * Boite's guide for this thread's agent, or '' when a context mode without
@@ -281,7 +289,7 @@ export class TurnContexts {
     // prompt is the resume note, and a fresh session reads this turn's work too.
     const input = resumePrompt !== undefined ? { prompt: resumePrompt, attachments: [] } : this.lastUserInput(threadId, turn.id);
     const history = (): { prompt: string; attachments: Attachment[] } =>
-      continuationInput(this.core.journal, threadId, resumePrompt !== undefined ? null : turn.id, input, provider, part => fileReference(this.core.dataDir, part));
+      continuationInput(this.core.journal, threadId, resumePrompt !== undefined ? null : turn.id, input, provider, (part, place) => this.files.of(threadId, part, place));
     // Read once for a resume, before its note lands: a later fresh start would otherwise carry the note twice.
     const resumedHistory = resumePrompt !== undefined ? history() : null;
     const carry = (): { prompt: string; attachments: Attachment[] } => resumedHistory ?? history();
