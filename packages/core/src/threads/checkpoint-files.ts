@@ -194,16 +194,17 @@ async function replaceBlob(source: string, dest: string, tryLink: boolean): Prom
 }
 
 /**
- * Keep a blob in `objects` and in the shared store. Known content is only
- * linked: a shared name of the right size is trusted without reading it
- * back. New content is written into `objects` first and gets its shared
- * name once complete, so the store never names a partial file. A short
- * shared blob, left by a crash before its data reached the disk, is replaced.
+ * Keep a blob in `objects` and in the shared store. Known content is linked
+ * once its shared copy matches `bytes`; one read costs less than a write.
+ * New content is written into `objects` first and gets its shared name once
+ * complete, so the store never names a partial file. A shared blob left
+ * short or zeroed by a crash before its data reached the disk is replaced,
+ * along with the thread's own name when it is the same file.
  */
 async function storeBlob(shared: string, objects: string, hash: string, bytes: Buffer, folders: Set<string>): Promise<void> {
   const source = sharedBlob(shared, hash);
   const info = await lstat(source).catch(() => null);
-  if (info?.isFile() && info.size === bytes.length && await linkBlob(shared, objects, hash)) return;
+  if (info?.isFile() && info.size === bytes.length && await sameBytes(source, bytes) && await linkBlob(shared, objects, hash)) return;
   const dest = join(objects, hash);
   await writeCheckpointBlob(dest, hash, bytes);
   const folder = dirname(source);
@@ -211,6 +212,11 @@ async function storeBlob(shared: string, objects: string, hash: string, bytes: B
   if (info) await rm(source, { force: true });
   try { await link(dest, source); }
   catch (error) { if (errno(error) !== 'EEXIST' && !NO_LINK.has(errno(error))) throw error; }
+}
+
+async function sameBytes(path: string, bytes: Buffer): Promise<boolean> {
+  const existing = await readFile(path).catch(() => null);
+  return existing !== null && existing.equals(bytes);
 }
 
 /**
