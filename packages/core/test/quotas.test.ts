@@ -1,12 +1,12 @@
 import { afterEach, expect, test, spyOn } from 'bun:test';
 import type { AccountQuota } from '@boite/contracts';
-import { QuotaStore, claudeQuotaWindows, claudeUsageAgent, codexQuotaWindows } from '../src/quotas.ts';
+import { QuotaStore, claudeQuotaWindows, claudeUsageAgent, codexQuotaWindows, type QuotaReader } from '../src/quotas.ts';
 import { claudeQuotaDetails, codexQuotaDetails, museQuotaReading } from '../src/quota-details.ts';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { codexQuotaError } from '../src/drivers/codex/models.ts';
 import type { QueryFn } from '../src/drivers/claude/query.ts';
-import { scriptedClaude, startTestCore, type TestCore } from './harness.ts';
+import { scriptedClaude, startTestCore, waitFor, type TestCore } from './harness.ts';
 let harness: TestCore | undefined;
 afterEach(async () => { await harness?.stop(); harness = undefined; });
 
@@ -168,23 +168,19 @@ test('a blocked provider does not delay another provider or its progress event',
     fastReported = resolve;
     deadline = setTimeout(() => reject(new Error('Codex quota progress did not arrive while Claude was blocked')), 2_000);
   });
-  const off = harness.core.bus.onAny((name, payload) => {
-    const event = payload as { requestId: string; quota: { accountId: string } };
-    if (name === 'quotas.progress' && event.requestId === 'progress-test') {
-      reported.push(event.quota.accountId);
-      if (event.quota.accountId === fast.id) fastReported();
-    }
-  });
   const store = new QuotaStore(harness.core, async (account) => {
     if (account.providerId === 'claude') await blocked;
     return [{ id: 'session', label: 'Session', usedPercent: 20, resetsAt: null }];
   });
-  const reading = store.list(true, 'progress-test');
+  const reading = store.list(true, 'progress-test', (quota) => {
+    reported.push(quota.accountId);
+    if (quota.accountId === fast.id) fastReported();
+  });
   try {
     await fastReady;
     expect(reported).toContain(fast.id);
     expect(reported).not.toContain(slow.id);
-  } finally { clearTimeout(deadline); release(); await reading; off(); }
+  } finally { clearTimeout(deadline); release(); await reading; }
 });
 
 test('Codex selects the account bucket and respects monthly plans and reset seconds', () => {
@@ -299,4 +295,114 @@ test('the standalone Antigravity source is opt-in, persists and never borrows an
   await store.configure('quota:antigravity-cli', false);
   const restored = new QuotaStore(harness.core, read);
   expect((await restored.list()).find((row) => row.accountId === 'quota:antigravity-cli')?.status).toBe('disabled');
+});
+
+test('a Codex session reading merges into the last full read and stands as a fresh one', async () => {
+  harness = await startTestCore();
+  const account = harness.core.accounts.add({ providerId: 'codex', label: 'Codex' });
+  const accounts = spyOn(harness.core.accounts, 'list').mockReturnValue([account]);
+  let calls = 0;
+  const store = new QuotaStore(harness.core, async () => {
+    calls++;
+    return { windows: [{ id: 'primary', label: '5 hours', usedPercent: 10, resetsAt: null }, { id: 'secondary', label: 'Weekly', usedPercent: 20, resetsAt: null }],
+      resetCredits: { availableCount: 2, nextExpiresAt: null } };
+  });
+  let updates = 0;
+  const off = harness.core.bus.onAny((name) => { if (name === 'quotas.updated') updates++; });
+  let now = Date.now();
+  const clock = spyOn(Date, 'now').mockImplementation(() => now);
+  const observed = { windows: [{ id: 'primary', label: '5 hours', usedPercent: 42, resetsAt: null }] };
+  const row = async () => (await store.list()).find((row) => row.accountId === account.id)!;
+  try {
+    // With no full read held, a sparse update cannot stand for one: the list reads.
+    store.observe(account.id, observed, now);
+    expect(updates).toBe(0);
+    expect((await row()).windows[0]!.usedPercent).toBe(10);
+    expect(calls).toBe(1);
+    // The update replaces the window it carries; the other window and the banked resets stay.
+    now += 5_000;
+    store.observe(account.id, observed, now);
+    expect(updates).toBe(1);
+    now += 50_000;
+    expect(await row()).toMatchObject({ status: 'ready', source: 'observation', checkedAt: now - 50_000, resetCredits: { availableCount: 2 },
+      windows: [observed.windows[0], { id: 'secondary', usedPercent: 20 }] });
+    expect(calls).toBe(1);
+    // The same limits again change nothing a client shows; an older reading does not replace a newer one.
+    store.observe(account.id, observed, now);
+    expect(updates).toBe(1);
+    store.observe(account.id, { windows: [{ id: 'primary', label: '5 hours', usedPercent: 99, resetsAt: null }] }, now - 1_000);
+    expect((await row()).windows[0]!.usedPercent).toBe(42);
+    // Five minutes after the full read, updates stop standing in for it: the next list reads again.
+    now += 250_000;
+    store.observe(account.id, { windows: [{ id: 'primary', label: '5 hours', usedPercent: 50, resetsAt: null }] }, now);
+    now += 61_000;
+    expect((await row()).windows[0]!.usedPercent).toBe(10);
+    expect(calls).toBe(2);
+    // A reading with no limits, or for a disabled account, is not one.
+    store.observe(account.id, { windows: [] }, now + 1);
+    expect((await row()).checkedAt).toBe(now);
+    await store.configure(account.id, false);
+    store.observe(account.id, observed, now + 2);
+    expect((await row()).status).toBe('disabled');
+  } finally { off(); clock.mockRestore(); accounts.mockRestore(); }
+});
+
+test('quota progress reaches the connection that asked and no other', async () => {
+  harness = await startTestCore();
+  const accounts = [harness.core.accounts.add({ providerId: 'claude', label: 'A' }), harness.core.accounts.add({ providerId: 'codex', label: 'B' })];
+  const list = spyOn(harness.core.accounts, 'list').mockReturnValue(accounts);
+  let calls = 0;
+  (harness.core.quotas as unknown as { read: QuotaReader }).read = async () => { calls++; return [{ id: 'session', label: '5 hours', usedPercent: 5, resetsAt: null }]; };
+  const caller = await harness.connect();
+  const other = await harness.connect();
+  const frames = { caller: 0, other: 0 };
+  caller.on('quotas.progress', (event) => { if (event.requestId === 'mine') frames.caller++; });
+  other.on('quotas.progress', () => { frames.other++; });
+  try {
+    const rows = await caller.call('quotas.list', { refresh: true, requestId: 'mine' });
+    // A response follows every event sent before it on that socket.
+    await other.call('quotas.list', {});
+    expect(calls).toBe(2);
+    expect(frames).toEqual({ caller: rows.length, other: 0 });
+  } finally { caller.close(); other.close(); list.mockRestore(); }
+});
+
+test('changing one account re-reads that account only and keeps the others in flight', async () => {
+  harness = await startTestCore();
+  const a = harness.core.accounts.add({ providerId: 'claude', label: 'A' });
+  const b = harness.core.accounts.add({ providerId: 'codex', label: 'B' });
+  const list = spyOn(harness.core.accounts, 'list').mockReturnValue([a, b]);
+  const reads: string[] = [];
+  let hold: Promise<void> | null = null;
+  const store = new QuotaStore(harness.core, async (account) => {
+    reads.push(account.id);
+    if (account.id === b.id && hold) await hold;
+    return [{ id: 'session', label: '5 hours', usedPercent: 5, resetsAt: null }];
+  });
+  try {
+    await store.list();
+    expect(reads.sort()).toEqual([a.id, b.id].sort());
+    reads.length = 0;
+    // A rename of A, as accounts.updated announces it.
+    harness.core.bus.emit('accounts.updated', { ...a, label: 'A renamed' });
+    await store.list();
+    expect(reads).toEqual([a.id]);
+    // B's read in flight when A changes still fills B's cache.
+    let release!: () => void;
+    hold = new Promise((resolve) => { release = resolve; });
+    store.invalidate(b.id);
+    reads.length = 0;
+    const pending = store.list();
+    await waitFor(() => reads.includes(b.id));
+    harness.core.bus.emit('accounts.updated', { ...a, label: 'A again' });
+    release(); await pending;
+    reads.length = 0;
+    await store.list();
+    expect(reads).toEqual([a.id]);
+    // A provider change still reads everything.
+    reads.length = 0;
+    harness.core.bus.emit('providers.updated', harness.core.providers.list());
+    await store.list();
+    expect(reads.sort()).toEqual([a.id, b.id].sort());
+  } finally { list.mockRestore(); }
 });

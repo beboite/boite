@@ -1825,7 +1825,6 @@ describe('codex hooks', () => {
   });
 });
 
-
 test('connection checks refresh Codex auth and never mistake models for a login', async () => {
   const client = await startCore();
   const { accountId } = await codexAccount(client);
@@ -1835,7 +1834,6 @@ test('connection checks refresh Codex auth and never mistake models for a login'
   expect(fakeLog()).toContain('account/read refresh=true');
   expect(fakeLog()).not.toContain('model/list');
 });
-
 
 test('Codex device login keeps its code, checks the completed login and returns the email', async () => {
   const client = await startCore();

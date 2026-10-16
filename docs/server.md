@@ -163,7 +163,10 @@ link to this guide. A core predating this feature needs one manual update first.
 The server checks eight seconds after startup, then every six hours. It follows
 its installed stable or nightly channel, downloads an immutable release's
 signed server archive, and verifies the publisher signature and embedded
-version before staging the complete core, CLI and UI. The download and idle
+version before staging the complete core, CLI and UI. The archive is hashed as
+it arrives and checked over every byte before anything unpacks; it is then
+inflated a chunk at a time, so neither it nor its files sit in memory and other
+requests keep being served. The download and idle
 wait can be cancelled. An idle server installs through the idle gate. A busy
 one hands its turns to the next core at once, as a desktop update does
 ([restart handoff](restart-handoff.md)): each running turn ends its tool call,

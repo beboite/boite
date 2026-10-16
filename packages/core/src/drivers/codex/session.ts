@@ -566,10 +566,7 @@ export class CodexSession {
       this.reportUsage(params);
       return;
     }
-    if (method === 'hook/completed') {
-      this.onHook(params['run'] as CodexHookRun | undefined);
-      return;
-    }
+    if (method === 'hook/completed') return this.onHook(params['run'] as CodexHookRun | undefined);
     if (method === 'account/rateLimits/updated') {
       if (this.spentWindows.note(params['rateLimits']) && this.current !== null) this.current.spentWindowResetsAt = this.spentWindows.latest();
       this.rateLimits.updated(params);
