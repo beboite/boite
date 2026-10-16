@@ -108,11 +108,13 @@ test('seven screens fit both languages and widths, without leaving the tour', as
         if (panelHeight !== undefined) expect(height).toBe(panelHeight);
         panelHeight = height;
         if (step !== 'profile' && step !== 'privacy') {
+          // The measures come with a failure: the controls' place depends on the pointer the machine reports.
           expect(await page.evaluate(`(() => {
             const scene = document.querySelector('[data-testid=onboarding-scene]');
             const controls = scene.querySelector('.controls');
-            return getComputedStyle(controls).display === 'none' || controls.getBoundingClientRect().top >= scene.querySelector('.stage').getBoundingClientRect().bottom;
-          })()`)).toBe(true);
+            const top = controls.getBoundingClientRect().top, bottom = scene.querySelector('.stage').getBoundingClientRect().bottom;
+            return { below: getComputedStyle(controls).display === 'none' || top >= bottom, top, bottom, transform: getComputedStyle(controls).transform, hover: matchMedia('(hover: hover)').matches, figure: scene.className, step: '${step}' };
+          })()`)).toMatchObject({ below: true });
         }
         expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
         // Privacy ends on its consent rows, every other screen on Next.
