@@ -42,6 +42,7 @@ import { BrowserEngines } from './browser/engines.ts';
 import { RemoteDrive } from './browser/remote-drive.ts';
 import type { Engine, Tab } from './browser/types.ts';
 import { SETTLED_VIEWPORT_SCRIPT } from './browser/scripts.ts';
+import { screenTurns, takeTurn } from './browser/frames.ts';
 import { automate, awaitDocument, documentToken, PAGE_ACTIONS } from './browser/automation.ts';
 
 /** The process scope of the agent browser's own processes, in the trace and the registry. */
@@ -54,7 +55,7 @@ const TABS_MAX = 24;
  * never finishes; agent-browser's commands work on the DOM.
  */
 const DOM_WAIT_MS = 10_000;
-/** A capture or size change still running after this long lets the next one of its tab go: one stuck in the browser never freezes the tab's frames. */
+/** A capture still running after this long lets the next capture of its tab go: one stuck in the browser never freezes the tab's frames. */
 const SCREEN_TURN_MS = 5000;
 const HISTORY_MAX = 100;
 const TAB_ID = /^browser:[a-zA-Z0-9:-]{1,100}$/;
@@ -87,7 +88,7 @@ export class AgentBrowser {
       tabOf: (threadId, tabId) => this.#tabOf(threadId, tabId),
       evaluate: (tab, expression, timeoutMs) => this.#evaluate(tab, expression, timeoutMs),
       send: (tab, method, params) => this.#send(tab, method, params),
-      screen: (tab, run) => this.#screen(tab, run),
+      screen: (tab, run, strict) => this.#screen(tab, run, strict),
     });
   }
 
@@ -172,7 +173,7 @@ export class AgentBrowser {
     const tab: Tab = {
       id: `browser:${crypto.randomUUID()}`, threadId, engine, targetId, sessionId, url, title: '',
       preset: null, orientation: 'portrait', colorScheme: 'system', diagnostics: [], dropped: 0, history: [], requests: new Map(),
-      recorder: null, discarded: false, frame: null, screen: Promise.resolve(), off: [], acting: false,
+      recorder: null, discarded: false, frame: null, screen: screenTurns(), off: [], acting: false,
       page: {
         send: (method, params = {}, timeoutMs) => engine.cdp.send(method, params, sessionId, timeoutMs),
         dialogs: [], dialogPolicy: { accept: true, text: null },
@@ -381,14 +382,14 @@ export class AgentBrowser {
       case 'evaluate': return done(await this.#evaluate(tab, action.expression, 30_000));
       // The page takes a few frames to reach a new size: the next command meets it laid out.
       case 'resize':
-        await this.#screen(tab, () => this.#send(tab, 'Emulation.setDeviceMetricsOverride', { width: action.width, height: action.height, deviceScaleFactor: 1, mobile: false }));
+        await this.#screen(tab, () => this.#send(tab, 'Emulation.setDeviceMetricsOverride', { width: action.width, height: action.height, deviceScaleFactor: 1, mobile: false }), true);
         tab.preset = null; tab.frame = null; await this.#settle(tab); return done();
       case 'reset-viewport':
-        await this.#screen(tab, () => this.#send(tab, 'Emulation.clearDeviceMetricsOverride'));
+        await this.#screen(tab, () => this.#send(tab, 'Emulation.clearDeviceMetricsOverride'), true);
         tab.preset = null; tab.frame = null; await this.#settle(tab); return done();
       case 'preset': {
         const size = browserPresetSize(action.preset, action.orientation);
-        await this.#screen(tab, () => this.#send(tab, 'Emulation.setDeviceMetricsOverride', { ...size, deviceScaleFactor: 1, mobile: false }));
+        await this.#screen(tab, () => this.#send(tab, 'Emulation.setDeviceMetricsOverride', { ...size, deviceScaleFactor: 1, mobile: false }), true);
         tab.preset = action.preset; tab.orientation = size.width > size.height ? 'landscape' : 'portrait'; tab.frame = null;
         await this.#settle(tab);
         return done(size);
@@ -510,11 +511,9 @@ export class AgentBrowser {
     return this.#remote.remoteStatus(params, connection);
   }
 
-  /** Captures, size changes and reads of the page's size take turns: see `browser/frames.ts`. */
-  #screen<T>(tab: Tab, run: () => Promise<T>): Promise<T> {
-    const next = tab.screen.then(run);
-    tab.screen = Promise.race([next.then(() => {}, () => {}), Bun.sleep(SCREEN_TURN_MS)]);
-    return next;
+  /** Captures, size changes (`strict`) and reads of the page's size (`strict`) take turns: see `takeTurn` in `browser/frames.ts`. */
+  #screen<T>(tab: Tab, run: () => Promise<T>, strict = false): Promise<T> {
+    return takeTurn(tab.screen, strict, run, SCREEN_TURN_MS);
   }
 
   remoteFrame(params: RpcParams<'browser.remoteFrame'>, connection: Connection): Promise<RemoteBrowserFrame> {
