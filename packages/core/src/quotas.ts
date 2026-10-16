@@ -10,7 +10,7 @@ import { homePath } from './paths.ts';
 import { invalidParams } from './errors.ts';
 import { claudeQuotaDetails, claudeUsageAgent, codexQuotaDetails, codexQuotaWindows, quotaWindow } from './quota-details.ts';
 import { consumeClaudeReset, QuotaResetStore, type QuotaResetConsumer } from './quota-resets.ts';
-import { ANTIGRAVITY_QUOTA_ID, readExtraQuota } from './quota-readers.ts';
+import { ANTIGRAVITY_QUOTA_ID, readExtraQuota, readsAntigravitySignIn } from './quota-readers.ts';
 import type { ProbeContext } from './drivers/types.ts';
 import { activeSubscriptionProxy } from './subscription-proxy.ts';
 import { GatewayQuotas } from './subscription-proxy-quotas.ts';
@@ -212,7 +212,7 @@ export class QuotaStore {
     const provider = this.core.providers.get(account.providerId);
     const proxied = provider && activeSubscriptionProxy(this.core, provider);
     // A provider turned off is never read: its accounts stand as they would with no reader.
-    const supported = !proxied && this.core.providers.summary(account.providerId)?.enabled !== false && (this.isMuse(account) || ['claude', 'codex', 'grok', 'opencode', OPENCODE_V2].includes(account.providerId) || account.id === ANTIGRAVITY_QUOTA_ID);
+    const supported = !proxied && this.core.providers.summary(account.providerId)?.enabled !== false && (this.isMuse(account) || ['claude', 'codex', 'grok', 'opencode', OPENCODE_V2].includes(account.providerId) || account.id === ANTIGRAVITY_QUOTA_ID || readsAntigravitySignIn(provider));
     const enabled = account.id === ANTIGRAVITY_QUOTA_ID ? preferences[account.id] === true : preferences[account.id] !== false;
     return { accountId: account.id, providerId: account.providerId, providerName: isOpenCode(account.providerId) ? 'OpenCode Go' : this.core.providers.get(account.providerId)?.name ?? account.providerId,
       label: account.label, enabled, status: !supported ? 'unsupported' : !enabled ? 'disabled' : 'unavailable', windows: [], checkedAt: null, error: null };

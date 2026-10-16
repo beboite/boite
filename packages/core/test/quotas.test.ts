@@ -406,3 +406,18 @@ test('changing one account re-reads that account only and keeps the others in fl
     expect(reads.sort()).toEqual([a.id, b.id].sort());
   } finally { list.mockRestore(); }
 });
+
+test('an Antigravity account has its own limits row, beside the Antigravity CLI one', async () => {
+  harness = await startTestCore();
+  const account = harness.core.accounts.add({ providerId: 'antigravity', label: 'Google' });
+  const read: string[] = [];
+  const store = new QuotaStore(harness.core, async (row) => {
+    read.push(row.id);
+    return { windows: [{ id: 'gemini-5h', label: 'Gemini · 5 hours', usedPercent: 30, resetsAt: null }] };
+  });
+  const rows = await store.list();
+  expect(rows.find((row) => row.accountId === account.id)).toMatchObject({ status: 'ready', enabled: true, windows: [{ id: 'gemini-5h', usedPercent: 30 }] });
+  expect(read).toContain(account.id);
+  // The CLI's row still waits for the user to turn it on.
+  expect(rows.find((row) => row.accountId === 'quota:antigravity-cli')?.status).toBe('disabled');
+});

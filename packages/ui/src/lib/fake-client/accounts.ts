@@ -61,6 +61,10 @@ function quotas(ctx: FakeContext): AccountQuota[] {
 function accountQuotas(ctx: FakeContext): AccountQuota[] {
   const accounts = [...ctx.accounts, { id: 'quota:antigravity-cli', providerId: 'antigravity', label: 'Antigravity CLI' }];
   const proxied = (providerId: string) => subscriptionProxyOf(ctx.settings, ctx.providers.find(provider => provider.id === providerId)) !== null;
+  // As the core: a managed Antigravity account reads its own sign-in, so one
+  // not signed in yet reports why instead of limits.
+  const signedOut = (account: (typeof accounts)[number]) => account.providerId === 'antigravity' && account.id !== 'quota:antigravity-cli'
+    && 'status' in account && account.status === 'unauthenticated';
   return accounts.map((account, index) => ({
     ...(ctx.quotaExtras && ctx.quotaEnabled[account.id] !== false && ['claude', 'codex'].includes(account.providerId) ? {
       resetCredits: { availableCount: Math.max(0, (account.providerId === 'claude' ? 1 : 2) - (ctx.quotaResetsUsed[account.id] ?? 0)), nextExpiresAt: Date.now() + 7 * 86400_000 },
@@ -71,9 +75,9 @@ function accountQuotas(ctx: FakeContext): AccountQuota[] {
     accountId: account.id, providerId: account.providerId, providerName: account.providerId === 'opencode' || account.providerId === 'opencode-v2' ? 'OpenCode Go' : ctx.providers.find((p) => p.id === account.providerId)?.name ?? account.providerId,
     label: account.label, enabled: account.id === 'quota:antigravity-cli' ? ctx.quotaEnabled[account.id] === true : ctx.quotaEnabled[account.id] !== false,
     // The CLI's own account reports nothing: its limits come from the `quota:antigravity-cli` source.
-    status: proxied(account.providerId) || ctx.providers.find(provider => provider.id === account.providerId)?.enabled === false || account.providerId === 'echo' || account.providerId === 'pi' || account.providerId === 'antigravity-cli' || account.id === 'a-antigravity' ? 'unsupported' : ctx.quotaEnabled[account.id] === false || account.id === 'quota:antigravity-cli' && ctx.quotaEnabled[account.id] !== true ? 'disabled' : 'ready',
-    checkedAt: Date.now(), error: null,
-    windows: proxied(account.providerId) || ctx.quotaEnabled[account.id] === false || account.id === 'quota:antigravity-cli' && ctx.quotaEnabled[account.id] !== true ? [] : (ctx.quotaResetsUsed[account.id] ?? 0) > 0 ? [
+    status: proxied(account.providerId) || ctx.providers.find(provider => provider.id === account.providerId)?.enabled === false || account.providerId === 'echo' || account.providerId === 'pi' || account.providerId === 'antigravity-cli' ? 'unsupported' : ctx.quotaEnabled[account.id] === false || account.id === 'quota:antigravity-cli' && ctx.quotaEnabled[account.id] !== true ? 'disabled' : signedOut(account) ? 'unavailable' : 'ready',
+    checkedAt: signedOut(account) ? null : Date.now(), error: signedOut(account) && ctx.quotaEnabled[account.id] !== false ? 'Sign in to Antigravity in Providers to see its limits.' : null,
+    windows: proxied(account.providerId) || ctx.quotaEnabled[account.id] === false || signedOut(account) || account.id === 'quota:antigravity-cli' && ctx.quotaEnabled[account.id] !== true ? [] : (ctx.quotaResetsUsed[account.id] ?? 0) > 0 ? [
       { id: 'primary', label: '5 hours', usedPercent: 0, resetsAt: null },
       { id: 'secondary', label: 'Weekly', usedPercent: 0, resetsAt: null },
     ] : [

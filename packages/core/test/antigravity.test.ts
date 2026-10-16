@@ -167,6 +167,12 @@ describe('antigravity', () => {
     // driver kept it out of the protocol stream and handed it to the client.
     await waitFor(() => urls.length > 0, 20000);
     expect(urls[0]).toContain('https://accounts.google.com/');
+    // The whole link, whichever stream brought it first: one cut at 400
+    // characters asked Google for the scope `https://www.googleapis.`.
+    expect(new URL(urls[0] ?? '').searchParams.get('scope')).toBe(
+      'https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile',
+    );
+    expect(urls[0]).toEndWith('&access_type=offline');
     expect(lines.some((line) => line.startsWith('Open the following link'))).toBe(true);
 
     // The agent carries the account's home, the flags it needs and none of the

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import type { Core } from '../src/core.ts';
 import type { Account } from '@boite/contracts';
 import { antigravityQuotaWindows, grokQuotaWindows, openCodeQuotaWindows, readExtraQuota, supportsAntigravityUsage } from '../src/quota-readers.ts';
+import { forgetAntigravityTokens } from '../src/antigravity-quota.ts';
 let directory = '';
 let restore: (() => void) | undefined;
 afterEach(async () => { restore?.(); restore = undefined; if (directory) await rm(directory, { recursive: true, force: true }); directory = ''; delete process.env.BOITE_DATA_DIR; });
@@ -89,4 +90,56 @@ test('OpenCode reads the isolated Go key and sends it only to its fixed usage en
   await writeFile(join(directory, 'opencode', 'auth.json'), '{}');
   await expect(readExtraQuota(core, account)).rejects.toThrow('Connect OpenCode Go');
   expect(fetcher).toHaveBeenCalledTimes(1);
+});
+
+test('an Antigravity account reads its limits from the server sign-in, renewing the access token only when it runs out', async () => {
+  directory = await mkdtemp(join(tmpdir(), 'boite-quota-test-'));
+  forgetAntigravityTokens();
+  const core = { accounts: { accountEnv: () => ({ GEMINI_HOME: directory }) }, providers: { require: () => ({ quirks: ['antigravity'] }) } } as unknown as Core;
+  const account = { id: 'acc_agy', providerId: 'antigravity', isolationDir: directory } as Account;
+  await expect(readExtraQuota(core, account)).rejects.toThrow('Sign in to Antigravity in Providers');
+
+  await mkdir(join(directory, 'antigravity-acp'));
+  await writeFile(join(directory, 'antigravity-acp', 'acp_token.json'), JSON.stringify({ client_id: 'fixture-client', client_secret: 'fixture-secret', refresh_token: 'fixture-refresh', project_id: 'fixture-project' }));
+  const calls: string[] = [];
+  let summary: unknown = {
+    groups: [
+      { displayName: 'Gemini', buckets: [
+        { bucketId: 'gemini-5h', window: '5h', remainingFraction: 0.25, resetTime: '2026-10-16T18:00:00Z' },
+        { bucketId: 'gemini-weekly', window: 'weekly', remainingFraction: 0.75 },
+        { bucketId: 'gemini-off', window: 'weekly', remainingFraction: 0, disabled: true },
+      ] },
+      { displayName: 'Claude and GPT', buckets: [{ bucketId: '3p-weekly', window: 'weekly', remainingFraction: 1 }] },
+    ],
+  };
+  const fakeFetch: typeof fetch = Object.assign(async (url: string | URL | Request, options?: RequestInit) => {
+    const address = String(url);
+    calls.push(address);
+    if (address === 'https://oauth2.googleapis.com/token') {
+      expect(String(options?.body)).toContain('refresh_token=fixture-refresh');
+      return Response.json({ access_token: 'fixture-access', expires_in: 3600 });
+    }
+    expect(options?.headers).toMatchObject({ Authorization: 'Bearer fixture-access' });
+    expect(JSON.parse(String(options?.body))).toEqual({ project: 'fixture-project' });
+    if (address.endsWith(':retrieveUserQuotaSummary')) return address.startsWith('https://daily-') ? new Response('', { status: 503 }) : Response.json(summary);
+    if (address.endsWith(':fetchAvailableModels')) {
+      return Response.json({ models: { 'gemini-3.8-flash': { modelProvider: 'MODEL_PROVIDER_GOOGLE', quotaInfo: { remainingFraction: 0.5 } }, 'claude-opus-4-6': { quotaInfo: { remainingFraction: 0.2 } }, 'tab-model': { quotaInfo: { remainingFraction: 0 } } } });
+    }
+    return new Response('', { status: 404 });
+  }, { preconnect: fetch.preconnect });
+  const fetcher = spyOn(globalThis, 'fetch').mockImplementation(fakeFetch);
+  restore = () => fetcher.mockRestore();
+
+  // The daily endpoint failed, the stable one answered; the disabled bucket is left out.
+  expect(await readExtraQuota(core, account)).toEqual([
+    { id: 'gemini-5h', label: 'Gemini · 5 hours', usedPercent: 75, resetsAt: Date.parse('2026-10-16T18:00:00Z') },
+    { id: 'gemini-weekly', label: 'Gemini · Weekly', usedPercent: 25, resetsAt: null },
+    { id: '3p-weekly', label: 'Claude and GPT · Weekly', usedPercent: 0, resetsAt: null },
+  ]);
+  // An account whose summary is empty reports per-model quotas instead.
+  summary = { groups: [] };
+  expect((await readExtraQuota(core, account)).map((row) => [row.label, row.usedPercent])).toEqual([['Gemini · Quota', 50], ['Claude · Quota', 80]]);
+  // One renewal for both reads: the access token was still good.
+  expect(calls.filter((url) => url.includes('oauth2')).length).toBe(1);
+  expect(calls.every((url) => url.startsWith('https://oauth2.googleapis.com/') || url.includes('cloudcode-pa.googleapis.com/v1internal:'))).toBe(true);
 });
