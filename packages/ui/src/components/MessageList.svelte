@@ -40,6 +40,7 @@
   import { ReadingAnchor, type RowAnchor } from '../lib/reading-anchor';
   import { MediaQuery } from 'svelte/reactivity';
   import { placeViews, turnViews, viewPart } from '../lib/inline-view';
+  import { filesLast, publishedFile } from '../lib/message-order';
 
   /** A phone has no room left of the bubbles for the outline rail: it is not drawn there. */
   const narrow = new MediaQuery('(max-width: 720px)');
@@ -101,7 +102,8 @@
   /** The pages each turn published: its answer places them, or they go after it once the turn ends (`placeViews`). */
   let shownViews: ReadonlyMap<string, Message[]> | undefined;
   const views = $derived.by(() => (shownViews = turnViews(grouped.timeline, shownViews)));
-  const timeline = $derived(placeViews(grouped.timeline, store.openThread?.id === threadId ? store.openThread.turns : store.delegationThread?.id === threadId ? store.delegationThread.turns : [], views));
+  /** A finished turn's published files go after its answer, its pages after them. */
+  const timeline = $derived(placeViews(filesLast(grouped.timeline, shownTurns), shownTurns, views));
   const memoryPlacement = $derived(placeMemoryEvents(messages, store.openThread?.id === threadId ? store.openThread.memoryEvents ?? [] : store.delegationThread?.id === threadId ? store.delegationThread.memoryEvents ?? [] : []));
   const memoryRows = $derived(new Map(memoryPlacement.standalone.map((event, index) => [`memory:${event.at}:${event.kind}:${index}`, event])));
   /** What the window lists and measures: a row per message, several for the message of a long turn (lib/timeline-rows.ts). */
@@ -698,8 +700,8 @@
   const firstAssistantInTurn = $derived.by(() => {
     const result = new Map<string, string>();
     for (const message of messages) {
-      // A view is drawn after the answer, wherever it was published: the answer's first message carries the model.
-      if (message.role === 'assistant' && !result.has(message.turnId) && !viewPart(message)) result.set(message.turnId, message.id);
+      // A view or a published file is drawn after the answer, wherever it was published: the answer's first message carries the model.
+      if (message.role === 'assistant' && !result.has(message.turnId) && !viewPart(message) && !publishedFile(message)) result.set(message.turnId, message.id);
     }
     return result;
   });
@@ -766,7 +768,7 @@
         {@const message = row.message}
         {@const group = grouped.groups.get(message.id)}
         {@const turn = store.openThread?.turns.find(turn => turn.id === message.turnId)}
-        {@const source = group || viewPart(message) ? messages.findLast(current => current.turnId === message.turnId) : message}
+        {@const source = group || viewPart(message) || publishedFile(message) ? messages.findLast(current => current.turnId === message.turnId) : message}
         {@const closes = row.last && turn !== undefined && lastInTurn.get(turn.id) === message.id}
         {@const joined = seam(rows[view.start + index - 1], row)}
         <article

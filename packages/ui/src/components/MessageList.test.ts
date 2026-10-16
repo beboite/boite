@@ -119,7 +119,7 @@ afterEach(async () => {
   document.body.innerHTML = '';
 });
 
-test('one model label covers a turn split across text and separate attachments, and the next turn names its own model', async ({ createStore }) => {
+test('one model label covers a turn split across text and separate attachments, which close the finished turn, and the next turn names its own model', async ({ createStore }) => {
   const { store: owner, client } = createStore({ delayMs: 0 });
   owner.attach(client);
   await owner.connect();
@@ -128,13 +128,18 @@ test('one model label covers a turn split across text and separate attachments, 
   const first = thread.turns[0]!;
   first.execution = { ...thread, providerId: 'codex', accountId: 'a-codex', model: 'gpt-6.1-sol', sessionGeneration: 0, selectionVersion: 0 };
   thread.turns.push({ ...first, id: 'turn-next', execution: { ...first.execution, model: 'gpt-6-astra' } });
+  const files = ['README.md', 'review-small.mp4', 'NOTES.md'].map((name, index): Message => ({
+    id: `m-file-${index}`, threadId: thread.id, turnId: first.id, role: 'assistant', state: 'complete', createdAt: index * 2 + 1,
+    parts: [{ type: 'file', name, mimeType: name.endsWith('.mp4') ? 'video/mp4' : 'text/markdown', data: 'ZmlsZQ==' }]
+  }));
+  // Published before, between and after what the agent wrote: the finished turn shows them under its last words.
   thread.messages = [
-    { id: 'm-intro', threadId: thread.id, turnId: first.id, role: 'assistant', state: 'complete', createdAt: 1, parts: [{ type: 'text', text: 'Here are the files.' }] },
-    ...['README.md', 'review-small.mp4', 'NOTES.md'].map((name, index): Message => ({
-      id: `m-file-${index}`, threadId: thread.id, turnId: first.id, role: 'assistant', state: 'complete', createdAt: index + 2,
-      parts: [{ type: 'file', name, mimeType: name.endsWith('.mp4') ? 'video/mp4' : 'text/markdown', data: 'ZmlsZQ==' }]
-    })),
-    { id: 'm-next', threadId: thread.id, turnId: 'turn-next', role: 'assistant', state: 'streaming', createdAt: 5, parts: [{ type: 'text', text: 'Next answer.\n\n' }] }
+    files[0]!,
+    { id: 'm-intro', threadId: thread.id, turnId: first.id, role: 'assistant', state: 'complete', createdAt: 2, parts: [{ type: 'text', text: 'Here are the files.' }] },
+    files[1]!,
+    { id: 'm-outro', threadId: thread.id, turnId: first.id, role: 'assistant', state: 'complete', createdAt: 4, parts: [{ type: 'text', text: 'That is all.' }] },
+    files[2]!,
+    { id: 'm-next', threadId: thread.id, turnId: 'turn-next', role: 'assistant', state: 'streaming', createdAt: 7, parts: [{ type: 'text', text: 'Next answer.\n\n' }] }
   ];
   running = mount(MessageList, { target: document.body, props: { store: owner, threadId: thread.id, messages: thread.messages } });
   flushSync();
@@ -142,7 +147,9 @@ test('one model label covers a turn split across text and separate attachments, 
   expect(labels).toHaveLength(2);
   expect(labels[0]!.closest('[data-mid]')?.getAttribute('data-mid')).toBe('m-intro');
   expect(labels[1]!.textContent).toContain('gpt-6-astra');
-  expect(document.querySelectorAll('[data-mid^=m-file-]')).toHaveLength(3);
+  expect([...document.querySelectorAll('[data-mid^=m-]')].map(node => node.getAttribute('data-mid')))
+    .toEqual(['m-intro', 'm-outro', 'm-file-0', 'm-file-1', 'm-file-2', 'm-next']);
+  expect(document.querySelector('[data-mid=m-file-2]')?.querySelector('[data-testid=turn-summary]')).not.toBeNull();
 });
 
 /**
@@ -584,8 +591,9 @@ test('a viewer opened from a row stays open, its files readable, once the rows l
   URL.createObjectURL = () => 'blob:capture';
   URL.revokeObjectURL = (url: string) => { revoked.push(url); };
   const messages = thread(500);
-  messages[250] = { id: 'm-250', threadId: 't-long', turnId: 'turn-1', role: 'user', parts: [{ type: 'image', mimeType: 'image/png', data: btoa('png'), alt: 'shot.png' }], state: 'complete', createdAt: 250 };
-  messages[251] = { ...messages[251]!, parts: [{ type: 'file', name: 'capture.png', mimeType: 'image/png', data: btoa('png bytes') }] };
+  // One turn of their own: a published file goes after the rest of its turn, which would part the two.
+  messages[250] = { id: 'm-250', threadId: 't-long', turnId: 'turn-250', role: 'user', parts: [{ type: 'image', mimeType: 'image/png', data: btoa('png'), alt: 'shot.png' }], state: 'complete', createdAt: 250 };
+  messages[251] = { ...messages[251]!, turnId: 'turn-250', parts: [{ type: 'file', name: 'capture.png', mimeType: 'image/png', data: btoa('png bytes') }] };
   stubLayout(messages.length * ESTIMATE);
   const owner = { ...store, openThread: null, composerStates: {}, busy: false } as unknown as Store;
   running = mount(MessageList, { target: document.body, props: { store: owner, threadId: 't-long', messages } });
