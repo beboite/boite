@@ -215,16 +215,19 @@ test('the Douane plugin: its row in Plugins and the proxy card pointing at it, a
     await local.screenshot(join(process.env.BOITE_CAPTURE_DIR ?? join(import.meta.dir, '.artifacts'), name));
   };
   // The list above can still grow as rows land: scroll until the element stays in view.
-  const inView = (selector: string) => `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return false; el.scrollIntoView({ block: "center" }); const box = el.getBoundingClientRect(); return box.top >= 0 && box.bottom <= innerHeight; })()`;
-  const strip = '[data-testid=plugin-gateway][data-plugin=douane]';
+  // One page-side helper, then fixed expressions naming it: no expression is built from a value.
+  const scrolled = 'window.__inView = (selector) => { const el = document.querySelector(selector); if (!el) return false; el.scrollIntoView({ block: "center" }); const box = el.getBoundingClientRect(); return box.top >= 0 && box.bottom <= innerHeight; }';
+  const stripInView = 'window.__inView("[data-testid=plugin-gateway][data-plugin=douane]")';
+  const stripRunning = 'document.querySelector("[data-testid=plugin-gateway][data-plugin=douane]")?.dataset.gatewayStatus === "running"';
   try {
     await local.waitFor('document.querySelector("[data-testid=nav-settings]")');
     await local.click('[data-testid="nav-settings"]');
     await local.click('[data-testid="settings-tab-plugins"]');
-    await local.waitFor(`document.querySelector(${JSON.stringify(strip)})?.dataset.gatewayStatus === "running"`);
+    await local.evaluate(scrolled);
+    await local.waitFor(stripRunning);
     expect(await local.text('[data-testid=plugin-gateway][data-plugin=douane] [data-testid=plugin-gateway-state]')).toContain('0.3.0 on 127.0.0.1:8787');
     expect(await local.evaluate('!!document.querySelector("[data-testid=plugin-gateway-open][data-plugin=douane]")')).toBe(true);
-    await local.waitFor(inView(strip));
+    await local.waitFor(stripInView);
     await shot('boite-douane-plugin-desktop.png');
 
     await local.click('[data-testid="settings-tab-accounts"]');
@@ -235,7 +238,7 @@ test('the Douane plugin: its row in Plugins and the proxy card pointing at it, a
     await local.click('[data-testid="subscription-proxy-save"]');
     await local.waitFor('document.querySelector("[data-testid=subscription-proxy-result]")?.textContent.includes("saved")');
     expect(await local.text('[data-testid=subscription-proxy-plugin]')).toContain('Douane 0.3.0 answers on 127.0.0.1:8787.');
-    await local.waitFor(inView('[data-testid=subscription-proxy-settings]'));
+    await local.waitFor('window.__inView("[data-testid=subscription-proxy-settings]")');
     await shot('boite-douane-proxy-desktop.png');
 
     // The phone has no Plugins page (plugins are the desktop's to manage): the proxy card under Limits.
@@ -247,7 +250,7 @@ test('the Douane plugin: its row in Plugins and the proxy card pointing at it, a
     await local.waitFor('document.querySelector("[data-testid=subscription-proxy-settings]")');
     await local.evaluate('document.querySelector("[data-testid=subscription-proxy-settings]").closest("details").open = true');
     await local.waitFor('document.querySelector("[data-testid=subscription-proxy-plugin]")?.dataset.state === "running"');
-    await local.waitFor(inView('[data-testid=subscription-proxy-plugin]'));
+    await local.waitFor('window.__inView("[data-testid=subscription-proxy-plugin]")');
     expect(await local.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
     await shot('boite-douane-proxy-phone.png');
     expect(local.errors()).toEqual([]);
