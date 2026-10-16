@@ -408,6 +408,8 @@ test('threads on one folder share each blob, and a discarded thread\'s blobs are
   }
 
   await h.core.threads.codeCheckpoints.discard([first]);
+  // The unlink moved the blob's ctime, which a filesystem clock can put past a cutoff read in the same millisecond.
+  await Bun.sleep(10);
   expect(await h.core.threads.codeCheckpoints.collect(0)).toBe(1);
   await expect(stat(sharedBlob(shared, hashOf('first')))).rejects.toMatchObject({ code: 'ENOENT' });
   expect((await stat(sharedBlob(shared, hashOf('initial')))).nlink).toBe(2);
