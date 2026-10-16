@@ -271,9 +271,8 @@ export class Threads {
     if (!client) return;
     try {
       // The page a first visit reads: what the copies held cannot be patched, so they start over.
-      const fresh = await client.call('threads.get', { threadId, limit: INITIAL_MESSAGE_PAGE, maxBytes: INITIAL_PAGE_BYTES, ...lightPage(this.ctx) });
+      const fresh = this.ctx.positions.noted(threadId, await client.call('threads.get', { threadId, limit: INITIAL_MESSAGE_PAGE, maxBytes: INITIAL_PAGE_BYTES, ...lightPage(this.ctx) }));
       if (!this.ctx.currentClient(client, clientGeneration)) return;
-      this.ctx.positions.note(threadId, fresh.messages, fresh.messageOffset);
       for (const held of this.threadSnapshots(threadId)) {
         held.messages = fresh.messages;
         held.turns = fresh.turns;
@@ -525,10 +524,9 @@ export class Threads {
     const navigation = this.openGeneration;
     const current = () => generation === this.#olderGeneration && this.ctx.currentNavigation(client, navigation);
     try {
-      const page = await client.call('messages.list', { threadId: open.id, before: cursor, maxBytes: READING_PAGE_BYTES, ...lightPage(this.ctx) });
+      const page = this.ctx.positions.noted(open.id, await client.call('messages.list', { threadId: open.id, before: cursor, maxBytes: READING_PAGE_BYTES, ...lightPage(this.ctx) }));
       const still = this.openThread;
       if (!current() || !still || still.id !== open.id || still.messagesBefore !== cursor) return 0;
-      this.ctx.positions.note(open.id, page.messages, page.offset);
       const known = new Set(still.messages.map((m) => m.id));
       const older = page.messages.filter((m) => !known.has(m.id));
       still.messages.unshift(...older);

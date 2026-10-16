@@ -48,6 +48,16 @@ export class MessagePositions {
     this.version += 1;
   }
 
+  /**
+   * `page` itself, once where it sits is noted: a thread snapshot by its
+   * `messageOffset`, a `messages.list` page by its `offset`. Noted before the
+   * caller decides whether to use the page: a position is a fact of the core.
+   */
+  noted<T extends { messages: readonly Message[]; messageOffset?: number; offset?: number }>(threadId: ThreadId, page: T): T {
+    this.note(threadId, page.messages, page.messageOffset ?? page.offset);
+    return page;
+  }
+
   /** Where `messages` sit and what is missing between them. */
   placement(threadId: ThreadId, messages: readonly Message[]): Placement {
     void this.version;
