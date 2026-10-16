@@ -4,7 +4,8 @@ import { removeDir } from './fs-retry.ts';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import type { Account, QuotaWindow } from '@boite/contracts';
+import type { Account, ProviderDescriptor, QuotaWindow } from '@boite/contracts';
+import { readAntigravityQuota } from './antigravity-quota.ts';
 import type { Core } from './core.ts';
 import { homePath } from './paths.ts';
 import { hostAgentsEnabled } from './providers/resolve.ts';
@@ -77,9 +78,20 @@ async function request(url: string, token: string, name: string, headers: Record
   try { return await response.json(); } catch { throw new Error(`${name} returned an invalid usage response.`); }
 }
 
+/** An account of the managed Antigravity server, whose limits come from its own sign-in file. */
+export function readsAntigravitySignIn(provider: ProviderDescriptor | undefined): boolean {
+  return provider?.quirks?.includes('antigravity') === true;
+}
+
 export async function readExtraQuota(core: Core, account: Account): Promise<QuotaWindow[]> {
   if (account.id === ANTIGRAVITY_QUOTA_ID) return readAntigravity(core);
-  const env = core.accounts.accountEnv(account, core.providers.require(account.providerId));
+  const provider = core.providers.require(account.providerId);
+  const env = core.accounts.accountEnv(account, provider);
+  if (readsAntigravitySignIn(provider)) {
+    const home = env['GEMINI_HOME'] ?? account.isolationDir;
+    if (!home) throw new Error('Sign in to Antigravity in Providers to see its limits.');
+    return readAntigravityQuota(home);
+  }
   if (account.providerId === 'grok') {
     const root = env['GROK_HOME'] ?? process.env['GROK_HOME'] ?? join(homePath(), '.grok');
     const path = join(root, 'auth.json');

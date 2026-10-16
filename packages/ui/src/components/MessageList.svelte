@@ -704,11 +704,8 @@
     }
     return result;
   });
-  const lastInTurn = $derived.by(() => {
-    const result = new Map<string, string>();
-    for (const message of timeline) result.set(message.turnId, message.id);
-    return result;
-  });
+  /** The last row of each turn: a later message of the same turn replaces an earlier one. */
+  const lastInTurn = $derived(new Map(timeline.map((message): [string, string] => [message.turnId, message.id])));
   /** Each turn's answers, rebuilt when a message comes or goes, never on a part or a delta. */
   const answers = $derived(answersByTurn(messages));
   const fileCache = new TurnFileCache();
