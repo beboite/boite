@@ -29,6 +29,14 @@ after a core restart, and with the switch below turned off. Paired phones can
 download the published snapshot. They cannot publish or browse arbitrary host
 files through the file APIs.
 
+A published file shows where it was sent while its turn runs, so it can be
+seen at once. Once the turn ends, the turn's files move under the last thing
+the agent wrote, in the order they were published, and any inline views come
+after them (`filesLast` in `packages/ui/src/lib/message-order.ts`). The
+journal keeps the publish order; only the drawing changes, so older threads
+are shown the same way. A file whose turn has nothing else on the loaded page
+keeps its place.
+
 Published images, videos and audio appear directly in the conversation
 whatever the switch says. Media keeps its aspect ratio in a bounded card; videos have
 playback, seeking and fullscreen controls and never autoplay. Images open in a
