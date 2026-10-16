@@ -24,7 +24,7 @@ import {
   toolViewOf,
   usageDelta,
 } from './mapping.ts';
-import type { CodexHookRun, CodexHooksListed, CodexItem, CodexQuestion, CodexThreadOpened, CodexTokenUsage, CodexTurnError, CodexTurnRecord, Timer } from './protocol.ts';
+import type { CodexHookRun, CodexHooksListed, CodexItem, CodexQuestion, CodexThreadOpened, CodexTokenUsage, CodexTurnRecord, Timer } from './protocol.ts';
 import {
   CLIENT_NAME,
   COMMAND_TOOL_NAME,
@@ -37,20 +37,13 @@ import {
   STDERR_MAX,
 } from './protocol.ts';
 import { CodexRpc } from './rpc.ts';
+import { resumeThread, ThreadLostError } from './resume.ts';
+import { threadConfig } from './config.ts';
 import { updateTurnSettings } from './live-settings.ts';
 import { CodexTurn } from './turn.ts';
+import { SpentWindows, turnError } from './availability.ts';
 import { SessionRetention } from '../session-retention.ts';
-import { errorCodeOf, httpStatusOf, noteReady } from '../driver-log.ts';
-
-/**
- * What `thread/resume` answers when the thread's rollout file is gone. Both
- * sentences are in the 0.156.1 binary; any other refusal keeps the thread.
- */
-const MISSING_THREAD = /no rollout found for (?:thread|conversation) id|thread not found: /i;
-
-/** `thread/resume` refused a thread the agent no longer has. */
-/** `sessionLost` tells `noteReady` this is a resume miss the turn recovers from, not a failed open. */
-class ThreadLostError extends Error { readonly sessionLost = true; }
+import { noteReady } from '../driver-log.ts';
 
 /** `hook/completed` statuses as the ledger counts them; `running` is not an end. */
 const HOOK_OUTCOMES: Record<string, HookOutcome> = {
@@ -94,6 +87,8 @@ export class CodexSession {
   private idle: Timer | null = null;
   /** The turn whose `turn/start` is in flight. Context updates also arrive while idle. */
   private current: CodexTurn | null = null;
+  /** The account's spent windows, from `account/rateLimits/updated`. */
+  private readonly spentWindows = new SpentWindows();
   /** The turn this session is running, from its process start to its settle. */
   private active: CodexTurn | null = null;
   /** Armed by a stop: an agent that has not ended the turn by then loses its process. */
@@ -266,6 +261,7 @@ export class CodexSession {
       return;
     }
     this.current = turn;
+    turn.spentWindowResetsAt = this.spentWindows.latest();
     this.contextSink = turn.ctx.context;
     const ctx = turn.ctx;
     try {
@@ -340,18 +336,16 @@ export class CodexSession {
 
     const policy = MODE_POLICY[ctx.thread.permissionMode];
     const model = modelOf(ctx);
+    const config = await threadConfig(rpc, ctx.thread.cwd, (level, message) => ctx.log(level, message));
     if (ctx.sessionId !== null) {
-      const resumed = await rpc.request<CodexThreadOpened>('thread/resume', {
+      const resumed = await resumeThread(rpc, ctx, {
         threadId: ctx.sessionId,
         cwd: ctx.thread.cwd,
         approvalPolicy: policy.approvalPolicy,
         sandbox: policy.sandbox,
         ...(model === null ? {} : { model }),
-        config: { 'tools.update_plan.enabled': true },
+        config,
         excludeTurns: true,
-      }).catch((error: unknown) => {
-        const reason = messageOf(error);
-        throw MISSING_THREAD.test(reason) ? new ThreadLostError(reason) : error;
       });
       this.threadId = resumed.thread.id;
       this.served = servedOf(resumed);
@@ -359,7 +353,7 @@ export class CodexSession {
     }
 
     const created = await rpc.request<CodexThreadOpened>('thread/start', {
-      config: { 'tools.update_plan.enabled': true },
+      config,
       cwd: ctx.thread.cwd,
       approvalPolicy: policy.approvalPolicy,
       sandbox: policy.sandbox,
@@ -572,6 +566,10 @@ export class CodexSession {
       this.onHook(params['run'] as CodexHookRun | undefined);
       return;
     }
+    if (method === 'account/rateLimits/updated') {
+      if (this.spentWindows.note(params['rateLimits']) && this.current !== null) this.current.spentWindowResetsAt = this.spentWindows.latest();
+      return;
+    }
     const turn = this.current;
     if (turn === null) return;
     if (typeof params['turnId'] === 'string' && turn.turnId !== null && params['turnId'] !== turn.turnId) return;
@@ -587,22 +585,10 @@ export class CodexSession {
         if (record !== undefined) turn.finish(record);
         break;
       }
-      case 'error': {
-        const error = params['error'] as CodexTurnError | undefined;
-        const willRetry = params['willRetry'] === true;
-        const text = error?.message ?? 'the codex agent reported an error';
-        const info = (error as { codexErrorInfo?: unknown } | undefined)?.codexErrorInfo;
-        const code = errorCodeOf(info);
-        const status = httpStatusOf(info);
-        turn.ctx.diagnostic?.('warn', `Codex reported ${code ?? 'an error'}${status === null ? '' : ` (HTTP ${status})`}${willRetry ? ', it retries' : ', no retry'}: ${text}`, {
-          event: willRetry ? 'driver.api.retry' : 'driver.api.error', data: { code, status, willRetry },
-        });
-        // `turn/completed` says whether the turn survived it, so this is a line
-        // in the log and never the turn's own outcome.
-        turn.ctx.log('warn', `codex agent: ${text}${willRetry ? ' (retrying)' : ''}`);
-        if (willRetry) turn.ctx.reportProgress?.('retrying', text);
+      case 'error':
+        // `turn/completed` says whether the turn survived it: this is a line in the log, never the outcome.
+        turnError(turn, params);
         break;
-      }
       default:
         this.renderNotification(turn, method, params);
         break;

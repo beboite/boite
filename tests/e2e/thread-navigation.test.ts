@@ -12,7 +12,7 @@ beforeAll(async () => {
   server = await startUi(port);
   url = `http://127.0.0.1:${port}/?fake=1&open=recent`;
 }, 30_000);
-afterAll(async () => { await server?.close(); });
+afterAll(async () => { await server?.close(); }, 30_000);
 
 async function capture(page: BrowserPage, name: string) {
   await page.evaluate('Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])');

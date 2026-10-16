@@ -253,7 +253,7 @@ boite answer <id> <question-id> <option|text ...> [--skip]
 boite permissions [<id>]         pending tool permissions
 boite allow|deny <id> <request-id>
 boite attach <file>               publish a file snapshot in chat, at most 512 MB
-boite view <file.html>            draw the page at the end of the answer (--title <text>)
+boite view <file.html>            draw the page where a line ![title](file.html) of the answer places it, else at its end (--title <text>)
 boite view help                   the rules of a page: layout, the app's look, theme, motion, checks
 boite view example                a complete page in the app's look, to start from
 boite preview <file.html>          open a local HTML artifact and its neighbouring assets
@@ -285,7 +285,7 @@ boite agent remember <json>
 boite agent routines
 boite agent schedule <json>
 boite delegate models|profiles|list
-boite delegate spawn <brief> [--model <provider/model>] [--effort <level>] [--speed <tier>] [--profile <id>] [--title <t>] [context flags]
+boite delegate spawn <brief> [--model <provider/model>] [--effort <level>] [--speed <tier>] [--profile <id>] [--title <t>] [--worktree] [context flags]
 boite delegate send <thread-id> <text>
 boite delegate wait [thread-id] [--timeout <s>]
 boite delegate result <thread-id> <turn-id> [offset]
@@ -298,6 +298,11 @@ boite help
 The context flags, `--context light|neutral`, `--keep|--drop <parts>`,
 `--tools <Tool,...>` and `--rules <text>` or `--rules-file <path>`, start the
 thread without part of the user's setup ([context modes](context-modes.md)).
+`--worktree` runs the child in a git worktree of its own instead of the
+parent's checkout ([delegation](delegation.md#children-in-their-own-worktree)).
+`delegate send` to a child that waits on a question answers that question, and
+`delegate wait` returns `needs_input` as soon as a child asks something
+([delegation](delegation.md#questions-from-a-child)).
 
 Coordination commands are documented in [coordination](coordination.md#agent-commands),
 child controls in [delegation](delegation.md#agent-commands), and plan/output

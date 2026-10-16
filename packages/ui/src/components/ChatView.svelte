@@ -15,9 +15,11 @@
   import MessageList from './MessageList.svelte';
   import ThreadLoading from './ThreadLoading.svelte';
   import ThreadRecovery from './ThreadRecovery.svelte';
+  import ThreadRetry from './ThreadRetry.svelte';
   import ForkReturn from './ForkReturn.svelte';
   import ProjectTile from './ProjectTile.svelte';
   import DoneThreadNotice from './DoneThreadNotice.svelte';
+  import WorktreeGoneNotice from './WorktreeGoneNotice.svelte';
 
   let { store }: { store: Store } = $props();
 
@@ -137,11 +139,12 @@
     {/if}
 
     {#if thread}<AgentDock {store} threadId={thread.id} />{/if}
-    {#if thread}<ThreadRecovery {store} />{/if}
+    {#if thread}<ThreadRecovery {store} /><ThreadRetry {store} />{/if}
     {#if thread?.agentSessionId}
       <AgentOwnerBar {store} {thread} />
     {:else}
       {#if store.openProject?.missing === true}<FolderGoneNotice {store} project={store.openProject} />{/if}
+      {#if thread?.worktreeRemoved}<WorktreeGoneNotice removal={thread.worktreeRemoved} archived={thread.archived} />{/if}
       {#if thread?.archived}<DoneThreadNotice {store} threadId={thread.id} />{:else}<Composer {store} centered={!thread && !sending} />{/if}
     {/if}
 

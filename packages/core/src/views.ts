@@ -202,8 +202,9 @@ const notReady = (problems: string[]) => refused(`artifacts.view page is not rea
 
 /**
  * Publish a page as a view. The message is journalled where the command ran;
- * a client draws it at the end of the turn. Unlike a published file, it does
- * not cut the running answer in two: the answer reads as one text above it.
+ * a client draws it where a line of the turn's answer places it, else at the
+ * end of the turn. Unlike a published file, it does not cut the running answer
+ * in two where the command ran: only the answer's own line places it.
  */
 export async function publishView(core: Core, params: RpcParams<'artifacts.view'>): Promise<RpcResult<'artifacts.view'>> {
   const thread = core.threads.require(params.threadId);

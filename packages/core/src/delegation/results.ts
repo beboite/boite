@@ -59,7 +59,8 @@ export function delegatedResultPage(core: Core, params: RpcParams<'delegation.re
 export class DelegationWaits {
   private readonly pending = new Set<() => void>();
   private closed = false;
-  constructor(private readonly core: Core, private readonly agents: (threadId: ThreadId) => DelegatedAgent[]) {}
+  /** `settling`: a child whose turn ended while its worktree is still being looked at has not answered yet. */
+  constructor(private readonly core: Core, private readonly agents: (threadId: ThreadId) => DelegatedAgent[], private readonly settling: (threadId: ThreadId) => boolean = () => false) {}
   get size(): number { return this.pending.size; }
 
   wait(params: RpcParams<'delegation.wait'>, connection?: Connection): Promise<DelegationWaitResult> {
@@ -79,10 +80,12 @@ export class DelegationWaits {
           directChildren(this.core, params.threadId, params.agentId);
           const agents = this.agents(params.threadId).filter(agent => params.agentId === undefined || agent.thread.id === params.agentId);
           // A child that ended its turn to wait on its background work has not answered yet.
-          const waiting = agents.some(agent => (agent.lastTurn !== null && ['queued', 'running'].includes(agent.lastTurn.status)) || agent.thread.backgroundWait?.state === 'waiting');
-          if (waiting && !timedOut) return;
+          const waiting = agents.some(agent => (agent.lastTurn !== null && ['queued', 'running'].includes(agent.lastTurn.status)) || agent.thread.backgroundWait?.state === 'waiting' || this.settling(agent.thread.id));
+          // A child stopped on a question or an approval waits on someone: its running turn would hold the wait to its timeout.
+          const asks = agents.some(agent => agent.needsInput?.some(need => need.kind === 'permission' || need.blocking));
+          if (waiting && !asks && !timedOut) return;
           cleanup();
-          resolve({ state: waiting ? 'waiting_for_children' : params.agentId && agents.some(agent => agent.settlement === 'result_available') ? 'result_available' : 'settled', timedOut, agents });
+          resolve({ state: asks ? 'needs_input' : waiting ? 'waiting_for_children' : params.agentId && agents.some(agent => agent.settlement === 'result_available') ? 'result_available' : 'settled', timedOut: timedOut && !asks, agents });
         } catch (error) { cleanup(); reject(error); }
       };
       this.pending.add(cancel);

@@ -88,7 +88,8 @@ export class Worktrees {
     return this.add(threadId, project, branch, path);
   }
 
-  async add(threadId: ThreadId, project: Project, wanted?: string, recordedPath?: string, preparation?: WorktreePreparation): Promise<PlacedWorktree> {
+  /** `base` is the commit the new branch starts from; left out, the project's HEAD. */
+  async add(threadId: ThreadId, project: Project, wanted?: string, recordedPath?: string, preparation?: WorktreePreparation, base?: string): Promise<PlacedWorktree> {
     preparation?.assertActive();
     if (!existsSync(project.path)) throw folderGone(project.path, { field: 'projectId', projectId: project.id, project: project.name });
     if (!existsSync(join(project.path, '.git'))) {
@@ -141,7 +142,7 @@ export class Worktrees {
         preparation.assertActive();
       }
       const added = await this.git(threadId, project.path,
-        preparation ? ['worktree', 'add', path, branch] : ['worktree', 'add', '-b', branch, path], preparation?.timeoutMs);
+        preparation ? ['worktree', 'add', path, branch] : ['worktree', 'add', '-b', branch, path, ...(base === undefined ? [] : [base])], preparation?.timeoutMs);
       if (added.code !== 0) {
         throw refused(`git worktree add failed in ${project.path}: ${added.stderr.trim() || `exit ${added.code}`}`, {
           path: project.path,
@@ -241,6 +242,22 @@ export class Worktrees {
       }
     }
     return null;
+  }
+
+  /** The commit checked out in `cwd`, refused by name when it is not a git checkout or has no commit yet. */
+  async head(threadId: ThreadId, cwd: string): Promise<string> {
+    const result = await this.git(threadId, cwd, ['rev-parse', '--verify', 'HEAD^{commit}']);
+    if (result.code !== 0) throw refused(`cannot read the commit checked out in ${cwd}: ${result.stderr.trim() || `exit ${result.code}`}`, { cwd });
+    return result.stdout.trim();
+  }
+
+  /** Commits on HEAD beyond `base`, and whether the checkout has uncommitted or untracked changes. */
+  async changes(threadId: ThreadId, cwd: string, base: string): Promise<{ commits: number; dirty: boolean }> {
+    const status = await this.git(threadId, cwd, ['status', '--porcelain', '--untracked-files=normal']);
+    if (status.code !== 0) throw refused(`cannot read the status of ${cwd}: ${status.stderr.trim() || `exit ${status.code}`}`, { cwd });
+    const count = await this.git(threadId, cwd, ['rev-list', '--count', `${base}..HEAD`]);
+    if (count.code !== 0) throw refused(`cannot count the commits of ${cwd} beyond ${base}: ${count.stderr.trim() || `exit ${count.code}`}`, { cwd, base });
+    return { commits: Number(count.stdout.trim()) || 0, dirty: status.stdout.trim().length > 0 };
   }
 
   private async branchExists(threadId: ThreadId, cwd: string, branch: string, timeoutMs?: number): Promise<boolean> {

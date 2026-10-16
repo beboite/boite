@@ -29,7 +29,7 @@ beforeAll(async () => {
   page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&open=recent`, windowSize: { width: 1360, height: 960 } });
   await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
 }, 60_000);
-afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
+afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
 test('owners choose storage in desktop and phone settings, with validation and existing paths preserved', async () => {
   await page.click(id('nav-settings'));
