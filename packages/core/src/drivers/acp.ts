@@ -1,4 +1,6 @@
-import type { AccountId, ModelInfo, ProviderId, ThreadId } from '@boite/contracts';
+import type { SessionConfigOption } from '@agentclientprotocol/sdk';
+import type { AccountId, ModelInfo, ProviderDescriptor, ProviderId, ThreadId } from '@boite/contracts';
+import { agentModelsOf, modelsFrom, plainObject } from './acp/models.ts';
 import { AcpSession, sessionKey, type AcpMemory } from './acp/session.ts';
 import { readModels, withModelEffort, type ProbeEntry } from './acp/probe.ts';
 import { isGrok, MINUTE_MS, type AcpDeps } from './acp/protocol.ts';
@@ -150,6 +152,27 @@ export function createAcpDriver(deps: AcpDeps): Driver {
 
     probedModels(providerId: ProviderId, accountId: AccountId): ModelInfo[] | null {
       return probes.get(keyOf(providerId, accountId))?.result?.models ?? null;
+    },
+
+    async rememberSession(provider: ProviderDescriptor, accountId: AccountId, created: unknown): Promise<ModelInfo[]> {
+      // Read exactly as a probe reads its own `session/new`.
+      const listed = plainObject(created)?.['configOptions'];
+      const options = Array.isArray(listed) ? (listed as SessionConfigOption[]) : null;
+      const models = modelsFrom(provider, options, agentModelsOf(created));
+      const key = keyOf(provider.id, accountId);
+      const entry: ProbeEntry = probes.get(key) ?? {
+        options: [],
+        providerId: provider.id,
+        accountId,
+        running: null,
+        result: null,
+        effortRead: new Set<string>(),
+      };
+      entry.options = options ?? [];
+      entry.result = { models, probedAt: Date.now() };
+      for (const model of models) if (model.effort !== undefined) entry.effortRead.add(model.id);
+      probes.set(key, entry);
+      return models;
     },
 
     forgetProbes(filter: ProbeFilter = {}): void {

@@ -3,6 +3,7 @@ import type {
   AccountId,
   ModelInfo,
   Protocol,
+  ProviderDescriptor,
   ProviderId,
   ProviderSummary,
   ThreadId,
@@ -132,6 +133,15 @@ export function probedModelsOf(
     ?? DRIVERS.get(protocol)?.probedModels?.(providerId, accountId)
     ?? refreshing.get(refreshKey(providerId, accountId))?.models
     ?? null;
+}
+
+/**
+ * A `session/new` answer the account's sign-in read becomes its probe, so the
+ * models are listed without a second agent process. Null for a protocol that
+ * cannot take one.
+ */
+export function rememberSessionModels(provider: ProviderDescriptor, accountId: AccountId, created: unknown): Promise<ModelInfo[] | null> | null {
+  return DRIVERS.get(provider.protocol)?.rememberSession?.(provider, accountId, created) ?? null;
 }
 
 /** A reload, a changed account or a removed one: what a probe cached is stale. */

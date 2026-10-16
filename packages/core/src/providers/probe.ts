@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Core } from '../core.ts';
 import { forgetProbes, probedModelsOf, probeModels, refreshProbes, rememberExternalModels, settleRefresh } from '../drivers/index.ts';
+import { launchTemp, type LaunchTemp } from '../drivers/launch-temp.ts';
 import { mergeProxyModels, readSubscriptionProxyModels } from '../subscription-proxy.ts';
 import { invalidParams, refused, unavailable } from '../errors.ts';
 import { logMessageOf } from '../log-errors.ts';
@@ -94,11 +95,14 @@ async function probeNative(
   const cleanupContext = { source: provider.id, event: 'provider.probeCleanup', threadId };
   const directory = mkdtempSync(join(tmpdir(), 'boite-probe-'));
   const exits: Promise<void>[] = [];
+  let temp: LaunchTemp | null = null;
   try {
+    temp = launchTemp(provider, account.isolationDir);
+    const accountEnv = core.accounts.accountEnv(account, provider);
     const { models, probedAt } = await probeModels(provider.protocol, {
       provider,
       accountId: account.id,
-      accountEnv: core.accounts.accountEnv(account, provider),
+      accountEnv: temp === null ? accountEnv : { ...accountEnv, ...temp.env },
       cwd: directory,
       catalogThread: core.drafts.catalogThread(provider.id, account.id)
         ?? core.threads.list({}).find(thread => thread.providerId === provider.id && thread.accountId === account.id && core.threads.focus.viewed(thread.id)),
@@ -156,7 +160,9 @@ async function probeNative(
         clearTimeout(timer);
       }
     }
-    await removeDir(directory, (message) => core.log('warn', `probing ${provider.id}: ${message}`, cleanupContext));
+    const log = (message: string): void => core.log('warn', `probing ${provider.id}: ${message}`, cleanupContext);
+    await temp?.dispose(log);
+    await removeDir(directory, log);
   }
 }
 

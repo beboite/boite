@@ -384,6 +384,12 @@ export interface Driver {
   probe?(ctx: ProbeContext): Promise<ProbeResult>;
   /** What the last probe read, without running one. Null when nothing was probed. */
   probedModels?(providerId: ProviderId, accountId: AccountId): ModelInfo[] | null;
+  /**
+   * Takes a `session/new` answer another process of this account read (the
+   * sign-in's) as the account's probe, so no probe process starts for it.
+   * Answers the models it now lists, or null for a driver that keeps no probes.
+   */
+  rememberSession?(provider: ProviderDescriptor, accountId: AccountId, created: unknown): Promise<ModelInfo[] | null>;
   /** Drop cached probes: a reload, a changed account, a removed one. */
   forgetProbes?(filter?: ProbeFilter): void;
   /**

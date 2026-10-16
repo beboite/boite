@@ -6,6 +6,7 @@ import { newId } from './ids.ts';
 import { stripAnsi } from './ansi.ts';
 import { invalidParams, messageOf, notFound, refused, unavailable } from './errors.ts';
 import { runAcpLogin, type AcpLoginRun } from './drivers/acp/login.ts';
+import { loginFolders, publishLoginCatalog } from './account-login.ts';
 import { probeThreadId } from './providers/probe.ts';
 import { activeSubscriptionProxy, subscriptionProxyEnv } from './subscription-proxy.ts';
 import { agentEnv, hostAgentsEnabled, profileFor, resolveExecutable, resolveLaunch } from './providers/resolve.ts';
@@ -542,14 +543,17 @@ export class AccountStore {
     const env = agentEnv(provider, this.accountEnv(account, provider));
 
     let acp: AcpLoginRun;
+    let folders: ReturnType<typeof loginFolders> | null = null;
     this.core.providers.installs.acquire(provider.id);
     try {
+      folders = loginFolders(this.core, account, provider, loginThreadId(accountId));
       acp = runAcpLogin({
         methodId,
         executable: launch.executable,
         args: [...launch.prefix, ...(profile?.launch?.args ?? [])],
         cwd: account.isolationDir ?? this.core.dataDir,
-        env,
+        env: { ...env, ...folders.env },
+        catalogCwd: folders.catalogCwd,
         spawnChild: (cmd, args, opts) => this.core.procs.spawnChild(loginThreadId(accountId), cmd, args, opts),
         onLine: (line) => {
           this.onLoginLine(accountId, line);
@@ -557,6 +561,7 @@ export class AccountStore {
       });
     } catch (error) {
       this.core.providers.installs.release(provider.id);
+      void folders?.dispose();
       throw refused(`the ${provider.name} agent did not start: ${messageOf(error)}`, {
         accountId,
         command: launch.executable,
@@ -566,7 +571,7 @@ export class AccountStore {
     const run: LoginRun = { spawned: null, acp, url: null, lastLine: '', done: Promise.resolve() };
     this.logins.set(accountId, run);
     this.emitLogin(accountId, 'running', '', run);
-    run.done = this.finishAcpLogin(accountId, run, acp).finally(() => this.core.providers.installs.release(provider.id));
+    run.done = this.finishAcpLogin(accountId, run, acp, folders?.dispose).finally(() => this.core.providers.installs.release(provider.id));
     return { ok: true };
   }
 
@@ -623,23 +628,29 @@ export class AccountStore {
     return { ok: true };
   }
 
-  private async finishAcpLogin(accountId: AccountId, run: LoginRun, acp: AcpLoginRun): Promise<void> {
+  private async finishAcpLogin(accountId: AccountId, run: LoginRun, acp: AcpLoginRun, scratch?: () => Promise<void>): Promise<void> {
     let failure: string | null = null;
     try {
       await acp.done;
     } catch (error) {
       failure = messageOf(error);
     }
+    const catalog = acp.catalog === undefined ? null : await acp.catalog;
     acp.kill();
     this.core.procs.killTree(loginThreadId(accountId));
     await acp.exited;
+    // Removing an unpacked agent takes seconds; the sign-in result does not wait for it.
+    void scratch?.();
     if (!this.core.journal.isClosed()) {
       try {
         const provider = this.core.providers.require(this.require(accountId).providerId);
         if (!run.cancelled && provider.protocol === 'codex-appserver') {
           const checked = await this.verify(accountId);
           if (failure === null && checked.status !== 'ok') failure = 'Codex finished signing in but the account is not connected. Retry the connection.';
-        } else this.check(accountId, true);
+        } else {
+          const checked = this.check(accountId, true);
+          if (!run.cancelled && failure === null && checked.status === 'ok' && catalog !== null) void publishLoginCatalog(this.core, checked, provider, catalog, loginThreadId(accountId));
+        }
       } catch (error) { failure ??= messageOf(error); }
     }
     this.logins.delete(accountId);

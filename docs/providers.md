@@ -790,6 +790,19 @@ a Job Object and in the trace like any other, then asks the protocol's own quest
   agent's own session list. A refresh drops cached catalogs but keeps the one
   a session still opening reads: the composer refreshes as the app opens while
   the draft's process starts, and that answer is as fresh as a probe's.
+- ACP after a sign-in: the login process, already running and signed in,
+  opens one `session/new` in an empty folder and its answer becomes the
+  account's catalog, told to clients as `providers.probed`. No probe process
+  starts for an account that just signed in. A sign-in whose session did not
+  open within 30 seconds is still signed in; the next look at the models probes.
+- Under the `antigravity` quirk a probe waits 90 seconds instead of 20. The
+  agent is a PyInstaller one-file program that unpacks about 1.2 GB before its
+  server reads a line: 45 to 54 seconds on an 8 GB laptop with 600 MB free.
+  Each launch, probe, sign-in or session, unpacks into its own folder under
+  `<isolationDir>/tmp`, set as `TEMP`, `TMP` and `TMPDIR`, and the folder goes
+  once the process has exited. Every one of them ends in a forced stop, which
+  would otherwise leave the unpacked copy in the user's temp folder. What a
+  stopped core left there is removed the first time the account launches again.
 - ACP controls on a running session: a model, effort or mode goes out only
   when the session's own last answer does not already report it. OpenCode 2
   puts the effort back on `default` with any model change, so the effort goes
