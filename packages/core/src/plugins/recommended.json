@@ -46,29 +46,29 @@
     "id": "douane",
     "name": "Douane",
     "version": "0.3.0",
-    "description": "Your Claude, Codex, Grok and Copilot subscriptions behind one local gateway, with quota routing and a dashboard. Boite's subscription proxy can point at it.",
+    "description": "Local gateway for AI coding subscriptions: pools Claude, Codex, Grok, Copilot and API key accounts behind one OpenAI and Anthropic compatible endpoint, with quota tracking and a dashboard.",
     "homepage": "https://github.com/beboite/douane",
     "executable": "douane",
     "artifacts": {
       "win32-x64": {
         "url": "https://github.com/beboite/douane/releases/download/v0.3.0/douane-windows-x64.exe",
-        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
-      },
-      "darwin-x64": {
-        "url": "https://github.com/beboite/douane/releases/download/v0.3.0/douane-macos-x64",
-        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        "sha256": "9dfbdacb3845438b147a33daa9fb000941c756a3afb598bd1b12813627429a81"
       },
       "darwin-arm64": {
         "url": "https://github.com/beboite/douane/releases/download/v0.3.0/douane-macos-arm64",
-        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        "sha256": "c1f97fb350a7a56c160e062bdf1d09a93b59946a21eaccb6a2912d836ec65ae8"
+      },
+      "darwin-x64": {
+        "url": "https://github.com/beboite/douane/releases/download/v0.3.0/douane-macos-x64",
+        "sha256": "129e1d3e3604f935476cdb5e9cef97fbeabce8e519ce6677a2822a7803235d1b"
       },
       "linux-x64": {
         "url": "https://github.com/beboite/douane/releases/download/v0.3.0/douane-linux-x64",
-        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        "sha256": "5964cc8f84d0ddfed15954e09d3ceccfe5b5ecb53997b00ab4e15d6e16388210"
       },
       "linux-arm64": {
         "url": "https://github.com/beboite/douane/releases/download/v0.3.0/douane-linux-arm64",
-        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        "sha256": "cf2bf1869d29616a1b18859f66ba5103d3873b1767ddd049bebb9fd7d19bfa9a"
       }
     },
     "provides": {

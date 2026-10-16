@@ -1,6 +1,6 @@
 <script lang="ts">
   import { errorText } from '../lib/errors';
-  import { onMount, untrack } from 'svelte';
+  import { untrack } from 'svelte';
   import { checkSettingsPatch, type PluginState, type SubscriptionProxy, type SubscriptionProxyMode } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
@@ -29,8 +29,10 @@
   let douane = $state<PluginState | null | undefined>(undefined);
   const gateway = $derived(douane?.status === 'installed' ? douane.gateway ?? null : null);
 
+  // Read once local mode is on screen: the card also sits in Limits, which has no use for plugins.
   // Plugins are the owner's: a paired device reads none and shows no plugin state.
-  onMount(() => {
+  $effect(() => {
+    if (!local) return;
     const client = store.client;
     if (!client || !store.owner) return;
     let disposed = false;
