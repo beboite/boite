@@ -792,7 +792,13 @@ a Job Object and in the trace like any other, then asks the protocol's own quest
   suffix, stays as listed.
 - pi: `get_state`, `get_available_models` and `get_available_thinking_levels`.
   Each model id carries its provider prefix, because that is what pi's `--model`
-  takes and two providers can ship a name. An unauthenticated pi answers with
+  takes and two providers can ship a name. The thinking level `get_state` reports
+  is the default effort of the model the probe's session is on, and of no other:
+  pi does not say which level it would run another model on, so those models
+  carry their scale without a default. A thread that picks one sends no level,
+  pi keeps its own clamped to that model, and the reasoning chip reads Default
+  until a level is picked. On such a model the reasoning popover, and the
+  phone's options sheet, offer Default to hand a picked level back to pi. An unauthenticated pi answers with
   nothing, so the descriptor's models are left standing rather than replaced by an
   empty list.
 
@@ -1047,6 +1053,31 @@ and failures after initialization end the turn without an automatic retry.
 Each retry is logged, and a third failure keeps the agent's exit error visible.
 An initialization RPC error waits up to 2 seconds for process closure and remaining
 stderr before the retry decision, so a process that stays alive cannot stall it.
+
+Every `thread/start`, `thread/resume` and `thread/fork` sends
+`mcp_optional_startup_grace_ms: 10000` in its per-thread configuration, unless
+`config/read` shows the user set that key, `0` included (Codex then waits for
+each server's own `startup_timeout_sec`). Codex
+waits that long for the MCP servers of `config.toml` before the first model
+request and leaves out any server still starting; its default of about a second
+is too short for a cold `npx` or `uvx` server, whose tools would then be missing
+from the first turn of each new process. A server that hangs delays only that
+first turn, by 10 seconds.
+
+A thread archived in the Codex app or CLI, which share the default account's
+history, makes `thread/resume` answer `session <id> is archived`. Boite then calls
+`thread/unarchive` on it and resumes once more, so the thread keeps its native
+history instead of failing every turn. A rollout that is gone is different: the
+turn starts a new native thread and carries the conversation in its prompt.
+
+The app-server that writes a title or a branch name starts with
+`features.plugins=false` and `features.apps=false`, reads the effective
+configuration of the thread's folder with `config/read`, and opens its ephemeral
+thread with every MCP server listed there set to `enabled = false`. Without it,
+each title would start the user's MCP servers and plugins, and a server could act
+on the prompt. A Codex that refuses `config/read` writes no title: the attempt
+fails with that reason rather than start the servers, and the thread keeps the
+title it has.
 
 ### Codex task tracking
 

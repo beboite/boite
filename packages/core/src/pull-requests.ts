@@ -9,6 +9,8 @@ import { GIT_PROBE_TIMEOUT_MS, hasGitMarker } from './projects.ts';
 import { PullRequestReviews } from './pull-request-review.ts';
 
 type PullRequest = ThreadSummary['pullRequest'];
+/** What a merge proof reads of a thread. The worktree cleanup also asks for a worktree whose thread was deleted. */
+export type CheckoutOwner = Pick<ThreadSummary, 'id' | 'cwd' | 'branch' | 'projectId'>;
 
 export function hasGitHubRemote(remotes: string, host = process.env.GH_HOST ?? 'github.com'): boolean {
   return remotes.split('\n').some(line => {
@@ -257,7 +259,7 @@ export class PullRequests {
    * the fix, so the branch is read from the checkout, not from the thread.
    * Fresh checkout checks use the same bounded process queue as display lookups.
    */
-  async cleanCheckout(thread: ThreadSummary, sha?: string, signal?: AbortSignal): Promise<{ branch: string | null; sha: string } | null> {
+  async cleanCheckout(thread: CheckoutOwner, sha?: string, signal?: AbortSignal): Promise<{ branch: string | null; sha: string } | null> {
     if (!thread.branch || thread.branch === 'HEAD') return null;
     const status = await this.#run(thread, thread.cwd, 'git', ['status', '--porcelain=v2', '--branch', '-z'], signal);
     const records = status.split('\0').filter(Boolean);
@@ -267,7 +269,7 @@ export class PullRequests {
     return { branch: branch === '(detached)' ? null : branch, sha: tip };
   }
 
-  async validateMergedCheckout(thread: ThreadSummary, proof: MergedPrProof, signal?: AbortSignal): Promise<boolean> {
+  async validateMergedCheckout(thread: CheckoutOwner, proof: MergedPrProof, signal?: AbortSignal): Promise<boolean> {
     signal?.throwIfAborted();
     if (repositoryOf(thread.cwd) !== proof.checkoutRepository || githubRepository(await this.#run(thread, thread.cwd, 'git', ['remote', '-v'], signal)) !== proof.repository) return false;
     return (await this.cleanCheckout(thread, proof.sha, signal))?.branch === proof.branch;
@@ -279,7 +281,7 @@ export class PullRequests {
    * branch has no merged pull request costs no process of its own. The
    * checkout's status walk runs only when a merged pull request could match.
    */
-  async proveMerged(thread: ThreadSummary, signal?: AbortSignal): Promise<MergedPrProof | null> {
+  async proveMerged(thread: CheckoutOwner, signal?: AbortSignal): Promise<MergedPrProof | null> {
     signal?.throwIfAborted();
     const project = thread.projectId === null ? null : this.core.journal.getProject(thread.projectId);
     if (!project || resolve(thread.cwd) === resolve(project.path) || !thread.branch || thread.branch === 'HEAD') return null;
@@ -346,12 +348,12 @@ export class PullRequests {
   }
 
   /** `git remote -v`, read once per repository every five minutes. */
-  #remote(thread: ThreadSummary, cwd: string, repository: string, signal?: AbortSignal): Promise<string> {
+  #remote(thread: Pick<ThreadSummary, 'id'>, cwd: string, repository: string, signal?: AbortSignal): Promise<string> {
     return this.#shared(this.#remotes, repository, REMOTES_TTL_MS, ownerSignal => this.#run(thread, cwd, 'git', ['remote', '-v'], ownerSignal), signal);
   }
 
   /** The repository's newest pull requests, read once per fifteen seconds for badges and merge proofs alike. */
-  #list(thread: ThreadSummary, cwd: string, repository: string, signal?: AbortSignal): Promise<PullRequestList> {
+  #list(thread: Pick<ThreadSummary, 'id'>, cwd: string, repository: string, signal?: AbortSignal): Promise<PullRequestList> {
     return this.#shared(this.#lists, repository, LIST_TTL_MS, async ownerSignal => parsePullRequestList(
       await this.#run(thread, cwd, 'gh', ['pr', 'list', '--state', 'all', '--limit', String(LIST_LIMIT), '--json', PROOF_FIELDS], ownerSignal),
     ), signal);
@@ -487,7 +489,7 @@ export class PullRequests {
     };
   }
 
-  async #run(thread: ThreadSummary, cwd: string, command: string, args: string[], signal?: AbortSignal): Promise<string> {
+  async #run(thread: Pick<ThreadSummary, 'id'>, cwd: string, command: string, args: string[], signal?: AbortSignal): Promise<string> {
     const release = await this.#acquire(signal);
     const scope = `pull-request:${thread.id}:${++this.#sequence}`;
     try {
