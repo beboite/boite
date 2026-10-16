@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
+import { mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, expect, test } from 'bun:test';
@@ -69,8 +69,9 @@ test('a quiet WAL is truncated, and closing waits for the checkpoint the Worker 
   target.close();
   expect(target.checkpoints!.running).toBe(false);
   journal = undefined;
-  // The Worker's connection closed first, so the journal's was the last one and removed the WAL.
-  expect(existsSync(`${file}-wal`)).toBe(false);
+  // The Worker's connection closed first, so the journal's was the last one and emptied the WAL.
+  // Linux's SQLite removes the file; Apple's system SQLite keeps it at 0 bytes.
+  expect(walBytes()).toBe(0);
   expect(errors).toEqual([]);
 });
 
