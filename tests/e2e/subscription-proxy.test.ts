@@ -2,6 +2,7 @@ import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp.ts';
 import { startDevUi } from './lib/ui.ts';
+import { mobileAction } from './lib/mobile.ts';
 import { pairingUrlOf, startCore } from './lib/core.ts';
 import { connect } from '../../packages/core/src/client.ts';
 
@@ -206,6 +207,55 @@ test('phone Limits opens the same gateway and disabling it restores the native p
   await capture('boite-proxy-disabled-native-limits-phone.png');
   expect(page.errors()).toEqual([]);
 }, 30_000);
+
+test('the Douane plugin: its row in Plugins and the proxy card pointing at it, at desktop and phone widths', async () => {
+  const local = await BrowserPage.launch({ url: `${origin}/?fake=1&open=recent`, windowSize: { width: 1280, height: 900 } });
+  const shot = async (name: string) => {
+    await local.evaluate('Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])');
+    await local.screenshot(join(process.env.BOITE_CAPTURE_DIR ?? join(import.meta.dir, '.artifacts'), name));
+  };
+  // The list above can still grow as rows land: scroll until the element stays in view.
+  // One page-side helper, then fixed expressions naming it: no expression is built from a value.
+  const scrolled = 'window.__inView = (selector) => { const el = document.querySelector(selector); if (!el) return false; el.scrollIntoView({ block: "center" }); const box = el.getBoundingClientRect(); return box.top >= 0 && box.bottom <= innerHeight; }';
+  const stripInView = 'window.__inView("[data-testid=plugin-gateway][data-plugin=douane]")';
+  const stripRunning = 'document.querySelector("[data-testid=plugin-gateway][data-plugin=douane]")?.dataset.gatewayStatus === "running"';
+  try {
+    await local.waitFor('document.querySelector("[data-testid=nav-settings]")');
+    await local.click('[data-testid="nav-settings"]');
+    await local.click('[data-testid="settings-tab-plugins"]');
+    await local.evaluate(scrolled);
+    await local.waitFor(stripRunning);
+    expect(await local.text('[data-testid=plugin-gateway][data-plugin=douane] [data-testid=plugin-gateway-state]')).toContain('0.3.0 on 127.0.0.1:8787');
+    expect(await local.evaluate('!!document.querySelector("[data-testid=plugin-gateway-open][data-plugin=douane]")')).toBe(true);
+    await local.waitFor(stripInView);
+    await shot('boite-douane-plugin-desktop.png');
+
+    await local.click('[data-testid="settings-tab-accounts"]');
+    await local.waitFor('document.querySelector("[data-testid=subscription-proxy-settings]")');
+    await local.click('[data-testid="subscription-proxy-local"]');
+    await local.waitFor('document.querySelector("[data-testid=subscription-proxy-plugin]")?.dataset.state === "running"');
+    await local.click('[data-testid="subscription-proxy-enabled"]');
+    await local.click('[data-testid="subscription-proxy-save"]');
+    await local.waitFor('document.querySelector("[data-testid=subscription-proxy-result]")?.textContent.includes("saved")');
+    expect(await local.text('[data-testid=subscription-proxy-plugin]')).toContain('Douane 0.3.0 answers on 127.0.0.1:8787.');
+    await local.waitFor('window.__inView("[data-testid=subscription-proxy-settings]")');
+    await shot('boite-douane-proxy-desktop.png');
+
+    // The phone has no Plugins page (plugins are the desktop's to manage): the proxy card under Limits.
+    await local.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+    await local.waitFor('document.querySelector("[data-testid=mobile-menu]")');
+    await mobileAction(local, 'mobile-settings');
+    await local.waitFor('document.querySelector("[data-testid=mobile-settings-home]")');
+    await local.click('[data-testid="settings-tab-limits"]');
+    await local.waitFor('document.querySelector("[data-testid=subscription-proxy-settings]")');
+    await local.evaluate('document.querySelector("[data-testid=subscription-proxy-settings]").closest("details").open = true');
+    await local.waitFor('document.querySelector("[data-testid=subscription-proxy-plugin]")?.dataset.state === "running"');
+    await local.waitFor('window.__inView("[data-testid=subscription-proxy-plugin]")');
+    expect(await local.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+    await shot('boite-douane-proxy-phone.png');
+    expect(local.errors()).toEqual([]);
+  } finally { await local.close(); }
+}, 45_000);
 
 test('production desktop and phone embed the dashboard through the real core without the fake bridge', async () => {
   const core = await startCore();

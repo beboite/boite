@@ -65,6 +65,25 @@ cross-site cookies; those dashboards remain available through that button.
 Show account limits opens the native limits and monitoring switches for agents
 that keep their own configuration; Show proxy dashboard returns to the gateway.
 
+### Douane on this machine
+
+The proxy card's first choice is where the gateway runs: Remote gateway (the
+URLs above, typed by the user) or Douane on this machine, the Douane plugin
+(Settings > Plugins, [gateways](plugins.md#gateways)). Settings store it as
+`subscriptionProxy.mode`, `remote` or `local`; settings with no `mode` read as
+remote, unchanged. In local mode the kind is Douane and the core writes both
+URLs from the plugin's port: `baseUrl` `http://127.0.0.1:<port>/v1` and
+`dashboardUrl` `http://127.0.0.1:<port>/admin/`, and follows the plugin when
+it moves to another port. The proxy key stays the placeholder, since a
+loopback Douane asks clients for no key. `subscriptionProxyOf`, model
+discovery, the gateway account view and Limits then work as with a remote
+Douane.
+
+The card says whether the plugin runs (`Douane <version> answers on
+127.0.0.1:<port>`), is stopped or starting, or is not installed, with Open
+Plugins when it does not run. Choosing local mode starts nothing: the plugin
+runs from its own row, whether or not the proxy uses it.
+
 ### Open Douane
 
 Open Douane, or Open CLIProxyAPI, opens the gateway's dashboard URL in the
@@ -80,7 +99,10 @@ than a dead link (`gatewayDashboardReachable` in contracts,
 ### Moving connections to Douane
 
 Move my connections to Douane, under the proxy settings, appears once a Douane
-gateway is saved and the core advertises `features.gatewayMove`. It lists what
+gateway is saved and the core advertises `features.gatewayMove`. The Douane
+plugin's row in Settings > Plugins offers it too while the plugin runs; that
+one sends `target: "plugin"` and moves into the plugin whatever the proxy
+points at. It lists what
 this machine's accounts hold that Douane can serve, default and isolated
 accounts alike (`subscriptionProxy.movePlan`), and the user ticks what to move:
 

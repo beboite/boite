@@ -646,7 +646,7 @@ export interface PluginArtifact {
   sha256: string;
 }
 
-/** What Boite does with the executable: account pools, a desktop app, or both. */
+/** What Boite does with the executable: account pools, a desktop app, a gateway, or several. */
 export interface PluginProvides {
   /** The executable answers the account pool commands for these providers. */
   accountPools?: { providers: ProviderId[] };
@@ -656,6 +656,37 @@ export interface PluginProvides {
    * token in `BOITE_TOKEN`. No fields today.
    */
   desktopApp?: Record<string, never>;
+  /**
+   * The executable is a subscription gateway speaking Douane's runtime
+   * contract: the core runs it in the background with `--config <file>` it
+   * writes, on a loopback port, and the subscription proxy's local mode points
+   * at it. No fields today.
+   */
+  gateway?: Record<string, never>;
+}
+
+/** Where a gateway plugin stands. Null on a plugin that provides no gateway. */
+export interface PluginGatewayState {
+  /** Whether the core runs it. True after a first install, kept across restarts and updates. */
+  enabled: boolean;
+  /**
+   * `starting`: launched and not answering `/health` yet, or waiting to start
+   * again after a crash. `updating`: a newer release waits for the requests in
+   * flight to end. `crashed`: it failed four times in five minutes; it waits
+   * for the owner.
+   */
+  status: 'stopped' | 'starting' | 'running' | 'updating' | 'crashed';
+  /** The loopback port it listens on, or will at its next start. */
+  port: number;
+  /** What its `/health` reported, once it answered. */
+  version: string | null;
+  pid: number | null;
+  exitCode: number | null;
+  /** Why it is not running, when Boite knows. Never its own output. */
+  error: string | null;
+  startedAt: Timestamp | null;
+  /** Where its configuration, sign-ins and database live; an uninstall keeps them. */
+  dataDir: string;
 }
 
 /** Where a desktop-app plugin stands. Null on a plugin that provides no desktop app. */
@@ -720,6 +751,12 @@ export interface PluginRejected {
   message: string;
 }
 
+/**
+ * Where a move sends the logins: the configured proxy's Douane (absent), or
+ * `plugin`, the Douane plugin this core runs, whatever the proxy points at.
+ */
+export type GatewayMoveTarget = 'proxy' | 'plugin';
+
 export interface PluginState {
   id: string;
   name: string;
@@ -748,6 +785,8 @@ export interface PluginState {
   rejected: PluginRejected | null;
   /** The desktop app the plugin provides, null when it provides none. */
   app: PluginAppState | null;
+  /** The gateway the plugin provides, null when it provides none. Absent from cores older than gateway plugins. */
+  gateway?: PluginGatewayState | null;
   /**
    * Where Boite looks for this recommended plugin's newer releases, and what
    * it last found there. Null when its entry names no update source. Absent
@@ -2261,7 +2300,16 @@ export interface SubscriptionProxy {
   baseUrl: string;
   /** User-facing quotas page, opened inside Boite. Never contains a token. */
   dashboardUrl: string;
+  /**
+   * Where the gateway runs. Missing or `remote`: at the URLs above, which the
+   * user typed. `local`: the Douane plugin this core runs (`provides.gateway`,
+   * docs/plugins.md); the kind is `douane` and the core writes both URLs from
+   * the plugin's loopback port.
+   */
+  mode?: SubscriptionProxyMode;
 }
+
+export type SubscriptionProxyMode = 'remote' | 'local';
 
 /** The protocols whose every agent a subscription proxy serves. */
 export const SUBSCRIPTION_PROXY_PROTOCOLS: readonly Protocol[] = ['claude-sdk', 'codex-appserver'];
@@ -4033,6 +4081,8 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * disables and kills it, `restart` kills and launches it again.
    */
   'plugins.app': { params: { id: string; action: 'start' | 'stop' | 'restart' }; result: PluginState };
+  /** Owner-only. Start, stop or restart a gateway plugin; stop keeps it off across core starts until a start. */
+  'plugins.gateway': { params: { id: string; action: 'start' | 'stop' | 'restart' }; result: PluginState };
   /**
    * Reads the update source of one recommended plugin, or of every one that
    * names a source, now. Answers once the reads finish; each changed state is
@@ -4811,13 +4861,13 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   /** Owner-only. The core reads the gateway's quotas route itself; `quotas.list` carries the same entries. */
   'subscriptionProxy.quotas': { params: { refresh?: boolean }; result: SubscriptionProxyQuotas };
   /** Owner-only. The logins and OpenCode keys of this machine's accounts Douane could take, without their values. */
-  'subscriptionProxy.movePlan': { params: Record<string, never>; result: GatewayMovePlan };
+  'subscriptionProxy.movePlan': { params: { target?: GatewayMoveTarget }; result: GatewayMovePlan };
   /**
    * Owner-only. The core reads each named item's file and posts it to the
    * configured Douane's `/admin/api/accounts/import`. `managementToken` saves
    * (or with null removes) the token sent to that API; omitted keeps it.
    */
-  'subscriptionProxy.move': { params: { ids: string[]; managementToken?: string | null }; result: { outcomes: GatewayMoveOutcome[] } };
+  'subscriptionProxy.move': { params: { ids: string[]; managementToken?: string | null; target?: GatewayMoveTarget }; result: { outcomes: GatewayMoveOutcome[] } };
   'settings.set': { params: Partial<Settings>; result: Settings };
   /** The keybindings file as last read: the path, the entries it names, and what it got wrong. */
   'keybindings.get': { params: Record<string, never>; result: Keybindings };

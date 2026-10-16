@@ -119,8 +119,8 @@ describe('the plugin manifest', () => {
 });
 
 describe('the recommended list', () => {
-  test('is Bots alone', () => {
-    expect(recommendedPlugins().map((manifest) => manifest.id)).toEqual(['bots']);
+  test('is Bots, then Douane', () => {
+    expect(recommendedPlugins().map((manifest) => manifest.id)).toEqual(['bots', 'douane']);
   });
 
   test('Bots is a desktop app, from its v0.1.9 release assets and digests', () => {
@@ -137,8 +137,11 @@ describe('the recommended list', () => {
     for (const artifact of Object.values(bots.artifacts)) expect(artifact?.url).toMatch(/^https:\/\/github\.com\/beboite\/bots\/releases\/download\/v0\.1\.9\/bots-/);
   });
 
-  test('Bots finds its newer releases on its own repository', () => {
-    expect(recommendedUpdates()).toEqual({ bots: { url: 'https://github.com/beboite/bots', ref: 'main' } });
+  test('Bots and Douane find their newer releases on their own repositories', () => {
+    expect(recommendedUpdates()).toEqual({
+      bots: { url: 'https://github.com/beboite/bots', ref: 'main' },
+      douane: { url: 'https://github.com/beboite/douane', ref: 'main' },
+    });
   });
 });
 

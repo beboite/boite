@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte';
   import { SvelteMap, SvelteSet } from 'svelte/reactivity';
-  import type { GatewayMoveItem, GatewayMoveOutcome, GatewayMovePlan } from '@boite/contracts';
+  import type { GatewayMoveItem, GatewayMoveOutcome, GatewayMovePlan, GatewayMoveTarget } from '@boite/contracts';
   import { Closing } from '../lib/closing.svelte';
   import { errorText } from '../lib/errors';
   import { mobileOverlay } from '../lib/mobile-history';
@@ -13,7 +13,9 @@
    * The core reads every file and talks to the gateway; this dialog only sees
    * what could move and what happened to each line.
    */
-  let { store, open, onclose }: { store: Store; open: boolean; onclose: () => void } = $props();
+  /** `plugin` moves into the Douane plugin this machine runs, whatever the proxy points at. */
+  let { store, open, onclose, target }: { store: Store; open: boolean; onclose: () => void; target?: GatewayMoveTarget } = $props();
+  const targeted = $derived(target === undefined ? {} : { target });
   const text = strings.subscriptionProxy.move;
   const FOCUSABLE = 'button:not(:disabled), input:not(:disabled)';
 
@@ -41,7 +43,7 @@
     loading = true; error = ''; plan = null; token = ''; clearToken = false;
     chosen.clear(); outcomes.clear();
     try {
-      plan = await client.call('subscriptionProxy.movePlan', {});
+      plan = await client.call('subscriptionProxy.movePlan', { ...targeted });
       for (const item of plan.items) if (item.movable) chosen.add(item.id);
     } catch (failure) { error = fill(text.failed, { error: errorText(failure) }); }
     finally { loading = false; }
@@ -61,7 +63,7 @@
     running = true; error = '';
     try {
       const answer = await client.call('subscriptionProxy.move', {
-        ids: pending, ...(token || clearToken ? { managementToken: clearToken ? null : token } : {}),
+        ids: pending, ...targeted, ...(token || clearToken ? { managementToken: clearToken ? null : token } : {}),
       });
       for (const outcome of answer.outcomes) outcomes.set(outcome.id, outcome);
       if (plan && (token || clearToken)) plan = { ...plan, managementToken: !clearToken };

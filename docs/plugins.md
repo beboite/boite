@@ -2,9 +2,11 @@
 
 A plugin is one native executable. Boite downloads it over https, checks it
 against the SHA-256 its manifest publishes, and runs it for the features the
-manifest names. There are two features today: account pools, which save and
-switch the default login of an agent CLI, and desktop apps, which Boite starts
-beside itself with the owner's access ([Desktop apps](#desktop-apps)).
+manifest names. There are three features today: account pools, which save and
+switch the default login of an agent CLI, desktop apps, which Boite starts
+beside itself with the owner's access ([Desktop apps](#desktop-apps)), and
+gateways, which Boite runs in the background for the subscription proxy
+([Gateways](#gateways)).
 
 Settings > Plugins has three sections. Installed and Recommended are drawn
 only when they hold a plugin:
@@ -13,7 +15,8 @@ only when they hold a plugin:
   from, its pools and its errors.
 - Recommended: the plugins Boite ships a manifest for and that are not
   installed yet, in the order Boite lists them. Today that is
-  [Bots](https://github.com/beboite/bots), the desktop companion. A row there
+  [Bots](https://github.com/beboite/bots), the desktop companion, and
+  [Douane](https://github.com/beboite/douane), the subscription gateway. A row there
   carries the name, version, a link to the source, the description and
   Install, with no state line.
 - Add from a git URL: any repository with a `boite-plugin.json` at its root.
@@ -65,7 +68,7 @@ Put `boite-plugin.json` at the root of the repository:
 | `homepage` | An https URL with a host and no user or password, at most 2048 characters. The page links to it as the source code. |
 | `executable` | The file name Boite saves the download as: a letter or digit, then letters, digits, `_` and `-`, 64 characters at most, no extension. Boite adds `.exe` on Windows. |
 | `artifacts` | An object keyed by platform, at least one of `win32-x64`, `win32-arm64`, `darwin-x64`, `darwin-arm64`, `linux-x64`, `linux-arm64`. Each value is `{ "url", "sha256" }`: an https URL as for `homepage`, and the file's SHA-256 as 64 lowercase hexadecimal characters. |
-| `provides` | An object naming at least one feature, among `accountPools` and `desktopApp`. `accountPools` is `{ "providers": [...] }`: a non-empty list of distinct provider ids among `antigravity`, `antigravity-cli`, `claude`, `codex`, `grok`, `muse`, `opencode` and `pi`. `desktopApp` is `{}`, an object with no field ([Desktop apps](#desktop-apps)). A plugin may provide both. |
+| `provides` | An object naming at least one feature, among `accountPools`, `desktopApp` and `gateway`. `accountPools` is `{ "providers": [...] }`: a non-empty list of distinct provider ids among `antigravity`, `antigravity-cli`, `claude`, `codex`, `grok`, `muse`, `opencode` and `pi`. `desktopApp` and `gateway` are `{}`, objects with no field ([Desktop apps](#desktop-apps), [Gateways](#gateways)). A plugin may provide several. |
 
 The platform key is `process.platform` and `process.arch` of the machine that
 runs the core, joined by a hyphen. A core on a Linux server downloads the
@@ -254,6 +257,87 @@ nothing.
 `ui.reveal` is owner-only, as is the event: a paired device or an agent that
 calls it is refused, and neither receives it.
 
+## Gateways
+
+A plugin that provides `gateway` is a subscription gateway speaking Douane's
+runtime contract, such as [Douane](https://github.com/beboite/douane). Boite
+runs it in the background; the subscription proxy's local mode points at it
+([providers](providers.md#douane-on-this-machine)).
+
+```json
+"provides": { "gateway": {} }
+```
+
+`gateway` takes no field; any key in it is refused. The executable answers:
+
+- `<executable> --config <file>`: it reads the TOML file Boite wrote, whose
+  relative paths resolve from the file's folder.
+- `GET /health` with `{"status":"ok","version":"<version>"}` once it serves.
+- `GET /admin/api/summary` with `in_flight`, the requests it is serving, open
+  on loopback without a token.
+
+Its data lives outside the plugin directory, so an uninstall keeps it:
+`<dataDir>/douane/` for Douane, `<dataDir>/gateways/<id>/` for any other. Boite
+writes `<executable>.toml` there once:
+
+```toml
+[server]
+listen = "127.0.0.1:8787"
+auth_dir = "auth"
+database = "douane.sqlite"
+```
+
+and afterwards only moves its `listen` line, because the gateway saves its own
+settings into the same file. The port is the one remembered for the plugin
+(journal setting `gateway-port:<id>`) when it is free, 8787 otherwise, any free
+port last; a new port is remembered and, for Douane, written into the proxy's
+URLs.
+
+The core runs it:
+
+- when the core starts, after its install or an update, and on Start or
+  Restart (`plugins.gateway {id, action: "start" | "stop" | "restart"}`);
+- from its data directory, through the core's process launcher as
+  `plugin:<id>:gateway`, with no window and no `DISPLAY` requirement;
+- with the core's environment minus every agent variable, `BOITE_TOKEN` and
+  `BOITE_CORE_URL`: a gateway never talks to the core. `NO_COLOR=1` is added.
+
+Its stdout and stderr go to the core log line by line (`source: plugins`,
+`event: gateway.output`), never to a client. It counts as started once
+`/health` answers, within 30 seconds; one that stays silent is stopped and
+treated as a crash. Crashes, Stop, uninstall and core shutdown follow the
+[desktop apps](#desktop-apps)' rules: 2, 10 and 30 seconds, then `crashed`
+after a fourth exit within five minutes; whether it is on is kept in
+`<dataDir>/plugins/<id>/gateway.json`.
+
+An update waits until `in_flight` reads 0 (five minutes at most, then it goes
+ahead), stops the gateway, keeps the old executable as `<executable>.previous`
+and starts the new one. The old one is deleted once the new one answers
+`/health`. When it does not, the old one goes back and starts again, and the
+update fails with the reason, keeping the version that worked.
+
+On Linux, a gateway a dead core left running is stopped at the next start when
+its command line still names this configuration (`gateway.pid` in its data
+directory). Elsewhere the core's Job Object (Windows) or service manager takes
+it down with the core.
+
+`PluginState.gateway` carries its state:
+
+```ts
+{ enabled: boolean; status: 'stopped' | 'starting' | 'running' | 'updating' | 'crashed';
+  port: number; version: string | null; pid: number | null; exitCode: number | null;
+  error: string | null; startedAt: number | null; dataDir: string }
+```
+
+Douane's row in Settings > Plugins shows it with Start, Stop and Restart, Open
+Douane (its dashboard, beside the core only) and Move my connections to Douane,
+which moves this machine's sign-ins into the plugin (`subscriptionProxy.move`
+with `target: "plugin"`, [providers](providers.md#moving-connections-to-douane)).
+Its uninstall confirmation says where the sign-ins stay.
+`BOITE_DOUANE_BINARY=<path>` runs that executable for Douane instead of the
+installed one; a `.ts` or `.js` path runs with the core's Bun, which is how the
+tests' fake Douane starts.
+
 ## Install and run
 
 A recommended plugin installs from its row. A plugin from a URL takes two
@@ -283,6 +367,7 @@ then records the install:
   seat-pool.exe        the executable (no extension off Windows)
   installed.json       what was installed, from where, when
   app.json             a desktop app only: whether it is on, once changed
+  gateway.json         a gateway only: whether it is on, once changed
 ```
 
 ```json

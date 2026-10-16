@@ -13,7 +13,11 @@ function stateOf(ctx: FakeContext): MoveState {
   return state;
 }
 
-function douane(ctx: FakeContext) {
+function douane(ctx: FakeContext, target?: string) {
+  if (target === 'plugin') {
+    const port = ctx.plugins.gatewayPort('douane');
+    return ctx.plugins.gatewayRunning('douane') ? { enabled: false, kind: 'douane' as const, baseUrl: `http://127.0.0.1:${port}/v1`, dashboardUrl: `http://127.0.0.1:${port}/admin/` } : null;
+  }
   const proxy = ctx.settings.subscriptionProxy;
   return proxy && proxy.kind === 'douane' && proxy.baseUrl ? proxy : null;
 }
@@ -39,13 +43,13 @@ function items(ctx: FakeContext): GatewayMoveItem[] {
 
 export function gatewayMoveMethods(ctx: FakeContext) {
   return {
-    'subscriptionProxy.movePlan': async () => {
-      const proxy = douane(ctx);
+    'subscriptionProxy.movePlan': async ({ target }: { target?: string } = {}) => {
+      const proxy = douane(ctx, target);
       return { origin: proxy ? subscriptionProxyOrigin(proxy) : null, managementToken: stateOf(ctx).token, items: items(ctx) };
     },
-    'subscriptionProxy.move': async ({ ids, managementToken }: { ids: string[]; managementToken?: string | null }) => {
+    'subscriptionProxy.move': async ({ ids, managementToken, target }: { ids: string[]; managementToken?: string | null; target?: string }) => {
       if (!Array.isArray(ids) || ids.length === 0) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'ids must be 1 to 200 item ids from subscriptionProxy.movePlan', data: { field: 'ids' } });
-      const proxy = douane(ctx);
+      const proxy = douane(ctx, target);
       if (!proxy) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'configure a Douane gateway first: moving logins needs Douane', data: { field: 'subscriptionProxy.kind' } });
       const state = stateOf(ctx);
       if (managementToken !== undefined) state.token = managementToken !== null;

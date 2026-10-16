@@ -24,6 +24,15 @@ export const strings = {
     entryStatus: { ready: 'Ready', cooldown: 'Cooling down', error: 'Error', disabled: 'Disabled' },
     creditOf: '{remaining} of {limit}',
     creditUsed: '{used} used',
+    /** Where the gateway runs: a URL the user types, or Douane run by this machine's core. */
+    where: 'Where the gateway runs',
+    remote: 'Remote gateway', local: 'Douane on this machine',
+    localHint: 'The Douane plugin, installed and run by Boite from Settings > Plugins. The proxy points at its loopback port by itself, and follows it if the port changes.',
+    localMissing: 'The Douane plugin is not installed on this machine.',
+    localStopped: 'The Douane plugin is stopped.',
+    localStarting: 'The Douane plugin is starting.',
+    localRunning: 'Douane {version} answers on 127.0.0.1:{port}.',
+    openPlugins: 'Open Plugins',
     /** Moving this machine's sign-ins and OpenCode keys into Douane. */
     move: {
       open: 'Move my connections to Douane',
@@ -2721,6 +2730,16 @@ export const strings = {
     appStart: 'Start',
     appStop: 'Stop',
     appRestart: 'Restart',
+    /** A gateway plugin: run in the background on a loopback port, for the subscription proxy. */
+    gateway: 'Gateway',
+    gatewayRunning: '{version} on 127.0.0.1:{port}',
+    gatewayStarting: 'Starting',
+    gatewayUpdating: 'Updating',
+    gatewayCrashed: 'Crashed',
+    gatewayData: 'Its sign-ins and database live in {dir}, and stay there when it is uninstalled.',
+    removeGatewayBody: 'Deletes the program in Boite\'s data directory. Its sign-ins, settings and database stay in {dir}, ready for the next install.',
+    previewGateway: 'Gateway',
+    previewGatewayBody: 'Runs in the background on this machine, on a loopback port, with no access to Boite. The subscription proxy can point at it.',
     trust: 'This program runs with your permissions on the machine hosting your core. Install it only if you trust whoever publishes it.',
     confirmAdd: 'Install {name}',
     refusedTitle: 'Boite refused this plugin',

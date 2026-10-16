@@ -11,7 +11,7 @@ import {
   type RpcResult,
 } from '@boite/contracts';
 import { RpcFailure } from '../client';
-import { appCommands, FAKE_RELEASES, fakePluginPools, fakePlugins, PLUGIN_STEPS, poolCommands } from './plugins-seed';
+import { appCommands, FAKE_RELEASES, fakePluginPools, fakePlugins, PLUGIN_STEPS, poolCommands, runningGateway } from './plugins-seed';
 import { INSTALL_STEP_MS } from './providers';
 
 type PluginMethod = Extract<RpcMethodName, `plugins.${string}`>;
@@ -30,6 +30,10 @@ export class FakePlugins {
   close(): void { for (const [id, run] of this.#pluginRuns) this.#pluginRuns.set(id, run + 1); }
   handles(method: RpcMethodName): method is PluginMethod { return Object.hasOwn(this.handlers, method); }
   async call(method: PluginMethod, params: unknown): Promise<unknown> { return this.handlers[method](params as never); }
+  /** The loopback port a gateway plugin listens on, Douane's default when it is not listed. */
+  gatewayPort(id: string): number { return this.#plugins.find((entry) => entry.id === id)?.gateway?.port ?? 8787; }
+  /** Whether that gateway answers now. */
+  gatewayRunning(id: string): boolean { return this.#plugins.find((entry) => entry.id === id)?.gateway?.status === 'running'; }
   private readonly handlers: Handlers = {
     'plugins.list': (params) => { return structuredClone(this.#plugins).sort((a, b) => a.origin === b.origin ? (a.origin === 'url' ? a.id.localeCompare(b.id) : 0) : a.origin === 'recommended' ? -1 : 1); },
     'plugins.inspect': (params) => { return this.#inspectPlugin(params); },
@@ -61,7 +65,9 @@ export class FakePlugins {
       if (plugin.origin === 'url') return this.#dropPlugin(plugin);
       // The core kills the app and deletes its directory, `app.json` with it: what is left is a fresh, enabled app.
       const app: PluginAppState | null = plugin.app === null ? null : { enabled: true, status: 'stopped', pid: null, exitCode: null, error: null, startedAt: null };
-      Object.assign(plugin, { status: 'not-installed', version: null, progress: 0, error: null, rejected: null, app });
+      // A gateway's data directory stays; its program and `gateway.json` go.
+      const gateway = plugin.gateway == null ? null : { ...plugin.gateway, enabled: true, status: 'stopped' as const, pid: null, version: null, startedAt: null, error: null };
+      Object.assign(plugin, { status: 'not-installed', version: null, progress: 0, error: null, rejected: null, app, gateway });
       this.host.emit('plugins.updated', structuredClone(plugin));
       return structuredClone(plugin);
     },
@@ -87,6 +93,19 @@ export class FakePlugins {
       plugin.app = params.action === 'stop'
         ? { ...plugin.app, enabled: false, status: 'stopped', pid: null, startedAt: null, error: null }
         : this.#running(plugin.app);
+      this.host.emit('plugins.updated', structuredClone(plugin));
+      return structuredClone(plugin);
+    },
+    'plugins.gateway': (params) => {
+      if (!['start', 'stop', 'restart'].includes(params.action)) {
+        throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'plugin gateway action must be start, stop or restart' });
+      }
+      const plugin = this.#requirePlugin(params.id);
+      if (plugin.status !== 'installed') throw new RpcFailure({ code: RpcErrorCode.Refused, message: `Install ${plugin.id} first.` });
+      if (plugin.gateway == null) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${plugin.id} provides no gateway.` });
+      plugin.gateway = params.action === 'stop'
+        ? { ...plugin.gateway, enabled: false, status: 'stopped', pid: null, version: null, startedAt: null, error: null }
+        : runningGateway(plugin.version, 4000 + this.host.nextId(), this.host.now());
       this.host.emit('plugins.updated', structuredClone(plugin));
       return structuredClone(plugin);
     },
@@ -167,6 +186,7 @@ export class FakePlugins {
         // Installed, the release found is no longer an update.
         if (plugin.updates?.available != null) plugin.updates = { ...plugin.updates, available: null };
         if (plugin.app?.enabled) plugin.app = this.#running(plugin.app);
+        if (plugin.gateway?.enabled) plugin.gateway = runningGateway(plugin.version, 4000 + this.host.nextId(), this.host.now());
       }
       this.host.emit('plugins.updated', structuredClone(plugin));
     }

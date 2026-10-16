@@ -43,7 +43,7 @@ function type(selector: string, value: string): void {
 test('each section holds its plugins, every state drawn with what the owner can do next', async () => {
   await open();
   const installed = q('[data-testid="plugins-installed"]')!;
-  expect([...installed.querySelectorAll('[data-testid="plugin-row"]')].map((el) => el.getAttribute('data-plugin'))).toEqual(['bots', 'grok-seats', 'pool-legacy', 'seat-pool']);
+  expect([...installed.querySelectorAll('[data-testid="plugin-row"]')].map((el) => el.getAttribute('data-plugin'))).toEqual(['bots', 'douane', 'grok-seats', 'pool-legacy', 'seat-pool']);
   // Every recommended plugin is installed: the section has nothing to say and is not drawn.
   expect(q('[data-testid="plugins-recommended"]')).toBeNull();
   // A recommended plugin links its source from its name; a URL one shows the repository and commit instead.
@@ -216,4 +216,26 @@ test('an ignored release and a failed check read as quiet notes, never alarms', 
   const updates = row('bots')!.querySelector('[data-testid="plugin-updates"]')!;
   expect(updates.textContent).toContain('Not offered: 0.1.8 found there, older than 0.1.9; Boite never goes back.');
   expect(updates.querySelector('[role="alert"], .bad')).toBeNull();
+});
+test('Douane\'s row shows its gateway on loopback, stops and starts it, and its uninstall says the sign-ins stay', async () => {
+  await open();
+  const strip = () => q('[data-testid="plugin-gateway"][data-plugin="douane"]');
+  await vi.waitFor(() => expect(strip()?.dataset.gatewayStatus).toBe('running'));
+  expect(q('[data-testid="plugin-gateway-state"]')?.textContent).toContain('0.3.0 on 127.0.0.1:8787');
+  // The page runs at a loopback address, beside its core: the dashboard opens from here.
+  expect(q('[data-testid="plugin-gateway-open"]')?.textContent).toContain('Open Douane');
+
+  q('[data-testid="plugin-gateway-stop"]')!.click();
+  await vi.waitFor(() => expect(strip()?.dataset.gatewayStatus).toBe('stopped'));
+  expect(q('[data-testid="plugin-gateway-state"]')?.textContent).toContain('starts again only when you start it');
+  q('[data-testid="plugin-gateway-start"]')!.click();
+  await vi.waitFor(() => expect(strip()?.dataset.gatewayStatus).toBe('running'));
+
+  const { confirm } = await import('../lib/confirm.svelte');
+  const ask = vi.spyOn(confirm, 'ask').mockResolvedValue(false);
+  q('[data-testid="plugin-uninstall"][data-plugin="douane"]')!.click();
+  await vi.waitFor(() => expect(ask).toHaveBeenCalled());
+  expect(ask.mock.calls[0]![0].body).toMatch(/sign-ins, settings and database stay in .*douane/);
+  expect(strip()).not.toBeNull();
+  ask.mockRestore();
 });

@@ -5,6 +5,8 @@ import type { Core } from './core.ts';
 import { invalidParams, refused, unavailable, RpcFailure } from './errors.ts';
 import { homePath } from './paths.ts';
 import { hostAgentsEnabled, profileFor } from './providers/resolve.ts';
+import { DOUANE_PLUGIN } from './plugins/gateway.ts';
+import { localProxy } from './settings.ts';
 import { proxyApiUrl } from './subscription-proxy.ts';
 
 /**
@@ -142,7 +144,12 @@ function prepare(core: Core): Prepared[] {
   return prepared;
 }
 
-function douaneOf(core: Core): SubscriptionProxy | null {
+/** The Douane a move talks to: the proxy's, or with `plugin` the Douane plugin running on this core. */
+function douaneOf(core: Core, target: unknown = 'proxy'): SubscriptionProxy | null {
+  if (target !== 'proxy' && target !== 'plugin') throw invalidParams('target must be proxy, plugin or absent', { field: 'target', expected: 'proxy or plugin' });
+  if (target === 'plugin') {
+    return core.plugins.gateways.running(DOUANE_PLUGIN) ? localProxy({ enabled: false, kind: 'douane', baseUrl: '', dashboardUrl: '' }, core.plugins.gateways.port(DOUANE_PLUGIN)) : null;
+  }
   const proxy = core.settings.get().subscriptionProxy;
   return proxy && proxy.kind === 'douane' && proxy.baseUrl ? proxy : null;
 }
@@ -152,8 +159,8 @@ function managementToken(core: Core): string | null {
   return typeof token === 'string' && token ? token : null;
 }
 
-export function movePlan(core: Core): GatewayMovePlan {
-  const proxy = douaneOf(core);
+export function movePlan(core: Core, target?: unknown): GatewayMovePlan {
+  const proxy = douaneOf(core, target);
   return { origin: proxy ? subscriptionProxyOrigin(proxy) : null, managementToken: managementToken(core) !== null, items: prepare(core).map(entry => entry.item) };
 }
 
@@ -216,13 +223,16 @@ const SUBSCRIPTION_OF: Readonly<Record<string, string>> = { copilot: 'copilot', 
 /** The cores with a move running: one at a time, or two would race on the gateway's list. */
 const moving = new WeakSet<Core>();
 
-export async function moveToGateway(core: Core, ids: unknown, token: unknown): Promise<{ outcomes: GatewayMoveOutcome[] }> {
+export async function moveToGateway(core: Core, ids: unknown, token: unknown, target?: unknown): Promise<{ outcomes: GatewayMoveOutcome[] }> {
   if (!Array.isArray(ids) || ids.length === 0 || ids.length > 200 || ids.some(id => typeof id !== 'string' || id.length > 300)) {
     throw invalidParams('ids must be 1 to 200 item ids from subscriptionProxy.movePlan', { field: 'ids' });
   }
   if (token !== undefined) validateToken(token);
-  const proxy = douaneOf(core);
-  if (proxy === null) throw refused('configure a Douane gateway first: moving logins needs Douane', { field: 'subscriptionProxy.kind', expected: 'douane' });
+  const proxy = douaneOf(core, target);
+  if (proxy === null) {
+    if (target === 'plugin') throw refused('start the Douane plugin first: moving logins needs it running', { field: 'target', expected: 'a running Douane plugin' });
+    throw refused('configure a Douane gateway first: moving logins needs Douane', { field: 'subscriptionProxy.kind', expected: 'douane' });
+  }
   if (moving.has(core)) throw refused('a move to Douane is already running');
   moving.add(core);
   try {
@@ -288,6 +298,6 @@ export async function moveToGateway(core: Core, ids: unknown, token: unknown): P
 }
 
 export function registerGatewayMove(core: Core): void {
-  core.router.register('subscriptionProxy.movePlan', () => movePlan(core));
-  core.router.register('subscriptionProxy.move', ({ ids, managementToken: token }) => moveToGateway(core, ids, token));
+  core.router.register('subscriptionProxy.movePlan', (params) => movePlan(core, params?.target));
+  core.router.register('subscriptionProxy.move', ({ ids, managementToken: token, target }) => moveToGateway(core, ids, token, target));
 }

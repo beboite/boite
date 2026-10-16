@@ -3,7 +3,11 @@
   import InfoTip from './InfoTip.svelte';
   import { onMount } from 'svelte';
   import { Download, ExternalLink, Play, Puzzle, RefreshCw, RotateCw, ShieldAlert, Square, TriangleAlert } from '@lucide/svelte';
-  import type { PluginAppState, PluginPool, PluginPreview, PluginRejected, PluginState, PluginUpdates, RpcParams } from '@boite/contracts';
+  import type { PluginAppState, PluginGatewayState, PluginPool, PluginPreview, PluginRejected, PluginState, PluginUpdates, RpcParams } from '@boite/contracts';
+  import { gatewayDashboardReachable } from '@boite/contracts';
+  import { besideCore } from '../lib/gateway-dashboard';
+  import { openExternal } from '../lib/links';
+  import GatewayMoveDialog from './GatewayMoveDialog.svelte';
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
   import { relativeTime } from '../lib/format';
@@ -19,6 +23,8 @@
   let checking = $state<Record<string, boolean>>({});
   let errors = $state<Record<string, string>>({});
   let error = $state('');
+  /** The gateway plugin whose connections dialog is open. */
+  let moving = $state(false);
 
   let url = $state('');
   let ref = $state('');
@@ -67,7 +73,7 @@
     const client = store.client;
     if (!client) return;
     if (method === 'plugins.uninstall' && !await confirm.ask({
-      title: fill(t.removeTitle, { name: plugin.name }), body: t.removeBody,
+      title: fill(t.removeTitle, { name: plugin.name }), body: plugin.gateway ? fill(t.removeGatewayBody, { dir: plugin.gateway.dataDir }) : t.removeBody,
       confirmLabel: t.remove, cancelLabel: strings.common.cancel, danger: true
     })) return;
     busy[plugin.id] = true;
@@ -148,6 +154,37 @@
     } finally {
       busy[plugin.id] = false;
     }
+  }
+
+  /** Start, stop or restart a gateway; the core answers once it answers `/health`, or failed to. */
+  async function gatewayAction(plugin: PluginState, action: RpcParams<'plugins.gateway'>['action']) {
+    const client = store.client;
+    if (!client) return;
+    busy[plugin.id] = true;
+    try {
+      put(await client.call('plugins.gateway', { id: plugin.id, action }));
+      delete errors[plugin.id];
+    } catch (cause) {
+      errors[plugin.id] = messageOf(cause);
+    } finally {
+      busy[plugin.id] = false;
+    }
+  }
+
+  function gatewayLine(gateway: PluginGatewayState): string {
+    switch (gateway.status) {
+      case 'running': return fill(t.gatewayRunning, { version: gateway.version ?? '', port: String(gateway.port) }).trim();
+      case 'starting': return t.gatewayStarting;
+      case 'updating': return t.gatewayUpdating;
+      case 'crashed': return t.gatewayCrashed;
+      default: return gateway.enabled ? t.appStopped : t.appOff;
+    }
+  }
+
+  /** Its dashboard, where this client can reach a loopback address: beside the core only. */
+  function gatewayDashboard(gateway: PluginGatewayState): string | null {
+    const url = `http://127.0.0.1:${gateway.port}/admin/`;
+    return gateway.status === 'running' && gatewayDashboardReachable(url, besideCore(store)) ? url : null;
   }
 
   function appLine(app: PluginAppState): string {
@@ -314,6 +351,37 @@
         {#if app.error}<p class={app.status === 'crashed' ? 'bad' : 'hint'} data-testid="plugin-app-error">{app.error}</p>{/if}
       </div>
     {/if}
+    {#if plugin.status === 'installed' && plugin.gateway}
+      {@const gateway = plugin.gateway}
+      {@const live = gateway.status !== 'stopped' && gateway.status !== 'crashed'}
+      {@const dashboard = gatewayDashboard(gateway)}
+      <div class="desktop-app" data-testid="plugin-gateway" data-plugin={plugin.id} data-gateway-status={gateway.status}>
+        <div class="app-head">
+          <p class="state" data-testid="plugin-gateway-state">
+            <span class="dot" class:ok={gateway.status === 'running'} class:live={gateway.status === 'starting' || gateway.status === 'updating'}
+              class:bad={gateway.status === 'crashed'}></span><span class="ui-label app-name">{t.gateway}</span><span aria-hidden="true">·</span><span class="ui-label gateway-line">{gatewayLine(gateway)}</span>
+            <InfoTip topic={t.gateway} text={fill(t.gatewayData, { dir: gateway.dataDir })} />
+          </p>
+          <div class="act">
+            {#if live}
+              <button class="quiet small" data-testid="plugin-gateway-restart" data-plugin={plugin.id} disabled={working} onclick={() => void gatewayAction(plugin, 'restart')}><RotateCw size={14} /><span class="ui-label">{t.appRestart}</span></button>
+              <button class="quiet small" data-testid="plugin-gateway-stop" data-plugin={plugin.id} disabled={working} onclick={() => void gatewayAction(plugin, 'stop')}><Square size={14} /><span class="ui-label">{t.appStop}</span></button>
+            {:else}
+              <button class="small" data-testid="plugin-gateway-start" data-plugin={plugin.id} disabled={working} onclick={() => void gatewayAction(plugin, 'start')}><Play size={14} /><span class="ui-label">{t.appStart}</span></button>
+            {/if}
+          </div>
+        </div>
+        {#if gateway.error}<p class={gateway.status === 'crashed' ? 'bad' : 'hint'} data-testid="plugin-gateway-error">{gateway.error}</p>{/if}
+        {#if gateway.status === 'running' && (dashboard || plugin.id === 'douane')}
+          <div class="act gateway-act">
+            {#if dashboard}<button class="ghost small" data-testid="plugin-gateway-open" data-plugin={plugin.id} onclick={() => void openExternal(dashboard)}><ExternalLink size={14} /><span class="ui-label">{fill(strings.subscriptionProxy.openGateway, { name: plugin.name })}</span></button>{/if}
+            {#if plugin.id === 'douane' && store.core?.features?.gatewayMove === true}
+              <button class="ghost small" data-testid="plugin-gateway-move" data-plugin={plugin.id} onclick={() => { moving = true; }}><span class="ui-label">{strings.subscriptionProxy.move.open}</span></button>
+            {/if}
+          </div>
+        {/if}
+      </div>
+    {/if}
     {#if plugin.status === 'installed' && plugin.pools.length > 0}
       <div class="pools">
         <div class="pools-head">
@@ -415,6 +483,10 @@
                 <dt>{t.previewApp}</dt>
                 <dd data-testid="plugin-preview-app">{t.previewAppBody}</dd>
               {/if}
+              {#if preview.manifest?.provides.gateway}
+                <dt>{t.previewGateway}</dt>
+                <dd data-testid="plugin-preview-gateway">{t.previewGatewayBody}</dd>
+              {/if}
             {/if}
           </dl>
           {#if preview.rejected === null}
@@ -431,6 +503,8 @@
     </div>
   </section>
 </div>
+
+<GatewayMoveDialog {store} open={moving} target="plugin" onclose={() => { moving = false; }} />
 
 <style>
   .page { container-type: inline-size; }
@@ -465,6 +539,8 @@
   .spinning :global(svg) { animation: spin 0.9s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .act.end { justify-content: flex-end; }
+  .gateway-act { justify-content: flex-start; }
+  .gateway-line { font-variant-numeric: tabular-nums; }
   .act button, .pools button, .account-actions button { gap: 6px; }
 
   .track { height: 2px; border-radius: 999px; background: var(--color-surface-3); overflow: hidden; }

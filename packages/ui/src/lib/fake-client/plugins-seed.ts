@@ -20,6 +20,16 @@ export function appCommands(executable: string, pluginId: string): string[] {
   return [executable, `environment: BOITE_CORE_URL=<this core> BOITE_TOKEN=<the owner token> BOITE_PLUGIN_ID=${pluginId}`];
 }
 
+/** The line the core shows for a gateway: how it runs it. */
+export function gatewayCommands(executable: string): string[] {
+  return [`${executable} --config <its data directory>/${executable}.toml`];
+}
+
+/** A gateway the fake runs, as the core reports it once it answered `/health`. */
+export function runningGateway(version: string | null, pid: number, startedAt: number): NonNullable<PluginState['gateway']> {
+  return { enabled: true, status: 'running', port: 8787, version, pid, exitCode: null, error: null, startedAt, dataDir: `${DATA_DIR}\\douane` };
+}
+
 /** What the fake update sources publish: a check finds these when they differ from what is installed. */
 export const FAKE_RELEASES: Record<string, { version: string; commit: string; artifact: { url: string; sha256: string } }> = {
   bots: {
@@ -35,7 +45,7 @@ export const FAKE_RELEASES: Record<string, { version: string; commit: string; ar
  * installed, one stuck mid-download, and one whose installed.json the core refuses.
  */
 export function fakePlugins(): PluginState[] {
-  const base = { platform: 'win32-x64', progress: 0, error: null, rejected: null, app: null };
+  const base = { platform: 'win32-x64', progress: 0, error: null, rejected: null, app: null, gateway: null };
   const legacy = `${DATA_DIR}\\plugins\\pool-legacy\\installed.json`;
   return [
     {
@@ -47,6 +57,19 @@ export function fakePlugins(): PluginState[] {
       app: { enabled: true, status: 'running', pid: 4242, exitCode: null, error: null, startedAt: Date.parse('2026-10-10T08:00:00Z') },
       updates: {
         source: { url: 'https://github.com/beboite/bots', ref: 'main' }, checking: false,
+        checkedAt: Date.parse('2026-10-10T08:01:00Z'), nextCheckAt: Date.parse('2026-10-10T14:01:00Z'),
+        available: null, ignored: null, error: null
+      }
+    },
+    {
+      ...base, id: 'douane', name: 'Douane', origin: 'recommended',
+      description: 'Your Claude, Codex, Grok and Copilot subscriptions behind one local gateway, with quota routing and a dashboard. Boite\'s subscription proxy can point at it.',
+      homepage: 'https://github.com/beboite/douane', version: '0.3.0', availableVersion: '0.3.0', status: 'installed', source: null,
+      artifact: { url: 'https://github.com/beboite/douane/releases/download/v0.3.0/douane-windows-x64.exe', sha256: '7e1a3c5b9d2f4a6c8e0b1d3f5a7c9e2b4d6f8a0c1e3b5d7f9a2c4e6b8d0f1a3c' },
+      commands: gatewayCommands('douane'), pools: [],
+      gateway: runningGateway('0.3.0', 4343, Date.parse('2026-10-10T08:00:00Z')),
+      updates: {
+        source: { url: 'https://github.com/beboite/douane', ref: 'main' }, checking: false,
         checkedAt: Date.parse('2026-10-10T08:01:00Z'), nextCheckAt: Date.parse('2026-10-10T14:01:00Z'),
         available: null, ignored: null, error: null
       }

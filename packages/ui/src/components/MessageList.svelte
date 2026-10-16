@@ -225,8 +225,7 @@
     scrollTop = box.scrollTop;
   }
 
-  // Keep the target aligned as estimated heights become real measurements.
-  // Wheel, touch, scrollbar and keyboard input return control to the reader.
+  // Keep the target aligned as estimated heights become real measurements; wheel, touch, scrollbar and keyboard input return control to the reader.
   $effect(() => {
     const id = navigationTarget;
     void measured;
@@ -728,8 +727,7 @@
     const thread = store.openThread;
     return thread !== null && thread.id === threadId && !thread.agentSessionId && thread.projectId !== null;
   });
-  // A prompt still waiting in the queue would run after the edit, on the rewound thread.
-  // So would an edit started under a prompt still on its way to the core.
+  // A prompt still waiting in the queue would run after the edit, on the rewound thread, as would an edit started under a prompt still on its way to the core.
   const atRest = $derived(branchable && !store.busy && (store.composerStates[threadId]?.queued.length ?? 0) === 0 && !store.composerStates[threadId]?.sending);
 
   async function editMessage(message: Message): Promise<void> {
