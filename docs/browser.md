@@ -191,10 +191,15 @@ macOS apps do not host; their webviews have no DevTools channel to relay.
 `recording-start` records the tab as a silent MP4 without any encoder on the
 machine. The tab streams its frames (`Page.startScreencast`, at most
 1920 × 1080), and a blank page of the same browser, in a throwaway context of
-its own, draws them on a canvas that a `MediaRecorder` encodes. A 30 fps take
-asks for every second frame of Chromium's 60 Hz compositor, and frames reach
-the canvas at most at the take's rate; a frame that comes early waits its turn
-and the newest replaces it. The helper decodes each frame with
+its own, draws them on a canvas that a `MediaRecorder` encodes. The take gets
+every picture the page draws, and frames reach the canvas at most at the
+take's rate; a frame that comes early waits its turn and the newest replaces
+it. A frame is acknowledged when it leaves, not when it arrives, and one stays
+unacknowledged while a frame waits, so Chrome encodes about one picture per
+slot of the take: a 30 Hz animation keeps all its pictures, a 60 Hz one costs
+about 30 encodes a second. Chrome skips the paints it makes while held back,
+so when no picture follows within 150 ms the screencast restarts, which sends
+the page as it is. The helper decodes each frame with
 `Uint8Array.fromBase64`. A still page sends no frame, so the last one is drawn again each second and the video keeps
 its length. H.264 is the default. Chrome 153 on Linux encodes H.264 and AV1 into MP4, not
 HEVC; a codec the browser cannot encode is refused with the ones it can. The same 100 MB limit and turn rule
@@ -239,8 +244,9 @@ started by the first viewer and stopped 3 s after the last one asked, when the
 tab closes or its viewers disconnect (`browser/frames.ts`). Chrome sends a
 picture only when the page draws, so a still page sends nothing. The core keeps
 the newest picture and acknowledges it when a viewer takes it, so Chrome draws
-no faster than the fastest viewer. Every viewer of a tab shares one screencast,
-as wide as the widest of them asked and at the lowest quality one asked. A
+no faster than the fastest viewer. Viewers of a tab that ask the same width and
+quality share one screencast; each other width or quality gets its own, so a
+phone on a slow link never downloads the desktop's wider, heavier frames. A
 viewer names the frame it shows (`after`): the core answers with a newer one,
 or with `unchanged` once a second passes without one, and the frame it shows
 stays valid for input. Chrome sends nothing for the last size of a quick run

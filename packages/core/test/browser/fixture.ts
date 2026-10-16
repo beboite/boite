@@ -50,6 +50,8 @@ export function createBrowserFixture() {
       if (path === '/later/done') { later.complete(); return new Response('done'); }
       if (path === '/sent') return new Response(`<title>Sent</title><h1>Thanks ${new URL(request.url).searchParams.get('name')}</h1>`, { headers: { 'content-type': 'text/html' } });
       if (path === '/popup') return new Response('<title>Popup</title>popup', { headers: { 'content-type': 'text/html' } });
+      // Draws `hz` times a second, like a video or an animation slower than the screen.
+      if (path === '/ticking') return new Response(`<title>Ticking</title><div id=box style="width:80px;height:80px;background:red;position:absolute"></div><script>let x=0;setInterval(()=>{x=(x+7)%600;box.style.left=x+"px"},${1000 / Number(new URL(request.url).searchParams.get('hz') ?? 10)})</script>`, { headers: { 'content-type': 'text/html' } });
       if (path === '/moving') return new Response('<title>Moving</title><div id=box style="width:80px;height:80px;background:red;position:absolute"></div><script>let x=0;setInterval(()=>{x=(x+7)%600;box.style.left=x+"px"},16)</script>', { headers: { 'content-type': 'text/html' } });
       return new Response('missing', { status: 404 });
     } });

@@ -841,12 +841,14 @@ keeps the video. `BOITE_RECORDING_PRESET` sizes the page,
 `BOITE_RECORDING_PLAY` lists other videos (`;`-separated) to play in chat.
 
 The core's own recorder (`browser/recorder.ts`, a tab of the agent's browser)
-asks a 30 fps take for every second frame of the 60 Hz compositor and paces
-frames to the take's rate. Its helper page decodes each frame's base64 with
+paces frames to the take's rate and acknowledges each when it leaves, so
+Chrome encodes about one picture per slot of the take. Its helper page decodes each frame's base64 with
 `Uint8Array.fromBase64`: 0.2 ms instead of 18 ms for a 1920 × 1080 frame. On
 2026-10-15, a 10 s 30 fps take of a moving 1920 × 1080 page went from 19.7 to
 29.4 frames a second by ffprobe, and the core's Chrome from 453 % to 339 % of
-a core ([results](../bench/results/2026-10-15-perf-browser.md)).
+a core ([results](../bench/results/2026-10-15-perf-browser.md)), with a
+version that asked every second frame; the late acknowledgement that replaced
+it has not been measured.
 
 ## Benches
 

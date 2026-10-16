@@ -209,6 +209,40 @@ real('a viewer of a still page gets no new picture until the page draws, and the
   expect(base64).not.toBe(held.base64);
 }, 150_000);
 
+real('two viewers of one tab each get frames as wide and as light as they asked', async () => {
+  const { harness, owner, agent, threadId } = browserFixture;
+  const { tabId } = await agent.call('browser.command', { threadId, action: { kind: 'open', url: url('/moving') } });
+  await owner.call('threads.subscribe', { threadId });
+  const { grant } = await owner.call('pairing.grant', {});
+  const phone = await connect(harness.url, '', { grant, client: { name: 'pwa', version: 'test' } });
+  try {
+    await phone.call('threads.subscribe', { threadId });
+    // The desktop panel and a phone on a slow link watch the same tab at once.
+    for (let round = 0; round < 3; round++) {
+      const [wide, narrow] = await Promise.all([
+        picture(owner.call('browser.remoteFrame', { threadId, tabId, maxWidth: 800, quality: 80 })),
+        picture(phone.call('browser.remoteFrame', { threadId, tabId, maxWidth: 400, quality: 30 })),
+      ]);
+      expect(jpegSize(wide.base64).width).toBe(800);
+      expect(jpegSize(narrow.base64).width).toBe(400);
+      // A quarter of the pixels at a lower quality: far fewer bytes, whatever the other viewer asked.
+      expect(narrow.base64.length * 2).toBeLessThan(wide.base64.length);
+      await Bun.sleep(150);
+    }
+  } finally { phone.close(); }
+}, 150_000);
+
+real('a recording keeps every picture of a page that draws slower than the take', async () => {
+  const { agent, threadId } = browserFixture;
+  await agent.call('browser.command', { threadId, action: { kind: 'open', url: url('/ticking?hz=10') } });
+  await agent.call('browser.command', { threadId, action: { kind: 'recording-start' } });
+  await Bun.sleep(3000);
+  const { recording, tabId } = await agent.call('browser.command', { threadId, action: { kind: 'recording-stop' } });
+  // The page draws 10 pictures a second, well within what any runner encodes: skipping every second one leaves 5.
+  expect((recording!.frames ?? 0) / (recording!.durationMs / 1000)).toBeGreaterThan(8);
+  await agent.call('browser.command', { threadId, tabId, action: { kind: 'recording-discard', recordingId: recording!.id } });
+}, 150_000);
+
 real('a recording is an MP4 made in the browser itself, and one left running when the turn ends is thrown away', async () => {
   const { owner, agent, threadId } = browserFixture;
   await agent.call('browser.command', { threadId, action: { kind: 'open', url: url('/moving') } });

@@ -21,6 +21,9 @@ const STREAM_IDLE_MS = 3000;
 
 interface Saved { frame: RemoteBrowserFrame; page: PageInfo; seq: number }
 interface Viewer { requestedAt: number; tabId: string; options: StreamOptions; frames: Saved[] }
+interface StreamEntry { tabId: string; options: StreamOptions; stream: ViewerStream; asking: number; idle?: ReturnType<typeof setTimeout> }
+
+const streamKey = (tabId: string, options: StreamOptions) => `${tabId}:${options.maxWidth ?? 0}:${options.quality}`;
 
 interface RemoteDriveContext {
   require(threadId: ThreadId): { archived: boolean };
@@ -33,48 +36,46 @@ interface RemoteDriveContext {
 
 export class RemoteDrive {
   #viewers = new Map<string, Viewer>();
-  /** Per tab of the core's own browser, the screencast its viewers are shown (`ViewerStream`), and when it stops. */
-  #streams = new Map<string, { stream: ViewerStream; asking: number; idle?: ReturnType<typeof setTimeout> }>();
+  /**
+   * Per tab of the core's own browser and per size and quality its viewers
+   * asked, the screencast they are shown (`ViewerStream`), and when it stops:
+   * a phone on a slow link is never sent the desktop's wider, heavier frames.
+   */
+  #streams = new Map<string, StreamEntry>();
   constructor(private context: RemoteDriveContext) {}
 
   dropTab(id: string): void {
     for (const viewer of this.#viewers.values()) viewer.frames = viewer.frames.filter(saved => saved.frame.tabId !== id);
-    this.#stopStream(id);
+    for (const [key, entry] of this.#streams) if (entry.tabId === id) this.#stopStream(key);
   }
 
   /** The tab moved to another document, size or color scheme: no viewer is shown what it was before. */
   stale(tab: Tab): void {
     tab.frame = null;
-    this.#streams.get(tab.id)?.stream.forget();
+    for (const entry of this.#streams.values()) if (entry.tabId === tab.id) entry.stream.forget();
   }
 
-  #stopStream(tabId: string): void {
-    const entry = this.#streams.get(tabId);
+  #stopStream(key: string): void {
+    const entry = this.#streams.get(key);
     if (!entry) return;
-    this.#streams.delete(tabId);
+    this.#streams.delete(key);
     clearTimeout(entry.idle);
     entry.stream.close();
   }
 
-  /** What the tab's screencast is asked for: the widest of its live viewers, at the lowest quality one asked. */
-  #options(tabId: string): StreamOptions {
-    let maxWidth: number | undefined = 0, quality = 80;
-    for (const viewer of this.#viewers.values()) {
-      if (viewer.tabId !== tabId || Date.now() - viewer.requestedAt > STREAM_IDLE_MS) continue;
-      maxWidth = maxWidth === undefined || viewer.options.maxWidth === undefined ? undefined : Math.max(maxWidth, viewer.options.maxWidth);
-      quality = Math.min(quality, viewer.options.quality);
-    }
-    return { maxWidth: maxWidth || undefined, quality };
+  /** Whether a viewer that asked within `withinMs` is shown this screencast. */
+  #watched(key: string, withinMs = Infinity): boolean {
+    for (const viewer of this.#viewers.values()) if (streamKey(viewer.tabId, viewer.options) === key && Date.now() - viewer.requestedAt < withinMs) return true;
+    return false;
   }
 
   /** Stops the screencast once no viewer has asked for `STREAM_IDLE_MS` and none waits. */
-  #idle(tabId: string): void {
-    const entry = this.#streams.get(tabId);
+  #idle(key: string): void {
+    const entry = this.#streams.get(key);
     if (!entry) return;
     clearTimeout(entry.idle);
     entry.idle = setTimeout(() => {
-      const live = [...this.#viewers.values()].some(viewer => viewer.tabId === tabId && Date.now() - viewer.requestedAt < STREAM_IDLE_MS);
-      if (entry.asking > 0 || live) this.#idle(tabId); else this.#stopStream(tabId);
+      if (entry.asking > 0 || this.#watched(key, STREAM_IDLE_MS)) this.#idle(key); else this.#stopStream(key);
     }, STREAM_IDLE_MS);
     (entry.idle as { unref?: () => void }).unref?.();
   }
@@ -127,16 +128,16 @@ export class RemoteDrive {
 
   /** A frame of the tab's screencast newer than the one the viewer holds, or `unchanged` when the page drew nothing new. */
   async #streamed(tab: Tab, viewer: Viewer, after: string | undefined): Promise<RemoteBrowserFrame | RemoteBrowserUnchanged> {
-    let entry = this.#streams.get(tab.id);
+    const key = streamKey(tab.id, viewer.options);
+    let entry = this.#streams.get(key);
     if (!entry) {
       const stream = new ViewerStream(tab.engine.cdp, tab.targetId, async () => await this.context.evaluate(tab, PAGE_INFO_SCRIPT, 5000) as PageInfo | null);
-      this.#streams.set(tab.id, entry = { stream, asking: 0 });
+      this.#streams.set(key, entry = { tabId: tab.id, options: viewer.options, stream, asking: 0 });
     }
-    const { stream } = entry, started = Date.now();
+    const { stream, options } = entry, started = Date.now();
     // A screencast that could not start is not kept: the next request starts another.
-    const options = this.#options(tab.id);
     const configure = (force = false) => stream.configure(options, force).catch(error => {
-      if (this.#streams.get(tab.id) === entry) this.#stopStream(tab.id);
+      if (this.#streams.get(key) === entry) this.#stopStream(key);
       throw error;
     });
     entry.asking++;
@@ -169,7 +170,7 @@ export class RemoteDrive {
       return frame;
     } finally {
       entry.asking--;
-      this.#idle(tab.id);
+      this.#idle(key);
     }
   }
 
@@ -264,10 +265,10 @@ export class RemoteDrive {
   disconnect(connectionId: string): void {
     for (const id of this.#viewers.keys()) if (id.startsWith(`${connectionId}:`)) this.#viewers.delete(id);
     // A screencast nobody else watches stops now, not at its idle timer.
-    for (const [tabId, entry] of this.#streams) if (!entry.asking && ![...this.#viewers.values()].some(viewer => viewer.tabId === tabId)) this.#stopStream(tabId);
+    for (const [key, entry] of this.#streams) if (!entry.asking && !this.#watched(key)) this.#stopStream(key);
   }
 
   close(): void {
-    for (const tabId of [...this.#streams.keys()]) this.#stopStream(tabId);
+    for (const key of [...this.#streams.keys()]) this.#stopStream(key);
   }
 }
