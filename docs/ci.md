@@ -151,11 +151,29 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 593,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,941,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,982,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,161,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,251,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-16, faster provider detection and the native Codex binary (PR #524)
+merged with `origin/main` at `0f480824` measure 4,248,845 core JavaScript bytes
+after fresh `bun run build:ui` and `bun run build:core` on Linux, against
+4,237,867 for that main: the hand-written ACP update parser, the Codex launcher
+lookup and the provider lookup memo add 10,978 bytes. The core limit becomes
+4,251,000; the UI measures 4,975,415 bytes on both and its limits stay
+unchanged.
+
+On 2026-10-16, the dialog showing what a Claude thread sends (PR #501) merged
+with `origin/main` at `4eec5562` measures 4,975,415 UI bytes and 4,237,867 core
+JavaScript bytes after fresh `bun run build:ui` and `bun run build:core` on
+Linux, against 4,958,781 and 4,231,749 for that main: the dialog, its strings in
+both languages and the store add 16,634 UI bytes, the reader of the recorded
+request 6,118 core bytes. On `d11f6d16` Windows CI measured the UI about 5,000
+bytes above Linux. The limits become 4,982,000 and 4,240,000; the entry and
+`main.js` limits stay unchanged. The core row before this showed 4,161,000
+while `budgets.json` held the 4,233,000 PR #505 set.
 
 On 2026-10-15, views placed inside an answer (PR #502), merged with PR #503,
 measure 4,938,784 UI bytes and 4,151,081 core JavaScript bytes after fresh

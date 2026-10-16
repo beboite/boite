@@ -1,7 +1,7 @@
 import { startDiagnosticsReport } from './diagnostics-report';
-import type { Message, PermissionMode, ProjectId, ProviderId, ThreadId } from '@boite/contracts';
+import { RpcErrorCode, type AgentShape, type Message, type PermissionMode, type ProjectId, type ProviderId, type ThreadId } from '@boite/contracts';
 import type { Client } from './client';
-import { wasClosed } from './rpc-error';
+import { RpcFailure, wasClosed } from './rpc-error';
 import { readModelDefaults } from './model-defaults';
 import { modelFavorites } from './model-favorites.svelte';
 import { readLayout, readPrefs } from './prefs';
@@ -547,6 +547,12 @@ export class Store {
     try { await client.call('turns.cancelRetry', { threadId }); } catch (error) { this.#ctx.fail(error); }
   }
   threadCapabilities(...args: Parameters<Threads['capabilities']>) { return this.#ctx.threads.capabilities(...args); }
+  /** What the thread's last Claude request carried, read from its transcript on this store's machine. */
+  agentShape(threadId: ThreadId): Promise<AgentShape> {
+    const client = this.#ctx.client;
+    if (!client) return Promise.reject(new RpcFailure({ code: RpcErrorCode.Internal, message: 'not connected' }));
+    return client.call('threads.agentShape', { threadId });
+  }
   setPermissionMode(...args: Parameters<Threads['setPermissionMode']>) { return this.#ctx.threads.setPermissionMode(...args); }
   rename(...args: Parameters<Threads['rename']>) { return this.#ctx.threads.rename(...args); }
   retitle(...args: Parameters<Threads['retitle']>) { return this.#ctx.threads.retitle(...args); }
@@ -709,6 +715,7 @@ export class Store {
   setTasks(...args: Parameters<Workbench['setTasks']>) { return this.#ctx.workbench.setTasks(...args); }
   loadTodos(...args: Parameters<Workbench['loadTodos']>) { return this.#ctx.workbench.loadTodos(...args); }
   addTodo(...args: Parameters<Workbench['addTodo']>) { return this.#ctx.workbench.addTodo(...args); }
+  unwatchPullRequest(...args: Parameters<Workbench['unwatchPullRequest']>) { return this.#ctx.workbench.unwatchPullRequest(...args); }
   updateTodo(...args: Parameters<Workbench['updateTodo']>) { return this.#ctx.workbench.updateTodo(...args); }
   removeTodo(...args: Parameters<Workbench['removeTodo']>) { return this.#ctx.workbench.removeTodo(...args); }
   refreshResources(...args: Parameters<Workbench['refreshResources']>) { return this.#ctx.workbench.refreshResources(...args); }

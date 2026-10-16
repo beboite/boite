@@ -84,7 +84,7 @@ it, and the menu's last row, Choose the buttons, leads back to the switches.
 | Changes  | one      | `git.status` of the working directory, a file's diff on click                 |
 | Files    | one      | the working directory as a tree, `files.list` one directory at a time         |
 | File     | per path | a text editor with save, an image viewer with zoom and pan, a video or audio player |
-| Tasks    | one      | goal and loop, the agent's tasks, the project's todo list                     |
+| Tasks    | one      | goal and loop, pull request watches, the agent's tasks, the project's todo list |
 | Discussions | one   | agent exchanges grouped by discussion, then one discussion's back and forth; a chat row opens it on its burst |
 | Subagents | one     | the thread's workflow runs and subagents in one list, a run's graph, a subagent's conversation, see [delegation.md](delegation.md) and [workflows.md](workflows.md) |
 | Trace    | one      | the thread's processes, see [trace.md](trace.md)                              |

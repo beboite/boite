@@ -198,6 +198,16 @@ export class PullRequests {
     this.#maxOutputBytes = options.maxOutputBytes ?? 8 * 1024 * 1024;
   }
 
+  /**
+   * A `gh` call for a pull request watch, in the thread's folder when it is
+   * still there (a removed worktree leaves it gone; `gh api` needs none), under
+   * the same two-at-a-time queue and deadline as every lookup here.
+   */
+  gh(threadId: string, args: string[]): Promise<string> {
+    const thread = this.core.threads.require(threadId);
+    return this.#run(thread, existsSync(thread.cwd) ? thread.cwd : this.core.dataDir, 'gh', args);
+  }
+
   async detail(threadId: string, input: string): Promise<LinkedPullRequest> {
     const address = pullRequestAddress(input);
     const host = (process.env.GH_HOST ?? 'github.com').toLowerCase();

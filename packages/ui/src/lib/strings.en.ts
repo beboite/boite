@@ -967,6 +967,9 @@ export const strings = {
       /** The turn ended, the agent still runs a shell, a subagent or a workflow. */
       background: 'In background',
       backgroundFor: 'In background for {elapsed}',
+      /** The turn ended, Boite watches pull requests for the agent and wakes it when they need it. */
+      watching: 'Watching PR',
+      watchingMany: 'Watching {count} PRs',
       /** A delegated agent's turn ended on its own background work, which wakes it: what it waits for. */
       awaiting: 'Waiting on {what}',
       /** That work ended without waking it: the agent stopped there, its result never came. */
@@ -1071,6 +1074,34 @@ export const strings = {
     empty: 'No Claude Code session for this folder.',
     imported: 'Imported',
     importing: 'Importing',
+  },
+
+  /** What a Claude thread's last request started with, from the context meter. */
+  agentShape: {
+    open: 'What the agent sees',
+    title: 'What the agent sees',
+    intro: 'The system prompt and tools of the last request, as Claude Code recorded it.',
+    loading: 'Reading the transcript',
+    failed: 'Could not read the transcript: {error}',
+    noSession: 'No request yet: send a first message.',
+    noTranscript: 'The session transcript is not on this machine any more.',
+    unrecorded: 'This Claude Code version records no request details. Update it to 2.1.300 or later.',
+    system: 'System prompt',
+    tools: 'Tools',
+    block: 'Block {n}',
+    truncated: 'Cut here; the block holds {chars} characters.',
+    description: 'description {chars}',
+    omitted: '{n} more, counted in the total',
+    estimate: 'about {tokens} tokens',
+    estimateHint: 'Characters divided by four: an estimate, not the provider\'s count.',
+    chars: '{n} chars',
+    model: 'Model',
+    effort: 'Effort',
+    thinking: 'Thinking',
+    maxTokens: 'Max output',
+    betas: 'Betas',
+    version: 'Claude Code',
+    sent: 'Sent',
   },
 
   /** Images on their way to an agent, files given with an answer, and the full-screen viewer. */
@@ -1807,7 +1838,21 @@ export const strings = {
     markDone: 'Confirm it is done',
     removeTodo: 'Remove this todo',
     collapse: 'Fold this section',
-    expand: 'Unfold this section'
+    expand: 'Unfold this section',
+    /** The pull requests the agent asked Boite to watch (`boite pr watch`). */
+    watchSection: 'Pull request watches',
+    noWatches: 'No pull request watched',
+    watchHint: 'Boite reads the pull request on GitHub about once a minute and wakes the agent when a check fails, the checks pass, a review or comment lands or the branch conflicts',
+    watchNotRead: 'Not read yet',
+    watchNoChecks: 'No checks',
+    watchChecks: '{total} checks',
+    watchRunning: '{count} running',
+    watchFailed: '{count} failed',
+    watchConflict: 'Conflicts with {base}',
+    watchRateLimited: 'GitHub rate limit, next read {time}',
+    watchUnreachable: 'GitHub out of reach, next read {time}',
+    stopWatch: 'Stop watching',
+    stopWatchOf: 'Stop watching #{number}'
   },
 
   /** The file tree and the file viewer, the two surfaces reading the working directory. */

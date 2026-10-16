@@ -70,6 +70,8 @@ export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMeth
   ['threads.pullRequests', 'read the pull requests attached to its own conversation'],
   ['threads.linkPullRequest', 'attach a verified GitHub PR to its own conversation; does not publish or modify the PR'],
   ['threads.unlinkPullRequest', 'remove a conversation link without changing the GitHub PR'],
+  ['threads.watchPullRequest', 'have Boite read one of its own PRs on GitHub and wake its own conversation when it changes; reads only, never writes to GitHub'],
+  ['threads.unwatchPullRequest', 'stop its own conversation\'s watches; changes nothing on GitHub'],
   ['agents.routine.save', 'bounded durable scheduling for its own identity from its direct conversation, when the owner enabled routines'],
   ['agents.snapshot', 'only the persistent identity, context and resources of this execution'],
   ['agents.history', 'older messages, work and memory of this execution context, under the snapshot rules'],
