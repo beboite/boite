@@ -351,7 +351,9 @@ when the core advertises `chunkedAnswers`.
   `messages.attachment` with `display` answers a WebP at quality 80, at most
   1,280 px on its longer side, made once on Bun's image worker and kept in
   `media_displays`. Six 1,541 to 2,467 KB PNG screenshots measured 51 to
-  130 KB this way on 2026-10-07, about 130 ms each to make. AVIF would be
+  130 KB this way on 2026-10-07, about 130 ms each to make. A kept copy is
+  read by message, part and thread before anything else, so it answers without
+  loading the original's base64. AVIF would be
   smaller, but Bun's Linux build cannot encode it. A GIF, a copy that would not
   be lighter and any other file come as they are. A click opens the original
   in the viewer, and a download or an edit also fetches the original
@@ -478,6 +480,14 @@ The UI build writes a `.br` and a `.gz` beside every text file of 1 KB or more
 never compresses anything itself. A browser only offers `br` over https, so a
 phone on the LAN gets the gzip.
 
+Every static answer outside `/assets/` carries an `ETag` and a `Last-Modified` of the variant sent,
+so revalidating the shell, `sw.js` or the manifest is a 304 without a body.
+Fonts and icons are fresh for a day: a phone on plain http has no service
+worker and would otherwise fetch the two default faces, 144 KB, on every load.
+A view is gzipped once when it is published and sent compressed to a client
+that reads gzip. The [2026-10-15 report](../bench/results/2026-10-15-perf-media.md)
+has the bytes before and after.
+
 The command palette, the project picker, the import dialog and the right panel
 are separate chunks. They load when first asked for, and all of them once the
 app has booted and the page is idle, so a PWA that goes offline later still has
@@ -591,7 +601,12 @@ process. `packages/core/test/lazy-driver.test.ts` covers these boundaries.
 runtime, is imported where it unzips. Evaluating it builds its Huffman tables,
 about 8 ms per core start measured on 2026-09-25, for code most starts never
 run. `packages/core/test/startup-imports.test.ts` fails if a static import
-brings it back.
+brings it back. The same test keeps `node:util` and `node:dns` out of the
+static graph: terminal escapes are stripped by `packages/core/src/ansi.ts`, and
+the MagicDNS lookup imports its resolver when it runs. The recommended plugin
+list is parsed on the first plugins call. The compiled Linux server carries
+ESM bytecode like the desktop sidecar. Measurements:
+`bench/results/2026-10-15-perf-media.md`.
 
 The core lists its providers twice before it listens (the registry loads, then
 the default accounts ask which ones are available), and again for every client

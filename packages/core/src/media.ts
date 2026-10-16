@@ -151,12 +151,7 @@ export class MediaPreviews {
   async display(threadId: string, messageId: string, partIndex: number, mimeType: string, data: string): Promise<{ data: string; mimeType: string } | null> {
     if (!DISPLAY_TYPES.test(mimeType)) return null;
     const db = this.core.journal.db;
-    let held: Uint8Array | null = null;
-    try {
-      held = mediaDisplay(db, messageId, partIndex);
-    } catch (error) {
-      this.core.log('warn', `display copy of message ${messageId} part ${partIndex} could not be read: ${messageOf(error)}`);
-    }
+    let held = this.held(threadId, messageId, partIndex);
     if (held === null) {
       const key = `${messageId}\0${partIndex}`;
       let made = this.displays.get(key);
@@ -176,6 +171,25 @@ export class MediaPreviews {
       held = await made;
     }
     return held.length === 0 ? null : { data: Buffer.from(held).toString('base64'), mimeType: 'image/webp' };
+  }
+
+  /**
+   * The copy `display` already kept, read without the original: null when
+   * none was made or the original is what to send. Only a copy of a message
+   * of `threadId` is found, so a hit needs no other check.
+   */
+  keptDisplay(threadId: string, messageId: string, partIndex: number): { data: string; mimeType: string } | null {
+    const held = this.held(threadId, messageId, partIndex);
+    return held === null || held.length === 0 ? null : { data: Buffer.from(held).toString('base64'), mimeType: 'image/webp' };
+  }
+
+  private held(threadId: string, messageId: string, partIndex: number): Uint8Array | null {
+    try {
+      return mediaDisplay(this.core.journal.db, threadId, messageId, partIndex);
+    } catch (error) {
+      this.core.log('warn', `display copy of message ${messageId} part ${partIndex} could not be read: ${messageOf(error)}`);
+      return null;
+    }
   }
 
   /** Runs `work` once fewer than `DISPLAY_CONCURRENCY` copies are being made. */

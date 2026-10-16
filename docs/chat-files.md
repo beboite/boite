@@ -13,9 +13,12 @@ directory and the message stores a reference. Downloads support HTTP ranges,
 so videos can seek without loading the entire file. The UI renews download
 tickets while the card is mounted. Unreferenced snapshots and interrupted
 copies older than a day are removed by daily maintenance; forks retain their
-referenced files. The reference scan runs in a worker so large journals do not
-block the core's event loop. A pass that overlaps journal writes skips deletion
-to avoid acting on stale references. User uploads still have their separate 5 MB limit.
+referenced files. A pass skips the reference scan when no file is a day old.
+The scan runs in a worker so large journals do not block the core's event loop.
+A file is never deleted on a scan older than the last journal write: when a
+write lands during the scan, the pass scans again once, and when that scan is
+overtaken too, it tries again in 15 minutes, up to 8 times before waiting a
+day. User uploads still have their separate 5 MB limit.
 Relative and absolute paths must
 stay inside that directory, including resolved symlinks. A missing file,
 directory, oversized file or archived thread is refused. The thread must have
@@ -217,7 +220,10 @@ which lifts the same running page over the app; and download.
 on the core's own port, so a phone and a proxied core need nothing more than
 they already reach. Only a ticket minted for a view opens there; a file
 ticket still only downloads, and a view's download address still does not
-render.
+render. Publication also writes the snapshot gzipped beside it
+(`<id>.gz`), and the route sends that copy with `content-encoding: gzip` to a
+client that reads gzip; a view published before that copy existed is sent as
+it is. Retention removes the copy with its snapshot.
 
 The route sends `content-security-policy: sandbox allow-scripts` and the
 frame carries the same sandbox. The page runs on an opaque origin: it has no

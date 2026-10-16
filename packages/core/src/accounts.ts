@@ -1,9 +1,9 @@
 import { chmodSync, existsSync, lstatSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { stripVTControlCharacters } from 'node:util';
 import { dirname, join, resolve } from 'node:path';
 import type { Account, AccountId, ProviderDescriptor, ProviderId, RpcEvents, TerminalState } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { newId } from './ids.ts';
+import { stripAnsi } from './ansi.ts';
 import { invalidParams, messageOf, notFound, refused, unavailable } from './errors.ts';
 import { runAcpLogin, type AcpLoginRun } from './drivers/acp/login.ts';
 import { probeThreadId } from './providers/probe.ts';
@@ -720,7 +720,7 @@ export class AccountStore {
 
   /** One line of a login's output, whichever form it takes. */
   private onLoginLine(accountId: AccountId, line: string): void {
-    line = stripVTControlCharacters(line).trim();
+    line = stripAnsi(line).trim();
     const run = this.logins.get(accountId);
     if (run === undefined || line.length === 0) return;
     run.lastLine = line;
