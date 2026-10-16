@@ -9,8 +9,8 @@ export const strings = {
     clearKey: 'Remove saved key', save: 'Save proxy', saved: 'Proxy saved',
     configure: 'Configure proxy', native: 'Show account limits',
     showDashboard: 'Show proxy dashboard',
-    openDashboard: 'Open dashboard',
-    signInHint: 'Sign in with Open dashboard, then reload here. If the page stays blank, this dashboard may block embedded views.',
+    openGateway: 'Open {name}',
+    signInHint: 'Sign in with Open {name}, then reload here. If the page stays blank, this dashboard may block embedded views.',
     mixedContent: 'This page uses HTTPS. Set an HTTPS dashboard URL to view it here, or open the HTTP dashboard separately.',
     enabledHint: 'When on, the accounts signed in on this machine are no longer used for Claude and Codex, nor for Grok behind Douane.',
     /** The single account a proxied provider shows. */
@@ -24,6 +24,32 @@ export const strings = {
     entryStatus: { ready: 'Ready', cooldown: 'Cooling down', error: 'Error', disabled: 'Disabled' },
     creditOf: '{remaining} of {limit}',
     creditUsed: '{used} used',
+    /** Moving this machine's sign-ins and OpenCode keys into Douane. */
+    move: {
+      open: 'Move my connections to Douane',
+      openHint: 'Douane takes the sign-ins and API keys this machine already has, so nobody signs in again or pastes a key.',
+      title: 'Move connections to Douane',
+      intro: 'Claude, Codex and Grok sign-ins move: their tokens rotate, so once Douane holds one it serves that agent through the gateway and this machine\'s copy stops working. Turning the gateway off later means signing in again here. API keys are copied as they are.',
+      loading: 'Reading this machine\'s sign-ins',
+      empty: 'Nothing here that Douane can take.',
+      token: 'Management token (optional)',
+      tokenHint: 'Only for a Douane whose admin API asks for one. It stays on this machine and is never shown again.',
+      tokenSaved: 'A management token is saved; leave empty to keep it.',
+      clearToken: 'Remove saved token',
+      confirm: 'Move {count}',
+      moving: 'Moving',
+      failed: 'Could not move: {error}',
+      login: '{provider} sign-in',
+      copilot: 'GitHub Copilot sign-in',
+      endpoint: '{source} API key',
+      opencodeGo: 'OpenCode Go key',
+      route: 'served as {route}',
+      outcomes: { moved: 'Moved', present: 'Already there', refused: 'Refused', missing: 'No longer here' },
+      reasons: {
+        signedOut: 'Not signed in', unreadable: 'Login file unreadable', noAddress: 'No known API address',
+        otherApi: 'Not an OpenAI-compatible API', otherSignIn: 'Douane cannot take this sign-in', routeTaken: 'Route used by another endpoint',
+      },
+    },
   },
   /** A settings card an agent put in the conversation (`boite settings request|open`). */
   settingRequest: {

@@ -1,17 +1,17 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { ExternalLink, RefreshCw } from '@lucide/svelte';
+  import { RefreshCw } from '@lucide/svelte';
   import { subscriptionProxyName, type AccountQuota } from '@boite/contracts';
   import InfoTip from './InfoTip.svelte';
   import ProviderLogo from './ProviderLogo.svelte';
   import UsageLimits from './UsageLimits.svelte';
   import AccountRename from './AccountRename.svelte';
   import QuotaMachineScope from './QuotaMachineScope.svelte';
-  import { openExternal } from '../lib/links';
   import { gatewayReader, namedQuotas, quotaProviderOff, quotaReader, shownQuotas } from '../lib/quota-reader.svelte';
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
   import SubscriptionProxyDashboard from './SubscriptionProxyDashboard.svelte';
+  import GatewayOpenButton from './GatewayOpenButton.svelte';
   import SubscriptionProxySettings from './SubscriptionProxySettings.svelte';
 
   /**
@@ -104,8 +104,10 @@
       </button>
     {/if}
   </header>
-  {#if proxyEnabled && !gatewayNative}<div class="actions proxy-switch"><button type="button" class="ghost small" onclick={() => native = false} data-testid="subscription-proxy-show-dashboard"><span class="ui-label">{strings.subscriptionProxy.showDashboard}</span></button></div>
-  {:else if gatewayNative && proxy}<div class="actions proxy-switch"><button type="button" class="ghost small" onclick={() => void openExternal(proxy!.dashboardUrl)} data-testid="subscription-proxy-open"><ExternalLink size={15} /><span class="ui-label">{strings.subscriptionProxy.openDashboard}</span></button></div>{/if}
+  {#if proxyEnabled}<div class="actions proxy-switch">
+    {#if !gatewayNative}<button type="button" class="ghost small" onclick={() => native = false} data-testid="subscription-proxy-show-dashboard"><span class="ui-label">{strings.subscriptionProxy.showDashboard}</span></button>{/if}
+    <GatewayOpenButton {store} />
+  </div>{/if}
 
   {#if reader.error}
     <div class="card failed" role="alert" data-testid="limits-error">
