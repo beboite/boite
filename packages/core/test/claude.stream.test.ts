@@ -1,8 +1,10 @@
 import { describe, expect, test } from 'bun:test';
+import { crc32, deflateSync } from 'node:zlib';
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { MessagePart } from '@boite/contracts';
 import { waitFor } from './harness.ts';
 import {
+  answerEach,
   assistant,
   calls,
   claudeThread,
@@ -19,6 +21,31 @@ import {
 } from './fixtures/claude-query.ts';
 
 useClaudeHarness();
+
+/** A grey 8-bit PNG of the given size, written by hand so the test needs no encoder. */
+function greyPng(width: number, height: number): string {
+  const chunk = (type: string, body: Buffer): Buffer => {
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(body.length);
+    const typed = Buffer.concat([Buffer.from(type, 'ascii'), body]);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(typed) >>> 0);
+    return Buffer.concat([length, typed, crc]);
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8; // bit depth
+  header[9] = 0; // greyscale
+  const rows = Buffer.alloc((width + 1) * height, 128);
+  for (let row = 0; row < height; row += 1) rows[row * (width + 1)] = 0; // no filter
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', header),
+    chunk('IDAT', deflateSync(rows)),
+    chunk('IEND', Buffer.alloc(0)),
+  ]).toString('base64');
+}
 
 test('Claude Agent tools reach Team while child text remains on its sidechain', async () => {
   const client = await harness.connect();
@@ -407,31 +434,76 @@ describe('claude driver', () => {
     expect(documentsOf('toolu_bash')).toBeUndefined();
   });
 
+  test('on Claude 5.1+, the second of two thinking blocks before a tool call is the progress text', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    const reasoning = 'The failure points at the parser.';
+    const update = "Now I'll run the parser tests.";
+    // One API message per model: what 5.1+ and 5.0 send ahead of the same call.
+    const turn = (model: string, sessionId: string, toolId: string) => (fake: { emit(message: SDKMessage): void; end(): void }) => {
+      const event = (body: unknown) => fake.emit(streamEvent(sessionId, body));
+      fake.emit(init(sessionId));
+      event({ type: 'message_start', message: { id: `msg_${model}`, model } });
+      [reasoning, update].forEach((text, index) => {
+        event({ type: 'content_block_start', index, content_block: { type: 'thinking', thinking: '' } });
+        event({ type: 'content_block_delta', index, delta: { type: 'thinking_delta', thinking: text } });
+        event({ type: 'content_block_stop', index });
+      });
+      event({ type: 'content_block_start', index: 2, content_block: { type: 'tool_use', id: toolId, name: 'Bash', input: {} } });
+      event({ type: 'content_block_stop', index: 2 });
+      fake.emit(sdk({ ...(assistant(sessionId, [{ type: 'thinking', thinking: reasoning, signature: 's' }]) as object), message: { id: `msg_${model}`, model, content: [{ type: 'thinking', thinking: reasoning, signature: 's' }] } }));
+      fake.emit(sdk({ ...(assistant(sessionId, []) as object), message: { id: `msg_${model}`, model, content: [{ type: 'thinking', thinking: update, signature: 's' }] } }));
+      fake.emit(sdk({ ...(assistant(sessionId, []) as object), message: { id: `msg_${model}`, model, content: [{ type: 'tool_use', id: toolId, name: 'Bash', input: { command: 'bun test' } }] } }));
+      fake.emit(toolResult(sessionId, toolId, 'ok'));
+      fake.emit(success(sessionId));
+      fake.end();
+    };
+    const partsOf = async () => {
+      const thread = await client.call('threads.get', { threadId });
+      return (thread.messages.filter((message) => message.role === 'assistant').at(-1)?.parts ?? []).map((part: MessagePart) => part.type === 'tool' ? { type: 'tool' } : { type: part.type, text: (part as { text?: string }).text });
+    };
+
+    scripted(turn('claude-opus-5-5', 'sess-progress', 'tool_new'));
+    expect(await runTurn(client, threadId, 'fix it')).toBe('done');
+    // The reasoning stays folded, the update reads as the agent's own words.
+    expect(await partsOf()).toEqual([{ type: 'thinking', text: reasoning }, { type: 'text', text: update }, { type: 'tool' }]);
+
+    scripted(turn('claude-opus-5', 'sess-reasoning', 'tool_old'));
+    expect(await runTurn(client, threadId, 'fix it again')).toBe('done');
+    // A 5.0 model writes its updates as text: both blocks are reasoning.
+    expect(await partsOf()).toEqual([{ type: 'thinking', text: reasoning + update }, { type: 'tool' }]);
+  });
+
   test('an image attachment rides beside the text as a content block', async () => {
     const client = await harness.connect();
     const threadId = await claudeThread(client);
 
-    scripted((fake) => {
-      fake.emit(init('sess-image'));
-      fake.emit(assistant('sess-image', [{ type: 'text', text: 'i see it' }]));
-      fake.emit(success('sess-image'));
-    });
+    // Like the CLI, the fake answers once it has read the prompt.
+    scripted(() => undefined, answerEach('sess-image'));
 
     const PNG =
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+    // Stored when the composer's cap was 2048 px, or sent by a client that does not reduce.
+    const WIDE = greyPng(2048, 64);
     const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
     await client.call('turns.start', {
       threadId,
       prompt: 'what is this',
-      attachments: [{ kind: 'image', mimeType: 'image/png', data: PNG, name: 'pixel.png' }],
+      attachments: [
+        { kind: 'image', mimeType: 'image/png', data: PNG, name: 'pixel.png' },
+        { kind: 'image', mimeType: 'image/png', data: WIDE, name: 'wide.png' },
+      ],
     });
     expect((await finished).status).toBe('done');
 
-    const sent = JSON.parse(calls[0]?.prompts[0] ?? '[]') as unknown[];
-    expect(sent).toEqual([
+    const sent = JSON.parse(calls[0]?.prompts[0] ?? '[]') as { type: string; text?: string; source?: { type: string; media_type: string; data: string } }[];
+    expect(sent.slice(0, 2)).toEqual([
       { type: 'text', text: 'what is this' },
       { type: 'image', source: { type: 'base64', media_type: 'image/png', data: PNG } },
     ]);
+    // Past 2000 px Claude refuses a request with more than 20 images: the wide one is fitted.
+    const fitted = await new Bun.Image(Buffer.from(sent[2]?.source?.data ?? '', 'base64')).metadata();
+    expect({ width: fitted.width, height: fitted.height, format: fitted.format }).toEqual({ width: 2000, height: 63, format: 'png' });
   });
 
   test('supportedCommands lists the slash commands, and commands_changed moves the list', async () => {

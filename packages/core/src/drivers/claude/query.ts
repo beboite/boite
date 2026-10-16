@@ -1,6 +1,7 @@
-import type { EffortLevel, Options, Query, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { EffortLevel, Options, PermissionMode as SdkPermissionMode, Query, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { ImageAttachment, PermissionMode } from '@boite/contracts';
 import type { SessionContext } from '../types.ts';
+import { fitImages } from './images.ts';
 
 export const STDERR_MAX = 400;
 
@@ -27,7 +28,12 @@ export interface LiveSetup {
    */
   effortLevel: EffortLevel | null;
   fastMode: boolean;
-  permissionMode: Exclude<PermissionMode, 'yolo'>;
+  /**
+   * What the CLI runs in: the mode Boite set, or one the CLI reported entering
+   * by itself (EnterPlanMode, or an ExitPlanMode it was refused), which can be
+   * one Boite has no name for.
+   */
+  permissionMode: Exclude<PermissionMode, 'yolo'> | SdkPermissionMode;
   disableHooks: boolean;
 }
 
@@ -44,32 +50,33 @@ export function liveSetup(thread: { model: string | null; effort: string | null;
   };
 }
 
+function userMessage(text: string, images: ImageAttachment[] = []): SDKUserMessage {
+  const content =
+    images.length === 0
+      ? text
+      : [
+          { type: 'text', text },
+          ...images.map((image) => ({
+            type: 'image',
+            source: { type: 'base64', media_type: image.mimeType, data: image.data },
+          })),
+        ];
+  return { type: 'user', message: { role: 'user', content }, parent_tool_use_id: null } as SDKUserMessage;
+}
+
 /**
  * The user messages of a warm session, in order. The SDK reads this once and
  * answers every message with its own `result`, so one generator carries every
  * turn of the thread until the session ends.
  */
 export class PromptQueue {
-  private readonly items: SDKUserMessage[] = [];
+  /** A message with images waits for them to be fitted; the order stays the push order. */
+  private readonly items: (SDKUserMessage | Promise<SDKUserMessage>)[] = [];
   private notify: (() => void) | null = null;
   private ended = false;
 
   push(text: string, attachments: ImageAttachment[]): void {
-    const content =
-      attachments.length === 0
-        ? text
-        : [
-            { type: 'text', text },
-            ...attachments.map((attachment) => ({
-              type: 'image',
-              source: { type: 'base64', media_type: attachment.mimeType, data: attachment.data },
-            })),
-          ];
-    this.items.push({
-      type: 'user',
-      message: { role: 'user', content },
-      parent_tool_use_id: null,
-    } as SDKUserMessage);
+    this.items.push(attachments.length === 0 ? userMessage(text) : fitImages(attachments).then((images) => userMessage(text, images)));
     this.wake();
   }
 
@@ -82,11 +89,12 @@ export class PromptQueue {
     for (;;) {
       const next = this.items.shift();
       if (next !== undefined) {
-        yield next;
+        const message = await next;
+        yield message;
         // Asking for the next prompt means the SDK wrote this one. Its loop and
         // this generator still hold the object until then: let the images go.
-        const content = next.message.content;
-        if (typeof content !== 'string') next.message.content = content.filter(block => block.type !== 'image');
+        const content = message.message.content;
+        if (typeof content !== 'string') message.message.content = content.filter(block => block.type !== 'image');
         continue;
       }
       if (this.ended) return;

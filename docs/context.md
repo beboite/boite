@@ -136,6 +136,13 @@ compact again. The timers live in memory: a core restart drops them, and the
 next finished turn arms a new one. The in-memory client implements `turn-end`
 and the threshold only; it has no background work and no cache to wait on.
 
+## Turns a provider refused
+
+A turn refused because the model was at capacity tries again by itself, and a
+thread stopped by a usage limit can resume once the window resets (opt-in).
+Both, their prompts and their guards are in
+[usage](usage.md#when-a-provider-refuses-a-turn).
+
 ## Pending prompts, goals and loops
 
 Enter during a running turn queues the message and its attachments; where the

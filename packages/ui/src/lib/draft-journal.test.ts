@@ -47,3 +47,64 @@ test('a stalled durable write aborts and rejects instead of holding flush foreve
   expect(transaction.abort).toHaveBeenCalledOnce();
   expect(await writing).toBeInstanceOf(Error);
 });
+
+/** A connection whose writes complete, or one the browser closed: `transaction` throws InvalidStateError. */
+function connection(closed: boolean) {
+  const db = {
+    onclose: null as (() => void) | null,
+    close: vi.fn(),
+    transaction: vi.fn(() => {
+      if (closed) throw new DOMException('The database connection is closing.', 'InvalidStateError');
+      const transaction = {
+        oncomplete: null as (() => void) | null,
+        onabort: null as (() => void) | null,
+        error: null,
+        objectStore: () => ({ put: () => Promise.resolve().then(() => transaction.oncomplete?.()) }),
+        abort: vi.fn()
+      };
+      return transaction;
+    })
+  };
+  return db;
+}
+
+function serve(connections: ReturnType<typeof connection>[]) {
+  const open = vi.fn(() => {
+    const request = { result: connections[open.mock.calls.length - 1], onsuccess: null as (() => void) | null };
+    Promise.resolve().then(() => request.onsuccess?.());
+    return request;
+  });
+  vi.stubGlobal('indexedDB', { open });
+  return open;
+}
+
+test('a connection the browser closes is reopened for the next write', async () => {
+  const first = connection(false), second = connection(false);
+  const open = serve([first, second]);
+  const { writeDraftJournal } = await import('./draft-journal');
+  await writeDraftJournal('fixture', { text: 'one' });
+  first.onclose?.();
+  await expect(writeDraftJournal('fixture', { text: 'two' })).resolves.toBeUndefined();
+  expect(open).toHaveBeenCalledTimes(2);
+  expect(second.transaction).toHaveBeenCalledOnce();
+});
+
+test('a write on a connection closed without an event retries once on a fresh one', async () => {
+  const dead = connection(true), fresh = connection(false);
+  const open = serve([dead, fresh]);
+  const { writeDraftJournal } = await import('./draft-journal');
+  await expect(writeDraftJournal('fixture', { text: 'kept' })).resolves.toBeUndefined();
+  expect(open).toHaveBeenCalledTimes(2);
+  expect(dead.transaction).toHaveBeenCalledOnce();
+  expect(fresh.transaction).toHaveBeenCalledOnce();
+});
+
+test('a second closed connection fails the write instead of retrying forever', async () => {
+  const open = serve([connection(true), connection(true), connection(false)]);
+  const { writeDraftJournal } = await import('./draft-journal');
+  await expect(writeDraftJournal('fixture', {})).rejects.toMatchObject({ name: 'InvalidStateError' });
+  expect(open).toHaveBeenCalledTimes(2);
+  // The failed connection is not kept either: the next save opens the third.
+  await expect(writeDraftJournal('fixture', {})).resolves.toBeUndefined();
+  expect(open).toHaveBeenCalledTimes(3);
+});

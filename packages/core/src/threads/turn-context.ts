@@ -16,7 +16,7 @@ import type {
 } from '@boite/contracts';
 import { activityPrompt } from '../activity-prompt.ts';
 import { agentEnvOf } from '../agent.ts';
-import { agentGuide } from '../agent-guide.ts';
+import { agentGuide, SHORT_ANSWERS } from '../agent-guide.ts';
 import { nativeSkillFiles } from '../brain.ts';
 import { takesSystemGuide } from '../drivers/index.ts';
 import { contextRulesBlock } from '@boite/contracts';
@@ -59,7 +59,8 @@ export class TurnContexts {
     if ((mode !== null && !mode.guides) || this.core.brain.config().boiteGuide === false) return '';
     const settings = this.core.settings.get();
     const logAccess = settings.agentLogAccess !== false;
-    const skills = logAccess ? builtinSkills(this.core.dataDir, message => { try { this.core.logs.warn(message, { source: 'skills', event: 'skills.write-failed' }); } catch { /* The guide is built without that skill. */ } }) : [];
+    // Without log access the guide still lists the built-in skills; only report-issue needs the logs.
+    const skills = builtinSkills(this.core.dataDir, message => { try { this.core.logs.warn(message, { source: 'skills', event: 'skills.write-failed' }); } catch { /* The guide is built without that skill. */ } });
     // Echo treats "question" as a test directive, including in injected help.
     return agentGuide(provider.protocol !== 'echo' && settings.asyncQuestions !== false, logAccess, skills);
   }
@@ -327,7 +328,10 @@ export class TurnContexts {
       const guide = inject && sessionId === null && guideEnabled && systemGuide === undefined ? this.boiteGuide(thread, provider) : '';
       // Custom rules lead every fresh session, whatever the guides, on every provider.
       const rules = inject && sessionId === null && mode?.rules ? `${contextRulesBlock(mode.rules)}\n\n` : '';
-      const prefix = rules + (inject && !noGuides ? this.core.brain.instructions(provider.id, listedSkills) : '') + guide;
+      // Every turn, not once a session: a style said once fades after a few answers.
+      // Boite's own text, so the guide switch turns it off with the rest.
+      const style = inject && guideEnabled && operation !== 'compact' && this.core.settings.get().shortAnswers !== false ? `${SHORT_ANSWERS}\n\n` : '';
+      const prefix = rules + (inject && !noGuides ? this.core.brain.instructions(provider.id, listedSkills) : '') + guide + style;
       return carried.memory + prefix + (prefix ? 'User request:\n' : '') + said + deferred + body + coordinationGuide + tail(inject && sessionId === null && guideEnabled) + this.threads.cards.askInstructions({ ...thread, sessionId }, provider, turn, body);
     };
     return {

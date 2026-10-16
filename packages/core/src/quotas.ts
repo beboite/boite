@@ -281,6 +281,16 @@ export class QuotaStore {
     }));
     return [...result.map((row) => this.observations.get(row.accountId) ?? row), ...await gateway];
   }
+  /**
+   * One account's reading, through the same cache, backoff and shared read as
+   * the list. Null for an account that is gone; a failed read answers its last
+   * good reading, marked unavailable.
+   */
+  async readAccount(accountId: string, refresh = false): Promise<AccountQuota | null> {
+    const account = this.core.accounts.list().find((row) => row.id === accountId);
+    if (account === undefined) return null;
+    return this.observations.get(accountId) ?? await this.one(account, refresh);
+  }
   private async one(account: Account, refresh: boolean): Promise<AccountQuota> {
     const base = this.base(account);
     if (base.status !== 'unavailable') return base;

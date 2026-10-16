@@ -1,4 +1,4 @@
-import type { ProjectId, ProviderId, ThreadId, Timestamp, Usage } from './index';
+import type { DelegationWorktree, ProjectId, ProviderId, ThreadId, Timestamp, Usage } from './index';
 import type { ContextPreset, ContextRequest } from './context-mode';
 
 /**
@@ -38,6 +38,12 @@ export interface WorkflowStepPlan {
   when?: WorkflowCondition;
   /** Structured output the step must return, validated by the core. */
   output?: WorkflowShape;
+  /**
+   * Run the step in a git worktree of its own, on a new branch from the
+   * conversation's current HEAD, instead of the shared checkout. Uncommitted
+   * edits are not copied. The run's summary names the branch to merge.
+   */
+  worktree?: boolean;
 }
 
 export interface WorkflowLimits {
@@ -95,6 +101,8 @@ export interface WorkflowInstance {
   error: string | null;
   startedAt: Timestamp | null;
   finishedAt: Timestamp | null;
+  /** The step's own worktree, for a step that set `worktree`. Missing otherwise and on older runs. */
+  worktree?: DelegationWorktree;
 }
 
 export interface WorkflowNode {

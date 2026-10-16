@@ -14,6 +14,8 @@ import {
   type RpcParams,
   type RpcResult,
   type ThreadId,
+  type ThreadRetry,
+  type ThreadWorktreeRemoval,
 } from '@boite/contracts';
 import { RpcFailure, type CallOptions, type ClientState, type EventHandler, type ObservableClient } from './client';
 import { closedFailure } from './rpc-error';
@@ -54,6 +56,7 @@ import { devicesMethods } from './fake-client/devices';
 import { pullRequestMethods } from './fake-client/pull-requests';
 import { worktreeMethods } from './fake-client/worktrees';
 import { serverUpdateMethods } from './fake-client/server-update';
+import { planRetry, retryMethods, seedRetry } from './fake-client/retry';
 import { closeSideQuestions } from './fake-client/side-questions';
 import { holdAfterRestart } from './fake-client/recovery';
 import { journalInspectionMethods } from './fake-client/journal-inspection';
@@ -98,6 +101,7 @@ export class FakeClient implements ObservableClient {
     seed(ctx);
     if (options.delegationDemo) seedDelegationDemo(ctx);
     if (options.agentsDemo) seedAgentsDemo(ctx);
+    seedRetry(ctx);
     if (options.uninstalled) {
       ctx.providers = ctx.providers.filter(provider => provider.id !== 'echo').map(provider => ({
         ...provider, available: false, executable: null,
@@ -155,6 +159,11 @@ export class FakeClient implements ObservableClient {
   holdAfterRestart(threadId: ThreadId, prompt: string) {
     return holdAfterRestart(this.#ctx, threadId, prompt);
   }
+  /** A fixture for a retry the core planned: the thread's row carries it until it is cancelled. */
+  planRetry(threadId: ThreadId, retry: ThreadRetry) {
+    planRetry(this.#ctx, threadId, retry);
+  }
+
 
   /**
    * Takes a folder off the fake's disk, as a repository deleted outside the
@@ -163,6 +172,18 @@ export class FakeClient implements ObservableClient {
    */
   loseFolder(path: string): void {
     this.#ctx.goneFolders.add(pathKey(path));
+  }
+
+  /**
+   * What the core's settled worktree cleanup leaves behind: the thread's
+   * folder gone from the fake's disk and the removal on its summary.
+   */
+  removeWorktree(threadId: ThreadId, removal: Omit<ThreadWorktreeRemoval, 'path'>): void {
+    const thread = this.#ctx.threads.get(threadId);
+    if (!thread) throw new Error(`no fake thread ${threadId}`);
+    this.#ctx.goneFolders.add(pathKey(thread.cwd));
+    thread.worktreeRemoved = { ...removal, path: thread.cwd };
+    this.#ctx.touch(thread);
   }
 
   setMergedPrFixture(threadId: ThreadId, fixture: MergedPrFixture): void {
@@ -260,7 +281,7 @@ export class FakeClient implements ObservableClient {
     if (this.#missing.has(method)) throw new RpcFailure({ code: RpcErrorCode.MethodNotFound, message: `unknown method ${method}` });
     // The fixture has no thread-bound agent token; do not widen this scoped read.
     if (bus.principal === 'agent' && (method === 'threads.capabilities' || method === 'threads.mergeBack')) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method} requires a thread-bound agent identity` });
-    if (bus.principal === 'agent' && (method === 'core.logs' || method === 'projects.setAutoArchiveMergedPr' || method === 'quotas.reset')) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method} is not one of the agent's methods` });
+    if (bus.principal === 'agent' && (method === 'core.logs' || method === 'projects.setAutoArchiveMergedPr' || method === 'projects.setAutoRemoveWorktrees' || method === 'quotas.reset')) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method} is not one of the agent's methods` });
     // The router's gate, word for word: deny by default, `hello` before it.
     if (bus.principal === 'session' && method !== 'hello' && !DEVICE_METHODS.has(method)) {
       throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method} is for the owner only` });
@@ -393,6 +414,7 @@ export class FakeClient implements ObservableClient {
       ...brainMethods(ctx),
       ...logMethods(ctx),
       ...serverUpdateMethods(ctx),
+      ...retryMethods(ctx),
       ...hookMethods(ctx),
       ...pairingMethods(ctx),
       ...projects,

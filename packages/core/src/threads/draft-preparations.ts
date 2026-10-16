@@ -42,6 +42,12 @@ export class DraftPreparations {
 
   constructor(private readonly core: Core) { this.ledger = new DraftReservationLedger(core); }
 
+  /** Folders a draft reserved or is cleaning up: the worktree cleanup leaves them alone. */
+  reservedPaths(): string[] {
+    const live = [...this.entries.values(), ...this.backlog].flatMap(entry => entry.ownership ? [entry.ownership.path] : []);
+    return [...new Set([...this.ledger.list().map(ownership => ownership.path), ...live])];
+  }
+
   /** Startup and speculative admission share one reconciliation barrier. */
   recover(): Promise<void> { return this.readiness ??= this.ledger.recover(); }
 

@@ -58,9 +58,12 @@ describe('the decisions', () => {
     expect(isReducible({ type: 'image/avif', name: 'a.avif' })).toBe(true);
   });
 
-  test('the long edge comes to 2048 and the ratio stays', () => {
-    expect(fitWithin(1179, 2556)).toEqual({ width: 945, height: IMAGE_MAX_EDGE });
-    expect(fitWithin(4032, 3024)).toEqual({ width: IMAGE_MAX_EDGE, height: 1536 });
+  test('the long edge comes to 2000 and the ratio stays', () => {
+    expect(IMAGE_MAX_EDGE).toBe(2000);
+    expect(fitWithin(1179, 2556)).toEqual({ width: 923, height: IMAGE_MAX_EDGE });
+    expect(fitWithin(4032, 3024)).toEqual({ width: IMAGE_MAX_EDGE, height: 1500 });
+    // Claude refuses a side over 2000 px once a request holds more than 20 images.
+    expect(fitWithin(2048, 1536)).toEqual({ width: 2000, height: 1500 });
     expect(fitWithin(800, 600)).toEqual({ width: 800, height: 600 });
   });
 
@@ -73,7 +76,7 @@ describe('the decisions', () => {
 });
 
 describe('prepareImage', () => {
-  test('an iPhone screenshot comes to 2048 px as the lighter of JPEG and PNG', async () => {
+  test('an iPhone screenshot comes to 2000 px as the lighter of JPEG and PNG', async () => {
     const shot = file('IMG_0001.PNG', 'image/png', 3_200_000);
     const fake = codec({ width: 1179, height: 2556 }, { 'image/jpeg': 420_000, 'image/png': 1_900_000 });
     const prepared = await prepareImage(shot, fake.codec);
@@ -82,8 +85,8 @@ describe('prepareImage', () => {
     expect(prepared.file.name).toBe('IMG_0001.jpg');
     expect(prepared.file.size).toBe(420_000);
     expect(fake.encoded).toEqual([
-      { width: 945, height: 2048, mimeType: 'image/png', quality: undefined },
-      { width: 945, height: 2048, mimeType: 'image/jpeg', quality: 0.85 }
+      { width: 923, height: 2000, mimeType: 'image/png', quality: undefined },
+      { width: 923, height: 2000, mimeType: 'image/jpeg', quality: 0.85 }
     ]);
     expect(fake.closed()).toBe(1);
   });
@@ -121,14 +124,14 @@ describe('prepareImage', () => {
     expect(prepared).toEqual({ kind: 'undecodable', file: photo });
   });
 
-  test('a small image already within 2048 px goes untouched', async () => {
+  test('a small image already within 2000 px goes untouched', async () => {
     const small = file('pixel.png', 'image/png', 40_000);
     const fake = codec({ width: 600, height: 400 }, { 'image/jpeg': 10, 'image/png': 10 });
     expect(await prepareImage(small, fake.codec)).toEqual({ kind: 'kept', file: small });
     expect(fake.encoded).toEqual([]);
   });
 
-  test('an image within 2048 px that no encoding beats is sent as it is', async () => {
+  test('an image within 2000 px that no encoding beats is sent as it is', async () => {
     const photo = file('photo.jpg', 'image/jpeg', 800_000);
     const prepared = await prepareImage(photo, codec({ width: 2000, height: 1500 }, { 'image/jpeg': 950_000 }).codec);
     expect(prepared).toEqual({ kind: 'kept', file: photo });

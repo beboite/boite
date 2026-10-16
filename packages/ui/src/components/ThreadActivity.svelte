@@ -5,7 +5,7 @@
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
   import { dockRoom, questionDock } from '../lib/question-dock.svelte';
-  import { ignoreQuestions, replyOf, repliesOf, sendAnswer, writeAnswer } from '../lib/question-reply.svelte';
+  import { ignoreQuestions, releaseWaiting, replyOf, repliesOf, sendAnswer, writeAnswer } from '../lib/question-reply.svelte';
   import QuestionCard from './QuestionCard.svelte';
   import SettingRequestCard from './SettingRequestCardLoader.svelte';
   import { settingHeading } from '../lib/setting-requests';
@@ -55,6 +55,8 @@
   });
   // The composer answers the question on screen when the agent stopped for none.
   $effect(() => { repliesOf(store).docked = shown?.id ?? null; });
+  // A question that arrived while the user wrote takes the composer once it is empty and quiet.
+  $effect(() => releaseWaiting(store));
   function page(step: -1 | 1) {
     const next = asked[(at + step + asked.length) % asked.length];
     if (next) shownId = next.id;

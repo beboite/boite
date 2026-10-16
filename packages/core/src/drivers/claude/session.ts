@@ -5,7 +5,7 @@ import type { SpawnedChild } from '../../procs.ts';
 import { profileFor, resolveExecutable } from '../../providers/resolve.ts';
 import type { LiveTurnSettings, SessionContext, TurnContext } from '../types.ts';
 import { hookReport } from './hooks.ts';
-import { authenticationFailureOf, backgroundKind, commandsOf, isAuthenticationFailure, restoredCost, subagentOf } from './mapping.ts';
+import { authenticationFailureOf, authenticationSuspectOf, backgroundKind, commandsOf, isAuthenticationFailure, restoredCost, subagentOf } from './mapping.ts';
 import { toolGate } from './permissions.ts';
 import { agentEnv, liveSetup, PROMPT_EFFORT, PromptQueue, STDERR_MAX, THINKING_DISPLAY_FLAG } from './query.ts';
 import type { ClaudeDeps, LiveSetup } from './query.ts';
@@ -101,6 +101,8 @@ export class ClaudeSession {
   private closing = false;
   private ended = false;
   private loginRejected = false;
+  /** An `authentication_failed` frame whose result has not said yet whether it was a 401 or a 403. */
+  private authSuspect = false;
   /** The last `total_cost_usd` this CLI process reported, which the next result includes. */
   private costSoFar = 0;
   /** A resumed session's earlier turns, until the first result says whether the CLI restored them. */
@@ -484,7 +486,9 @@ export class ClaudeSession {
 
   /** `replayed` is an adopted message handed to the turn that opened for it: already diagnosed when it came. */
   private receive(message: SDKMessage, replayed = false): void {
-    const authFailure = authenticationFailureOf(message);
+    if (authenticationSuspectOf(message)) this.authSuspect = true;
+    const authFailure = authenticationFailureOf(message, this.authSuspect);
+    if (message.type === 'result' && subagentOf(message) === null) this.authSuspect = false;
     if (authFailure !== null) {
       this.loginRejected = true;
       (this.head()?.ctx ?? this.ctx).authenticationFailed?.();
@@ -499,6 +503,7 @@ export class ClaudeSession {
     if (message.type === 'system' && message.subtype === 'init') {
       for (const report of this.fastReports.splice(0)) report(message.fast_mode_state);
     }
+    if (message.type === 'system' && (message.subtype === 'init' || message.subtype === 'status')) this.noteMode(message.permissionMode);
     if (this.replayed(message)) return;
     // Counted once here, with or without a turn: an adopted message is handed
     // to the turn that opens for it later.
@@ -532,6 +537,18 @@ export class ClaudeSession {
       if (turn.sessionLost || this.loginRejected) this.close(null);
       this.endTurn(turn);
     }
+  }
+
+  /**
+   * The permission mode the CLI says it runs in. Claude can switch it by
+   * itself: EnterPlanMode puts it in plan, and an ExitPlanMode the user
+   * refused leaves it there. Recording it makes the next turn's `applyLive`
+   * see the drift and put the thread's own mode back, instead of sending
+   * nothing because the thread's setting did not move.
+   */
+  private noteMode(mode: string | undefined): void {
+    if (typeof mode !== 'string' || mode.length === 0 || this.applied === null) return;
+    this.applied.permissionMode = mode as LiveSetup['permissionMode'];
   }
 
   /** True for the empty result that closes a resume's report of dead background tasks. */
@@ -647,7 +664,10 @@ export class ClaudeSession {
   /** The loop is over: the CLI is gone, so nothing of this session survives. */
   private finish(reason: string | null): void {
     if (this.ended) return;
-    if (reason !== null && isAuthenticationFailure(reason)) (this.head()?.ctx ?? this.ctx).authenticationFailed?.();
+    // A CLI gone between its `authentication_failed` frame and the result that
+    // would have named the status: the label is all there is to go on.
+    if ((reason !== null && isAuthenticationFailure(reason)) || this.authSuspect) (this.head()?.ctx ?? this.ctx).authenticationFailed?.();
+    this.authSuspect = false;
     this.ended = true;
     // Nothing waits on a query that will never open.
     this.markReady();
