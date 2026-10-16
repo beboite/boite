@@ -1,5 +1,6 @@
 import { MergedPrArchive } from './merged-pr-archive.ts';
 import { PullRequests } from './pull-requests.ts';
+import { PullRequestWatches, type WatchTiming } from './pull-request-watch.ts';
 import { existsSync, mkdirSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { basename, dirname, join } from 'node:path';
@@ -77,6 +78,8 @@ export interface SubscriptionSink {
 
 export interface CoreOptions {
   serverUpdates?: ServerUpdateOptions;
+  /** Tests shorten the pull request watch loop's waits. */
+  pullRequestWatches?: Partial<WatchTiming>;
   bundleHash?: string;
   dataDir: string;
   token: string;
@@ -136,6 +139,7 @@ export class Core {
   readonly pullRequests: PullRequests;
   readonly mergedPrArchive: MergedPrArchive;
   readonly worktreeCleanup: WorktreeCleanup;
+  readonly pullRequestWatches: PullRequestWatches;
   readonly journal: Journal;
   readonly router: Router;
   readonly settings: SettingsStore;
@@ -360,6 +364,7 @@ export class Core {
 
     this.workforce = new AgentStore(this);
     this.pullRequests = new PullRequests(this);
+    this.pullRequestWatches = new PullRequestWatches(this, (threadId, args) => this.pullRequests.gh(threadId, args), options.pullRequestWatches);
     registerModules(this);
     phase('startup.stores-ready', 'Stores and RPC handlers ready', { methods: this.router.methods().length });
     this.#onShutdown = options.onShutdown;
@@ -395,6 +400,7 @@ export class Core {
     this.mergedPrArchive.start();
     this.worktreeCleanup = new WorktreeCleanup(this);
     this.worktreeCleanup.start();
+    this.pullRequestWatches.start();
     this.logs.record('info', `Core ${this.version} started in ${Date.now() - this.startedAt} ms, ${process.platform} ${process.arch}, Bun ${process.versions.bun ?? 'unknown'}`, {
       source: 'core', event: 'core.started', durationMs: Date.now() - this.startedAt,
       data: { version: this.version, channel: this.channel, os: process.platform, arch: process.arch, bun: process.versions.bun ?? null, pid: process.pid, cliShim: this.cliDir !== null, trace: this.procs.capability().mode },
@@ -470,6 +476,7 @@ export class Core {
     this.coordination.beginClose();
     void this.mergedPrArchive.close();
     void this.worktreeCleanup.close();
+    void this.pullRequestWatches.close();
     this.group.beginClose();
     this.activity.close();
     this.threads.autoCompact.close();
@@ -497,6 +504,7 @@ export class Core {
     this.threads.sideQuestions.close();
     await this.mergedPrArchive.close();
     await this.worktreeCleanup.close();
+    await this.pullRequestWatches.close();
     this.threads.titles.close();
     this.threads.autoCompact.close();
     this.threads.limitResumes.close();

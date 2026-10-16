@@ -434,6 +434,8 @@ export function threadMethods(ctx: FakeContext) {
       thread.archivedAt = thread.archived ? (was ? thread.archivedAt ?? null : Date.now()) : null;
       if (thread.archived) {
         delete thread.archiveReason;
+        // As the core: archive and Mark done end the thread's pull request watches.
+        thread.pullRequestWatches = [];
         cancelFamilySideQuestions(ctx, thread.id);
         const family = [...ctx.threads.values()].filter(member => member.id === thread.id || member.parentThreadId === thread.id);
         await Promise.all(family.map(member => putAway(ctx, member)));
@@ -693,7 +695,9 @@ export function threadMethods(ctx: FakeContext) {
       // As the core: Stop also drops a planned retry, and counts as having stopped something.
       const plannedRetry = thread.retry != null;
       if (plannedRetry) { thread.retry = null; ctx.touch(thread); }
-      const stopped = await ctx.stopTurn(params.threadId) || childrenStopped > 0 || plannedRetry;
+      const unwatched = thread.pullRequestWatches?.length ?? 0;
+      if (unwatched > 0) { thread.pullRequestWatches = []; ctx.emit('thread.updated', structuredClone(toSummary(thread))); }
+      const stopped = await ctx.stopTurn(params.threadId) || childrenStopped > 0 || plannedRetry || unwatched > 0;
       // As the core: Stop on an idle thread ends what it still runs in the background.
       if (!stopped && (thread.background?.length ?? 0) > 0) {
         ctx.setBackground(thread, [], 'session-ended');
