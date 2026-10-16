@@ -162,8 +162,8 @@
   /* An inner accent glow while the scene plays, so it reads as an animation and not a picture. */
   figure::after { content: ''; position: absolute; inset: 0; z-index: 3; border-radius: inherit; pointer-events: none; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 55%, transparent), inset 0 0 22px color-mix(in srgb, var(--color-accent) 30%, transparent); opacity: 0; transition: opacity var(--dur-3) var(--ease-out-quint); }
   figure.playing::after { opacity: 1; animation: glow calc(var(--dur-3) * 8) ease-in-out infinite alternate; }
-  /* Reserve a small row for playback so controls never cover the illustration. */
-  .controls { position: relative; z-index: 2; display: flex; align-items: center; justify-content: flex-end; gap: 2px; height: 28px; margin-top: 2px; opacity: 0; transform: translateY(-3px); transition: opacity var(--dur-2) var(--ease-out-quint), transform var(--dur-2) var(--ease-out-quint); }
+  /* Reserve a small row for playback so controls never cover the illustration: hidden, they rise no further than their margin. */
+  .controls { position: relative; z-index: 2; display: flex; align-items: center; justify-content: flex-end; gap: 2px; height: 28px; margin-top: 2px; opacity: 0; transform: translateY(-2px); transition: opacity var(--dur-2) var(--ease-out-quint), transform var(--dur-2) var(--ease-out-quint); }
   .controls button { width: 28px; height: 28px; color: var(--color-muted-foreground); }
   .controls button:hover { color: var(--color-foreground); }
   figure:hover .controls, figure:focus-within .controls, figure.paused .controls { opacity: 1; transform: none; }
