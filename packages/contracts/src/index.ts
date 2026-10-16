@@ -1164,8 +1164,36 @@ export interface ThreadSummary {
    * lifetime is unknown or no turn has finished. Missing on older cores.
    */
   promptCache?: PromptCache | null;
+  /**
+   * What the core plans to try again by itself after a provider refused a
+   * turn for availability (`ThreadRetry`). Null when nothing is planned;
+   * missing on older cores.
+   */
+  retry?: ThreadRetry | null;
   createdAt: Timestamp;
   updatedAt: Timestamp;
+}
+
+/**
+ * An automatic retry the core planned after a provider refused a turn for
+ * availability rather than for a fault of the request (docs/usage.md).
+ * `capacity`: the model was at capacity; the same turn tries again at `at`,
+ * the `attempt`th of `attempts` tries, and the thread stays running meanwhile.
+ * `usage-limit`: the subscription window was spent and `autoResumeLimitedThreads`
+ * is on; a new turn resumes the thread at `at`, shortly after `resetsAt`, and
+ * the plan survives a core restart. `turns.cancelRetry` or Stop cancels either.
+ */
+export interface ThreadRetry {
+  kind: 'capacity' | 'usage-limit';
+  /** The turn the provider refused. */
+  turnId: TurnId;
+  /** When the core tries again. */
+  at: Timestamp;
+  /** This try's number, from 1; always 1 for a usage limit. */
+  attempt: number;
+  attempts: number;
+  /** When the spent window resets, for a usage limit; null for capacity. */
+  resetsAt: Timestamp | null;
 }
 
 export interface Usage {
@@ -2187,6 +2215,12 @@ export interface Settings {
    * machine it controls. Missing on older cores and before the first star.
    */
   modelFavorites?: ModelFavorites;
+  /**
+   * A turn that failed on a subscription usage limit resumes by itself once
+   * that limit's window resets: one new turn per window and thread, with a
+   * short continue prompt (docs/usage.md). Missing reads as off.
+   */
+  autoResumeLimitedThreads?: boolean;
 }
 
 /** One starred model. Accounts are named by label: an id means nothing on another machine. */
@@ -4507,6 +4541,12 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'turns.stop': { params: { threadId: ThreadId }; result: { stopped: boolean } };
   /** Resume or discard exactly one unsent prompt held after restart, retaining its execution selection. */
   'turns.recover': { params: { threadId: ThreadId; turnId: TurnId; action: 'resume' | 'discard' }; result: Turn };
+  /**
+   * Cancels the retry the core planned for the thread (`ThreadSummary.retry`).
+   * A capacity retry's turn then fails with the provider's refusal; a usage
+   * limit resume is dropped. False when nothing was planned.
+   */
+  'turns.cancelRetry': { params: { threadId: ThreadId }; result: { cancelled: boolean } };
 
   /**
    * The requests still unanswered, in the order they were created; every thread

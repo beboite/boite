@@ -380,6 +380,8 @@ export class Core {
     // left running or queued is closed here, or nothing ever would.
     this.threads.agentState.backgroundHistory.interruptLive();
     const recovered = this.threads.recoverStuckTurns();
+    // After recovery: a thread a usage limit stopped resumes at its window's reset, across restarts.
+    this.threads.limitResumes.start();
     this.threads.cards.restoreAsyncQuestions();
     phase('startup.recovered', `Previous run recovered, ${recovered} unfinished turns`, { stuckTurns: recovered });
     queueMicrotask(() => {
@@ -471,6 +473,7 @@ export class Core {
     this.group.beginClose();
     this.activity.close();
     this.threads.autoCompact.close();
+    this.threads.limitResumes.close();
     this.#drainPromise = this.agentRuntime.close().then(() => this.scheduler.drain(timeoutMs));
     return this.#drainPromise;
   }
@@ -496,6 +499,7 @@ export class Core {
     await this.worktreeCleanup.close();
     this.threads.titles.close();
     this.threads.autoCompact.close();
+    this.threads.limitResumes.close();
     await this.agentRuntime.close();
     this.workforce.close();
     this.#stopping = true;
