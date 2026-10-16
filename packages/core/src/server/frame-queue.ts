@@ -34,11 +34,6 @@ export class FrameQueue {
   private active = 0;
   private activeAgents = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
-  /** A pump is queued as a microtask. */
-  private soon = false;
-  /** Time the microtask pumps took since the last timer pump or pause, and when the last one ended. */
-  private fastSpent = 0;
-  private fastEnd = 0;
   private count = 0;
   private bytes = 0;
   private closed = false;
@@ -76,7 +71,7 @@ export class FrameQueue {
     retained.bytes += bytes;
     this.retained.set(connection, retained);
     const result = new Promise<void>((resolve, reject) => queue.frames.push({ raw, resolve, reject }));
-    this.schedule(this.active === 0 && this.count === 1);
+    this.schedule();
     return result;
   }
 
@@ -93,12 +88,13 @@ export class FrameQueue {
 
   close(): void {
     this.closed = true;
-    this.cancel();
+    if (this.timer !== null) clearTimeout(this.timer);
+    this.timer = null;
     for (const connection of this.pending.keys()) this.drop(connection);
   }
 
   private pump(): void {
-    this.cancel();
+    this.timer = null;
     const deadline = performance.now() + SLICE_MS;
     while (this.pending.size > 0 && this.active < MAX_ACTIVE && performance.now() < deadline) {
       const available = [...this.pending].find(([connection]) => (this.activeByConnection.get(connection) ?? 0) < MAX_ACTIVE_PER_CONNECTION
@@ -133,34 +129,8 @@ export class FrameQueue {
     if (this.active < MAX_ACTIVE) this.schedule();
   }
 
-  /**
-   * A request that finds the queue idle runs in a microtask, after the frames
-   * of the same read have queued, so a flood is still bounded before any of it
-   * runs. Those microtask pumps share one 4 ms slice, refilled by a timer pump
-   * or a 4 ms pause: a burst of quick requests, each finding the queue idle,
-   * cannot hold the loop. Otherwise the queue pumps on a 1 ms timer, which lets
-   * HTTP, drains and other clients in between slices. Not `setImmediate`: with
-   * it, Windows CI left a client's last request queued until its socket closed.
-   */
-  private schedule(idle = false): void {
-    if (this.closed || this.pending.size === 0 || this.timer !== null || this.soon) return;
-    if (idle && performance.now() - this.fastEnd >= SLICE_MS) this.fastSpent = 0;
-    if (idle && this.fastSpent < SLICE_MS) {
-      this.soon = true;
-      queueMicrotask(() => {
-        if (!this.soon) return;
-        const started = performance.now();
-        this.pump();
-        this.fastEnd = performance.now();
-        this.fastSpent += this.fastEnd - started;
-      });
-    } else this.timer = setTimeout(() => { this.fastSpent = 0; this.pump(); }, 1);
-  }
-
-  private cancel(): void {
-    if (this.timer !== null) clearTimeout(this.timer);
-    this.timer = null;
-    this.soon = false;
+  private schedule(): void {
+    if (!this.closed && this.pending.size > 0 && this.timer === null) this.timer = setTimeout(() => this.pump(), 1);
   }
 
   private refuse(connection: ServerConnection, reason: string): void {
