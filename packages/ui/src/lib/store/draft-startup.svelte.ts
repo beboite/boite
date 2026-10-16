@@ -31,8 +31,7 @@ export class DraftStartup {
         const active = s.visible && !this.#hidden && s.page === 'chat' && s.connection === 'ready';
         const files = active ? input?.attachments ?? [] : [];
         const choice = active && draft && !s.openThread && (input?.text.trim() || files.length) ? s.defaultChoice() : null;
-        const project = draft?.projectId ? s.projects.find(p => p.id === draft.projectId) : null;
-        const key = draft && choice ? JSON.stringify([draft.id, draft.projectId, draft.worktree, draft.incognito, project?.path, choiceKey(choice)]) : null;
+        const key = draft && choice ? this.#key(draft, choice) : null;
         const client = this.ctx.client;
         const generation = this.ctx.clientGeneration;
         const supports = s.core?.features?.draftPreparation === true;
@@ -85,11 +84,22 @@ export class DraftStartup {
     const current = s.defaultChoice();
     if (!current || (choiceKey(current) !== choiceKey(held.source) && choiceKey(current) !== choiceKey(held.choice)) ||
       (choiceKey(choice) !== choiceKey(held.source) && choiceKey(choice) !== choiceKey(held.choice))) return null;
-    const project = draft.projectId ? s.projects.find(p => p.id === draft.projectId) : null;
-    if (held.key !== JSON.stringify([draft.id, draft.projectId, draft.worktree, draft.incognito, project?.path, choiceKey(held.source)])) return null;
+    if (held.key !== this.#key(draft, held.source)) return null;
     held.claimed = true;
     this.#prepared = null;
     return { preparationId: held.id, choice: held.choice, projectId: held.input.projectId };
+  }
+
+  /**
+   * What a preparation is valid for. A draft with no project goes to the
+   * drafts project: its id is part of the key, so removing the drafts drops a
+   * preparation made in them instead of sending into a project that is gone.
+   */
+  #key(draft: Draft, choice: Choice): string {
+    const s = this.ctx.store;
+    const projectId = draft.projectId ?? s.draftsProject?.id ?? null;
+    const project = projectId ? s.projects.find(p => p.id === projectId) : null;
+    return JSON.stringify([draft.id, projectId, draft.worktree, draft.incognito, project?.path, choiceKey(choice)]);
   }
 
   finish(draft: Draft | null): void { if (this.#sendingDraft === draft) this.#sendingDraft = null; }
