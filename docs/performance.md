@@ -838,6 +838,14 @@ latency, 3.4 with 80 ms and 2.5 with 200 ms; the capture in the core's browser
 takes about 200 ms a frame for that page
 ([results](../bench/results/2026-10-05-remote-browser-frames.md)).
 
+Since 2026-10-15 the frames come from a screencast of the tab on its own
+DevTools session ([the agent's browser](browser.md#watching-it)). Chrome sends a picture
+only when the page draws, and a viewer naming the frame it shows gets
+`unchanged` on a still page. On a still page a viewer went from 163 to 15 KiB/s
+of base64 and the core's Chrome from 8 % to 0 % of a core; on a moving page the
+trip lost about 72 ms at the same four frames a second and the same Chrome CPU
+([results](../bench/results/2026-10-15-perf-browser.md)).
+
 ## Browser recordings
 
 A recording used to ask the tab for a screenshot every 125 ms and wait for
@@ -929,6 +937,16 @@ took 8.4 s.
 keeps the video. `BOITE_RECORDING_PRESET` sizes the page,
 `BOITE_RECORDING_NOISE=1` records noise to reach the cap, and
 `BOITE_RECORDING_PLAY` lists other videos (`;`-separated) to play in chat.
+
+The core's own recorder (`browser/recorder.ts`, a tab of the agent's browser)
+paces frames to the take's rate and acknowledges each when it leaves, so
+Chrome encodes about one picture per slot of the take. Its helper page decodes each frame's base64 with
+`Uint8Array.fromBase64`: 0.2 ms instead of 18 ms for a 1920 × 1080 frame. On
+2026-10-15, a 10 s 30 fps take of a moving 1920 × 1080 page went from 19.7 to
+29.4 frames a second by ffprobe, and the core's Chrome from 453 % to 339 % of
+a core ([results](../bench/results/2026-10-15-perf-browser.md)), with a
+version that asked every second frame; the late acknowledgement that replaced
+it has not been measured.
 
 ## Benches
 
