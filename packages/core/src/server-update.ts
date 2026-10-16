@@ -118,6 +118,10 @@ export class ServerUpdates {
 
   private async prepare(offer: ServerOffer, abort: AbortController): Promise<void> {
     const installation = this.installation!;
+    // A worker cut off with its recovery, by a power cut, left its files beside the installation.
+    try { (await import('./server-update/apply.ts')).clearStaleUpdates(dirname(installation.directory)); }
+    catch (error) { this.core.log('warn', `server update cleanup: ${messageOf(error)}`); }
+    if (abort.signal.aborted || this.closed) return;
     const id = randomUUID();
     const directory = join(dirname(installation.directory), `.boite-update-${id}`);
     this.directory = directory;

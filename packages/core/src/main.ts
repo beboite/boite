@@ -417,11 +417,13 @@ export function main(argv: string[]): void {
     return;
   }
   withUtf8Locale(process.env, process.platform);
-  if (argv[0] === 'update-apply') {
+  // The update worker, and the recovery its unit runs however the worker ended.
+  if (argv[0] === 'update-apply' || argv[0] === 'update-recover') {
+    const command = argv[0];
     void (async () => {
-      if (!processPlatform.serverUpdates || !argv[1]) throw new Error('update-apply expects a private server update plan on Linux');
-      const { applyServerUpdate } = await import('./server-update/apply.ts');
-      await applyServerUpdate(argv[1], processPlatform.serverUpdates);
+      if (!processPlatform.serverUpdates || !argv[1]) throw new Error(`${command} expects a private server update plan on Linux`);
+      const { applyServerUpdate, recoverServerUpdate } = await import('./server-update/apply.ts');
+      await (command === 'update-apply' ? applyServerUpdate : recoverServerUpdate)(argv[1], processPlatform.serverUpdates);
     })().catch(error => { process.stderr.write(`boite-core update: ${messageOf(error)}\n`); process.exitCode = 1; });
     return;
   }

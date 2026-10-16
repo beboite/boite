@@ -184,14 +184,28 @@ browser profiles, attachments, artifacts, logs and dictation models stay out,
 since a release does not rewrite them. Copying them kept a server with 1,300
 threads down 2 min 25 s for 8.9 GB, and filled its disk once mid-copy; a
 rollback keeps the live ones. Before stopping the service, the job checks that
-the disk holds the snapshot plus 1 GB and otherwise leaves the server running
-with the reason in its status. A copy cut short is deleted. Health must
+the disk holds the snapshot plus 1 GB; otherwise it starts the untouched
+server again, since the core stops itself once it admits the update, with the
+reason in its status. A copy cut short is deleted. Health must
 report the target version and that service's new PID within 30 seconds.
 Failure restores both the previous installation and its data snapshot before
 restarting. Pairings and conversations survive; clients reconnect normally.
 Backups remain private beside the installation as `.boite-backup-<id>`; a
 successful update keeps the two newest and deletes the older ones.
 Failure artifacts also remain for diagnosis; inspect them before removing them.
+
+The job runs under `MemoryHigh=1G`, which throttles it, rather than a hard
+memory limit: copying a 19 GB data directory once filled a 512 MB limit with
+page cache under writeback, and the kernel killed the job 30 seconds into the
+copy, leaving the service stopped. Its unit now has an `ExecStopPost` that
+runs `boite-core update-recover` however the job ends, a kill included. It
+reads where the update stood from the disk: a job that never stopped the
+service only closes the admission, a new version that answers health is kept,
+and anything else is rolled back as above before the service starts again.
+The recovery runs from a hard link of the job's executable,
+`.boite-recover-<id>`, which it deletes when done. If the recovery itself
+never ran, as after a power cut, the next update deletes the unfinished
+operation directory and the incomplete snapshot it left.
 
 From a terminal on the server, the same owner actions need no thread:
 
