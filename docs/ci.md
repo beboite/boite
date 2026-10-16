@@ -151,11 +151,22 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 593,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,982,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,989,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,244,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,267,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-16, `main` at `7ccb238d` measures 4,982,096 UI bytes and 4,263,703
+core JavaScript bytes after fresh `bun run build:ui` and `bun run build:core` on
+Linux, above its 4,982,000 and 4,244,000 limits. Nine pull requests merged that
+day each fit the limits alone; together they add 6,681 UI bytes and 25,836 core
+bytes over `9c5c1849`. Measured after each merge: #521 10,828 core bytes, #520
+6,273 UI bytes, #519 5,070 core and 125 UI, #528 4,287 core and 283 UI, #516
+3,693 core, #523 814, #531 518, #514 318 and #530 308 core bytes. The limits
+rise by the growth they did not yet count, every byte but #516's 3,693 core
+bytes, to 4,989,000 and 4,267,000; the entry and `main.js` limits stay
+unchanged.
 
 On 2026-10-16, the runtime optimization pass (PR #516) merged with `origin/main`
 at `0f480824` measures 4,241,560 core JavaScript bytes after fresh `bun run build:core`
