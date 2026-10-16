@@ -35,6 +35,19 @@ describe('spawn command resolution', () => {
     expect(lookup.asked).toHaveLength(4);
   });
 
+  test('a PATH with a relative entry leaves the bare name to the spawn, which resolves it from the child directory', () => {
+    const lookup = windowsLookup({ gh: 'C:\\Program Files\\GitHub CLI\\gh.exe' });
+    expect(resolveSpawnCommand('gh', { Path: 'tools;C:\\Program Files\\GitHub CLI' }, lookup)).toBe('gh');
+    expect(resolveSpawnCommand('gh', { Path: 'C:\\Program Files\\GitHub CLI;' }, lookup)).toBe('C:\\Program Files\\GitHub CLI\\gh.exe');
+    expect(lookup.asked).toEqual(['gh C:\\Program Files\\GitHub CLI;']);
+    const asked: string[] = [];
+    const posixLookup: SpawnLookup = { windows: false, which: (name, PATH) => { asked.push(`${name} ${PATH}`); return `/usr/bin/${name}`; } };
+    // An empty POSIX entry is the current directory too.
+    for (const PATH of ['bin:/usr/bin', '/usr/bin::/bin', '/usr/bin:']) expect(resolveSpawnCommand('git', { PATH }, posixLookup)).toBe('git');
+    expect(resolveSpawnCommand('git', { PATH: '/usr/bin:/bin' }, posixLookup)).toBe('/usr/bin/git');
+    expect(asked).toEqual(['git /usr/bin:/bin']);
+  });
+
   test.skipIf(process.platform === 'win32')('a bare name is looked up once per child PATH, and a changed PATH looks again', () => {
     const root = mkdtempSync(join(tmpdir(), 'boite-spawn-command-'));
     try {

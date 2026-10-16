@@ -23,15 +23,27 @@ function envValue(env: Record<string, string | undefined>, name: string, windows
 }
 
 /**
+ * A PATH entry the spawn resolves from the child's own directory: a relative
+ * one, or on POSIX an empty one, which names the current directory. A lookup
+ * from the core's directory could find another program there.
+ */
+function hasRelativeEntry(PATH: string, windows: boolean): boolean {
+  const path = windows ? win32 : posix;
+  return PATH.split(path.delimiter).some((entry) => (windows ? entry !== '' && !path.isAbsolute(entry) : !path.isAbsolute(entry)));
+}
+
+/**
  * The absolute path to spawn for `cmd`, or `cmd` itself when it already names
- * a path, is not on the child's PATH, or resolves to something only a shell
- * can start (a `.cmd`, `.bat` or `.ps1` shim on Windows): Bun and node keep
- * their own handling of those.
+ * a path, is not on the child's PATH, the PATH has a relative entry, or it
+ * resolves to something only a shell can start (a `.cmd`, `.bat` or `.ps1`
+ * shim on Windows): Bun and node keep their own handling of those.
  */
 export function resolveSpawnCommand(cmd: string, env: Record<string, string | undefined>, lookup: SpawnLookup = hostLookup): string {
   const { windows } = lookup;
   if (cmd.length === 0 || cmd.includes('/') || (windows && (cmd.includes('\\') || cmd.includes(':')))) return cmd;
-  const found = lookup.which(cmd, envValue(env, 'PATH', windows) ?? '');
+  const PATH = envValue(env, 'PATH', windows) ?? '';
+  if (hasRelativeEntry(PATH, windows)) return cmd;
+  const found = lookup.which(cmd, PATH);
   if (found === null || !(windows ? win32 : posix).isAbsolute(found)) return cmd;
   if (!windows) return found;
   const extension = win32.extname(found).toLowerCase();
