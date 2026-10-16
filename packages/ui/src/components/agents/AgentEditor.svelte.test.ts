@@ -15,7 +15,7 @@ const settle = async () => { for (let i = 0; i < 20; i++) { await Promise.resolv
 const profile: AgentProfile = {
   id: 'a-mira', name: 'Mira', domain: '', instructions: '', avatar: '', status: 'active',
   selection: { providerId: 'echo', accountId: 'echo', model: 'echo', effort: null, permissionMode: 'default' },
-  tools: [], accountIntegration: 'provider', revision: 1, createdAt: 1, updatedAt: 1,
+  tools: [], revision: 1, createdAt: 1, updatedAt: 1,
 };
 
 test('archiving requires the stored agent name, cancellation saves nothing, and a confirmed retry archives', async () => {

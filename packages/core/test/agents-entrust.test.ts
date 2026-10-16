@@ -27,9 +27,9 @@ const threadMessages = () => h.core.workforce.records.list('message').filter(m =
 beforeEach(async () => {
   // The persona joins turns with the rest of Boite's own guide text.
   h = await startTestCore({ boiteGuide: true }); client = await h.connect();
-  h.core.workforce.setLimits({ paused: true, backgroundConcurrency: 2, kebaccExperiment: false });
+  h.core.workforce.setLimits({ paused: true, backgroundConcurrency: 2 });
   const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
-  agent = await client.call('agents.profile.save', { value: { name: 'Ada', domain: 'Builds', instructions: 'Always run the tests before answering.', avatar: '', status: 'active', tools: ['messages'], accountIntegration: 'provider', selection: { providerId: 'echo', accountId: account.id, model: 'echo', effort: null, permissionMode: 'default' } } });
+  agent = await client.call('agents.profile.save', { value: { name: 'Ada', domain: 'Builds', instructions: 'Always run the tests before answering.', avatar: '', status: 'active', tools: ['messages'], selection: { providerId: 'echo', accountId: account.id, model: 'echo', effort: null, permissionMode: 'default' } } });
 });
 afterEach(async () => { restore?.(); restore = undefined; await h.stop(); });
 
@@ -58,7 +58,7 @@ test('refuses threads and agents that cannot be entrusted', async () => {
 
 test('entrusting starts the goal, carries the persona and posts one done message', async () => {
   const { threadId } = await echoThread(h, client, 'Fix the login');
-  h.core.workforce.setLimits({ paused: false, backgroundConcurrency: 2, kebaccExperiment: false });
+  h.core.workforce.setLimits({ paused: false, backgroundConcurrency: 2 });
   script('All tests pass. The login works.\n[BOITE_GOAL_COMPLETE]');
   const entry = await client.call('agents.entrust', { threadId, agentId: agent.id });
   expect(entry).toMatchObject({ threadId, agentId: agent.id, objective: 'Take over this work where it stands and carry it to a verified result.' });

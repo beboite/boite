@@ -48,12 +48,14 @@ test('the page lists installed plugins, then the recommended ones, then the URL 
   expect(await sectionOf('seat-pool')).toBe('plugins-installed');
   expect(await sectionOf('grok-seats')).toBe('plugins-installed');
   expect(await sectionOf('pool-legacy')).toBe('plugins-installed');
-  expect(await sectionOf('kebacc-switcher')).toBe('plugins-recommended');
+  expect(await sectionOf('bots')).toBe('plugins-installed');
+  // Every recommended plugin is installed, so the section is not drawn.
+  expect(await page.evaluate(`document.querySelector('${id('plugins-recommended')}') === null`)).toBe(true);
   expect(await page.evaluate(`document.querySelector('${row('grok-seats')} ${id('plugin-progress')}').getAttribute('aria-valuenow')`)).toBe('45');
   expect(await page.evaluate(`document.querySelector('${row('pool-legacy')} ${id('plugin-rejected')}').dataset.field`)).toBe('manifest.schema');
   await page.waitFor(`document.querySelector('${row('seat-pool')} ${id('plugin-pool')}[data-provider="opencode"]')`);
   await capture('plugins-desktop.png');
-  await scrollTo(id('plugins-recommended'));
+  await scrollTo(id('plugins-add'));
   await capture('plugins-desktop-lower.png');
 }, 30_000);
 
@@ -80,20 +82,22 @@ test('a URL shows its manifest before anything installs, and a refused one says 
   await page.waitFor(`document.querySelector('${row('pi-pool')}') === null`);
 }, 30_000);
 
-test('the recommended plugin installs, switches an account and uninstalls back to Recommended', async () => {
-  await page.click(`${row('kebacc-switcher')} ${id('plugin-install')}`);
-  await page.waitFor(`document.querySelectorAll('${row('kebacc-switcher')} ${id('plugin-pool')}').length === 3`);
-  expect(await page.evaluate(`document.querySelector('${row('kebacc-switcher')}').closest('section').dataset.testid`)).toBe('plugins-installed');
-  const account = `${row('kebacc-switcher')} ${id('plugin-pool')}[data-provider="claude"] ${id('plugin-account')}[data-email="personal@example.com"]`;
+test('a pool switches its login, and the recommended plugin uninstalls back to Recommended and installs again', async () => {
+  const account = `${row('seat-pool')} ${id('plugin-pool')}[data-provider="opencode"] ${id('plugin-account')}[data-email="side@example.com"]`;
   await page.click(`${account} ${id('plugin-switch')}`);
   await page.waitFor(`document.querySelector('${id('confirm-ok')}')`); await page.click(id('confirm-ok'));
   // The active login says so and has nothing to switch to.
   await page.waitFor(`document.querySelector('${account} ${id('plugin-account-active')}') !== null && document.querySelector('${account} ${id('plugin-switch')}') === null`);
-  await scrollTo(row('kebacc-switcher'));
+  await scrollTo(row('seat-pool'));
   await capture('plugins-installed-desktop.png');
-  await page.click(`${row('kebacc-switcher')} ${id('plugin-uninstall')}`);
+
+  await page.click(`${row('bots')} ${id('plugin-uninstall')}`);
   await page.waitFor(`document.querySelector('${id('confirm-ok')}')`); await page.click(id('confirm-ok'));
-  await page.waitFor(`document.querySelector('${row('kebacc-switcher')}')?.closest('section')?.dataset.testid === 'plugins-recommended'`);
+  await page.waitFor(`document.querySelector('${row('bots')}')?.closest('section')?.dataset.testid === 'plugins-recommended'`);
+  await scrollTo(id('plugins-recommended'));
+  await capture('plugins-recommended-desktop.png');
+  await page.click(`${row('bots')} ${id('plugin-install')}`);
+  await page.waitFor(`document.querySelector('${row('bots')}')?.closest('section')?.dataset.testid === 'plugins-installed' && document.querySelector('${row('bots')}').dataset.status === 'installed'`);
 }, 30_000);
 
 test('in a 390 pixel column the page wraps instead of scrolling sideways', async () => {

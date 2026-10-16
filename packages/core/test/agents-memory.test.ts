@@ -38,7 +38,7 @@ async function setup(name = 'Ada') {
   const h = await startTestCore(); cores.push(h);
   const client = await h.connect();
   const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
-  const agent = await client.call('agents.profile.save', { value: { name, domain: '', instructions: '', avatar: '', status: 'active', tools: ['messages'], accountIntegration: 'provider', selection: { providerId: 'echo', accountId: account.id, model: 'echo', effort: null, permissionMode: 'default' } } });
+  const agent = await client.call('agents.profile.save', { value: { name, domain: '', instructions: '', avatar: '', status: 'active', tools: ['messages'], selection: { providerId: 'echo', accountId: account.id, model: 'echo', effort: null, permissionMode: 'default' } } });
   const ask = (text: string, requestId: string) => client.call('agents.message.send', { scope: { kind: 'agent', id: agent.id }, recipientIds: [agent.id], text, requestId });
   const work = () => h.core.workforce.records.list('work').filter(w => w.agentId === agent.id);
   return { h, client, agent, ask, work, accountId: account.id };

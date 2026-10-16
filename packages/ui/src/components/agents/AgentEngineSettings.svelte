@@ -28,10 +28,6 @@
     <span class="text ui-label">{labels.paused}</span>
     <input type="checkbox" role="switch" disabled={view.pending} checked={limits.paused} onchange={event => { void view.call('agents.limits.set', { ...limits, paused: event.currentTarget.checked }); }} />
   </label>
-  <label class="switch-row">
-    <span class="text">{labels.kebacc}<span class="hint">{labels.kebaccHint}</span></span>
-    <input type="checkbox" role="switch" disabled={view.pending} checked={limits.kebaccExperiment} onchange={event => { void view.call('agents.limits.set', { ...limits, kebaccExperiment: event.currentTarget.checked }); }} />
-  </label>
 </section>
 
 <AgentAccountAccess {view} />

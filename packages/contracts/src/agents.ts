@@ -60,8 +60,6 @@ export interface AgentProfile extends AgentRecord {
   selection: AgentSelection;
   status: 'active' | 'paused' | 'archived';
   tools: string[];
-  /** External plugin integration only. Boite never selects or rotates agy logins. */
-  accountIntegration: 'provider' | 'kebacc-experiment';
   /**
    * Projects the owner entrusted to this agent. Its direct conversation reads
    * their threads, starts, steers, archives, moves and stops them, answers
@@ -310,7 +308,7 @@ export interface AgentsSnapshot {
   decisions: AgentDecision[];
   /** Per kind, true when older records exist beyond this snapshot. */
   more: Record<AgentHistoryKind, boolean>;
-  limits: { backgroundConcurrency: number; paused: boolean; kebaccExperiment: boolean };
+  limits: { backgroundConcurrency: number; paused: boolean };
   /** Threads entrusted to agents on this core. Missing on older cores. */
   entrusted?: AgentEntrustment[];
   /** Where agents' brains live on this core. Missing on older cores. */
