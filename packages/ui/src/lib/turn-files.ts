@@ -1,6 +1,6 @@
 import type { Message, MessagePart, ToolDocument, Turn } from '@boite/contracts';
 import { describeTool, fileName } from './tool-summary';
-import { diffCounts, diffRows } from './diff';
+import { diffCountsOf } from './diff';
 
 /**
  * The files one answer made or changed, for the card at its end. Read from
@@ -31,48 +31,111 @@ export interface TurnFilesData {
   deferred: { messageId: string; toolId: string }[];
 }
 
-/** Keep diff arrays stable across text deltas so line counts and trees do not rebuild. */
-export class TurnFileCache {
-  #entries = new Map<string, { sources: unknown[][]; data: TurnFilesData }>();
-
-  retain(ids: ReadonlySet<string>): void {
-    for (const id of this.#entries.keys()) if (!ids.has(id)) this.#entries.delete(id);
-  }
-
-  read(id: string, sources: FileSource[], cwd: string): TurnFilesData {
-    const snapshots = sources.map(({ messageId, part }) => [messageId, part.toolId, part.name, part.input,
-      part.inputText, part.inputDeferred, part.documents, part.documentsDeferred]);
-    const before = this.#entries.get(id);
-    if (before?.data.cwd === cwd && before.sources.length === snapshots.length &&
-      snapshots.every((row, at) => row.every((value, field) => value === before.sources[at]?.[field]))) return before.data;
-    const parts = sources.map(source => source.part);
-    const deferred = sources.filter(({ part }) => (part.inputDeferred || part.documentsDeferred) && touched(part).length > 0)
-      .map(({ messageId, part }) => ({ messageId, toolId: part.toolId }));
-    const data = { files: turnFiles(parts, cwd), diffs: turnDiffs(parts), cwd, deferred };
-    this.#entries.set(id, { sources: snapshots, data });
-    return data;
-  }
+/** Whether a turn's end shows a files card: never for a queued turn, for a running one only when changes are grouped. */
+export function showsTurnFiles(turn: Pick<Turn, 'status'>, includeRunning: boolean): boolean {
+  return turn.status !== 'queued' && (includeRunning || turn.status !== 'running');
 }
 
-/** Aggregate successful changes once at each visible turn's end, including active work when grouped. */
-export function visibleTurnFiles(messages: readonly Message[], turns: readonly Turn[], visible: ReadonlySet<string>, cwd: string,
-  includeRunning = false, cache = new TurnFileCache()): Map<string, TurnFilesData> {
-  const result = new Map<string, TurnFilesData>();
-  const wanted = new Set(turns.filter(turn => visible.has(turn.id) && (includeRunning || turn.status !== 'running') && turn.status !== 'queued').map(turn => turn.id));
-  cache.retain(wanted);
-  if (wanted.size === 0) return result;
-  const sources = new Map<string, FileSource[]>();
+/** Each turn's assistant messages, in order. Reads each message's role and turn, never its parts. */
+export function answersByTurn(messages: readonly Message[]): Map<string, Message[]> {
+  const result = new Map<string, Message[]>();
   for (const message of messages) {
-    if (message.role !== 'assistant' || !wanted.has(message.turnId)) continue;
-    const own = sources.get(message.turnId) ?? [];
-    for (const part of message.parts) if (part.type === 'tool' && part.status === 'done') own.push({ messageId: message.id, part });
-    sources.set(message.turnId, own);
-  }
-  for (const id of wanted) {
-    const data = cache.read(id, sources.get(id) ?? [], cwd);
-    if (data.files.length) result.set(id, data);
+    if (message.role !== 'assistant') continue;
+    const own = result.get(message.turnId);
+    if (own) own.push(message);
+    else result.set(message.turnId, [message]);
   }
   return result;
+}
+
+/** What a finished call's files and diffs are read from. */
+function snapshotOf({ messageId, part }: FileSource): unknown[] {
+  return [messageId, part.toolId, part.name, part.input, part.inputText, part.inputDeferred, part.documents, part.documentsDeferred];
+}
+
+function sameRow(row: readonly unknown[], before: readonly unknown[] | undefined): boolean {
+  return before !== undefined && row.every((value, field) => value === before[field]);
+}
+
+interface TurnFileEntry {
+  cwd: string;
+  /** The turn's answers and every part of them, in order, by identity. */
+  messages: readonly Message[];
+  parts: MessagePart[];
+  sources: FileSource[];
+  snapshots: unknown[][];
+  /** Indices in `sources` of the calls a deferred load fills in place. */
+  deferredAt: number[];
+  data: TurnFilesData;
+}
+
+/**
+ * Each turn's files and diffs, kept stable across text deltas so line counts
+ * and trees do not rebuild. Least recently read first out, so a turn end that
+ * scrolls out of the window and back finds its entry.
+ */
+export class TurnFileCache {
+  static readonly SIZE = 24;
+  #entries = new Map<string, TurnFileEntry>();
+
+  /**
+   * The files of one turn, from its assistant messages in order. A running
+   * turn compares every finished call field by field, since its calls are
+   * still written. A finished turn's parts are only ever replaced, so the
+   * same messages holding the same part objects read the same, except the
+   * fields `loadToolOutput` fills in place on a deferred call.
+   */
+  read(id: string, messages: readonly Message[], cwd: string, running: boolean): TurnFilesData {
+    const before = this.#entries.get(id);
+    if (before?.cwd === cwd && (running ? this.#sameCalls(before, messages) : this.#sameParts(before, messages))) {
+      this.#entries.delete(id);
+      this.#entries.set(id, before);
+      return before.data;
+    }
+    const parts: MessagePart[] = [];
+    const sources: FileSource[] = [];
+    for (const message of messages) {
+      for (const part of message.parts) {
+        parts.push(part);
+        if (part.type === 'tool' && part.status === 'done') sources.push({ messageId: message.id, part });
+      }
+    }
+    const tools = sources.map(source => source.part);
+    const deferredAt = sources.flatMap(({ part }, at) => part.inputDeferred || part.documentsDeferred ? [at] : []);
+    const deferred = deferredAt.map(at => sources[at]!).filter(({ part }) => touched(part).length > 0)
+      .map(({ messageId, part }) => ({ messageId, toolId: part.toolId }));
+    const data = { files: turnFiles(tools, cwd), diffs: turnDiffs(tools), cwd, deferred };
+    this.#entries.delete(id);
+    this.#entries.set(id, { cwd, messages: [...messages], parts, sources, snapshots: sources.map(snapshotOf), deferredAt, data });
+    for (const oldest of this.#entries.keys()) {
+      if (this.#entries.size <= TurnFileCache.SIZE) break;
+      this.#entries.delete(oldest);
+    }
+    return data;
+  }
+
+  #sameCalls(before: TurnFileEntry, messages: readonly Message[]): boolean {
+    let at = 0;
+    for (const message of messages) {
+      for (const part of message.parts) {
+        if (part.type !== 'tool' || part.status !== 'done') continue;
+        if (!sameRow(snapshotOf({ messageId: message.id, part }), before.snapshots[at])) return false;
+        at += 1;
+      }
+    }
+    return at === before.snapshots.length;
+  }
+
+  #sameParts(before: TurnFileEntry, messages: readonly Message[]): boolean {
+    if (messages.length !== before.messages.length) return false;
+    let at = 0;
+    for (const [index, message] of messages.entries()) {
+      if (message !== before.messages[index]) return false;
+      const parts = message.parts;
+      for (let part = 0; part < parts.length; part += 1) if (parts[part] !== before.parts[at++]) return false;
+    }
+    return at === before.parts.length && before.deferredAt.every(index => sameRow(snapshotOf(before.sources[index]!), before.snapshots[index]));
+  }
 }
 
 export type TurnFileNode =
@@ -212,7 +275,7 @@ export function turnDiffs(parts: readonly MessagePart[]): TurnDiff[] {
     const attached = (part.documents ?? []).filter((document): document is TurnDiff => document.kind === 'diff');
     if (attached.length || part.inputDeferred || typeof part.inputText === 'string') return attached;
     const change = describeTool(part.name, part.input).change;
-    return change ? [{ kind: 'diff' as const, ...change }] : [];
+    return change ? [change] : [];
   });
 }
 
@@ -231,7 +294,7 @@ export function turnLineCounts(diffs: readonly TurnDiff[], cwd: string): { total
   const byPath = new Map<string, LineCounts>();
   const total = { added: 0, removed: 0 };
   for (const doc of diffs) {
-    const { added, removed } = diffCounts(diffRows(doc.oldText, doc.newText));
+    const { added, removed } = diffCountsOf(doc);
     const key = fileKey(cwd, doc.path);
     const seen = byPath.get(key) ?? { added: 0, removed: 0 };
     byPath.set(key, { added: seen.added + added, removed: seen.removed + removed });

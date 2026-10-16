@@ -1205,6 +1205,17 @@ details[open] > summary .fold-caret {
 .disclosure-fold.open { grid-template-rows: 1fr; opacity: 1; }
 .disclosure-fold > * { min-height: 0; overflow: hidden; }
 
+/* A closed body stops being styled and laid out once its close has run: a
+   group opened once kept every call it built in each layout of its row. The
+   transition sits on the closed state only, so a close waits for the track
+   and an open shows the body at once. */
+@supports (transition-behavior: allow-discrete) {
+  .disclosure-fold:not(.open) > * {
+    content-visibility: hidden;
+    transition: content-visibility var(--dur-3) allow-discrete;
+  }
+}
+
 /* Instant folds and chevrons for whoever asked for less motion. */
 @media (prefers-reduced-motion: reduce) {
   .disclosure-fold, .fold-caret, details.disclosure > summary::before { transition: none; }

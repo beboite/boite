@@ -88,3 +88,29 @@ mod tests {
         assert_eq!(toast_app_id(Path::new(r"D:\apps\release"), id), id);
     }
 }
+
+/// Asks WebView2 to trim the main page's memory while it waits in the tray
+/// (`low`), and to hold it normally again before it is shown. Scripts keep
+/// running at the low level, so the page still raises toasts and keeps its
+/// connection. A runtime too old for `ICoreWebView2_19` keeps the normal level.
+pub(crate) fn memory_level<R: tauri::Runtime>(webview: &tauri::Webview<R>, low: bool) {
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        ICoreWebView2_19, COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW, COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL,
+    };
+    use windows::core::Interface;
+    let level = if low { COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW } else { COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL };
+    let name = if low { "low" } else { "normal" };
+    let queued = webview.with_webview(move |platform| {
+        let set = || -> windows::core::Result<()> { unsafe {
+            platform.controller().CoreWebView2()?.cast::<ICoreWebView2_19>()?.SetMemoryUsageTargetLevel(level)
+        }};
+        if let Err(error) = set() {
+            crate::shell_log::debug("webview", "shell.webview.memory-level",
+                format!("the page's memory level stays as it was, not {name}: {error}"), serde_json::json!({ "level": name }));
+        }
+    });
+    if let Err(error) = queued {
+        crate::shell_log::debug("webview", "shell.webview.memory-level",
+            format!("the page's memory level stays as it was, not {name}: {error}"), serde_json::json!({ "level": name }));
+    }
+}

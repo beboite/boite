@@ -80,6 +80,8 @@ export class ClaudeSession {
    * took over before that run finished: they close that run, not the turn.
    */
   private foreignResults = 0;
+  /** The uuids of the messages each turn put in the prompt stream: its prompt and its steers. */
+  private readonly promptIds = new WeakMap<ClaudeTurn, Set<string>>();
   /** No `init` yet: what the CLI writes before it is about an earlier process. */
   private beforeInit = true;
   /**
@@ -214,7 +216,7 @@ export class ClaudeSession {
       this.started = true;
       // The options the query opens on are this turn's: nothing to apply yet.
       this.applied = liveSetup(turn.ctx.thread);
-      this.prompts.push(turn.promptText(), turn.ctx.attachments);
+      this.send(turn, turn.promptText(), turn.ctx.attachments);
       this.steerable.add(turn);
       void this.run(turn);
       return;
@@ -229,8 +231,23 @@ export class ClaudeSession {
   async steer(turn: ClaudeTurn, text: string, attachments: TurnContext['attachments'] = []): Promise<boolean> {
     if (this.head() !== turn || !this.steerable.has(turn) || turn.settled || turn.isStopped || !this.query || this.closing || this.ended) return false;
     // The CLI reads this live stream while working, without interrupting its agent loop.
-    this.prompts.push(text, attachments);
+    this.send(turn, text, attachments);
     return true;
+  }
+
+  private send(turn: ClaudeTurn, text: string, attachments: TurnContext['attachments']): void {
+    const id = this.prompts.push(text, attachments);
+    const ids = this.promptIds.get(turn);
+    if (ids === undefined) this.promptIds.set(turn, new Set([id]));
+    else ids.add(id);
+  }
+
+  /** The result names one of this turn's messages: the CLI took it into the run this result ends. */
+  private answers(turn: ClaudeTurn, result: Extract<SDKMessage, { type: 'result' }>): boolean {
+    const ids = this.promptIds.get(turn);
+    if (ids === undefined) return false;
+    const named = result.user_message_uuids ?? (result.user_message_uuid === undefined ? [] : [result.user_message_uuid]);
+    return named.some(id => ids.has(id));
   }
 
   async setPermissionMode(turn: ClaudeTurn, mode: PermissionMode): Promise<boolean> {
@@ -327,7 +344,7 @@ export class ClaudeSession {
     if (turn.isStopped || this.closing || this.ended) return;
     if (!(await this.applyLive(turn))) return;
     if (turn.isStopped || this.closing || this.ended) return;
-    this.prompts.push(turn.promptText(), turn.ctx.attachments);
+    this.send(turn, turn.promptText(), turn.ctx.attachments);
     this.steerable.add(turn);
   }
 
@@ -497,9 +514,16 @@ export class ClaudeSession {
     }
     if (this.sessionId !== null) turn.noteSession(this.sessionId);
     if (message.type === 'result' && this.foreignResults > 0) {
-      this.foreignResults -= 1;
-      if (typeof message.total_cost_usd === 'number') this.costSoFar = message.total_cost_usd;
-      return;
+      // A prompt that reaches the CLI while its own run is still between tool
+      // rounds is folded into that run (CLI 2.1.300): one result answers both,
+      // and it names the prompt. Without that name it is the CLI's own result.
+      if (this.answers(turn, message)) {
+        this.foreignResults = 0;
+      } else {
+        this.foreignResults -= 1;
+        if (typeof message.total_cost_usd === 'number') this.costSoFar = message.total_cost_usd;
+        return;
+      }
     }
     // `total_cost_usd` counts from the start of the CLI process, so on a warm
     // query every result after the first carries the turns before it too. The

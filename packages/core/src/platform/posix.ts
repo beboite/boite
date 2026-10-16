@@ -1,6 +1,6 @@
 import { availableParallelism, totalmem } from 'node:os';
 import { readCgroupMemory } from './linux-cgroup.ts';
-import { LinuxLoad, linuxMachineMemory, linuxStartedAt } from './linux-load.ts';
+import { LinuxLoad, linuxMachineMemory, linuxStartKey, linuxStartedAt } from './linux-load.ts';
 import type { ProcessPlatform } from './types.ts';
 import { linuxServerUpdates } from './linux-server-update.ts';
 import { findTailscaleCli } from './tailscale.ts';
@@ -41,6 +41,7 @@ export function createPosixPlatform(
     forget(threadId) { load?.forget?.(threadId); },
     guardStatus: () => ({ running: false, hook: null, failure: null, audio: 'off', mutedPids: [] }),
     startedAt: (pid) => (os === 'linux' ? linuxStartedAt(pid) : null),
+    ...(os === 'linux' ? { startKey: (pid: number) => linuxStartKey(pid) } : {}),
     // Every process traced here is the core's own child, so the sweep never asks.
     runningSince: () => null,
   };

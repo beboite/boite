@@ -103,8 +103,12 @@ describe('terminals', () => {
     writeFileSync(join(harness.dataDir, '.bashrc'), `printf 'profile asks: '\nread answer\nprintf '%s' "$answer" > ${commandLine('posix', [stolen])}\n`);
     const chosen = process.env['BOITE_TERMINAL_SHELL'];
     process.env['BOITE_TERMINAL_SHELL'] = '/bin/bash';
-    const client = await harness.connect();
-    const seen = watch(client, id);
+    // Opened in the core, not by a client: no socket attached it, so its output is read on the bus.
+    let text = '';
+    const off = harness.core.bus.onAny((name, payload) => {
+      if (name === 'terminal.output' && (payload as RpcEvents['terminal.output']).id === id) text += (payload as RpcEvents['terminal.output']).data;
+    });
+    const seen = { text: () => text };
     try {
       harness.core.terminals.open(id, {
         cwd: harness.dataDir, env: { ...process.env, HOME: harness.dataDir }, cols: 100, rows: 24,
@@ -121,11 +125,36 @@ describe('terminals', () => {
       await waitFor(() => existsSync(stolen));
       expect(readFileSync(stolen, 'utf8')).toBe('profile-answer');
     } finally {
+      off();
       await harness.core.terminals.close(id);
       if (chosen === undefined) delete process.env['BOITE_TERMINAL_SHELL'];
       else process.env['BOITE_TERMINAL_SHELL'] = chosen;
     }
   }, 15_000);
+
+  test('the output of a shell reaches only the windows that attached it, and its exit every window', async () => {
+    const watching = await harness.connect();
+    const other = await harness.connect();
+    const { threadId } = await echoThread(harness, watching);
+    const id = threadTerminalId(threadId);
+    const seen = watch(watching, id);
+    const elsewhere = watch(other, id);
+    let stray = 0;
+    other.on('terminal.output', () => { stray++; });
+    await watching.call('terminals.open', { threadId, cols: 80, rows: 24 });
+    await watching.call('terminals.write', { id, data: 'echo only-here\r' });
+    await waitFor(() => seen.text().includes('only-here\r\n'), SHELL_MS);
+    await watching.call('terminals.close', { id });
+    await waitFor(() => elsewhere.exited() !== null && seen.exited() !== null);
+    expect(stray).toBe(0);
+
+    // A socket that closed watches nothing: the next window to attach the id is the only one that hears it.
+    await other.call('terminals.open', { threadId, cols: 80, rows: 24 });
+    watching.close();
+    await other.call('terminals.write', { id, data: 'echo now-here\r' });
+    await waitFor(() => elsewhere.text().includes('now-here\r\n'), SHELL_MS);
+    await other.call('terminals.close', { id });
+  }, 30_000);
 
   test('a thread shell runs in its working directory, takes keys, resizes, reattaches and closes', async () => {
     const client = await harness.connect();

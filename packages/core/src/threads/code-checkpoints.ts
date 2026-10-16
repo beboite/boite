@@ -78,7 +78,7 @@ export class CodeCheckpoints {
   private async capture(thread: ThreadSummary, turnId: string): Promise<void> {
     let root: string;
     try { root = await workspaceRoot(thread.cwd); } catch { return; }
-    const checkpoint: Checkpoint = { root, messages: [...this.core.journal.walkTurnMessages(thread.id, turnId)].filter(message => message.role === 'user').map(message => message.id) };
+    const checkpoint: Checkpoint = { root, messages: [...this.core.journal.walkTurnMessages(thread.id, turnId, { blobs: false })].filter(message => message.role === 'user').map(message => message.id) };
     this.assertAvailable(root);
     for (const other of this.active.values()) {
       if (contains(root, other.checkpoint.root) || contains(other.checkpoint.root, root)) {

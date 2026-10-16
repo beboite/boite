@@ -67,7 +67,7 @@ async function snapshot(core: Core, cwd: string, path: string): Promise<{ part: 
 export async function publishArtifact(core: Core, params: RpcParams<'artifacts.publish'>): Promise<Message> {
   const thread = core.threads.require(params.threadId);
   if (thread.archived) throw refused('artifacts.publish needs an active thread', { threadId: thread.id });
-  const turn = core.journal.listTurns(thread.id).at(-1);
+  const turn = core.journal.lastTurn(thread.id);
   if (!turn) throw refused('artifacts.publish needs a thread with a turn', { threadId: thread.id });
   const { part, stored } = await snapshot(core, thread.cwd, params.path);
   let committed = false;

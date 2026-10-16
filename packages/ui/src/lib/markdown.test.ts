@@ -70,3 +70,15 @@ test('a kept block is the same markup, kept apart for plain and rich rendering',
   expect(renderBlock(block, true)).toBe(rich);
   expect(renderBlock(block, false)).toBe(plain);
 });
+
+test('links are found in linear time: a line of 32,000 brackets renders at once', () => {
+  // Retrying a link regex from every `[` read to the end of the line each time: seconds per render.
+  const lines = ['['.repeat(32_000), '[a'.repeat(16_000), '[a](<'.repeat(6_000), '[a](http://'.repeat(3_000)];
+  const started = performance.now();
+  for (const line of lines) for (const rich of [false, true]) renderMarkdown(line, rich);
+  expect(performance.now() - started).toBeLessThan(500);
+  expect(renderMarkdown('['.repeat(32_000))).toBe(`<p>${'['.repeat(32_000)}</p>`);
+  // The leftmost `[` still opens the label, and an image's `!` stays with its link.
+  expect(renderMarkdown(`${'['.repeat(100)}docs](https://a.b/c)`)).toBe(`<p><a href="https://a.b/c" target="_blank" rel="noopener noreferrer">${'['.repeat(99)}docs</a></p>`);
+  expect(renderMarkdown('see ![a](<https://a.b/c d>) and [(x)](y(z)) now', true)).toBe('<p>see <a href="https://a.b/c%20d" target="_blank" rel="noopener noreferrer">a</a> and <a href="#file" data-file-path="y(z)">(x)</a> now</p>');
+});

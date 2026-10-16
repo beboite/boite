@@ -128,6 +128,13 @@ export interface ProcessPlatform {
    */
   startedAt(pid: number): number | null;
   /**
+   * How the OS names one run of the process holding `pid`, where `startedAt`
+   * is not absolute: Linux rebuilds it from a boot time that moves with every
+   * step of the wall clock. Two equal keys are the same run. Absent where
+   * `startedAt` is enough.
+   */
+  startKey?(pid: number): string | null;
+  /**
    * The same reading for a process that is still running: null too once it has
    * exited, even while something keeps a handle on it. The orphan sweep asks
    * this before it stops a process whose parent the registry does not hold.

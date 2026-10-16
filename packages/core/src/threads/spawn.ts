@@ -211,7 +211,7 @@ export class ThreadSpawns {
 
   /** A line of the starter's timeline, on its last turn. */
   private systemLine(threadId: ThreadId, part: Message['parts'][number]): void {
-    const turnId = this.core.journal.listTurns(threadId).at(-1)?.id ?? newId('trn_');
+    const turnId = this.core.journal.lastTurn(threadId)?.id ?? newId('trn_');
     const message: Message = { id: newId('msg_'), threadId, turnId, role: 'system', parts: [part], state: 'complete', createdAt: Date.now() };
     this.core.journal.append({ type: 'thread.spawned', threadId, version: 1, payload: message }, () => this.core.journal.putMessage(message));
     this.core.bus.emit('message.started', message);
