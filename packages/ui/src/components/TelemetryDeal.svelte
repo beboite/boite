@@ -2,6 +2,7 @@
   import type { TelemetryState } from '@boite/contracts';
   import tradeOffer from '../assets/onboarding/trade-offer.webm';
   import noThanks from '../assets/onboarding/no-thanks.webm';
+  import InfoTip from './InfoTip.svelte';
   import { openExternal } from '../lib/links';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
@@ -28,6 +29,14 @@
   let clipSize = $state('');
   let timer: ReturnType<typeof setTimeout> | undefined;
   $effect(() => () => clearTimeout(timer));
+  // The meme plays like a GIF, reduced motion or not, and only while the window is shown.
+  $effect(() => {
+    const video = clip;
+    if (!video) return;
+    const update = () => { if (document.visibilityState === 'visible') void video.play().catch(() => {}); else video.pause(); };
+    document.addEventListener('visibilitychange', update);
+    return () => document.removeEventListener('visibilitychange', update);
+  });
 
   $effect(() => {
     const client = store.client;
@@ -94,11 +103,11 @@
   <div class="pitch">
     {#key refusing}
       <video class="clip" bind:this={clip} src={refusing ? noThanks : tradeOffer} aria-label={strings.onboarding.privacy.video}
-        autoplay={!reduced} loop muted playsinline disablepictureinpicture preload="auto" style={clipSize || undefined}></video>
+        autoplay loop muted playsinline disablepictureinpicture preload="auto" style={clipSize || undefined}></video>
     {/key}
     <p class="intro">{strings.onboarding.privacy.intro}</p>
   </div>
-  <p class="question">{strings.onboarding.privacy.question}</p>
+  <p class="question">{strings.onboarding.privacy.question}<InfoTip topic={strings.onboarding.privacy.doc} text={strings.onboarding.privacy.details} testid="onboarding-telemetry-details" /></p>
   <div class="rows">
     <button class="row no" class:refused={refusing} disabled={busy || refusing || !consent} data-testid="onboarding-telemetry-basic" onclick={() => void enough()}>
       <span class="label">{strings.onboarding.privacy.basic}<small>{strings.onboarding.privacy.basicDefault}</small></span>
@@ -121,7 +130,7 @@
   p { margin: 0; }
   .clip { display: block; max-width: 100%; max-height: min(26vh, 200px); margin: 0 auto; border-radius: var(--radius-lg); animation: swap var(--dur-3) var(--ease-out-quint); }
   .intro { max-width: 52ch; margin: 0 auto; color: var(--color-muted-foreground); font-size: var(--text-sm); line-height: 1.6; text-align: center; }
-  .question { margin: 2px 0 0; font-size: var(--text-lg); font-weight: 800; text-align: center; }
+  .question { display: flex; align-items: center; justify-content: center; gap: 6px; margin: 2px 0 0; font-size: var(--text-lg); font-weight: 800; }
   .rows { display: grid; gap: 8px; }
   .row { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; height: auto; padding: 8px 14px; white-space: normal; text-align: left; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: color-mix(in srgb, var(--color-surface-2) 88%, var(--color-foreground) 12%); color: var(--color-foreground); cursor: pointer; transition: transform var(--dur-1) ease-out, border-color var(--dur-2) ease-out, background var(--dur-2) ease-out, color var(--dur-2) ease-out, box-shadow var(--dur-2) ease-out; }
   .row:hover:not(:disabled) { transform: translateY(-1px); border-color: color-mix(in srgb, var(--color-foreground) 45%, var(--color-border)); }

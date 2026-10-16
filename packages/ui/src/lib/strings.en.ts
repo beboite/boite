@@ -2799,14 +2799,15 @@ export const strings = {
     /** Boite Legacy's trade offer: picking a row is the tour's last click. */
     privacy: {
       title: 'SELL YOUR SOUL TO BOITE!',
-      intro: 'Boite counts a few anonymous usage stats so we know what to fix first. Your messages, files and accounts never leave your machine, the app works the same either way, and you can change your mind anytime in Settings.',
+      intro: 'A few anonymous stats tell us what to fix first. Your messages, files and accounts never leave your machine.',
       question: 'Deal?',
       video: 'Trade offer meme',
       basic: 'NO! Just the basic counters',
       basicDefault: '(default)',
-      basicHint: 'Counts of active installs, launches, conversations and turn outcomes. The usage IDs change every day. No profile.',
+      basicHint: 'Anonymous counters, new IDs every day.',
       deal: 'DEAL',
-      dealHint: 'Adds the public models you pick, reasoning level, speed and permission modes, durations and token volumes, under a stable random ID. Private models count as "other". It helps a lot. Thank you!',
+      dealHint: 'Also the models and settings you use. Thank you!',
+      details: 'Basic: active installs, launches, conversations and turn outcomes, under IDs that change every day. No profile. Deal adds the public models you pick, reasoning level, speed and permission modes, durations and token volumes, under a stable random ID; private models count as "other". The app works the same either way, and Settings changes it anytime.',
       optOut: "If you REALLY don't want to help Boite:",
       offLabel: 'turn everything off :c',
       doc: 'What is collected'

@@ -3,27 +3,50 @@
   import ProviderLogo from './ProviderLogo.svelte';
   import BoiteMark from './BoiteMark.svelte';
   import { strings } from '../lib/strings';
+  import { untrack } from 'svelte';
 
   let { scene }: { scene: 'welcome' | 'agents' | 'voice' | 'panel' | 'usage' | 'reach' | 'quiet' } = $props();
+  /** The reader's pause: it holds the scene and its loop until resumed. */
   let paused = $state(false);
   let replay = $state(0);
+  let figure = $state<HTMLElement>();
   let stage = $state<HTMLDivElement>();
-  /** Until the last of its animations ends, a scene is playing: it glows and offers a pause. */
-  let playing = $state(true);
+  /**
+   * On screen in a shown window. Off it the scene holds where it is, so a tour
+   * opened behind the window's reveal or scrolled past starts when it is seen
+   * and costs nothing while nobody looks.
+   */
+  let seen = $state(false);
+  /** The last animation ended: the final frame rests, then the scene plays again, like a GIF. */
+  let finished = $state(false);
+  const REST_MS = 2400;
   function running(): boolean {
-    // An engine that cannot list animations is assumed to be playing, so the pause stays reachable.
+    // An engine that cannot list animations is assumed to be playing.
     if (!stage?.getAnimations) return true;
     return stage.getAnimations({ subtree: true }).some((animation) => animation.playState === 'running' || animation.playState === 'paused');
   }
   // Another scene, or a restart, plays from the top: a pause does not carry over.
   $effect(() => {
     void scene; void replay;
-    paused = false;
-    playing = true;
-    const frame = requestAnimationFrame(() => { playing = running(); });
-    return () => cancelAnimationFrame(frame);
+    untrack(() => { paused = false; finished = false; });
   });
-  function ended() { if (!running()) playing = false; }
+  $effect(() => {
+    const node = figure;
+    if (!node) return;
+    let onScreen = typeof IntersectionObserver !== 'function';
+    const update = () => { seen = onScreen && document.visibilityState === 'visible'; };
+    const observer = onScreen ? null : new IntersectionObserver((entries) => { onScreen = entries.some((entry) => entry.isIntersecting); update(); });
+    observer?.observe(node);
+    update();
+    document.addEventListener('visibilitychange', update);
+    return () => { observer?.disconnect(); document.removeEventListener('visibilitychange', update); };
+  });
+  $effect(() => {
+    if (!finished || !seen || paused) return;
+    const timer = setTimeout(() => { replay++; }, REST_MS);
+    return () => clearTimeout(timer);
+  });
+  function ended() { if (!running()) finished = true; }
   // One markup per scene: the artwork reads the same strings as the tour around it.
   const t = $derived(strings.onboarding.demo);
   const description = $derived(scene === 'voice' ? t.voiceHint : scene === 'agents' ? t.continued : scene === 'panel' ? t.reviewed : scene === 'usage' ? t.trayHint : scene === 'reach' ? t.reachHint : scene === 'quiet' ? t.quietBody : strings.onboarding.welcome.body);
@@ -39,7 +62,7 @@
   <div class="chrome"><BoiteMark size={16} /><span class="ui-label">{t.task}</span><span class="chrome-end"><Check size={14} /></span></div>
 {/snippet}
 
-<figure data-testid="onboarding-scene" data-scene={scene} class:paused class:playing={playing && !paused}>
+<figure data-testid="onboarding-scene" data-scene={scene} bind:this={figure} class:paused class:held={!seen} class:playing={seen && !paused && !finished}>
   {#key `${scene}-${replay}`}
     <div class="stage {scene}" role="img" aria-label={description} data-testid="onboarding-animation" bind:this={stage} onanimationend={ended}>
       {#if scene === 'welcome'}
@@ -128,9 +151,7 @@
   {/key}
   <!-- Keep playback controls below the scene so touch devices can read every row. -->
   <div class="controls">
-    {#if playing}
-      <button class="ghost icon" aria-pressed={paused} aria-label={paused ? t.resume : t.pause} title={paused ? t.resume : t.pause} data-testid="onboarding-animation-pause" onclick={() => paused = !paused}>{#if paused}<Play size={14} />{:else}<Pause size={14} />{/if}</button>
-    {/if}
+    <button class="ghost icon" aria-pressed={paused} aria-label={paused ? t.resume : t.pause} title={paused ? t.resume : t.pause} data-testid="onboarding-animation-pause" onclick={() => paused = !paused}>{#if paused}<Play size={14} />{:else}<Pause size={14} />{/if}</button>
     <button class="ghost icon" aria-label={t.play} title={t.play} data-testid="onboarding-animation-replay" onclick={() => { paused = false; replay++; }}><RotateCcw size={14} /></button>
   </div>
 </figure>
@@ -148,9 +169,10 @@
   figure:hover .controls, figure:focus-within .controls, figure.paused .controls { opacity: 1; transform: none; }
   /* Without a pointer that hovers, the controls stay in view. */
   @media (hover: none) { .controls { opacity: 1; transform: none; } }
-  .stage { --demo-duration: calc(var(--dur-3) * 16); font-size: var(--text-sm); line-height: 1.5; color: var(--color-foreground); }
+  /* Its own clock: a GIF keeps its pace when the app's motion tokens drop to zero under reduced motion. */
+  .stage { --demo-step: var(--dur-demo-step); --demo-word: var(--dur-demo-word); --demo-duration: calc(var(--demo-step) * 16); font-size: var(--text-sm); line-height: 1.5; color: var(--color-foreground); }
   /* The two conversation demos carry text to read; the others are over in under four seconds. */
-  .stage.agents, .stage.voice { --demo-duration: calc(var(--dur-3) * 22); }
+  .stage.agents, .stage.voice { --demo-duration: calc(var(--demo-step) * 22); }
   .stage :global(svg) { flex: none; }
   .stage p { margin: 0; }
   .mini-app { background: var(--color-surface-2); border: 1px solid var(--color-edge); border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-e1); }
@@ -193,11 +215,11 @@
   .recording-done { position: absolute; inset: 8px 0 auto; animation: second var(--demo-duration) both; color: var(--color-success); }
   .record-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
   .waveform { width: 100%; height: 44px; margin-top: 4px; overflow: visible; }
-  .waveform rect { fill: var(--color-accent); transform-box: fill-box; transform-origin: center; animation: waveform calc(var(--dur-3) * 3) 5 alternate both; animation-delay: var(--beat); }
+  .waveform rect { fill: var(--color-accent); transform-box: fill-box; transform-origin: center; animation: waveform calc(var(--demo-step) * 3) 5 alternate both; animation-delay: var(--beat); }
   .wave-axis { stroke: var(--color-edge); stroke-width: 1; }
   .draft-label { font-size: var(--text-xs); color: var(--color-muted-foreground); }
   .transcript { min-height: 24px; padding-top: 2px; font-size: var(--text-base); }
-  .transcript > span:not(.caret) { animation: word var(--demo-duration) both; animation-delay: calc(var(--word) * var(--dur-2)); }
+  .transcript > span:not(.caret) { animation: word var(--demo-duration) both; animation-delay: calc(var(--word) * var(--demo-word)); }
   .caret { display: inline-block; vertical-align: middle; margin-left: 3px; height: 1.1em; border-left: 2px solid var(--color-accent); }
   .local { display: inline-flex; align-items: center; gap: 5px; color: var(--color-muted-foreground); }
   .voice-actions { display: flex; align-items: center; gap: 12px; }
@@ -234,13 +256,13 @@
   .clock { font-variant-numeric: tabular-nums; }
   .tray-instruction { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin: 10px 85px 0 12px; color: var(--color-muted-foreground); }
   .tasks { margin: 0; padding: 0; list-style: none; border: 1px solid var(--color-edge); border-radius: var(--radius-lg); background: var(--color-surface-2); }
-  .task { --delay: calc(var(--order) * var(--dur-3) * 2); display: flex; align-items: center; gap: 11px; padding: 9px 14px; }
+  .task { --delay: calc(var(--order) * var(--demo-step) * 2); display: flex; align-items: center; gap: 11px; padding: 9px 14px; }
   .task + .task { border-top: 1px solid var(--color-border); }
   .task strong { flex: 1; min-width: 0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .task-state { display: grid; justify-items: end; color: var(--color-muted-foreground); }
   .task-working, .task-done { grid-area: 1 / 1; display: flex; align-items: center; gap: 6px; white-space: nowrap; animation: first var(--demo-duration) both var(--delay); }
   .task-done { color: var(--color-success); animation-name: second; }
-  .spinner { display: block; width: 12px; height: 12px; border: 2px solid var(--color-edge); border-top-color: var(--color-accent); border-radius: 50%; animation: spin calc(var(--dur-3) * 4) linear 4; }
+  .spinner { display: block; width: 12px; height: 12px; border: 2px solid var(--color-edge); border-top-color: var(--color-accent); border-radius: 50%; animation: spin calc(var(--demo-step) * 4) linear 4; }
   .devices { display: flex; align-items: flex-end; justify-content: center; gap: 12px; padding-top: 4px; }
   .computer, .phone-side { display: grid; justify-items: center; gap: 0; }
   .device-label { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: var(--text-xs); color: var(--color-muted-foreground); }
@@ -268,7 +290,7 @@
   .notification div { display: grid; gap: 2px; }
   .notification strong { font-size: var(--text-xs); }
   .notification > :global(svg:last-child) { color: var(--color-success); }
-  .paused .stage, .paused .stage :global(*) { animation-play-state: paused !important; }
+  :is(.paused, .held) .stage, :is(.paused, .held) .stage :global(*) { animation-play-state: paused !important; }
   @keyframes glow { from { opacity: 1; } to { opacity: 0.55; } }
   @keyframes first { 0%, 45% { opacity: 1; } 53%, 100% { opacity: 0; } }
   @keyframes second { 0%, 48% { opacity: 0; } 58%, 100% { opacity: 1; } }
@@ -299,12 +321,11 @@
     .notification { left: 12px; right: 0; gap: 7px; font-size: var(--text-xs); }
     .quota-popup { margin-right: 14px; } .tray-instruction { margin-right: 16px; } .desktop-app { display: none; }
   }
-  @media (prefers-reduced-motion: reduce) {
-    .stage :global(*) { animation: none !important; }
-    .agent-old, .agent-draft > span:first-child, .before-handoff, .recording-live, .task-working, .agent-menu, .pointer, .sync-link span { opacity: 0; }
-    .controls, figure::after { display: none; }
-  }
-  :global(html[data-motion="reduced"]) .stage :global(*) { animation: none !important; }
-  :global(html[data-motion="reduced"]) :is(.agent-old, .agent-draft > span:first-child, .before-handoff, .recording-live, .task-working, .agent-menu, .pointer, .sync-link span) { opacity: 0; }
-  :global(html[data-motion="reduced"]) .controls, :global(html[data-motion="reduced"]) figure::after { display: none; }
+  /*
+   * The scenes are the tour's pictures, played like a GIF even when the system
+   * asks for less motion: they move only on screen and the pause stays one
+   * click away. The glow around them is decoration and stops.
+   */
+  @media (prefers-reduced-motion: reduce) { figure.playing::after { animation: none; } }
+  :global(html[data-motion="reduced"]) figure.playing::after { animation: none; }
 </style>
