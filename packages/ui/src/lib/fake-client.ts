@@ -42,6 +42,7 @@ import { clearRequestsOf, requestMethods } from './fake-client/requests';
 import { resourceMethods } from './fake-client/resources';
 import { seed } from './fake-client/seed';
 import { settingsMethods } from './fake-client/settings';
+import { gatewayMoveMethods } from './fake-client/gateway-move';
 import { DEVICE_METHODS } from './fake-client/shared';
 import { speechMethods } from './fake-client/speech';
 import { terminalMethods } from './fake-client/terminals';
@@ -444,6 +445,7 @@ export class FakeClient implements ObservableClient {
       ...terminalMethods(ctx),
       ...resourceMethods(ctx),
       ...settingsMethods(ctx),
+      ...gatewayMoveMethods(ctx),
       ...speechMethods(ctx),
       ...delegationMethods(ctx),
       ...coordinationMethods(ctx),
