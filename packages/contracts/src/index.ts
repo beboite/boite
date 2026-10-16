@@ -14,6 +14,7 @@ export * from './workflows';
 export * from './workflow-plan';
 export * from './thread-focus';
 export * from './context-mode';
+export * from './delegation-input';
 import type { ContextPreset, ContextRequest, ThreadContextMode } from './context-mode';
 
 /**
@@ -2962,9 +2963,11 @@ export interface AgentLetter {
    * Who the core says wrote it. Missing on older coordination mail: another
    * agent. `user` and `result` are delegation mail. `resident` comes from the
    * persistent agent the owner entrusted the recipient's project to. None of
-   * them is a message the user typed.
+   * them is a message the user typed. `question` is written by the core when
+   * a delegated agent asks something (a question card or a permission request)
+   * and tells its parent; it is withdrawn when the card closes before delivery.
    */
-  origin?: 'user' | 'agent' | 'result' | 'resident';
+  origin?: 'user' | 'agent' | 'result' | 'resident' | 'question';
   /**
    * A `result` written when a delegated agent ended its turn to wait on its
    * own background work: what it said so far, not its final result, which
@@ -2983,6 +2986,12 @@ export interface AgentLetter {
   expiresAt: Timestamp;
   status: 'queued' | 'received' | 'delivered' | 'uncertain' | 'expired' | 'rejected';
   error: string | null;
+  /**
+   * The question of the recipient this message answered instead of being
+   * delivered as a message: a parent's `delegation.send` to a child waiting on
+   * a question card. Missing otherwise and on older cores.
+   */
+  answered?: RequestId;
   /**
    * How the other end relates to the thread whose view lists this letter.
    * The core sets it when it reads the letter out, never stores it; missing on
@@ -3325,9 +3334,14 @@ export interface DelegationModels {
 /** The profile every conversation has without configuring one: its own harness, account, model and effort. */
 export const CONVERSATION_PROFILE_ID = 'conversation';
 export interface DelegationResultRef { agentId: ThreadId; turnId: TurnId }
-export type DelegationSettlement = 'result_available' | 'waiting_for_children' | 'settled';
+/** `needs_input`: a child waits on a question or a permission request; its `needsInput` says which. */
+export type DelegationSettlement = 'result_available' | 'waiting_for_children' | 'needs_input' | 'settled';
 export interface DelegationWaitResult {
-  /** Single-child completion exposes its result; a whole finished team is settled. */
+  /**
+   * Single-child completion exposes its result; a whole finished team is
+   * settled. A wait also ends, as `needs_input`, as soon as a child it covers
+   * asks something.
+   */
   state: DelegationSettlement;
   timedOut: boolean;
   agents: DelegatedAgent[];
@@ -3350,6 +3364,39 @@ export interface DelegatedAgent {
   resultRef?: DelegationResultRef;
   /** A child's terminal result availability, not ownership of nested children. */
   settlement?: 'result_available' | 'settled';
+  /** What the child waits on from someone, oldest first. Missing when nothing is open. */
+  needsInput?: DelegationInput[];
+  /** The child's own git worktree, for a child spawned with `worktree`. Missing for a child in the shared checkout. */
+  worktree?: DelegationWorktree;
+}
+/**
+ * A card a delegated child waits on. A question's free text or one of its
+ * option labels, sent by the parent with `delegation.send`, answers it; a
+ * permission request only the user can decide, in the child's conversation.
+ */
+export type DelegationInput =
+  | { kind: 'question'; id: RequestId; text: string; options: string[]; allowText: boolean; multiple: boolean; blocking: boolean }
+  | { kind: 'permission'; id: RequestId; toolName: string; description: string | null };
+/**
+ * A delegated child's worktree. `pending`: not made yet, it is made from the
+ * parent's HEAD before the child's next turn. `active`: the child works in it.
+ * `kept`: its last turn left commits beyond `base` or uncommitted changes, so
+ * the branch waits for the parent to merge it. `removed`: it ended with
+ * neither, so the worktree and its branch were deleted; a new turn makes them
+ * again from the parent's HEAD.
+ */
+export interface DelegationWorktree {
+  branch: string;
+  path: string;
+  /** The commit it branched from; null while pending. */
+  base: string | null;
+  state: 'pending' | 'active' | 'kept' | 'removed';
+  /** Commits on the branch beyond `base` when it was last settled. */
+  commits?: number;
+  /** Uncommitted changes when it was last settled. */
+  dirty?: boolean;
+  /** Why the core could not settle or make it, when it could not. */
+  error?: string;
 }
 export interface DelegationView {
   rootThreadId: ThreadId;
@@ -3640,9 +3687,22 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * (`Fast (priority)`), case-insensitively, and is refused otherwise. Left
    * out: no tier, never the parent's. `context` starts the child without
    * part of the user's setup; left out, it gets all of it.
+   *
+   * `worktree: true` runs the child in a git worktree of its own on a new
+   * `boite/sub-<id>` branch from the parent's current HEAD instead of the
+   * shared checkout; refused when the parent's project is not a git
+   * repository. Uncommitted edits of the parent are not copied.
    */
-  'delegation.spawn': { params: { threadId: ThreadId; profileId?: string; model?: string; effort?: string; speed?: string; context?: ContextRequest | ContextPreset; task: string; title?: string; requestId: string }; result: DelegatedAgent };
+  'delegation.spawn': { params: { threadId: ThreadId; profileId?: string; model?: string; effort?: string; speed?: string; context?: ContextRequest | ContextPreset; task: string; title?: string; worktree?: boolean; requestId: string }; result: DelegatedAgent };
   'delegation.models': { params: { threadId: ThreadId }; result: DelegationModels };
+  /**
+   * From a parent to a child blocked on a question card, the text answers
+   * that question (an option label, or free text where it takes some) and the
+   * letter carries `answered`; a text that fits neither is refused with the
+   * options. A question asked without stopping takes only its option labels.
+   * Otherwise a message delivered at the next tool boundary or turn
+   * (`delegationReply`).
+   */
   'delegation.send': { params: { threadId: ThreadId; toThreadId: ThreadId; text: string; requestId: string }; result: AgentLetter };
   'delegation.stop': { params: { threadId: ThreadId; agentId?: ThreadId }; result: { stopped: number } };
   'delegation.result': { params: { threadId: ThreadId; agentId: ThreadId; turnId: TurnId; offset?: number; limit?: number }; result: DelegationResultPage };

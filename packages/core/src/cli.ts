@@ -130,15 +130,19 @@ ${CONTROL_HELP}
   delegate spawn <brief>         start a subagent on one bounded job; its result
                                  comes back as a message (--model <provider/model>,
                                  --effort <level>, --speed <tier>, --title <title>,
-                                 --profile <id>, and a context mode: --context
+                                 --profile <id>, --worktree for a git worktree of
+                                 its own branched from your HEAD instead of your
+                                 checkout, and a context mode: --context
                                  light|neutral, --keep|--drop <parts>, --tools
                                  <Tool,...>, --rules <text>|--rules-file <path>)
   delegate list                  every subagent and workflow: state, model, time
   delegate send <thread-id> <text>
-                                 steer or reuse a subagent, or ask the parent
+                                 steer or reuse a subagent, or ask the parent;
+                                 to a subagent that asks something, the answer
   delegate stop [thread-id]      stop one subagent, or all of them
-  delegate wait [thread-id]      block until children finish (--timeout <s>,
-                                 default 600, max 3600); only with nothing else to do
+  delegate wait [thread-id]      block until children finish or one asks something
+                                 (--timeout <s>, default 600, max 3600); only with
+                                 nothing else to do
   delegate result <child> <turn> [offset]
                                  read a bounded page of full assistant text
   delegate profiles              the owner's named routes
@@ -394,6 +398,7 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
         ...(parsed.requestId === undefined ? {} : { requestId: parsed.requestId }), ...(parsed.timeout === undefined ? {} : { timeout: parsed.timeout }),
         ...(parsed.title === undefined ? {} : { title: parsed.title }), ...(parsed.model === undefined ? {} : { model: parsed.model }),
         ...(parsed.effort === undefined ? {} : { effort: parsed.effort }), ...(parsed.speed === undefined ? {} : { speed: parsed.speed }), ...(parsed.profile === undefined ? {} : { profile: parsed.profile }),
+        ...(parsed.worktree === true ? { worktree: true } : {}),
         ...(parsed.context === undefined ? {} : { context: contextRequest(parsed, readRules) }),
       }, print);
     },
