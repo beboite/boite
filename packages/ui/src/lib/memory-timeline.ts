@@ -1,5 +1,5 @@
 import type { MemoryEvent, Message, MessagePart } from '@boite/contracts';
-import { partRuns, type PartRun } from './tool-groups';
+import { partRuns, runKey, type PartRun } from './tool-groups';
 
 /** Older notices use tool timestamps; new notices retain their exact part boundary. */
 export function placeMemoryEvents(messages: Message[], events: MemoryEvent[]) {
@@ -59,3 +59,34 @@ export function memoryPartRuns(parts: MessagePart[], events: MemoryEvent[], from
   return runs;
 }
 
+type MessageRun = PartRun | MemoryRun;
+
+function sameRun(before: MessageRun, run: MessageRun): boolean {
+  if (run.kind === 'part') return before.kind === 'part' && before.index === run.index;
+  if (run.kind === 'activity') return before.kind === 'activity' && before.indices.length === run.indices.length && before.indices.every((at, index) => at === run.indices[index]);
+  return before.kind === 'memory' && before.events.length === run.events.length && before.events.every((event, index) => event === run.events[index]);
+}
+
+/**
+ * memoryPartRuns for one row that keeps what it built, as `TimelineRows` does:
+ * a run over the same parts comes back as the same object, and the same array
+ * while every run is the same. A part arriving at the end then hands no new
+ * `parts` to the groups above it.
+ */
+export class MessageRuns {
+  #runs: MessageRun[] = [];
+
+  build(parts: MessagePart[], events: MemoryEvent[], from = 0, to = parts.length, groupChanges = false): MessageRun[] {
+    const known = new Map(this.#runs.map(run => [run.kind === 'memory' ? run.key : runKey(run), run]));
+    let same = true;
+    const runs = memoryPartRuns(parts, events, from, to, groupChanges).map((run, index) => {
+      const before = known.get(run.kind === 'memory' ? run.key : runKey(run));
+      const kept = before && sameRun(before, run) ? before : run;
+      if (kept !== this.#runs[index]) same = false;
+      return kept;
+    });
+    if (same && runs.length === this.#runs.length) return this.#runs;
+    this.#runs = runs;
+    return runs;
+  }
+}

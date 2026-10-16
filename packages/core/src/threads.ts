@@ -725,8 +725,7 @@ export class ThreadStore {
   }
 
   stopQueuedCoordination(threadId: ThreadId): boolean {
-    const queued = this.core.journal.listTurns(threadId).find(turn => turn.status === 'queued' && turn.execution?.operation === 'coordination');
-    return queued === undefined ? false : this.core.scheduler.stop(threadId);
+    return this.core.journal.queuedTurn(threadId, 'coordination') === null ? false : this.core.scheduler.stop(threadId);
   }
 
   canSteer(threadId: string): boolean { return typeof this.runner.handles.get(threadId)?.steer === 'function'; }
@@ -734,7 +733,7 @@ export class ThreadStore {
   async steer(threadId: string, text: string): Promise<boolean> {
     const handle = this.runner.handles.get(threadId);
     if (!handle?.steer || this.runner.steering.has(threadId)) return false;
-    const turn = this.core.journal.listTurns(threadId).find(t => t.status === 'running');
+    const turn = this.core.journal.runningTurn(threadId);
     if (!turn) return false;
     this.runner.steering.add(threadId);
     try {

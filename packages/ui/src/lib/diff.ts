@@ -257,6 +257,44 @@ export function diffCounts(rows: DiffRow[]): { added: number; removed: number } 
   return { added, removed };
 }
 
+/** The two texts a diff is read from: a tool's diff document or an edit's change. */
+export interface DiffSource {
+  oldText: string;
+  newText: string;
+}
+
+/**
+ * Rows and counts by document, each whitespace mode apart. A tool card's
+ * counts, its opened diff and the turn's files card read one diff, and a card
+ * the window mounts again reads none. The store replaces a document rather
+ * than editing it, so a deferred one filled in later is a new key; the texts
+ * are compared anyway, so an object edited in place is read again.
+ */
+const diffsByDoc = new WeakMap<DiffSource, { oldText: string; newText: string; plain?: DiffRow[]; squeezed?: DiffRow[]; counts?: { added: number; removed: number } }>();
+
+function memoOf(doc: DiffSource): { oldText: string; newText: string; plain?: DiffRow[]; squeezed?: DiffRow[]; counts?: { added: number; removed: number } } {
+  const { oldText, newText } = doc;
+  let memo = diffsByDoc.get(doc);
+  if (memo?.oldText !== oldText || memo.newText !== newText) {
+    memo = { oldText, newText };
+    diffsByDoc.set(doc, memo);
+  }
+  return memo;
+}
+
+/** `diffRows` of a document, computed once per document and whitespace mode. Callers must not change the rows. */
+export function diffRowsOf(doc: DiffSource, ignoreWhitespace = false): DiffRow[] {
+  const memo = memoOf(doc);
+  if (ignoreWhitespace) return memo.squeezed ??= diffRows(memo.oldText, memo.newText, { ignoreWhitespace: true });
+  return memo.plain ??= diffRows(memo.oldText, memo.newText);
+}
+
+/** Lines added and removed by a document, whitespace included: what a tool card and the files card count. */
+export function diffCountsOf(doc: DiffSource): { added: number; removed: number } {
+  const memo = memoOf(doc);
+  return memo.counts ??= diffCounts(memo.plain ??= diffRows(memo.oldText, memo.newText));
+}
+
 /** One line of the side-by-side view: the old side on the left, the new on the right, either empty. */
 export type SplitRow =
   | { kind: 'pair'; left: Exclude<DiffRow, { kind: 'gap' }> | null; right: Exclude<DiffRow, { kind: 'gap' }> | null }

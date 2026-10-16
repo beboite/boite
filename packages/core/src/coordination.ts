@@ -52,9 +52,10 @@ export class Coordination {
   /** When the sweep last pruned the wake log and old letters; both are hourly bookkeeping. */
   private swept = 0;
 
-  constructor(private readonly core: Core) {
+  /** `threadJsonChecked`: the core already validated visible thread JSON at this start. */
+  constructor(private readonly core: Core, threadJsonChecked = false) {
     // A restart keeps idle contacts reachable, but never replays pending work automatically.
-    core.journal.validateVisibleThreadJson();
+    if (!threadJsonChecked) core.journal.validateVisibleThreadJson();
     const candidates = core.journal.db.query(`SELECT settings.key, settings.value, threads.rowid FROM settings JOIN threads ON settings.key = 'coordination:' || threads.id
       WHERE threads.id NOT IN (SELECT thread_id FROM thread_deletions) AND (typeof(settings.value) <> 'text' OR NOT json_valid(settings.value))
       ORDER BY threads.rowid`).all() as { key: string; value: string; rowid: number }[];
@@ -375,7 +376,7 @@ export class Coordination {
     if (to.coreId === this.self('').coreId) {
       const contact = (resident ? this.contact(to.threadId, true) : undefined) ?? this.localReach(threadId).find(a => same(a, to)) ?? (to.threadId === threadId ? this.contact(threadId) : undefined);
       if (!contact) throw refused(`target: ${to.threadId} is not a contact this thread may reach; see boite agents list`);
-      return { contact, ...transcript(this.core.journal.db, to.threadId, limit, before) };
+      return { contact, ...transcript(this.core.journal.db, to.threadId, limit, before, id => this.core.journal.streamingMessage(id)) };
     }
     const peer = this.trusted().find(p => p.coreId === to.coreId);
     if (!peer) throw refused('target.coreId: not this core nor a machine trusted for coordination');
@@ -831,7 +832,7 @@ export class Coordination {
           if (payload.before !== undefined && !Number.isSafeInteger(payload.before)) throw invalidParams('read.before: expected a timestamp');
           const contact = this.localDirectory().find(a => a.threadId === threadId);
           if (!contact) throw refused('read.threadId: not a thread open to other machines');
-          result = { contact, ...transcript(this.core.journal.db, threadId, limit as number, payload.before as number | undefined) };
+          result = { contact, ...transcript(this.core.journal.db, threadId, limit as number, payload.before as number | undefined, id => this.core.journal.streamingMessage(id)) };
         }
         else if (envelope.operation === 'receipt') {
           const payload = envelope.payload as { id: string; fromThreadId: string };

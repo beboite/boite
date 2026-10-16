@@ -162,12 +162,16 @@ Producers must classify output; text redaction alone is not a transcript
 filter.
 
 Writes use a bounded 1,024-record pending buffer and 250 ms batching, with
-earlier flushes for large batches. Overflow reports dropped persistence;
-recent memory retains up to 4,096 records. A failed sink reports once and
-leaves core work running. Queries merge recent memory, the core files newest
+earlier flushes for large batches. Memory holds only the records the files do
+not: pending ones, the batch being written, and up to 4,096 that will not be
+written (a failed sink, an overflow of the pending buffer, a record larger than
+a file). Overflow reports dropped persistence. A failed sink reports once and
+leaves core work running. Queries merge that memory, the core files newest
 first (stopping once an older file cannot change the answer) and the shell's
 files, ignore malformed or partial crash records, sort by time and serialize
-reads with rotation. Close flushes writes. POSIX directories use `0700` and
+reads with rotation. A query with `since`, such as the Diagnostics page's poll
+every 3 s, opens no file last modified more than 10 minutes (the allowed client
+clock skew) before it. Close flushes writes. POSIX directories use `0700` and
 files `0600`.
 
 ### Anonymization

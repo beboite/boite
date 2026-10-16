@@ -13,8 +13,11 @@ export interface ToolDescription {
   family: ToolFamily;
   /** The path, command, pattern, address or query the call is about; empty when it has none. */
   subject: string;
-  /** An edit whose before and after are both in the input: what the diff view draws. */
-  change: { path: string; oldText: string; newText: string } | null;
+  /**
+   * An edit whose before and after are both in the input: what the diff view
+   * draws, as a diff document. One object per input, so its line diff is read once.
+   */
+  change: { kind: 'diff'; path: string; oldText: string; newText: string } | null;
 }
 
 const SUMMARY_KEYS = ['file_path', 'path', 'command', 'cmd', 'pattern', 'query', 'url', 'notebook_path', 'prompt', 'description'];
@@ -119,9 +122,9 @@ function describe(name: string, input: unknown): ToolDescription {
   }
   let change: ToolDescription['change'] = null;
   if (family === 'edit' && path && (typeof fields['old_string'] === 'string' || typeof fields['new_string'] === 'string')) {
-    change = { path, oldText: text(fields['old_string']), newText: text(fields['new_string']) };
+    change = { kind: 'diff', path, oldText: text(fields['old_string']), newText: text(fields['new_string']) };
   } else if (family === 'write' && path && bodyOf(fields) !== null) {
-    change = { path, oldText: '', newText: bodyOf(fields) ?? '' };
+    change = { kind: 'diff', path, oldText: '', newText: bodyOf(fields) ?? '' };
   }
   return { family, subject, change };
 }

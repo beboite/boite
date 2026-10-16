@@ -211,10 +211,12 @@ bun run build:ui
 bun run build:core:linux
 ```
 
-That is `build:core` followed by `bun build --compile --target=bun-linux-x64-baseline`,
+That is `build:core` followed by `bun build --compile --target=bun-linux-x64-baseline --bytecode --format=esm`,
 which writes `packages/core/dist/boite-core-linux-x64`: one executable for x64
 glibc Linux that carries its own Bun, in the baseline build that also runs on
-CPUs without AVX2. The image's Bun comes from `oven/bun`, whose x64 build is the
+CPUs without AVX2. The precompiled bytecode cuts its start to ready by about
+a third (bench/results/2026-10-15-perf-media.md) and ties the binary to the Bun
+that built it, which the build pins. The image's Bun comes from `oven/bun`, whose x64 build is the
 baseline one too. Cross-compiling works from Windows. Copy it
 to the server with `packages/ui/dist` beside it, renamed `ui`, since a compiled
 core looks for the UI next to its own executable. The build also writes

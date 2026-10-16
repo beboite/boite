@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { crc32, deflateSync } from 'node:zlib';
 import type { Message } from '@boite/contracts';
-import { echoThread, startTestCore } from './harness.ts';
+import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
 let harness: TestCore;
@@ -136,6 +136,51 @@ describe('deferred pictures', () => {
     expect((await client.call('messages.attachment', { threadId, messageId: 'msg_attached', partIndex: 0 })).data).toBe(SHOT);
   });
 
+  test('a live prompt and agent part reach a window opened light as its pages do, and the blur is queued', async () => {
+    const light = await harness.connect();
+    const whole = await harness.connect();
+    const { threadId } = await echoThread(harness, light);
+    await light.call('threads.get', { threadId, compactFiles: true, compactImages: true, open: {} });
+    await whole.call('threads.get', { threadId, open: {} });
+    const notes = Buffer.from('notes '.repeat(64)).toString('base64');
+    const lightStarted = light.next('message.started', message => message.role === 'user');
+    const wholeStarted = whole.next('message.started', message => message.role === 'user');
+    await light.call('turns.start', { threadId, prompt: 'look', attachments: [
+      { kind: 'image', mimeType: 'image/png', data: SHOT, name: 'shot.png' },
+      { kind: 'file', mimeType: 'text/plain', data: notes, name: 'notes.txt' },
+    ] });
+    const sent = await lightStarted;
+    const image = sent.parts.find(part => part.type === 'image');
+    const file = sent.parts.find(part => part.type === 'file');
+    expect(image).toMatchObject({ data: '', dataDeferred: true, width: 320, height: 180, bytes: Buffer.from(SHOT, 'base64').length });
+    expect(file).toMatchObject({ name: 'notes.txt', data: '', dataDeferred: true, bytes: Buffer.from(notes, 'base64').length });
+    // The other window asked for whole pages, and gets the whole prompt.
+    const full = await wholeStarted;
+    expect(full.parts.find(part => part.type === 'image')).toMatchObject({ data: SHOT });
+    expect(full.parts.find(part => part.type === 'file')).toMatchObject({ data: notes });
+    // The blur it went without is made for the next page.
+    await waitFor(() => previews(threadId) > 0);
+    const page = await light.call('threads.get', { threadId, compactFiles: true, compactImages: true });
+    const paged = page.messages.find(message => message.id === sent.id)!.parts.find(part => part.type === 'image');
+    expect(paged?.type === 'image' && paged.preview?.startsWith('data:image/png;base64,')).toBe(true);
+    expect((await light.call('messages.attachment', { threadId, messageId: sent.id, partIndex: sent.parts.indexOf(image!) })).data).toBe(SHOT);
+
+    // An agent's picture part is deferred too; its video keeps its bytes.
+    const video = Buffer.from('a short clip').toString('base64');
+    const parts = [
+      { type: 'file' as const, mimeType: 'image/png', data: SHOT, name: 'street.png' },
+      { type: 'file' as const, mimeType: 'video/mp4', data: video, name: 'drive.mp4' },
+    ];
+    for (const [partIndex, part] of parts.entries()) {
+      const lightPart = light.next('message.part', event => event.partIndex === partIndex && event.messageId === 'msg_agent');
+      const wholePart = whole.next('message.part', event => event.partIndex === partIndex && event.messageId === 'msg_agent');
+      harness.core.bus.emit('message.part', { threadId, messageId: 'msg_agent', partIndex, part });
+      expect((await wholePart).part).toEqual(part);
+      if (partIndex === 0) expect((await lightPart).part).toMatchObject({ data: '', dataDeferred: true, width: 320, height: 180 });
+      else expect((await lightPart).part).toEqual(part);
+    }
+  });
+
   test('messages.attachment with display hands back a lighter WebP made once, and the original without it', async () => {
     const client = await harness.connect();
     const { threadId } = await echoThread(harness, client);
@@ -154,7 +199,16 @@ describe('deferred pictures', () => {
     // Kept: the second read is the same copy, from the journal.
     const kept = harness.core.journal.db.query('SELECT length(data) AS n FROM media_displays WHERE message_id = ?').get('msg_screen') as { n: number };
     expect(kept.n).toBe(bytes.length);
+    // The kept copy answers without reading the message, and only for the message's own thread.
+    const journal = harness.core.journal;
+    const messagePart = journal.messagePart.bind(journal);
+    let reads = 0;
+    journal.messagePart = (...args) => { reads += 1; return messagePart(...args); };
     expect((await client.call('messages.attachment', { threadId, messageId: 'msg_screen', partIndex: 0, display: true })).data).toBe(copy.data);
+    expect(reads).toBe(0);
+    const other = await echoThread(harness, client, 'other thread');
+    await expect(client.call('messages.attachment', { threadId: other.threadId, messageId: 'msg_screen', partIndex: 0, display: true })).rejects.toThrow('is not a message of thread');
+    journal.messagePart = messagePart;
     // The original is still what a plain read gives; a copy heavier than its PNG is not sent; a GIF stays a GIF.
     expect(await client.call('messages.attachment', { threadId, messageId: 'msg_screen', partIndex: 0 })).toEqual({ data: SCREEN });
     expect(await client.call('messages.attachment', { threadId, messageId: 'msg_shot', partIndex: 1, display: true })).toEqual({ data: SHOT });

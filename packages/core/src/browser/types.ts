@@ -3,7 +3,7 @@ import type { BrowserDiagnostic, BrowserHistoryEntry, BrowserPreset, RemoteBrows
 import type { Cdp } from './cdp.ts';
 import type { BrowserIdentity } from './chromium.ts';
 import type { TabRecorder } from './recorder.ts';
-import type { PageInfo } from './frames.ts';
+import type { PageInfo, ScreenTurns } from './frames.ts';
 import type { AgentPage } from './automation.ts';
 
 /** One Chromium process: a profile folder, or a throwaway one for private tabs. */
@@ -49,8 +49,8 @@ export interface Tab {
   /** The agent's turn ended while its recording ran: the video was thrown away. */
   discarded: boolean;
   frame: { at: number; key: string; promise: Promise<{ frame: RemoteBrowserFrame; page: PageInfo }> } | null;
-  /** The last capture or page size change of this tab: they take turns (`#screen`). */
-  screen: Promise<unknown>;
+  /** Captures and page size changes of this tab take turns (`frames.ts`, `takeTurn`). */
+  screen: ScreenTurns;
   off: Array<() => void>;
   /** An agent command is running: the dialogs it raises follow `page.dialogPolicy`. */
   acting: boolean;

@@ -21,7 +21,8 @@ interface RemoteDriveContext {
   tabOf(threadId: ThreadId, tabId?: string): Tab;
   evaluate(tab: Tab, expression: string, timeoutMs?: number): Promise<unknown>;
   send(tab: Tab, method: string, params?: Record<string, unknown>): Promise<unknown>;
-  screen<T>(tab: Tab, run: () => Promise<T>): Promise<T>;
+  /** `strict`: a size change or a read of the page's size, which no capture may overlap. */
+  screen<T>(tab: Tab, run: () => Promise<T>, strict?: boolean): Promise<T>;
 }
 
 export class RemoteDrive {
@@ -92,13 +93,13 @@ export class RemoteDrive {
         return { ok: true };
       }
       case 'viewport':
-        retire(); await this.context.screen(tab, () => this.context.send(tab, 'Emulation.setDeviceMetricsOverride', { width: input.width, height: input.height, deviceScaleFactor: 1, mobile: false }));
+        retire(); await this.context.screen(tab, () => this.context.send(tab, 'Emulation.setDeviceMetricsOverride', { width: input.width, height: input.height, deviceScaleFactor: 1, mobile: false }), true);
         tab.preset = null; return { ok: true };
-      case 'reset-viewport': retire(); await this.context.screen(tab, () => this.context.send(tab, 'Emulation.clearDeviceMetricsOverride')); tab.preset = null; return { ok: true };
+      case 'reset-viewport': retire(); await this.context.screen(tab, () => this.context.send(tab, 'Emulation.clearDeviceMetricsOverride'), true); tab.preset = null; return { ok: true };
       default: break;
     }
     // Read in turn with captures: a scaled one in flight resizes the page for its shot.
-    const page = await this.context.screen(tab, () => this.context.evaluate(tab, PAGE_INFO_SCRIPT, 5000)) as PageInfo;
+    const page = await this.context.screen(tab, () => this.context.evaluate(tab, PAGE_INFO_SCRIPT, 5000), true) as PageInfo;
     const same = page.width === saved.page.width && page.height === saved.page.height && page.href === saved.page.href && page.origin === saved.page.origin;
     if (!same) throw changed();
     if ((input.kind === 'tap' || input.kind === 'drag') && (input.width !== saved.frame.width || input.height !== saved.frame.height)) throw refused('the browser viewport changed; refresh before tapping');

@@ -15,7 +15,6 @@
  * `usableAddresses` in the UI).
  */
 
-import { Resolver } from 'node:dns/promises';
 import { networkInterfaces, type NetworkInterfaceInfo } from 'node:os';
 import { lanAddress } from '../server/lan.ts';
 import { ADDRESSES_MAX } from './roster.ts';
@@ -70,6 +69,8 @@ export function tailnetAddress(
 
 /** The name MagicDNS gives that address, or null when the tailnet has none or the resolver is silent. */
 export async function magicName(ip: string): Promise<string | null> {
+  // Loaded here: only tailnet address lookups need a resolver, and the module costs every start.
+  const { Resolver } = await import('node:dns/promises');
   const resolver = new Resolver({ timeout: MAGIC_DNS_TIMEOUT_MS, tries: 1 });
   try {
     resolver.setServers([MAGIC_DNS]);

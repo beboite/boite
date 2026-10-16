@@ -150,7 +150,8 @@ test('with no cached shell a failing core answers for itself', async () => {
 
 test('installation caches entry scripts, styles and fonts before taking control', async () => {
   const sw = worker();
-  sw.fetch.mockResolvedValue(new Response('<script src="/assets/index-ab.js"></script><link href="/assets/index-cd.css"><script src="/assets/index-ab.js"></script>'));
+  // The locale map of an inline script names a catalogue the document does not load.
+  sw.fetch.mockResolvedValue(new Response('<script src="./assets/index-ab.js"></script><link href="/assets/index-cd.css"><script src="/assets/index-ab.js"></script><script>var l={"fr":"./assets/strings.fr-ef.js"}</script>'));
   await sw.emit('install');
   expect(sw.cache.addAll).toHaveBeenCalledExactlyOnceWith([
     '/assets/index-ab.js', '/assets/index-cd.css', '/manifest.webmanifest', '/icons/icon-192.png', '/fonts/Inter-latin.woff2', '/fonts/GeistMono-Variable.woff2'
@@ -169,12 +170,12 @@ test('activation keeps other apps caches and RPC is never handled', async () => 
 test("a build's worker opens a cache of its own, and activating it drops the previous build's files", async () => {
   const stamped = stampWorkerCache(source, '0123456789abcdef');
   expect(stamped).not.toBe(source);
-  const sw = worker(stamped, ['boite-ui-v3', 'boite-ui-v3-fedcba9876543210', 'boite-ui-v3-0123456789abcdef', 'another-app']);
+  const sw = worker(stamped, ['boite-ui-v4', 'boite-ui-v4-fedcba9876543210', 'boite-ui-v4-0123456789abcdef', 'another-app']);
 
   await sw.emit('install');
-  expect(sw.caches.open).toHaveBeenCalledWith('boite-ui-v3-0123456789abcdef');
+  expect(sw.caches.open).toHaveBeenCalledWith('boite-ui-v4-0123456789abcdef');
   await sw.emit('activate');
-  expect(sw.caches.delete.mock.calls.map(([name]) => name)).toEqual(['boite-ui-v3', 'boite-ui-v3-fedcba9876543210']);
+  expect(sw.caches.delete.mock.calls.map(([name]) => name)).toEqual(['boite-ui-v4', 'boite-ui-v4-fedcba9876543210']);
 
   // A second build is a different file, which is what makes the browser install it.
   expect(stampWorkerCache(source, 'fedcba9876543210')).not.toBe(stamped);
