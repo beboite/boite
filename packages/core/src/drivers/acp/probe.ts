@@ -4,11 +4,11 @@ import type { ClientConnection, SessionConfigOption } from '@agentclientprotocol
 import type { AccountId, ModelInfo, ProviderId } from '@boite/contracts';
 import pkg from '../../../package.json';
 import { messageOf, unavailable } from '../../errors.ts';
-import { agentEnv, launchPrefix, profileFor, resolveExecutable } from '../../providers/resolve.ts';
+import { agentEnv, profileFor, resolveLaunch } from '../../providers/resolve.ts';
 import { stderrDrained, stderrLines } from '../lines.ts';
 import type { ProbeContext, ProbeResult } from '../types.ts';
 import { agentModelsOf, categoryOption, effortFrom, modelsFrom, selectValues, type AgentModels } from './models.ts';
-import { CLIENT_NAME, isGrok, preferExit, STDERR_MAX, type AcpDeps, type Timer } from './protocol.ts';
+import { canDeleteSessions, CLIENT_NAME, discardSession, isGrok, preferExit, STDERR_MAX, type AcpDeps, type Timer } from './protocol.ts';
 import { jsonLinesOnly } from './stdout.ts';
 
 /** How long a probe waits for the agent to answer `initialize` and `session/new`. */
@@ -29,15 +29,15 @@ export interface ProbeReading {
 export async function readModels(ctx: ProbeContext, deps: AcpDeps, noteOptions: (options: SessionConfigOption[]) => void): Promise<ProbeReading> {
   const sdk = await deps.loadSdk();
   const profile = profileFor(ctx.provider);
-  const executable = profile === undefined ? null : resolveExecutable(profile);
-  if (executable === null) {
+  const launch = resolveLaunch(profile);
+  if (launch === null) {
     throw unavailable(`no ${ctx.provider.id} executable on this machine`, { providerId: ctx.provider.id });
   }
 
   let lastStderr = '';
   // No thread here, so no permission mode either: the probe launches the line
   // the descriptor declares and reads the agent on its own defaults.
-  const child = ctx.spawnChild(executable, [...launchPrefix(profile), ...(profile?.launch?.args ?? [])], {
+  const child = ctx.spawnChild(launch.executable, [...launch.prefix, ...(profile?.launch?.args ?? [])], {
     cwd: ctx.cwd,
     env: agentEnv(ctx.provider, ctx.accountEnv),
   });
@@ -90,7 +90,7 @@ export async function readModels(ctx: ProbeContext, deps: AcpDeps, noteOptions: 
     connection = open;
 
     const read = (async (): Promise<{ options: SessionConfigOption[] | null; listed: AgentModels | null; effort: ProbeReading['effort'] }> => {
-      await open.agent.request('initialize', {
+      const init = await open.agent.request('initialize', {
         protocolVersion: sdk.PROTOCOL_VERSION,
         clientCapabilities: {},
         clientInfo: { name: CLIENT_NAME, version: pkg.version },
@@ -112,6 +112,7 @@ export async function readModels(ctx: ProbeContext, deps: AcpDeps, noteOptions: 
         const listed = (answer as { configOptions?: SessionConfigOption[] | null }).configOptions ?? null;
         effort = { model: wanted, scale: effortFrom(categoryOption(listed, 'thought_level')) };
       }
+      await discardSession(open.agent, canDeleteSessions(init), created.sessionId);
       return { options, listed: agentModelsOf(created), effort };
     })();
 

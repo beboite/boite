@@ -100,7 +100,9 @@ export interface RecordingOverlay { start(): void; active(): boolean; draw(ctx: 
 
 /** What a core from before 100 MB recordings reads at a time: its CLI refuses a larger chunk. */
 const LEGACY_CHUNK_BYTES = 512 * 1024;
-const jpegOf = (base64: string): Blob => new Blob([Uint8Array.from(atob(base64), c => c.charCodeAt(0))], { type: 'image/jpeg' });
+/** Native base64 decoding where the webview has it (WebView2, current Chromium); WebKitGTK and older WKWebView copy byte by byte. */
+const fromBase64 = (Uint8Array as { fromBase64?: (base64: string) => Uint8Array<ArrayBuffer> }).fromBase64?.bind(Uint8Array);
+const jpegOf = (base64: string): Blob => new Blob([fromBase64 ? fromBase64(base64) : Uint8Array.from(atob(base64), c => c.charCodeAt(0))], { type: 'image/jpeg' });
 
 export class BrowserRecorder {
   private recorder: MediaRecorder | null = null;

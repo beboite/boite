@@ -1,3 +1,4 @@
+import type { RemoteBrowserUnchanged } from '@boite/contracts';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import { FakeClient } from '../lib/fake-client';
@@ -245,6 +246,31 @@ test('a still page is polled slowly, and a phone back from the background resume
   window.dispatchEvent(new Event('pageshow'));
   await vi.advanceTimersByTimeAsync(1); await settle();
   expect(requests).toHaveLength(idle + 1);
+});
+
+test('a frame the core reports unchanged stays shown and usable, and its wait is not counted as a slow link', async () => {
+  client = new FakeClient({ delayMs: 0 }); store = new Store(); store.attach(client); await store.connect();
+  const original = client.call.bind(client), asked: Record<string, unknown>[] = [];
+  const calls = vi.spyOn(client, 'call').mockImplementation(((method: string, params: unknown) => {
+    if (method === 'browser.remoteFrame') {
+      asked.push(params as Record<string, unknown>);
+      if (asked.length === 1) return Promise.resolve({ id: 'held', tabId: 'tab', title: 'Desktop', width: 760, height: 900, at: Date.now(), base64: '' });
+      // The core holds each request a second waiting for the page, then says it did not change.
+      return new Promise<RemoteBrowserUnchanged>(resolve => setTimeout(() => resolve({ unchanged: true, id: 'held', tabId: 'tab', at: Date.now(), waitedMs: 1000 }), 1000));
+    }
+    if (method === 'browser.remoteInput') return Promise.resolve({ ok: true });
+    return original(method as never, params as never);
+  }) as typeof client.call);
+  vi.useFakeTimers();
+  app = mount(RemoteBrowser, { target: document.body, props: { store, threadId: 't-trace' } }); await settle();
+  await vi.advanceTimersByTimeAsync(1); await settle();
+  await vi.advanceTimersByTimeAsync(8000); await settle();
+  expect(asked.length).toBeGreaterThan(3);
+  expect(asked.slice(1).every(params => params.after === 'held' && params.quality === undefined)).toBe(true);
+  // Eight seconds after the frame arrived, it is still the page: a key aimed at it leaves.
+  const enter = [...document.querySelectorAll<HTMLButtonElement>('.keys button')].find(b => b.textContent === 'Enter')!;
+  enter.click(); await settle();
+  expect(calls).toHaveBeenCalledWith('browser.remoteInput', { threadId: 't-trace', frameId: 'held', input: { kind: 'key', key: 'Enter' } });
 });
 
 test('a computer drives the page itself: keys in order, the wheel, a paste and a copy, with no text field below', async () => {

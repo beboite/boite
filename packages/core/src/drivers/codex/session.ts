@@ -9,7 +9,6 @@ import { profileFor, resolveExecutable } from '../../providers/resolve.ts';
 import { subscriptionProxyCodexArgs } from '../../subscription-proxy.ts';
 import type { LiveTurnSettings, ProbeContext, QuestionAsk, SessionContext, TurnContext } from '../types.ts';
 import { preparedModels } from './models.ts';
-import { codexQuotaReading } from '../../quota-details.ts';
 import { exitWithin } from '../exit.ts';
 import {
   addCounts,
@@ -19,6 +18,7 @@ import {
   mapUsage,
   modelOf,
   optionsOf,
+  planTasksOf,
   questionTextOf,
   servedOf,
   textOf,
@@ -42,6 +42,7 @@ import { resumeThread, ThreadLostError } from './resume.ts';
 import { threadConfig } from './config.ts';
 import { updateTurnSettings } from './live-settings.ts';
 import { CodexTurn } from './turn.ts';
+import { CodexRateLimits } from './rate-limits.ts';
 import { SpentWindows, turnError } from './availability.ts';
 import { SessionRetention } from '../session-retention.ts';
 import { noteReady } from '../driver-log.ts';
@@ -108,6 +109,8 @@ export class CodexSession {
   private initializing = false;
   private sqliteInitFailed = false;
   private startupStderr = '';
+  /** Rolling rate-limit updates, forwarded as quota readings of this session's account. */
+  private readonly rateLimits = new CodexRateLimits(() => this.rpc, () => this.current?.ctx ?? this.opener);
 
   constructor(
     readonly key: string,
@@ -566,9 +569,7 @@ export class CodexSession {
     if (method === 'hook/completed') return this.onHook(params['run'] as CodexHookRun | undefined);
     if (method === 'account/rateLimits/updated') {
       if (this.spentWindows.note(params['rateLimits']) && this.current !== null) this.current.spentWindowResetsAt = this.spentWindows.latest();
-      // The limits tab shows the account's limits from here without starting an app-server to read them.
-      const reading = codexQuotaReading(params);
-      if (reading) this.opener?.quota?.(reading, Date.now());
+      this.rateLimits.updated(params);
       return;
     }
     const turn = this.current;
@@ -606,13 +607,15 @@ export class CodexSession {
       case 'item/commandExecution/outputDelta':
         if (typeof params['itemId'] === 'string') turn.appendOutput(params['itemId'], textOf(params['delta']));
         break;
-      case 'turn/plan/updated':
-        this.updatePlan(turn, params['plan']);
+      case 'turn/plan/updated': {
+        const tasks = planTasksOf(params['plan']);
+        if (tasks !== null) turn.ctx.tasks?.(tasks);
         break;
+      }
       case 'item/reasoning/textDelta':
       case 'item/reasoning/summaryTextDelta': {
         const summary = method === 'item/reasoning/summaryTextDelta';
-        turn.ctx.reportProgress?.('thinking');
+        if (!turn.thinkingOpen) turn.ctx.reportProgress?.('thinking');
         turn.writeThinking(textOf(params['delta']), `${textOf(params['itemId'])}:${summary ? 'summary' : 'content'}:${String(params[summary ? 'summaryIndex' : 'contentIndex'] ?? 0)}`);
         break;
       }
@@ -628,15 +631,6 @@ export class CodexSession {
         // has no part for them, so they are dropped.
         break;
     }
-  }
-
-  /** A plan update replaces the turn's tasks, keeping the wire's two in-progress spellings. */
-  private updatePlan(turn: CodexTurn, plan: unknown): void {
-    if (!Array.isArray(plan)) return;
-    turn.ctx.tasks?.(plan.flatMap((entry, index) => {
-      if (!entry || typeof entry.step !== 'string') return [];
-      return [{ id: String(index), text: entry.step, status: entry.status === 'completed' ? 'completed' as const : entry.status === 'inProgress' || entry.status === 'in_progress' ? 'in_progress' as const : 'pending' as const }];
-    }));
   }
 
   /** Completed items replace their own parts; asynchronous questions are drawn once per item. */

@@ -6,7 +6,7 @@ import { GuardLogic, HWND_BOTTOM, PUSH_BACK_FLAGS } from '../src/platform/window
 import type { GuardWin32, WindowOwner } from '../src/platform/windows/guard-logic.ts';
 import { AudioEndpoint, NO_ENDPOINT, NO_ENDPOINT_RETRY_MS } from '../src/platform/windows/audio-endpoint.ts';
 import type { AudioSessions } from '../src/platform/windows/audio-sessions.ts';
-import { MuteLogic } from '../src/platform/windows/mute-logic.ts';
+import { MUTE_BATCH_MS, MuteLogic } from '../src/platform/windows/mute-logic.ts';
 import { jobsWorkerRunning, setJobsIdleGrace } from '../src/platform/windows/jobs.ts';
 import type { ThreadId, Turn } from '@boite/contracts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
@@ -278,6 +278,32 @@ describe('the audio mute rule', () => {
     mute.tick();
     expect(walks).toBe(1);
   });
+  test('a burst of new pids shares one walk, and a session the first one opens late is still muted', () => {
+    const endpoint = new FakeEndpoint();
+    let walks = 0;
+    let clock = 5000;
+    const mute = new MuteLogic((skipped) => { walks += 1; return endpoint.list(skipped); }, true, () => clock);
+
+    for (let index = 0; index < 50; index += 1) mute.addPid('thr_build', 8000 + index);
+    expect(walks).toBe(1);
+    expect(mute.pendingWalkIn()).toBe(MUTE_BATCH_MS);
+
+    // The first process opens its session after its own walk went past.
+    const mixer = endpoint.add(8000);
+    clock += MUTE_BATCH_MS;
+    expect(mute.pendingWalkIn()).toBe(0);
+    mute.tick();
+    expect(walks).toBe(2);
+    expect(mixer.muted).toBe(true);
+    expect(mute.pendingWalkIn()).toBeNull();
+
+    // A pid that comes once the gap is over is walked for at once, as before.
+    clock += MUTE_BATCH_MS;
+    mute.addPid('thr_build', 9000);
+    expect(walks).toBe(3);
+    expect(mute.pendingWalkIn()).toBeNull();
+  });
+
   test('a session of a traced pid is muted once and reported once', () => {
     const endpoint = new FakeEndpoint();
     const mixer = endpoint.add(MUTED_PID);
@@ -329,6 +355,8 @@ describe('the audio mute rule', () => {
     const mute = new MuteLogic(endpoint.list, true);
     mute.addPid('thr_one', MUTED_PID);
     mute.addPid('thr_two', OTHER_PID);
+    // The second pid came inside the batch gap: the pump's next walk takes it.
+    mute.tick();
     expect([one.muted, two.muted]).toEqual([true, true]);
 
     mute.setEnabled(false);

@@ -209,7 +209,7 @@ export class DraftPreparations {
     const account = this.core.accounts.require(thread.accountId);
     const driver = getDriver(provider.protocol);
     if (!driver.prepare || this.core.plugins.blocksAccount(account.id)) return;
-    assertDriverRunnable(provider.protocol, this.core.providers.list().loaded.find(item => item.id === provider.id), account);
+    assertDriverRunnable(provider.protocol, this.core.providers.summary(provider.id), account);
     const context = this.core.threads.contexts.makeSessionContext(thread, provider, account);
     // Setup can report commands/context before there is a journal record. Buffer those until adoption.
     const buffered: { field: keyof SessionContext; args: unknown[] }[] = [];

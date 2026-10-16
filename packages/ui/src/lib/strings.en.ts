@@ -2156,7 +2156,6 @@ export const strings = {
     unpriced: 'No price for {providers}: no public rate and no reported cost.',
     unreported: '{count} turns reported no usage. They count as turns only.',
     limits: 'Limits',
-    limitsOwner: 'Subscription limits are read on the computer that runs Boite. Open this page there to see them.',
     refresh: 'Refresh usage',
     loading: 'Reading usage',
     failed: 'Could not read usage: {error}',
@@ -2505,6 +2504,7 @@ export const strings = {
 
   quotas: {
     machineAccounts: 'Account limits for {machine}',
+    outdated: 'Update Boite on this machine to see its limits on this device.',
     usingCredits: 'Using credits',
     reorder: 'Reorder {name}. Drag or use the arrow keys.',
     bankedReset: '{count} banked reset',

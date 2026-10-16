@@ -55,7 +55,6 @@ export function claudeQuotaWindows(raw: unknown): QuotaWindow[] {
   return windows;
 }
 
-
 /**
  * One HTTP request when the login is a file Boite can read. Otherwise the CLI
  * answers for itself: on macOS Claude keeps its login in the Keychain, and an

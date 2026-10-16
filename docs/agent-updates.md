@@ -84,7 +84,11 @@ from that candidate. It stands in for a launcher Boite skips: Codex's npm
 package starts its binary through a Node script that sets
 `CODEX_MANAGED_BY_NPM`, and `codex update` refuses with `Could not detect the
 Codex installation method` without it. The Windows descriptor runs that binary
-directly, so its two npm candidates set the variable themselves.
+directly, so its two npm candidates set the variable themselves. On Linux and
+macOS sessions and probes run the binary directly when PATH reaches the
+launcher itself, but the updater still runs the launcher: it names the package
+manager that owns the install (npm, Bun, pnpm or Vite+) and the package root,
+which a fixed variable cannot.
 
 An agent installed by npm updates through `npm install -g`, which writes under
 npm's configured prefix. That prefix is not always the one holding the copy

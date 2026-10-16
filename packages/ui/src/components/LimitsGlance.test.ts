@@ -85,13 +85,15 @@ function proxied(owner: boolean, status: 'ready' | 'unsupported' | (() => Promis
   return { call, showSettings };
 }
 
-test('a paired device sends the press to the Limits page, which shows the gateway, without asking for its quotas', async () => {
+test('a paired device opens the glance on the gateway bars, without forcing a refresh', async () => {
   const { call, showSettings } = proxied(false, 'ready', 'glance-proxy-phone');
   document.querySelector<HTMLButtonElement>('[data-testid="nav-limits"]')!.click();
   await settle();
-  expect(showSettings).toHaveBeenCalledWith('limits');
-  expect(document.querySelector('[data-testid="limits-glance"]')).toBeNull();
-  expect(call).not.toHaveBeenCalledWith('subscriptionProxy.quotas', expect.anything());
+  expect(showSettings).not.toHaveBeenCalled();
+  expect(document.querySelector('[data-testid="limits-glance"]')).not.toBeNull();
+  expect(document.querySelector('[data-testid="limits-glance-refresh"]')).toBeNull();
+  expect(call).toHaveBeenCalledWith('quotas.list', expect.objectContaining({ refresh: false }));
+  expect(call).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ refresh: true }));
 });
 
 test('the first press already knows whether Douane serves its quotas: the dashboard without the route, the bars with it', async () => {

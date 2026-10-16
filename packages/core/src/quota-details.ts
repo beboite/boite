@@ -18,6 +18,32 @@ function expires(value: unknown): number | null {
   const at = typeof value === 'number' ? value * 1000 : typeof value === 'string' ? Date.parse(value) : NaN;
   return Number.isFinite(at) ? at : null;
 }
+
+/** One usage window, its reset given in seconds or as a date. */
+export function quotaWindow(id: string, label: string, percent: unknown, reset: unknown): QuotaWindow | null {
+  if (typeof percent !== 'number' || !Number.isFinite(percent)) return null;
+  const at = typeof reset === 'number' ? reset * 1000 : typeof reset === 'string' ? Date.parse(reset) : NaN;
+  return { id, label, usedPercent: Math.max(0, Math.min(100, percent)), resetsAt: Number.isFinite(at) ? at : null };
+}
+
+/** Here rather than in quotas.ts, so the Codex driver maps a session's rolling update without importing the store. */
+export function codexQuotaWindows(raw: unknown): QuotaWindow[] {
+  const root = object(raw);
+  const byId = object(root['rateLimitsByLimitId']);
+  const snapshot = object(byId['codex'] ?? root['rateLimits']);
+  if (snapshot['limitId'] && snapshot['limitId'] !== 'codex') return [];
+  const windows: QuotaWindow[] = [];
+  for (const id of ['primary', 'secondary']) {
+    const value = object(snapshot[id]);
+    const fallback = id === 'secondary' ? 10080 : ['free', 'go'].includes(String(snapshot['planType'])) ? 43200 : 300;
+    const minutes = typeof value['windowDurationMins'] === 'number' ? value['windowDurationMins'] : fallback;
+    const label = minutes >= 43200 ? 'Monthly' : minutes >= 10080 ? 'Weekly' : `${minutes / 60} hours`;
+    const mapped = quotaWindow(id, label, value['usedPercent'], value['resetsAt']);
+    if (mapped) windows.push(mapped);
+  }
+  return windows;
+}
+
 function liveExpiration(value: unknown, now: number): boolean {
   if (value == null) return true;
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value)) return false;
@@ -50,38 +76,6 @@ export function codexNextResetCredit(raw: unknown, now = Date.now()): { id: stri
     throw new Error('Codex did not report all available reset details. Refresh the limits or update Codex before using a reset.');
   }
   return credits.reduce((next, credit) => (credit.expiresAt ?? Infinity) < (next.expiresAt ?? Infinity) ? credit : next);
-}
-
-export function quotaWindow(id: string, label: string, percent: unknown, reset: unknown): QuotaWindow | null {
-  if (typeof percent !== 'number' || !Number.isFinite(percent)) return null;
-  const at = typeof reset === 'number' ? reset * 1000 : typeof reset === 'string' ? Date.parse(reset) : NaN;
-  return { id, label, usedPercent: Math.max(0, Math.min(100, percent)), resetsAt: Number.isFinite(at) ? at : null };
-}
-
-export function codexQuotaWindows(raw: unknown): QuotaWindow[] {
-  const root = object(raw);
-  const byId = object(root['rateLimitsByLimitId']);
-  const snapshot = object(byId['codex'] ?? root['rateLimits']);
-  if (snapshot['limitId'] && snapshot['limitId'] !== 'codex') return [];
-  const windows: QuotaWindow[] = [];
-  for (const id of ['primary', 'secondary']) {
-    const value = object(snapshot[id]);
-    const fallback = id === 'secondary' ? 10080 : ['free', 'go'].includes(String(snapshot['planType'])) ? 43200 : 300;
-    const minutes = typeof value['windowDurationMins'] === 'number' ? value['windowDurationMins'] : fallback;
-    const label = minutes >= 43200 ? 'Monthly' : minutes >= 10080 ? 'Weekly' : `${minutes / 60} hours`;
-    const mapped = quotaWindow(id, label, value['usedPercent'], value['resetsAt']);
-    if (mapped) windows.push(mapped);
-  }
-  return windows;
-}
-
-/**
- * The limits a running session's `account/rateLimits/updated` carries: a sparse
- * update, with no banked resets. Null when it names no Codex window.
- */
-export function codexQuotaReading(raw: unknown): QuotaReading | null {
-  const windows = codexQuotaWindows(raw);
-  return windows.length ? { windows, ...codexQuotaDetails(raw) } : null;
 }
 
 export function codexQuotaDetails(raw: unknown): Pick<QuotaReading, 'resetCredits' | 'credits'> {

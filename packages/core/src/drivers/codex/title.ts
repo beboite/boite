@@ -6,7 +6,7 @@ import type { TitleContext } from '../types.ts';
 import { subscriptionProxyCodexArgs } from '../../subscription-proxy.ts';
 import { imageInputsOf, textOf } from './mapping.ts';
 import type { CodexThreadOpened, CodexTurnRecord, Timer } from './protocol.ts';
-import { AGENT_OWN_MODEL, CLIENT_NAME, NO_PLUGINS, STDERR_MAX } from './protocol.ts';
+import { AGENT_OWN_MODEL, CLIENT_NAME, NO_NATIVE_SUBAGENTS, NO_PLUGINS, STDERR_MAX } from './protocol.ts';
 import { CodexRpc } from './rpc.ts';
 import { mcpServersOff, readConfig } from './config.ts';
 
@@ -31,7 +31,12 @@ export async function titleTurn(ctx: TitleContext): Promise<string | null> {
   }
 
   let lastStderr = '';
-  const child = ctx.spawnChild(executable, [...subscriptionProxyCodexArgs(profile?.launch?.args ?? [], ctx.accountEnv), ...NO_PLUGINS], {
+  // No hooks, plugins, connectors or native subagents: a title is one read-only answer.
+  const args = [
+    ...subscriptionProxyCodexArgs(profile?.launch?.args ?? [], ctx.accountEnv),
+    '--config', 'features.hooks=false', ...NO_NATIVE_SUBAGENTS, ...NO_PLUGINS,
+  ];
+  const child = ctx.spawnChild(executable, args, {
     cwd: ctx.thread.cwd,
     env: { ...process.env, ...ctx.accountEnv },
   });

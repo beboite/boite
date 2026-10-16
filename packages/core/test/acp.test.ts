@@ -11,6 +11,7 @@ import { createAcpDriver } from '../src/drivers/acp.ts';
 import { runAcpLogin } from '../src/drivers/acp/login.ts';
 import type { AcpSdk } from '../src/drivers/acp/protocol.ts';
 import { toolOutputText } from '../src/drivers/acp/turn.ts';
+import { sessionNotificationOf } from '../src/drivers/acp/updates.ts';
 import { stderrLines } from '../src/drivers/lines.ts';
 import { getDriver, setDriver } from '../src/drivers/index.ts';
 import { startTestCore, waitFor } from './harness.ts';
@@ -41,6 +42,16 @@ test('ACP takes an effort change while its prompt runs, as the same config optio
   expect(countLogLines(fakeLog(), 'set_config_option thought_level high')).toBe(1);
   expect((await client.call('threads.get', { threadId })).turns[0]).toMatchObject({ id: turn.id, status: 'running' });
   expect(fakeLog().split('session/prompt').length - 1).toBe(1);
+  await client.call('turns.stop', { threadId });
+  await waitFor(() => harness!.core.journal.getTurn(turn.id)?.status === 'stopped');
+});
+
+test('ACP reads as waiting for the provider once its prompt is out, not as starting', async () => {
+  const client = await startCore();
+  const threadId = await acpThread(client);
+  const turn = await client.call('turns.start', { threadId, prompt: '[slow]' });
+  await waitFor(() => fakeLog().includes('waiting for cancel'));
+  expect(harness!.core.threads.get(threadId).progress).toMatchObject({ turnId: turn.id, phase: 'waiting' });
   await client.call('turns.stop', { threadId });
   await waitFor(() => harness!.core.journal.getTurn(turn.id)?.status === 'stopped');
 });
@@ -78,6 +89,7 @@ afterEach(async () => {
   delete process.env['ACP_FAKE_LOAD_AUTH'];
   delete process.env['ACP_FAKE_LOAD_BROKEN'];
   delete process.env['ACP_FAKE_COST_PER_PROCESS'];
+  delete process.env['ACP_FAKE_OPENCODE2'];
   try {
     if (open !== null) await open.stop();
   } finally {
@@ -94,15 +106,20 @@ afterEach(async () => {
  */
 async function sdkWithUpdateSeam(): Promise<{ sdk: AcpSdk; send: (notification: SessionNotification) => void }> {
   const real = await import('@agentclientprotocol/sdk');
-  let handler: ((context: { params: SessionNotification }) => void) | null = null;
+  let handler: ((context: { params: unknown }) => void) | null = null;
+  let parse: (params: unknown) => unknown = (params) => params;
   const sdk = {
     ...real,
     client: (options?: Parameters<typeof real.client>[0]) => {
       const app = real.client(options);
       const register = app.onNotification.bind(app);
-      app.onNotification = ((method: string, given: unknown) => {
-        if (method === 'session/update') handler = given as (context: { params: SessionNotification }) => void;
-        return register(method as never, given as never);
+      app.onNotification = ((method: string, ...given: unknown[]) => {
+        if (method === 'session/update') {
+          // `(method, handler)`, or `(method, params parser, handler)`.
+          handler = given.at(-1) as (context: { params: unknown }) => void;
+          if (given.length > 1) parse = given[0] as (params: unknown) => unknown;
+        }
+        return (register as (...args: unknown[]) => typeof app)(method, ...given);
       }) as typeof app.onNotification;
       return app;
     },
@@ -111,7 +128,7 @@ async function sdkWithUpdateSeam(): Promise<{ sdk: AcpSdk; send: (notification: 
     sdk,
     send: (notification) => {
       if (handler === null) throw new Error('the driver registered no session/update handler');
-      handler({ params: notification });
+      handler({ params: parse(notification) });
     },
   };
 }
@@ -958,7 +975,6 @@ describe('acp driver', () => {
     const counted = countProcesses(client, threadId);
 
     await runTurn(client, threadId, 'first');
-    await waitFor(() => configCount('model fake-fast') === 1);
 
     await client.call('threads.update', { threadId, effort: 'high' });
     await runTurn(client, threadId, 'second');
@@ -970,8 +986,66 @@ describe('acp driver', () => {
     // Neither is part of the session key any more, so the same agent kept the turn.
     expect(counted.started).toHaveLength(1);
     expect(counted.exited).toHaveLength(0);
-    // Only what moved went out: the first turn's model is not sent twice.
-    expect(configCount('model fake-fast')).toBe(1);
+    // Only what moved went out: the session opened on fake-fast, so that model is never sent.
+    expect(configCount('model fake-fast')).toBe(0);
+  });
+
+  test('on an agent that resets the effort with the model, the effort goes again, and none puts it back on its default', async () => {
+    process.env['ACP_FAKE_OPENCODE2'] = '1';
+    const client = await startCore({ warmProcessMinutes: 5 });
+    const threadId = await acpThread(client, 'fake-fast');
+    // What the thread's own session was sent during a turn; probes reading a model's scale log too.
+    const sentDuring = async (prompt: string, line: string): Promise<number> => {
+      const before = configCount(line);
+      await runTurn(client, threadId, prompt);
+      return configCount(line) - before;
+    };
+    await client.call('threads.update', { threadId, effort: 'high' });
+    expect(await sentDuring('first', 'thought_level high')).toBe(1);
+
+    // A new model clears the thread's effort and the user picks high again. OpenCode 2 put
+    // itself back on its default with the model: high has to go out again.
+    await client.call('threads.update', { threadId, model: 'fake-smart' });
+    await client.call('threads.update', { threadId, effort: 'high' });
+    expect(await sentDuring('second', 'thought_level high')).toBe(1);
+
+    // No effort is the agent's own level, which it does not take back by itself.
+    await client.call('threads.update', { threadId, effort: null });
+    expect(await sentDuring('third', 'thought_level default')).toBe(1);
+
+    // Neither does it go back to its own model: the one it opened on is asked for.
+    await client.call('threads.update', { threadId, model: 'default' });
+    expect(await sentDuring('fourth', 'model fake-fast')).toBe(1);
+    expect(configCount('model default')).toBe(0);
+  });
+
+  test('a cold resume reads the controls from session/load, and a probe deletes the session it opened', async () => {
+    process.env['ACP_FAKE_OPENCODE2'] = '1';
+    const client = await startCore({ warmProcessMinutes: 0 });
+    const threadId = await acpThread(client, 'fake-smart');
+    const { forgetProbes } = await import('../src/drivers/index.ts');
+    const created = (): string[] => fakeLog().split('\n').filter((line) => line.startsWith('new:'));
+    const deleted = (): string[] => fakeLog().split('\n').filter((line) => line.startsWith('delete:'));
+
+    // The probe behind the thread's model check opened a session to read the catalog, then deleted it.
+    expect(deleted()).toEqual(created().map((line) => line.replace('new:', 'delete:')));
+    const probes = created().length;
+    await runTurn(client, threadId, 'first');
+    forgetProbes();
+    await runTurn(client, threadId, 'second');
+    // One session for the thread, no throwaway before the load: the load answered the options.
+    expect(created()).toHaveLength(probes + 1);
+    expect(fakeLog().split('\n').filter((line) => line.startsWith('loaded:'))).toHaveLength(1);
+  });
+
+  test('a prompt the agent fails with only a generic message shows the reason it gave', async () => {
+    const client = await startCore();
+    const threadId = await acpThread(client);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: '[internal]' });
+    const done = await finished;
+    expect(done.status).toBe('error');
+    expect(done.error).toBe('no available subscription for this model');
   });
 
   test('a thread on the model "default" lets the agent keep its own', async () => {
@@ -1035,6 +1109,28 @@ describe('acp driver', () => {
     expect(toolOutputText({ output: 'done', metadata: { exit: 0 } })).toBe('done');
     // Anything else stays readable JSON rather than vanishing.
     expect(toolOutputText({ other: 1 })).toContain('"other"');
+  });
+
+  test('an update with a missing or mistyped field is dropped, a bad optional field or list entry is left out', () => {
+    const of = (update: unknown): unknown => sessionNotificationOf({ sessionId: 's', update })?.update ?? null;
+    expect(sessionNotificationOf(null)).toBeNull();
+    expect(sessionNotificationOf({ update: { sessionUpdate: 'plan', entries: [] } })).toBeNull();
+    expect(of({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 7 } })).toBeNull();
+    expect(of({ sessionUpdate: 'usage_update', used: '9', size: 10 })).toBeNull();
+    expect(of({ sessionUpdate: 'tool_call', toolCallId: 't' })).toBeNull();
+    expect(of({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'hi' } })).toEqual({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'hi' } });
+    expect(of({
+      sessionUpdate: 'tool_call_update', toolCallId: 't', title: 3, status: 'exploded',
+      content: [{ type: 'diff', path: 'a', newText: 'b', oldText: 4 }, { type: 'diff', path: 'a' }, { type: 'content', content: { type: 'image', data: 'x' } }, 'junk'],
+    })).toEqual({ sessionUpdate: 'tool_call_update', toolCallId: 't', title: undefined, name: undefined, status: undefined, content: [{ type: 'diff', path: 'a', newText: 'b', oldText: undefined }] });
+    expect(of({ sessionUpdate: 'usage_update', used: 9, size: 10, cost: { amount: '1', currency: 'USD' } })).toEqual({ sessionUpdate: 'usage_update', used: 9, size: 10, cost: undefined });
+    expect((of({
+      sessionUpdate: 'config_option_update',
+      configOptions: [
+        { id: 'mode', name: 'Mode', type: 'select', category: 'mode', currentValue: 'a', options: [{ value: 'a', name: 'A' }] },
+        { id: 'broken', name: 'Broken', type: 'select', currentValue: 'a', options: [{ value: 'a', name: 'A' }, { value: 2 }] },
+      ],
+    }) as { configOptions: { id: string }[] }).configOptions.map((option) => option.id)).toEqual(['mode']);
   });
 
   test('two probes of one account asked together both answer, one after the other', async () => {
@@ -1267,6 +1363,26 @@ describe('acp driver', () => {
     await runTurn(client, thread.id, 'second');
     expect(configCount('model elsewhere/kimi')).toBe(0);
     await waitFor(() => logs.some((line) => line === 'warn acp: the agent offers no model option with the value elsewhere/kimi'));
+  });
+
+  test('an injected model the agent keeps refusing is asked for once per process, not on every turn', async () => {
+    const client = await startCore({ warmProcessMinutes: 5 });
+    const { projectId, accountId, dataDir } = await acpAccount(client);
+    const file = join(dataDir, 'providers', 'acp-fake.json');
+    const descriptor = JSON.parse(readFileSync(file, 'utf8')) as { profiles: Record<string, { env?: Record<string, string> }>; models: unknown[] };
+    for (const profile of Object.values(descriptor.profiles)) profile.env = { BOITE_SUBSCRIPTION_PROXY_PREFIX: 'gateway/' };
+    descriptor.models.push({ id: 'gateway/gone', name: 'Gone' });
+    writeFileSync(file, JSON.stringify(descriptor));
+    expect((await client.call('providers.reload', {})).rejected).toEqual([]);
+    process.env['ACP_FAKE_LATE_MODEL'] = '99';
+    const logs = collectLogs(client);
+
+    const thread = await client.call('threads.create', { projectId, providerId: 'acp-fake', accountId, title: 'gone', model: 'gateway/gone' });
+    await runTurn(client, thread.id, 'first');
+    await runTurn(client, thread.id, 'second');
+    // One call and its four retries while the agent might still be loading the provider, then nothing more.
+    expect(configCount('model gateway/gone')).toBe(5);
+    await waitFor(() => logs.filter((line) => line.startsWith('warn acp: the agent refused the model gateway/gone')).length === 1);
   });
 
   test('an agent that lists its modes as a config option is moved through that option', async () => {

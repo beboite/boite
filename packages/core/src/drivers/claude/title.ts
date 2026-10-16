@@ -62,6 +62,9 @@ export async function titleQuery(deps: ClaudeDeps, ctx: TitleContext): Promise<s
         maxTurns: 1,
         tools: [],
         allowedTools: [],
+        // No MCP server either, whatever source it would come from.
+        mcpServers: {},
+        strictMcpConfig: true,
         settingSources: [],
         persistSession: false,
         includePartialMessages: false,

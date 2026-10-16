@@ -425,6 +425,30 @@ test('a delayed thread list cannot undo a newer pin event', async ({ store, clie
   } finally { gate.resolve(); await loading; spy.mockRestore(); }
 });
 
+test('a load sample during a thread list keeps the list row and adds only its load', async ({ store, client }) => {
+  const call = client.call.bind(client);
+  const gate = deferred();
+  const held = store.threads.find(row => row.id === 't-trace')!;
+  Object.assign(held, { status: 'running', title: 'old title' });
+  let asked = false;
+  const spy = vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    const value = await call(method, params);
+    if (method !== 'threads.list') return value;
+    asked = true; await gate.promise;
+    return (value as typeof store.threads).map(row => row.id === 't-trace' ? { ...row, status: 'idle', title: 'new title' } : row) as never;
+  });
+  const loading = store.reload();
+  try {
+    await vi.waitFor(() => expect(asked).toBe(true));
+    client.sampleLoad('t-trace', 3);
+    expect(held.load?.processes).toBe(3);
+    gate.resolve();
+    await loading;
+    const row = store.threads.find(row => row.id === 't-trace')!;
+    expect({ status: row.status, title: row.title, processes: row.load?.processes }).toEqual({ status: 'idle', title: 'new title', processes: 3 });
+  } finally { gate.resolve(); await loading; spy.mockRestore(); }
+});
+
 test('a secondary login read cannot hold an accepted prompt behind reload', async ({ store, client }) => {
   await store.open('t-trace');
   const call = client.call.bind(client);

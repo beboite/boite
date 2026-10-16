@@ -518,8 +518,9 @@ export class HarnessUpdates {
     this.assertOpen();
     // An updater just rewrote the program, or it was never asked its version: a
     // candidate that names a major resolves once the program has answered.
-    if (via === undefined && resolveCommand(target.profile) === null) await this.core.providers.settle(this.versionTimeoutMs);
-    const command = via?.command ?? resolveCommand(target.profile);
+    // The program as installed, a launcher included: an updater reads its install method from what the launcher sets.
+    if (via === undefined && resolveCommand(target.profile, true, true) === null) await this.core.providers.settle(this.versionTimeoutMs);
+    const command = via?.command ?? resolveCommand(target.profile, true, true);
     if (command === null) throw new Error(`${target.descriptor.name} is not on this machine any more`);
     const label = via?.label ?? args.join(' ');
     const spawned = this.core.procs.spawnPiped(updateThreadId(target.descriptor.id), command.executable, [...command.prefix, ...args], {

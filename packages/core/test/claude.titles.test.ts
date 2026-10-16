@@ -30,6 +30,7 @@ test('Claude titles the first request with its images while the main SDK query k
     expect(titleCall.options.model).toBe('claude-haiku-4-5-20251001');
     expect(titleCall.options.tools).toEqual([]);
     expect(titleCall.options.settingSources).toEqual([]);
+    expect(titleCall.options).toMatchObject({ mcpServers: {}, strictMcpConfig: true });
     expect(titleCall.options.maxTurns).toBe(1);
     expect(titleCall.prompts[0]).toContain('needsRefinement');
     expect(titleCall.prompts[0]).toContain(png);

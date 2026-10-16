@@ -91,9 +91,10 @@ failure. It never quotes the body, which can echo a credential.
 - The cadence is the native one. A list within a minute of the last read
   reuses it, and the refresh button reads again. `subscriptionProxy.quotas`
   returns the gateway's state (`ready`, `unavailable`, `unsupported` or `off`)
-  and `subscriptionProxy.quotasUpdated` follows it. Both are owner-only, like
-  `quotas.list`. A phone with full control gets the rows from its core and
-  never reaches the gateway.
+  and `subscriptionProxy.quotasUpdated` follows it. A paired device reads both,
+  without `refresh: true`. A phone gets the rows from its core and never
+  reaches the gateway, so it draws the same native bars as the desktop instead
+  of embedding the dashboard.
 - Limits shows one heading per provider the gateway reports, then one card per
   entry. Each card has its window bars, reset times, plan, status and credits.
   An `average` entry is named by its provider and account count, such as
@@ -142,9 +143,11 @@ time, including over-quota readings. Before the first observation, after
 monitoring is disabled or with an older host, the source is unavailable. Its
 schema supplies no paid credit balance or banked resets.
 
-A running Codex session forwards each `account/rateLimits/updated` notification
-to `QuotaStore.observe`. The update is sparse, so it is merged into the last
-full read of that account: the windows it carries replace theirs, the others
+A running Codex session merges each sparse `account/rateLimits/updated`
+notification into a full `account/rateLimits/read` of that same process, read
+again once it is a minute old, and forwards the result to `QuotaStore.observe`
+(`drivers/codex/rate-limits.ts`). The store merges it into the last full read
+of that account: the windows it carries replace theirs, the others
 and the banked resets stay. The merged row stands as a successful read timed at
 its observation, so the next list returns it without starting an app-server
 until it is a minute old. Updates stand in for a read only within five minutes
@@ -406,9 +409,11 @@ call both, since cancelling spends nothing. `?fake=1&retry=capacity` and
 A phone may call `usage.history`: it returns sums over the same finished turns
 a device can already open, and the thread titles it names are the ones
 `threads.list` shows it. The reason sits beside the entry in
-`packages/core/src/access.ts`. `quotas.list` stays owner-only, so on a device
-the Limits tab says the limits are read on the computer that runs Boite. On a
-phone both pages are under Settings > Machines, as Usage and Limits.
+`packages/core/src/access.ts`. A device also reads `quotas.list` and
+`subscriptionProxy.quotas` with the bars the core holds: no refresh button, no
+monitoring switch, no reset. A core older than that refuses the read, and the
+Limits tab asks to update Boite on that machine. On a phone both pages are under
+Settings > Machines, as Usage and Limits.
 
 ## The fake client
 

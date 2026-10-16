@@ -134,6 +134,22 @@ real('a window a page opens joins the conversation as a tab of its own', async (
   expect(browserFixture.agents.get('/popup')).toMatch(/ Chrome\/\d+/);
 }, 150_000);
 
+real('a burst of windows opened at once stops at the conversation tab limit', async () => {
+  const { agent, threadId } = browserFixture;
+  // The desktop app's webviews let a page open many windows; Chromium's own blocker allows one per click.
+  const host = await browserFixture.fakeHost('shell', ['--disable-popup-blocking']);
+  try {
+    await host.app.call('browser.hostAttach', {});
+    for (let i = 0; i < 7; i++) await agent.call('browser.command', { threadId, action: { kind: 'open', url: url() } });
+    await evaluate(`for (let i = 0; i < 10; i++) window.open('/popup?' + i, 'burst' + i); true`);
+    const count = async () => ((await agent.call('browser.command', { threadId, action: { kind: 'status' } })).value as { tabs: unknown[] }).tabs.length;
+    for (let i = 0; i < 50 && await count() < 8; i++) await Bun.sleep(100);
+    // Every window of the burst is announced before the first one is attached: none may pass the check on a stale count.
+    await Bun.sleep(1500);
+    expect(await count()).toBe(8);
+  } finally { await host.close(); }
+}, 150_000);
+
 real('a site sees the browser a person runs with a window, not headless Chrome', async () => {
   const { agent, threadId } = browserFixture;
   await agent.call('browser.command', { threadId, action: { kind: 'open', url: url() } });

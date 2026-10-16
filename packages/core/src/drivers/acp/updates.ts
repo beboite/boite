@@ -13,8 +13,149 @@ import type {
 import { isAntigravityQuestion } from '../antigravity.ts';
 import { usdCostOf, type AcpTurn } from './turn.ts';
 
+type Update = SessionNotification['update'];
+type Fields = Record<string, unknown>;
+
+const TOOL_STATUSES = new Set(['pending', 'in_progress', 'completed', 'failed']);
+const PLAN_STATUSES = new Set(['pending', 'in_progress', 'completed']);
+const PLAN_PRIORITIES = new Set(['high', 'medium', 'low']);
+
+function fields(value: unknown): Fields | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Fields) : null;
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === 'string';
+}
+
+/** An optional string as the schema reads one: anything else is left out. */
+function optionalString(value: unknown): string | null | undefined {
+  return isString(value) || value === null ? value : undefined;
+}
+
+/** The entries of a list that pass, the others skipped, as the schema's lists do. */
+function entries<T>(value: unknown, keep: (entry: Fields) => T | null): T[] {
+  if (!Array.isArray(value)) return [];
+  const kept: T[] = [];
+  for (const entry of value) {
+    const record = fields(entry);
+    const checked = record === null ? null : keep(record);
+    if (checked !== null) kept.push(checked);
+  }
+  return kept;
+}
+
+/** A content block, with the fields Boite reads checked for the text and image kinds. */
+function contentBlock(value: unknown): Fields | null {
+  const block = fields(value);
+  if (block === null || !isString(block['type'])) return null;
+  if (block['type'] === 'text' && !isString(block['text'])) return null;
+  if (block['type'] === 'image' && (!isString(block['data']) || !isString(block['mimeType']))) return null;
+  return block;
+}
+
+function toolContent(entry: Fields): Fields | null {
+  if (entry['type'] === 'diff') {
+    if (!isString(entry['path']) || !isString(entry['newText'])) return null;
+    return { ...entry, oldText: optionalString(entry['oldText']) };
+  }
+  if (entry['type'] === 'content') return contentBlock(entry['content']) === null ? null : entry;
+  return isString(entry['type']) ? entry : null;
+}
+
+function toolFields(update: Fields, call: boolean): Fields | null {
+  if (!isString(update['toolCallId'])) return null;
+  if (call && !isString(update['title'])) return null;
+  const content = update['content'];
+  return {
+    ...update,
+    ...(call ? {} : { title: optionalString(update['title']) }),
+    name: optionalString(update['name']),
+    status: isString(update['status']) && TOOL_STATUSES.has(update['status']) ? update['status'] : undefined,
+    content: call || Array.isArray(content) ? entries(content, toolContent) : undefined,
+  };
+}
+
+function configOption(entry: Fields): Fields | null {
+  if (!isString(entry['id']) || !isString(entry['name'])) return null;
+  const base = { ...entry, category: optionalString(entry['category']) };
+  if (entry['type'] === 'boolean') return typeof entry['currentValue'] === 'boolean' ? base : null;
+  if (entry['type'] !== 'select' || !isString(entry['currentValue']) || !Array.isArray(entry['options'])) return null;
+  const choice = (option: Fields): Fields | null => (isString(option['value']) && isString(option['name']) ? option : null);
+  const grouped = entry['options'].length > 0 && fields(entry['options'][0])?.['group'] !== undefined;
+  const options = grouped
+    ? entries(entry['options'], (group) => (isString(group['group']) && isString(group['name']) ? { ...group, options: entries(group['options'], choice) } : null))
+    : entries(entry['options'], choice);
+  // A list that is neither all choices nor all groups is refused whole, as the schema does.
+  if (options.length !== entry['options'].length) return null;
+  return { ...base, options };
+}
+
+/**
+ * The fields of one update that Boite reads, checked by hand: the SDK's own
+ * parse of every `session/update` costs about fifteen times a `JSON.parse`
+ * and runs twice per line. A required field that is missing or of the wrong
+ * type drops the update; an optional one is left out; a list keeps the
+ * entries that pass. Kinds Boite does not draw pass with their tag alone.
+ */
+function checkedUpdate(update: Fields): Fields | null {
+  switch (update['sessionUpdate']) {
+    case 'agent_message_chunk':
+    case 'agent_thought_chunk':
+    case 'user_message_chunk':
+      return contentBlock(update['content']) === null ? null : update;
+    case 'tool_call':
+      return toolFields(update, true);
+    case 'tool_call_update':
+      return toolFields(update, false);
+    case 'plan':
+      return {
+        ...update,
+        entries: entries(update['entries'], (entry) =>
+          isString(entry['content']) && isString(entry['status']) && PLAN_STATUSES.has(entry['status'])
+          && isString(entry['priority']) && PLAN_PRIORITIES.has(entry['priority']) ? entry : null),
+      };
+    case 'available_commands_update':
+      return {
+        ...update,
+        availableCommands: entries(update['availableCommands'], (command) => {
+          if (!isString(command['name']) || !isString(command['description'])) return null;
+          const input = fields(command['input']);
+          return { ...command, input: input !== null && isString(input['hint']) ? input : undefined };
+        }),
+      };
+    case 'current_mode_update':
+      return isString(update['currentModeId']) ? update : null;
+    case 'config_option_update':
+      return { ...update, configOptions: entries(update['configOptions'], configOption) };
+    case 'usage_update': {
+      if (typeof update['used'] !== 'number' || typeof update['size'] !== 'number') return null;
+      const cost = fields(update['cost']);
+      return { ...update, cost: cost !== null && typeof cost['amount'] === 'number' && isString(cost['currency']) ? cost : undefined };
+    }
+    case 'compaction_update':
+      if (!isString(update['compactionId']) || !isString(update['status'])) return null;
+      return { ...update, error: optionalString(update['error']) };
+    default:
+      return update;
+  }
+}
+
+/**
+ * The SDK's params parser for `session/update`: the notification when the
+ * fields Boite reads have the types it reads them as, else null, which the
+ * session drops.
+ */
+export function sessionNotificationOf(params: unknown): SessionNotification | null {
+  const notification = fields(params);
+  const update = fields(notification?.['update']);
+  if (notification === null || update === null || !isString(notification['sessionId']) || !isString(update['sessionUpdate'])) return null;
+  const checked = checkedUpdate(update);
+  return checked === null ? null : ({ ...notification, update: checked as Update } as SessionNotification);
+}
+
 /** One `session/update` of the prompt in flight. */
-export function drawUpdate(turn: AcpTurn, update: SessionNotification['update']): void {
+export function drawUpdate(turn: AcpTurn, update: Update): void {
   switch (update.sessionUpdate) {
     case 'agent_message_chunk':
       if (update.content.type === 'text') turn.writeText(update.content.text);

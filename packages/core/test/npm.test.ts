@@ -1,8 +1,9 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { isNpmSpec, resolveNpm } from '../src/providers/npm.ts';
+import { forgetWhich } from '../src/providers/which.ts';
 
 const windows = process.platform === 'win32';
 let prefix: string;
@@ -69,5 +70,20 @@ describe('npm candidates', () => {
     expect(resolveNpm('@boite-test/escape')).toBeNull();
     expect(resolveNpm('@boite-test/unbuilt')).toBeNull();
     expect(resolveNpm('@boite-test/absent')).toBeNull();
+  });
+
+  test('a kept answer whose script is gone resolves again, and a miss lasts until the lookups are forgotten', () => {
+    const dir = install('@boite-test/kept', { bin: 'cli.js' }, ['cli.js']);
+    expect(resolveNpm('@boite-test/kept')?.script).toBe(join(dir, 'cli.js'));
+    unlinkSync(join(dir, 'cli.js'));
+    expect(resolveNpm('@boite-test/kept')).toBeNull();
+
+    // Installed in a terminal after a miss: found once a reload forgets the lookups.
+    const later = install('@boite-test/later', { bin: 'cli.js' }, []);
+    expect(resolveNpm('@boite-test/later')).toBeNull();
+    writeFileSync(join(later, 'cli.js'), '', 'utf8');
+    expect(resolveNpm('@boite-test/later')).toBeNull();
+    forgetWhich();
+    expect(resolveNpm('@boite-test/later')?.script).toBe(join(later, 'cli.js'));
   });
 });

@@ -34,6 +34,14 @@
  * - `ACP_FAKE_LOAD_BROKEN=1`: `session/load` answers the internal error
  *   OpenCode answers for a session it cannot read, missing or not:
  *   -32603 "OpenCode service failure" with `{ service: 'session' }`.
+ * - `[internal]` in a prompt: `session/prompt` fails the way the SDK maps any
+ *   agent failure, -32603 "Internal error" with the reason in `data.details`.
+ *
+ * `ACP_FAKE_OPENCODE2=1` answers the way OpenCode 2 does: its effort option
+ * lists `default` beside the levels, a model change puts the effort back on
+ * `default`, every change shows in the option's current value, `session/load`
+ * answers the options, and `initialize` advertises `sessionCapabilities.delete`
+ * (each `session/delete` is logged as `delete:<id>`).
  *
  * `usage_update.cost` is the session's running total, as the protocol defines
  * it: each `[usage]` adds 0.0042 to it. The total outlives the process, the way
@@ -54,7 +62,7 @@ import type {
   Usage,
 } from '@agentclientprotocol/sdk';
 
-const DIRECTIVE = /\[(agents|tool|documents|big-image|huge-tool|permission|question|thought|usage|slow|deaf|refuse|crash|noise|big-glog)\]/g;
+const DIRECTIVE = /\[(agents|tool|documents|big-image|huge-tool|permission|question|thought|usage|slow|deaf|refuse|internal|crash|noise|big-glog)\]/g;
 /** `[mode-switch <id>]`: the agent changes mode on its own before it answers. */
 const MODE_SWITCH = /\[mode-switch ([\w-]+)\]/g;
 const CHUNKS = 3;
@@ -70,6 +78,7 @@ type Directive =
   | 'thought'
   | 'usage'
   | 'slow'
+  | 'internal'
   | 'deaf'
   | 'refuse'
   | 'crash'
@@ -182,6 +191,14 @@ function modeState(): SessionModeState | undefined {
 
 /** An agent that cannot resume a session, so the client has to carry the history. */
 const noLoad = process.env['ACP_FAKE_NO_LOAD'] === '1';
+const opencode2 = process.env['ACP_FAKE_OPENCODE2'] === '1';
+if (opencode2) {
+  const effort = configOptions.find((entry) => entry.id === 'thought_level');
+  if (effort?.type === 'select') {
+    effort.options = [...(effort.options as { value: string; name: string }[]), { value: 'default', name: 'Default' }];
+    effort.currentValue = 'default';
+  }
+}
 /** The sessions this process handed out, so `session/load` can recognise one. */
 const known = new Set<string>();
 const cancels = new Map<string, () => void>();
@@ -250,6 +267,7 @@ const app = agent({ name: 'acp-fake' })
       agentCapabilities: {
         loadSession: !noLoad,
         ...(noImages ? {} : { promptCapabilities: { image: true } }),
+        ...(opencode2 ? { sessionCapabilities: { delete: {} } } : {}),
       },
       agentInfo: { name: 'acp-fake', version: '1' },
     };
@@ -282,10 +300,23 @@ const app = agent({ name: 'acp-fake' })
     known.add(params.sessionId);
     log(`loaded:${params.sessionId}`);
     // A conforming load may omit configOptions. The probe still supplied them.
-    return { modes: modeState() };
+    return opencode2 ? { modes: modeState(), configOptions } : { modes: modeState() };
+  })
+  .onRequest('session/delete', ({ params }) => {
+    log(`delete:${params.sessionId}`);
+    known.delete(params.sessionId);
+    return {};
   })
   .onRequest('session/set_config_option', ({ params }) => {
     log(`set_config_option ${params.configId} ${String(params.value)}`);
+    if (opencode2 && (params.configId === 'model' || params.configId === 'thought_level')) {
+      for (const option of configOptions) {
+        if (option.type !== 'select') continue;
+        if (option.id === params.configId) option.currentValue = String(params.value);
+        else if (params.configId === 'model' && option.id === 'thought_level') option.currentValue = 'default';
+      }
+      return { configOptions };
+    }
     // A model of a provider the client injected: not listed, unknown for the first calls, then taken.
     if (params.configId === 'model' && String(params.value).startsWith('gateway/')) {
       lateModelCalls += 1;
@@ -505,6 +536,8 @@ const app = agent({ name: 'acp-fake' })
           break;
         case 'refuse':
           return { stopReason: 'refusal' };
+        case 'internal':
+          throw RequestError.internalError({ details: 'no available subscription for this model' });
         case 'crash':
           process.stderr.write('boom\n');
           setTimeout(() => {

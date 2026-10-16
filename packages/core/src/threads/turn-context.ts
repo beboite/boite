@@ -23,7 +23,7 @@ import { contextRulesBlock } from '@boite/contracts';
 import { prepareAttachments, FileReferences } from '../attachments.ts';
 import { continuationInput } from '../continuation.ts';
 import type { Core } from '../core.ts';
-import type { EmitSink, PermissionTicket, QuestionAsk, QuestionTicket, SessionContext, TurnContext } from '../drivers/types.ts';
+import type { EmitSink, PermissionTicket, ToolPatch, QuestionAsk, QuestionTicket, SessionContext, TurnContext } from '../drivers/types.ts';
 import { newId } from '../ids.ts';
 import type { SpawnedChild, SpawnOptions } from '../procs.ts';
 import { noteStderr } from '../drivers/stderr-tail.ts';
@@ -280,6 +280,16 @@ export class TurnContexts {
         if (boundary) this.core.bus.emit('turn.toolCompleted', { threadId, turnId: turn.id, boundary: `${messageId}:${partIndex}` });
         if (segment && answer && segment !== answer.segments.at(-1)) closeIdle(segment);
       },
+      patchTool: (driverId: MessageId, driverIndex: number, fields: ToolPatch): void => {
+        const { messageId, partIndex } = route(driverId, driverIndex);
+        // Reads that one part: the open message's own object, or only its blobs once written.
+        const stored = this.core.journal.messagePart(messageId, partIndex)?.part;
+        if (stored?.type !== 'tool') return;
+        const merged: Record<string, unknown> = { ...stored, ...fields };
+        for (const key of Object.keys(fields)) if (merged[key] === undefined) delete merged[key];
+        // The same path as a whole part, so times, progress and the tool boundary stay as they were.
+        emit.part(driverId, driverIndex, merged as MessagePart);
+      },
       complete: (driverId: MessageId, state: Message['state']): void => {
         for (const segment of answers.get(driverId)?.segments ?? []) close(segment, state);
       },
@@ -287,12 +297,10 @@ export class TurnContexts {
 
     // A turn resumed after an agent update goes on from its own messages: the
     // prompt is the resume note, and a fresh session reads this turn's work too.
+    // No closure of this context may reach `input` or `prepared`: they share one
+    // scope, and a driver keeps the callbacks of its session between turns.
     const input = resumePrompt !== undefined ? { prompt: resumePrompt, attachments: [] } : this.lastUserInput(threadId, turn.id);
-    const history = (): { prompt: string; attachments: Attachment[] } =>
-      continuationInput(this.core.journal, threadId, resumePrompt !== undefined ? null : turn.id, input, provider, (part, place) => this.files.of(threadId, part, place));
-    // Read once for a resume, before its note lands: a later fresh start would otherwise carry the note twice.
-    const resumedHistory = resumePrompt !== undefined ? history() : null;
-    const carry = (): { prompt: string; attachments: Attachment[] } => resumedHistory ?? history();
+    const carry = carrier(this.core, this.files, threadId, resumePrompt !== undefined ? null : turn.id, input, provider);
     const fresh = !thread.agentSessionId && thread.sessionId === null && ((thread.sessionGeneration ?? 0) > 0 || resumePrompt !== undefined);
     const continued = fresh ? carry() : input;
     const prepared = prepareAttachments(this.core.dataDir, continued);
@@ -300,7 +308,8 @@ export class TurnContexts {
     // Both are taken once per turn: a second context for the same turn (the
     // core's retry on a fresh session) and a driver's `continuation` get what
     // the first one took.
-    carried.deferred ??= operation || nativeCommandPrompt(prepared.prompt) ? '' : this.threads.deferred.takeDeferred(threadId);
+    const preparedPrompt = prepared.prompt;
+    carried.deferred ??= operation || nativeCommandPrompt(preparedPrompt) ? '' : this.threads.deferred.takeDeferred(threadId);
     carried.memory ??= this.threads.deferred.memory.take(threadId);
     carried.letters ??= operation === 'compact' ? '' : this.core.delegation.initialInput(threadId, turn.id);
     const deferred = carried.deferred;
@@ -309,7 +318,7 @@ export class TurnContexts {
     // A context mode without guides gets its brief and the letters meant for it, nothing from the brain, Boite or the team.
     const mode = thread.contextMode ?? null;
     const noGuides = mode !== null && !mode.guides;
-    const tail = (fresh: boolean): string => operation === 'compact' ? '' : (noGuides ? '' : this.core.delegation.instructions(threadId, operation ? '' : prepared.prompt, fresh)) + carried.letters;
+    const tail = (fresh: boolean): string => operation === 'compact' ? '' : (noGuides ? '' : this.core.delegation.instructions(threadId, operation ? '' : preparedPrompt, fresh)) + carried.letters;
     const origin = input.sentFrom;
     const systemGuide = this.systemGuide(thread, provider);
     // Skills the harness already names to its model stay out of the brain's catalog.
@@ -338,12 +347,9 @@ export class TurnContexts {
       account,
       provider,
       turn,
-      prompt: compose(prepared.prompt, thread.sessionId),
+      prompt: compose(preparedPrompt, thread.sessionId),
       systemGuide,
-      continuation: () => {
-        const fresh = prepareAttachments(this.core.dataDir, carry());
-        return { prompt: compose(fresh.prompt, null), attachments: fresh.attachments };
-      },
+      continuation: freshStart(this.core.dataDir, carry, compose),
       coordination: () => this.core.delegation.take(threadId, turn.id) ?? this.core.coordination.take(threadId, turn.id)
         ?? this.threads.deferred.takeForRunningTurn(threadId),
       attachments: prepared.attachments,
@@ -489,6 +495,29 @@ export class TurnContexts {
     }
     return { prompt: '', attachments: [] };
   }
+}
+
+type TurnInput = Parameters<typeof continuationInput>[3];
+
+/**
+ * This turn's input as a fresh session needs it, read on demand. Outside
+ * `makeContext`, so that only the context's `continuation` holds the input,
+ * not every callback of the context.
+ */
+function carrier(core: Core, files: FileReferences, threadId: ThreadId, turnId: TurnId | null, input: TurnInput, provider: ProviderDescriptor): () => { prompt: string; attachments: Attachment[] } {
+  const history = (): { prompt: string; attachments: Attachment[] } =>
+    continuationInput(core.journal, threadId, turnId, input, provider, (part, place) => files.of(threadId, part, place));
+  // Read once for a resume, before its note lands: a later fresh start would otherwise carry the note twice.
+  const resumedHistory = turnId === null ? history() : null;
+  return () => resumedHistory ?? history();
+}
+
+/** `TurnContext.continuation`, built here for the same reason as `carrier`. */
+function freshStart(dataDir: string, carry: () => { prompt: string; attachments: Attachment[] }, compose: (body: string, sessionId: string | null) => string): NonNullable<TurnContext['continuation']> {
+  return () => {
+    const fresh = prepareAttachments(dataDir, carry());
+    return { prompt: compose(fresh.prompt, null), attachments: fresh.attachments };
+  };
 }
 
 function sameOrigin(origin: { from: SentFrom }, before: SentFrom | null): boolean {

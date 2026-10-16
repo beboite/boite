@@ -198,6 +198,35 @@ describe('claude driver', () => {
     expect(tools.every((part) => part.status === 'done')).toBe(true);
   });
 
+  test('a summary that lands after the cards were written keeps their input and output', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    scripted(fake => fake.emit(init('sess-late')));
+    const turn = await client.call('turns.start', { threadId, prompt: 'write it' });
+    await waitFor(() => calls[0]?.prompts.length === 1);
+    const fake = queries[0]!;
+    const content = 'x'.repeat(4096);
+    fake.emit(assistant('sess-late', [{ type: 'tool_use', id: 'toolu_w', name: 'Write', input: { file_path: 'a.txt', content } }]));
+    fake.emit(toolResult('sess-late', 'toolu_w', 'written'));
+    // A result ahead of its call: the card gets its input after it finished.
+    fake.emit(toolResult('sess-late', 'toolu_r', 'rules'));
+    fake.emit(assistant('sess-late', [{ type: 'tool_use', id: 'toolu_r', name: 'Read', input: { file_path: 'rules.md' } }]));
+    await waitFor(() => harness.core.journal.listMessages(threadId).some(m => m.parts.some(p => p.type === 'tool' && p.toolId === 'toolu_r' && p.name === 'Read')));
+    // A follow-up cuts the answer, so the cards' message is closed and written before the label lands.
+    expect(await client.call('turns.steer', { threadId, turnId: turn.id, prompt: 'and?', clientRequestId: 'claude_late_01' })).toEqual({ accepted: true });
+    await waitFor(() => calls[0]?.prompts.length === 2);
+    const finished = client.next('turn.finished', record => record.id === turn.id);
+    fake.emit(sdk({ type: 'tool_use_summary', summary: 'Wrote a.txt, read rules.md', preceding_tool_use_ids: ['toolu_w', 'toolu_r'], uuid: 'u-late', session_id: 'sess-late' }));
+    fake.emit(success('sess-late'));
+    expect((await finished).status).toBe('done');
+
+    const tools = harness.core.journal.listMessages(threadId).flatMap(m => m.parts).filter(p => p.type === 'tool');
+    expect(tools).toEqual([
+      expect.objectContaining({ toolId: 'toolu_w', name: 'Write', input: { file_path: 'a.txt', content }, output: 'written', status: 'done', summary: 'Wrote a.txt, read rules.md', documents: [expect.objectContaining({ newText: content })] }),
+      expect.objectContaining({ toolId: 'toolu_r', name: 'Read', input: { file_path: 'rules.md' }, inputText: null, output: 'rules', status: 'done', summary: 'Wrote a.txt, read rules.md' }),
+    ]);
+  });
+
   test('a tool input streams as partial json, then the assistant frame parses it', async () => {
     const client = await harness.connect();
     const threadId = await claudeThread(client);
