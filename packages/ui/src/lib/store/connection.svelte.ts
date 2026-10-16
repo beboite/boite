@@ -161,6 +161,7 @@ export class Connection {
             heavy: params.get('heavy') === '1',
             delegationDemo: params.get('team') === '1',
             agentsDemo: params.get('agents') === '1',
+            watchDemo: params.get('watch') === '1',
             uninstalled: params.get('uninstalled') === '1',
             ...(params.get('principal') === 'session' ? { principal: 'session' as const } : {}),
             ...(params.get('missing') ? { missing: params.get('missing')!.split(',') } : {})
@@ -567,7 +568,11 @@ export class Connection {
       if (current()) apply(value); else cancel?.();
     }).catch(error => { cancel?.(); if (current()) this.ctx.fail(error); });
     const primary = [
-      slice(client.call('projects.list', {}), rows => { s.projects = retainRows(s.projects, projectRead.apply(rows, s.projects)); this.ctx.projects.bootListAt = Date.now(); }, () => projectRead.cancel()),
+      slice(client.call('projects.list', {}), rows => {
+        s.projects = retainRows(s.projects, this.ctx.projects.withPendingArchives(projectRead.apply(rows, s.projects)));
+        this.ctx.projects.bootListAt = Date.now();
+        void this.ctx.projects.sendPendingArchives(rows);
+      }, () => projectRead.cancel()),
       slice(client.call('threads.list', {}), rows => {
         s.threads = reconcileRows(s.threads, threadRead.apply(rows, s.threads));
         const read = reopened && s.openThread?.unread === false ? s.threads.find(t => t.id === s.openThread?.id) : undefined;

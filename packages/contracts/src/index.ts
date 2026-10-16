@@ -1,7 +1,7 @@
 import type { AgentsRpcMethods, AgentsRpcEvents } from './agents';
 import type { WorkflowsRpcMethods, WorkflowsRpcEvents } from './workflows';
 import type { BrowserRpcMethods, BrowserRpcEvents, BrowserProfile } from './browser';
-import type { PullRequestsRpcMethods, PullRequestsRpcEvents } from './pull-requests';
+import type { PullRequestsRpcMethods, PullRequestsRpcEvents, PullRequestWatch } from './pull-requests';
 import type { MobileDevicesRpcMethods, MobileDevicesRpcEvents } from './mobile-devices';
 import type { CoreLogContext, CoreLogLevel, CoreLogRecord, CoreLogsQuery, DiagnosticsRpcMethods } from './diagnostics';
 export * from './diagnostics';
@@ -14,6 +14,7 @@ export * from './workflows';
 export * from './workflow-plan';
 export * from './thread-focus';
 export * from './context-mode';
+export * from './delegation-input';
 import type { ContextPreset, ContextRequest, ThreadContextMode } from './context-mode';
 
 /**
@@ -360,8 +361,14 @@ export interface ModelInfo {
   legacy?: boolean;
   /** A small mark next to the name in the picker. */
   badge?: 'new';
-  /** Reasoning effort this model offers. A model without it has no effort control. */
-  effort?: { levels: EffortLevel[]; default: string };
+  /**
+   * Reasoning effort this model offers. A model without it has no effort control.
+   * `default` is the level the agent runs this model on when none is picked;
+   * absent when the agent decides it itself and the core cannot read it (pi
+   * knows only the level of the model its session is on), so a thread on that
+   * model sends no level until the user picks one.
+   */
+  effort?: { levels: EffortLevel[]; default?: string };
   /** Native service tiers advertised for this model; absent means no speed control. */
   speeds?: SpeedTier[];
 }
@@ -815,6 +822,13 @@ export interface Project {
   /** Automatically hide a quiescent worktree conversation after its exact PR merges. Missing means enabled. */
   autoArchiveMergedPr?: boolean;
   /**
+   * Remove a worktree the core created once every thread in it is archived or
+   * done and its work is settled: the exact head merged in a PR, or nothing
+   * missing from every other branch. Absent from a core older than this field;
+   * otherwise true unless the owner turned it off.
+   */
+  autoRemoveWorktrees?: boolean;
+  /**
    * The folder holds a `.git`, read on every answer rather than stored: the
    * test `threads.create.worktree` applies. Absent before the core's first
    * check of the folder answers, and from a core older than this field: a
@@ -969,6 +983,24 @@ export interface ThreadArchiveReason {
   archivedAt: Timestamp;
 }
 
+/**
+ * The core removed the worktree this thread worked in while it was archived.
+ * `cwd` still names the folder, which no longer exists: the thread can be read
+ * and restored but not continued there.
+ */
+export interface ThreadWorktreeRemoval {
+  /** The folder that was removed, the thread's `cwd` at the time. */
+  path: string;
+  /** The branch checked out there, null on a detached HEAD. */
+  branch: string | null;
+  /** The local branch went too. A kept branch can be checked out again by hand. */
+  branchDeleted: boolean;
+  /** `pr-merged`: the checkout's exact tip was a merged PR's head. `clean`: no change and no commit missing from every other branch. */
+  reason: 'pr-merged' | 'clean';
+  pullRequest?: { number: number; url: string };
+  removedAt: Timestamp;
+}
+
 /** Provenance of a copied conversation; native history and seeded history remain distinct. */
 export const JOURNAL_INSPECTION_TABLES = ['threads', 'turns', 'messages', 'turn_requests', 'background_observations', 'coordination_letters'] as const;
 export type JournalInspectionTable = typeof JOURNAL_INSPECTION_TABLES[number];
@@ -1012,6 +1044,8 @@ export interface ThreadSummary {
 
   /** Durable explanation for an automatic archive; absent for manual archives and restored conversations. */
   archiveReason?: ThreadArchiveReason;
+  /** Set once the core removed this thread's worktree, kept after a restore while `cwd` still names it. */
+  worktreeRemoved?: ThreadWorktreeRemoval | null;
   /** Core-owned delegation relationship. Absent on ordinary conversations. */
   parentThreadId?: ThreadId | null;
   /** What the conversation starts without, fixed at creation. Absent: the whole setup. */
@@ -1099,6 +1133,12 @@ export interface ThreadSummary {
   /** Answers accepted by the core, waiting for the running agent or the next turn. In memory only. */
   pendingAnswers?: string[];
   /**
+   * The pull requests the thread's agent watches (`threads.watchPullRequest`):
+   * a thread at rest with one reads as watching, not done, since the watch
+   * will wake it. Empty when none; missing on older cores.
+   */
+  pullRequestWatches?: PullRequestWatch[];
+  /**
    * Questions the agent asked without stopping (`boite ask`, Codex's own)
    * that still wait for the user. The status stays `running` or `idle`, so a
    * row reads this to say the thread needs the user. Missing on older cores.
@@ -1130,8 +1170,36 @@ export interface ThreadSummary {
    * lifetime is unknown or no turn has finished. Missing on older cores.
    */
   promptCache?: PromptCache | null;
+  /**
+   * What the core plans to try again by itself after a provider refused a
+   * turn for availability (`ThreadRetry`). Null when nothing is planned;
+   * missing on older cores.
+   */
+  retry?: ThreadRetry | null;
   createdAt: Timestamp;
   updatedAt: Timestamp;
+}
+
+/**
+ * An automatic retry the core planned after a provider refused a turn for
+ * availability rather than for a fault of the request (docs/usage.md).
+ * `capacity`: the model was at capacity; the same turn tries again at `at`,
+ * the `attempt`th of `attempts` tries, and the thread stays running meanwhile.
+ * `usage-limit`: the subscription window was spent and `autoResumeLimitedThreads`
+ * is on; a new turn resumes the thread at `at`, shortly after `resetsAt`, and
+ * the plan survives a core restart. `turns.cancelRetry` or Stop cancels either.
+ */
+export interface ThreadRetry {
+  kind: 'capacity' | 'usage-limit';
+  /** The turn the provider refused. */
+  turnId: TurnId;
+  /** When the core tries again. */
+  at: Timestamp;
+  /** This try's number, from 1; always 1 for a usage limit. */
+  attempt: number;
+  attempts: number;
+  /** When the spent window resets, for a usage limit; null for capacity. */
+  resetsAt: Timestamp | null;
 }
 
 export interface Usage {
@@ -1221,8 +1289,10 @@ export type TurnExecution = Pick<ThreadSummary,
    * started finished; the turn carries no prompt of the user's.
    * `resume`: the core restarted over a running turn and opened this one so
    * the agent carries on (`docs/restart-handoff.md`).
+   * `pull-request`: a pull request the agent watches needs a look; the turn
+   * carries what changed (`threads.watchPullRequest`).
    */
-  operation?: 'compact' | 'coordination' | 'delegation' | 'background' | 'resume';
+  operation?: 'compact' | 'coordination' | 'delegation' | 'background' | 'resume' | 'pull-request';
   /** A `compact` the core opened by the `autoCompact` setting, not one the user asked for. */
   automatic?: true;
 };
@@ -1253,14 +1323,14 @@ export interface Turn {
 /**
  * Whether Boite opened this turn itself to carry on the user's last request:
  * background work it left finished, a delegated agent or another agent wrote
- * back, the core resumed after a restart, or the context was compacted on its
- * own. The user's message, not this turn, is where the request started.
+ * back, a pull request it watches changed, the core resumed after a restart,
+ * or the context was compacted on its own. The user's message, not this turn, is where the request started.
  */
 export function continuesRequest(turn: Pick<Turn, 'execution'>): boolean {
   const execution = turn.execution;
   if (!execution) return false;
   const operation = execution.operation;
-  return operation === 'background' || operation === 'delegation' || operation === 'coordination' || operation === 'resume' || execution.automatic === true;
+  return operation === 'background' || operation === 'delegation' || operation === 'coordination' || operation === 'resume' || operation === 'pull-request' || execution.automatic === true;
 }
 
 /** Queue order: `queuedAt`, then id, so every client and the core agree on a tie. */
@@ -1330,7 +1400,7 @@ export type ToolDocument =
   /** `data` is base64 with no `data:` prefix. The core caps it before it is journalled. */
   | { kind: 'image'; mimeType: string; data: string; alt: string | null };
 
-export { IMAGE_MIME_TYPES, ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_TURN, ATTACHMENTS_TOTAL_MAX_BYTES, RPC_MAX_FRAME_BYTES } from './attachment-limits.ts';
+export { IMAGE_MIME_TYPES, IMAGE_MAX_EDGE, ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_TURN, ATTACHMENTS_TOTAL_MAX_BYTES, RPC_MAX_FRAME_BYTES } from './attachment-limits.ts';
 import type { ImageMimeType } from './attachment-limits.ts';
 export type { ImageMimeType } from './attachment-limits.ts';
 
@@ -2126,6 +2196,11 @@ export interface Settings {
    */
   asyncQuestions?: boolean;
   /**
+   * Every normal turn asks the agent for short answers: result first, no
+   * preamble, recap or commentary between tool calls. Missing reads as on.
+   */
+  shortAnswers?: boolean;
+  /**
    * Agents may read this machine's anonymized diagnostics and draft an issue
    * from them (`boite logs`, `boite issue`). Missing reads as on.
    */
@@ -2148,6 +2223,12 @@ export interface Settings {
    * machine it controls. Missing on older cores and before the first star.
    */
   modelFavorites?: ModelFavorites;
+  /**
+   * A turn that failed on a subscription usage limit resumes by itself once
+   * that limit's window resets: one new turn per window and thread, with a
+   * short continue prompt (docs/usage.md). Missing reads as off.
+   */
+  autoResumeLimitedThreads?: boolean;
 }
 
 /** One starred model. Accounts are named by label: an id means nothing on another machine. */
@@ -2924,9 +3005,11 @@ export interface AgentLetter {
    * Who the core says wrote it. Missing on older coordination mail: another
    * agent. `user` and `result` are delegation mail. `resident` comes from the
    * persistent agent the owner entrusted the recipient's project to. None of
-   * them is a message the user typed.
+   * them is a message the user typed. `question` is written by the core when
+   * a delegated agent asks something (a question card or a permission request)
+   * and tells its parent; it is withdrawn when the card closes before delivery.
    */
-  origin?: 'user' | 'agent' | 'result' | 'resident';
+  origin?: 'user' | 'agent' | 'result' | 'resident' | 'question';
   /**
    * A `result` written when a delegated agent ended its turn to wait on its
    * own background work: what it said so far, not its final result, which
@@ -2945,6 +3028,12 @@ export interface AgentLetter {
   expiresAt: Timestamp;
   status: 'queued' | 'received' | 'delivered' | 'uncertain' | 'expired' | 'rejected';
   error: string | null;
+  /**
+   * The question of the recipient this message answered instead of being
+   * delivered as a message: a parent's `delegation.send` to a child waiting on
+   * a question card. Missing otherwise and on older cores.
+   */
+  answered?: RequestId;
   /**
    * How the other end relates to the thread whose view lists this letter.
    * The core sets it when it reads the letter out, never stores it; missing on
@@ -3287,9 +3376,14 @@ export interface DelegationModels {
 /** The profile every conversation has without configuring one: its own harness, account, model and effort. */
 export const CONVERSATION_PROFILE_ID = 'conversation';
 export interface DelegationResultRef { agentId: ThreadId; turnId: TurnId }
-export type DelegationSettlement = 'result_available' | 'waiting_for_children' | 'settled';
+/** `needs_input`: a child waits on a question or a permission request; its `needsInput` says which. */
+export type DelegationSettlement = 'result_available' | 'waiting_for_children' | 'needs_input' | 'settled';
 export interface DelegationWaitResult {
-  /** Single-child completion exposes its result; a whole finished team is settled. */
+  /**
+   * Single-child completion exposes its result; a whole finished team is
+   * settled. A wait also ends, as `needs_input`, as soon as a child it covers
+   * asks something.
+   */
   state: DelegationSettlement;
   timedOut: boolean;
   agents: DelegatedAgent[];
@@ -3312,6 +3406,39 @@ export interface DelegatedAgent {
   resultRef?: DelegationResultRef;
   /** A child's terminal result availability, not ownership of nested children. */
   settlement?: 'result_available' | 'settled';
+  /** What the child waits on from someone, oldest first. Missing when nothing is open. */
+  needsInput?: DelegationInput[];
+  /** The child's own git worktree, for a child spawned with `worktree`. Missing for a child in the shared checkout. */
+  worktree?: DelegationWorktree;
+}
+/**
+ * A card a delegated child waits on. A question's free text or one of its
+ * option labels, sent by the parent with `delegation.send`, answers it; a
+ * permission request only the user can decide, in the child's conversation.
+ */
+export type DelegationInput =
+  | { kind: 'question'; id: RequestId; text: string; options: string[]; allowText: boolean; multiple: boolean; blocking: boolean }
+  | { kind: 'permission'; id: RequestId; toolName: string; description: string | null };
+/**
+ * A delegated child's worktree. `pending`: not made yet, it is made from the
+ * parent's HEAD before the child's next turn. `active`: the child works in it.
+ * `kept`: its last turn left commits beyond `base` or uncommitted changes, so
+ * the branch waits for the parent to merge it. `removed`: it ended with
+ * neither, so the worktree and its branch were deleted; a new turn makes them
+ * again from the parent's HEAD.
+ */
+export interface DelegationWorktree {
+  branch: string;
+  path: string;
+  /** The commit it branched from; null while pending. */
+  base: string | null;
+  state: 'pending' | 'active' | 'kept' | 'removed';
+  /** Commits on the branch beyond `base` when it was last settled. */
+  commits?: number;
+  /** Uncommitted changes when it was last settled. */
+  dirty?: boolean;
+  /** Why the core could not settle or make it, when it could not. */
+  error?: string;
 }
 export interface DelegationView {
   rootThreadId: ThreadId;
@@ -3558,6 +3685,8 @@ export interface UpdateEverythingResult {
 export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, BrowserRpcMethods, PullRequestsRpcMethods, MobileDevicesRpcMethods, DiagnosticsRpcMethods {
   /** Owner-only merged-PR visibility policy; absent defaults to enabled. Disabling reveals automatically hidden roots, retaining manual archives. */
   'projects.setAutoArchiveMergedPr': { params: { projectId: ProjectId; enabled: boolean }; result: Project };
+  /** Owner-only automatic worktree removal policy; absent defaults to enabled. Turning it off stops future removals only. */
+  'projects.setAutoRemoveWorktrees': { params: { projectId: ProjectId; enabled: boolean }; result: Project };
   /** Owner-only, private bounded diagnostic history, including earlier runs. */
   'journal.inspect': { params: { cursor?: JournalInspectionCursor | null; limit?: number }; result: JournalInspection };
   'core.logs': { params: CoreLogsQuery; result: CoreLogRecord[] };
@@ -3600,9 +3729,22 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * (`Fast (priority)`), case-insensitively, and is refused otherwise. Left
    * out: no tier, never the parent's. `context` starts the child without
    * part of the user's setup; left out, it gets all of it.
+   *
+   * `worktree: true` runs the child in a git worktree of its own on a new
+   * `boite/sub-<id>` branch from the parent's current HEAD instead of the
+   * shared checkout; refused when the parent's project is not a git
+   * repository. Uncommitted edits of the parent are not copied.
    */
-  'delegation.spawn': { params: { threadId: ThreadId; profileId?: string; model?: string; effort?: string; speed?: string; context?: ContextRequest | ContextPreset; task: string; title?: string; requestId: string }; result: DelegatedAgent };
+  'delegation.spawn': { params: { threadId: ThreadId; profileId?: string; model?: string; effort?: string; speed?: string; context?: ContextRequest | ContextPreset; task: string; title?: string; worktree?: boolean; requestId: string }; result: DelegatedAgent };
   'delegation.models': { params: { threadId: ThreadId }; result: DelegationModels };
+  /**
+   * From a parent to a child blocked on a question card, the text answers
+   * that question (an option label, or free text where it takes some) and the
+   * letter carries `answered`; a text that fits neither is refused with the
+   * options. A question asked without stopping takes only its option labels.
+   * Otherwise a message delivered at the next tool boundary or turn
+   * (`delegationReply`).
+   */
   'delegation.send': { params: { threadId: ThreadId; toThreadId: ThreadId; text: string; requestId: string }; result: AgentLetter };
   'delegation.stop': { params: { threadId: ThreadId; agentId?: ThreadId }; result: { stopped: number } };
   'delegation.result': { params: { threadId: ThreadId; agentId: ThreadId; turnId: TurnId; offset?: number; limit?: number }; result: DelegationResultPage };
@@ -4407,6 +4549,12 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'turns.stop': { params: { threadId: ThreadId }; result: { stopped: boolean } };
   /** Resume or discard exactly one unsent prompt held after restart, retaining its execution selection. */
   'turns.recover': { params: { threadId: ThreadId; turnId: TurnId; action: 'resume' | 'discard' }; result: Turn };
+  /**
+   * Cancels the retry the core planned for the thread (`ThreadSummary.retry`).
+   * A capacity retry's turn then fails with the provider's refusal; a usage
+   * limit resume is dropped. False when nothing was planned.
+   */
+  'turns.cancelRetry': { params: { threadId: ThreadId }; result: { cancelled: boolean } };
 
   /**
    * The requests still unanswered, in the order they were created; every thread
