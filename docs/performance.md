@@ -416,9 +416,10 @@ when the core advertises `chunkedAnswers`.
   then on one timer per connection: every 15 seconds while the thread works,
   every 60 seconds at rest, above the core's 15-second cache of a repository's
   list, so a round of idle cards runs `gh` at most once per repository. A
-  hidden page skips its rounds; back in view, it runs one if a round is due. A
-  merged pull request is not asked about again, except by Refresh PR
-  (`watchPullRequests` in `pull-request.ts`).
+  hidden page skips its rounds; back in view, it runs one if a round is due.
+  The rounds skip a merged pull request; a mount, a reconnect, a status change
+  and Refresh PR still ask, so a new PR on the same branch shows when the turn
+  ends (`watchPullRequests` in `pull-request.ts`).
 - An open Done or Archived fold reads the archive again only when a project's
   archive count, the listed projects or a connection change, not when a prompt
   re-sorts the list, and keeps its rows on screen while it reads.

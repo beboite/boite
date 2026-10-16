@@ -16,7 +16,7 @@ afterEach(async () => {
   vi.restoreAllMocks(); document.body.innerHTML = ''; localStorage.clear();
 });
 
-test('a card asks every minute at rest and every 15 s at work, and a merged PR is not asked about again until a manual refresh', async () => {
+test('a card asks every minute at rest and every 15 s at work, and its rounds skip a merged PR while a finished turn still finds the next one', async () => {
   client = new FakeClient({ delayMs: 0 });
   store = new Store(); store.attach(client); await store.connect();
   const thread = store.threads.find(thread => thread.branch)!;
@@ -25,8 +25,10 @@ test('a card asks every minute at rest and every 15 s at work, and a merged PR i
   thread.status = 'idle';
   const project = store.projects.find(project => project.id === thread.projectId)!;
   const pr = { number: 181, url: 'https://github.com/example/repo/pull/181', state: 'OPEN' as const };
+  const next = { number: 182, url: 'https://github.com/example/repo/pull/182', state: 'OPEN' as const };
   const call = vi.spyOn(client, 'call').mockResolvedValueOnce(null).mockResolvedValueOnce(pr).mockRejectedValueOnce(new Error('offline'))
-    .mockResolvedValueOnce(pr).mockResolvedValue({ ...pr, state: 'MERGED' });
+    .mockResolvedValueOnce(pr).mockResolvedValueOnce({ ...pr, state: 'MERGED' }).mockResolvedValueOnce(next)
+    .mockResolvedValue({ ...next, state: 'MERGED' });
   vi.useFakeTimers();
   mounted = mount(ThreadCard, { target: document.body, props: { machine: { id: 'local', label: 'Local', store }, project, thread, now: Date.now(), showProject: false } });
   await settle();
@@ -52,20 +54,35 @@ test('a card asks every minute at rest and every 15 s at work, and a merged PR i
   visibility.mockReturnValue(false);
   document.dispatchEvent(new Event('visibilitychange')); await settle();
   expect(call).toHaveBeenCalledTimes(5);
-  // Merged stays merged: neither the rounds nor a finished turn ask again.
-  await vi.advanceTimersByTimeAsync(120_000); await settle();
-  thread.status = 'idle'; await settle();
+  // Merged stays merged for the rounds.
   await vi.advanceTimersByTimeAsync(120_000); await settle();
   expect(call).toHaveBeenCalledTimes(5);
+  // The turn ends after opening a new PR on the same branch: the status change asks and shows it.
+  thread.status = 'idle'; await settle();
+  expect(call).toHaveBeenCalledTimes(6);
+  expect(document.querySelector('[data-testid=thread-pr]')?.textContent).toContain('#182');
+  // An open PR is asked about again at the next round, a merged one no more.
+  await vi.advanceTimersByTimeAsync(60_000); await settle();
+  expect(call).toHaveBeenCalledTimes(7);
+  await vi.advanceTimersByTimeAsync(120_000); await settle();
+  expect(call).toHaveBeenCalledTimes(7);
   // The user's own refresh still does.
   const { contextMenu } = await import('../lib/context-menu.svelte');
   document.querySelector('[data-testid=thread-row]')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 4, clientY: 4 }));
   contextMenu.current!.onpick('pr'); contextMenu.close(); await settle();
-  expect(call).toHaveBeenCalledTimes(6);
+  expect(call).toHaveBeenCalledTimes(8);
   expect(call).toHaveBeenLastCalledWith('threads.pullRequest', { threadId: thread.id, refresh: true });
   await unmount(mounted); mounted = undefined;
   await vi.advanceTimersByTimeAsync(120_000); await settle();
-  expect(call).toHaveBeenCalledTimes(6);
+  expect(call).toHaveBeenCalledTimes(8);
+  // A remount starts from the merged line on screen and asks once: the branch may hold a newer PR.
+  mounted = mount(ThreadCard, { target: document.body, props: { machine: { id: 'local', label: 'Local', store }, project, thread, now: Date.now(), showProject: false } });
+  flushSync();
+  expect(document.querySelector('[data-testid=thread-pr]')?.textContent).toContain('#182');
+  await settle();
+  expect(call).toHaveBeenCalledTimes(9);
+  await vi.advanceTimersByTimeAsync(120_000); await settle();
+  expect(call).toHaveBeenCalledTimes(9);
 });
 
 test('cards on screen share one round a minute, none while the page is hidden, and one on return', async () => {

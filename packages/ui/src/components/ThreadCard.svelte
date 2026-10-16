@@ -72,7 +72,10 @@
       if (revision === prRevision) prLoading = false;
     }
   }
-  /** A merged pull request stays merged: only the user's own refresh asks about it again. A closed one can reopen. */
+  /**
+   * A timer round skips a merged pull request: it stays merged. A closed one can reopen. A mount, a reconnect
+   * and a status change still ask, since the thread can open a new PR on the same branch.
+   */
   function pollPr() {
     if (pullRequest?.state !== 'MERGED') void refreshPr();
   }
@@ -86,7 +89,7 @@
       // moved thread or another branch starts from nothing.
       pullRequest = knownPullRequest(key);
       prLoading = false;
-      if (ready && identity.client && identity.branch && identity.branch !== 'HEAD') pollPr();
+      if (ready && identity.client && identity.branch && identity.branch !== 'HEAD') void refreshPr();
     });
     return () => { prRevision++; };
   });
@@ -98,9 +101,9 @@
     return watchPullRequests(client, pollPr, threadActive(thread.status) ? WORKING_PULL_REQUEST_POLL_MS : PULL_REQUEST_POLL_MS);
   });
   $effect(() => {
-    // A finished turn can have opened or merged a PR since its row first mounted.
+    // A finished turn can have opened or merged a PR since its row first mounted, a new one after a merged one included.
     const status = thread.status;
-    untrack(() => { void status; pollPr(); });
+    untrack(() => { void status; void refreshPr(); });
   });
   function rename() {
     title = thread.title;

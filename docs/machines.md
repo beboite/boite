@@ -288,8 +288,9 @@ A missing branch gets its own lookup only when that list was full. At most two
 commands run at once, each with a ten-second deadline through `procs` as
 `pull-request:<threadId>`. Folded projects defer lookups until opened. A client
 asks again every 15 seconds while the thread works and once a minute at rest,
-not while its page is hidden, and never about a merged PR unless the user picks
-Refresh PR.
+not while its page is hidden. These rounds skip a merged PR; a status change, a
+remount, a reconnect and Refresh PR still ask, so a newer PR on the same branch
+replaces it.
 
 When a machine drops, its cards stay listed, greyed, and still open. The client
 asks nothing of the core then: it shows the timeline it last read for that
