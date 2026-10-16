@@ -56,6 +56,13 @@
 
   let rail = $state<HTMLElement | undefined>(undefined);
   let folded: boolean | undefined;
+  /**
+   * Whether this list was folded since it was drawn. Only then does its
+   * arrival slide in from the window's edge: a list drawn by a page change
+   * (Threads to Agents, back from Settings) or at boot replaces the one that
+   * stood there, so it stands still and only its rows change.
+   */
+  let wasFolded = $state(untrack(() => store.sidebarCollapsed));
   let sliding: ReturnType<typeof setTimeout> | undefined;
   let marked: HTMLElement | undefined;
 
@@ -75,6 +82,7 @@
     const now = store.sidebarCollapsed;
     const was = folded;
     folded = now;
+    if (now) wasFolded = true;
     const row = untrack(() => rail)?.parentElement;
     if (was === undefined || was === now || !row) return;
     unmark();
@@ -96,6 +104,7 @@
   class:drawer
   class:open={drawer && store.sidebarOpen}
   class:collapsed={store.sidebarCollapsed}
+  class:was-folded={wasFolded}
   style:--sidebar-width={`${store.sidebarWidth}px`}
   aria-label={label}
   data-testid={testid}
@@ -224,7 +233,8 @@
       margin-left: calc(-1 * var(--slide-room));
       transition: margin-left var(--dur-slide-out) var(--ease-slide), opacity var(--dur-2) var(--ease-out-quint), display var(--dur-slide-out) allow-discrete;
     }
-    @starting-style { .rail:not(.collapsed) { opacity: 0; margin-left: calc(-1 * var(--slide-room)); } }
+    /* Unfolding only (`wasFolded`): a list drawn open stands where it is. */
+    @starting-style { .rail.was-folded:not(.collapsed) { opacity: 0; margin-left: calc(-1 * var(--slide-room)); } }
   }
   @media (max-width: 720px) {
     .rail.drawer {

@@ -51,9 +51,8 @@ estimate](#the-api-estimate)).
   reads again whether the switch went on or off.
 - Providers refresh independently, with up to two accounts per provider in
   flight. Each `quotas.progress` event carries the request ID and one account's
-  result; the final response retains the account order. A paired device may
-  call `quotas.list` and receives both events; `refresh: true` stays the
-  owner's, as do `quotas.configure` and `quotas.reset`.
+  result, and goes only to the connection that sent that request; the final
+  response retains the account order. Both events and calls remain owner-only.
 - In the tray and the limits tab, existing bars lose saturation while their
   account is pending. Each answer updates its bars and restores their colour
   with a transition. A slow provider does not hold up the others. Cache and
@@ -123,7 +122,7 @@ quota views update the label immediately while retaining their cached windows.
 | Source | Read behavior and limits |
 | --- | --- |
 | Claude | OAuth usage endpoint for file logins; Keychain, Credential Manager or expired-token logins fall back to asking the CLI for usage with `skipBehaviors: true`, no prompt queue, tools or hooks. Fallback can omit resets and paid usage. |
-| Codex | `account/rateLimits/read`, without opening a conversation. A running session forwards its `account/rateLimits/updated` notifications, merged into one full read of that same process per minute |
+| Codex | `account/rateLimits/read`, without opening a conversation; a running session's `account/rateLimits/updated` refreshes it (below) |
 | Muse Code | Last `usage/changed` observation from an existing host supporting that event; no host or prompt starts to refresh limits |
 | Grok | Credit percentage or legacy credit amounts from the selected CLI login's billing endpoint |
 | OpenCode Go | Rolling, weekly and monthly limits from its Go usage API, using its own saved API login or the default account's `OPENCODE_API_KEY`. OpenCode 2 accounts read the key from their own database |
@@ -132,8 +131,10 @@ quota views update the label immediately while retaining their cached windows.
 Quota readers live in `packages/core/src/quotas.ts` and `quota-readers.ts`, with
 Claude's fallback under `drivers/claude/quota.ts`. Successful snapshots cache for
 one minute; manual refreshes are at least ten seconds apart and failures back
-off for five minutes. A failed read returns the last successful windows as stale
-with its error and timestamp. Unknown percentages remain unavailable. Failed
+off for five minutes. A change to one account (a rename, a login check, a
+removal) clears that account's cache alone; reads of other accounts in flight
+still land in theirs. A provider change clears every account. A failed read
+returns the last successful windows as stale with its error and timestamp. Unknown percentages remain unavailable. Failed
 reads never advertise old resets or credits as available. Unsupported providers
 report unsupported limits rather than using local token totals as quota.
 
@@ -141,6 +142,18 @@ Muse observations stay in memory per account with their original observation
 time, including over-quota readings. Before the first observation, after
 monitoring is disabled or with an older host, the source is unavailable. Its
 schema supplies no paid credit balance or banked resets.
+
+A running Codex session merges each sparse `account/rateLimits/updated`
+notification into a full `account/rateLimits/read` of that same process, read
+again once it is a minute old, and forwards the result to `QuotaStore.observe`
+(`drivers/codex/rate-limits.ts`). The store merges it into the last full read
+of that account: the windows it carries replace theirs, the others
+and the banked resets stay. The merged row stands as a successful read timed at
+its observation, so the next list returns it without starting an app-server
+until it is a minute old. Updates stand in for a read only within five minutes
+of the last full read and are dropped when no full read is held; the next list
+then reads again. A reading older than the one held is ignored, and
+`quotas.updated` goes out only when the values changed.
 
 ### Resets and paid allowances
 

@@ -564,7 +564,10 @@ for 25, so a phone that iOS suspends before it can say so (`pagehide`,
 `freeze`) stops counting within that time.
 
 The core holds back finished-turn pushes about an attended thread rather than
-dropping them (`PushStore.notify`). Requests for input bypass this hold.
+dropping them (`PushStore.notify`). Requests for input bypass this hold. A core
+with no push subscription and no other group member prepares nothing: no reply
+excerpt, no badge count, no forwarding. The check runs when the news happens, so
+a phone that subscribes mid-turn gets the next one.
 Each report carries `idleMs`, how long ago the page was last used while
 attentive; use after the news arrived means it was seen, and the held push is
 dropped. The page reports its first use after a quiet spell at once, at most

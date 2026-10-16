@@ -11,7 +11,10 @@ stopped work item says the agent was paused or archived.
 The page is a chat. Its list is the thread list's own column: both draw
 `RailFrame` (width, resize handle, the title bar's fold, the foot ending on the
 limits and Settings) and `RailHead` (the Threads and Agents switch and one row
-of tools), so switching between them changes only the rows and the tools. Under it, one card
+of tools), so switching between them changes only the rows and the tools.
+The column and the card beside it stay in place and only the card's content
+fades in; the column slides in from the window's edge only when it unfolds
+(`tests/e2e/agents.test.ts` reads both on every frame). Under it, one card
 holds every conversation, agents and groups together, newest first. A row
 reads like a thread row: the agent's picture where the provider logo goes, its
 name, the same state a thread shows on the right (Working with its time, Needs

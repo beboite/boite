@@ -41,6 +41,7 @@ import type { Sealing } from './group/seal.ts';
 import { encodeInvite, encodeTicket, parseInvite, parseTicket, ticketSigningInput, inviteId, invitePsk } from './group/ticket.ts';
 import type { Invite } from './group/ticket.ts';
 import { DEVICES_MAX, GroupClients } from './group/clients.ts';
+import { SyncBackoff } from './group/backoff.ts';
 import { newId, newToken } from './ids.ts';
 import { currentOs } from './paths.ts';
 import { principalOf as principalOfRole, type ClientIdentity, type Identity } from './sessions.ts';
@@ -94,6 +95,8 @@ export class GroupStore {
   private joins = { since: 0, count: 0 };
   /** The roster digest each member last agreed on with this core. */
   private readonly acked = new Map<string, string>();
+  /** Members that did not answer the last offer: offered the same roster again after one tick, doubling up to the full sync period. */
+  readonly backoff = new SyncBackoff(TICK_MS, TICK_MS * FULL_SYNC_TICKS);
   /** The address each member last answered on, tried first the next time. */
   private readonly good = new Map<string, string>();
   private tailnet: Tailnet | null = null;
@@ -542,9 +545,11 @@ export class GroupStore {
         this.core.log('warn', `${entry.name} answered that this machine was removed from the group ${roster.name}`, { source: 'group', event: 'group.removed' });
         this.disband();
       }
-      // Anything else is a machine that is off or unreachable: the next tick asks again.
+      // Anything else is a machine that is off or unreachable: it is asked again later, sooner if the roster changes.
+      else if (stillMember()) this.backoff.failed(entry.coreId, digestOf(roster));
       return;
     }
+    this.backoff.heard(entry.coreId);
     if (!stillMember() || this.roster === null) return;
     const reply = answer as { roster?: unknown; left?: boolean } | null;
     if (reply?.left === true) {
@@ -558,14 +563,14 @@ export class GroupStore {
     if (this.roster !== null && digestOf(this.roster) === digestOf(theirs)) this.acked.set(entry.coreId, digestOf(theirs));
   }
 
-  /** Every member that has not agreed on the current roster is offered it. */
+  /** Every member that has not agreed on the current roster is offered it, unless it is waiting out a failed offer of that same roster. */
   private async syncPending(): Promise<void> {
     const roster = this.roster;
     if (roster === null || this.closed) return;
     const digest = digestOf(roster);
     const self = this.selfId();
     await Promise.allSettled(liveCores(roster)
-      .filter((core) => core.coreId !== self && this.acked.get(core.coreId) !== digest)
+      .filter((core) => core.coreId !== self && this.acked.get(core.coreId) !== digest && !this.backoff.waiting(core.coreId, digest))
       .map((core) => this.syncWith(core)));
   }
 
@@ -626,6 +631,7 @@ export class GroupStore {
     this.roster = null;
     this.core.journal.deleteSetting(SETTING);
     this.acked.clear();
+    this.backoff.clear();
     this.good.clear();
     this.invites.clear();
     this.reconcile();

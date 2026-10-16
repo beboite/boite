@@ -22,14 +22,16 @@ export interface FakeSdkState {
   bootMs?: number;
   /** `emulator -avd` exits at once with this message instead of booting. */
   emulatorFails?: string;
+  /** The color every screen shows; a new one is a changed screen. */
+  screen?: [number, number, number];
 }
 
 export const SCREEN = { width: 108, height: 240 };
 
 /** A solid PNG the size of a small phone screen. */
-export function png(width = SCREEN.width, height = SCREEN.height): Uint8Array {
+export function png(width = SCREEN.width, height = SCREEN.height, color: [number, number, number] = [40, 120, 200]): Uint8Array {
   const row = new Uint8Array(1 + width * 3);
-  for (let x = 0; x < width; x++) row.set([40, 120, 200], 1 + x * 3);
+  for (let x = 0; x < width; x++) row.set(color, 1 + x * 3);
   const raw = new Uint8Array(row.length * height);
   for (let y = 0; y < height; y++) raw.set(row, y * row.length);
   const chunk = (type: string, data: Uint8Array) => {
@@ -77,6 +79,11 @@ export function fakeSdk(state: Partial<FakeSdkState> = {}, tools: { adb?: boolea
     xcode: join(root, 'xcode'),
     calls: () => (existsSync(join(root, 'calls.log')) ? readFileSync(join(root, 'calls.log'), 'utf8').trim().split('\n') : []),
     state: () => JSON.parse(readFileSync(join(root, 'state.json'), 'utf8')) as FakeSdkState,
+    /** Changes what every screen shows from the next capture on. */
+    paint: (screen: [number, number, number]) => {
+      const state = JSON.parse(readFileSync(join(root, 'state.json'), 'utf8')) as FakeSdkState;
+      writeFileSync(join(root, 'state.json'), JSON.stringify({ ...state, screen }));
+    },
     /** Ends every fake emulator process, which watch the state for their serial. */
     stopEmulators: () => {
       const state = JSON.parse(readFileSync(join(root, 'state.json'), 'utf8')) as FakeSdkState;
@@ -131,7 +138,7 @@ async function main(root: string, tool: string, args: string[]): Promise<number>
       out(!emulator || Date.now() >= emulator.bootedAt ? '1\n' : '\n');
       return 0;
     }
-    if (args[0] === 'exec-out' && args[1] === 'screencap') { process.stdout.write(png()); return 0; }
+    if (args[0] === 'exec-out' && args[1] === 'screencap') { process.stdout.write(png(SCREEN.width, SCREEN.height, state.screen)); return 0; }
     if (args[0] === 'shell' && args[1] === 'input') return 0;
     process.stderr.write(`unknown adb call ${args.join(' ')}\n`);
     return 1;
@@ -153,7 +160,7 @@ async function main(root: string, tool: string, args: string[]): Promise<number>
         sim.state = 'Booted'; write(state); return 0;
       case 'bootstatus': return sim?.state === 'Booted' ? 0 : 1;
       case 'shutdown': if (!sim) return 1; sim.state = 'Shutdown'; write(state); return 0;
-      case 'io': if (sim?.state !== 'Booted') return 1; process.stdout.write(png()); return 0;
+      case 'io': if (sim?.state !== 'Booted') return 1; process.stdout.write(png(SCREEN.width, SCREEN.height, state.screen)); return 0;
     }
   }
   process.stderr.write(`unknown call ${tool} ${args.join(' ')}\n`);

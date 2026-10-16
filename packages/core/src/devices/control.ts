@@ -11,6 +11,7 @@ import {
   mobileDeviceInputError,
   type MobileDevice,
   type MobileDeviceFrame,
+  type MobileDeviceFrameUnchanged,
   type MobileDeviceInput,
   type MobileDeviceList,
   type MobileDeviceSession,
@@ -44,6 +45,8 @@ const COMMAND_TIMEOUT_MS = 15_000;
 /** A capture is shared by every viewer that asks within this long, so a phone and a desktop cost one screencap. */
 const CAPTURE_REUSE_MS = 200;
 const SESSIONS_MAX = 4;
+/** Sizes and qualities remembered per device for `previous`: a desktop and a phone each ask their own. */
+const FRAME_KINDS_MAX = 8;
 const KEYCODES = { back: 4, home: 3, recents: 187, enter: 66, backspace: 67, power: 26, tab: 61, delete: 112, up: 19, down: 20, left: 21, right: 22 } as const;
 
 interface Run {
@@ -68,7 +71,14 @@ interface Boot {
 
 interface Capture {
   at: number;
-  png: Promise<{ bytes: Uint8Array; width: number; height: number }>;
+  /** `hash` is the SHA-1 of the PNG bytes: the same hash is the same screen. */
+  png: Promise<{ bytes: Uint8Array; width: number; height: number; hash: string }>;
+}
+
+/** The last frame made from a device's screen at one size and quality. */
+interface SentFrame {
+  hash: string;
+  id: string;
 }
 
 export interface MobileDevicesOptions {
@@ -92,6 +102,8 @@ export class MobileDevices {
   readonly #lives = new Map<string, number>();
   readonly #emulators = new Map<string, { kill(): void }>();
   readonly #captures = new Map<string, Capture>();
+  /** Per device, by `maxWidth:quality`, the frame last made, so a caller still showing it gets `unchanged`. */
+  readonly #frames = new Map<string, Map<string, SentFrame>>();
   #closed = false;
 
   constructor(core: Core, options: MobileDevicesOptions = {}) {
@@ -161,16 +173,31 @@ export class MobileDevices {
     return { session: { ...session } };
   }
 
-  async frame(params: RpcParams<'devices.frame'>, connection?: Connection): Promise<MobileDeviceFrame> {
-    const { threadId, deviceId, maxWidth, quality = 60 } = params;
+  /**
+   * A frame keeps its id while the screen's PNG bytes stay the same at that size and quality. A caller
+   * whose `previous` is that id gets `unchanged` with no picture, and the JPEG is not made again.
+   */
+  async frame(params: RpcParams<'devices.frame'>, connection?: Connection): Promise<MobileDeviceFrame | MobileDeviceFrameUnchanged> {
+    const { threadId, deviceId, maxWidth, quality = 60, previous } = params;
     if (maxWidth !== undefined && !(Number.isInteger(maxWidth) && maxWidth >= 160 && maxWidth <= 3840)) throw refused('device frame maxWidth must be an integer from 160 to 3840');
     if (!(Number.isInteger(quality) && quality >= 20 && quality <= 90)) throw refused('device frame quality must be an integer from 20 to 90');
+    if (previous !== undefined && !(typeof previous === 'string' && previous.length <= 100)) throw refused('device frame previous must be the id of a frame this device sent');
     const target = this.#ready(threadId, deviceId, connection);
     const png = await this.#capture(target);
+    const kind = `${maxWidth ?? 0}:${quality}`;
+    const sent = this.#frames.get(deviceId) ?? new Map<string, SentFrame>();
+    const last = sent.get(kind);
+    const same = last?.hash === png.hash ? last : undefined;
+    if (same && previous === same.id) return { id: same.id, deviceId, width: png.width, height: png.height, unchanged: true, at: Date.now() };
     let image = new Bun.Image(png.bytes);
     if (maxWidth !== undefined && maxWidth < png.width) image = image.resize(maxWidth);
     const jpeg = await image.jpeg({ quality }).bytes();
-    return { id: crypto.randomUUID(), deviceId, width: png.width, height: png.height, base64: Buffer.from(jpeg).toString('base64'), at: Date.now() };
+    const id = same?.id ?? crypto.randomUUID();
+    sent.delete(kind);
+    sent.set(kind, { hash: png.hash, id });
+    if (sent.size > FRAME_KINDS_MAX) sent.delete(sent.keys().next().value!);
+    this.#frames.set(deviceId, sent);
+    return { id, deviceId, width: png.width, height: png.height, base64: Buffer.from(jpeg).toString('base64'), at: Date.now() };
   }
 
   async screenshot(params: RpcParams<'devices.screenshot'>, connection?: Connection): Promise<RpcResult<'devices.screenshot'>> {
@@ -218,7 +245,7 @@ export class MobileDevices {
     this.#core.logs.info(`Device ${deviceId} closed in the Device panel`, { source: 'devices', event: 'device.closed', threadId: params.threadId, data: { deviceId } });
     this.#sessions.get(params.threadId)?.delete(deviceId);
     this.#changed(params.threadId);
-    if (![...this.#sessions.values()].some((open) => open.has(deviceId))) this.#captures.delete(deviceId);
+    if (![...this.#sessions.values()].some((open) => open.has(deviceId))) { this.#captures.delete(deviceId); this.#frames.delete(deviceId); }
     return { closed: [deviceId] };
   }
 
@@ -231,6 +258,7 @@ export class MobileDevices {
     this.#closed = true;
     this.#sessions.clear();
     this.#captures.clear();
+    this.#frames.clear();
   }
 
   // --- discovery ---
@@ -394,7 +422,7 @@ export class MobileDevices {
         : await this.#run(this.#xcrun(), ['simctl', 'io', target.id, 'screenshot', '--type=png', '-'], COMMAND_TIMEOUT_MS);
       const size = run.code === 0 ? pngSize(run.stdout) : undefined;
       if (!size) throw refused(`the screen of ${target.name} could not be captured: ${this.#why(run) || 'not a PNG'}`, { deviceId: target.id });
-      return { bytes: run.stdout, ...size };
+      return { bytes: run.stdout, ...size, hash: new Bun.CryptoHasher('sha1').update(run.stdout).digest('hex') };
     })();
     const capture = { at: Date.now(), png };
     this.#captures.set(target.id, capture);
@@ -434,6 +462,7 @@ export class MobileDevices {
   #forget(deviceId: string): void {
     this.#targets.delete(deviceId);
     this.#captures.delete(deviceId);
+    this.#frames.delete(deviceId);
     this.#emulators.delete(deviceId);
   }
 

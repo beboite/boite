@@ -795,6 +795,8 @@ export class Coordination {
       // turned away here, in the next. Up to three times the quota by name; past that by date, nothing as old being taken again: bounded either way.
       if (++rate.count <= 360) this.nonces.set(key, now);
       else rate.floor = Math.max(rate.floor ?? 0, envelope.at);
+      // A member that sent a signed request is up, even past its quota: the next tick offers it the roster, whatever its wait.
+      this.core.group.backoff.heard(peer.coreId);
       if (rate.count > 120) return new Response('peer rate limit', { status: 429 });
     } catch { return new Response('invalid signed message', { status: 403 }); }
     const groupOnly = envelope.operation === 'group.sync' || envelope.operation === 'group.push'; // the group's own: sealed, from a member

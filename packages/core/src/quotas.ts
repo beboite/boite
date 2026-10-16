@@ -8,7 +8,7 @@ import type { Account, AccountQuota, QuotaReading, QuotaWindow } from '@boite/co
 import type { Core } from './core.ts';
 import { homePath } from './paths.ts';
 import { invalidParams } from './errors.ts';
-import { claudeQuotaDetails, claudeUsageAgent, codexQuotaDetails, codexQuotaWindows, quotaWindow as window } from './quota-details.ts';
+import { claudeQuotaDetails, claudeUsageAgent, codexQuotaDetails, codexQuotaWindows, quotaWindow } from './quota-details.ts';
 import { consumeClaudeReset, QuotaResetStore, type QuotaResetConsumer } from './quota-resets.ts';
 import { ANTIGRAVITY_QUOTA_ID, readExtraQuota } from './quota-readers.ts';
 import type { ProbeContext } from './drivers/types.ts';
@@ -21,6 +21,8 @@ const cliAccount: Account = { id: ANTIGRAVITY_QUOTA_ID, providerId: 'antigravity
 
 const CACHE_MS = 60_000;
 const RETRY_MS = 300_000;
+/** A session's readings stand in for reads only this long after a full read, which alone reports banked resets. */
+const OBSERVED_MS = 300_000;
 /** A disabled spending budget alone does not report subscription usage. */
 function hasQuota(reading: QuotaReading): boolean {
   return reading.windows.length > 0 || reading.resetCredits !== undefined ||
@@ -41,13 +43,13 @@ export function claudeQuotaWindows(raw: unknown): QuotaWindow[] {
     if (!id.startsWith('five_hour') && !id.startsWith('seven_day')) continue;
     const entry = object(value);
     const label = id === 'five_hour' ? '5 hours' : id === 'seven_day' ? 'Weekly' : id.replaceAll('_', ' ');
-    const mapped = window(id, label, entry['utilization'], entry['resets_at']);
+    const mapped = quotaWindow(id, label, entry['utilization'], entry['resets_at']);
     if (mapped) windows.push(mapped);
   }
   for (const value of Array.isArray(limits['model_scoped']) ? limits['model_scoped'] : []) {
     const entry = object(value);
     if (typeof entry['display_name'] !== 'string') continue;
-    const mapped = window(`model:${entry['display_name']}`, `Weekly · ${entry['display_name']}`, entry['utilization'], entry['resets_at']);
+    const mapped = quotaWindow(`model:${entry['display_name']}`, `Weekly · ${entry['display_name']}`, entry['utilization'], entry['resets_at']);
     if (mapped) windows.push(mapped);
   }
   return windows;
@@ -143,8 +145,11 @@ export class QuotaStore {
   readonly resets: QuotaResetStore;
   /** The subscription gateway's own accounts, listed after this machine's. */
   readonly gateway: GatewayQuotas;
-  /** Backoff and freshness: when the next read may go out. Cleared by every invalidation. */
-  private cache = new Map<string, { value: AccountQuota; retryAt: number }>();
+  /**
+   * Backoff and freshness: when the next read may go out. Cleared by every invalidation.
+   * `readAt` is the time of the full read a session's readings were merged into.
+   */
+  private cache = new Map<string, { value: AccountQuota; retryAt: number; readAt?: number }>();
   /**
    * The last successful reading of each account, kept through invalidations so
    * a failed read shows it as stale instead of nothing. Forgotten only when it
@@ -152,7 +157,9 @@ export class QuotaStore {
    */
   private lastGood = new Map<string, { value: AccountQuota; identity: string | null }>();
   private pending = new Map<string, Promise<AccountQuota>>();
+  /** Bumped by an invalidation of every account; `accountGenerations` by one of a single account. */
   private generation = 0;
+  private accountGenerations = new Map<string, number>();
   private observations = new Map<string, AccountQuota>();
   /** Bumped when one account's reading is dropped, so a read already in flight cannot restore it. */
   private epochs = new Map<string, number>();
@@ -184,8 +191,11 @@ export class QuotaStore {
   }
   /** The next list reads again; the last good readings stay as the fallback. */
   invalidate(accountId?: string): void {
-    this.generation++; this.cache.clear();
-    if (accountId) this.observations.delete(accountId); else this.observations.clear();
+    if (!accountId) { this.generation++; this.cache.clear(); this.observations.clear(); return; }
+    // One account changed: the others keep their readings and their reads in flight.
+    this.accountGenerations.set(accountId, (this.accountGenerations.get(accountId) ?? 0) + 1);
+    this.cache.delete(accountId);
+    this.observations.delete(accountId);
   }
   /** Drops the readings of these accounts, for a login that now belongs to someone else. */
   forget(matches: (accountId: string) => boolean): void {
@@ -208,15 +218,40 @@ export class QuotaStore {
       label: account.label, enabled, status: !supported ? 'unsupported' : !enabled ? 'disabled' : 'unavailable', windows: [], checkedAt: null, error: null };
   }
   private isMuse(account: Account): boolean { return this.core.providers.get(account.providerId)?.protocol === 'muse'; }
-  /** Only running hosts contribute observations; listing never starts a Muse turn. */
+  /**
+   * Only running hosts contribute observations; listing never starts a Muse turn.
+   * A running Codex session reports the limits a read would spawn an app-server
+   * for, in a sparse update: it is merged into the last full read, and the
+   * merged row stands as a fresh read until it is `CACHE_MS` old. With no full
+   * read held, or one `OBSERVED_MS` old, the update is dropped and the next
+   * list reads again.
+   */
   observe(accountId: string, reading: QuotaReading, observedAt: number): void {
     const account = this.core.accounts.list().find((row) => row.id === accountId);
-    if (!account || !this.isMuse(account) || !this.base(account).enabled || !reading.windows.length) return;
+    if (!account) return;
+    if (account.providerId === 'codex' && !this.isMuse(account)) { this.observeRead(account, reading, observedAt); return; }
+    if (!this.isMuse(account) || !this.base(account).enabled || !reading.windows.length) return;
     const previous = this.observations.get(accountId);
     if (previous && (previous.checkedAt ?? 0) > observedAt) return;
     const value: AccountQuota = { ...this.base(account), ...reading, status: 'ready', source: 'observation', checkedAt: observedAt };
     this.observations.set(accountId, value);
     this.core.bus.emit('quotas.updated', this.known());
+  }
+  private observeRead(account: Account, reading: QuotaReading, observedAt: number): void {
+    const base = this.base(account);
+    if (base.status !== 'unavailable' || !reading.windows.length) return;
+    const held = this.cache.get(account.id);
+    const previous = held?.value;
+    if (!previous || previous.status !== 'ready' || held.readAt === undefined || observedAt - held.readAt > OBSERVED_MS) return;
+    if (previous.checkedAt != null && previous.checkedAt > observedAt) return;
+    // A window the update leaves out keeps its last value; banked resets come only from a full read.
+    const windows = [...previous.windows.map((old) => reading.windows.find((row) => row.id === old.id) ?? old), ...reading.windows.filter((row) => !previous.windows.some((old) => old.id === row.id))];
+    const value: AccountQuota = { ...previous, label: base.label, providerName: base.providerName, windows, ...(reading.credits ? { credits: reading.credits } : {}),
+      status: 'ready', source: 'observation', checkedAt: observedAt, error: null };
+    this.cache.set(account.id, { value, retryAt: Date.now() + 10_000, readAt: held.readAt });
+    this.lastGood.set(account.id, { value, identity: account.identity });
+    const same = previous?.status === 'ready' && JSON.stringify([previous.windows, previous.resetCredits, previous.credits]) === JSON.stringify([value.windows, value.resetCredits, value.credits]);
+    if (!same) this.core.bus.emit('quotas.updated', this.known());
   }
   private kept(account: Account): AccountQuota | undefined {
     const kept = this.lastGood.get(account.id);
@@ -243,7 +278,8 @@ export class QuotaStore {
     const known = this.observations.get(account.id) ?? this.cache.get(account.id)?.value ?? this.kept(account);
     return known ? { ...known, label: base.label, providerName: base.providerName } : base;
   }
-  async list(refresh = false, requestId?: string): Promise<AccountQuota[]> {
+  /** `progress` hears each row as it lands, for the caller that passed `requestId` alone. */
+  async list(refresh = false, requestId?: string, progress?: (quota: AccountQuota) => void): Promise<AccountQuota[]> {
     if (requestId !== undefined && (typeof requestId !== 'string' || !requestId || requestId.length > 128)) {
       throw invalidParams('quotas.list requestId must be a non-empty string of at most 128 characters');
     }
@@ -251,7 +287,7 @@ export class QuotaStore {
     // Concurrent lists still share the account's pending read and cache.
     if (this.gatewayOwnsLimits()) {
       const rows = this.gateway.rows(await this.gateway.read(refresh));
-      if (requestId) for (const quota of rows) this.core.bus.emit('quotas.progress', { requestId, quota });
+      if (requestId && progress) for (const quota of rows) progress(quota);
       return rows;
     }
     const rows = [...this.core.accounts.list(), cliAccount];
@@ -265,7 +301,7 @@ export class QuotaStore {
     // The gateway answers for its own accounts, alongside the providers.
     const gateway = this.gateway.read(refresh).then((state) => {
       const rows = this.gateway.rows(state);
-      if (requestId) for (const quota of rows) this.core.bus.emit('quotas.progress', { requestId, quota });
+      if (requestId && progress) for (const quota of rows) progress(quota);
       return rows;
     });
     await Promise.all([...groups.values()].map(async (group) => {
@@ -275,7 +311,7 @@ export class QuotaStore {
           const { account, index } = group[next++]!;
           const quota = await this.one(account, refresh);
           result[index] = quota;
-          if (requestId) this.core.bus.emit('quotas.progress', { requestId, quota });
+          if (requestId && progress) progress(quota);
         }
       }));
     }));
@@ -301,6 +337,7 @@ export class QuotaStore {
     const existing = this.pending.get(account.id);
     if (existing) return existing;
     const generation = this.generation;
+    const accountGeneration = this.accountGenerations.get(account.id) ?? 0;
     const epoch = this.epochs.get(account.id) ?? 0;
     const running = (async () => {
       let value: AccountQuota;
@@ -315,7 +352,7 @@ export class QuotaStore {
         value = { ...(kept ?? base), label: base.label, providerName: base.providerName, status: 'unavailable', checkedAt: kept?.checkedAt ?? null,
           error: error instanceof Error ? error.message : 'Quota request failed.' };
       }
-      if (generation === this.generation && epoch === (this.epochs.get(account.id) ?? 0)) this.cache.set(account.id, { value, retryAt: Date.now() + (value.status === 'ready' ? 10_000 : RETRY_MS) });
+      if (generation === this.generation && accountGeneration === (this.accountGenerations.get(account.id) ?? 0) && epoch === (this.epochs.get(account.id) ?? 0)) this.cache.set(account.id, value.status === 'ready' ? { value, retryAt: Date.now() + 10_000, readAt: value.checkedAt! } : { value, retryAt: Date.now() + RETRY_MS });
       return value;
     })();
     this.pending.set(account.id, running);
