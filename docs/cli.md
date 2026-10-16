@@ -176,6 +176,50 @@ An agent can manage links only in its own conversation. Paired devices can
 read the list. Lookup uses the local `gh` login and the configured `GH_HOST`.
 At most 20 PRs can be linked to one conversation.
 
+### Watching a pull request
+
+`boite pr watch [<url|number>]` asks Boite to babysit a PR for the agent, so
+the agent ends its turn instead of polling CI. With nothing named it watches
+the conversation's only linked PR, or its only open one; a number names a
+linked PR; a URL not linked yet is linked first. It prints what the first
+read saw (head, checks running and failed, a conflict) and wakes nothing for
+it. `boite pr unwatch [<url|number>]` stops one watch, or all of them.
+
+The core (`packages/core/src/pull-request-watch.ts`) wakes the conversation
+with one message, a `pull-request` turn, when:
+
+- a check fails, each failure once; a rerun that fails again counts again;
+- every check the base branch requires finished without failing (every check
+  when none is required), including a required check that appears already
+  passed, and never while another run of the same check on that commit still
+  goes;
+- someone other than the account `gh` signs in as posts a comment, a review or
+  an inline review comment, replies included, or a bot rewrites one;
+- the branch starts to conflict with its base.
+
+The message names each change with its link. A change waits 20 seconds for
+the rest of its burst and for a running turn to end, then everything waiting
+goes out together; the same state never wakes twice.
+
+Each watched PR costs one GraphQL query a minute, a fingerprint of its state,
+mergeability, head, check counts by state, comment and review counts, edits
+and `updatedAt`. Only when it moves does the core read the checks one by one
+(with whether each is required) and the comments, reviews and inline comments,
+100 a page up to 10 pages each; remarks are read again every 30 minutes
+regardless, for edits the fingerprint cannot see. GitHub's rate limit pauses
+every read, from two minutes doubling up to 15; an unreachable GitHub or a
+missing `gh` pauses that watch the same way. Neither ends it.
+
+A watch ends on merge or close, on Stop, on archive or Mark done, on removal
+and on unwatch. It survives a core restart (`pr-watches:<thread>` in the
+journal settings). A thread at rest with a watch reads as watching, not done,
+in the sidebar. The thread header carries a chip with the watched numbers;
+its menu shows each watch's last status and stops one, on a phone too. The
+owner's Tasks panel lists them the same way. A paired phone may stop a watch,
+never start one. Delegated agents and
+persistent agent sessions cannot watch: their parent or Agents owns the work.
+At most 10 PRs per conversation.
+
 ## How an agent finds the core
 
 Every process a thread launches, the agent and whatever it spawns, carries
@@ -253,7 +297,7 @@ boite answer <id> <question-id> <option|text ...> [--skip]
 boite permissions [<id>]         pending tool permissions
 boite allow|deny <id> <request-id>
 boite attach <file>               publish a file snapshot in chat, at most 512 MB
-boite view <file.html>            draw the page at the end of the answer (--title <text>)
+boite view <file.html>            draw the page where a line ![title](file.html) of the answer places it, else at its end (--title <text>)
 boite view help                   the rules of a page: layout, the app's look, theme, motion, checks
 boite view example                a complete page in the app's look, to start from
 boite preview <file.html>          open a local HTML artifact and its neighbouring assets
@@ -285,7 +329,7 @@ boite agent remember <json>
 boite agent routines
 boite agent schedule <json>
 boite delegate models|profiles|list
-boite delegate spawn <brief> [--model <provider/model>] [--effort <level>] [--speed <tier>] [--profile <id>] [--title <t>] [context flags]
+boite delegate spawn <brief> [--model <provider/model>] [--effort <level>] [--speed <tier>] [--profile <id>] [--title <t>] [--worktree] [context flags]
 boite delegate send <thread-id> <text>
 boite delegate wait [thread-id] [--timeout <s>]
 boite delegate result <thread-id> <turn-id> [offset]
@@ -298,6 +342,11 @@ boite help
 The context flags, `--context light|neutral`, `--keep|--drop <parts>`,
 `--tools <Tool,...>` and `--rules <text>` or `--rules-file <path>`, start the
 thread without part of the user's setup ([context modes](context-modes.md)).
+`--worktree` runs the child in a git worktree of its own instead of the
+parent's checkout ([delegation](delegation.md#children-in-their-own-worktree)).
+`delegate send` to a child that waits on a question answers that question, and
+`delegate wait` returns `needs_input` as soon as a child asks something
+([delegation](delegation.md#questions-from-a-child)).
 
 Coordination commands are documented in [coordination](coordination.md#agent-commands),
 child controls in [delegation](delegation.md#agent-commands), and plan/output

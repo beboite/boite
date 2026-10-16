@@ -113,6 +113,12 @@ export interface TurnContext {
   /** The isolation environment of this account, empty for the provider's own login. */
   accountEnv: Record<string, string>;
   /**
+   * Boite's guide for a driver that puts it in its agent's system prompt
+   * (`takesSystemGuide`); the prompt then does not carry it. Absent for the
+   * other drivers, and when a context mode or the brain turns the guide off.
+   */
+  systemGuide?: string;
+  /**
    * `warmProcessMinutes` as it stands when this turn starts. Zero means the
    * driver drops its process with the turn; above zero it may keep it for that
    * many minutes of idleness and give the next turn of the thread the same one.
@@ -191,7 +197,7 @@ export interface TurnContext {
 /** Native session setup without a prompt, a turn or a message sink. */
 export type SessionContext = Pick<TurnContext,
   'thread' | 'account' | 'provider' | 'sessionId' | 'resumeAt' | 'sessionBefore' |
-  'accountEnv' | 'warmProcessMinutes' | 'log' | 'diagnostic' | 'authenticationFailed' | 'commands' | 'context' | 'hook' |
+  'accountEnv' | 'systemGuide' | 'warmProcessMinutes' | 'log' | 'diagnostic' | 'authenticationFailed' | 'commands' | 'context' | 'hook' |
   'background' | 'backgroundFinished' | 'wake' | 'spawnChild' | 'finishStartup' | 'killTree' | 'quota'>;
 
 export type DiagnosticLevel = 'debug' | 'info' | 'warn' | 'error';
@@ -226,7 +232,18 @@ export interface TurnResult {
    * entry (`Turn.checkpoint`). Absent when the driver has none.
    */
   checkpoint?: { sessionId: string; entry: string };
+  /**
+   * The provider refused the turn for availability, not for a fault of the
+   * request, and said so unambiguously: `capacity` when the model is at
+   * capacity right now (Codex `serverOverloaded`, Claude `overloaded_error`),
+   * `usage-limit` when the account's subscription window is spent, with its
+   * reset when the agent reported one. The core retries or resumes on it
+   * (`threads/retries.ts`); a driver that cannot tell leaves it out.
+   */
+  refusal?: TurnRefusal;
 }
+
+export type TurnRefusal = { kind: 'capacity' } | { kind: 'usage-limit'; resetsAt: number | null };
 
 export type PromptCacheLife = Pick<import('@boite/contracts').PromptCache, 'ttlSeconds' | 'maxSeconds' | 'source'>;
 

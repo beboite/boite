@@ -15,7 +15,7 @@ beforeAll(async () => {
   await page.click('[data-thread-id="t-trace"]');
   await page.waitFor('globalThis.__boiteTest.workspace.active.openThread?.id === "t-trace"');
 }, 90000);
-afterAll(async () => { await page?.close(); await server?.close(); }, 15000);
+afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
 async function capture(name: string) {
   await page.evaluate('Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])');

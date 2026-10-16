@@ -235,6 +235,18 @@ export class Workbench {
     }
   }
 
+  /** Stops one pull request watch; the thread's row and panel follow from `thread.updated`. A phone may too. */
+  async unwatchPullRequest(threadId: ThreadId, url: string): Promise<void> {
+    const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
+    if (!client) return;
+    try {
+      await client.call('threads.unwatchPullRequest', { threadId, url });
+    } catch (error) {
+      if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
+    }
+  }
+
   async addTodo(threadId: ThreadId, text: string): Promise<void> {
     const client = this.ctx.client;
     const clientGeneration = this.ctx.clientGeneration;

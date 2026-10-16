@@ -1,6 +1,6 @@
 /** Delegation: a parent thread's team of child threads, their usage and letters. */
 import { errorText } from '../errors';
-import { collectNativeAgents, collectProcessAgents, CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, matchSpeed, providerEnabled, RpcErrorCode, SPEED_NEEDS_MODEL, speedRefusal, threadActive, type AgentLetter, type DelegatedAgent, type DelegationConfig, type DelegationModelChoice, type DelegationProfile, type DelegationView, type DelegationWaitResult, type RpcParams, type Message, type Thread, type ThreadId, type Turn } from '@boite/contracts';
+import { collectNativeAgents, collectProcessAgents, CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, delegationNeeds, delegationReply, matchSpeed, providerEnabled, RpcErrorCode, SPEED_NEEDS_MODEL, speedRefusal, threadActive, type AgentLetter, type DelegatedAgent, type DelegationConfig, type DelegationModelChoice, type DelegationProfile, type DelegationView, type DelegationWaitResult, type RpcParams, type Message, type Thread, type ThreadId, type Turn } from '@boite/contracts';
 import { fakeContextMode } from './context-mode';
 import { RpcFailure } from '../client';
 import { addUsage, emptyUsage, toSummary } from './shared';
@@ -89,7 +89,12 @@ function delegatedAgent(ctx: FakeContext, row: { threadId: ThreadId; profileId: 
   const settled = terminal && wait !== 'waiting'
     ? { resultRef: { agentId: thread.id, turnId: lastTurn.id }, settlement: wait === 'interrupted' ? 'settled' as const : 'result_available' as const }
     : lastTurn === null ? { settlement: 'settled' as const } : {};
-  return { thread: structuredClone(summary), profileId: row.profileId, task: row.task, lastTurn: structuredClone(lastTurn), result: result || null, ...settled };
+  // As the core: the cards the child waits on, and its own worktree when it has one.
+  const needsInput = delegationNeeds([...ctx.pendingQuestions.values()].map(entry => entry.request).filter(request => request.threadId === thread.id),
+    [...ctx.pendingPermissions.values()].map(entry => entry.request).filter(request => request.threadId === thread.id));
+  const worktree = ctx.delegationWorktrees.get(thread.id);
+  return { thread: structuredClone(summary), profileId: row.profileId, task: row.task, lastTurn: structuredClone(lastTurn), result: result || null, ...settled,
+    ...(needsInput.length ? { needsInput } : {}), ...(worktree ? { worktree: structuredClone(worktree) } : {}) };
 }
 
 /** A child still owes its parent a result: a turn under way, or a wait on its own background work. */
@@ -296,12 +301,14 @@ function waitDelegation(ctx: FakeContext, params: RpcParams<'delegation.wait'>):
         const agents = delegationView(ctx, params.threadId).agents.filter(agent => params.agentId === undefined || agent.thread.id === params.agentId);
         // A child that ended its turn to wait on its background work has not answered yet.
         const waiting = agents.some(agent => (agent.lastTurn !== null && ['queued', 'running'].includes(agent.lastTurn.status)) || agent.thread.backgroundWait?.state === 'waiting');
-        if (waiting && !timedOut) return;
+        // As the core: a child stopped on a question or an approval ends the wait at once.
+        const asks = agents.some(agent => agent.needsInput?.some(need => need.kind === 'permission' || need.blocking));
+        if (waiting && !asks && !timedOut) return;
         cleanup();
-        resolve({ state: waiting ? 'waiting_for_children' : params.agentId && agents.some(agent => agent.settlement === 'result_available') ? 'result_available' : 'settled', timedOut, agents });
+        resolve({ state: asks ? 'needs_input' : waiting ? 'waiting_for_children' : params.agentId && agents.some(agent => agent.settlement === 'result_available') ? 'result_available' : 'settled', timedOut: timedOut && !asks, agents });
       } catch (error) { cleanup(); reject(error); }
     };
-    subscriptions.push(ctx.bus.on('turn.finished', () => inspect()), ctx.bus.on('delegation.changed', () => inspect()), ctx.bus.on('thread.removed', () => inspect()), ctx.bus.on('thread.background', () => inspect()));
+    subscriptions.push(ctx.bus.on('turn.finished', () => inspect()), ctx.bus.on('delegation.changed', () => inspect()), ctx.bus.on('thread.removed', () => inspect()), ctx.bus.on('thread.background', () => inspect()), ctx.bus.on('question.asked', () => inspect()), ctx.bus.on('permission.requested', () => inspect()));
     subscriptions.push(ctx.bus.onState(state => {
       if (state !== 'ready') { cleanup(); reject(new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation.wait: connection closed' })); }
     }));
@@ -376,7 +383,8 @@ export function delegationMethods(ctx: FakeContext) {
       const task = params.task.trim();
       if (!task || task.length > 12000) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'task must contain 1 to 12000 characters' });
       if (params.speed !== undefined) checkSpeedText(params.speed);
-      const fingerprint = JSON.stringify([params.profileId ?? null, params.model ?? null, params.effort ?? null, params.speed ?? null, task, params.title ?? null, params.context ?? null]);
+      if (params.worktree !== undefined && typeof params.worktree !== 'boolean') throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'worktree: expected true, false or absent' });
+      const fingerprint = JSON.stringify([params.profileId ?? null, params.model ?? null, params.effort ?? null, params.speed ?? null, task, params.title ?? null, params.context ?? null, params.worktree === true]);
       const requestKey = `${parent.id}:${params.requestId}`;
       const prior = ctx.delegationRequests.get(requestKey);
       if (prior) {
@@ -395,8 +403,13 @@ export function delegationMethods(ctx: FakeContext) {
       const contextMode = fakeContextMode(ctx.providers.find(entry => entry.id === profile.providerId) ?? { protocol: 'echo', name: profile.providerId }, params.context);
       const id = `t-${++ctx.seq}`;
       const at = ctx.now();
+      // As the core: a branch and folder of its own, refused outside a project; the fake has no git to make it with.
+      const project = ctx.projects.find(entry => entry.id === parent.projectId);
+      if (params.worktree === true && (!project || project.kind === 'drafts')) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `worktree: ${project?.path ?? 'this conversation'} is not a git repository; spawn without --worktree to share the checkout` });
+      const worktree = params.worktree === true && project ? { branch: `boite/sub-${id}`, path: `${project.path}/.boite/worktrees/sub-${id}`, base: null, state: 'pending' as const } : null;
       const child: Thread = {
         ...parent,
+        ...(worktree ? { cwd: worktree.path, branch: worktree.branch } : {}),
         id,
         parentThreadId: parent.id,
         title: params.title?.trim() || task.split('\n')[0]!.slice(0, 80),
@@ -414,6 +427,7 @@ export function delegationMethods(ctx: FakeContext) {
       delete child.pullRequest;
       delete child.lastUserMessageAt;
       ctx.threads.set(id, child);
+      if (worktree) ctx.delegationWorktrees.set(id, worktree);
       const row = { threadId: id, profileId: profile.id, task };
       ctx.delegationAgents.set(parent.id, [...rows, row]);
       ctx.delegationTurns.set(parent.id, (ctx.delegationTurns.get(parent.id) ?? 0) + 1);
@@ -443,14 +457,22 @@ export function delegationMethods(ctx: FakeContext) {
       const config = delegationConfig(ctx, root);
       if (ctx.thread(root).archived || sender.archived || recipient.archived) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation messages require an unarchived parent and threads' });
       if (!config.enabled || config.paused) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation is disabled or paused' });
+      // As the core: a parent's message to a child waiting on a question answers it.
+      const reply = sender.parentThreadId ? null : delegationReply([...ctx.pendingQuestions.values()].map(entry => entry.request).filter(request => request.threadId === recipient.id), body);
+      if (typeof reply === 'string') throw new RpcFailure({ code: RpcErrorCode.Refused, message: reply });
+      const question = reply?.question, answer = reply?.answer;
       const letter: AgentLetter = {
         id: `letter-${++ctx.seq}`,
         origin: 'user',
         from: { coreId: 'local', threadId: sender.id, title: sender.title, project: ctx.projects.find(project => project.id === sender.projectId)?.name, machine: 'Boite', resources: '', status: sender.status, mode: 'team' },
         to: { coreId: 'local', threadId: recipient.id }, toTitle: recipient.title, toProject: ctx.projects.find(project => project.id === recipient.projectId)?.name, toMachine: 'Boite',
         text: body, replyTo: null, createdAt: ctx.now(), expiresAt: ctx.now() + 15 * 60_000,
-        status: 'received', error: null
+        status: question ? 'delivered' : 'received', error: null, ...(question ? { answered: question.id } : {})
       };
+      if (question && answer) {
+        ctx.pendingQuestions.get(question.id)?.resolve(answer);
+        ctx.pendingQuestions.delete(question.id);
+      }
       ctx.delegationLetters.set(root, [...(ctx.delegationLetters.get(root) ?? []), letter]);
       ctx.delegationSendRequests.set(key, { fingerprint, letter });
       ctx.emit('delegation.changed', { threadId: root });

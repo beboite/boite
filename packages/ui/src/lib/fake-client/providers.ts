@@ -90,6 +90,19 @@ const PROBED_CATALOGUE: [string, string][] = [
 ];
 
 /** The scale the Muse probe falls back to when its model catalog lists none. */
+/**
+ * A pi model other than the one pi's session is on: its scale is known, its
+ * level is not, so it carries no default, as the core's probe reports it.
+ */
+export const PI_EFFORT: NonNullable<ModelInfo['effort']> = {
+  levels: [
+    { id: 'off', label: 'Off' },
+    { id: 'low', label: 'Low' },
+    { id: 'medium', label: 'Medium' },
+    { id: 'high', label: 'High' }
+  ]
+};
+
 export const MUSE_EFFORT: NonNullable<ModelInfo['effort']> = {
   levels: [
     { id: 'low', label: 'Low' },

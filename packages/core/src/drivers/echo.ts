@@ -15,6 +15,11 @@ const TOOL_STREAM_DELAY_MS = 120;
 const TOOL_STREAM_INPUT = '{"command":"echo streamed","description":"a streamed input"}';
 const TOOL_STREAM_PIECES = 4;
 const ERROR_MESSAGE = 'echo error requested';
+/** The sentences the real agents fail with, so the fake's refusals read like theirs. */
+const CAPACITY_MESSAGE = 'Selected model is at capacity. Please try a different model.';
+const USAGE_LIMIT_MESSAGE = 'You\'ve hit your usage limit.';
+/** Per thread, how many turns `[capacity:n]` already failed. */
+const capacityFailures = new Map<string, number>();
 
 /** What `[question]`, or the bare word `question`, asks: two options and a free field. */
 const QUESTION_TEXT = 'Which shape should the echo take?';
@@ -68,7 +73,11 @@ type Segment =
   | { kind: 'think' }
   | { kind: 'compact' }
   | { kind: 'spawn'; command: string }
-  | { kind: 'error' };
+  | { kind: 'error' }
+  /** `[capacity:2]`: the first two turns of the thread that reach it fail as a model at capacity. */
+  | { kind: 'capacity'; times: number }
+  /** `[usage-limit:60000]`: the turn fails on a spent usage window that resets this many ms from now. */
+  | { kind: 'usage-limit'; inMs: number };
 
 /** What the fake's context meter says: a fixed window, and a token per character of the prompt on top of a floor. */
 const CONTEXT_WINDOW = 2_000;
@@ -85,7 +94,7 @@ const COMPACT_POST_TOKENS = 300;
  * one whenever a prompt mentions it, which is what the end to end run types.
  */
 const DIRECTIVE =
-  /\[(?:sleep:\d+|tool-stream|tool(?::\d+)?|diff|doc|image|permission(?::\d+)?|question|think|compact|spawn:[^\]]*|error)\]|\bquestion\b/g;
+  /\[(?:sleep:\d+|tool-stream|tool(?::\d+)?|diff|doc|image|permission(?::\d+)?|question|think|compact|spawn:[^\]]*|error|capacity:\d+|usage-limit:-?\d+)\]|\bquestion\b/g;
 
 export function parsePrompt(prompt: string): Segment[] {
   const segments: Segment[] = [];
@@ -108,6 +117,8 @@ export function parsePrompt(prompt: string): Segment[] {
     else if (body === 'question') segments.push({ kind: 'question' });
     else if (body === 'think') segments.push({ kind: 'think' });
     else if (body === 'compact') segments.push({ kind: 'compact' });
+    else if (body.startsWith('capacity:')) segments.push({ kind: 'capacity', times: Number(body.slice('capacity:'.length)) });
+    else if (body.startsWith('usage-limit:')) segments.push({ kind: 'usage-limit', inMs: Number(body.slice('usage-limit:'.length)) });
     else segments.push({ kind: 'error' });
     last = match.index + match[0].length;
   }
@@ -504,6 +515,21 @@ async function run(ctx: TurnContext, state: RunState): Promise<TurnResult> {
         ctx.emit.complete(messageId, 'error');
         state.ended = true;
         return { status: 'error', sessionId, usage: usage(), error: ERROR_MESSAGE };
+      }
+      case 'capacity': {
+        const failed = capacityFailures.get(ctx.thread.id) ?? 0;
+        if (failed >= segment.times) break;
+        capacityFailures.set(ctx.thread.id, failed + 1);
+        ctx.emit.part(messageId, takeIndex(), { type: 'error', message: CAPACITY_MESSAGE });
+        ctx.emit.complete(messageId, 'error');
+        state.ended = true;
+        return { status: 'error', sessionId, usage: usage(), error: CAPACITY_MESSAGE, refusal: { kind: 'capacity' } };
+      }
+      case 'usage-limit': {
+        ctx.emit.part(messageId, takeIndex(), { type: 'error', message: USAGE_LIMIT_MESSAGE });
+        ctx.emit.complete(messageId, 'error');
+        state.ended = true;
+        return { status: 'error', sessionId, usage: usage(), error: USAGE_LIMIT_MESSAGE, refusal: { kind: 'usage-limit', resetsAt: Date.now() + segment.inMs } };
       }
     }
     while (!state.stopped && state.input.length) {

@@ -54,6 +54,11 @@ test('the session guide names the command and what calls for it, and view help c
   // The logs hint stands without a skill (one that could not be written), and only while agents may read logs.
   expect(agentGuide(true, true, [])).toContain('`boite logs problems`');
   expect(agentGuide(true, false, [])).not.toContain('boite logs');
+  // The diagnostic skill is offered only beside its logs; the others stand on their own.
+  const skills = [{ name: 'boite-report-issue', description: 'd1', path: '/r' }, { name: 'boite-prove-it', description: 'd2', path: '/p' }];
+  expect(agentGuide(true, false, skills)).not.toContain('boite-report-issue');
+  expect(agentGuide(true, false, skills)).toContain('boite-prove-it: d2\nFile: /p');
+  expect(agentGuide(true, true, skills)).toContain('; skill boite-report-issue: /r');
   expect(VIEW_GUIDE_LINE).toMatch(/when asked for a visual or a schema/);
   // One line of the session prompt, which every turn of every thread pays for.
   expect(VIEW_GUIDE_LINE.length).toBeLessThan(240);
@@ -178,6 +183,9 @@ test('boite view publishes a page as an artifact that opens only on the view rou
   expect(stored).toContain('boite-view-theme');
   expect(stored).toContain('<circle cx="20"');
   expect(readdirSync(join(harness.dataDir, 'artifacts')).filter(name => name.endsWith('.partial'))).toEqual([]);
+  // The output hands the agent the line that places the page in its answer, a path with spaces in angle brackets.
+  write('views/two words.html', page('<p>quiet</p>', '<title>Two [words]</title>'));
+  expect((await cli('view', 'views/two words.html')).output).toContain('place: ![Two words](<views/two words.html>) alone on a line of your answer');
   const history = await client.call('threads.get', { threadId });
   expect(history.messages.find(message => message.id === result.message.id)?.parts).toEqual(result.message.parts);
 
@@ -247,6 +255,8 @@ real('a page is loaded in a headless browser before it is shown: its height is m
   const loud = await cli('view', 'views/loud.html');
   expect(loud.code).toBe(0);
   expect(loud.output).toContain("advice: 1 fixed color (#ff0000) will not follow the user's theme");
+  // The output hands the agent the line that places the page in its answer, a path with spaces in angle brackets.
+  expect(loud.output).toContain('place: ![loud](views/loud.html) alone on a line of your answer');
 
   // Without a doctype a root is as tall as the window it is loaded in: the stored page has one, so its own height is what is measured.
   write('views/bare.html', '<html><head></head><body><div style="height:120px"></div></body></html>');

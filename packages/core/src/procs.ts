@@ -8,9 +8,10 @@ import { MemoryGuard } from './memory-guard.ts';
 import type { MemoryProcess } from './memory-guard-logic.ts';
 import { processPlatform } from './platform/index.ts';
 import { type KnownProcess, type ProcessIdentity, unseenIdentity } from './process-identity.ts';
-import { stopGroup } from './platform/posix-kill.ts';
+import { killBunChild, stopGroup } from './platform/posix-kill.ts';
 import type { GuardStatus, NativeProcessExit, NativeProcessInfo, ProcessPlatform } from './platform/types.ts';
 import { ResourceCollection } from './resource-usage.ts';
+import { launchOf } from './git/command.ts';
 
 export interface SpawnOptions {
   /** Bounded normal-priority initialization, ended explicitly when the agent is ready. */
@@ -268,10 +269,10 @@ export class ProcRegistry {
 
   spawn(threadId: ThreadId, cmd: string, args: string[], opts: SpawnOptions = {}): SpawnedProcess {
     this.assertAccepting();
-    const env: Record<string, string | undefined> = { ...process.env, ...(opts.env ?? {}) };
+    const [command, env] = launchOf(cmd, { ...process.env, ...(opts.env ?? {}) });
     const extra = Math.max(0, Math.floor(opts.extraPipes ?? 0));
     const proc = Bun.spawn({
-      cmd: [cmd, ...args],
+      cmd: [command, ...args],
       cwd: opts.cwd,
       env,
       ...(extra
@@ -309,9 +310,9 @@ export class ProcRegistry {
    */
   spawnPiped(threadId: ThreadId, cmd: string, args: string[], opts: SpawnOptions = {}): SpawnedPipedProcess {
     this.assertAccepting();
-    const env = opts.env ?? process.env;
+    const [command, env] = launchOf(cmd, opts.env ?? process.env);
     const proc = Bun.spawn({
-      cmd: [cmd, ...args],
+      cmd: [command, ...args],
       cwd: opts.cwd,
       env,
       stdin: 'pipe',
@@ -410,9 +411,10 @@ export class ProcRegistry {
    */
   spawnChild(threadId: ThreadId, cmd: string, args: string[], opts: SpawnOptions = {}): SpawnedChild {
     this.assertAccepting();
-    const child = spawnNodeChild(cmd, args, {
+    const [command, env] = launchOf(cmd, opts.env);
+    const child = spawnNodeChild(command, args, {
       cwd: opts.cwd,
-      env: opts.env,
+      env,
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
       detached: OWN_GROUP,
@@ -871,13 +873,6 @@ export class ProcRegistry {
       }
     });
   }
-}
-
-/** A Bun child's kill: its whole group off Windows, the process itself on Windows. */
-function killBunChild(proc: Bun.Subprocess): Promise<void> | undefined {
-  if (OWN_GROUP) return stopGroup(proc.pid, () => proc.exitCode === null && proc.signalCode === null);
-  proc.kill();
-  return undefined;
 }
 
 function nativeBirth(entry: Entry): number {

@@ -70,3 +70,7 @@ until the owner resumes it, then they wake the parent at once").
 main (2adac07b), 4,130,934 on the branch, so the branch adds 3,693
 bytes: the bounded journal walks, the copy memo and file reference cache, the
 per-pump delegation config map and the undelivered-run set.
+
+After merging `origin/main` at `0f480824` (2026-10-16), main's limit is 4,240,000.
+`bun run build:core` on Linux: 4,237,867 bytes on main, 4,241,560 on the
+branch, the same 3,693 bytes of growth, so the limit becomes 4,244,000.

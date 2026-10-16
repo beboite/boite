@@ -131,6 +131,7 @@ import { workspace } from '../lib/workspace.svelte';
     ['general', 'conversations', strings.settings.groupOtherProjects],
     ['general', 'conversations', strings.settings.notifications],
     ['general', 'conversations', strings.settings.asyncQuestions],
+    ['general', 'conversations', strings.settings.shortAnswers],
     ['general', 'conversations', strings.settings.titleModel],
     ['general', 'conversations', strings.features.chatArtifacts.title],
     ...(browserBridge.paints ? [['general', 'browser-profiles', strings.browserProfiles.heading]] as [SettingsTab, string, string][] : []),
@@ -166,6 +167,7 @@ import { workspace } from '../lib/workspace.svelte';
     ['machines', 'phone', strings.phone.publicUrl],
     ['machines', 'machines', strings.machines.main],
     ['advanced', 'execution', strings.settings.warmProcessMinutes],
+    ['limits', 'limit-resume', strings.quotas.autoResume],
     ['diagnostics', 'diagnostics-status', strings.diagnostics.export],
     ['diagnostics', 'diagnostics-status', strings.diagnostics.report],
     ['diagnostics', 'diagnostics-log', strings.diagnostics.search]

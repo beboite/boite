@@ -3,6 +3,12 @@ import { readSavedCookies, writeSavedCookies } from './chromium.ts';
 
 /** The desktop app takes at most 5000 cookies a call (`browser_set_cookies`). */
 const HOSTED_COOKIES_BATCH = 1000;
+/**
+ * Restoring runs while the app's browser starts, relayed through the app: a
+ * loaded Windows machine took past 5 seconds, and a refusal there drops the
+ * sign-in for the whole session (browser-sharing test, 2026-10-15).
+ */
+const RESTORE_TIMEOUT_MS = 30_000;
 
 /** A profile's browser connection and the folder its `boite-cookies.json` lives in; no folder, nothing kept. */
 export interface CookieKeeper {
@@ -48,11 +54,11 @@ export async function restoreMissingCookies(keeper: CookieKeeper, log: Log): Pro
   if (!saved.length) return;
   const key = (cookie: Record<string, unknown>) => `${String(cookie.name)}\n${String(cookie.domain)}\n${String(cookie.path ?? '/')}`;
   try {
-    const { cookies: held } = await keeper.cdp.send<{ cookies: Record<string, unknown>[] }>('Storage.getCookies', {}, undefined, 5000);
+    const { cookies: held } = await keeper.cdp.send<{ cookies: Record<string, unknown>[] }>('Storage.getCookies', {}, undefined, RESTORE_TIMEOUT_MS);
     const have = new Set(held.map(key));
     const missing = saved.filter(cookie => !have.has(key(cookie)));
     for (let at = 0; at < missing.length; at += HOSTED_COOKIES_BATCH) {
-      await keeper.cdp.send('Storage.setCookies', { cookies: missing.slice(at, at + HOSTED_COOKIES_BATCH) }, undefined, 10_000);
+      await keeper.cdp.send('Storage.setCookies', { cookies: missing.slice(at, at + HOSTED_COOKIES_BATCH) }, undefined, RESTORE_TIMEOUT_MS);
     }
   } catch (error) {
     log(`the saved cookies of browser profile ${keeper.profile} were not handed to the desktop app: ${reason(error)}`);
