@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Bus } from '../src/bus.ts';
 import { Journal } from '../src/journal.ts';
-import { cpuTicks, LinuxLoad, linuxMachineMemory, linuxStartedAt, residentBytes, USER_HZ } from '../src/platform/linux-load.ts';
+import { cpuTicks, LinuxLoad, linuxMachineMemory, linuxStartKey, linuxStartedAt, residentBytes, USER_HZ } from '../src/platform/linux-load.ts';
 import { createPosixPlatform } from '../src/platform/posix.ts';
 import { ProcRegistry } from '../src/procs.ts';
 import { DEFAULT_SETTINGS } from '../src/settings.ts';
@@ -81,6 +81,12 @@ describe('the procfs parsers', () => {
     expect(linuxStartedAt(42, read)).toBe(1_790_500_000_000 + (12345 * 1000) / USER_HZ);
     expect(linuxStartedAt(43, read)).toBeNull();
     expect(linuxStartedAt(0, read)).toBeNull();
+    // The key keeps the raw ticks and the boot, never the wall clock.
+    files.set('/proc/sys/kernel/random/boot_id', '6f1c2d3e-0000-4000-8000-0123456789ab\n');
+    expect(linuxStartKey(42, read)).toBe('6f1c2d3e-0000-4000-8000-0123456789ab:12345');
+    files.set('/proc/stat', 'cpu  1 2 3 4\nbtime 1790500007\nprocesses 900\n');
+    expect(linuxStartKey(42, read)).toBe('6f1c2d3e-0000-4000-8000-0123456789ab:12345');
+    expect(linuxStartKey(43, read)).toBeNull();
   });
 });
 

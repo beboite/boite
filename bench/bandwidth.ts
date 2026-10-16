@@ -120,15 +120,46 @@ const UI_DIST = CORE_MAIN === ''
   : join(dirname(CORE_MAIN), '..', '..', 'ui', 'dist');
 const UI_INDEX = join(UI_DIST, 'index.html');
 
-async function staticLoad(base: string): Promise<{ files: number }> {
+/** The faces index.html preloads when Appearance was never touched (`--font-sans` and `--font-mono` in app.css): its script builds their URLs, so no regex finds them. */
+const DEFAULT_FONTS = ['/fonts/Inter-latin.woff2', '/fonts/GeistMono-Variable.woff2'];
+
+/** What a browser keeps of one answer to decide the next load: its freshness and its validators. */
+interface Cached { path: string; cacheControl: string; etag: string | null; lastModified: string | null }
+
+/** The files a first load fetches: what the document loads by `src` or `href`, the default fonts, the manifest and the worker. */
+async function staticLoad(base: string): Promise<Cached[]> {
   const html = readFileSync(UI_INDEX, 'utf8');
-  const referenced = [...new Set(html.match(/\.\/(?:assets|fonts)\/[^\s"'<>]+/g) ?? [])].map((path) => path.slice(1));
-  const paths = ['/', ...referenced, '/manifest.webmanifest', '/sw.js'];
+  // Attributes only, as the worker precaches: the locale map of an inline script names catalogues an English load never fetches.
+  const referenced = [...new Set([...html.matchAll(/(?:src|href)="\.?(\/assets\/[^"]+)"/g)].map((found) => found[1] as string))];
+  const paths = ['/', ...referenced, ...DEFAULT_FONTS, '/manifest.webmanifest', '/sw.js'];
   // A browser opens six connections to one host; the order is the document's.
   const headers = { 'accept-encoding': 'gzip, deflate, br, zstd' };
-  await fetch(`${base}/`, { headers }).then((response) => response.arrayBuffer());
-  await Promise.all(paths.slice(1).map((path) => fetch(`${base}${path}`, { headers }).then((response) => response.arrayBuffer())));
-  return { files: paths.length };
+  const get = async (path: string): Promise<Cached> => {
+    const response = await fetch(`${base}${path}`, { headers });
+    await response.arrayBuffer();
+    return { path, cacheControl: response.headers.get('cache-control') ?? '', etag: response.headers.get('etag'), lastModified: response.headers.get('last-modified') };
+  };
+  const first = await get('/');
+  return [first, ...await Promise.all(paths.slice(1).map(get))];
+}
+
+/**
+ * The same files on the next open with the HTTP cache warm and no service
+ * worker, as a phone on plain http: a file still fresh is not asked for, one
+ * with a validator is revalidated, and one with neither is fetched whole.
+ */
+async function warmLoad(base: string, cached: Cached[]): Promise<void> {
+  const fresh = (entry: Cached): boolean => !/no-cache|no-store/.test(entry.cacheControl) && /max-age=[1-9]/.test(entry.cacheControl);
+  const conditional = (entry: Cached): Record<string, string> => ({
+    'accept-encoding': 'gzip, deflate, br, zstd',
+    ...(entry.etag === null ? {} : { 'if-none-match': entry.etag }),
+    ...(entry.lastModified === null ? {} : { 'if-modified-since': entry.lastModified }),
+  });
+  const [shell, ...rest] = cached;
+  if (shell === undefined) return;
+  const get = (entry: Cached): Promise<ArrayBuffer> => fetch(`${base}${entry.path}`, { headers: conditional(entry) }).then((response) => response.arrayBuffer());
+  await get(shell);
+  await Promise.all(rest.filter((entry) => !fresh(entry)).map(get));
 }
 
 /** Every script and stylesheet the document does not name: what the idle prefetch and the first visit to Settings bring in. */
@@ -176,8 +207,12 @@ async function main(): Promise<void> {
       rows.push({ name, downBytes: down, upBytes: up, chunksDown, ms });
     };
 
+    let cached: Cached[] = [];
     await measure('page load, cold cache (html, js, css, fonts, manifest, worker)', async () => {
-      await staticLoad(relay.url);
+      cached = await staticLoad(relay.url);
+    });
+    await measure('page load again, warm HTTP cache, no service worker', async () => {
+      await warmLoad(relay.url, cached);
     });
     await measure('every other script and stylesheet (idle prefetch, settings, highlighters)', async () => {
       await lazyLoad(relay.url);

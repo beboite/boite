@@ -95,6 +95,22 @@ export function linuxStartedAt(pid: number, read: ProcRead = readProc): number |
 }
 
 /**
+ * How Linux names one run of a process: the boot it runs in and its start in
+ * clock ticks since that boot, `<boot_id>:<ticks>`. Unlike `linuxStartedAt`,
+ * whose `btime` moves with every step of the wall clock, neither part ever
+ * changes, so two readings are compared for equality. The shell reads the
+ * same string (`start_key` in platform/posix_process.rs).
+ */
+export function linuxStartKey(pid: number, read: ProcRead = readProc): string | null {
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  const stat = read(`/proc/${pid}/stat`);
+  const ticks = stat === null ? null : statField(stat, 22);
+  const boot = read('/proc/sys/kernel/random/boot_id')?.trim() ?? '';
+  if (ticks === null || boot === '') return null;
+  return `${boot}:${ticks}`;
+}
+
+/**
  * The memory a process holds for itself, in bytes: its anonymous and shared
  * memory pages, RssAnon plus RssShmem. VmRSS also counts the file pages every
  * process maps, so sixteen rustc workers each counted the same compiler

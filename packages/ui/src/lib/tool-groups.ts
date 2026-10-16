@@ -62,7 +62,8 @@ export function partRuns(parts: readonly MessagePart[], from = 0, to = parts.len
     const part = parts[index];
     if (!part) continue;
     // Blank text is skipped unless it ends the message itself: that one carries the caret.
-    if (part.type === 'text' && part.text.trim() === '' && index < parts.length - 1) continue;
+    // The index comes first, so the streaming last part's text is never read and a delta reruns nothing here.
+    if (index < parts.length - 1 && part.type === 'text' && part.text.trim() === '') continue;
     const folds = part.type === 'thinking' || (part.type === 'tool' && planOf(part.name, part.input) === null);
     if (!folds) {
       open = null;
@@ -249,6 +250,30 @@ export function agentSummary(parts: readonly ToolPart[]): string | null {
 
 /** A line that is only a bold run: the heading Codex opens each reasoning section with. */
 const THOUGHT_HEADING = /^[\t ]*\*\*([^*\r\n]+)\*\*[\t ]*\r?$/gm;
+/** A line between two newlines that ends a paragraph: spaces and tabs only. */
+const BLANK_LINE = /^[\t ]*$/;
+/** The white space from a position on, the same set `trim` takes off. */
+const SPACE = /\s*/y;
+
+/**
+ * The words of the last heading in a stretch that holds no newline. A match
+ * never crosses a newline, so each line read alone gives what the whole text
+ * gives with `/m`.
+ */
+function lastHeading(line: string): string | undefined {
+  if (!line.includes('**')) return undefined;
+  let words: string | undefined;
+  for (const match of line.matchAll(THOUGHT_HEADING)) words = match[1];
+  return words;
+}
+
+/** The first line of a paragraph as a title: markdown off, cut at its first sentence. */
+function sentenceOf(firstLine: string): string | null {
+  const line = firstLine.replace(/\*\*|__|`/g, '').replace(/^[#>*\-\s]+/, '').trim();
+  const end = line.search(/[.!?](\s|$)/);
+  const sentence = (end === -1 ? line : line.slice(0, end + 1)).replace(/\.$/, '').trim();
+  return sentence || null;
+}
 
 /**
  * What a reasoning step is about, in one line: the last heading Codex wrote
@@ -257,14 +282,96 @@ const THOUGHT_HEADING = /^[\t ]*\*\*([^*\r\n]+)\*\*[\t ]*\r?$/gm;
  * while the step has no words, so the caller falls back to "Thinking".
  */
 export function thoughtTitle(text: string): string | null {
-  const heading = [...text.matchAll(THOUGHT_HEADING)].at(-1)?.[1]?.trim();
-  if (heading) return heading;
-  const paragraph = text.split(/\n[\t ]*\n/).map((block) => block.trim()).filter(Boolean).at(-1);
-  if (!paragraph) return null;
-  const line = (paragraph.split('\n')[0] ?? '').replace(/\*\*|__|`/g, '').replace(/^[#>*\-\s]+/, '').trim();
-  const end = line.search(/[.!?](\s|$)/);
-  const sentence = (end === -1 ? line : line.slice(0, end + 1)).replace(/\.$/, '').trim();
-  return sentence || null;
+  return new ThoughtTitleScan().title(text);
+}
+
+/**
+ * thoughtTitle for a thought that grows: a text that extends the last one
+ * resumes after its last complete line, so a delta reads only its own lines
+ * and the unfinished one. Paragraphs split where `text.split(/\n[\t ]*\n/)` would:
+ * a blank line ends one only when the newline before it did not already close
+ * the previous blank line. Any other text starts over.
+ */
+export class ThoughtTitleScan {
+  /** Where the line after the last newline read starts. */
+  #offset = 0;
+  /** The words of the last heading in the complete lines, blank words included. */
+  #heading: string | undefined;
+  /** The newline before the next line is free to open a paragraph break. */
+  #free = false;
+  /** The first non-space character of the open paragraph, -1 while it has none. */
+  #first = -1;
+  /** Where the search for it resumes: what lies before is white space. */
+  #seek = 0;
+  /** The first non-space character of the last closed paragraph with words. */
+  #closed = -1;
+  /** The title of a first line that ended, by where it starts. */
+  #lineAt = -1;
+  #lineTitle: string | null = null;
+  #text: string | null = null;
+  #title: string | null = null;
+
+  title(text: string): string | null {
+    if (text === this.#text) return this.#title;
+    // What was found in the unfinished line holds only for a text that extends the whole last one.
+    if (this.#text === null || !text.startsWith(this.#text)) {
+      this.#offset = 0;
+      this.#heading = undefined;
+      this.#free = false;
+      this.#first = -1;
+      this.#seek = 0;
+      this.#closed = -1;
+      this.#lineAt = -1;
+    }
+    let offset = this.#offset;
+    for (let end = text.indexOf('\n', offset); end !== -1; end = text.indexOf('\n', offset)) {
+      const line = text.slice(offset, end);
+      const heading = lastHeading(line);
+      if (heading !== undefined) this.#heading = heading;
+      if (this.#free && BLANK_LINE.test(line)) {
+        // The break runs from the newline before this line to the one after it.
+        if (this.#seekFirst(text, offset - 1)) this.#closed = this.#first;
+        this.#first = -1;
+        this.#seek = end + 1;
+        this.#free = false;
+      } else {
+        this.#free = true;
+      }
+      offset = end + 1;
+    }
+    this.#offset = offset;
+    this.#text = text;
+    this.#title = this.#titleOf(text, lastHeading(text.slice(offset)) ?? this.#heading);
+    return this.#title;
+  }
+
+  #titleOf(text: string, heading: string | undefined): string | null {
+    const words = heading?.trim();
+    if (words) return words;
+    const at = this.#seekFirst(text, text.length) ? this.#first : this.#closed;
+    if (at < 0) return null;
+    if (at === this.#lineAt) return this.#lineTitle;
+    const end = text.indexOf('\n', at);
+    const title = sentenceOf(text.slice(at, end < 0 ? text.length : end));
+    if (end >= 0) {
+      this.#lineAt = at;
+      this.#lineTitle = title;
+    }
+    return title;
+  }
+
+  /** Whether the open paragraph has a non-space character before `limit`. */
+  #seekFirst(text: string, limit: number): boolean {
+    if (this.#first >= 0) return true;
+    SPACE.lastIndex = this.#seek;
+    SPACE.exec(text);
+    if (SPACE.lastIndex < limit) {
+      this.#first = SPACE.lastIndex;
+      return true;
+    }
+    this.#seek = Math.max(this.#seek, Math.min(SPACE.lastIndex, limit));
+    return false;
+  }
 }
 
 type SummaryKind = Exclude<ToolFamily, 'write'> | 'attempt';

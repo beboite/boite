@@ -447,7 +447,7 @@ export class ThreadBranching {
     // Native checkpoints cover the provider's entire turn, including later input and output.
     // Message order cannot identify a precise native cut once user input joins mid-turn.
     let users = 0;
-    for (const message of this.core.journal.walkTurnMessages(thread.id, turnId)) {
+    for (const message of this.core.journal.walkTurnMessages(thread.id, turnId, { blobs: false })) {
       if (message.role === 'user' && ++users > 1) return null;
     }
     return { sessionId: checkpoint.sessionId, sessionResumeAt: checkpoint.entry, session: 'native' };

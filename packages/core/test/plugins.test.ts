@@ -5,7 +5,7 @@ import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { PLUGIN_MANIFEST_FILE, type Account } from '@boite/contracts';
 import { connect } from '../src/client.ts';
 import { getDriver } from '../src/drivers/index.ts';
-import { RECOMMENDED, parsePluginPool, verifyPluginDownload } from '../src/plugins.ts';
+import { parsePluginPool, recommendedPlugins, verifyPluginDownload } from '../src/plugins.ts';
 import { fetchManifest } from '../src/plugins/source.ts';
 import type { SpawnedProcess } from '../src/procs.ts';
 import { platformKey } from '../src/plugins/manifest.ts';
@@ -35,7 +35,7 @@ function git(cwd: string, ...args: string[]): string {
 
 const sha256 = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
 /** kebacc-switcher's entry in the shipped list, wherever it sits in it. */
-const KEBACC = RECOMMENDED.find((manifest) => manifest.id === 'kebacc-switcher')!;
+const KEBACC = recommendedPlugins().find((manifest) => manifest.id === 'kebacc-switcher')!;
 
 /** Every download answered from memory: tests never reach the network. */
 function serveDownloads(files: Record<string, Uint8Array | number>): string[] {

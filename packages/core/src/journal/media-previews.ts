@@ -38,9 +38,13 @@ export function putMediaPreview(db: Database, threadId: string, messageId: strin
     .run(messageId, partIndex, threadId, preview, messageId, threadId);
 }
 
-/** The WebP copy the timeline draws: its bytes, empty when the original is lighter, or null when not made yet. */
-export function mediaDisplay(db: Database, messageId: string, partIndex: number): Uint8Array | null {
-  const row = db.query('SELECT data FROM media_displays WHERE message_id = ? AND part_index = ?').get(messageId, partIndex) as { data: Uint8Array } | null;
+/**
+ * The WebP copy the timeline draws: its bytes, empty when the original is
+ * lighter, or null when not made yet. The thread is part of the key, so a
+ * found copy is also proof that the message is one of that thread's.
+ */
+export function mediaDisplay(db: Database, threadId: string, messageId: string, partIndex: number): Uint8Array | null {
+  const row = db.query('SELECT data FROM media_displays WHERE message_id = ? AND part_index = ? AND thread_id = ?').get(messageId, partIndex, threadId) as { data: Uint8Array } | null;
   return row === null ? null : row.data;
 }
 
