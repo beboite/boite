@@ -61,50 +61,196 @@ export function linkHtml(label: string, raw: string): string {
 
 const ABSOLUTE_PATH = String.raw`(?:[A-Za-z]:[\\/]|\.\.?[\\/]|\/)[^\s<>]+`;
 const RELATIVE_PATH = String.raw`((?:[\w@.-]+[\\/])+[\w@.-]+\.[\w.-]+(?::\d+)?)`;
-const LINK_TOKENS = String.raw`!?\[([^\]\n]+)\]\(\s*(?:<([^>\n]+)>|((?:[^\s()]|\([^()]*\))+))\s*\)|<((?:https?:\/\/|mailto:)[^>\s]+)>|https?:\/\/[^\s<>]+|` + `${RELATIVE_PATH}|${ABSOLUTE_PATH}`;
+/** The tokens other than `[label](destination)`: group 1 an autolink's address, group 2 a relative path. */
+const OTHER_TOKENS = String.raw`<((?:https?:\/\/|mailto:)[^>\s]+)>|https?:\/\/[^\s<>]+|` + `${RELATIVE_PATH}|${ABSOLUTE_PATH}`;
+
+const SPACE = /\s/;
+
+/** `\s` for one UTF-16 unit, without a regex for ASCII. */
+function isSpace(code: number): boolean {
+  return code === 32 || (code >= 9 && code <= 13) || (code > 127 && SPACE.test(String.fromCharCode(code)));
+}
+
+const LABEL_STOP = (code: number) => code === 93 || code === 10; // ] \n
+const WORD_STOP = (code: number) => !isSpace(code);
+const ANGLE_STOP = (code: number) => code === 62 || code === 10; // > \n
+const WEB_RUN_STOP = (code: number) => code === 41 || isSpace(code); // )
+const RUN_STOP = (code: number) => code === 40 || code === 41 || isSpace(code); // ( )
+const GROUP_STOP = (code: number) => code === 40 || code === 41;
 
 /**
- * The link tokens of `text`, in order. A relative path (group 5) must not
- * follow a word character or a colon; that check is made here instead of in a
- * lookbehind, which Safari before 16.4 cannot parse. A path refused at one
- * position falls through to the absolute path there, as the next alternative of
- * one regex would, and the scan then moves on by one character.
+ * The first index at or after a position whose character `stop` accepts, the
+ * text's length when none does. It remembers its last search, so a search that
+ * starts inside the stretch already read costs nothing.
  */
-function* linkTokens(text: string): Generator<RegExpExecArray> {
-  const tokens = new RegExp(LINK_TOKENS, 'g');
+class Forward {
+  #from = -1;
+  #at = 0;
+
+  constructor(private readonly text: string, private readonly stop: (code: number) => boolean) {}
+
+  find(from: number): number {
+    if (this.#from >= 0 && from >= this.#from && from <= this.#at) return this.#at;
+    let at = from;
+    while (at < this.text.length && !this.stop(this.text.charCodeAt(at))) at += 1;
+    this.#from = from;
+    this.#at = at;
+    return at;
+  }
+}
+
+export type BracketLink = { index: number; end: number; label: string; target: string; angle: boolean };
+
+/**
+ * The `[label](destination)` links of a text, read in linear time. A regex
+ * retries from every `[` and reads to the end of the label each time, so a
+ * line of 32,000 `[` took seconds. Every `[` before a label's `]` shares that
+ * `]` and what follows it, so when one fails they all do and the scan jumps to
+ * the `]`. `web` reads the plain renderer's links, `[label](http://...)` only;
+ * otherwise a destination is `<...>` or a run of characters and balanced
+ * parentheses, and a `!` before the `[` belongs to the link, as
+ * `!?\[([^\]\n]+)\]\(\s*(?:<([^>\n]+)>|((?:[^\s()]|\([^()]*\))+))\s*\)` reads.
+ */
+export class BracketLinks {
+  readonly #label: Forward;
+  readonly #word: Forward;
+  readonly #angle: Forward;
+  readonly #run: Forward;
+  readonly #group: Forward;
+  #from = -1;
+  #found: BracketLink | null = null;
+
+  constructor(private readonly text: string, private readonly web: boolean) {
+    this.#label = new Forward(text, LABEL_STOP);
+    this.#word = new Forward(text, WORD_STOP);
+    this.#angle = new Forward(text, ANGLE_STOP);
+    this.#run = new Forward(text, web ? WEB_RUN_STOP : RUN_STOP);
+    this.#group = new Forward(text, GROUP_STOP);
+  }
+
+  /** The first link that starts at or after `at`, null when none does. */
+  next(at: number): BracketLink | null {
+    // No link starts between the last search and what it found, so that answer holds from here too.
+    if (this.#from >= 0 && at >= this.#from && (this.#found === null || this.#found.index >= at)) return this.#found;
+    this.#from = at;
+    this.#found = this.#scan(at);
+    return this.#found;
+  }
+
+  #scan(at: number): BracketLink | null {
+    const text = this.text;
+    for (let open = text.indexOf('[', at); open !== -1;) {
+      const close = this.#label.find(open + 1);
+      // No `]` or newline left: no `[` after this one closes either.
+      if (close === text.length) return null;
+      if (text[close] === ']' && close > open + 1 && text[close + 1] === '(') {
+        const target = this.web ? this.#webTarget(close + 2) : this.#target(close + 2);
+        if (target) {
+          const index = !this.web && open > at && text[open - 1] === '!' ? open - 1 : open;
+          return { index, label: text.slice(open + 1, close), ...target };
+        }
+      }
+      open = text.indexOf('[', close + 1);
+    }
+    return null;
+  }
+
+  /** `https?:\/\/[^)\s]+\)` at `at`. */
+  #webTarget(at: number): Omit<BracketLink, 'index' | 'label'> | null {
+    const scheme = this.text.startsWith('https://', at) ? 8 : this.text.startsWith('http://', at) ? 7 : 0;
+    if (scheme === 0) return null;
+    const stop = this.#run.find(at + scheme);
+    if (stop === at + scheme || this.text[stop] !== ')') return null;
+    return { end: stop + 1, target: this.text.slice(at, stop), angle: false };
+  }
+
+  /** `\s*(?:<([^>\n]+)>|((?:[^\s()]|\([^()]*\))+))\s*\)` at `at`: the regex backtracks into neither part. */
+  #target(at: number): Omit<BracketLink, 'index' | 'label'> | null {
+    const text = this.text;
+    const start = this.#word.find(at);
+    if (text[start] === '<') {
+      const close = this.#angle.find(start + 1);
+      const end = text[close] === '>' && close > start + 1 ? this.#closing(close + 1) : -1;
+      if (end >= 0) return { end, target: text.slice(start + 1, close), angle: true };
+    }
+    let stop = start;
+    for (;;) {
+      stop = this.#run.find(stop);
+      if (text[stop] !== '(') break;
+      const close = this.#group.find(stop + 1);
+      if (text[close] !== ')') break;
+      stop = close + 1;
+    }
+    const end = stop === start ? -1 : this.#closing(stop);
+    return end < 0 ? null : { end, target: text.slice(start, stop), angle: false };
+  }
+
+  /** Past `\s*\)` at `at`, -1 when the next word is not `)`. */
+  #closing(at: number): number {
+    const close = this.#word.find(at);
+    return this.text[close] === ')' ? close + 1 : -1;
+  }
+}
+
+type LinkToken = { index: number; text: string; label?: string; target?: string; auto?: string };
+
+/**
+ * The link tokens of `text`, in order: the leftmost of the next bracket link
+ * and the next other token, as one regex of both would find. They never start
+ * on the same character: a bracket link starts on `[` or `!`, no other token
+ * does. A relative path must not follow a word character or a colon; that check
+ * is made here instead of in a lookbehind, which Safari before 16.4 cannot
+ * parse. A path refused at one position falls through to the absolute path
+ * there, as the next alternative of one regex would, and the scan then moves
+ * on by one character.
+ */
+function* linkTokens(text: string): Generator<LinkToken> {
+  const tokens = new RegExp(OTHER_TOKENS, 'g');
   const absoluteAt = new RegExp(ABSOLUTE_PATH, 'y');
-  for (let match = tokens.exec(text); match; match = tokens.exec(text)) {
-    if (match[5] !== undefined && match.index > 0 && /[\w:]/.test(text[match.index - 1]!)) {
+  // Every bracket link holds `](`: a text without one never builds the scanner.
+  const links = text.includes('](') ? new BracketLinks(text, false) : null;
+  const nextOther = (from: number): LinkToken | null => {
+    tokens.lastIndex = from;
+    for (let match = tokens.exec(text); match; match = tokens.exec(text)) {
+      if (match[2] === undefined || match.index === 0 || !/[\w:]/.test(text[match.index - 1]!)) return { index: match.index, text: match[0], auto: match[1] };
       absoluteAt.lastIndex = match.index;
       const absolute = absoluteAt.exec(text);
-      if (!absolute) {
-        tokens.lastIndex = match.index + 1;
-        continue;
-      }
-      match = absolute;
-      tokens.lastIndex = match.index + match[0].length;
+      if (absolute) return { index: absolute.index, text: absolute[0] };
+      tokens.lastIndex = match.index + 1;
     }
+    return null;
+  };
+  // The next other token from where the last search started: it holds while it lies ahead.
+  let other: LinkToken | null | undefined;
+  for (let at = 0; ;) {
+    if (other === undefined || (other !== null && other.index < at)) other = nextOther(at);
+    const link = links?.next(at) ?? null;
+    const token: LinkToken | null = link && (!other || link.index < other.index)
+      ? { index: link.index, text: text.slice(link.index, link.end), label: link.label, target: link.target }
+      : other;
+    if (!token) return;
+    at = token.index + token.text.length;
     // A numeric denominator can end on markdown delimiters, not just punctuation.
-    if (match[0].startsWith('/') && /\d/.test(text[match.index - 1] ?? '')) continue;
-    yield match;
+    if (token.text.startsWith('/') && /\d/.test(text[token.index - 1] ?? '')) continue;
+    yield token;
   }
 }
 
 /** Tokenize links before emphasis, keeping URL punctuation and escaped attributes intact. */
 export function richInline(text: string, format: (text: string) => string): string {
   let out = '', start = 0;
-  for (const match of linkTokens(text)) {
-    let raw = match[2] ?? match[3] ?? match[4] ?? match[0];
+  for (const token of linkTokens(text)) {
+    let raw = token.target ?? token.auto ?? token.text;
     let suffix = '';
-    if (!match[1] && !match[4]) {
+    if (token.label === undefined && token.auto === undefined) {
       const clean = raw.replace(/[.,;!?]+$/, '');
       suffix = raw.slice(clean.length); raw = clean;
       while (raw.endsWith(')') && (raw.match(/\)/g)?.length ?? 0) > (raw.match(/\(/g)?.length ?? 0)) { raw = raw.slice(0, -1); suffix = ')' + suffix; }
     }
-    if (match[1] === undefined && match[4] === undefined && NUMERIC_PATH.test(raw)) continue;
-    out += format(text.slice(start, match.index));
-    out += linkHtml(match[1] ?? raw, raw) + escapeHtml(suffix);
-    start = match.index + match[0].length;
+    if (token.label === undefined && token.auto === undefined && NUMERIC_PATH.test(raw)) continue;
+    out += format(text.slice(start, token.index));
+    out += linkHtml(token.label ?? raw, raw) + escapeHtml(suffix);
+    start = token.index + token.text.length;
   }
   return out + format(text.slice(start));
 }

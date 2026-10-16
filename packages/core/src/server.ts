@@ -2,7 +2,8 @@ import type { ServerWebSocket } from 'bun';
 import type { Channel, RpcEventName, RpcEvents, ThreadId } from '@boite/contracts';
 import { APP_ORIGIN, FILE_ROUTE, RPC_MAX_FRAME_BYTES, RPC_PATH, RpcCloseCode, VIEW_CONTENT_POLICY, VIEW_ROUTE, VIEW_SANDBOX } from '@boite/contracts';
 import { timingSafeEqual } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { constants, existsSync, statSync } from 'node:fs';
+import { open, type FileHandle } from 'node:fs/promises';
 import { hostname, networkInterfaces } from 'node:os';
 import { dirname, join, normalize, resolve, sep } from 'node:path';
 import { eventThreadId, type EventPayload } from './bus.ts';
@@ -12,14 +13,15 @@ import { messageOf } from './errors.ts';
 import { JOIN_ROUTE } from './group.ts';
 import { parseRelayPath, RelayHub, type RelaySocketData } from './group/relay.ts';
 import type { Connection } from './router.ts';
-import type { SocketData } from './server/connection.ts';
-import { ServerConnection } from './server/connection.ts';
+import type { EventFrames, SocketData } from './server/connection.ts';
+import { OUTBOUND_MAX_BUFFERED_BYTES, ServerConnection } from './server/connection.ts';
 import { clientField, logConnectionClosed } from './server/connection-log.ts';
 import { handleFrame } from './server/frame.ts';
 import { authenticateToken } from './server/hello.ts';
 import { FrameQueue } from './server/frame-queue.ts';
 import { Refusals } from './server/refusals.ts';
 import { fdResponse } from './server/file-response.ts';
+import { VIEW_GZIP_SUFFIX } from './views.ts';
 export { ServerConnection } from './server/connection.ts';
 
 const DEFAULT_HELLO_TIMEOUT_MS = 5000;
@@ -188,6 +190,13 @@ export function preauthRefusal(waiting: Iterable<string>, peer: string): string 
 }
 
 const IMMUTABLE_FOR_A_YEAR = 'public, max-age=31536000, immutable';
+/**
+ * Fonts and icons keep their names from one build to the next, so they cannot
+ * be immutable. A day fresh, then a week served stale while the browser
+ * revalidates: a font swapped in a release shows at most a day late, and the
+ * revalidation is a 304.
+ */
+const FRESH_FOR_A_DAY = 'public, max-age=86400, stale-while-revalidate=604800';
 
 /**
  * What the PWA's service worker needs from the host that serves it. Vite's
@@ -195,14 +204,17 @@ const IMMUTABLE_FOR_A_YEAR = 'public, max-age=31536000, immutable';
  * is the version and a phone never fetches one twice. The shell, the worker
  * and the manifest decide what the next load caches, so all three are
  * revalidated every time; `Service-Worker-Allowed` is what lets `/sw.js` claim
- * the whole origin rather than its own directory. Everything else keeps the
- * headers `Bun.file` gives it.
+ * the whole origin rather than its own directory. Fonts and icons are fresh
+ * for a day: a phone on the LAN has no service worker, since plain http is not
+ * a secure context, and would otherwise fetch the default faces on every load.
+ * Everything else keeps the headers `Bun.file` gives it.
  */
 function cacheHeaders(pathname: string): Record<string, string> {
   if (pathname.startsWith('/assets/')) return { 'cache-control': IMMUTABLE_FOR_A_YEAR };
   if (pathname === '/sw.js') return { 'cache-control': 'no-cache', 'service-worker-allowed': '/' };
   if (pathname === '/' || pathname === '/index.html') return { 'cache-control': 'no-cache', ...NO_FOREIGN_FRAMES };
   if (pathname === '/manifest.webmanifest') return { 'cache-control': 'no-cache' };
+  if (pathname.startsWith('/fonts/') || pathname.startsWith('/icons/')) return { 'cache-control': FRESH_FOR_A_DAY };
   return {};
 }
 
@@ -230,29 +242,79 @@ const ENCODINGS: readonly { token: string; suffix: string }[] = [
   { token: 'gzip', suffix: '.gz' },
 ];
 
-/**
- * The UI build compresses its own text files (`packages/ui/vite.config.ts`),
- * so the core never deflates anything: it hands out the file the browser says
- * it can read. A browser only offers `br` on https, so a phone on the LAN gets
- * the `.gz`. `Vary` keeps a cache between the two from mixing them up.
- */
-export function staticResponse(file: string, pathname: string, acceptEncoding: string | null): Response {
-  const headers = cacheHeaders(pathname);
-  // `br;q=0` names a coding to refuse it, so an entry at zero is not accepted.
-  const accepted = (acceptEncoding ?? '').toLowerCase().split(',').flatMap((entry) => {
+/** The codings an `Accept-Encoding` value accepts. `br;q=0` names a coding to refuse it, so an entry at zero is not accepted. */
+export function acceptedEncodings(acceptEncoding: string | null): string[] {
+  return (acceptEncoding ?? '').toLowerCase().split(',').flatMap((entry) => {
     const [token = '', ...params] = entry.split(';').map((piece) => piece.trim());
     const quality = params.find((param) => param.startsWith('q='));
     return quality !== undefined && Number(quality.slice(2)) === 0 ? [] : [token];
   });
+}
+
+/**
+ * The validators of the exact file sent, read at each request: the size and
+ * the modification time, with the coding in the tag so the `.br` and the `.gz`
+ * of one file never answer for each other. Stating the file every time costs
+ * one system call and means a build replaced under a running core is never
+ * answered with a 304 for the old one.
+ */
+function validators(path: string, coding: string | null): { etag: string; lastModified: string; modifiedSeconds: number } {
+  const stats = statSync(path);
+  const modifiedSeconds = Math.floor(stats.mtimeMs / 1000);
+  return {
+    etag: `"${stats.size.toString(36)}-${Math.floor(stats.mtimeMs).toString(36)}${coding === null ? '' : `-${coding}`}"`,
+    lastModified: new Date(modifiedSeconds * 1000).toUTCString(),
+    modifiedSeconds,
+  };
+}
+
+/** RFC 9110: `If-None-Match` decides when present (weak comparison), `If-Modified-Since` only without it. */
+function notModified(conditions: Pick<Headers, 'get'> | undefined, etag: string, modifiedSeconds: number): boolean {
+  if (conditions === undefined) return false;
+  const match = conditions.get('if-none-match');
+  if (match !== null) {
+    return match.split(',').some((tag) => {
+      const trimmed = tag.trim();
+      return trimmed === '*' || trimmed.replace(/^W\//, '') === etag;
+    });
+  }
+  const since = conditions.get('if-modified-since');
+  if (since === null) return false;
+  const time = Date.parse(since);
+  return Number.isFinite(time) && modifiedSeconds <= Math.floor(time / 1000);
+}
+
+/**
+ * The UI build compresses its own text files (`packages/ui/vite.config.ts`),
+ * so the core never deflates anything: it hands out the file the browser says
+ * it can read. A browser only offers `br` on https, so a phone on the LAN gets
+ * the `.gz`. `Vary` keeps a cache between the two from mixing them up. Every
+ * answer outside `/assets/` carries an `ETag` and a `Last-Modified` of the
+ * variant sent, so a revalidation of the shell, the worker or a font is a
+ * bodiless 304.
+ */
+export function staticResponse(file: string, pathname: string, acceptEncoding: string | null, conditions?: Pick<Headers, 'get'>): Response {
+  const accepted = acceptedEncodings(acceptEncoding);
+  let sent = file;
+  let coding: string | null = null;
   for (const { token, suffix } of ENCODINGS) {
     if (!accepted.includes(token)) continue;
     const candidate = file + suffix;
     if (!existsSync(candidate)) continue;
-    return new Response(Bun.file(candidate), {
-      headers: { ...headers, 'content-type': Bun.file(file).type, 'content-encoding': token, vary: 'accept-encoding' },
-    });
+    sent = candidate;
+    coding = token;
+    break;
   }
-  return new Response(Bun.file(file), { headers: { ...headers, vary: 'accept-encoding' } });
+  const headers: Record<string, string> = { ...cacheHeaders(pathname), vary: 'accept-encoding' };
+  // A hashed asset is immutable, its name is its version: a validator would be about 70 bytes on every one, never used.
+  if (!pathname.startsWith('/assets/')) {
+    const { etag, lastModified, modifiedSeconds } = validators(sent, coding);
+    headers.etag = etag;
+    headers['last-modified'] = lastModified;
+    if (notModified(conditions, etag, modifiedSeconds)) return new Response(null, { status: 304, headers });
+  }
+  if (coding === null) return new Response(Bun.file(file), { headers });
+  return new Response(Bun.file(sent), { headers: { ...headers, 'content-type': Bun.file(file).type, 'content-encoding': coding } });
 }
 
 /**
@@ -302,21 +364,44 @@ async function ticketedFile(core: Core, ticket: string, range: string | null): P
  * whether a client frames it or someone opens the address: it has no storage,
  * no cookie and no way to the core's socket, and the policy lets it load and
  * call nothing. The snapshot never changes, but its ticket does not outlive
- * ten minutes, so nothing is cached.
+ * ten minutes, so nothing is cached. `publishView` gzipped the snapshot once
+ * beside it; a client that reads gzip gets that copy, and a view published
+ * before the copy existed is sent as it is.
  */
-async function viewPage(core: Core, ticket: string): Promise<Response> {
+async function viewPage(core: Core, ticket: string, acceptEncoding: string | null): Promise<Response> {
   const opened = await core.fileTickets.open(ticket);
   if (opened === null || !opened.view) {
     void opened?.handle.close();
     return new Response('unknown or expired ticket', { status: 404 });
   }
-  return fdResponse(opened.handle, opened.size, null, {
+  const headers: Record<string, string> = {
     'content-type': 'text/html; charset=utf-8',
     'cache-control': 'no-store',
     'x-content-type-options': 'nosniff',
     'referrer-policy': 'no-referrer',
     'content-security-policy': `sandbox ${VIEW_SANDBOX}; ${VIEW_CONTENT_POLICY}`,
-  });
+    vary: 'accept-encoding',
+  };
+  if (acceptedEncodings(acceptEncoding).includes('gzip')) {
+    const compressed = await openViewCopy(`${opened.path}${VIEW_GZIP_SUFFIX}`);
+    if (compressed !== null) {
+      void opened.handle.close();
+      return fdResponse(compressed.handle, compressed.size, null, { ...headers, 'content-encoding': 'gzip' });
+    }
+  }
+  return fdResponse(opened.handle, opened.size, null, headers);
+}
+
+/** The gzipped copy of a view, opened without following a link; null when it is missing or not a file. */
+async function openViewCopy(path: string): Promise<{ handle: FileHandle; size: number } | null> {
+  let handle: FileHandle;
+  try { handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0)); } catch { return null; }
+  try {
+    const stats = await handle.stat();
+    if (stats.isFile()) return { handle, size: stats.size };
+  } catch { /* Closed below. */ }
+  await handle.close();
+  return null;
 }
 
 /**
@@ -488,7 +573,7 @@ export function startServer(options: ServerOptions): RunningServer {
 
       if (url.pathname.startsWith(`${VIEW_ROUTE}/`)) {
         if (request.method !== 'GET') return new Response('method not allowed', { status: 405 });
-        return viewPage(core, url.pathname.slice(VIEW_ROUTE.length + 1));
+        return viewPage(core, url.pathname.slice(VIEW_ROUTE.length + 1), request.headers.get('accept-encoding'));
       }
 
       // What this machine trusts of its own accord: itself, the shell, and the addresses its owner gave it.
@@ -513,7 +598,7 @@ export function startServer(options: ServerOptions): RunningServer {
             core.log('warn', `refused a relayed websocket: ${refusal}`, { source: 'connections', event: 'connection.preauth-refused' });
             return new Response('too many connections waiting for hello', { status: 503 });
           }
-          const pipe = relays.pipe(relayed.coreId, peer);
+          const pipe = relays.pipe(relayed.coreId, peer, !isLoopbackHost(request.headers.get('host')));
           if (self.upgrade(request, { data: { relay: pipe } })) return undefined;
           pipe.close(1000);
           return new Response('expected a websocket upgrade', { status: 400 });
@@ -547,7 +632,7 @@ export function startServer(options: ServerOptions): RunningServer {
       }
 
       const file = staticFile(url.pathname);
-      if (file !== null) return staticResponse(file, url.pathname, request.headers.get('accept-encoding'));
+      if (file !== null) return staticResponse(file, url.pathname, request.headers.get('accept-encoding'), request.headers);
       if (url.pathname === '/') {
         return new Response(PLACEHOLDER_HTML, { headers: { 'content-type': 'text/html; charset=utf-8', ...NO_FOREIGN_FRAMES } });
       }
@@ -567,6 +652,11 @@ export function startServer(options: ServerOptions): RunningServer {
       // The contract derives the attachment total of a turn from this number,
       // and the UI refuses a larger frame before sending it.
       maxPayloadLength: RPC_MAX_FRAME_BYTES,
+      // Bun drops a frame, and keeps the socket open, once this much waits
+      // (16 MiB by default). The connections and relays close at their own
+      // 32 MiB budget first, checked before each send, so nothing is dropped
+      // below the limit the code enforces.
+      backpressureLimit: OUTBOUND_MAX_BUFFERED_BYTES,
 
       open(socket) {
         if ('relay' in socket.data) {
@@ -602,7 +692,10 @@ export function startServer(options: ServerOptions): RunningServer {
         void frame.catch((error: unknown) => core.log('error', messageOf(error))).finally(() => frames.delete(frame));
       },
 
-      drain(socket) { if (!('relay' in socket.data)) socket.data.connection.drain(); },
+      drain(socket) {
+        if ('relay' in socket.data) socket.data.relay.drained();
+        else socket.data.connection.drain();
+      },
 
       close(socket, code, reason) {
         if ('relay' in socket.data) {
@@ -613,6 +706,7 @@ export function startServer(options: ServerOptions): RunningServer {
         core.procs.unwatchResources(socket.data.connection.id);
         core.coordination.bridge.disconnect(socket.data.connection.id);
         core.browser.disconnect(socket.data.connection.id);
+        core.terminals.disconnect(socket.data.connection.id);
         core.threads.focus.disconnect(socket.data.connection.id);
         void core.drafts.disconnect(socket.data.connection.id).catch(error => core.log('warn', `draft cleanup failed: ${String(error)}`));
         void core.attachmentUploads.disconnect(socket.data.connection.id).catch(error => core.log('warn', `attachment cleanup failed: ${String(error)}`));
@@ -725,6 +819,8 @@ export function startServer(options: ServerOptions): RunningServer {
       // trace panel reads it.
       name.startsWith('process.');
     const threadId = eventThreadId(payload);
+    // Serialized once per projection, not once per socket.
+    const frames: EventFrames = new Map();
     for (const connection of connections) {
       if (!connection.authenticated) continue;
       if (!mayReceiveEvent(name, connection)) continue;
@@ -735,8 +831,12 @@ export function startServer(options: ServerOptions): RunningServer {
       // that thread open; an agent socket still gets its own thread's.
       if (name === 'thread.activity' && connection.identity.principal !== 'agent' && (threadId === null || !connection.subscriptions.has(threadId))) continue;
       if (name === 'todos.updated' && !mayReadTodos(core, connection, (payload as RpcEvents['todos.updated']).projectId)) continue;
-      connection.sendEvent(name, payload);
+      // A shell's bytes go to the windows that attached it. Its exit still goes to every owner window: one
+      // that lays the pane out without having attached it, a background tab say, drops the pane then.
+      if (name === 'terminal.output' && !core.terminals.watches((payload as RpcEvents['terminal.output']).id, connection.id)) continue;
+      connection.sendEvent(name, payload, frames);
     }
+    if (name === 'terminal.exited') core.terminals.exitSent((payload as RpcEvents['terminal.exited']).id);
   };
   let pendingScheduler: RpcEvents['scheduler.updated'] | null = null;
   let schedulerTimer: ReturnType<typeof setTimeout> | null = null;

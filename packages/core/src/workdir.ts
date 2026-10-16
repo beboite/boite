@@ -537,7 +537,7 @@ export class FileTickets {
    * Open the ticket's file without following a symlink swapped in after the
    * mint. The handle is the caller's to close. A mismatch drops the ticket.
    */
-  async open(ticket: string, now = Date.now()): Promise<{ handle: FileHandle; mime: string; name?: string; size: number; view?: true } | null> {
+  async open(ticket: string, now = Date.now()): Promise<{ handle: FileHandle; path: string; mime: string; name?: string; size: number; view?: true } | null> {
     this.sweep(now);
     const entry = this.held.get(ticket);
     if (entry === undefined || entry.identity === null) {
@@ -561,7 +561,7 @@ export class FileTickets {
         await handle.close();
         return null;
       }
-      return { handle, mime: entry.mime, ...(entry.name ? { name: entry.name } : {}), size: Number(stats.size), ...(entry.view ? { view: true as const } : {}) };
+      return { handle, path: entry.path, mime: entry.mime, ...(entry.name ? { name: entry.name } : {}), size: Number(stats.size), ...(entry.view ? { view: true as const } : {}) };
     } catch (error) {
       await handle.close();
       throw error;

@@ -185,7 +185,7 @@ export class AgentProjects {
 
   detail(params: RpcParams<'resident.thread'>) {
     const { target } = this.target(params.threadId, params.target, 'resident.thread');
-    const last = this.core.journal.listTurns(target.id).findLast(turn => turn.status !== 'queued' && turn.status !== 'running') ?? null;
+    const last = this.core.journal.lastEndedTurn(target.id);
     return {
       thread: this.row(target),
       questions: this.core.threads.listQuestions(target.id),
@@ -375,7 +375,7 @@ export class AgentProjects {
 
   /** A system line in the target's timeline, on its last turn, saying what the agent did. */
   private line(threadId: ThreadId, text: string): void {
-    const turnId = this.core.journal.listTurns(threadId).at(-1)?.id ?? newId('trn_');
+    const turnId = this.core.journal.lastTurn(threadId)?.id ?? newId('trn_');
     const part: MessagePart = { type: 'text', text };
     const message: Message = { id: newId('msg_'), threadId, turnId, role: 'system', parts: [part], state: 'complete', createdAt: Date.now() };
     this.core.journal.append({ type: 'thread.resident', threadId, version: 1, payload: message }, () => this.core.journal.putMessage(message));

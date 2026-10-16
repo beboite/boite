@@ -38,8 +38,11 @@ xterm.js. xterm loads the first time a terminal opens, never at startup.
 - `terminals.open` starts a shell of the thread at the client's size, or attaches
   to the one already running and resizes it. The answer carries the last
   256 KiB of output, so a reload or a second window redraws the screen.
-- What the shell prints arrives as `terminal.output`, what the user types goes
-  back through `terminals.write`, and `terminals.resize` follows the drawer.
+- What the shell prints arrives as `terminal.output`, only on the connections
+  that attached that shell; its `terminal.exited` reaches every owner window,
+  so one that lays the pane out without having attached it drops it. What the
+  user types goes back through `terminals.write`, and `terminals.resize`
+  follows the drawer.
   The first output after a quiet moment goes out at once, so a typed key echoes
   without delay; output that keeps coming is sent every 16 ms as one event.
   The 256 KiB snapshot is exactly what those events carried so far.
