@@ -4123,8 +4123,14 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
 
   /** `git status` of the thread's working directory. Refused by name outside a repository. */
   'git.status': { params: { threadId: ThreadId }; result: GitStatus };
-  /** One file's two sides. `ref` is what the working tree is compared to, HEAD by default. */
-  'git.diff': { params: { threadId: ThreadId; path: string; ref?: string }; result: GitDiff };
+  /**
+   * One file's two sides. `ref` is what the working tree is compared to, HEAD
+   * by default. `oldPath` is the origin `git.status` gave the path, null for
+   * none: given, the core reads that side without a status of its own, and
+   * the answer's `status` is `renamed` or what the two sides show (`added`,
+   * `deleted`, `modified`). Absent, the core asks git for the origin.
+   */
+  'git.diff': { params: { threadId: ThreadId; path: string; ref?: string; oldPath?: string | null }; result: GitDiff };
 
   /** One directory of the working directory, `path` relative to it or empty for the root. Directories first. */
   'files.list': { params: { threadId: ThreadId; path?: string }; result: FileEntry[] };

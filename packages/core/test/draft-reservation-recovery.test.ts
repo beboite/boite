@@ -21,6 +21,13 @@ beforeEach(async () => {
 });
 afterEach(async () => { await h.stop(); });
 
+/** Git's arguments after the `-c name=value` pairs the core puts first, so a test matches the subcommand. */
+function command(args: readonly string[]): readonly string[] {
+  let at = 0;
+  while (args[at] === '-c') at += 2;
+  return args.slice(at);
+}
+
 function git(cwd: string, ...args: string[]): string {
   const run = Bun.spawnSync({
     cmd: ['git', ...args], cwd, stdout: 'pipe', stderr: 'pipe', windowsHide: true,
@@ -140,7 +147,7 @@ for (const checkedOut of [false, true]) test(`a concurrent branch and its unmerg
   const spawn = h.core.procs.spawn.bind(h.core.procs);
   let commit = '';
   const held = spyOn(h.core.procs, 'spawn').mockImplementation((id, cmd, args, options) => {
-    if (!commit && cmd === 'git' && ((args[0] === 'worktree' && args[1] === 'add') || args[0] === 'update-ref')) {
+    if (!commit && cmd === 'git' && ((command(args)[0] === 'worktree' && command(args)[1] === 'add') || args[0] === 'update-ref')) {
       if (checkedOut) git(repo.path, 'worktree', 'add', '-b', branch, competingPath);
       else { git(repo.path, 'branch', branch); git(repo.path, 'checkout', branch); }
       const cwd = checkedOut ? competingPath : repo.path;
@@ -171,8 +178,8 @@ test('a competing checkout at the reserved path survives rollback of our separat
   const spawn = h.core.procs.spawn.bind(h.core.procs);
   let competingPath = '';
   const held = spyOn(h.core.procs, 'spawn').mockImplementation((id, cmd, args, options) => {
-    if (!competingPath && cmd === 'git' && args[0] === 'worktree' && args[1] === 'add') {
-      competingPath = args[2]!;
+    if (!competingPath && cmd === 'git' && command(args)[0] === 'worktree' && command(args)[1] === 'add') {
+      competingPath = command(args)[2]!;
       git(repo.path, 'worktree', 'add', '-b', otherBranch, competingPath);
       writeFileSync(join(competingPath, 'unmerged.txt'), 'preserve the competing checkout\n');
       git(competingPath, 'add', 'unmerged.txt'); git(competingPath, 'commit', '-m', 'competing checkout work');
@@ -306,7 +313,7 @@ test('cancellation while git exclusion is awaiting cannot start a late worktree 
   let adds = 0;
   const held = spyOn(h.core.procs, 'spawn').mockImplementation((id, cmd, args, options) => {
     const child = spawn(id, cmd, args, options);
-    if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'add') adds++;
+    if (cmd === 'git' && command(args)[0] === 'worktree' && command(args)[1] === 'add') adds++;
     if (cmd === 'git' && args.includes('info/exclude')) {
       excluding = true;
       return { ...child, exited: child.exited.then(async code => { await gate.promise; return code; }) };

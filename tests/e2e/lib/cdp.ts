@@ -467,19 +467,26 @@ export class BrowserPage {
    * rendered, such as one inside a folded `content-visibility` section, never
    * gets that update: a theme change left its colour transitions finished
    * with their promises pending, and the wait hung until the call timed out.
+   * Content can also stop being drawn during the wait (a phone's chat body
+   * covered by the list), so each frame looks again.
    */
   async settleAnimations(): Promise<void> {
     // The page gives up first, so the frame pump never outlives the call.
     const settled = await this.evaluate<boolean>(`new Promise((resolve) => {
-      let live = true;
+      let live = true, fonts = false;
       const done = (ok) => { if (!live) return; live = false; resolve(ok); };
-      const frame = () => { if (live) requestAnimationFrame(frame); };
+      const drawn = (a) => !(a.effect instanceof KeyframeEffect) || a.effect.target?.checkVisibility?.({ contentVisibilityAuto: true }) !== false;
+      const ended = new Set();
+      const watched = document.getAnimations().filter((a) => a.effect?.getTiming().iterations !== Infinity && drawn(a));
+      for (const a of watched) a.finished.then(() => ended.add(a), () => ended.add(a));
+      document.fonts.ready.then(() => { fonts = true; });
+      const frame = () => {
+        if (!live) return;
+        if (fonts && watched.every((a) => ended.has(a) || !drawn(a))) return done(true);
+        requestAnimationFrame(frame);
+      };
       requestAnimationFrame(frame);
       setTimeout(() => done(false), ${CALL_TIMEOUT_MS - 5_000});
-      Promise.all([document.fonts.ready, ...document.getAnimations()
-        .filter((a) => a.effect?.getTiming().iterations !== Infinity)
-        .filter((a) => !(a.effect instanceof KeyframeEffect) || a.effect.target?.checkVisibility?.({ contentVisibilityAuto: true }) !== false)
-        .map((a) => a.finished.catch(() => {}))]).then(() => done(true));
     })`);
     if (!settled) throw new Error(`animations still running ${(CALL_TIMEOUT_MS - 5_000) / 1000} s after settleAnimations()`);
   }

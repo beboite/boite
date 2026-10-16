@@ -108,11 +108,13 @@ test('seven screens fit both languages and widths, without leaving the tour', as
         if (panelHeight !== undefined) expect(height).toBe(panelHeight);
         panelHeight = height;
         if (step !== 'profile' && step !== 'privacy') {
+          // The measures come with a failure: the controls' place depends on the pointer the machine reports.
           expect(await page.evaluate(`(() => {
             const scene = document.querySelector('[data-testid=onboarding-scene]');
             const controls = scene.querySelector('.controls');
-            return getComputedStyle(controls).display === 'none' || controls.getBoundingClientRect().top >= scene.querySelector('.stage').getBoundingClientRect().bottom;
-          })()`)).toBe(true);
+            const top = controls.getBoundingClientRect().top, bottom = scene.querySelector('.stage').getBoundingClientRect().bottom;
+            return { below: getComputedStyle(controls).display === 'none' || top >= bottom, top, bottom, transform: getComputedStyle(controls).transform, hover: matchMedia('(hover: hover)').matches, figure: scene.className, step: '${step}' };
+          })()`)).toMatchObject({ below: true });
         }
         expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
         // Privacy ends on its consent rows, every other screen on Next.
@@ -133,8 +135,9 @@ test('seven screens fit both languages and widths, without leaving the tour', as
   }
   await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
   await page.click('[data-testid=onboarding-dot-agents]');
-  expect(await page.evaluate(`document.querySelector('[data-testid=onboarding-animation]').getAnimations({subtree:true}).length`)).toBe(0);
-  expect(await page.evaluate(`getComputedStyle(document.querySelector('[data-testid=onboarding-scene] .controls')).display`)).toBe('none');
+  // The scenes are the tour's pictures: they play like a GIF even under reduced motion, with the pause at hand.
+  await page.waitFor(`document.querySelector('[data-testid=onboarding-animation]').getAnimations({subtree:true}).some(a => a.playState === 'running')`);
+  expect(await page.evaluate(`getComputedStyle(document.querySelector('[data-testid=onboarding-scene] .controls')).display`)).not.toBe('none');
   await capture('tour-reduced-motion.png');
 }, 120_000);
 
@@ -201,7 +204,16 @@ test('demo selectors look actionable and animations pause, resume and replay', a
   await page.click('[data-testid=onboarding-animation-replay]');
   await page.waitFor(`!document.querySelector('[data-testid=onboarding-animation]').dataset.previous`);
   expect(await page.evaluate(`document.querySelector('[data-testid=onboarding-animation]').getAnimations({subtree:true}).some(a => a.playState === 'running')`)).toBe(true);
-}, 20_000);
+
+  // Played to its end, the scene rests on its last frame and starts again by itself.
+  await page.evaluate(`(() => { const stage = document.querySelector('[data-testid=onboarding-animation]'); for (const a of stage.getAnimations({subtree:true})) a.finish(); stage.dataset.previous = 'yes'; })()`);
+  await page.waitFor(`!document.querySelector('[data-testid=onboarding-animation]').dataset.previous && document.querySelector('[data-testid=onboarding-animation]').getAnimations({subtree:true}).some(a => a.playState === 'running')`, 8_000);
+  // A hidden window holds it where it is.
+  await page.evaluate(`Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' }); document.dispatchEvent(new Event('visibilitychange'))`);
+  await page.waitFor(`document.querySelector('[data-testid=onboarding-animation]').getAnimations({subtree:true}).every(a => a.playState !== 'running')`);
+  await page.evaluate(`delete document.visibilityState; document.dispatchEvent(new Event('visibilitychange'))`);
+  await page.waitFor(`document.querySelector('[data-testid=onboarding-animation]').getAnimations({subtree:true}).some(a => a.playState === 'running')`);
+}, 30_000);
 
 test('pending agent updates remain in Machines after the tour closes', async () => {
   await page.evaluate(`localStorage.removeItem('boite.onboarding')`);

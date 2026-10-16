@@ -237,6 +237,8 @@ export function workdirMethods(ctx: FakeContext, all: () => Pick<FakeMethods, 'b
       const path = inside(ctx, ctx.thread(params.threadId).cwd, params.path, 'git.diff path');
       const change = FAKE_CHANGES.find((one) => one.path === path);
       if (!change) throw ctx.notFound('change', path);
+      // The origin the status gave is checked like the path; the fixture already knows it.
+      if (params.oldPath !== undefined && params.oldPath !== null) inside(ctx, ctx.thread(params.threadId).cwd, params.oldPath, 'git.diff oldPath');
       const sides = FAKE_DIFFS[path] ?? {
         // A row with no fixture of its own still opens on two readable sides.
         oldText: `// ${path}

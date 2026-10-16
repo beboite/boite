@@ -383,6 +383,9 @@
   --dur-slide-out: 200ms;
   /* How long a Settings card a conversation pointed at stays ringed. */
   --dur-flash: 1800ms;
+  /* The tour's scenes play like a GIF: reduced motion leaves these two alone. */
+  --dur-demo-step: 220ms;
+  --dur-demo-word: 150ms;
   --ease-slide: cubic-bezier(0.2, 0, 0, 1);
   --z-whip: 100;
   --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
