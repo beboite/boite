@@ -151,11 +151,20 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 593,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,993,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,994,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,302,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,314,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-16, shared git reads, checkpoint blobs and merged-PR backoff
+(PR #526) merged with `origin/main` at `83f1720a` measure 4,988,020 UI bytes and
+4,310,297 core JavaScript bytes after fresh `bun run build:ui` and `bun run
+build:core` on Linux, against 4,987,764 and 4,299,107 for that main: the shared
+checkpoint store, the batch diff read, the eight read slots, the worktree pool
+and the merged-PR proof backoff add 11,190 core bytes and 256 UI bytes. The
+limits rise by that growth to 4,994,000 and 4,314,000; the entry and `main.js`
+limits stay unchanged.
 
 On 2026-10-16, the network pass (PR #518: group sync backoff, streamed server
 update unpacking, device frame reuse, per-account quota reads and the merge of a
