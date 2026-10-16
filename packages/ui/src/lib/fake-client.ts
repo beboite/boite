@@ -14,6 +14,7 @@ import {
   type RpcParams,
   type RpcResult,
   type ThreadId,
+  type ThreadWorktreeRemoval,
 } from '@boite/contracts';
 import { RpcFailure, type CallOptions, type ClientState, type EventHandler, type ObservableClient } from './client';
 import { closedFailure } from './rpc-error';
@@ -166,6 +167,18 @@ export class FakeClient implements ObservableClient {
     this.#ctx.goneFolders.add(pathKey(path));
   }
 
+  /**
+   * What the core's settled worktree cleanup leaves behind: the thread's
+   * folder gone from the fake's disk and the removal on its summary.
+   */
+  removeWorktree(threadId: ThreadId, removal: Omit<ThreadWorktreeRemoval, 'path'>): void {
+    const thread = this.#ctx.threads.get(threadId);
+    if (!thread) throw new Error(`no fake thread ${threadId}`);
+    this.#ctx.goneFolders.add(pathKey(thread.cwd));
+    thread.worktreeRemoved = { ...removal, path: thread.cwd };
+    this.#ctx.touch(thread);
+  }
+
   setMergedPrFixture(threadId: ThreadId, fixture: MergedPrFixture): void {
     this.#ctx.mergedPrFixtures.set(threadId, fixture);
   }
@@ -261,7 +274,7 @@ export class FakeClient implements ObservableClient {
     if (this.#missing.has(method)) throw new RpcFailure({ code: RpcErrorCode.MethodNotFound, message: `unknown method ${method}` });
     // The fixture has no thread-bound agent token; do not widen this scoped read.
     if (bus.principal === 'agent' && (method === 'threads.capabilities' || method === 'threads.mergeBack')) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method} requires a thread-bound agent identity` });
-    if (bus.principal === 'agent' && (method === 'core.logs' || method === 'projects.setAutoArchiveMergedPr' || method === 'quotas.reset')) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method} is not one of the agent's methods` });
+    if (bus.principal === 'agent' && (method === 'core.logs' || method === 'projects.setAutoArchiveMergedPr' || method === 'projects.setAutoRemoveWorktrees' || method === 'quotas.reset')) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method} is not one of the agent's methods` });
     // The router's gate, word for word: deny by default, `hello` before it.
     if (bus.principal === 'session' && method !== 'hello' && !DEVICE_METHODS.has(method)) {
       throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method} is for the owner only` });

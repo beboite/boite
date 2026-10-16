@@ -7,6 +7,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import type { WorkflowNode, WorkflowPlan, WorkflowRun, WorkflowStepPlan } from '@boite/contracts';
 import type { CoreClient } from './client.ts';
+import { worktreeLine } from './delegation/messages.ts';
 
 export const WORKFLOW_HELP = `A workflow is a JSON plan the core runs for you: every step is a child
 agent, a step starts as soon as the steps it depends on end, and the results
@@ -42,6 +43,8 @@ Fields of a step:
   when      { "path": ..., "equals": value | "notEmpty": true | "empty": true }
   output    the JSON shape the step must return: "string", "number",
             "boolean", "any", [shape], or { "key": shape }
+  worktree  optional: true runs the step in a git worktree of its own,
+            branched from your HEAD; the summary names its branch to merge
 A path reads a step's output (or its answer when it has none). On a fanned-out
 step, "review.bugs" collects the bugs of every item into one list.
 
@@ -52,7 +55,7 @@ shows its progress; boite workflow show <run-id> prints every step's result.
 
 A step with output returns it with boite workflow output '<json>' or a final
 \`\`\`json block; the core checks the shape and asks once more on a mismatch.
-Steps share this checkout: give parallel steps distinct files. A failed step
+Steps share this checkout unless they set worktree: give parallel steps distinct files. A failed step
 pauses what depends on it; boite workflow retry <run-id> <step> runs it again.`;
 
 function readPlan(raw: string | undefined, cwd: string, what: string): unknown {
@@ -146,6 +149,7 @@ export async function workflowCommand(client: CoreClient, threadId: string, rest
           lines.push(`    ${inst.key}${label} ${inst.status}${inst.threadId ? ` thread=${inst.threadId}` : ''}${inst.error ? ` error=${JSON.stringify(inst.error)}` : ''}`);
           const shown = value(inst.output, inst.result);
           if (shown) lines.push(`      ${shown}`);
+          if (inst.worktree) lines.push(`      ${worktreeLine(inst.worktree)}`);
         }
       }
       print(lines, run);
