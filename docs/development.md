@@ -128,7 +128,9 @@ the phone's options sheet. This device preference preserves the draft's choice
 and the project's default.
 
 With `worktree: {}`, `threads.create` runs `git worktree add -b` before writing
-the thread. The temporary branch is `boite/wt-<id>`, unless explicitly named;
+the thread, with `-c checkout.workers=0` (one checkout worker per core) unless
+the repository's or the user's git config sets `checkout.workers`; the core
+reads that once per repository. The temporary branch is `boite/wt-<id>`, unless explicitly named;
 the directory is `<project>/.boite/worktrees/wt-<id>` by default. A missing Git
 executable, a non-repository project or an existing branch is refused by name
 without writing a thread. Git calls appear in the thread's trace. The header
@@ -169,7 +171,11 @@ thread, even with `force`. Without `force`, it also refuses dirty or unmerged
 worktrees. Removal uses `git worktree remove`, branch deletion and
 `git worktree prune --expire 1.hour.ago`. A missing directory loses its
 registration only; `branchDeleted: false` records when Git keeps the branch.
-Both RPCs trace Git under `worktrees:<projectId>`.
+Both RPCs trace Git under `worktrees:<projectId>`. The list describes four
+worktrees at once and keeps git's order. Its reads go through the Changes
+panel's reader (deadline, shared read slots, no index lock, no fsmonitor hook).
+A thread counts as a holder only when it belongs to the project or its folder,
+as written, lies in the project, its worktree folder or a listed worktree.
 
 Settings > Worktrees and Manage project offer the same controls. Removing clean
 worktrees requires no force; ignored dependencies and build output leave with
@@ -365,11 +371,19 @@ Projects default to `autoArchiveMergedPr: true`; the owner changes it through
 root conversation only for a clean linked worktree and a uniquely identified,
 merged, non-fork PR from the same repository with the exact branch tip. The
 proof takes the checkout's current branch from `git status`, not the thread's
-recorded starting branch. It first asks `gh pr view` about up to five PRs the
-conversation linked, newest first: a linked PR needs the tip as its head commit
-but may have another head name, because agents often push `HEAD:fix/...`. A
-link that no longer resolves is skipped. Without a matching link it asks
-`gh pr list --head` for the checkout's branch, which needs that exact name.
+recorded starting branch. Cheapest evidence comes first: the repository's cached
+`git remote -v`, the branch in the worktree's `HEAD` file, then the repository's
+list of its newest 200 PRs, which the sidebar badges read too. `git status` runs
+only when a listed merged PR could match. Up to five PRs the conversation
+linked are tried first, newest first: a linked PR needs the tip as its head
+commit but may have another head name, because agents often push
+`HEAD:fix/...`. A link absent from a list that is not full does not exist and
+is skipped; one absent from a full list is asked with `gh pr view`. The
+checkout's branch then needs exactly one PR of that name in the list. When the
+list is full and holds a merged PR of that branch, or none, `gh pr list --head`
+confirms it. A thread whose proof finds nothing is not proved again for 5
+minutes, then 10, 20 and so on up to an hour, until the thread changes or
+links another PR.
 The grouping menu in both views exposes this project policy as Hide merged PR
 conversations and names the project it affects. In Recent it follows the project
 filter, or the current project when all projects are shown. Disabling reveals

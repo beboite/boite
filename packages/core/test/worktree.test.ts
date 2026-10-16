@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { slugOf, worktreeRoot } from '../src/worktree.ts';
 import { echoDriver } from '../src/drivers/echo.ts';
 import { setDriver } from '../src/drivers/index.ts';
@@ -242,6 +242,35 @@ describe('a thread in its own worktree', () => {
     // The git calls ran under the thread's id, so the trace has them.
     const processes = await client.call('trace.get', { threadId: thread.id });
     expect(processes.some((record) => record.exe === 'git')).toBe(true);
+  });
+
+  test('a new worktree checks out with one worker per core unless the repository config names a count, asked once per repository', async () => {
+    const accountId = await echoAccount();
+    const calls: string[][] = [];
+    const spawn = harness.core.procs.spawn.bind(harness.core.procs);
+    const spy = spyOn(harness.core.procs, 'spawn').mockImplementation((scope, command, args, options) => {
+      if (command === 'git') calls.push(args);
+      return spawn(scope, command, args, options);
+    });
+    try {
+      const open = await repoProject('open');
+      // The machine's own config is the user's: a count set there must stand too.
+      const presetByMachine = Bun.spawnSync({ cmd: ['git', 'config', '--get', 'checkout.workers'], cwd: open.path }).exitCode === 0;
+      for (const title of ['one', 'two']) await client.call('threads.create', { projectId: open.id, providerId: 'echo', accountId, title, worktree: {} });
+      const adds = calls.filter((args) => args.includes('worktree') && args.includes('add'));
+      expect(adds).toHaveLength(2);
+      for (const args of adds) expect(args.slice(0, 2)).toEqual(presetByMachine ? ['worktree', 'add'] : ['-c', 'checkout.workers=0']);
+      expect(calls.filter((args) => args.join(' ') === 'config --get checkout.workers')).toHaveLength(1);
+
+      calls.length = 0;
+      const pinned = await repoProject('pinned');
+      git(pinned.path, 'config', 'checkout.workers', '2');
+      await client.call('threads.create', { projectId: pinned.id, providerId: 'echo', accountId, title: 'three', worktree: {} });
+      const pinnedAdd = calls.find((args) => args.includes('worktree') && args.includes('add'));
+      expect(pinnedAdd?.slice(0, 2)).toEqual(['worktree', 'add']);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   test('storage changes affect new worktrees only and separate repositories with the same name', async () => {

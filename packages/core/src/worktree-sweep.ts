@@ -11,10 +11,18 @@
 
 import { realpath, stat } from 'node:fs/promises';
 import { basename, dirname, join, resolve, sep } from 'node:path';
-import type { Project, ProjectId, ThreadSummary, WorktreeEntry } from '@boite/contracts';
+import type { Project, ProjectId, ThreadId, ThreadSummary, WorktreeEntry } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { folderGone, invalidParams, messageOf, refused } from './errors.ts';
-import { GIT_READ_TIMEOUT_MS } from './git/read.ts';
+import { git as readGit } from './git/read.ts';
+import { worktreeRoot } from './worktree.ts';
+
+/**
+ * How many worktrees are described at once. Each costs a `git status` walk of
+ * its tree and a `for-each-ref --contains`: CPU-bound reads that share the
+ * core's git read slots with the panels.
+ */
+const DESCRIBE_AT_ONCE = 4;
 
 /**
  * How old a vanished worktree's registration must be before `prune` drops it.
@@ -70,6 +78,21 @@ export async function realKey(path: string): Promise<string> {
   }
 }
 
+/** `work` on every item, at most `limit` at once, the answers in the items' order. */
+async function inOrder<T, R>(items: readonly T[], limit: number, work: (item: T) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const lane = async (): Promise<void> => {
+    while (next < items.length) {
+      const at = next;
+      next += 1;
+      out[at] = await work(items[at] as T);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, lane));
+  return out;
+}
+
 export function inside(root: string, target: string): boolean {
   return target === root || target.startsWith(root.endsWith(sep) ? root : `${root}${sep}`);
 }
@@ -116,14 +139,13 @@ export class WorktreeSweep {
   async list(projectId: ProjectId): Promise<WorktreeEntry[]> {
     const project = this.project(projectId);
     const listed = await this.listed(project);
-    const own = await realKey(project.path);
-    const holders = await this.holders();
-    const entries: WorktreeEntry[] = [];
-    for (const worktree of listed) {
-      if (worktree.main || (await realKey(worktree.path)) === own) continue;
-      entries.push(await this.describe(project, worktree, holders));
-    }
-    return entries;
+    const [own, keys, holders] = await Promise.all([
+      realKey(project.path),
+      Promise.all(listed.map((worktree) => realKey(worktree.path))),
+      this.holders(project, listed),
+    ]);
+    const linked = listed.flatMap((worktree, at) => (worktree.main || keys[at] === own ? [] : [{ worktree, key: keys[at] as string }]));
+    return inOrder(linked, DESCRIBE_AT_ONCE, ({ worktree, key }) => this.describe(project, worktree, key, holders));
   }
 
   async remove(params: { projectId: ProjectId; path: string; force?: boolean }): Promise<{ ok: true; branchDeleted: boolean }> {
@@ -137,13 +159,8 @@ export class WorktreeSweep {
     const project = this.project(projectId);
     const listed = await this.listed(project);
     const wanted = await realKey(path);
-    let target: Listed | undefined;
-    for (const worktree of listed) {
-      if ((await realKey(worktree.path)) === wanted) {
-        target = worktree;
-        break;
-      }
-    }
+    const keys = await Promise.all(listed.map((worktree) => realKey(worktree.path)));
+    const target = listed.find((_, at) => keys[at] === wanted);
     if (target === undefined) {
       throw refused(`${path} is not a worktree git lists for ${project.name}`, {
         projectId, path, field: 'path', expected: 'a worktree of this project',
@@ -154,7 +171,7 @@ export class WorktreeSweep {
         projectId, path, field: 'path', expected: 'a linked worktree, not the main checkout',
       });
     }
-    const entry = await this.describe(project, target, await this.holders());
+    const entry = await this.describe(project, target, wanted, await this.holders(project, listed));
     this.refuseLive(project, path, entry);
     if (force !== true && (entry.dirty || entry.unmerged)) {
       const reasons = [
@@ -185,7 +202,7 @@ export class WorktreeSweep {
     if (target === undefined || target.main || wanted === (await realKey(project.path))) {
       throw refused(`${path} is not a linked worktree of ${project.name}`, { projectId: project.id, path });
     }
-    const entry = await this.describe(project, target, await this.holders());
+    const entry = await this.describe(project, target, wanted, await this.holders(project, listed));
     this.refuseLive(project, path, entry);
     if (entry.missing) throw refused(`${path} is already gone`, { projectId: project.id, path });
     if (entry.dirty) throw refused('This worktree has uncommitted changes.', { projectId: project.id, path, dirty: true });
@@ -250,20 +267,32 @@ export class WorktreeSweep {
         projectId: project.id, path: project.path, field: 'projectId', expected: 'a project that is a git repository',
       });
     }
-    const listed = await this.git(project, project.path, ['worktree', 'list', '--porcelain', '-z'], GIT_READ_TIMEOUT_MS);
+    const listed = await this.read(project, project.path, ['worktree', 'list', '--porcelain', '-z']);
     if (listed.code !== 0) throw refused(`cannot list worktrees in ${project.path}: ${listed.stderr.trim() || `exit ${listed.code}`}`, { projectId: project.id });
     return parseWorktreeList(listed.stdout);
   }
 
-  /** Every thread by the real key of its folder, archived ones included. */
-  async holders(): Promise<{ key: string; thread: ThreadSummary }[]> {
-    const threads = this.core.threads.list({ includeArchived: true });
+  /**
+   * The threads that may stand in one of these worktrees, archived ones
+   * included, by the real key of their folder. Only those are resolved: the
+   * project's own threads, and any whose folder as written lies in the
+   * project, its worktree folder or a worktree git lists. Every thread in the
+   * database went through `realpath` before, most of them in other projects.
+   */
+  async holders(project: Project, listed: readonly Listed[]): Promise<{ key: string; thread: ThreadSummary }[]> {
+    const roots = new Set([project.path, worktreeRoot(project.path, this.core.settings.get().worktreeStorage, project.id), ...listed.map((worktree) => worktree.path)].map(keyOf));
+    const near = (cwd: string): boolean => {
+      for (let at = keyOf(cwd); ; at = dirname(at)) {
+        if (roots.has(at)) return true;
+        if (dirname(at) === at) return false;
+      }
+    };
+    const threads = this.core.threads.list({ includeArchived: true }).filter((thread) => thread.projectId === project.id || near(thread.cwd));
     return Promise.all(threads.map(async (thread) => ({ key: await realKey(thread.cwd), thread })));
   }
 
-  async describe(project: Project, worktree: Listed, holders: { key: string; thread: ThreadSummary }[]): Promise<WorktreeEntry> {
+  async describe(project: Project, worktree: Listed, key: string, holders: { key: string; thread: ThreadSummary }[]): Promise<WorktreeEntry> {
     const missing = !(await exists(worktree.path));
-    const key = await realKey(worktree.path);
     const standing = holders.filter((holder) => inside(key, holder.key)).map((holder) => holder.thread);
     const holder = standing.find((thread) => !thread.archived) ?? standing[0] ?? null;
     const [dirty, unmerged] = await Promise.all([
@@ -283,7 +312,7 @@ export class WorktreeSweep {
   }
 
   async dirty(project: Project, path: string): Promise<boolean> {
-    const status = await this.git(project, path, ['status', '--porcelain=v1', '-z', '--untracked-files=normal'], GIT_READ_TIMEOUT_MS);
+    const status = await this.read(project, path, ['status', '--porcelain=v1', '-z', '--untracked-files=normal']);
     if (status.code !== 0) throw refused(`git status failed in ${path}: ${status.stderr.trim() || `exit ${status.code}`}`, { projectId: project.id, path });
     return status.stdout.length > 0;
   }
@@ -291,39 +320,31 @@ export class WorktreeSweep {
   /** HEAD on no ref but the worktree's own branch. A worktree on an unborn branch has nothing to lose. */
   async unmerged(project: Project, worktree: Listed): Promise<boolean> {
     if (worktree.head === null) return false;
-    const refs = await this.git(project, project.path, ['for-each-ref', '--format=%(refname)', '--contains', worktree.head, 'refs/heads/', 'refs/remotes/'], GIT_READ_TIMEOUT_MS);
+    const refs = await this.read(project, project.path, ['for-each-ref', '--format=%(refname)', '--contains', worktree.head, 'refs/heads/', 'refs/remotes/']);
     if (refs.code !== 0) throw refused(`git for-each-ref failed in ${project.path}: ${refs.stderr.trim() || `exit ${refs.code}`}`, { projectId: project.id });
     const own = worktree.branch === null ? null : `refs/heads/${worktree.branch}`;
     return !refs.stdout.split('\n').some((ref) => ref.length > 0 && ref !== own);
   }
 
   /**
-   * Git through the launcher under the project's trace id. The reads carry
-   * `GIT_OPTIONAL_LOCKS=0` and a deadline, so a status in a worktree an agent
-   * is committing in takes no index lock; a removal has no deadline, since
-   * deleting a large tree takes what it takes.
+   * A read under the project's trace id, through the panels' reader: a
+   * deadline, a shared slot, no index lock and no fsmonitor hook, so a status
+   * in a worktree an agent is committing in takes no lock.
    */
-  private async git(project: Project, cwd: string, args: string[], timeoutMs?: number): Promise<GitRun> {
+  private read(project: Project, cwd: string, args: string[]): Promise<GitRun> {
+    return readGit(this.core, traceId(project.id) as ThreadId, cwd, args, undefined, 'the worktree list');
+  }
+
+  /** A change under the project's trace id. No deadline: deleting a large tree takes what it takes. */
+  private async git(project: Project, cwd: string, args: string[]): Promise<GitRun> {
     let spawned;
     try {
-      spawned = this.core.procs.spawn(traceId(project.id), 'git', args, { cwd, ...(timeoutMs === undefined ? {} : { env: { GIT_OPTIONAL_LOCKS: '0' } }) });
+      spawned = this.core.procs.spawn(traceId(project.id), 'git', args, { cwd });
     } catch (error) {
       throw refused(`git did not start in ${cwd} (${messageOf(error)}): the worktree list needs git on PATH`, { projectId: project.id, cwd });
     }
-    const work = Promise.all([new Response(spawned.proc.stdout).text(), new Response(spawned.proc.stderr).text(), spawned.exited]);
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const late = timeoutMs === undefined ? null : new Promise<never>((_, reject) => {
-      timer = setTimeout(() => {
-        spawned.proc.kill();
-        reject(refused(`git ${args[0] ?? ''} did not answer within ${timeoutMs / 1000} s in ${cwd}`, { projectId: project.id, cwd }));
-      }, timeoutMs);
-    });
-    try {
-      const [stdout, stderr, code] = await (late === null ? work : Promise.race([work, late]));
-      return { code, stdout, stderr };
-    } finally {
-      clearTimeout(timer);
-    }
+    const [stdout, stderr, code] = await Promise.all([new Response(spawned.proc.stdout).text(), new Response(spawned.proc.stderr).text(), spawned.exited]);
+    return { code, stdout, stderr };
   }
 }
 

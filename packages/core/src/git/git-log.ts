@@ -2,8 +2,8 @@ import type { Core } from '../core.ts';
 
 /** Subcommands whose non-zero exit is an answer ("no such ref"), not a failure. */
 const PROBES = new Set(['rev-parse', 'symbolic-ref', 'show-ref', 'merge-base', 'check-ignore']);
-/** These answer only when asked to: `cat-file -e`/`-s`, `diff --quiet`, `ls-files --error-unmatch`; a content read that fails is a failure. */
-const PROBE_FLAGS: Record<string, readonly string[]> = { 'cat-file': ['-e', '-s'], diff: ['--quiet', '--exit-code'], 'ls-files': ['--error-unmatch'] };
+/** These answer only when asked to: `cat-file -e`/`-s`, `diff --quiet`, `ls-files --error-unmatch`, `config --get` of an unset key; a content read that fails is a failure. */
+const PROBE_FLAGS: Record<string, readonly string[]> = { 'cat-file': ['-e', '-s'], diff: ['--quiet', '--exit-code'], 'ls-files': ['--error-unmatch'], config: ['--get'] };
 
 function probes(subcommand: string, args: readonly string[]): boolean {
   return PROBES.has(subcommand) || (PROBE_FLAGS[subcommand]?.some(flag => args.includes(flag)) ?? false);

@@ -48,7 +48,10 @@ export function registerGitMethods(core: Core): void {
   core.router.register('git.diff', (params, ctx) => {
     if (ctx.connection.identity.principal === 'session') {
       assertDeviceReadable(core, params.threadId);
-      assertDeviceFile(core, params.threadId, threadCwd(core, params.threadId), params.path);
+      const cwd = threadCwd(core, params.threadId);
+      assertDeviceFile(core, params.threadId, cwd, params.path);
+      // The origin is read too, at HEAD: it answers to the same rules as the path.
+      if (typeof params.oldPath === 'string') assertDeviceFile(core, params.threadId, cwd, params.oldPath);
     }
     return gitDiff(core, params);
   });

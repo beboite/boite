@@ -28,6 +28,29 @@ test('links persist, deduplicate concurrent requests, refresh states and unlink 
   expect(harness.core.journal.getSetting('linked-pull-requests:' + threadId)).toBeUndefined();
 });
 
+test('a linked PR stored as merged is read again only when the user refreshes', async () => {
+  const owner = await harness.connect(), { threadId } = await echoThread(harness, owner);
+  const calls: string[] = [];
+  const states: Record<number, LinkedPullRequest['state']> = { 1: 'MERGED', 2: 'OPEN', 3: 'CLOSED' };
+  const links = new LinkedPullRequests(harness.core, async (_threadId, url) => {
+    calls.push(url);
+    const number = pullRequestAddress(url).number;
+    return { ...pr(number), state: states[number]! };
+  });
+  for (const number of [1, 2, 3]) await links.link(threadId, pr(number).url);
+  calls.length = 0;
+  const now = Date.now.bind(Date);
+  const clock = spyOn(Date, 'now').mockImplementation(() => now() + 61_000);
+  try {
+    // A minute later the open and the closed PR are read again; the merged one is kept as stored.
+    expect((await links.list(threadId)).map(p => [p.number, p.state])).toEqual([[1, 'MERGED'], [2, 'OPEN'], [3, 'CLOSED']]);
+    expect(calls.sort()).toEqual([pr(2).url, pr(3).url]);
+    calls.length = 0;
+    expect((await links.list(threadId, true)).map(p => p.number)).toEqual([1, 2, 3]);
+    expect(calls.sort()).toEqual([pr(1).url, pr(2).url, pr(3).url]);
+  } finally { clock.mockRestore(); }
+});
+
 test('dependency ordering separates repositories, forks and ambiguous branch names and terminates on cycles', () => {
   expect(orderPullRequests([pr(3, 'feature-2'), pr(1), pr(2, 'feature-1')]).map(p => p.number)).toEqual([1, 2, 3]);
   expect(orderPullRequests([pr(2, 'feature-1'), { ...pr(1), headRepository: 'fork/repo' }]).map(p => p.number)).toEqual([2, 1]);

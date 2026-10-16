@@ -192,6 +192,19 @@ history; selection yields every eight rows and shares a scheduler snapshot only
 within that synchronous group. Family, input, result and checkout guards remain
 fresh after asynchronous validation and immediately before the archive write.
 Large retained families and unindexed branch-holder checks can still cost more.
+Proofs share one `git remote -v` and one `gh pr list` per repository with the
+sidebar badges, and a thread without a merged PR waits 5 minutes, then up to
+an hour, before its next proof. Four unmerged worktree threads cost 2 processes
+on the first pass and none on the next ones, against 12 and then 8 a minute
+before ([bench/results/2026-10-15-perf-git.md](../bench/results/2026-10-15-perf-git.md)).
+
+Short git reads (30 seconds or less) share eight slots per core; a read waits
+for a free one before its git starts, and the wait does not count against its
+deadline. The Changes panel sends the rename origin its list gave, so
+`git.diff` runs one `git cat-file --batch -z` instead of a status walk and
+three gits: 24.2 to 5.9 ms on a 500-file repository. `worktrees.list`
+describes four worktrees at once and resolves only the threads of the project
+and of its folders: 50 worktrees list in 279 ms instead of 606 ms.
 
 The [dated stress report](../bench/results/2026-09-29-resources.md#stress-measurements-2026-09-29-and-2026-09-30)
 preserves the Windows Bun 1.4.2 runs, tables and failed 1,000-start attempts from

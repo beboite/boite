@@ -60,6 +60,8 @@ async function fixture() {
     holdGh: () => { ghGate = join(harness.dataDir, 'gh-gate'); },
     releaseGh: () => { if (ghGate) writeFileSync(ghGate, 'ready'); },
     ghCalls: () => ghCalls,
+    /** Every process the core spawned since the fixture started, as `<command> <first argument>`. */
+    spawned: () => replacement.mock.calls.map(([, command, args]) => `${command} ${args[0]}`),
   };
 }
 
@@ -143,6 +145,59 @@ test('large archive sweeps bound hydration, yield to owner RPCs and advance beyo
   } finally { proof.mockRestore(); enumerations.mockRestore(); hydration.mockRestore(); scheduler.mockRestore(); }
 });
 
+test('unmerged worktree threads cost one git and one gh call per pass, then wait longer before each new proof', async () => {
+  const f = await fixture();
+  const journal = harness.core.journal;
+  const original = harness.core.threads.require(f.threadId);
+  const ids = [f.threadId];
+  for (let index = 1; index < 4; index++) {
+    const checkout = join(harness.dataDir, `worktree-${index}`);
+    git(f.repo, 'worktree', 'add', '-q', '-b', `topic-${index}`, checkout);
+    journal.putThread({ ...original, id: `unmerged-${index}`, cwd: checkout, branch: `topic-${index}` });
+    ids.push(`unmerged-${index}`);
+  }
+  const open = ['topic', 'topic-1', 'topic-2', 'topic-3'].map((branch, index) => ({ ...f.candidates[0]!, number: 10 + index, url: `https://github.com/example/repo/pull/${10 + index}`, state: 'OPEN', headRefName: branch }));
+  f.setCandidates(open);
+  const proved = spyOn(harness.core.pullRequests, 'proveMerged');
+  const now = Date.now.bind(Date);
+  let elapsed = 0;
+  const clock = spyOn(Date, 'now').mockImplementation(() => now() + elapsed);
+  const passes: { proofs: number; spawned: string[] }[] = [];
+  const sweep = async (expected = 0) => {
+    const proofs = proved.mock.calls.length, spawned = f.spawned().length;
+    expect(await service.sweep()).toBe(expected);
+    passes.push({ proofs: proved.mock.calls.length - proofs, spawned: f.spawned().slice(spawned) });
+    return passes.at(-1)!;
+  };
+  try {
+    // Four open pull requests: one remote read and one list for the repository, no status walk.
+    expect(await sweep()).toEqual({ proofs: 4, spawned: ['git remote', 'gh pr'] });
+    expect(await sweep()).toEqual({ proofs: 0, spawned: [] });
+    expect(await sweep()).toEqual({ proofs: 0, spawned: [] });
+    // An updated thread is proved again at once, from what the repository reads kept.
+    journal.putThread({ ...journal.getThread(ids[1]!)!, updatedAt: original.updatedAt + 1 });
+    const updated = await sweep();
+    expect(updated.proofs).toBe(1);
+    expect(updated.spawned).not.toContain('git status');
+    // Five minutes later every thread is asked again; the next wait is ten minutes.
+    elapsed = 5 * 60_000 + 1;
+    expect(await sweep()).toEqual({ proofs: 4, spawned: ['git remote', 'gh pr'] });
+    elapsed += 5 * 60_000;
+    expect((await sweep()).proofs).toBe(0);
+    elapsed += 5 * 60_000;
+    expect((await sweep()).proofs).toBe(4);
+    // A merge is found once the thread changes, and only that checkout's status is walked.
+    f.setCandidates([{ ...open[0]!, state: 'MERGED' }, ...open.slice(1)]);
+    journal.putThread({ ...journal.getThread(f.threadId)!, updatedAt: original.updatedAt + 2 });
+    elapsed += 15_001;
+    const merged = await sweep(1);
+    expect(merged.proofs).toBe(1);
+    expect(merged.spawned.filter(command => command === 'git status')).toHaveLength(2);
+    expect(merged.spawned.filter(command => command === 'gh pr')).toHaveLength(1);
+    console.log('archive-spawn-measurement', JSON.stringify({ threads: 4, passes }));
+  } finally { proved.mockRestore(); clock.mockRestore(); }
+});
+
 test('archive rowid cycles revisit old candidates while appends and replacements continue', async () => {
   const f = await fixture();
   const journal = harness.core.journal;
@@ -152,6 +207,9 @@ test('archive rowid cycles revisit old candidates while appends and replacements
   for (const id of ids) journal.putThread({ ...original, id, branch: id, cwd: join(f.checkout, id) });
   const proved: string[] = [];
   const proof = spyOn(harness.core.pullRequests, 'proveMerged').mockImplementation(async thread => { proved.push(thread.id); return null; });
+  const now = Date.now.bind(Date);
+  let elapsed = 0;
+  const clock = spyOn(Date, 'now').mockImplementation(() => now() + elapsed);
   try {
     expect(await service.sweep()).toBe(0);
     expect(proved).toEqual(ids.slice(0, 8));
@@ -161,13 +219,15 @@ test('archive rowid cycles revisit old candidates while appends and replacements
     expect(await service.sweep()).toBe(0);
     expect(proved.slice(8)).toEqual([ids[8]!]);
     for (let index = 32; index < 64; index++) journal.putThread({ ...original, id: `append-${index}`, archived: true });
+    // Threads proved unmerged wait five minutes before the next proof.
+    elapsed = 5 * 60_000 + 1;
     const secondCycle = proved.length;
     expect(await service.sweep()).toBe(0);
     expect(proved.slice(secondCycle)).toHaveLength(8);
     for (let index = 64; index < 96; index++) journal.putThread({ ...original, id: `append-${index}`, archived: true });
     expect(await service.sweep()).toBe(0);
     expect(proved.slice(secondCycle)).toContain(ids[0]!);
-  } finally { proof.mockRestore(); }
+  } finally { proof.mockRestore(); clock.mockRestore(); }
 });
 
 test('root mutations during archive selection yields are observed before proof admission', async () => {
@@ -340,8 +400,8 @@ test('canceling one proof consumer preserves the coalesced consumer and its owni
   try {
     await waitFor(() => f.ghCalls() === 1);
     b = harness.core.pullRequests.proveMerged(thread, second.signal);
-    // Status, remote, then the shared proof lease have each registered cancellation.
-    await waitFor(() => subscriptions.mock.calls.length >= 3);
+    // The shared remote read, then the shared pull request list have each registered cancellation.
+    await waitFor(() => subscriptions.mock.calls.length >= 2);
     first.abort();
     expect(await a).toBeNull();
     f.releaseGh();
