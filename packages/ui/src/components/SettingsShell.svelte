@@ -167,6 +167,7 @@ import { workspace } from '../lib/workspace.svelte';
     ['machines', 'phone', strings.phone.publicUrl],
     ['machines', 'machines', strings.machines.main],
     ['advanced', 'execution', strings.settings.warmProcessMinutes],
+    ['limits', 'limit-resume', strings.quotas.autoResume],
     ['diagnostics', 'diagnostics-status', strings.diagnostics.export],
     ['diagnostics', 'diagnostics-status', strings.diagnostics.report],
     ['diagnostics', 'diagnostics-log', strings.diagnostics.search]

@@ -1,7 +1,7 @@
 import type { AgentsRpcMethods, AgentsRpcEvents } from './agents';
 import type { WorkflowsRpcMethods, WorkflowsRpcEvents } from './workflows';
 import type { BrowserRpcMethods, BrowserRpcEvents, BrowserProfile } from './browser';
-import type { PullRequestsRpcMethods, PullRequestsRpcEvents } from './pull-requests';
+import type { PullRequestsRpcMethods, PullRequestsRpcEvents, PullRequestWatch } from './pull-requests';
 import type { MobileDevicesRpcMethods, MobileDevicesRpcEvents } from './mobile-devices';
 import type { CoreLogContext, CoreLogLevel, CoreLogRecord, CoreLogsQuery, DiagnosticsRpcMethods } from './diagnostics';
 export * from './diagnostics';
@@ -1133,6 +1133,12 @@ export interface ThreadSummary {
   /** Answers accepted by the core, waiting for the running agent or the next turn. In memory only. */
   pendingAnswers?: string[];
   /**
+   * The pull requests the thread's agent watches (`threads.watchPullRequest`):
+   * a thread at rest with one reads as watching, not done, since the watch
+   * will wake it. Empty when none; missing on older cores.
+   */
+  pullRequestWatches?: PullRequestWatch[];
+  /**
    * Questions the agent asked without stopping (`boite ask`, Codex's own)
    * that still wait for the user. The status stays `running` or `idle`, so a
    * row reads this to say the thread needs the user. Missing on older cores.
@@ -1164,8 +1170,36 @@ export interface ThreadSummary {
    * lifetime is unknown or no turn has finished. Missing on older cores.
    */
   promptCache?: PromptCache | null;
+  /**
+   * What the core plans to try again by itself after a provider refused a
+   * turn for availability (`ThreadRetry`). Null when nothing is planned;
+   * missing on older cores.
+   */
+  retry?: ThreadRetry | null;
   createdAt: Timestamp;
   updatedAt: Timestamp;
+}
+
+/**
+ * An automatic retry the core planned after a provider refused a turn for
+ * availability rather than for a fault of the request (docs/usage.md).
+ * `capacity`: the model was at capacity; the same turn tries again at `at`,
+ * the `attempt`th of `attempts` tries, and the thread stays running meanwhile.
+ * `usage-limit`: the subscription window was spent and `autoResumeLimitedThreads`
+ * is on; a new turn resumes the thread at `at`, shortly after `resetsAt`, and
+ * the plan survives a core restart. `turns.cancelRetry` or Stop cancels either.
+ */
+export interface ThreadRetry {
+  kind: 'capacity' | 'usage-limit';
+  /** The turn the provider refused. */
+  turnId: TurnId;
+  /** When the core tries again. */
+  at: Timestamp;
+  /** This try's number, from 1; always 1 for a usage limit. */
+  attempt: number;
+  attempts: number;
+  /** When the spent window resets, for a usage limit; null for capacity. */
+  resetsAt: Timestamp | null;
 }
 
 export interface Usage {
@@ -1255,8 +1289,10 @@ export type TurnExecution = Pick<ThreadSummary,
    * started finished; the turn carries no prompt of the user's.
    * `resume`: the core restarted over a running turn and opened this one so
    * the agent carries on (`docs/restart-handoff.md`).
+   * `pull-request`: a pull request the agent watches needs a look; the turn
+   * carries what changed (`threads.watchPullRequest`).
    */
-  operation?: 'compact' | 'coordination' | 'delegation' | 'background' | 'resume';
+  operation?: 'compact' | 'coordination' | 'delegation' | 'background' | 'resume' | 'pull-request';
   /** A `compact` the core opened by the `autoCompact` setting, not one the user asked for. */
   automatic?: true;
 };
@@ -1287,14 +1323,14 @@ export interface Turn {
 /**
  * Whether Boite opened this turn itself to carry on the user's last request:
  * background work it left finished, a delegated agent or another agent wrote
- * back, the core resumed after a restart, or the context was compacted on its
- * own. The user's message, not this turn, is where the request started.
+ * back, a pull request it watches changed, the core resumed after a restart,
+ * or the context was compacted on its own. The user's message, not this turn, is where the request started.
  */
 export function continuesRequest(turn: Pick<Turn, 'execution'>): boolean {
   const execution = turn.execution;
   if (!execution) return false;
   const operation = execution.operation;
-  return operation === 'background' || operation === 'delegation' || operation === 'coordination' || operation === 'resume' || execution.automatic === true;
+  return operation === 'background' || operation === 'delegation' || operation === 'coordination' || operation === 'resume' || operation === 'pull-request' || execution.automatic === true;
 }
 
 /** Queue order: `queuedAt`, then id, so every client and the core agree on a tie. */
@@ -2187,6 +2223,12 @@ export interface Settings {
    * machine it controls. Missing on older cores and before the first star.
    */
   modelFavorites?: ModelFavorites;
+  /**
+   * A turn that failed on a subscription usage limit resumes by itself once
+   * that limit's window resets: one new turn per window and thread, with a
+   * short continue prompt (docs/usage.md). Missing reads as off.
+   */
+  autoResumeLimitedThreads?: boolean;
 }
 
 /** One starred model. Accounts are named by label: an id means nothing on another machine. */
@@ -2353,6 +2395,63 @@ export interface ImportableSession {
   bytes: number;
   /** The thread that already carries this session, so it is not imported twice. */
   threadId: ThreadId | null;
+}
+
+/** The longest text of one system block `threads.agentShape` sends; the rest stays on disk. */
+export const AGENT_SHAPE_BLOCK_MAX = 32_000;
+/** The text of every system block together, after which blocks keep their size but lose their text. */
+export const AGENT_SHAPE_TEXT_BUDGET = 200_000;
+/** System blocks and tools listed by `threads.agentShape`; the rest are counted in the totals only. */
+export const AGENT_SHAPE_ITEMS_MAX = 256;
+
+/** One block of the system prompt the agent sent. */
+export interface AgentShapeBlock {
+  /** Its length in characters, whole. */
+  chars: number;
+  /** Its text, cut at `AGENT_SHAPE_BLOCK_MAX` or by `AGENT_SHAPE_TEXT_BUDGET`. */
+  text: string;
+  truncated: boolean;
+}
+
+/** One tool definition the agent sent. */
+export interface AgentShapeTool {
+  name: string;
+  descriptionChars: number;
+  /** The whole definition as JSON: name, description and input schema. */
+  chars: number;
+}
+
+/**
+ * What the agent's last API request started with: the system prompt and tool
+ * definitions Claude Code wrote into its session transcript (CLI 2.1.300 and
+ * later), and the request's parameters. `status` says why the rest is empty:
+ * `no-session` before the first turn, `no-transcript` when the file is gone,
+ * `unrecorded` when the CLI wrote no request shape (older than 2.1.300).
+ * Sizes are characters; `estimatedTokens` is characters divided by four, an
+ * estimate and not the provider's count.
+ */
+export interface AgentShape {
+  threadId: ThreadId;
+  status: 'ready' | 'no-session' | 'no-transcript' | 'unrecorded';
+  sessionId: string | null;
+  /** The Claude Code version that wrote the request. */
+  version: string | null;
+  /** When the request was sent. */
+  at: Timestamp | null;
+  model: string | null;
+  effort: string | null;
+  /** The `thinking` type, with its token budget when it has one. */
+  thinking: string | null;
+  betas: string[];
+  maxTokens: number | null;
+  /** In the order they were sent. */
+  system: AgentShapeBlock[];
+  /** Largest first. */
+  tools: AgentShapeTool[];
+  /** System blocks and tools past `AGENT_SHAPE_ITEMS_MAX`, counted in `chars` but not listed. */
+  omitted: { system: number; tools: number };
+  chars: { system: number; tools: number };
+  estimatedTokens: number;
 }
 
 /** What `<dataDir>/keybindings.json` says, as the core last read it. */
@@ -4303,6 +4402,8 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   /** Transfer one validated attachment before Send. The lease belongs to this connection. */
   'attachments.upload': { params: { attachment: Attachment }; result: { id: string } };
   'attachments.release': { params: { ids: string[] }; result: { ok: true } };
+  /** The system prompt, tools and parameters of a Claude thread's last request, read from its transcript. Refused on other providers. */
+  'threads.agentShape': { params: { threadId: ThreadId }; result: AgentShape };
   /** Supported operations and their current availability for this thread. */
   'threads.capabilities': { params: { threadId: ThreadId }; result: ThreadCapabilities };
   /**
@@ -4513,6 +4614,12 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'turns.stop': { params: { threadId: ThreadId }; result: { stopped: boolean } };
   /** Resume or discard exactly one unsent prompt held after restart, retaining its execution selection. */
   'turns.recover': { params: { threadId: ThreadId; turnId: TurnId; action: 'resume' | 'discard' }; result: Turn };
+  /**
+   * Cancels the retry the core planned for the thread (`ThreadSummary.retry`).
+   * A capacity retry's turn then fails with the provider's refusal; a usage
+   * limit resume is dropped. False when nothing was planned.
+   */
+  'turns.cancelRetry': { params: { threadId: ThreadId }; result: { cancelled: boolean } };
 
   /**
    * The requests still unanswered, in the order they were created; every thread

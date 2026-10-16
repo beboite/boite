@@ -70,6 +70,8 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'threads.pullRequest', // Read-only branch metadata shown on the same phone thread cards.
   'threads.pullRequests', // Read-only conversation links, including dependency order, on phones.
   'threads.pullRequestReview', 'threads.pullRequestFiles', // Bounded read-only data for PRs the owner already linked.
+  // Stopping a pull request watch only ends Boite's own polling: the phone's button beside the watch, never a GitHub write.
+  'threads.unwatchPullRequest',
   'browser.remoteFrame', 'browser.remoteInput', // Only the subscribed conversation's agent browser; taps, keys and http(s) addresses, no scripts or host paths.
   'browser.remoteSelection', // The text selected in that same page, password fields excluded: what the frames already show, as text.
   'browser.remoteStatus', // The subscribed conversation's agent tabs (address and title) and whether this machine has a browser.
@@ -128,6 +130,8 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'turns.stop',
   // A paired phone can resume or discard the same retained prompt as the owner.
   'turns.recover',
+  // Cancelling a planned retry spends nothing and does less than turns.stop, which a phone already has.
+  'turns.cancelRetry',
   // The point of carrying the phone: answering the agent from anywhere.
   'permissions.list',
   'permissions.answer',

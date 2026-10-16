@@ -21,6 +21,7 @@
    * read: the one place monitoring is turned on or off.
    */
   let { store, showTitle = true }: { store: Store; showTitle?: boolean } = $props();
+  const uid = $props.id();
   let native = $state(false);
   const proxy = $derived(store.settings?.subscriptionProxy);
   const proxyEnabled = $derived(proxy?.enabled === true);
@@ -74,6 +75,12 @@
 
   function refresh() {
     if (store.client) void reader.read(store.client, true).catch(() => {});
+  }
+
+  /** A switch saves when it flips; a refusal puts it back. */
+  async function toggleAutoResume(input: HTMLInputElement) {
+    const ok = await store.saveSettings({ autoResumeLimitedThreads: input.checked });
+    if (!ok) input.checked = store.settings?.autoResumeLimitedThreads === true;
   }
 
   async function monitor(accountId: string, enabled: boolean) {
@@ -153,6 +160,15 @@
       {/each}
     </section>
   {/if}
+  {#if store.owner && store.settings && !dashboard}
+    <section class="card resume" id="settings-limit-resume">
+      <label for="{uid}-resume" class="switch-row">
+        <span class="text ui-label-box"><span class="ui-label" id="{uid}-resume-name">{strings.quotas.autoResume}</span><InfoTip topic={strings.quotas.autoResume} text={strings.quotas.autoResumeHint} /></span>
+        <input id="{uid}-resume" type="checkbox" role="switch" data-testid="setting-auto-resume" aria-labelledby="{uid}-resume-name"
+          checked={store.settings.autoResumeLimitedThreads === true} onchange={(event) => void toggleAutoResume(event.currentTarget)} />
+      </label>
+    </section>
+  {/if}
   {#if store.owner}<details class="disclosure"><summary><span class="ui-label">{strings.subscriptionProxy.configure}</span></summary><SubscriptionProxySettings {store} /></details>{/if}
   {/if}
 </div>
@@ -167,6 +183,7 @@
   .refresh { flex: none; margin-left: auto; width: var(--control); height: var(--control); padding: 0; }
   .refresh :global(.spinning) { animation: spin 900ms linear infinite; }
   .muted { margin: 0; color: var(--color-muted-foreground); font-size: var(--text-sm); }
+  .resume { max-width: var(--settings-width); margin-top: 12px; padding: 6px var(--settings-padding); }
   .tracked { display: grid; gap: 2px; max-width: var(--settings-width); margin-top: 12px; padding: var(--settings-padding); }
   .tracked h2 { display: flex; align-items: center; margin: 0 0 8px; font-size: var(--text-base); font-weight: 600; }
   .track-row { display: flex; align-items: center; gap: 10px; min-height: var(--row); cursor: pointer; }

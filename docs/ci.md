@@ -151,19 +151,30 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 593,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,961,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,982,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,233,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,256,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
-On 2026-10-15, shared git reads, checkpoint blobs and merged-PR backoff
-(PR #526) merged with `6961d5d9` measured 4,162,110 core JavaScript bytes after
-a clean `bun run build:core` on Linux, against 4,151,081 for that main: the
+On 2026-10-16, the dialog showing what a Claude thread sends (PR #501) merged
+with `origin/main` at `4eec5562` measures 4,975,415 UI bytes and 4,237,867 core
+JavaScript bytes after fresh `bun run build:ui` and `bun run build:core` on
+Linux, against 4,958,781 and 4,231,749 for that main: the dialog, its strings in
+both languages and the store add 16,634 UI bytes, the reader of the recorded
+request 6,118 core bytes. On `d11f6d16` Windows CI measured the UI about 5,000
+bytes above Linux. The limits become 4,982,000 and 4,240,000; the entry and
+`main.js` limits stay unchanged. The core row before this showed 4,161,000
+while `budgets.json` held the 4,233,000 PR #505 set.
+
+On 2026-10-16, shared git reads, checkpoint blobs and merged-PR backoff
+(PR #526) merged with `0f480824` measure 4,249,057 core JavaScript bytes after
+a clean `bun run build:core` on Linux, against 4,237,867 for that main: the
 shared checkpoint store, the batch diff read, the eight read slots, the
-worktree pool and the merged-PR proof backoff. Merged with `06e5d666`, whose
-limits are 4,961,000 UI and 4,233,000 core bytes after PR #505, it measures
-4,940,350 and 4,166,960, within them; no limit changes.
+worktree pool and the merged-PR proof backoff add 11,190 bytes. Windows CI
+measured 4,242,898 for the same code merged with `4eec5562`, in line with
+Linux. The core limit becomes 4,256,000; the UI, entry and `main.js` limits
+stay unchanged.
 
 On 2026-10-15, views placed inside an answer (PR #502), merged with PR #503,
 measure 4,938,784 UI bytes and 4,151,081 core JavaScript bytes after fresh

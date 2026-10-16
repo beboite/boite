@@ -14,6 +14,7 @@ import {
   type RpcParams,
   type RpcResult,
   type ThreadId,
+  type ThreadRetry,
   type ThreadWorktreeRemoval,
 } from '@boite/contracts';
 import { RpcFailure, type CallOptions, type ClientState, type EventHandler, type ObservableClient } from './client';
@@ -45,6 +46,7 @@ import { DEVICE_METHODS, toSummary } from './fake-client/shared';
 import { speechMethods } from './fake-client/speech';
 import { terminalMethods } from './fake-client/terminals';
 import { capabilityMethods } from './fake-client/capabilities';
+import { agentShapeMethods } from './fake-client/agent-shape';
 import { deleteExpiredDoneThreads, purgeDeletedThreads, threadMethods } from './fake-client/threads';
 import { threadMoveMethods } from './fake-client/thread-move';
 import { spawnMethods } from './fake-client/spawn';
@@ -55,6 +57,7 @@ import { devicesMethods } from './fake-client/devices';
 import { pullRequestMethods } from './fake-client/pull-requests';
 import { worktreeMethods } from './fake-client/worktrees';
 import { serverUpdateMethods } from './fake-client/server-update';
+import { planRetry, retryMethods, seedRetry } from './fake-client/retry';
 import { closeSideQuestions } from './fake-client/side-questions';
 import { holdAfterRestart } from './fake-client/recovery';
 import { journalInspectionMethods } from './fake-client/journal-inspection';
@@ -99,6 +102,15 @@ export class FakeClient implements ObservableClient {
     seed(ctx);
     if (options.delegationDemo) seedDelegationDemo(ctx);
     if (options.agentsDemo) seedAgentsDemo(ctx);
+    seedRetry(ctx);
+    if (options.watchDemo) {
+      const at = Date.now();
+      const watch = (number: number) => ({ url: `https://github.com/beboite/boite/pull/${number}`, repository: 'beboite/boite', number, since: at - 600_000 });
+      ctx.thread('t-trace').pullRequestWatches = [
+        { ...watch(512), paused: null, seen: { checkedAt: at - 30_000, head: '3e535df', base: 'main', checks: { total: 26, running: 4, failed: 1 }, conflicting: false } },
+        { ...watch(498), paused: { reason: 'rate-limit', until: at + 240_000, message: 'API rate limit exceeded' }, seen: { checkedAt: at - 300_000, head: '2f257f4', base: 'main', checks: { total: 26, running: 0, failed: 0 }, conflicting: true } },
+      ];
+    }
     if (options.uninstalled) {
       ctx.providers = ctx.providers.filter(provider => provider.id !== 'echo').map(provider => ({
         ...provider, available: false, executable: null,
@@ -156,6 +168,11 @@ export class FakeClient implements ObservableClient {
   holdAfterRestart(threadId: ThreadId, prompt: string) {
     return holdAfterRestart(this.#ctx, threadId, prompt);
   }
+  /** A fixture for a retry the core planned: the thread's row carries it until it is cancelled. */
+  planRetry(threadId: ThreadId, retry: ThreadRetry) {
+    planRetry(this.#ctx, threadId, retry);
+  }
+
 
   /**
    * Takes a folder off the fake's disk, as a repository deleted outside the
@@ -406,6 +423,7 @@ export class FakeClient implements ObservableClient {
       ...brainMethods(ctx),
       ...logMethods(ctx),
       ...serverUpdateMethods(ctx),
+      ...retryMethods(ctx),
       ...hookMethods(ctx),
       ...pairingMethods(ctx),
       ...projects,
@@ -413,6 +431,7 @@ export class FakeClient implements ObservableClient {
       ...threads,
       ...startupMethods(ctx, threads),
       ...capabilityMethods(ctx),
+      ...agentShapeMethods(ctx),
       ...forkReturnMethods(ctx),
       ...journalInspectionMethods(ctx),
       ...threadMoveMethods(ctx),

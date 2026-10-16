@@ -136,6 +136,13 @@ compact again. The timers live in memory: a core restart drops them, and the
 next finished turn arms a new one. The in-memory client implements `turn-end`
 and the threshold only; it has no background work and no cache to wait on.
 
+## Turns a provider refused
+
+A turn refused because the model was at capacity tries again by itself, and a
+thread stopped by a usage limit can resume once the window resets (opt-in).
+Both, their prompts and their guards are in
+[usage](usage.md#when-a-provider-refuses-a-turn).
+
 ## Pending prompts, goals and loops
 
 Enter during a running turn queues the message and its attachments; where the
@@ -359,6 +366,39 @@ The smaller ring opens details; it never starts compaction. The popup uses
 accent for uncached input, green for cached input, yellow for output and a
 neutral remainder for free capacity. These are provider token categories,
 not an estimated split between system instructions, files and tools.
+
+## What the agent sees
+
+On a Claude thread the context popup has a "What the agent sees" button. It
+opens the system prompt and the tool definitions of the thread's last API
+request, with that request's model, effort, thinking type, output limit,
+betas, Claude Code version and time. System blocks keep their order and
+expand to their text; tools are sorted largest first. Sizes are characters.
+The token figure is the characters of both divided by four, labelled as an
+estimate: it is not the provider's count and leaves out the messages.
+
+`threads.agentShape { threadId }` reads it, owner-only, and refuses a thread
+whose provider is not on the `claude-sdk` protocol with `field: 'providerId'`.
+The source is the session transcript, at
+`<config dir>/projects/<cwd, every non-alphanumeric character as ->/<sessionId>.jsonl`,
+the config directory being the account's isolation directory, else the
+provider's default (`CLAUDE_CONFIG_DIR`, then `~/.claude`), as
+[imports](../packages/core/src/imports.ts) finds it. Claude Code 2.1.300 and
+later write an `api-request-shape` record per distinct system and tool set and
+an `api-request` record per request naming its shape by hash
+(`packages/core/src/imports/claude-shape.ts`). The core reads the file
+backwards in 1 MiB chunks, decodes only lines carrying one of the two record
+types, skips lines above 8 MiB, and stops at the shape the last request names.
+The answer for a file is reused while its size and modification time hold.
+
+`status` explains an empty answer: `no-session` before the first turn,
+`no-transcript` when the file is gone, `unrecorded` when the CLI wrote no
+request shape (versions before 2.1.300). Each system block's text is cut at
+`AGENT_SHAPE_BLOCK_MAX` (32 000 characters) and all blocks together at
+`AGENT_SHAPE_TEXT_BUDGET` (200 000); a cut block says so and keeps its full
+size. At most `AGENT_SHAPE_ITEMS_MAX` (256) blocks and tools are listed; the
+rest are counted in the totals and in `omitted`. The in-memory client answers
+with a fixture shape written for it.
 
 ## Side questions
 

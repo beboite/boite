@@ -39,6 +39,8 @@ export class LinkedPullRequests {
     this.core.threads.require(threadId);
     return (this.core.journal.getSetting(PREFIX + threadId) as LinkedPullRequest[] | undefined) ?? [];
   }
+  /** The links as saved, without asking GitHub. */
+  saved(threadId: string): LinkedPullRequest[] { return this.stored(threadId); }
   requireLink(threadId: string, input: string): string {
     const { url } = pullRequestAddress(input);
     if (!this.stored(threadId).some(pr => pr.url.toLowerCase() === url.toLowerCase())) throw refused('link this pull request to the conversation before reading its review');

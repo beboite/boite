@@ -1,6 +1,7 @@
 import type { SDKAssistantMessage, SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { MessageId, MessagePart, ToolDocument, ToolStatus, Usage } from '@boite/contracts';
-import type { PromptCacheLife, TurnContext, TurnResult } from '../types.ts';
+import type { PromptCacheLife, TurnContext, TurnRefusal, TurnResult } from '../types.ts';
+import { isoTime } from './diagnostics.ts';
 import {
   apiErrorReason,
   apiErrorStatusOf,
@@ -101,6 +102,10 @@ export class ClaudeTurn {
   private authFrame: { content: unknown } | null = null;
   private status: TurnResult['status'] = 'done';
   private error: string | null = null;
+  /** Availability refusal the API error named: `overloaded` or a spent subscription window. */
+  private refusal: TurnRefusal | undefined;
+  /** When the window the CLI reported rejected resets (`rate_limit_event`), in milliseconds. */
+  private rejectedUntil: number | null = null;
   private resolve: (result: TurnResult) => void = () => undefined;
   private wake: () => void = () => undefined;
 
@@ -156,6 +161,7 @@ export class ClaudeTurn {
       error: this.error ?? undefined,
       promptCache: this.cacheLife,
       ...(this.sessionLost ? { sessionLost: true } : {}),
+      ...(this.status === 'error' && this.refusal ? { refusal: this.refusal } : {}),
       ...(this.sessionId !== null && this.lastEntry !== null ? { checkpoint: { sessionId: this.sessionId, entry: this.lastEntry } } : {}),
     });
   }
@@ -193,6 +199,9 @@ export class ClaudeTurn {
         break;
       case 'tool_use_summary':
         this.summarizeTools(message.preceding_tool_use_ids, message.summary);
+        break;
+      case 'rate_limit_event':
+        this.noteRateLimit(message.rate_limit_info as { status?: unknown; resetsAt?: unknown } | null | undefined);
         break;
       default:
         break;
@@ -312,6 +321,15 @@ export class ClaudeTurn {
     this.ctx.log('warn', `claude: the subagent of ${parentToolId} hit an error: ${errorSentence(message.error)}`);
   }
 
+  /** A rejected window's reset, kept for a usage limit failure that follows; an allowed one clears it. */
+  private noteRateLimit(info: { status?: unknown; resetsAt?: unknown } | null | undefined): void {
+    if (info === null || info === undefined) return;
+    if (info.status === 'allowed') { this.rejectedUntil = null; return; }
+    if (info.status !== 'rejected') return;
+    const at = isoTime(info.resetsAt);
+    if (at !== null) this.rejectedUntil = Date.parse(at);
+  }
+
   private handleAssistant(message: SDKAssistantMessage): void {
     if (message.error !== undefined) {
       const content = (message.message as { content?: unknown } | undefined)?.content;
@@ -321,6 +339,7 @@ export class ClaudeTurn {
         else this.authFrame = { content };
         return;
       }
+      if (this.status !== 'error') this.refusal = message.error === 'overloaded' ? { kind: 'capacity' } : message.error === 'rate_limit' ? { kind: 'usage-limit', resetsAt: this.rejectedUntil } : undefined;
       this.fail(apiErrorReason(message.error, content));
       return;
     }

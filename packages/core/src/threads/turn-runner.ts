@@ -1,4 +1,4 @@
-import type { PermissionMode, ProviderId, ThreadId, ThreadSummary, Turn, TurnId } from '@boite/contracts';
+import type { PermissionMode, ProviderId, ThreadId, ThreadRetry, ThreadSummary, Turn, TurnId } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { getDriver, releaseThread } from '../drivers/index.ts';
 import type { TurnResult } from '../drivers/types.ts';
@@ -46,6 +46,16 @@ export class TurnRunner {
   /** Withdraws a pause not yet taken. */
   cancelPause(threadId: ThreadId): void {
     this.attempts.cancelPause(threadId);
+  }
+
+  /** The capacity retry the thread's turn waits for, or null. */
+  retryOf(threadId: ThreadId): ThreadRetry | null {
+    return this.attempts.retryOf(threadId);
+  }
+
+  /** Gives up a capacity retry: the turn fails with the refusal. False when none waits. */
+  cancelRetry(threadId: ThreadId): boolean {
+    return this.attempts.cancelRetry(threadId);
   }
 
   /** True while the thread's turn waits for its agent's update. */
@@ -170,6 +180,8 @@ export class TurnRunner {
     // A thread an agent started answers it before a failure pauses its coordination.
     await this.threads.spawns.finished(finished);
     if (result.status !== 'done') this.core.coordination.pause(threadId);
+    // A spent subscription window: the thread may resume by itself once it resets (`threads/limit-resume.ts`).
+    if (result.status === 'error' && result.refusal?.kind === 'usage-limit' && !next.archived) this.threads.limitResumes.turnFailed(next, finished, result.refusal.resetsAt);
     if (result.status === 'done' && sameSession && !queued.execution?.operation) this.threads.titles.autoRefine(threadId);
     if (sameSession) this.threads.autoCompact.turnFinished(next, finished);
     const woke = this.threads.deferred.pendingWakes.get(threadId);
