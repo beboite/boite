@@ -500,7 +500,8 @@ describe('WsClient', () => {
     expect(hello.params).toEqual({
       token: 'secret',
       protocolVersion: PROTOCOL_VERSION,
-      client: { name: 'shell', version: '2.0.0-beta.1', device: 'office-pc' }
+      client: { name: 'shell', version: '2.0.0-beta.1', device: 'office-pc' },
+      accepts: ['thread.load']
     });
 
     live.receive({ jsonrpc: '2.0', id: hello.id, result: { core: CORE, principal: 'owner' } });

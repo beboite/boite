@@ -442,10 +442,17 @@ when the core advertises `chunkedAnswers`.
   so the missed text does not wait for the slowest of them. The fresh
   `threads.list` is laid over the rows already held: a row keeps its object and
   only the fields that changed are written, so the sidebar redraws the rows that
-  moved and no others. A `thread.updated` load tick patches its row the same way.
+  moved and no others. A `thread.load` sample patches the row's `load` alone,
+  about 4x fewer bytes than the whole row an older client still gets.
 - A streamed delta, part or turn looks up its message or turn from the end of
   the loaded timeline, where the item being written sits.
 - The trace is read when the trace surface is on screen, not on every open.
+- A process exit updates five columns of its trace row instead of rewriting it,
+  and a thread keeps its newest 2,000 rows (`bun bench/process-rows.ts`).
+- A spawn of a bare name (`gh`, git when its lookup found no real binary)
+  reuses the remembered PATH lookup (`bun bench/spawn-lookup.ts`).
+- On Windows new processes inside 100 ms share one audio-session walk, and
+  the jobs Worker drops the global job's copy of every start and exit.
 - A project names its icon by version or stack id only. The image, up to
   256 KB, is a `projects.icon` call made once per project and version, when a
   tile first draws it; a list never carries it ([project icons](project-icons.md)).
@@ -797,6 +804,16 @@ out now that it draws machine icons, and the translations. The entry chunk is
 increases from 4,872,000 to 4,898,000 bytes, leaving 9,174 bytes of headroom;
 entry and core limits stay unchanged. Totals exclude precompressed copies, as
 `bun scripts/ci/budgets.ts` does.
+
+### Process load pacing and trace rows
+
+On 2026-10-16, after integrating `main` at `0f480824`, `bun run build:core`
+with Bun 1.4.2 on Linux measured 4,246,842 bytes of core JavaScript. Main
+measured 4,237,867 at that commit. The load pacer, the bare-name spawn
+resolver, the trace row pruning, the jobs packet filter and the batched audio
+walk add 8,975 bytes. The core JavaScript budget increases from 4,240,000 to
+4,249,000 bytes, leaving 2,158 bytes of headroom; UI and core entry limits stay
+unchanged.
 
 ## The desktop browser on a phone
 

@@ -177,6 +177,8 @@ export const DEVICE_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
   'collaboration.changed', 'thread.activity',
   'project.added', 'project.removed', 'project.updated',
   'thread.created', 'thread.updated', 'thread.removed', 'thread.commands', 'thread.background', 'thread.btw',
+  // The load `thread.updated` already carries to the same sockets, without the rest of the row.
+  'thread.load',
   'turn.started', 'turn.finished',
   'turn.toolCompleted',
   'message.started', 'message.delta', 'message.part', 'message.completed', 'message.truncated',

@@ -8,6 +8,8 @@ export interface KnownProcess {
   identity: ProcessIdentity;
   incarnations: Set<string>;
   recordedAt: number;
+  /** When this incarnation exited, so a thread that stays busy can drop it later. */
+  exitedAt?: number;
 }
 
 /** True when `next` is a process the thread has not recorded under this PID yet. */

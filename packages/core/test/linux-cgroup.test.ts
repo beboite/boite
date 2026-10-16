@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { cgroupPath, readCgroupMemory } from '../src/platform/linux-cgroup.ts';
+import { CGROUP_LIMITS_MS, CgroupMemoryReader, cgroupPath, readCgroupMemory } from '../src/platform/linux-cgroup.ts';
 import { createPosixPlatform } from '../src/platform/posix.ts';
 
 const SCOPE = '/user.slice/agents.slice/run-r1.scope';
@@ -103,6 +103,29 @@ describe('cgroup memory reader', () => {
     expect(readCgroupMemory(13, roots)).toBeNull();
     // A hybrid host names its v1 controllers beside the unified line.
     expect(cgroupPath(`1:name=systemd:/a\n0::/b\n`)).toBe('/b');
+  });
+
+  test('the tick reader keeps the group and its limits for a while and reads only the counters', () => {
+    let at = 0;
+    const reader = new CgroupMemoryReader(roots, () => at);
+    group(20, `0::${SCOPE}\n`, scope(1));
+    expect(reader.read(20)).toMatchObject({ highEvents: 1, highBytes: 5 * GB });
+    // An admin raises the limit and the counters move: only the counters show at first.
+    writeFileSync(join(roots.cgroup, SCOPE, 'memory.high'), `${8 * GB}\n`);
+    writeFileSync(join(roots.cgroup, SCOPE, 'memory.events'), events(4));
+    expect(reader.read(20)).toMatchObject({ highEvents: 4, highBytes: 5 * GB });
+    at += CGROUP_LIMITS_MS;
+    expect(reader.read(20)).toMatchObject({ highEvents: 4, highBytes: 8 * GB });
+    // A pid the registry let go is looked up again: a reused one may sit in another group.
+    group(20, `0::/other.scope\n`, scope(2), '/other.scope');
+    expect(reader.read(20)).toMatchObject({ path: SCOPE });
+    reader.forget(20);
+    expect(reader.read(20)).toMatchObject({ path: '/other.scope', highEvents: 2 });
+    // A group that went away is looked up again on the next tick.
+    rmSync(join(roots.cgroup, '/other.scope'), { recursive: true });
+    expect(reader.read(20)).toBeNull();
+    writeFileSync(join(roots.proc, '20', 'cgroup'), `0::${SCOPE}\n`);
+    expect(reader.read(20)).toMatchObject({ path: SCOPE });
   });
 
   test('only Linux reads a cgroup', () => {

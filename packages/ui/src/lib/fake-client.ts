@@ -42,7 +42,7 @@ import { clearRequestsOf, requestMethods } from './fake-client/requests';
 import { resourceMethods } from './fake-client/resources';
 import { seed } from './fake-client/seed';
 import { settingsMethods } from './fake-client/settings';
-import { DEVICE_METHODS, toSummary } from './fake-client/shared';
+import { DEVICE_METHODS } from './fake-client/shared';
 import { speechMethods } from './fake-client/speech';
 import { terminalMethods } from './fake-client/terminals';
 import { capabilityMethods } from './fake-client/capabilities';
@@ -324,14 +324,13 @@ export class FakeClient implements ObservableClient {
 
   /**
    * One tick of the core's load sampler (`packages/core/src/procs.ts`): the
-   * thread's summary with a fresh `load` and the timestamp it already had,
-   * pushed once a second for every thread with a live process. It is not a
-   * `touch`: a load sample moves no row in the sidebar.
+   * thread's fresh `load` alone, as `thread.load`, which this client's hello
+   * accepts. It is not a `touch`: a load sample moves no row in the sidebar.
    */
   sampleLoad(threadId: ThreadId, processes = 1): void {
     const thread = this.#ctx.thread(threadId);
     thread.load = { processes, cpuPercent: 12, memoryBytes: 48 * 1024 * 1024 };
-    this.#ctx.emit('thread.updated', structuredClone(toSummary(thread)));
+    this.#ctx.emit('thread.load', { threadId, load: structuredClone(thread.load) });
   }
 
   /** A line of the core's own log, as `core.log` carries it: a failed scheduler, a guard at work. */
