@@ -182,6 +182,14 @@ freezes its execution target, so later picker changes cannot redirect queued
 work. Permission modes follow the current selection, including during a running
 turn. [Model switching](model-switching.md) owns transfer and revision rules.
 
+File checkpoints live beside the journal, not in it: `checkpoints/<thread>/`
+holds one zstd manifest per turn and hard links into the content-addressed
+store `checkpoints/objects/`, whose blobs are zstd frames named by the SHA-256
+of their original bytes (`threads/checkpoint-store.ts`). Each thread keeps the
+newest 50 turns, and none once archived or done for 7 days; a background pass
+moves older layouts to this one and collects unlinked blobs
+([context](context.md)).
+
 ## The scheduler tracks independent turns
 
 Independent conversations start immediately, including on the same account.
