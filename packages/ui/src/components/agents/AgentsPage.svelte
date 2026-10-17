@@ -3,11 +3,12 @@
   import { MediaQuery } from 'svelte/reactivity';
   import { ArrowLeft, Bot, Brain, CalendarClock, Ellipsis, History, MessageSquare, Settings2, SquareArrowOutUpRight, Target, Users } from '@lucide/svelte';
   import type { AgentScope } from '@boite/contracts';
-  import { AgentsView, agentChats, attentionOf, chatKey, liveThreads, missionHome, missionPreset, missionsOf, type AgentChat, type AgentEntryKind, type AgentFocus, type AgentSelection } from '../../lib/agents.svelte';
+  import { AgentsView, agentsFilter, chatKey, chatsOf, missionHome, missionPreset, missionsOf, type AgentChat, type AgentEntryKind, type AgentFocus, type AgentSelection } from '../../lib/agents.svelte';
   import { mobileOverlay } from '../../lib/mobile-history';
   import type { Store } from '../../lib/store.svelte';
   import { fill, strings } from '../../lib/strings';
   import { avatarStatus } from '../../lib/thread-state';
+  import { workspace } from '../../lib/workspace.svelte';
   import Menu from '../Menu.svelte';
   import InfoTip from '../InfoTip.svelte';
   import AgentsRail from './AgentsRail.svelte';
@@ -50,9 +51,24 @@
   const icons: Record<Pane, Component<{ size?: number; strokeWidth?: number }>> = { conversation: MessageSquare, members: Users, missions: Target, activity: History, memory: Brain, routines: CalendarClock, settings: Settings2, tasks: Target };
   const paneLabel = (p: Pane) => (p === 'routines' ? labels.planned : p === 'conversation' ? labels.backToChat : labels[p]);
   const snapshot = $derived(view.snapshot);
-  const attention = $derived(snapshot ? attentionOf(snapshot, store.threads) : { work: [], review: [] });
-  const chats = $derived(snapshot ? agentChats(snapshot, view.seen.messages, view.readAt, attention) : []);
-  const live = $derived(snapshot ? liveThreads(snapshot, store.threads) : new Map());
+  const own = $derived(chatsOf(view));
+  const chats = $derived(own.chats);
+  const live = $derived(own.live);
+  /**
+   * The list shows every connected machine's agents, the way the thread list
+   * shows every machine's threads. The page itself works on one machine at a
+   * time: a row of another opens that machine. A filter holds only while the
+   * page is on the machine it names.
+   */
+  const machines = $derived(workspace.machinesOr(store));
+  const here = $derived(machines.find(m => m.store === store) ?? null);
+  const filter = $derived(here && agentsFilter.machine === here.id ? here.id : null);
+  const others = $derived(filter ? [] : machines.filter(m => m.store !== store).map(machine => ({ machine, view: AgentsView.of(machine.store) })));
+  const lists = $derived([
+    ...(here ? [{ machine: here, view, chats, live }] : []),
+    ...others.map(({ machine, view: other }) => ({ machine, view: other, ...chatsOf(other) }))
+  ]);
+  const elsewhere = $derived(lists.some(l => l.view !== view && l.chats.length > 0));
   /**
    * A team folded into its group opens as that group, and a record that is gone
    * lets go. A desktop opens on the newest conversation, a phone on the list.
@@ -162,6 +178,12 @@
   $effect(() => { if (level) return mobileOverlay(back); });
 
   onMount(() => { view.start(); return () => view.pause(); });
+  // The other machines' snapshots load while their rows are listed.
+  $effect(() => {
+    const shown = others.map(o => o.view);
+    untrack(() => { for (const other of shown) other.start(); });
+    return () => { for (const other of shown) other.pause(); };
+  });
   // On a phone an open conversation hides the tab bar. The root carries it as a
   // class: `.app:has(.agents-page.detail-open)` made the whole app a `:has()`
   // subject, rechecked on every node mounted anywhere.
@@ -182,7 +204,7 @@
   $effect(() => {
     const target = store.agentsTarget;
     if (!target) return;
-    untrack(() => { open({ kind: 'profile', id: target.agentId }); if (target.pane) pane = target.pane; visit++; store.agentsTarget = null; });
+    untrack(() => { open({ kind: target.kind ?? 'profile', id: target.agentId }); if (target.pane) pane = target.pane; visit++; store.agentsTarget = null; });
   });
 
   function open(next: AgentFocus, from: AgentSelection | null = null) {
@@ -220,8 +242,8 @@
   </header>
 {/snippet}
 
-<section class="agents-page" class:detail-open={!!chosen || !!creating} class:no-agents={!!snapshot && !chats.length} data-testid="agents-page">
-  <AgentsRail {view} {chats} {active} {live} onfocus={next => open(next)} oncreate={kind => { creating = { kind }; }} />
+<section class="agents-page" class:detail-open={!!chosen || !!creating} class:no-agents={!!snapshot && !chats.length && !elsewhere} data-testid="agents-page">
+  <AgentsRail {view} {lists} {filter} {active} onfocus={next => open(next)} oncreate={kind => { creating = { kind }; }} />
 
   <main class="agents-main framed">
     {#if view.error || view.loadError}
@@ -301,7 +323,7 @@
     {:else}
       <div class="agent-welcome" data-testid="agents-empty">
         <Bot size={32} strokeWidth={1.5} />
-        <p>{labels.noAgents}</p>
+        <p>{elsewhere && here ? fill(labels.noAgentsOn, { machine: here.label }) : labels.noAgents}</p>
         <p class="hint">{labels.welcomeHint}</p>
         {#if store.owner}<button type="button" class="primary" onclick={() => { creating = { kind: 'profile' }; }} data-testid="agents-first">{labels.createAgent}</button>{/if}
       </div>

@@ -256,7 +256,7 @@ export const strings = {
     contexts: 'Conversation contexts', memories: 'Memories', toEveryone: 'Everyone',
     missionMembers: 'Agents on this mission', dangerZone: 'Stop the engine', dangerHint: 'Stops every agent on this core and disconnects its clients.',
     stopEngine: 'Stop this core', stopEngineBody: 'Stops all work on this core and disconnects its clients. Started work will need review before resuming. Reopen Boite on the host to start the core again.',
-    createAgent: 'Create an agent', noAgents: 'No agents yet', more: 'More', noMatch: 'Nothing matches',
+    createAgent: 'Create an agent', noAgents: 'No agents yet', noAgentsOn: 'No agents on {machine} yet', more: 'More', noMatch: 'Nothing matches',
     noMessagesYet: 'No messages yet', noMissions: 'No missions yet', previewFrom: '{name}: {text}', unread: '{count} unread',
     backToChat: 'Back to the conversation', backTo: 'Back to {name}', editRoles: 'Edit roles', startChat: 'Start the conversation',
     asks: '{name} asks you',
