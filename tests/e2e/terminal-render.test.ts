@@ -52,6 +52,11 @@ test("a real shell draws ANSI colours and a full-screen program edge to edge, an
     await page.waitFor('document.querySelector("[data-testid=status-connection]")?.dataset.state === "ready"');
     await page.click(`[data-thread-id="${thread.id}"]`);
     await page.waitFor('document.querySelector("[data-testid=thread-header][data-status]")');
+    // The drawer is measured at the chat's full width: the panel an untouched
+    // conversation opens on a wide window is shut first, and stays shut across the reload.
+    await page.waitFor('document.querySelector("[data-testid=panel-launcher]")');
+    await page.click("[data-testid=panel-close]");
+    await page.waitFor('!document.querySelector("[data-testid=right-panel]")');
     await chord(page, "j", "KeyJ", 74);
     await page.waitFor('document.activeElement?.classList.contains("xterm-helper-textarea")');
     await page.waitFor(`(${screenText}).includes(">") || (${screenText}).includes("$ ")`);

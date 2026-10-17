@@ -74,7 +74,8 @@ test('thread metadata, message identity and expandable trace fit a narrow panel'
   const prUrl = await page.evaluate<string>(`document.querySelector('${id('thread-pr')}').href`);
   await page.click(id('thread-pr'));
   expect(await page.evaluate(`window.__openedPr`)).toBe(prUrl);
-  await page.click(id('panel-toggle'));
+  // A wide window may already show this conversation's panel on its launcher.
+  if (!await page.evaluate<boolean>(`!!document.querySelector('${id('right-panel')}')`)) await page.click(id('panel-toggle'));
   await page.waitFor(`document.querySelector('${id('launch-trace')}') || document.querySelector('${id('trace-panel')}')`);
   await page.evaluate(`document.querySelector('${id('launch-trace')}')?.click()`);
   await page.waitFor(`document.querySelectorAll('${id('trace-row')}').length === 3`);

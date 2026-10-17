@@ -84,6 +84,9 @@ test('queued prompts sit above the activity dock attached to the input', async (
     })()`);
     await page.send('Emulation.setDeviceMetricsOverride', { width: 1300, height: 850, deviceScaleFactor: 1, mobile: false });
     await page.waitFor(`parseFloat(getComputedStyle(document.querySelector('[data-testid="timeline"]')).paddingBottom) === 20`);
+    // Back on a wide window the untouched conversation's panel opens on its launcher again: the chat is measured once it is in.
+    await page.waitFor(`document.querySelector('[data-testid="panel-launcher"]')`);
+    await page.settleAnimations();
     const fittedHeight = await page.evaluate<number>(`(() => { const t = document.querySelector('[data-testid="timeline"]'); return innerHeight + t.scrollHeight - t.clientHeight + 20; })()`);
     await page.send('Emulation.setDeviceMetricsOverride', { width: 1300, height: fittedHeight, deviceScaleFactor: 1, mobile: false });
     await page.waitFor(`document.querySelector('[data-testid="timeline"]').scrollTop === 0`);
