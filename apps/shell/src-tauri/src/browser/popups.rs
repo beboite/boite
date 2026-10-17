@@ -42,6 +42,26 @@ fn popup_title(url: Option<&Url>, title: &str) -> String {
     if title.is_empty() || title == place { place.to_owned() } else { format!("{place} – {title}") }
 }
 
+/// Whether a new popup goes on screen. One from a tab an agent drives out of
+/// sight waits hidden: the agent's commands cannot see it, and a window
+/// appearing over whatever the user is doing interrupts him. Its page still
+/// runs, since WebView2 keeps a hidden window's page going.
+fn shows_now(agent: bool, on_screen: bool) -> bool {
+    !agent || on_screen
+}
+
+/// Shows the popups of an agent's tab while that tab is on screen, and hides
+/// them while it is not, so a popup it opened out of sight appears with it.
+pub(super) fn follow_surface<R: Runtime>(app: &AppHandle<R>, surface: &str, shown: bool) {
+    let shown = shown && !crate::window::hidden();
+    for (label, window) in app.webview_windows() {
+        if popup_surface(&label) != Some(surface) || window.is_visible().is_ok_and(|visible| visible == shown) { continue; }
+        if let Err(error) = if shown { window.show() } else { window.hide() } {
+            eprintln!("[shell] the browser popup {label} could not be {}: {error}", if shown { "shown" } else { "hidden" });
+        }
+    }
+}
+
 /// Closes the popups of one surface, or all of them: they go with the tab
 /// whose page opened them.
 pub(super) fn close_popups<R: Runtime>(app: &AppHandle<R>, surface: Option<&str>) {
@@ -81,13 +101,15 @@ pub(super) fn new_window(app: &AppHandle, surface: &str, private: bool, url: Url
 /// InPrivate state, which is the surface's.
 fn open_popup(app: &AppHandle, surface: &str, private: bool, url: &Url, features: NewWindowFeatures) -> Result<WebviewWindow, String> {
     let label = popup_label(surface);
-    // A sign-in from the tab on screen comes to the front. One from a tab an
-    // agent drives off screen opens without taking the focus.
-    let on_screen = super::label_of(surface).is_ok_and(|view| super::surfaces().visible(&view));
+    // A sign-in from the tab on screen comes to the front. One from a user's
+    // tab off screen opens behind without the focus, and one from an agent's
+    // tab off screen waits hidden until that tab is shown.
+    let view = super::label_of(surface)?;
+    let on_screen = super::surfaces().visible(&view);
     let mut builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::External(checked_url(surface, BLANK)?))
         .window_features(features)
         .title(popup_title(Some(url), ""))
-        .visible(!crate::window::hidden())
+        .visible(!crate::window::hidden() && shows_now(super::is_agent_label(&view), on_screen))
         .focused(on_screen)
         .disable_drag_drop_handler()
         .incognito(private);
@@ -119,9 +141,19 @@ fn open_popup(app: &AppHandle, surface: &str, private: bool, url: &Url, features
 
 #[cfg(test)]
 mod tests {
-    use super::{popup_label, popup_surface, popup_title, popups_of, POPUPS_PER_SURFACE};
+    use super::{popup_label, popup_surface, popup_title, popups_of, shows_now, POPUPS_PER_SURFACE};
     use crate::browser::MAIN_LABEL;
     use tauri::Url;
+
+    /// A page an agent drives out of sight opened a sized `window.open`, and a
+    /// window titled "127.0.0.1 – hub" appeared over the user's work.
+    #[test]
+    fn only_an_agent_tab_out_of_sight_opens_its_popup_hidden() {
+        assert!(!shows_now(true, false));
+        assert!(shows_now(true, true));
+        assert!(shows_now(false, false), "a user's own tab keeps its sign-in popup");
+        assert!(shows_now(false, true));
+    }
 
     /// Surface ids carry `:`, so a popup of `browser:a` must not be taken for
     /// one of `browser:a:b` when the tab `browser:a` closes.
