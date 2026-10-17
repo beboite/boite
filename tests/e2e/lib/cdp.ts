@@ -326,7 +326,9 @@ export class BrowserPage {
     return new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.#pending.delete(id);
-        reject(new Error(`${method} timed out`));
+        // Name the expression: every hung evaluate otherwise reports the same line of this file.
+        const what = typeof params.expression === 'string' ? `: ${params.expression.replace(/\s+/g, ' ').slice(0, 160)}` : '';
+        reject(new Error(`${method} timed out${what}`));
       }, timeoutMs);
       this.#pending.set(id, { resolve, reject, timer });
       this.#socket.send(JSON.stringify({ id, method, params }));
@@ -472,9 +474,10 @@ export class BrowserPage {
    */
   async settleAnimations(): Promise<void> {
     // The page gives up first, so the frame pump never outlives the call.
-    const settled = await this.evaluate<boolean>(`new Promise((resolve) => {
+    const running = await this.evaluate<string[] | null>(`new Promise((resolve) => {
       let live = true, fonts = false;
-      const done = (ok) => { if (!live) return; live = false; resolve(ok); };
+      const done = (ok) => { if (!live) return; live = false; resolve(ok ? null : watched.filter((a) => !ended.has(a) && drawn(a))
+        .map((a) => (a.animationName ?? a.transitionProperty ?? a.id) + ' on .' + String(a.effect?.target?.className ?? '?').split(' ')[0] + ' ' + a.playState).concat(fonts ? [] : ['document.fonts'])); };
       const drawn = (a) => !(a.effect instanceof KeyframeEffect) || a.effect.target?.checkVisibility?.({ contentVisibilityAuto: true }) !== false;
       const ended = new Set();
       const watched = document.getAnimations().filter((a) => a.effect?.getTiming().iterations !== Infinity && drawn(a));
@@ -488,7 +491,7 @@ export class BrowserPage {
       requestAnimationFrame(frame);
       setTimeout(() => done(false), ${CALL_TIMEOUT_MS - 5_000});
     })`);
-    if (!settled) throw new Error(`animations still running ${(CALL_TIMEOUT_MS - 5_000) / 1000} s after settleAnimations()`);
+    if (running) throw new Error(`animations still running ${(CALL_TIMEOUT_MS - 5_000) / 1000} s after settleAnimations(): ${running.join(', ')}`);
   }
 
   async screenshot(path: string): Promise<void> {
