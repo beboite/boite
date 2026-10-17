@@ -8,7 +8,8 @@
  */
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
-import { coInitialize, coUninitialize, openSessions } from '../src/platform/windows/audio-sessions.ts';
+import { CFunction, FFIType, ptr } from 'bun:ffi';
+import { coInitialize, coUninitialize, openSessions, vtables } from '../src/platform/windows/audio-sessions.ts';
 import type { AudioSession, AudioSessions } from '../src/platform/windows/audio-sessions.ts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
@@ -48,6 +49,31 @@ async function settles(predicate: () => boolean, timeoutMs: number): Promise<boo
   }
 }
 
+(onWindows ? describe : describe.skip)('the objects Core Audio calls back', () => {
+  /** Calls a vtable slot the way Core Audio does, with `this` and up to two more pointers. */
+  function call(address: bigint, ...args: (Uint8Array | BigUint64Array | null)[]): number {
+    const native = CFunction({ ptr: Number(address) as never, args: [FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 });
+    return native(...[...args, null, null, null].slice(0, 3).map((arg) => (arg === null ? null : ptr(arg))));
+  }
+
+  test('answer QueryInterface with E_NOINTERFACE and a null interface, count one reference, and take a property change', () => {
+    const { session, client } = vtables();
+    const self = new BigUint64Array(1);
+    const iid = new Uint8Array(16);
+    for (const table of [session, client]) {
+      const out = new BigUint64Array([0xdeadbeefn]);
+      expect(call(table[0]!, self, iid, out) >>> 0).toBe(0x80004002);
+      expect(out[0]).toBe(0n);
+      // A caller that passes no out parameter gets the same answer, not a crash.
+      expect(call(table[0]!, self, iid, null) >>> 0).toBe(0x80004002);
+      expect(call(table[1]!, self)).toBe(1);
+      expect(call(table[2]!, self)).toBe(1);
+    }
+    // OnPropertyValueChanged: S_OK, nothing to walk for.
+    expect(call(client[7]!, self, null, null)).toBe(0);
+  });
+});
+
 describeWindows('the audio sessions of the default endpoint', () => {
   let endpoint: AudioSessions | null = null;
 
@@ -85,8 +111,8 @@ describeWindows('the audio sessions of the default endpoint', () => {
     }
   }
 
-  /** A turn that plays the fixture, once the core has muted its session. */
-  async function mutedFixture(harness: TestCore): Promise<{ threadId: string; pid: number; finished: Promise<unknown> }> {
+  /** A turn that plays the fixture, once the core has muted its session; `delayMs` opens the device that much later. */
+  async function mutedFixture(harness: TestCore, delayMs = 0): Promise<{ threadId: string; pid: number; finished: Promise<unknown> }> {
     const client = await harness.connect();
     const { threadId } = await echoThread(harness, client);
     await client.call('threads.subscribe', { threadId });
@@ -104,7 +130,7 @@ describeWindows('the audio sessions of the default endpoint', () => {
     );
     const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 40000);
 
-    await client.call('turns.start', { threadId, prompt: `[spawn:bun ${FIXTURE}]` });
+    await client.call('turns.start', { threadId, prompt: `[spawn:bun ${FIXTURE}${delayMs > 0 ? ` ${delayMs}` : ''}]` });
     const fixture = await started;
     expect(fixture.pid).toBeGreaterThan(0);
 
@@ -160,6 +186,24 @@ describeWindows('the audio sessions of the default endpoint', () => {
     }
   });
 
+  test('a session another process opens is reported by the endpoint itself', async () => {
+    const watched = openSessions();
+    expect(watched).not.toBeNull();
+    let notices = 0;
+    const child = Bun.spawn(['bun', FIXTURE, '1000'], { stdout: 'ignore', stderr: 'ignore' });
+    try {
+      // Core Audio only reports to a manager that enumerated its sessions once.
+      for (const session of watched!.list()) session.release();
+      watched!.watch!(() => { notices += 1; });
+      await waitFor(() => hasSession(child.pid), SESSION_WINDOW_MS);
+      await waitFor(() => notices > 0, MUTE_WINDOW_MS);
+    } finally {
+      child.kill();
+      await child.exited;
+      watched?.release();
+    }
+  }, 30000);
+
   describe('a process a thread launched', () => {
     let harness: TestCore;
 
@@ -204,6 +248,16 @@ describeWindows('the audio sessions of the default endpoint', () => {
       } finally {
         for (const session of after) session.release();
       }
+    }, 60000);
+
+    test('that starts its audio late is muted on the endpoint\'s notice, long before the half-minute walk', async () => {
+      // The pid is traced and walked for at once, with no session yet; the
+      // session opens seconds later, and only Core Audio's notice walks again
+      // inside the window `mutedFixture` allows.
+      const { pid, finished } = await mutedFixture(harness, 4000);
+      expect(harness.core.procs.guardStatus().mutedPids).toContain(pid);
+      await finished;
+      await waitFor(() => !harness.core.procs.guardStatus().mutedPids.includes(pid), 5000);
     }, 60000);
 
     test('is unmuted by the time the core has closed, even when it was still playing', async () => {

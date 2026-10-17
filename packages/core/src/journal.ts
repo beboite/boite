@@ -29,6 +29,7 @@ import { copyStoredParts, foldStreamingParts, messageOfError, StreamBuffer } fro
 import { requestSince } from './journal/request-since.ts';
 import { usageByBucket, usageByThread, type UsageSumRow, type UsageThreadRow } from './journal/usage-sums.ts';
 import { sent, type Projection } from './journal/sent.ts';
+import { threadSessions, type NativeSession } from './threads/native-sessions.ts';
 
 export interface JournalOptions {
   /** Where a write that fails on a timer, with no caller to throw to, is reported. */
@@ -79,6 +80,7 @@ export class Journal {
   private readonly turnListeners = new Set<(turn: Turn) => void>();
   private readonly onError: (message: string) => void;
   private closed = false;
+  #incognitoSessions: NativeSession[] = [];
   /** Checkpoints the WAL off the event loop; null for a database without a WAL file. */
   readonly checkpoints: WalCheckpoints | null = null;
   /** The schema version found on disk and the one after migration, for the startup log. */
@@ -319,21 +321,33 @@ export class Journal {
     })();
   }
 
-  /** Incognito conversations and the sub-threads they started. */
-  private purgeIncognitoThreads(): void {
+  /**
+   * Incognito conversations and the sub-threads they started. Their native
+   * sessions wait in `takeIncognitoSessions` for the core, which alone knows
+   * which account directories it may clean.
+   */
+  purgeIncognitoThreads(): void {
     // Almost always none: then the family query is never run.
     const roots = (this.db.query('SELECT id FROM threads WHERE incognito = 1').all() as { id: string }[]).map(row => row.id);
     if (roots.length === 0) return;
     const children = this.db.query(`SELECT id FROM threads WHERE parent_thread_id IN (${roots.map(() => '?').join(', ')})`).all(...roots) as { id: string }[];
-    this.deleteThreads([...roots, ...children.map(row => row.id)]);
+    const ids = [...roots, ...children.map(row => row.id)];
+    this.#incognitoSessions.push(...threadSessions(this.db, ids));
+    this.deleteThreads(ids);
   }
 
-  /** Purge expired families atomically, using their root's deletion time. */
-  purgeDeletedThreads(before: number): number {
+  /** The native sessions of the incognito conversations erased since the last call. */
+  takeIncognitoSessions(): NativeSession[] {
+    return this.#incognitoSessions.splice(0);
+  }
+
+  /** Purge expired families atomically, using their root's deletion time; `beforeDelete` reads their rows last. */
+  purgeDeletedThreads(before: number, beforeDelete?: (threadIds: string[]) => void): number {
     if (this.closed) return 0;
     const rows = this.db.query(`SELECT thread_id FROM thread_deletions WHERE root_id IN
       (SELECT root_id FROM thread_deletions WHERE thread_id = root_id AND deleted_at <= ?)`)
       .all(before) as { thread_id: string }[];
+    if (rows.length > 0) beforeDelete?.(rows.map(row => row.thread_id));
     this.deleteThreads(rows.map(row => row.thread_id));
     return rows.length;
   }

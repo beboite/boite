@@ -1,9 +1,9 @@
 import { expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { AgentBrowser } from '../src/browser.ts';
-import { chromiumArgs, findChromium } from '../src/browser/chromium.ts';
+import { chromiumArgs, findChromium, trimProfile } from '../src/browser/chromium.ts';
 import { createBrowserFixture } from './browser/fixture.ts';
 
 const browserFixture = createBrowserFixture();
@@ -47,7 +47,28 @@ test('the browser is found where each OS installs it, and BOITE_BROWSER alone wh
     }
     // Bun cannot open the pipe descriptors on Windows: a random port there, on loopback only.
     expect(chromiumArgs('/profile', 'win32')).toEqual(expect.arrayContaining(['--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1']));
+    // No component downloads and a bounded HTTP cache in the agent's profile.
+    for (const platform of ['linux', 'darwin', 'win32'] as const) {
+      expect(chromiumArgs('/profile', platform)).toEqual(expect.arrayContaining(['--disable-component-update', '--disk-cache-size=67108864']));
+    }
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a profile loses its downloaded components and caches once, never its cookies, logins or Local State', () => {
+  const profile = mkdtempSync(join(tmpdir(), 'boite-profile-'));
+  try {
+    const leftovers = ['component_crx_cache', 'ProvenanceData', 'Edge Wallet', 'Edge Entity Extraction', 'Edge Shopping', join('Default', 'Cache'), join('Default', 'Code Cache')];
+    const kept = ['Local State', 'boite-cookies.json', join('Default', 'Network', 'Cookies'), join('Default', 'Login Data'), join('Default', 'Preferences')];
+    for (const folder of leftovers) { mkdirSync(join(profile, folder), { recursive: true }); writeFileSync(join(profile, folder, 'data'), 'x'); }
+    for (const file of kept) { mkdirSync(dirname(join(profile, file)), { recursive: true }); writeFileSync(join(profile, file), 'kept'); }
+    trimProfile(profile);
+    for (const folder of leftovers) expect(existsSync(join(profile, folder))).toBe(false);
+    for (const file of kept) expect(readFileSync(join(profile, file), 'utf8')).toBe('kept');
+    // Once: what the browser writes back later stays.
+    mkdirSync(join(profile, 'Default', 'Cache'));
+    trimProfile(profile);
+    expect(existsSync(join(profile, 'Default', 'Cache'))).toBe(true);
+  } finally { rmSync(profile, { recursive: true, force: true }); }
 });
 
 test('a deleted profile loses its folder even when its browser had already closed', async () => {
