@@ -58,8 +58,21 @@ const MACOS_X64: Platform = { id: 'macos-x64', name: 'macOS x64', runner: 'macos
 const PORTABLE_PR = [LINUX_X64, MACOS_ARM64];
 export const PORTABLE_ALL = [LINUX_X64, LINUX_ARM64, MACOS_ARM64, MACOS_X64];
 
+// The core suite still needs a real Intel Mac, a scarce runner: 322 to 409 s a
+// PR on 2026-10-17. Pull requests skip it like the Intel desktop leg; main
+// pushes, releases and manual runs keep it.
+export type CoreRunner = { os: string; name: string };
+const CORE_PR: CoreRunner[] = [
+  { os: 'ubuntu-24.04', name: 'Linux x64' },
+  { os: 'ubuntu-24.04-arm', name: 'Linux arm64' },
+  { os: 'windows-2025', name: 'Windows x64' },
+  { os: 'macos-15', name: 'macOS arm64' },
+];
+export const CORE_ALL: CoreRunner[] = [...CORE_PR, { os: 'macos-15-intel', name: 'macOS x64' }];
+
 // `pr` gates a merge, `warm` follows it on main, `full` is a release or a
-// manual run. Main runs the extra portable architectures and refreshes caches.
+// manual run. Main runs the extra portable architectures, the Intel Mac core
+// suite, and refreshes caches.
 // A push event alone provides no proof that its tree passed PR tests, so every
 // mode runs the affected suites. A main push compares with the last main commit
 // whose CI passed, not the previous push: a cancelled or failed run's changes
@@ -82,6 +95,7 @@ export function plan(checks: ReturnType<typeof affectedChecks>, mode: Mode) {
     e2eTypes: checks.e2eTypes && !checks.web,
     e2e: checks.desktop,
     portable: JSON.stringify(mode === 'pr' ? PORTABLE_PR : PORTABLE_ALL),
+    coreRunners: JSON.stringify(mode === 'pr' ? CORE_PR : CORE_ALL),
   };
 }
 
