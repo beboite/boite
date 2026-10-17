@@ -111,6 +111,7 @@ describe.skipIf(!ready)('installer hooks', () => {
       '!define INSTALLMODE "currentUser"',
       `!define UNINSTKEY "${UNINSTKEY}"`,
       'Var PassiveMode',
+      'Var OldMainBinaryName',
       `OutFile "${join(base, 'setup.exe')}"`,
       'RequestExecutionLevel user',
       'SilentInstall silent',
@@ -130,7 +131,11 @@ describe.skipIf(!ready)('installer hooks', () => {
       `  File "/oname=boite-core.exe" "${join(base, 'new-core.txt')}"`,
       '  IfErrors 0 +2',
       '    FileOpen $0 "$INSTDIR\\write-failed" w',
+      // A copy that fails halfway, a full disk: the template's install aborts.
+      '  IfFileExists "$INSTDIR\\fail-copy" 0 +2',
+      '    Abort',
       `  WriteUninstaller "${join(base, 'uninstall.exe')}"`,
+      '  !insertmacro NSIS_HOOK_POSTINSTALL',
       'SectionEnd',
       'Section Uninstall',
       '  !insertmacro NSIS_HOOK_PREUNINSTALL',
@@ -193,12 +198,14 @@ describe.skipIf(!ready)('installer hooks', () => {
       await Bun.sleep(500);
       return { install, core, shell, restarted };
     }
-    // Whether the bundle directories are still there, and the user's files untouched.
+    // Whether the bundle directories are still there, the user's files
+    // untouched and nothing left aside.
     function bundles(install: string) {
       return {
         core: existsSync(join(install, 'core')),
         ui: existsSync(join(install, 'ui')),
         kept: KEPT.every(([path, text]) => existsSync(join(install, path)) && readFileSync(join(install, path), 'utf8') === text),
+        aside: existsSync(join(install, 'core.previous')) || existsSync(join(install, 'ui.previous')),
       };
     }
     function restartedPids(file: string): number[] {
@@ -226,7 +233,7 @@ describe.skipIf(!ready)('installer hooks', () => {
     expect(restartedPids(installed.restarted)).toEqual([]);
     expect(existsSync(join(installed.install, 'write-failed'))).toBe(false);
     expect(readFileSync(join(installed.install, 'boite-core.exe'), 'utf8')).toBe('the new core\n');
-    expect(bundles(installed.install)).toEqual({ core: false, ui: false, kept: true });
+    expect(bundles(installed.install)).toEqual({ core: false, ui: false, kept: true, aside: false });
 
     const removed = await running('uninstall');
     // A scanner or an editor holding a chunk, without delete sharing, through
@@ -250,7 +257,7 @@ describe.skipIf(!ready)('installer hooks', () => {
     expect(await exited(removed.core)).toBe(0);
     expect(restartedPids(removed.restarted)).toEqual([]);
     expect(existsSync(join(removed.install, 'boite-core.exe'))).toBe(false);
-    expect(bundles(removed.install)).toEqual({ core: false, ui: false, kept: true });
+    expect(bundles(removed.install)).toEqual({ core: false, ui: false, kept: true, aside: false });
 
     const busy = await running('busy');
     writeFileSync(join(data, 'boite2', 'busy'), '');
@@ -259,8 +266,20 @@ describe.skipIf(!ready)('installer hooks', () => {
     expect(busy.core.exitCode).toBeNull();
     expect(Bun.hash(readFileSync(join(busy.install, 'boite-core.exe')))).toBe(before);
     // Refused before anything was removed: a working core still loads its chunks.
-    expect(bundles(busy.install)).toEqual({ core: true, ui: true, kept: true });
+    expect(bundles(busy.install)).toEqual({ core: true, ui: true, kept: true, aside: false });
     expect(restartedPids(busy.restarted)).toEqual([]);
+
+    // A copy that fails halfway, once the core stopped and the previous build
+    // was moved aside: its chunks come back where that core loads them.
+    rmSync(join(data, 'boite2', 'busy'), { force: true });
+    const failed = await running('failed');
+    writeFileSync(join(failed.install, 'fail-copy'), '');
+    expect(await run([join(base, 'setup.exe'), '/S', `/D=${failed.install}`])).not.toBe(0);
+    expect(await exited(failed.shell)).not.toBe('still running');
+    expect(await exited(failed.core)).toBe(0);
+    expect(restartedPids(failed.restarted)).toEqual([]);
+    expect(bundles(failed.install)).toEqual({ core: true, ui: true, kept: true, aside: false });
+    for (const [path, text] of STALE) expect(readFileSync(join(failed.install, path), 'utf8')).toBe(text);
 
     // An install made before a rename (Boite Dev's boite-shell.exe): the
     // shell still runs under the name that install registered.
@@ -275,7 +294,7 @@ describe.skipIf(!ready)('installer hooks', () => {
     expect(await exited(renamed.core)).toBe(0);
     expect(restartedPids(renamed.restarted)).toEqual([]);
 
-    // Four installs and uninstalls later, the shell run from elsewhere still runs.
+    // Five installs and uninstalls later, the shell run from elsewhere still runs.
     expect(other.exitCode).toBeNull();
   }, 180_000);
 });

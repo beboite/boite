@@ -308,12 +308,15 @@ name is `Boite`. The install is per user and asks for no elevation.
 and the template only copies files and deletes the ones a build lists, so each
 update used to leave the previous build's chunks beside the new ones and an
 uninstall left them all: an install updated since 2026-09-28 held 3,614 files
-and 243 MB, about 108 MB of them stale. The installer hook now removes both
-directories once the core of that install has stopped, before the copy, and
-the uninstall hook removes them too (`windows/hooks.nsh`), once before the
-template's deletions and once after, since `RMDir /r` skips a file still held
-open without failing; what is still held then goes at the next restart where
-Windows allows it. Nothing else in the install directory is touched.
+and 243 MB, about 108 MB of them stale. Once the core of that install has
+stopped, the installer hook moves both directories aside to `core.previous` and
+`ui.previous` before the copy, deletes them when the install completes and puts
+them back when it fails (a full disk halfway through), so the previous core
+still finds its chunks (`windows/hooks.nsh`). The uninstall hook removes both
+directories, once before the template's deletions and once after, since
+`RMDir /r` skips a file still held open without failing; what is still held
+then goes at the next restart where Windows allows it. Nothing else in the
+install directory is touched.
 
 The identifier is fresh, so Boite installs beside Boite Legacy rather than over
 it. To see the exact file list a build produced, read

@@ -163,9 +163,49 @@
     RMDir /r "$INSTDIR\ui"
 !macroend
 
+; Set when this run moved the previous build's two directories aside.
+Var BoiteBundlesAside
+
+; An install moves the two directories aside rather than deleting them: a copy
+; that fails halfway (a full disk) puts them back in .onInstFailed, so the
+; previous core still finds its chunks; a completed install deletes them. A
+; directory that cannot be moved (a file held open) stays and the new build is
+; copied into it, as before this hook. What an interrupted run left aside goes
+; first.
+!macro BOITE_SET_BUNDLES_ASIDE
+  StrCmp $INSTDIR "" +7
+    RMDir /r "$INSTDIR\core.previous"
+    RMDir /r "$INSTDIR\ui.previous"
+    Rename "$INSTDIR\core" "$INSTDIR\core.previous"
+    Rename "$INSTDIR\ui" "$INSTDIR\ui.previous"
+    StrCpy $BoiteBundlesAside "1"
+    ; A first install has nothing to move: no error flag for the template.
+    ClearErrors
+!macroend
+
+!macro BOITE_DROP_BUNDLES_ASIDE
+  StrCmp $INSTDIR "" +3
+    RMDir /r /REBOOTOK "$INSTDIR\core.previous"
+    RMDir /r /REBOOTOK "$INSTDIR\ui.previous"
+!macroend
+
+; NSIS calls it when the install aborts or a file cannot be written. A refused
+; install (a busy core) aborts before anything was moved aside.
+Function .onInstFailed
+  StrCmp $BoiteBundlesAside "1" 0 boite_restore_done
+  StrCmp $INSTDIR "" boite_restore_done
+  IfFileExists "$INSTDIR\core.previous\*.*" 0 +3
+    RMDir /r "$INSTDIR\core"
+    Rename "$INSTDIR\core.previous" "$INSTDIR\core"
+  IfFileExists "$INSTDIR\ui.previous\*.*" 0 +3
+    RMDir /r "$INSTDIR\ui"
+    Rename "$INSTDIR\ui.previous" "$INSTDIR\ui"
+  boite_restore_done:
+FunctionEnd
+
 !macro NSIS_HOOK_PREINSTALL
   !insertmacro BOITE_STOP_CORE 1
-  !insertmacro BOITE_CLEAR_BUNDLES
+  !insertmacro BOITE_SET_BUNDLES_ASIDE
 !macroend
 
 ; A login entry the shell registered (src/platform/login.rs) under the
@@ -173,6 +213,7 @@
 ; it to this build's name. $OldMainBinaryName is the template's: it reads the
 ; previous install's name before it records this build's.
 !macro NSIS_HOOK_POSTINSTALL
+  !insertmacro BOITE_DROP_BUNDLES_ASIDE
   ${If} $OldMainBinaryName != ""
   ${AndIf} $OldMainBinaryName != "${MAINBINARYNAME}.exe"
     Push $0
@@ -197,8 +238,10 @@
 ; or `ui`, and so the install directory, alive. What is still held now goes at
 ; the next restart where Windows allows it; the directory goes once empty.
 !macro NSIS_HOOK_POSTUNINSTALL
-  StrCmp $INSTDIR "" +4
+  StrCmp $INSTDIR "" +6
     RMDir /r /REBOOTOK "$INSTDIR\core"
     RMDir /r /REBOOTOK "$INSTDIR\ui"
+    RMDir /r /REBOOTOK "$INSTDIR\core.previous"
+    RMDir /r /REBOOTOK "$INSTDIR\ui.previous"
     RMDir "$INSTDIR"
 !macroend
