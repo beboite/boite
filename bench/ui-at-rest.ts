@@ -50,11 +50,15 @@ const SETUP = `try { localStorage.setItem(${JSON.stringify(ONBOARDING_STORAGE_KE
 class Session {
   #id = 0;
   #pending = new Map<number, { settle: (value: Record<string, unknown>) => void; fail: (error: Error) => void }>();
+  /** DevTools events by name: only the ones the bench subscribes to are ever called. */
   readonly listeners = new Map<string, (params: Record<string, unknown>) => void>();
+  /** Called once Chrome closes the socket, apart from the events a message names. */
+  onClose: () => void = () => {};
   private constructor(private readonly socket: WebSocket) {
     socket.addEventListener('message', (event) => {
       const message = JSON.parse(String(event.data)) as { id?: number; result?: Record<string, unknown>; error?: { message: string }; method?: string; params?: Record<string, unknown> };
-      if (message.method) this.listeners.get(message.method)?.(message.params ?? {});
+      const listener = typeof message.method === 'string' ? this.listeners.get(message.method) : undefined;
+      if (typeof listener === 'function') listener(message.params ?? {});
       if (typeof message.id !== 'number') return;
       const pending = this.#pending.get(message.id);
       if (!pending) return;
@@ -66,7 +70,7 @@ class Session {
     socket.addEventListener('close', () => {
       for (const pending of this.#pending.values()) pending.fail(new Error('Chrome closed the debugging socket'));
       this.#pending.clear();
-      this.listeners.get('close')?.({});
+      this.onClose();
     });
   }
   static async open(url: string): Promise<Session> {
@@ -210,7 +214,7 @@ async function main(): Promise<void> {
         for (const event of params['value'] as { name: string; ph: string }[]) if (event.name === 'DrawFrame') frames.push(1);
       });
       page.listeners.set('Tracing.tracingComplete', () => done());
-      page.listeners.set('close', () => done());
+      page.onClose = () => done();
       await page.send('Tracing.start', { transferMode: 'ReportEvents', traceConfig: { includedCategories: ['disabled-by-default-devtools.timeline.frame'] } });
       const metrics = async () => Object.fromEntries(((await page.send('Performance.getMetrics')) as { metrics: { name: string; value: number }[] }).metrics.map((metric) => [metric.name, metric.value]));
       const before = await processes();
@@ -271,7 +275,8 @@ async function main(): Promise<void> {
     chrome.kill();
     await chrome.exited;
     server.stop(true);
-    rmSync(profile, { recursive: true, force: true });
+    // Chrome's helpers can still hold the profile a moment after it exits.
+    rmSync(profile, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
     if (own) rmSync(bundle, { recursive: true, force: true });
   }
 }
