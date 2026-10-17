@@ -162,7 +162,8 @@ the first head of PR #562, 2,183 bytes over its `origin/main` base at
 `7c7327ab`. That PR adds thread links in answers (`chat-links.ts`,
 `workspace.openThreadLink`), the direction line on agent mail rows and their
 strings, all in modules the entry already loads. On top of the PR watch state
-below, the entry limit becomes 597,000; the other limits stay unchanged.
+below and the 594,000 that PR #568 set in `budgets.json` for the Agents tab,
+the entry limit becomes 597,000; the other limits stay unchanged.
 
 On 2026-10-17, Windows CI measured a 593,177-byte UI entry chunk for
 `origin/main` at `7c7327ab`, already over its 593,000 limit after PRs #558 to
