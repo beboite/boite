@@ -150,12 +150,18 @@ The tested installer becomes the release artifact.
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 593,000 |
+| UI entry chunk | 593,400 |
 | UI files, excluding `.br` and `.gz` copies | 5,019,500 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 4,356,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-17, opening an untouched conversation's panel on its launcher
+(PR #563) at `e9c75221` measures 593,177 UI entry bytes on Windows CI, 177 over
+the 593,000 limit: the store's wide-window query and the untouched layout live
+in `right-panel.svelte.ts`, which the entry loads. The entry limit becomes
+593,400; the other limits stay unchanged.
 
 On 2026-10-16, the server update recovery (PR #552) on `origin/main` at
 `08c11d82` measures 4,353,036 core JavaScript bytes after a fresh `bun run
