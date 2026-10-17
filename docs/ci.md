@@ -153,9 +153,17 @@ The tested installer becomes the release artifact.
 | UI entry chunk | 596,500 |
 | UI files, excluding `.br` and `.gz` copies | 5,037,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,391,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,404,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-18, the checkpoint store on `origin/main` at `b611c01f` (blob and
+manifest compression, the background adoption pass and 50-turn retention in
+`checkpoint-store.ts` and `code-checkpoints.ts`, and the agent browser's
+profile trim) measures 4,403,058 core JavaScript bytes against 4,390,768 for
+that `main`, 12,290 more, after fresh `bun run build:ui` and
+`bun run build:core` on Windows. The UI measures are unchanged at 595,295 and
+5,036,764. The core limit rises to 4,404,000.
 
 On 2026-10-17, PR #566 merged with `origin/main` at `b6ae659a`, which brings
 the thread links and agent mail direction (PR #562), measures 595,205 entry
