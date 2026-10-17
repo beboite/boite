@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { link, lstat, mkdir, open, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { promisify } from 'node:util';
 import { zstdDecompress } from 'node:zlib';
 
 /**
@@ -19,7 +18,10 @@ const MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd]);
 export const BLOB_BYTE_LIMIT = 16 * 1024 * 1024;
 /** A manifest lists at most 20,000 files, a few MiB of JSON; this leaves room for long paths. */
 const MANIFEST_BYTE_LIMIT = 64 * 1024 * 1024;
-const inflate = promisify(zstdDecompress);
+/** `node:zlib` for its output bound; a callback, not `promisify`, keeps `node:util` out of startup. */
+const inflate = (stored: Buffer, maxOutputLength: number) => new Promise<Buffer>((resolve, reject) => {
+  zstdDecompress(stored, { maxOutputLength }, (error, content) => (error ? reject(error) : resolve(content)));
+});
 
 const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 const framed = (bytes: Uint8Array) => bytes.length >= 4 && MAGIC.equals(bytes.subarray(0, 4));
@@ -41,7 +43,7 @@ export async function encodeBlob(bytes: Buffer): Promise<Buffer> {
 export async function decodeBlob(stored: Buffer, hash: string): Promise<Buffer | null> {
   if (sha256(stored) === hash) return stored;
   if (!framed(stored)) return null;
-  const content = await inflate(stored, { maxOutputLength: BLOB_BYTE_LIMIT }).catch(() => null);
+  const content = await inflate(stored, BLOB_BYTE_LIMIT).catch(() => null);
   return content && sha256(content) === hash ? content : null;
 }
 
@@ -61,7 +63,7 @@ export async function encodeManifest(value: unknown): Promise<Buffer> {
  * cores. A frame decodes to at most `MANIFEST_BYTE_LIMIT` bytes.
  */
 export async function decodeManifest<T>(stored: Buffer): Promise<T> {
-  const text = framed(stored) ? (await inflate(stored, { maxOutputLength: MANIFEST_BYTE_LIMIT })).toString('utf8') : stored.toString('utf8');
+  const text = framed(stored) ? (await inflate(stored, MANIFEST_BYTE_LIMIT)).toString('utf8') : stored.toString('utf8');
   return JSON.parse(text) as T;
 }
 
