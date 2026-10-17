@@ -454,6 +454,35 @@ when the core advertises `chunkedAnswers`.
   (`store/display-images.ts`). The client keeps 120 copies and 24 M characters
   of them at most, since a GIF or an original can weigh several MB, and drops
   them when the Store switches to another machine.
+- A prompt's thumbnail asks for `thumb`, a WebP at quality 75 and at most
+  320 px, made once from the kept 1,280 px copy (or the original when there is
+  none) and kept in `media_displays` beside it, so it leaves with its thread.
+  `ChatImage.svelte` asks for it while the box's longer side times
+  `devicePixelRatio` stays within 320 px: a 16:9 tile of 88 px is 313 device
+  pixels on a 2x screen and takes it, a 3x phone or a panorama takes the
+  1,280 px copy. Pictures in an answer and the viewer keep the larger copy and
+  the original.
+- Copies and originals come as `ticket` addresses on the core's file route
+  rather than base64 in a JSON frame: the `<img>` loads `/file/<ticket>`
+  itself, with `immutable` caching, and the same part keeps the same ticket
+  while it lives, so the browser cache answers a scroll back. A ticket that no
+  longer loads (an expired ticket, a restarted core) is asked again once. The
+  desktop shell through another member's relay keeps base64: its policy
+  admits `/file/` only at a machine's own address.
+  `bun run bench/media-wire.ts --browser` on 2026-10-17, ten 1920 by 1080
+  PNG screenshots of 1.77 MB, medians of 5:
+
+  | link | answers | down KB | ms to pictures | Chromium decode ms |
+  | --- | --- | ---: | ---: | ---: |
+  | loopback | base64 large copies (before) | 1,762 | 110 | 93 |
+  | loopback | ticket, thumbnail copies | 86 | 19 | 12 |
+  | remote, 150 ms RTT, 8 Mbit/s (`--rtt 150 --rate 1000000 --remote`) | base64 large copies (before) | 1,327 | 1,611 | 93 |
+  | remote, 150 ms RTT, 8 Mbit/s | ticket, thumbnail copies | 86 | 525 | 364 |
+
+  The remote decode column counts the fetches, one more round trip than
+  base64: at 150 ms with no rate cap, ticketed thumbnails took 488 ms against
+  299 ms for base64 large copies, and ticketed large copies gain no bytes over
+  deflated base64 (1,325 against 1,327 KB) while taking that round trip.
 - A light read first makes the blurs of the messages around its page that no
   read looked at before, waiting 1.5 s at most. It does this before the page is
   read, never between the read and the answer, so the answer still holds every

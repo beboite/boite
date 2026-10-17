@@ -4704,9 +4704,10 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * keeps it. A client that cannot fetch that address (the desktop shell
    * through a relay, whose policy only admits `/file/` at a machine's own
    * address) leaves `ticket` out and gets base64, as an older core answers.
-   * Measured on 2026-10-17 with `bun run bench/media-wire.ts`: ten 960 by 540
-   * screenshots opened on a thread cost 1,149 KB as base64 copies and 202 KB as
-   * ticketed thumbnails on loopback.
+   * Measured on 2026-10-17 with `bun run bench/media-wire.ts --browser`: ten
+   * 1920 by 1080 screenshots opened on a thread cost 1,762 KB as base64 large
+   * copies and 86 KB as ticketed thumbnails on loopback, and Chromium went from
+   * the answers to decoded pictures in 93 ms and 12 ms.
    */
   'messages.attachment': {
     params: { threadId: ThreadId; messageId: MessageId; partIndex: number; display?: boolean; thumb?: boolean; ticket?: boolean };
