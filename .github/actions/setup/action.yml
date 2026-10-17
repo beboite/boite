@@ -3,8 +3,27 @@ description: Install the pinned Bun runtime and the workspace dependencies.
 runs:
   using: composite
   steps:
-    - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+    - id: bun
+      uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
       with:
         bun-version-file: package.json
+    # Bun's download store, not node_modules: install still links every package
+    # and runs lifecycle scripts, so a stale store only costs downloads.
+    - id: store
+      shell: bash
+      run: echo "path=$(bun pm cache)" >> "$GITHUB_OUTPUT"
+    # Saved on main only, like the Vitest cache: a pull request's copy is
+    # visible to that pull request alone and would evict the shared ones.
+    - id: restore
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+      with:
+        path: ${{ steps.store.outputs.path }}
+        key: bun-store-${{ runner.os }}-${{ runner.arch }}-${{ steps.bun.outputs.bun-version }}-${{ hashFiles('bun.lock') }}
+        restore-keys: bun-store-${{ runner.os }}-${{ runner.arch }}-${{ steps.bun.outputs.bun-version }}-
     - shell: bash
       run: bun install --frozen-lockfile
+    - if: github.ref == 'refs/heads/main' && steps.restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+      with:
+        path: ${{ steps.store.outputs.path }}
+        key: bun-store-${{ runner.os }}-${{ runner.arch }}-${{ steps.bun.outputs.bun-version }}-${{ hashFiles('bun.lock') }}

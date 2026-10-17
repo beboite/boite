@@ -33,6 +33,7 @@ import { Scheduler } from './scheduler.ts';
 import { SessionStore } from './sessions.ts';
 import { SettingsStore } from './settings.ts';
 import { eraseIncognitoRoot } from './threads/incognito.ts';
+import { removeTranscripts } from './threads/transcript-purge.ts';
 import { ThreadStore } from './threads.ts';
 import { DraftPreparations } from './threads/draft-preparations.ts';
 import { AttachmentUploads } from './attachment-uploads.ts';
@@ -347,6 +348,8 @@ export class Core {
     this.worktrees = new Worktrees(this);
     this.keybindings = new KeybindingStore(this);
     this.imports = new ImportStore(this);
+    // The journal erased the incognito conversations the last core left behind; their transcripts follow.
+    this.threads.transcriptPurge = removeTranscripts(this, this.journal.takeIncognitoSessions());
     // One scan of visible thread JSON serves activity and coordination recovery. It runs
     // where activity's own check ran, so a corrupt thread still fails before any recovery write.
     this.journal.validateVisibleThreadJson();
@@ -552,6 +555,13 @@ export class Core {
     this.#stopMoves();
     this.#stopDeletionRetention();
     await this.stopArtifactRetention();
+    if (!this.journal.isClosed()) {
+      // Incognito conversations end with the core. Their rows go now, while the
+      // journal can still say which transcripts no other thread names.
+      await this.threads.transcriptPurge;
+      this.journal.purgeIncognitoThreads();
+      await removeTranscripts(this, this.journal.takeIncognitoSessions());
+    }
     this.journal.close();
     // Every agent is stopped by now, so nothing holds an incognito folder.
     eraseIncognitoRoot(this.dataDir, (message) => console.error(message));
