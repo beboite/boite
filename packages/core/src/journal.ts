@@ -14,10 +14,10 @@ import type {
   Turn,
 } from '@boite/contracts';
 import { isNativeAgentPart } from './journal/native-agent-parts.ts';
-import { TRAIL_ONLY, trailOf } from './journal/trail.ts';
+import { TRAIL_ONLY, UNWRITTEN, pruneTrail, trailOf } from './journal/trail.ts';
 import { hydrate, hydratePart } from './journal/part-blobs.ts';
 import { migrate } from './journal/schema.ts';
-import { ProcessRows } from './journal/processes.ts';
+import { PROCESS_COLUMNS, PROCESS_FROM, ProcessRows } from './journal/processes.ts';
 import { runWrite } from './journal/statements.ts';
 import { WAL_LIMIT_BYTES, WalCheckpoints, type WalCheckpointOptions } from './journal/wal-checkpoints.ts';
 import { toAccount, toMessage, toProcess, toProject, toThread, toTurn, parseJson } from './journal/rows.ts';
@@ -101,6 +101,8 @@ export class Journal {
       foldStreamingParts(this.db); // What a stream left beside its row when the last core stopped without closing.
       // An incognito conversation never outlives the core that held it.
       this.purgeIncognitoThreads();
+      // Planner statistics for tables that have none or changed a lot, bounded by SQLite's own analysis limit.
+      this.db.exec('PRAGMA optimize=0x10002');
       // Started after the writes above: SQLite checkpoints those itself, as before.
       this.checkpoints = WalCheckpoints.start(this.db, file, this.onError, options.checkpoints);
     } catch (error) {
@@ -164,6 +166,21 @@ export class Journal {
            AND id IS NOT (SELECT MAX(id) FROM events WHERE type IN ('agents.record', 'agents.limits'))`,
       )
       .run(limit, before).changes;
+  }
+
+  /** Trail events written before `before`, walked forward from `afterId` (`journal/trail.ts`). */
+  pruneTrail(afterId: number, before: number, limit: number): { through: number; done: boolean } {
+    return this.closed ? { through: afterId, done: true } : pruneTrail(this.db, afterId, before, limit);
+  }
+
+  /** Index statistics for the planner, refreshed where SQLite judges them stale (sqlite.org/pragma.html#pragma_optimize). */
+  optimize(): void {
+    if (!this.closed) this.db.exec('PRAGMA optimize');
+  }
+
+  /** The trace rows of each thread past what it keeps, one thread per call (`ProcessRows.pruneNextThread`). */
+  pruneNextProcessThread(afterThreadId: string): string | null {
+    return this.closed ? null : this.processes.pruneNextThread(afterThreadId);
   }
 
   countEvents(type?: string): number {
@@ -813,7 +830,7 @@ export class Journal {
 
   listProcesses(threadId: string, limit: number): ProcessRecord[] {
     const rows = this.db
-      .query('SELECT * FROM processes WHERE thread_id = ? ORDER BY started_at DESC LIMIT ?')
+      .query(`SELECT ${PROCESS_COLUMNS} FROM ${PROCESS_FROM} WHERE p.thread_id = ? ORDER BY p.started_at DESC LIMIT ?`)
       .all(threadId, limit) as ProcessRow[];
     return rows.map(toProcess);
   }
@@ -881,6 +898,8 @@ export class Journal {
   }
 
   private writeEvent(event: JournalEvent): void {
+    // The message row holds what these said: one INSERT per part change bought nothing.
+    if (UNWRITTEN.has(event.type)) return;
     const payload = TRAIL_ONLY.has(event.type) ? trailOf(event.payload) : event.payload;
     this.db
       .query('INSERT INTO events (thread_id, ts, type, version, payload) VALUES (?, ?, ?, ?, ?)')

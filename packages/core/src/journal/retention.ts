@@ -1,17 +1,23 @@
 import type { Journal } from '../journal.ts';
-import { moveInlineValues } from './part-blobs.ts';
+import { moveInlineOutputs, moveInlineValues, recodePartBlobs } from './part-blobs.ts';
+import { deleteUnusedCommandLines, internOldCommandLines } from './processes.ts';
 import { messageOfError } from './stream-buffer.ts';
 
 /** How long events are kept. The projections hold the state; events are the recent trail. */
 export const EVENT_RETENTION_MS = 30 * 86_400_000;
+/** How long the trail events (`TRAIL_ONLY`) written before they stopped are kept. */
+export const TRAIL_RETENTION_MS = 3 * 86_400_000;
 const RETENTION_FIRST_MS = 60_000;
 const RETENTION_EVERY_MS = 86_400_000;
 const RETENTION_BATCH = 5_000;
+const TRAIL_CURSOR = 'events:trail-pruned-through';
 
 /**
  * Prunes events past the retention a minute after start and then daily, one
- * batch per timer tick so that no pass holds the event loop on an old machine.
- * Returns the stop.
+ * batch per timer tick so that no pass holds the event loop on an old machine:
+ * the trail events first, walked forward from where the last pass stopped,
+ * then every event past 30 days from the front of the table. The daily pass
+ * ends with `PRAGMA optimize`. Returns the stop.
  */
 export function scheduleEventRetention(journal: Journal, onError: (message: string) => void): () => void {
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -23,10 +29,11 @@ export function scheduleEventRetention(journal: Journal, onError: (message: stri
     timer = null;
     if (journal.isClosed()) return;
     try {
-      if (journal.pruneEvents(Date.now() - EVENT_RETENTION_MS, RETENTION_BATCH) > 0) {
+      if (pruneEventsOnce(journal, Date.now())) {
         arm(10);
         return;
       }
+      journal.optimize();
     } catch (error) {
       onError(`journal event retention: ${messageOfError(error)}`);
     }
@@ -39,19 +46,101 @@ export function scheduleEventRetention(journal: Journal, onError: (message: stri
   };
 }
 
+/** One batch of event retention at `now`; true while more is left. */
+export function pruneEventsOnce(journal: Journal, now: number): boolean {
+  const after = (journal.getSetting(TRAIL_CURSOR) as number | undefined) ?? 0;
+  const trail = journal.pruneTrail(after, now - TRAIL_RETENTION_MS, RETENTION_BATCH);
+  if (trail.through !== after) journal.setSetting(TRAIL_CURSOR, trail.through);
+  if (!trail.done) return true;
+  return journal.pruneEvents(now - EVENT_RETENTION_MS, RETENTION_BATCH) > 0;
+}
+
 const MOVE_FIRST_MS = 3 * 60_000;
 const MOVE_EVERY_MS = 250;
 const MOVE_RETRY_MS = 30_000;
-const MOVE_CURSOR = 'part-blobs:moved-through';
+const DAILY_MS = 86_400_000;
+/** About how many bytes of stored values one tick reads, so a tick stays in the tens of milliseconds. */
+export const COMPACTION_TICK_BYTES = 8 * 1024 * 1024;
+/** Trace rows whose command line one tick moves to `command_lines`. */
+export const COMPACTION_TICK_ROWS = 5_000;
+/** A cursor at this value is a pass that finished: rows written since are in the new shape. */
+const DONE = Number.MAX_SAFE_INTEGER;
+const PRUNED_THROUGH = 'processes:pruned-through';
+const PRUNED_AT = 'processes:pruned-at';
+const UNUSED_AT = 'command-lines:cleaned-at';
+
+/** What one step did: more is left, it is finished, or an open message holds it. */
+type Step = 'more' | 'done' | 'busy';
+
+/** One pass over rows written in an older shape, resumed from a rowid kept in settings. */
+function rowPass(journal: Journal, key: string, run: (after: number) => number | null): Step {
+  const after = (journal.getSetting(key) as number | undefined) ?? 0;
+  if (after === DONE) return 'done';
+  const through = run(after);
+  if (through === -1) return 'busy';
+  journal.setSetting(key, through === null ? DONE : through);
+  return through === null ? 'done' : 'more';
+}
 
 /**
- * Moves the large values of rows written before `part_blobs`, one message per
- * tick, starting a few minutes after start. A streaming turn pauses it: the
- * largest rows take a moment each, once. The last rowid done is kept, so a
- * finished journal is never scanned again.
+ * The steps of the background compaction, in order. A step that finished is
+ * skipped from then on; the daily ones run again a day after they last ended.
+ */
+export function compactionSteps(journal: Journal): ((now: number) => Step)[] {
+  const isOpen = (id: string) => journal.streamingMessage(id) !== undefined;
+  return [
+    // Values of 32 KiB and more of rows written before `part_blobs`.
+    () => rowPass(journal, 'part-blobs:moved-through', after => moveInlineValues(journal.db, after, isOpen)),
+    // Tool outputs of 4 to 32 KiB of rows written before schema 36.
+    () => rowPass(journal, 'part-blobs:outputs-moved-through', after => moveInlineOutputs(journal.db, after, COMPACTION_TICK_BYTES, isOpen)),
+    // `part_blobs` rows stored as text before schema 36.
+    () => rowPass(journal, 'part-blobs:recoded-through', after => recodePartBlobs(journal.db, after, COMPACTION_TICK_BYTES)),
+    // Command lines of trace rows written before schema 36.
+    () => rowPass(journal, 'processes:interned-through', after => internOldCommandLines(journal.db, after, COMPACTION_TICK_ROWS)),
+    // Every thread's trace cut to what it keeps, one thread per tick, then once a day.
+    now => {
+      const at = journal.getSetting(PRUNED_AT) as number | undefined;
+      if (at !== undefined && now - at < DAILY_MS) return 'done';
+      const next = journal.pruneNextProcessThread((journal.getSetting(PRUNED_THROUGH) as string | undefined) ?? '');
+      if (next !== null) { journal.setSetting(PRUNED_THROUGH, next); return 'more'; }
+      journal.setSetting(PRUNED_AT, now);
+      journal.deleteSetting(PRUNED_THROUGH);
+      return 'done';
+    },
+    // Command lines no trace row names any more, once a day.
+    now => {
+      const at = journal.getSetting(UNUSED_AT) as number | undefined;
+      if (at !== undefined && now - at < DAILY_MS) return 'done';
+      deleteUnusedCommandLines(journal.db);
+      journal.setSetting(UNUSED_AT, now);
+      return 'done';
+    },
+  ];
+}
+
+/**
+ * Runs the first step that is not finished, once. Returns 'done' when every
+ * step is, which is when the timer waits a day.
+ */
+export function compactOnce(journal: Journal, steps: ((now: number) => Step)[], now: number): Step {
+  for (const step of steps) {
+    const result = step(now);
+    if (result !== 'done') return result;
+  }
+  return 'done';
+}
+
+/**
+ * Brings rows written in an older shape to the current one and keeps the
+ * trace bounded, one bounded batch per tick 250 ms apart, starting a few
+ * minutes after start (`compactionSteps`). A streaming turn pauses it. Each
+ * step keeps its cursor in settings, so a finished journal is never scanned
+ * again; once every step is done it wakes once a day for the daily ones.
+ * Returns the stop.
  */
 export function scheduleInlineValueMoves(journal: Journal, onError: (message: string) => void): () => void {
   let timer: ReturnType<typeof setTimeout> | null = null;
+  const steps = compactionSteps(journal);
   const arm = (delay: number): void => {
     timer = setTimeout(pass, delay);
     timer.unref?.();
@@ -62,14 +151,10 @@ export function scheduleInlineValueMoves(journal: Journal, onError: (message: st
     if (journal.hasOpenMessages()) { arm(MOVE_RETRY_MS); return; }
     try {
       journal.flushDeltas();
-      const after = (journal.getSetting(MOVE_CURSOR) as number | undefined) ?? 0;
-      const moved = moveInlineValues(journal.db, after, id => journal.streamingMessage(id) !== undefined);
-      if (moved === null) return;
-      if (moved === -1) { arm(MOVE_RETRY_MS); return; }
-      journal.setSetting(MOVE_CURSOR, moved);
-      arm(MOVE_EVERY_MS);
+      const result = compactOnce(journal, steps, Date.now());
+      arm(result === 'more' ? MOVE_EVERY_MS : result === 'busy' ? MOVE_RETRY_MS : DAILY_MS);
     } catch (error) {
-      onError(`journal part values move: ${messageOfError(error)}`);
+      onError(`journal compaction: ${messageOfError(error)}`);
       arm(MOVE_RETRY_MS);
     }
   };

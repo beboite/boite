@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { RpcEvents } from '@boite/contracts';
 import { Bus } from '../src/bus.ts';
+import { Journal } from '../src/journal.ts';
 import { createPosixPlatform } from '../src/platform/posix.ts';
 import type { GuardEventSink, NativeProcessInfo, ProcessEventSink, ProcessPlatform } from '../src/platform/types.ts';
 import { ProcRegistry } from '../src/procs.ts';
@@ -8,6 +12,7 @@ import { nativeAgents } from '../src/native-agents.ts';
 import { DEFAULT_SETTINGS } from '../src/settings.ts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
+import { compactAll, schema35Journal } from './fixtures/journal-schema35.ts';
 
 const FORGET_MS = 40;
 const EXIT = { exitCode: 0, cpuMs: 5, peakMemoryBytes: 1024, ioBytes: null };
@@ -247,4 +252,52 @@ test('a thread keeps its newest 2,000 trace rows, its live rows and the rows its
   sink.exited(threadId, 1, { ...EXIT, startedAt: 1, incarnation: '1' });
   await waitFor(() => rows().length === 2002, 2000);
   expect(rows().slice(0, 3)).toEqual([2, 3, 110]);
+});
+
+test('a schema 35 trace has its command lines stored once and every thread over the limit pruned in the background, agent cards kept', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'boite-trace-'));
+  const file = join(dir, 'journal.db');
+  const old = schema35Journal(file);
+  const insert = old.query(`INSERT INTO processes (thread_id, pid, parent_pid, exe, command_line, started_at, exited_at, exit_code, cpu_ms, peak_memory_bytes, io_bytes)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 0, 5, 1024, NULL)`);
+  old.transaction(() => {
+    // A thread that finished before pruning ran every 500 exits: its whole trace, hooks with one command line.
+    insert.run('thr_done', 1, null, 'shell', null, 1, null);
+    insert.run('thr_done', 2, 1, 'bash', 'bash -c claude', 2, 3);
+    insert.run('thr_done', 3, 2, 'claude', 'claude -p "Review parsing" --model opus', 3, 4);
+    for (let pid = 10; pid < 2_610; pid++) insert.run('thr_done', pid, 1, 'bash', 'bash hooks/pre-tool.sh', pid, pid + 1);
+    // A thread under the limit keeps everything.
+    for (let pid = 10; pid < 110; pid++) insert.run('thr_small', pid, null, 'git', `git status ${pid % 2}`, pid, pid + 1);
+  })();
+  old.close();
+
+  const journal = new Journal(file);
+  try {
+    const listed = (threadId: string) => journal.listProcesses(threadId, 5_000);
+    const before = { done: listed('thr_done'), small: listed('thr_small') };
+    expect(before.done[0]).toMatchObject({ pid: 2609, commandLine: 'bash hooks/pre-tool.sh' });
+    compactAll(journal);
+    const count = (sql: string) => (journal.db.query(sql).get() as { n: number }).n;
+    expect(count('SELECT COUNT(*) AS n FROM processes WHERE command_line IS NOT NULL')).toBe(0);
+    // One row per distinct command line, the pruned rows' included until the daily cleanup.
+    expect(count('SELECT COUNT(*) AS n FROM command_lines')).toBe(5);
+    const rows = journal.db.query("SELECT pid FROM processes WHERE thread_id = 'thr_done' ORDER BY started_at").all().map(row => (row as { pid: number }).pid);
+    expect(rows).toHaveLength(2_003);
+    expect(rows.slice(0, 4)).toEqual([1, 2, 3, 610]);
+    expect(listed('thr_done')).toEqual(before.done.filter(record => rows.includes(record.pid)));
+    expect(listed('thr_small')).toEqual(before.small);
+    expect(nativeAgents(journal, 'thr_done').map(agent => [agent.name, agent.status])).toEqual([['Claude Code', 'done']]);
+
+    // A new row names its command line too; a thread deleted leaves its lines to the daily cleanup.
+    journal.putProcess({ threadId: 'thr_small', pid: 500, parentPid: null, exe: 'git', commandLine: 'git status 0', startedAt: 500, exitedAt: null, exitCode: null, cpuMs: null, peakMemoryBytes: null, ioBytes: null });
+    expect(count('SELECT COUNT(*) AS n FROM command_lines')).toBe(5);
+    expect(listed('thr_small')[0]).toMatchObject({ pid: 500, commandLine: 'git status 0' });
+    journal.deleteThreads(['thr_small']);
+    compactAll(journal, Date.now() + 86_400_001);
+    expect((journal.db.query('SELECT text FROM command_lines ORDER BY id').all() as { text: string }[]).map(row => row.text))
+      .toEqual(['bash -c claude', 'claude -p "Review parsing" --model opus', 'bash hooks/pre-tool.sh']);
+  } finally {
+    journal.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

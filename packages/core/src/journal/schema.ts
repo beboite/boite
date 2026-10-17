@@ -2,10 +2,11 @@ import type { Database } from 'bun:sqlite';
 import { createHash } from 'node:crypto';
 import type { MessagePart } from '@boite/contracts';
 import { nativeAgentPartSql } from './native-agent-parts.ts';
-import { createPartBlobs } from './part-blobs.ts';
+import { addPartBlobCodecs, createPartBlobs } from './part-blobs.ts';
+import { createCommandLines } from './processes.ts';
 import { parseJson } from './rows.ts';
 
-export const SCHEMA_VERSION = 35;
+export const SCHEMA_VERSION = 36;
 
 /** Raised when the journal was written by a newer core than this one. */
 export class JournalTooNewError extends Error {
@@ -430,6 +431,14 @@ export function migrate(db: Database, file: string): { from: number; to: number 
         PRIMARY KEY (message_id, part_index)) WITHOUT ROWID;
       DROP INDEX IF EXISTS background_observations_thread;`);
     version = 35;
+  }
+  // Part values compressed with zstd, tool outputs from 4 KiB moved out, and
+  // command lines stored once (`part-blobs.ts`, `processes.ts`). Older rows
+  // keep reading as they are; a background pass converts them (`retention.ts`).
+  if (version < 36) {
+    if (!hasColumn('part_blobs', 'codec')) addPartBlobCodecs(db);
+    createCommandLines(db, !hasColumn('processes', 'command_id'));
+    version = 36;
   }
   version = Math.max(version, SCHEMA_VERSION);
   if (row?.user_version !== version) db.exec(`PRAGMA user_version = ${version}`);
