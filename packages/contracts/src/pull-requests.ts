@@ -50,6 +50,14 @@ export interface PullRequestWatch {
    */
   paused: { reason: 'rate-limit' | 'unreachable'; until: number; message: string } | null;
 }
+/**
+ * A watch its agent still waits on: GitHub not read yet, or checks still
+ * running. Once they settle the agent has its answer, and the turn it ended on
+ * is finished work even though the watch stays to catch a review or a conflict.
+ */
+export function pullRequestWatchWaits(watch: PullRequestWatch): boolean {
+  return watch.seen === null || watch.seen.checks.running > 0;
+}
 export interface PullRequestWatchSeen {
   checkedAt: number;
   /** The head commit, abbreviated. */

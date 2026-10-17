@@ -157,12 +157,18 @@ The tested installer becomes the release artifact.
 
 The total JavaScript measure excludes native binaries and source maps.
 
-On 2026-10-17, Windows CI measured the UI entry chunk at 593,177 bytes on
-`origin/main` at `7c7327ab`, already past its 593,000 limit, and at 595,360 for
-the first head of PR #562 on an older base. That PR adds thread links in
-answers (`chat-links.ts`, `workspace.openThreadLink`), the direction line on
-agent mail rows and their strings, all in modules the entry already loads. The
-entry limit becomes 597,000; the other limits stay unchanged.
+On 2026-10-17, Windows CI measured the UI entry chunk at 595,360 bytes for
+the first head of PR #562, 2,183 bytes over its `origin/main` base at
+`7c7327ab`. That PR adds thread links in answers (`chat-links.ts`,
+`workspace.openThreadLink`), the direction line on agent mail rows and their
+strings, all in modules the entry already loads. On top of the PR watch state
+below, the entry limit becomes 597,000; the other limits stay unchanged.
+
+On 2026-10-17, Windows CI measured a 593,177-byte UI entry chunk for
+`origin/main` at `7c7327ab`, already over its 593,000 limit after PRs #558 to
+#560. The PR watch state (PR #564) adds 236 bytes there, 593,413 in total, and
+201 bytes in a fresh Linux `bun run build:ui` (538,541 to 538,742). The entry
+limit becomes 593,500; the other limits stay unchanged.
 
 On 2026-10-16, the server update recovery (PR #552) on `origin/main` at
 `08c11d82` measures 4,353,036 core JavaScript bytes after a fresh `bun run

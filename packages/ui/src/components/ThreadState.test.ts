@@ -206,18 +206,26 @@ test('threads, workflow runs and steps share one status mark vocabulary', () => 
   expect(workflowTone('skipped').tone).toBe('skipped');
 });
 
-test('a thread at rest watching pull requests reads as watching them, and counts with the work in a rollup', () => {
-  const watch = { url: 'https://github.com/example/repo/pull/7', repository: 'example/repo', number: 7, since: NOW, seen: null, paused: null };
+test('a thread at rest watching pull requests counts its time until their checks settle, then reads as finished', () => {
+  vi.useFakeTimers({ now: NOW });
+  const watch = { url: 'https://github.com/example/repo/pull/7', repository: 'example/repo', number: 7, since: NOW - 300_000, seen: null, paused: null };
   const shown = { status: 'idle' as const, unread: true, runningSince: null, backgroundWork: null, lastUserMessageAt: NOW - 120_000, createdAt: NOW - 600_000 };
-  running = mount(ThreadState, { target: document.body, props: { thread: { ...shown, pullRequestWatches: [watch, { ...watch, number: 9 }] }, now: NOW } });
+  running = mount(ThreadState, { target: document.body, props: { thread: { ...shown, requestSince: NOW - 600_000, pullRequestWatches: [watch, { ...watch, number: 9 }] }, now: NOW } });
   flushSync();
   const state = document.body.firstElementChild as HTMLElement;
   expect(state.dataset['state']).toBe('watching');
-  expect(state.getAttribute('title')).toBe('Watching 2 PRs\n#7, #9');
-  expect(state.textContent).toContain('#7 #9');
+  // The row counts from the request, like a monitor; the numbers stay in the tooltip, the card's own line links the PR.
+  expect(state.textContent?.trim()).toBe('10m 00s');
+  expect(state.getAttribute('title')).toBe('Watching 2 PRs\n#7, #9\n10m 00s');
   // Its own turn still comes first; a finished watch leaves the thread done.
   expect(threadState({ status: 'running', unread: false, pullRequestWatches: [watch] })).toBe('working');
   expect(threadState({ status: 'idle', unread: true, pullRequestWatches: [] })).toBe('done');
+  // Checks still running: watching. All settled: the agent has its answer, the turn is finished work.
+  const seen = { checkedAt: NOW, head: 'abc1234', base: 'main', conflicting: false };
+  expect(threadState({ status: 'idle', unread: true, pullRequestWatches: [{ ...watch, seen: { ...seen, checks: { total: 20, running: 3, failed: 0 } } }] })).toBe('watching');
+  const settled = { ...watch, seen: { ...seen, checks: { total: 20, running: 0, failed: 0 } } };
+  expect(threadState({ status: 'idle', unread: true, pullRequestWatches: [settled] })).toBe('done');
+  expect(threadState({ status: 'idle', unread: false, pullRequestWatches: [settled] })).toBeNull();
   expect(projectRollup([{ status: 'idle', unread: true }, { status: 'idle', unread: false, pullRequestWatches: [watch] }])).toEqual({ kind: 'watching', count: 1 });
 });
 

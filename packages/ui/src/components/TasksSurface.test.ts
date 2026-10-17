@@ -34,7 +34,7 @@ test('the panel lists the pull requests a thread watches with what the last read
     expect(row.querySelector('a')!.getAttribute('href')).toBe(URL);
     expect(row.textContent).toContain('#7');
     expect(row.textContent).toContain('4 checks · 2 running');
-    // A thread at rest with a watch reads as watching, not done, read or not.
+    // A thread at rest with a watch whose checks still run reads as watching, not done, read or not.
     expect(threadState(store.openThread!)).toBe('watching');
     expect(threadState({ ...store.openThread!, unread: true })).toBe('watching');
 
