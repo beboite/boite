@@ -2,21 +2,18 @@
  * The audio sessions of the default render endpoint, read through Core Audio
  * over `bun:ffi`. Windows only.
  *
- * There is no COM object to implement here, only COM objects to call: the
- * session notifications an audio engine pushes would need an MTA thread and a
- * JS vtable whose `HRESULT` returns a thread-safe `JSCallback` cannot give, so
- * the guard Worker polls this module instead. Every call goes through the
- * object's vtable: the first eight bytes of an interface pointer are the vtable
- * address, slot `n` sits at `n * 8`, and each slot is wrapped once in a
- * `CFunction` and kept, because building one per call would be the cost of the
- * whole poll.
+ * Every call goes through the object's vtable: the first eight bytes of an
+ * interface pointer are the vtable address, slot `n` sits at `n * 8`, and each
+ * slot is wrapped once in a `CFunction` and kept, because building one per call
+ * would be the cost of the whole walk. The two objects Core Audio calls back
+ * (a new session, a device change) are vtables filled here; see `watch`.
  *
  * Nothing here is silent: a `HRESULT` that is not a success throws with the
  * call's name and the value in hex, or, for one session of a walk, is handed to
  * the walk's `skipped` callback. The one exception is a machine with no render
  * endpoint, which is not a failure and answers `null`.
  */
-import { CFunction, dlopen, FFIType, ptr, read } from 'bun:ffi';
+import { CFunction, dlopen, FFIType, JSCallback, ptr, read } from 'bun:ffi';
 import type { Pointer } from 'bun:ffi';
 
 /** One session of one process, with its `ISimpleAudioVolume` held. */
@@ -44,6 +41,13 @@ export interface AudioSessions {
    * output, or the device went away. Sessions of the new default are elsewhere.
    */
   stale(): boolean;
+  /**
+   * Calls `changed`, later and on this thread, when a session opens on this
+   * endpoint or the render devices change, until `release`. Throws when Core
+   * Audio refuses either registration, which leaves nothing registered.
+   * Absent where the endpoint cannot say so, and then the caller polls.
+   */
+  watch?(changed: () => void): void;
   release(): void;
 }
 
@@ -79,15 +83,19 @@ const E_MULTIMEDIA = 1;
 /** `IUnknown`, on every interface. */
 const SLOT_QUERY_INTERFACE = 0;
 const SLOT_RELEASE = 2;
-/** `IMMDeviceEnumerator::GetDefaultAudioEndpoint`. */
+/** `IMMDeviceEnumerator::GetDefaultAudioEndpoint`, `::RegisterEndpointNotificationCallback` and its pair. */
 const SLOT_GET_DEFAULT_ENDPOINT = 4;
+const SLOT_REGISTER_ENDPOINT_NOTIFICATION = 6;
+const SLOT_UNREGISTER_ENDPOINT_NOTIFICATION = 7;
 /** `IMMDevice::Activate` and `::GetId`. */
 const SLOT_ACTIVATE = 3;
 const SLOT_GET_ID = 5;
 /** A device id is a short endpoint path; anything past this is a bad read. */
 const MAX_DEVICE_ID_CHARS = 512;
-/** `IAudioSessionManager2::GetSessionEnumerator`, after the two it inherits. */
+/** `IAudioSessionManager2::GetSessionEnumerator`, after the two it inherits, then `::RegisterSessionNotification` and its pair. */
 const SLOT_GET_SESSION_ENUMERATOR = 5;
+const SLOT_REGISTER_SESSION_NOTIFICATION = 6;
+const SLOT_UNREGISTER_SESSION_NOTIFICATION = 7;
 /** `IAudioSessionEnumerator::GetCount` and `::GetSession`. */
 const SLOT_GET_COUNT = 3;
 const SLOT_GET_SESSION = 4;
@@ -252,6 +260,70 @@ function queryInterface(self: Pointer, iid: Uint8Array, name: string): Pointer {
   return taken(out, `IUnknown::QueryInterface(${name})`);
 }
 
+// -- the objects Core Audio calls back -------------------------------------
+
+/**
+ * `IAudioSessionNotification` (`OnSessionCreated`) and `IMMNotificationClient`
+ * (a device's state, arrival, removal, the default changing, a property) as
+ * vtables filled here. Core Audio calls them on threads of its own, where no
+ * JavaScript may run, so the only JavaScript behind them is one thread-safe
+ * `JSCallback`: it answers S_OK at once and runs later on the thread that made
+ * it. `IUnknown` and property changes point at kernel32 functions that read no
+ * argument and change nothing: AddRef and Release at `GetCurrentProcessId`, a
+ * count that is never zero, since the object lives as long as this module;
+ * QueryInterface at `GetCurrentProcess`, whose -1 reads as a failed HRESULT, so
+ * nobody gets another interface out of it.
+ */
+interface Notifiers {
+  session: BigUint64Array;
+  client: BigUint64Array;
+}
+
+/** What each notification object, by address, wakes. A late call after `release` finds nothing. */
+const watchers = new Map<number, () => void>();
+let notifiers: Notifiers | null = null;
+/** Every object handed to Core Audio, kept for the module's life so a late call never reads freed memory. */
+const handedOut: BigUint64Array[] = [];
+
+/** The address of a `dlopen` symbol: Bun sets `ptr` on each function, its typings leave it out. */
+function nativeAddress(symbol: unknown, name: string): bigint {
+  const address = (symbol as { ptr?: unknown }).ptr;
+  if (typeof address !== 'number' || address === 0) throw new Error(`kernel32 ${name} has no address`);
+  return BigInt(address);
+}
+
+function vtables(): Notifiers {
+  if (notifiers !== null) return notifiers;
+  const k32 = dlopen('kernel32.dll', {
+    GetCurrentProcessId: { args: [], returns: FFIType.u32 },
+    GetCurrentProcess: { args: [], returns: FFIType.u64 },
+  }).symbols;
+  const count = nativeAddress(k32.GetCurrentProcessId, 'GetCurrentProcessId');
+  const refuse = nativeAddress(k32.GetCurrentProcess, 'GetCurrentProcess');
+  const notified = new JSCallback((self: number) => {
+    watchers.get(Number(self))?.();
+  }, { args: ['ptr'], returns: 'i32', threadsafe: true });
+  if (notified.ptr === null) throw new Error('the Core Audio notification callback has no pointer');
+  const wake = BigInt(notified.ptr as unknown as number);
+  notifiers = {
+    // QueryInterface, AddRef, Release, OnSessionCreated.
+    session: new BigUint64Array([refuse, count, count, wake]),
+    // QueryInterface, AddRef, Release, OnDeviceStateChanged, OnDeviceAdded,
+    // OnDeviceRemoved, OnDefaultDeviceChanged, OnPropertyValueChanged.
+    client: new BigUint64Array([refuse, count, count, wake, wake, wake, wake, count]),
+  };
+  return notifiers;
+}
+
+/** One object of the given vtable, whose calls reach `changed`. */
+function notifier(vtable: BigUint64Array, changed: () => void): Pointer {
+  const object = new BigUint64Array([BigInt(ptr(vtable) as unknown as number)]);
+  handedOut.push(object);
+  const address = ptr(object);
+  watchers.set(address as unknown as number, changed);
+  return address;
+}
+
 // -- the endpoint and its sessions -----------------------------------------
 
 /**
@@ -305,6 +377,22 @@ export function openSessions(): AudioSessions | null {
   }
 
   let open = true;
+  let session: Pointer | null = null;
+  let client: Pointer | null = null;
+  const unwatch = (): void => {
+    // Unregistering releases Core Audio's reference; a failure here means the
+    // endpoint is gone already, and the objects stay valid regardless.
+    if (session !== null) {
+      slot(manager, SLOT_UNREGISTER_SESSION_NOTIFICATION, 'IAudioSessionManager2::UnregisterSessionNotification', SIG_OUT_POINTER)(manager, session);
+      watchers.delete(session as unknown as number);
+      session = null;
+    }
+    if (client !== null) {
+      slot(enumerator, SLOT_UNREGISTER_ENDPOINT_NOTIFICATION, 'IMMDeviceEnumerator::UnregisterEndpointNotificationCallback', SIG_OUT_POINTER)(enumerator, client);
+      watchers.delete(client as unknown as number);
+      client = null;
+    }
+  };
   return {
     list: (skipped?: (message: string) => void): AudioSession[] => {
       if (!open) throw new Error('IAudioSessionManager2 was already released');
@@ -320,9 +408,28 @@ export function openSessions(): AudioSessions | null {
         release(device);
       }
     },
+    watch: (changed: () => void): void => {
+      if (!open) throw new Error('IAudioSessionManager2 was already released');
+      if (session !== null) return;
+      const { session: sessionTable, client: clientTable } = vtables();
+      try {
+        const sessionObject = notifier(sessionTable, changed);
+        ok(slot(manager, SLOT_REGISTER_SESSION_NOTIFICATION, 'IAudioSessionManager2::RegisterSessionNotification', SIG_OUT_POINTER)(manager, sessionObject),
+          'IAudioSessionManager2::RegisterSessionNotification');
+        session = sessionObject;
+        const clientObject = notifier(clientTable, changed);
+        ok(slot(enumerator, SLOT_REGISTER_ENDPOINT_NOTIFICATION, 'IMMDeviceEnumerator::RegisterEndpointNotificationCallback', SIG_OUT_POINTER)(enumerator, clientObject),
+          'IMMDeviceEnumerator::RegisterEndpointNotificationCallback');
+        client = clientObject;
+      } catch (error) {
+        try { unwatch(); } catch { /* the registration that failed is the one to report */ }
+        throw error;
+      }
+    },
     release: (): void => {
       if (!open) return;
       open = false;
+      try { unwatch(); } catch { /* releasing the endpoint below ends the registrations anyway */ }
       release(manager);
       release(enumerator);
     },
