@@ -329,6 +329,22 @@ describe('the right panel', () => {
     expect(again.for('t-3').surfaces).toHaveLength(0);
   });
 
+  test('on a wide window an untouched conversation opens on the launcher, until it is closed or an agent opens a tab', () => {
+    vi.stubGlobal('matchMedia', (media: string) => ({ media, matches: media === '(min-width: 1200px)' }));
+    const root = new RightPanelStore();
+
+    expect([root.for('t-1').isOpen, root.for('t-1').active]).toEqual([true, null]);
+    expect(root.for(null).isOpen).toBe(false);
+    root.for('t-1').toggle();
+    root.for('t-2').open('agent-browser');
+
+    const again = new RightPanelStore();
+    expect(again.for('t-1').isOpen).toBe(false);
+    expect(again.for('t-2').active?.kind).toBe('agent-browser');
+    vi.stubGlobal('matchMedia', (media: string) => ({ media, matches: false }));
+    expect(new RightPanelStore().for('t-3').isOpen).toBe(false);
+  });
+
   test('a phone comes back to the chat: the stored panel is shut, its tabs kept for the next open', () => {
     const first = panel('t-1');
     first.bound.open('trace');
