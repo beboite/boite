@@ -49,17 +49,39 @@ test('the boot resolves once the stored language can answer', async () => {
 });
 
 test('a French device boots on the French chunk alone, never fetching English', async () => {
+  // The mocks go in before a fresh copy of the module graph is imported, so
+  // they see every import of the catalogues that copy makes, static ones too.
   vi.resetModules();
-  vi.doMock('./strings.en', () => { throw new Error('a French device fetched the English catalogue'); });
+  let englishImported = false;
+  vi.doMock('./strings.en', async (original) => {
+    englishImported = true;
+    return await original();
+  });
   try {
     window.localStorage.setItem(LOCALE_STORAGE_KEY, 'fr');
     const fresh = await import('./i18n.svelte');
     await fresh.startLocale();
+    expect(englishImported).toBe(false);
     expect(fresh.activeLocale()).toBe('fr');
     expect(fresh.strings.common.yes).toBe('oui');
     // The chunk is whole (catalogue-plugin.ts): every key English has answers.
-    expect(Object.keys(fresh.strings.common)).toContain('no');
+    const english = (await import('./strings.en')).strings;
+    expect(Object.keys(fresh.strings.common)).toEqual(Object.keys(english.common));
   } finally {
     vi.doUnmock('./strings.en');
+  }
+});
+
+test('the boot rejects when no catalogue loads, so main.ts shows its notice instead of an empty app', async () => {
+  vi.resetModules();
+  vi.doMock('./strings.en', () => { throw new Error('offline'); });
+  vi.doMock('./strings.fr', () => { throw new Error('offline'); });
+  try {
+    window.localStorage.setItem(LOCALE_STORAGE_KEY, 'fr');
+    const fresh = await import('./i18n.svelte');
+    await expect(fresh.startLocale()).rejects.toThrow();
+  } finally {
+    vi.doUnmock('./strings.en');
+    vi.doUnmock('./strings.fr');
   }
 });

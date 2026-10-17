@@ -29,7 +29,7 @@
 
 {#snippet picture(member: Pick<AgentProfile, 'id' | 'name' | 'avatar'>, state: 'idle' | 'working' | 'waiting' | 'still')}
   {@const own = robotOf(member.id, member.avatar)}
-  {#if own}<Deferred part={parts.RobotFace}>{#snippet children(RobotFace)}<RobotFace robot={own} {state} />{/snippet}</Deferred>{:else}<span class="ui-label">{avatarText(member.name, member.avatar)}</span>{/if}
+  {#if own}<Deferred part={parts.RobotFace} quiet>{#snippet children(RobotFace)}<RobotFace robot={own} {state} />{/snippet}</Deferred>{:else}<span class="ui-label">{avatarText(member.name, member.avatar)}</span>{/if}
 {/snippet}
 
 <span class="agent-avatar" class:robot={!!robot} data-kind={kind} style:--size="{size}px" style:--tint={kind === 'mission' ? null : tintOf(id)} aria-hidden="true">
@@ -43,7 +43,7 @@
     <Target size={Math.round(size * 0.45)} strokeWidth={1.75} />
   {:else if robot}
     {@const own = robot}
-    <Deferred part={parts.RobotFace}>{#snippet children(RobotFace)}<RobotFace robot={own} state={size < 24 ? 'still' : face} />{/snippet}</Deferred>
+    <Deferred part={parts.RobotFace} quiet>{#snippet children(RobotFace)}<RobotFace robot={own} state={size < 24 ? 'still' : face} />{/snippet}</Deferred>
   {:else}
     <span class="ui-label">{avatarText(name, avatar)}</span>
   {/if}

@@ -13,7 +13,7 @@
  * leaving other apps alone. Bump the version whenever the strategy below
  * changes, so a dev server's unstamped worker moves on too.
  */
-const CACHE = 'boite-ui-v4';
+const CACHE = 'boite-ui-v5';
 const SHELL = '/';
 const MANIFEST = '/manifest.webmanifest';
 const WORKER = '/sw.js';
@@ -24,6 +24,8 @@ const SHELL_PATIENCE_MS = 2500;
 /** Notification words in the user's language, written by the page; outside the `boite-ui-` caches `activate` deletes. */
 const WORDS_CACHE = 'boite-notify';
 const WORDS_PATH = '/notification-words';
+/** The language the page last spoke, in the same cache: the next install stores that catalogue. */
+const LOCALE_PATH = '/locale';
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -34,16 +36,47 @@ self.addEventListener('install', (event) => {
       const shell = await fetch(SHELL, { cache: 'reload' });
       if (!shell.ok) throw new Error('the app shell could not be cached');
       const html = await shell.clone().text();
-      // Only what the document itself loads: a `src` or `href`. The locale map
-      // in an inline script names every catalogue, and a device has no use for
-      // the ones it does not speak; it stores its own on first use.
-      const assets = [...new Set([...html.matchAll(/(?:src|href)="\.?(\/assets\/[^"]+)"/g)].map((found) => found[1]))];
+      // What the document itself loads (a `src` or `href`), and the one
+      // catalogue this device speaks: the app mounts only with a catalogue, so
+      // an offline open of this build needs it as much as the entry.
+      const assets = new Set([...html.matchAll(/(?:src|href)="\.?(\/assets\/[^"]+)"/g)].map((found) => found[1]));
+      const catalogue = await catalogueFor(html);
+      if (catalogue) assets.add(catalogue);
       await cache.addAll([...assets, MANIFEST, '/icons/icon-192.png', '/fonts/Inter-latin.woff2', '/fonts/GeistMono-latin.woff2']);
       await cache.put(SHELL, shell);
       await self.skipWaiting();
     })(),
   );
 });
+
+/**
+ * The catalogue of the language the page last spoke (`storeWorkerLocale` in
+ * `src/lib/notify.ts`), else the first device language the build has, else
+ * English, read from the locale map index.html inlines (`var c={...}`). The
+ * other catalogues stay on the wire until someone switches to one.
+ */
+async function catalogueFor(html) {
+  const found = /var c=(\{[^}]*\})/.exec(html);
+  if (!found) return undefined;
+  let map;
+  try {
+    map = JSON.parse(found[1]);
+  } catch {
+    return undefined;
+  }
+  const chunk = (code) => (typeof map[code] === 'string' && map[code].startsWith('./assets/') ? map[code].slice(1) : undefined);
+  const stored = await (await caches.open(WORDS_CACHE)).match(LOCALE_PATH);
+  if (stored) {
+    const path = chunk((await stored.text()).trim());
+    if (path) return path;
+  }
+  const languages = self.navigator.languages ?? [self.navigator.language];
+  for (const language of languages) {
+    const path = typeof language === 'string' ? chunk(language.toLowerCase().split('-')[0]) : undefined;
+    if (path) return path;
+  }
+  return chunk('en');
+}
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(

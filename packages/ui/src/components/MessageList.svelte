@@ -833,7 +833,7 @@
     </button>
   {/if}
 </div>
-{#if viewing}{@const view = viewing}<Deferred part={parts.ImageViewer}>{#snippet children(ImageViewer)}<ImageViewer items={view.items} index={view.index} onclose={() => { viewing = null; releaseHeld(); }} />{/snippet}</Deferred>{/if}
+{#if viewing}{@const view = viewing}<Deferred part={parts.ImageViewer} floating>{#snippet children(ImageViewer)}<ImageViewer items={view.items} index={view.index} onclose={() => { viewing = null; releaseHeld(); }} />{/snippet}</Deferred>{/if}
 
 <style>
   .timeline-wrap {

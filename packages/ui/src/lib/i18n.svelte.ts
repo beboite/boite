@@ -251,12 +251,14 @@ export function setLocaleSetting(setting: LocaleSetting): Promise<void> {
 
 /**
  * Applies the stored language on boot and loads it, English when it cannot.
- * `main.ts` awaits it before the first frame.
+ * `main.ts` awaits it before the first frame, and draws nothing of the app when
+ * it rejects: with no catalogue at all, every sentence would be missing
+ * (`lib/boot-failure.ts` says so and retries instead).
  */
 export function startLocale(): Promise<void> {
   state.setting = readLocaleSetting();
   stamp();
-  return loadLocale(activeLocale()).catch(() => loadLocale(DEFAULT_LOCALE)).catch(() => undefined);
+  return loadLocale(activeLocale()).catch(() => loadLocale(DEFAULT_LOCALE));
 }
 
 /** What answers a key the active catalogue has not got: English, else the catalogue this page holds. */

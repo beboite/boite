@@ -25,8 +25,10 @@
   import { installDropNavigationGuard } from './lib/drop-navigation';
   import { QUIT_HOLD_MS } from './lib/quit-hold';
   import { closingStores, confirmedQuitHold, desktopQuit, installQuitGuard } from './lib/shell-quit';
-  import { notificationWords, onNotificationOpen, storeNotificationWords } from './lib/notify';
+  import { notificationWords, onNotificationOpen, storeNotificationWords, storeWorkerLocale } from './lib/notify';
   import { strings } from './lib/strings';
+  import { activeLocale } from './lib/i18n.svelte';
+  import { retryOrReload } from './lib/retry-load';
   import { experimentOn } from './lib/experiments.svelte';
   import { installWhipEscape } from './lib/whip.svelte';
   import { rightPanel } from './lib/right-panel.svelte';
@@ -35,7 +37,7 @@
   import type { Store } from './lib/store.svelte';
   import { tourRequested, tourSeen } from './lib/onboarding.svelte';
   import { prefetchAllowed, prefetchNames, warmPages, whenIdle } from './lib/prefetch';
-  import { parts, prefetchParts } from './lib/deferred-parts';
+  import { mobileNavigation, parts, prefetchParts } from './lib/deferred-parts';
   import { voice } from './lib/voice-prefs.svelte';
   import { startTheme } from './lib/theme';
   import { appName, appUpdater } from './lib/app-update.svelte';
@@ -56,20 +58,11 @@
 
   let store = $derived(workspace.active);
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
-  // The phone's navigation is drawn only outside the shell, which never parses
-  // it: there its chunk starts with the app, and the boot screen waits for it,
-  // so the first frame has it. A failed fetch (offline, cold cache) lets the app
-  // draw without it and is tried again once the core answers.
-  let MobileNavigation = $state.raw<typeof import('./components/MobileNavigation.svelte').default>();
-  let mobileNavigationMissing = $state(false);
-  let mobileNavigationLoading = false;
+  // The phone's navigation (`lib/deferred-parts.ts`). A failed fetch (offline,
+  // cold cache) lets the app draw with a bar that says so and retries, by hand,
+  // when the core answers again or when the browser is back online.
   function loadMobileNavigation(): void {
-    if (inShell || MobileNavigation || mobileNavigationLoading) return;
-    mobileNavigationLoading = true;
-    void import('./components/MobileNavigation.svelte').then(
-      (module) => { MobileNavigation = module.default; },
-      () => { mobileNavigationMissing = true; }
-    ).finally(() => { mobileNavigationLoading = false; });
+    if (!inShell) void mobileNavigation.load().catch(() => undefined);
   }
   loadMobileNavigation();
   $effect(() => {
@@ -79,7 +72,7 @@
   if (voice.current.enabled) void parts.Dictation.load().catch(() => undefined);
   // The machine the window opened on may still give way to one that answers: until then nothing of it is drawn.
   const booted = $derived(store.booted && !(workspace.waiting && store === workspace.primary)
-    && (inShell || MobileNavigation !== undefined || mobileNavigationMissing));
+    && (inShell || mobileNavigation.current !== undefined || mobileNavigation.failed));
   // A page the agent opens brings its browser forward in the panel, on every client (lib/agent-browser-watch.ts).
   $effect(() => {
     const threadId = store.openThread?.id;
@@ -388,6 +381,7 @@
   $effect(() => {
     if (inShell) return;
     void storeNotificationWords(notificationWords());
+    void storeWorkerLocale(activeLocale());
   });
 
   // Every http(s) link the UI shows goes to the system browser, once, from here.
@@ -518,7 +512,7 @@
 
 </script>
 
-<svelte:window {onkeydown} {onkeyup} {onblur} />
+<svelte:window {onkeydown} {onkeyup} {onblur} ononline={() => { if (mobileNavigation.failed) loadMobileNavigation(); }} />
 
 {#each workspace.machines as machine (machine.id)}
   <ThreadPreparation store={machine.store} visible={machine.store === store && documentVisible && (inShell || mobileScreen === 'chat')} />
@@ -528,7 +522,17 @@
 {/if}
 
 <div class="app" class:shell={inShell} class:ready={booted} class:phone-chat={!inShell && !mobileRecovery && store.page === 'chat' && mobileScreen === 'chat'} class:off-chat={!inShell && store.page !== 'chat'} class:quitting bind:this={appRoot}>
-  {#if !inShell && booted && MobileNavigation}<MobileNavigation {store} recover={mobileRecovery} bind:screen={mobileScreen} />{/if}
+  {#if !inShell && booted}
+    {#if mobileNavigation.current}
+      {@const MobileNavigation = mobileNavigation.current}
+      <MobileNavigation {store} recover={mobileRecovery} bind:screen={mobileScreen} />
+    {:else}
+      <p class="mobile-navigation-failed" role="alert" data-testid="mobile-navigation-failed">
+        <span>{strings.parts.navigationFailed}</span>
+        <button type="button" data-testid="mobile-navigation-retry" onclick={() => void retryOrReload(() => mobileNavigation.load())}>{strings.common.retry}</button>
+      </p>
+    {/if}
+  {/if}
   <TitleBar {store} />
 
   <div class="body" class:mobile-covered={!inShell && store.page === 'chat' && (mobileScreen !== 'chat' || mobileRecovery)} class:panel-maximized={rightPanel.maximized && !rightPanel.floating && store.panelOpen} class:sidebar-folded={sidebarFolded}>
@@ -811,7 +815,12 @@
     transition: opacity var(--dur-2) var(--ease-out-quint);
   }
 
+  .mobile-navigation-failed { display: none; }
+
   @media (max-width: 720px) {
+    /* The navigation's place when its chunk did not load: it says so, with a retry. */
+    .app:not(.shell) .mobile-navigation-failed { display: flex; grid-row: 1; grid-column: 1; align-items: center; gap: 10px; margin: 0; min-height: 60px; padding: max(8px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 8px max(12px, env(safe-area-inset-left)); border-bottom: 1px solid var(--color-border); color: var(--color-danger); }
+    .mobile-navigation-failed button { flex: none; min-height: 44px; padding: 0 14px; border-radius: var(--radius-md); }
     /* Safari scrolls the document to reveal a focused field even with overflow
        hidden. Anchor the app to the viewport so its header does not leave with it. */
     .app:not(.shell) { position: fixed; left: 0; right: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); grid-template-columns: minmax(0, 1fr); height: var(--app-height, 100dvh); top: var(--app-top, 0px); overflow: hidden; }

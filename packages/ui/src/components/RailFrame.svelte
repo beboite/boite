@@ -118,7 +118,7 @@
     {@render lead?.()}
     <span class="grow"></span>
     {@render foot?.()}
-    <Deferred part={parts.UpdatesNotice}>{#snippet children(UpdatesNotice)}<UpdatesNotice />{/snippet}</Deferred>
+    <Deferred part={parts.UpdatesNotice} quiet>{#snippet children(UpdatesNotice)}<UpdatesNotice />{/snippet}</Deferred>
     {#if work.shows('sidebar.limits')}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <span class="control" oncontextmenu={(event) => controlMenu(event, store, 'sidebar.limits')}><LimitsGlance {store} /></span>

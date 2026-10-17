@@ -306,7 +306,7 @@
   </div>
   {#if error}<div class="error" role="alert"><p>{error}</p><button type="button" class="ghost small" onclick={load} disabled={loading}><span class="ui-label">{strings.common.retry}</span></button></div>{/if}
 </section>
-{#if viewing}{@const view = viewing}<Deferred part={parts.ImageViewer}>{#snippet children(ImageViewer)}<ImageViewer items={view.items} index={view.index} onclose={() => viewing = null} />{/snippet}</Deferred>{/if}
+{#if viewing}{@const view = viewing}<Deferred part={parts.ImageViewer} floating>{#snippet children(ImageViewer)}<ImageViewer items={view.items} index={view.index} onclose={() => viewing = null} />{/snippet}</Deferred>{/if}
 
 <style>
   .chat-file { margin-block: 10px; max-width: 100%; min-width: 0; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); overflow: hidden; display: flex; flex-direction: column; }

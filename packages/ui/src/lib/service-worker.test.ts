@@ -5,7 +5,7 @@ import { expect, test, vi } from 'vitest';
 import { stampWorkerCache } from './worker-stamp';
 
 const source = readFileSync(resolve('public/sw.js'), 'utf8');
-function worker(code = source, cacheNames = ['boite-ui-v1', 'another-app']) {
+function worker(code = source, cacheNames = ['boite-ui-v1', 'another-app'], languages?: string[]) {
   const listeners = new Map<string, (event: any) => void>();
   const notification = vi.fn().mockResolvedValue(undefined);
   const openWindow = vi.fn().mockResolvedValue(undefined);
@@ -22,7 +22,7 @@ function worker(code = source, cacheNames = ['boite-ui-v1', 'another-app']) {
   const clearAppBadge = vi.fn().mockResolvedValue(undefined);
   runInNewContext(code, { URL, fetch, caches, setTimeout, clearTimeout, self: {
     addEventListener: (name: string, listener: (event: any) => void) => listeners.set(name, listener),
-    navigator: { setAppBadge, clearAppBadge }, location: { origin: 'https://boite.test' }, registration: { showNotification: notification },
+    navigator: { setAppBadge, clearAppBadge, languages }, location: { origin: 'https://boite.test' }, registration: { showNotification: notification },
     clients: { matchAll, openWindow, claim: vi.fn().mockResolvedValue(undefined) }, skipWaiting: vi.fn().mockResolvedValue(undefined)
   } });
   async function emit(name: string, input: Record<string, unknown> = {}) {
@@ -159,6 +159,29 @@ test('installation caches entry scripts, styles and fonts before taking control'
   expect(sw.put).toHaveBeenCalledWith('/', expect.any(Response));
 });
 
+test('installation also caches the one catalogue this device speaks, so an offline open can mount', async () => {
+  const html = '<script src="./assets/index-ab.js"></script><script>var c=localStorage.getItem(`x`);var c={"en":"./assets/strings.en-gh.js","fr":"./assets/strings.fr-ef.js"},k=["en","fr"]</script>';
+  const install = async (languages: string[] | undefined, stored?: string) => {
+    const sw = worker(source, undefined, languages);
+    sw.fetch.mockResolvedValue(new Response(html));
+    sw.cache.match.mockImplementation(async (path: string) => (path === '/locale' && stored !== undefined ? new Response(stored) : undefined));
+    await sw.emit('install');
+    return sw.cache.addAll.mock.calls[0]![0] as string[];
+  };
+  // Nothing stored and no language the build has: English.
+  expect(await install(undefined)).toEqual([
+    '/assets/index-ab.js', '/assets/strings.en-gh.js', '/manifest.webmanifest', '/icons/icon-192.png', '/fonts/Inter-latin.woff2', '/fonts/GeistMono-latin.woff2'
+  ]);
+  expect(await install(['de-CH'])).toContain('/assets/strings.en-gh.js');
+  // The device's first language the build has, by its base subtag.
+  const french = await install(['de-CH', 'fr-CA', 'en']);
+  expect(french).toContain('/assets/strings.fr-ef.js');
+  expect(french).not.toContain('/assets/strings.en-gh.js');
+  // The language the page last spoke beats the device's; one the build lacks does not.
+  expect(await install(['en-US'], 'fr')).toContain('/assets/strings.fr-ef.js');
+  expect(await install(['fr-FR'], 'xx')).toContain('/assets/strings.fr-ef.js');
+});
+
 test('activation keeps other apps caches and RPC is never handled', async () => {
   const sw = worker();
   await sw.emit('activate');
@@ -170,12 +193,12 @@ test('activation keeps other apps caches and RPC is never handled', async () => 
 test("a build's worker opens a cache of its own, and activating it drops the previous build's files", async () => {
   const stamped = stampWorkerCache(source, '0123456789abcdef');
   expect(stamped).not.toBe(source);
-  const sw = worker(stamped, ['boite-ui-v4', 'boite-ui-v4-fedcba9876543210', 'boite-ui-v4-0123456789abcdef', 'another-app']);
+  const sw = worker(stamped, ['boite-ui-v5', 'boite-ui-v5-fedcba9876543210', 'boite-ui-v5-0123456789abcdef', 'another-app']);
 
   await sw.emit('install');
-  expect(sw.caches.open).toHaveBeenCalledWith('boite-ui-v4-0123456789abcdef');
+  expect(sw.caches.open).toHaveBeenCalledWith('boite-ui-v5-0123456789abcdef');
   await sw.emit('activate');
-  expect(sw.caches.delete.mock.calls.map(([name]) => name)).toEqual(['boite-ui-v4', 'boite-ui-v4-fedcba9876543210']);
+  expect(sw.caches.delete.mock.calls.map(([name]) => name)).toEqual(['boite-ui-v5', 'boite-ui-v5-fedcba9876543210']);
 
   // A second build is a different file, which is what makes the browser install it.
   expect(stampWorkerCache(source, 'fedcba9876543210')).not.toBe(stamped);

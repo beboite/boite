@@ -472,10 +472,10 @@ core behind it; both are skipped. A registration that fails is one
 
 ## What is cached, and what never is
 
-Each build uses `boite-ui-v4-<build id>`, where the build ID hashes the asset
+Each build uses `boite-ui-v5-<build id>`, where the build ID hashes the asset
 filenames. Vite stamps it into `dist/sw.js` before compression. Activation
 removes older `boite-ui-` caches, including their hashed assets, and leaves
-other applications' caches alone. Development uses unstamped `boite-ui-v4`.
+other applications' caches alone. Development uses unstamped `boite-ui-v5`.
 
 | Request | Rule |
 |---|---|
@@ -504,9 +504,12 @@ end to end test stops the core, reloads the page and watches the shell paint
 anyway.
 
 Installation reads the entry HTML and precaches the hashed assets it names in
-a `src` or `href`, the default fonts, icon and manifest. The locale map of an
-inline script is left out, so a device reading English never stores the French
-catalogue; a French device stores it when the page first loads it. Every successful navigation refreshes the offline
+a `src` or `href`, the default fonts, icon and manifest, and one catalogue from
+the locale map of an inline script: the language the page last spoke, which it
+writes beside the notification words, else the device's first language the
+build has, else English. The app mounts only with a catalogue, so an offline
+open needs it as much as the entry; the other languages stay on the wire until
+someone picks one. Every successful navigation refreshes the offline
 HTML. Network errors and HTTP 5xx responses fall back to that cached shell.
 Secondary screens are cached when opened; an uncached Settings screen names
 the missing connection instead of silently failing.
