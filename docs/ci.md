@@ -150,12 +150,19 @@ The tested installer becomes the release artifact.
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 593,000 |
+| UI entry chunk | 597,000 |
 | UI files, excluding `.br` and `.gz` copies | 5,019,500 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 4,356,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-17, Windows CI measured the UI entry chunk at 593,177 bytes on
+`origin/main` at `7c7327ab`, already past its 593,000 limit, and at 595,360 for
+the first head of PR #562 on an older base. That PR adds thread links in
+answers (`chat-links.ts`, `workspace.openThreadLink`), the direction line on
+agent mail rows and their strings, all in modules the entry already loads. The
+entry limit becomes 597,000; the other limits stay unchanged.
 
 On 2026-10-16, the server update recovery (PR #552) on `origin/main` at
 `08c11d82` measures 4,353,036 core JavaScript bytes after a fresh `bun run
