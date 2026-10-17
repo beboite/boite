@@ -14,7 +14,7 @@ import type {
   Turn,
 } from '@boite/contracts';
 import { isNativeAgentPart } from './journal/native-agent-parts.ts';
-import { TRAIL_ONLY, UNWRITTEN, pruneTrail, trailOf } from './journal/trail.ts';
+import { TRAIL_ONLY, UNWRITTEN, pruneTrail, rewindTrailCursor, trailOf } from './journal/trail.ts';
 import { hydrate, hydratePart } from './journal/part-blobs.ts';
 import { migrate } from './journal/schema.ts';
 import { PROCESS_COLUMNS, PROCESS_FROM, ProcessRows } from './journal/processes.ts';
@@ -101,8 +101,6 @@ export class Journal {
       foldStreamingParts(this.db); // What a stream left beside its row when the last core stopped without closing.
       // An incognito conversation never outlives the core that held it.
       this.purgeIncognitoThreads();
-      // Planner statistics for tables that have none or changed a lot, bounded by SQLite's own analysis limit.
-      this.db.exec('PRAGMA optimize=0x10002');
       // Started after the writes above: SQLite checkpoints those itself, as before.
       this.checkpoints = WalCheckpoints.start(this.db, file, this.onError, options.checkpoints);
     } catch (error) {
@@ -160,12 +158,14 @@ export class Journal {
    */
   pruneEvents(before: number, limit: number): number {
     if (this.closed) return 0;
-    return this.db
-      .query(
+    return this.db.transaction(() => {
+      const { changes } = this.db.query(
         `DELETE FROM events WHERE id IN (SELECT id FROM events ORDER BY id LIMIT ?) AND ts < ?
            AND id IS NOT (SELECT MAX(id) FROM events WHERE type IN ('agents.record', 'agents.limits'))`,
-      )
-      .run(limit, before).changes;
+      ).run(limit, before);
+      rewindTrailCursor(this.db);
+      return changes;
+    })();
   }
 
   /** Trail events written before `before`, walked forward from `afterId` (`journal/trail.ts`). */
@@ -173,9 +173,26 @@ export class Journal {
     return this.closed ? { through: afterId, done: true } : pruneTrail(this.db, afterId, before, limit);
   }
 
-  /** Index statistics for the planner, refreshed where SQLite judges them stale (sqlite.org/pragma.html#pragma_optimize). */
-  optimize(): void {
-    if (!this.closed) this.db.exec('PRAGMA optimize');
+  /**
+   * The `ANALYZE` statements `PRAGMA optimize` would run now, without running
+   * them (its debug flag, 0x01), so that each runs in its own tick: in one
+   * call it held the event loop 270 ms to 1.6 s after the migration and
+   * 225 ms after the compaction passes on a 4.2 GB journal (2026-10-18).
+   * `all` adds the tables never analyzed, as after a migration (0x10000).
+   */
+  staleStatistics(all = false): string[] {
+    if (this.closed) return [];
+    return (this.db.query(`PRAGMA optimize=${all ? '0x10003' : '0x03'}`).all() as Record<string, unknown>[])
+      .map(row => String(Object.values(row)[0]))
+      .filter(statement => /^ANALYZE /i.test(statement));
+  }
+
+  /** One statement of `staleStatistics`, reading about 400 rows per index (sqlite.org/lang_analyze.html#approx). */
+  analyze(statement: string): void {
+    if (this.closed) return;
+    if (!/^ANALYZE "?[\w.\-" ]+$/i.test(statement)) throw new Error(`journal analyze: expected an ANALYZE statement from PRAGMA optimize, received ${statement}`);
+    this.db.exec('PRAGMA analysis_limit = 400');
+    this.db.exec(statement);
   }
 
   countEvents(type?: string): number {
@@ -371,13 +388,14 @@ export class Journal {
     // table keyed by thread is cleared here, events included, so a removed
     // project's prompts and tool output leave the disk.
     this.db.transaction(() => {
-      for (const table of ['background_observations', 'turn_requests', 'turns', 'messages', 'native_agent_messages', 'part_blobs', 'streaming_parts', 'media_previews', 'media_displays', 'processes', 'coordination_letters', 'coordination_wakes', 'events']) {
+      for (const table of ['background_observations', 'turn_requests', 'turns', 'messages', 'native_agent_messages', 'part_blobs', 'streaming_parts', 'media_previews', 'media_displays', 'processes', 'command_lines', 'coordination_letters', 'coordination_wakes', 'events']) {
         const query = this.db.query(`DELETE FROM ${table} WHERE thread_id = ?`);
         for (const id of threadIds) query.run(id);
       }
+      rewindTrailCursor(this.db);
       for (const id of threadIds) {
         // A conversation's terminals use separate process groups and trace keys.
-        this.db.query("DELETE FROM processes WHERE thread_id = 'terminal:' || ?1 OR (thread_id > 'terminal:' || ?1 || ':' AND thread_id < 'terminal:' || ?1 || ';')").run(id);
+        for (const table of ['processes', 'command_lines']) this.db.query(`DELETE FROM ${table} WHERE thread_id = 'terminal:' || ?1 OR (thread_id > 'terminal:' || ?1 || ':' AND thread_id < 'terminal:' || ?1 || ';')`).run(id);
         this.db.query('DELETE FROM delegated_agents WHERE thread_id = ? OR root_id = ?').run(id, id);
         this.db.query('DELETE FROM delegation_messages WHERE root_id = ? OR sender_id = ? OR recipient_id = ?').run(id, id, id);
         this.db.query('DELETE FROM workflow_steps WHERE thread_id = ? OR run_id IN (SELECT id FROM workflow_runs WHERE root_id = ?)').run(id, id);
@@ -836,9 +854,10 @@ export class Journal {
    * call would otherwise add rows for the life of the install.
    */
   forgetProcessesWithoutThread(threadId: string): void {
-    this.db
-      .query('DELETE FROM processes WHERE thread_id = ? AND NOT EXISTS (SELECT 1 FROM threads WHERE id = ?)')
-      .run(threadId, threadId);
+    if (this.db.query('SELECT 1 FROM threads WHERE id = ?').get(threadId) !== null) return;
+    this.db.transaction(() => {
+      for (const table of ['processes', 'command_lines']) this.db.query(`DELETE FROM ${table} WHERE thread_id = ?`).run(threadId);
+    })();
   }
 
   // -- accounts -------------------------------------------------------------

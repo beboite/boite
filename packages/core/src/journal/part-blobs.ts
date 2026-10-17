@@ -32,8 +32,9 @@ export const CODEC_ZSTD = 1;
 const ZSTD_LEVEL = 3;
 const ZSTD_MAX_SHARE = 0.95;
 const MARK = '$blob';
+// Text goes in as UTF-8 bytes cast to TEXT: bun:sqlite drops a leading U+FEFF from a string it binds.
 const INSERT_BLOB = `INSERT OR REPLACE INTO part_blobs (message_id, part_index, field, thread_id, data, digest, codec, preview, chars)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+  VALUES (?1, ?2, ?3, ?4, CASE ?7 WHEN ${CODEC_TEXT} THEN CAST(?5 AS TEXT) ELSE ?5 END, ?6, ?7, CAST(?8 AS TEXT), ?9)`;
 
 type Stored = MessagePart & { [MARK]?: string[] };
 
@@ -62,14 +63,36 @@ export function addPartBlobCodecs(db: Database): void {
     ALTER TABLE part_blobs ADD COLUMN chars INTEGER;`);
 }
 
-/** What a value is stored as: zstd when that saves bytes, else the text itself. */
-export function encodeValue(value: string): { data: string | Uint8Array; codec: number } {
+/**
+ * Values compressed ahead of a write, off the main thread: the zstd bytes, or
+ * null for a value that does not compress. A background pass fills it with
+ * `packValues` so that its synchronous part only writes.
+ */
+export type Packed = Map<string, Uint8Array | null>;
+
+/** What a value is stored as: zstd when that saves bytes, else its UTF-8 text. */
+export function encodeValue(value: string, packed?: Packed): { data: Uint8Array; codec: number } {
+  const ready = packed?.get(value);
+  if (ready) return { data: ready, codec: CODEC_ZSTD };
   const bytes = Buffer.from(value, 'utf8');
-  const packed = Bun.zstdCompressSync(bytes, { level: ZSTD_LEVEL });
-  return packed.length <= bytes.length * ZSTD_MAX_SHARE ? { data: packed, codec: CODEC_ZSTD } : { data: value, codec: CODEC_TEXT };
+  if (ready === null) return { data: bytes, codec: CODEC_TEXT };
+  const zstd = Bun.zstdCompressSync(bytes, { level: ZSTD_LEVEL });
+  return zstd.length <= bytes.length * ZSTD_MAX_SHARE ? { data: zstd, codec: CODEC_ZSTD } : { data: bytes, codec: CODEC_TEXT };
 }
 
-const utf8 = new TextDecoder();
+/** `encodeValue` for each of `values`, compressed on Bun's thread pool. */
+export async function packValues(values: Iterable<string>): Promise<Packed> {
+  const unique = [...new Set(values)];
+  const packed = await Promise.all(unique.map(async value => {
+    const bytes = Buffer.from(value, 'utf8');
+    const zstd = await Bun.zstdCompress(bytes, { level: ZSTD_LEVEL });
+    return zstd.length <= bytes.length * ZSTD_MAX_SHARE ? zstd : null;
+  }));
+  return new Map(unique.map((value, index) => [value, packed[index]!]));
+}
+
+// A value starting with U+FEFF keeps it: the default decoder drops it.
+const utf8 = new TextDecoder('utf-8', { ignoreBOM: true });
 
 /** The text of a stored value. */
 export function decodeValue(data: string | Uint8Array, codec: number): string {
@@ -77,9 +100,9 @@ export function decodeValue(data: string | Uint8Array, codec: number): string {
   return utf8.decode(Bun.zstdDecompressSync(data as Uint8Array));
 }
 
-function writeBlob(db: Database, message: Pick<Message, 'id' | 'threadId'>, index: number, field: string, value: string, digest: string): void {
-  const { data, codec } = encodeValue(value);
-  const preview = codec === CODEC_ZSTD && field === 'output' ? value.slice(0, TOOL_OUTPUT_PREVIEW_CHARS) : null;
+function writeBlob(db: Database, message: Pick<Message, 'id' | 'threadId'>, index: number, field: string, value: string, digest: string, packed?: Packed): void {
+  const { data, codec } = encodeValue(value, packed);
+  const preview = codec === CODEC_ZSTD && field === 'output' ? Buffer.from(value.slice(0, TOOL_OUTPUT_PREVIEW_CHARS), 'utf8') : null;
   runWrite(db, INSERT_BLOB, message.id, index, field, message.threadId, data, digest, codec, preview, value.length);
 }
 
@@ -89,7 +112,7 @@ function writeBlob(db: Database, message: Pick<Message, 'id' | 'threadId'>, inde
  * deleted, so a value that shrank leaves nothing behind; a value whose digest
  * matches the stored one is left as it is, not deleted and written again.
  */
-export function storePart(db: Database, message: Pick<Message, 'id' | 'threadId'>, index: number, part: MessagePart | undefined): string {
+export function storePart(db: Database, message: Pick<Message, 'id' | 'threadId'>, index: number, part: MessagePart | undefined, packed?: Packed): string {
   const fields = part === undefined || part === null ? [] : FIELDS[part.type] ?? [];
   const values = (part ?? {}) as unknown as Record<string, unknown>;
   const moved = fields.filter(field => typeof values[field] === 'string' && (values[field] as string).length >= minChars(part?.type, field));
@@ -106,7 +129,7 @@ export function storePart(db: Database, message: Pick<Message, 'id' | 'threadId'
   for (const field of moved) {
     const value = values[field] as string;
     const digest = Bun.hash(value).toString(36);
-    if (kept.get(field) !== `${message.threadId}:${digest}`) writeBlob(db, message, index, field, value, digest);
+    if (kept.get(field) !== `${message.threadId}:${digest}`) writeBlob(db, message, index, field, value, digest, packed);
     stored[field] = '';
   }
   return JSON.stringify(stored);
@@ -195,41 +218,64 @@ export function copyBlobs(db: Database, sourceId: string, copy: Pick<Message, 'i
     SELECT ?, part_index, field, ?, data, digest, codec, preview, chars FROM part_blobs WHERE message_id = ?`).run(copy.id, copy.threadId, sourceId);
 }
 
+type MessageRow = { rowid: number; id: string; threadId: string; parts: string };
+
+/** What one bounded pass did: the last rowid it looked at, null once nothing is left, -1 when an open message holds it. */
+export type PassResult = number | null;
+
 /**
  * Moves the large values of one message written before `part_blobs` existed,
  * the first one after `afterRowid` whose row is at least `BLOB_MIN_CHARS`
  * bytes. Returns its rowid, or null once none is left. A message still held
  * open is left for later and its rowid returned as -1.
  */
-export function moveInlineValues(db: Database, afterRowid: number, isOpen: (messageId: string) => boolean): number | null {
+export async function moveInlineValues(db: Database, afterRowid: number, isOpen: (messageId: string) => boolean): Promise<PassResult> {
   const row = db.query('SELECT rowid AS rowid, id, thread_id AS threadId, parts FROM messages WHERE rowid > ? AND octet_length(parts) >= ? ORDER BY rowid LIMIT 1')
-    .get(afterRowid, BLOB_MIN_CHARS) as { rowid: number; id: string; threadId: string; parts: string } | null;
+    .get(afterRowid, BLOB_MIN_CHARS) as MessageRow | null;
   if (row === null) return null;
   if (isOpen(row.id)) return -1;
-  moveRowValues(db, row);
-  return row.rowid;
+  const [done] = await moveRows(db, [row], isOpen);
+  // Written or opened while its values were compressed: the next tick reads it again.
+  return done ? row.rowid : afterRowid;
 }
+
+/** The inline values of a stored row that the current thresholds move out. */
+function inlineValues(stored: (Stored | null)[]): string[] {
+  return stored.flatMap(part => part === null || part[MARK] ? [] : (FIELDS[part.type] ?? []).flatMap(field => {
+    const value = (part as unknown as Record<string, unknown>)[field];
+    return typeof value === 'string' && value.length >= minChars(part.type, field) ? [value] : [];
+  }));
+}
+
+const STALE = new Error('the row changed while its values were compressed');
 
 /**
- * Writes the inline values of one stored row that the current thresholds move
- * out, and the row without them. Returns whether anything moved.
+ * Moves the inline values of `rows` out, compressing them on the thread pool
+ * first. A row is written only if its `parts` text is still the one read and
+ * its message is not open, so a write made during the compression wins.
+ * Returns, per row, whether it is done: moved, or nothing to move.
  */
-function moveRowValues(db: Database, row: { id: string; threadId: string; parts: string }): boolean {
-  const stored = JSON.parse(row.parts) as (Stored | null)[];
-  const inline = stored.some(part => part !== null && !part[MARK] && (FIELDS[part.type] ?? []).some(field => {
-    const value = (part as unknown as Record<string, unknown>)[field];
-    return typeof value === 'string' && value.length >= minChars(part.type, field);
-  }));
-  if (!inline) return false;
-  db.transaction(() => {
-    const texts = stored.map((part, index) => part === null || part[MARK] ? JSON.stringify(part) : storePart(db, { id: row.id, threadId: row.threadId }, index, part));
-    runWrite(db, 'UPDATE messages SET parts = ? WHERE id = ?', `[${texts.join(',')}]`, row.id);
-  })();
-  return true;
+async function moveRows(db: Database, rows: MessageRow[], isOpen: (messageId: string) => boolean): Promise<boolean[]> {
+  const parsed = rows.map(row => JSON.parse(row.parts) as (Stored | null)[]);
+  const values = parsed.map(inlineValues);
+  if (values.every(list => list.length === 0)) return rows.map(() => true);
+  const packed = await packValues(values.flat());
+  const guarded = db.query('UPDATE messages SET parts = ? WHERE rowid = ? AND parts = ?');
+  return rows.map((row, at) => {
+    if (values[at]!.length === 0) return true;
+    if (isOpen(row.id)) return false;
+    try {
+      db.transaction(() => {
+        const texts = parsed[at]!.map((part, index) => part === null || part[MARK] ? JSON.stringify(part) : storePart(db, { id: row.id, threadId: row.threadId }, index, part, packed));
+        if (guarded.run(`[${texts.join(',')}]`, row.rowid, row.parts).changes !== 1) throw STALE;
+      })();
+      return true;
+    } catch (error) {
+      if (error !== STALE) throw error;
+      return false;
+    }
+  });
 }
-
-/** What one bounded pass did: the last rowid it looked at, null once nothing is left, -1 when an open message holds it. */
-export type PassResult = number | null;
 
 /**
  * Moves the inline tool outputs of `TOOL_OUTPUT_BLOB_MIN_CHARS` up to
@@ -237,44 +283,55 @@ export type PassResult = number | null;
  * after `afterRowid`, reading about `budget` bytes of rows. A message still
  * held open stops the pass with -1, as `moveInlineValues` does.
  */
-export function moveInlineOutputs(db: Database, afterRowid: number, budget: number, isOpen: (messageId: string) => boolean): PassResult {
+export async function moveInlineOutputs(db: Database, afterRowid: number, budget: number, isOpen: (messageId: string) => boolean): Promise<PassResult> {
   const next = db.query(`SELECT rowid AS rowid, id, thread_id AS threadId, parts FROM messages
     WHERE rowid > ? AND octet_length(parts) >= ${TOOL_OUTPUT_BLOB_MIN_CHARS} ORDER BY rowid LIMIT 1`);
-  let cursor = afterRowid, read = 0;
+  const rows: MessageRow[] = [];
+  let cursor = afterRowid, read = 0, open = false;
   while (read < budget) {
-    const row = next.get(cursor) as { rowid: number; id: string; threadId: string; parts: string } | null;
-    if (row === null) return read === 0 ? null : cursor;
-    if (isOpen(row.id)) return read === 0 ? -1 : cursor;
+    const row = next.get(cursor) as MessageRow | null;
+    if (row === null) break;
+    if (isOpen(row.id)) { open = true; break; }
     // A cheap test first: most rows have no tool output in that range.
-    if (row.parts.includes('"output":"')) moveRowValues(db, row);
+    if (row.parts.includes('"output":"')) rows.push(row);
     read += row.parts.length;
     cursor = row.rowid;
   }
-  return cursor;
+  if (read === 0) return open ? -1 : null;
+  const done = await moveRows(db, rows, isOpen);
+  // The cursor stops before the first row that could not be written.
+  const stuck = done.indexOf(false);
+  return stuck === -1 ? cursor : rows[stuck]!.rowid - 1;
 }
 
 /**
  * Compresses `part_blobs` rows stored as text, from the first one after
- * `afterRowid`, about `budget` bytes of input. A row that changed meanwhile
- * (another digest, or already compressed) is left alone. Returns the last
- * rowid looked at, or null once none is left.
+ * `afterRowid`, about `budget` bytes of input, on the thread pool. A row that
+ * changed meanwhile (another digest, or already compressed) is left alone.
+ * Returns the last rowid looked at, or null once none is left.
  */
-export function recodePartBlobs(db: Database, afterRowid: number, budget: number): PassResult {
+export async function recodePartBlobs(db: Database, afterRowid: number, budget: number, isClosed: () => boolean = () => false): Promise<PassResult> {
   const next = db.query(`SELECT rowid AS rowid, field, data, digest FROM part_blobs WHERE rowid > ? AND codec = ${CODEC_TEXT} ORDER BY rowid LIMIT 1`);
-  const update = db.query(`UPDATE part_blobs SET data = ?, codec = ${CODEC_ZSTD}, preview = ?, chars = ? WHERE rowid = ? AND codec = ${CODEC_TEXT} AND digest = ?`);
-  const measure = db.query(`UPDATE part_blobs SET chars = ? WHERE rowid = ? AND codec = ${CODEC_TEXT} AND digest = ? AND chars IS NULL`);
+  const rows: { rowid: number; field: string; data: string; digest: string }[] = [];
   let cursor = afterRowid, read = 0;
+  while (read < budget) {
+    const row = next.get(cursor) as { rowid: number; field: string; data: string; digest: string } | null;
+    if (row === null) break;
+    rows.push(row);
+    read += row.data.length;
+    cursor = row.rowid;
+  }
+  if (rows.length === 0) return null;
+  const packed = await packValues(rows.map(row => row.data));
+  if (isClosed()) return afterRowid;
+  const update = db.query(`UPDATE part_blobs SET data = ?, codec = ${CODEC_ZSTD}, preview = CAST(? AS TEXT), chars = ? WHERE rowid = ? AND codec = ${CODEC_TEXT} AND digest = ?`);
+  const measure = db.query(`UPDATE part_blobs SET chars = ? WHERE rowid = ? AND codec = ${CODEC_TEXT} AND digest = ? AND chars IS NULL`);
   db.transaction(() => {
-    while (read < budget) {
-      const row = next.get(cursor) as { rowid: number; field: string; data: string; digest: string } | null;
-      if (row === null) break;
-      const { data, codec } = encodeValue(row.data);
-      if (codec === CODEC_ZSTD) {
-        update.run(data, row.field === 'output' ? row.data.slice(0, TOOL_OUTPUT_PREVIEW_CHARS) : null, row.data.length, row.rowid, row.digest);
-      } else measure.run(row.data.length, row.rowid, row.digest);
-      read += row.data.length;
-      cursor = row.rowid;
+    for (const row of rows) {
+      const zstd = packed.get(row.data);
+      if (zstd) update.run(zstd, row.field === 'output' ? Buffer.from(row.data.slice(0, TOOL_OUTPUT_PREVIEW_CHARS), 'utf8') : null, row.data.length, row.rowid, row.digest);
+      else measure.run(row.data.length, row.rowid, row.digest);
     }
   })();
-  return read === 0 ? null : cursor;
+  return cursor;
 }

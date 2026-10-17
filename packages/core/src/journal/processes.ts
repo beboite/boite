@@ -21,32 +21,45 @@ export const PROCESS_FROM = 'processes p LEFT JOIN command_lines c ON c.id = p.c
  * The same candidates `native-agents.ts` reads: an agent CLI card needs its own
  * row and its parent's, whatever their age.
  */
-const AGENT_EXE = `(lower(exe) LIKE '%claude%' OR lower(exe) LIKE '%codex%' OR lower(exe) LIKE '%opencode%'
-  OR lower(exe) LIKE '%pi%' OR lower(exe) LIKE '%grok%' OR lower(exe) LIKE '%agy%'
-  OR lower(exe) LIKE '%node%' OR lower(exe) LIKE '%bun%')`;
+const AGENT_EXE = `(lower(p.exe) LIKE '%claude%' OR lower(p.exe) LIKE '%codex%' OR lower(p.exe) LIKE '%opencode%'
+  OR lower(p.exe) LIKE '%pi%' OR lower(p.exe) LIKE '%grok%' OR lower(p.exe) LIKE '%agy%'
+  OR lower(p.exe) LIKE '%node%' OR lower(p.exe) LIKE '%bun%')`;
 
 interface AgentRow { pid: number; parent_pid: number | null; exe: string; command_line: string | null; started_at: number }
 
-/** Schema 36: one row per distinct command line, which process rows name by id. */
+/**
+ * Schema 36: one row per distinct command line of a thread's trace, which its
+ * process rows name by id. Keyed by thread, so removing a thread removes its
+ * lines with its rows, and no index over the whole trace is needed: building
+ * one held the migration for seconds on a 1.6 million row trace.
+ */
 export function createCommandLines(db: Database, addColumn: boolean): void {
-  db.exec(`CREATE TABLE IF NOT EXISTS command_lines (id INTEGER PRIMARY KEY, digest INTEGER NOT NULL, text TEXT NOT NULL);
-    CREATE INDEX IF NOT EXISTS command_lines_digest ON command_lines (digest);`);
+  db.exec(`CREATE TABLE IF NOT EXISTS command_lines (id INTEGER PRIMARY KEY, thread_id TEXT NOT NULL, digest INTEGER NOT NULL, text TEXT NOT NULL);
+    CREATE INDEX IF NOT EXISTS command_lines_by_thread ON command_lines (thread_id, digest);`);
   if (addColumn) db.exec('ALTER TABLE processes ADD COLUMN command_id INTEGER');
-  // What the daily pass looks up to find command lines no row names any more.
-  db.exec('CREATE INDEX IF NOT EXISTS processes_by_command ON processes (command_id) WHERE command_id IS NOT NULL');
 }
 
 const digestOf = (text: string): bigint => BigInt.asIntN(64, Bun.hash.xxHash64(text));
 
 /**
- * The id of `text` in `command_lines`, added when missing. A hook that runs
- * tens of thousands of times stores its command line once.
+ * The id of `text` among the command lines of `threadId`, added when missing.
+ * A hook that runs tens of thousands of times in a thread stores its command
+ * line once.
  */
-export function internCommandLine(db: Database, text: string): number {
+export function internCommandLine(db: Database, threadId: string, text: string): number {
   const digest = digestOf(text);
-  const found = db.query('SELECT id FROM command_lines WHERE digest = ? AND text = ?').get(digest, text) as { id: number } | null;
+  const found = db.query('SELECT id FROM command_lines WHERE thread_id = ? AND digest = ? AND text = ?').get(threadId, digest, text) as { id: number } | null;
   if (found !== null) return found.id;
-  return Number(db.query('INSERT INTO command_lines (digest, text) VALUES (?, ?)').run(digest, text).lastInsertRowid);
+  return Number(db.query('INSERT INTO command_lines (thread_id, digest, text) VALUES (?, ?, ?)').run(threadId, digest, text).lastInsertRowid);
+}
+
+/**
+ * Deletes the lines of `ids` no trace row of `threadId` names. Run once the
+ * thread holds what it keeps: the check reads its remaining rows.
+ */
+function deleteLines(db: Database, threadId: string, ids: Iterable<number>): void {
+  db.query(`DELETE FROM command_lines WHERE id IN (SELECT value FROM json_each(?1))
+    AND id NOT IN (SELECT command_id FROM processes WHERE thread_id = ?2 AND command_id IS NOT NULL)`).run(JSON.stringify([...ids]), threadId);
 }
 
 export class ProcessRows {
@@ -55,7 +68,7 @@ export class ProcessRows {
   constructor(private readonly db: Database) {}
 
   put(record: ProcessRecord): void {
-    const commandId = record.commandLine === null ? null : internCommandLine(this.db, record.commandLine);
+    const commandId = record.commandLine === null ? null : internCommandLine(this.db, record.threadId, record.commandLine);
     this.db.query(
       `INSERT OR REPLACE INTO processes
        (thread_id, pid, parent_pid, exe, command_line, command_id, started_at, exited_at, exit_code, cpu_ms, peak_memory_bytes, io_bytes)
@@ -84,13 +97,19 @@ export class ProcessRows {
 
   /**
    * Keeps a thread's newest `keep` rows, every live row and the rows an agent
-   * CLI card reads (the CLI and its parent). Returns the rows deleted.
+   * CLI card reads (the CLI and its parent), and the command lines of those.
+   * Returns the rows deleted.
    */
   prune(threadId: string, keep = PROCESS_ROWS_KEPT): number {
     this.exits.delete(threadId);
     const cutoff = cutoffOf(this.db, threadId, keep);
     if (cutoff === null) return 0;
-    return deleteBelow(this.db, threadId, cutoff, keptBelow(this.db, threadId, Number.MIN_SAFE_INTEGER, cutoff), -1);
+    return this.db.transaction(() => {
+      const lines = new Set<number>();
+      const deleted = deleteBelow(this.db, threadId, cutoff, keptBelow(this.db, threadId, Number.MIN_SAFE_INTEGER, cutoff), -1, lines);
+      if (lines.size > 0) deleteLines(this.db, threadId, lines);
+      return deleted;
+    })();
   }
 }
 
@@ -115,33 +134,66 @@ function keptBelow(db: Database, threadId: string, from: number, to: number): st
   return kept;
 }
 
-/** Deletes finished rows started before `cutoff` that `kept` does not name, at most `limit` (-1: all). */
-function deleteBelow(db: Database, threadId: string, cutoff: number, kept: Iterable<string>, limit: number): number {
-  return db.query(`DELETE FROM processes WHERE rowid IN (SELECT rowid FROM processes WHERE thread_id = ? AND started_at < ? AND exited_at IS NOT NULL
-    AND (pid || ':' || started_at) NOT IN (SELECT value FROM json_each(?)) LIMIT ?)`).run(threadId, cutoff, JSON.stringify([...kept]), limit).changes;
+/**
+ * Deletes finished rows started before `cutoff` that `kept` does not name, at
+ * most `limit` (-1: all), and adds the command line ids they named to `lines`.
+ */
+function deleteBelow(db: Database, threadId: string, cutoff: number, kept: Iterable<string>, limit: number, lines: Set<number>): number {
+  const rows = db.query(`DELETE FROM processes WHERE rowid IN (SELECT rowid FROM processes WHERE thread_id = ? AND started_at < ? AND exited_at IS NOT NULL
+    AND (pid || ':' || started_at) NOT IN (SELECT value FROM json_each(?)) LIMIT ?) RETURNING command_id`)
+    .all(threadId, cutoff, JSON.stringify([...kept]), limit) as { command_id: number | null }[];
+  for (const row of rows) if (row.command_id !== null) lines.add(row.command_id);
+  return rows.length;
 }
 
-/** The thread a `TracePrune` is cutting: where its scan for agent rows stands, then what it deletes. */
-interface TraceCut { threadId: string; cutoff: number; scanned: number | null; kept: Set<string> }
+/**
+ * The thread a `TracePrune` is cutting: where its scan for agent rows stands,
+ * what it deletes, then the command lines the deleted rows named, deleted
+ * when no remaining row names them, once it holds what it keeps.
+ */
+interface TraceCut { threadId: string; cutoff: number; scanned: number | null; kept: Set<string>; lines: Set<number>; sweep: boolean }
+export type TracePhase = 'find' | 'scan' | 'delete' | 'sweep';
 
 /**
  * Cuts every thread's trace to what `ProcessRows.prune` keeps, in calls that
  * each read or delete about `limit` rows, so a thread holding hundreds of
  * thousands of rows never holds the event loop: a call finds the next thread
  * past `PROCESS_ROWS_KEPT` plus `PROCESS_ROWS_SLACK`, later calls walk its
- * older rows for agent CLI rows, then delete the rest. A thread that finished
- * before pruning ran at every 500 exits kept its whole trace. The thread in
- * progress lives in memory: after a restart it is walked again.
+ * older rows for agent CLI rows, delete the rest, then the command lines only
+ * those rows named. A thread that finished before pruning ran at every 500
+ * exits kept its whole trace. The thread in progress lives in memory: after a
+ * restart it is walked again, and lines its rows deleted before the restart
+ * named stay until the thread is removed.
  */
 export class TracePrune {
   private cut: TraceCut | null = null;
 
-  constructor(private readonly db: Database, private readonly limit: number) {}
+  /** `limit` may change between calls: the scheduler sizes it to the time the last call took. */
+  constructor(private readonly db: Database, public limit: number) {}
+
+  /**
+   * What the next call does: look for a thread, scan its old rows for agent
+   * rows, delete, or sweep its command lines. A row costs each a different
+   * time, so the scheduler sizes each with its own pace.
+   */
+  get phase(): TracePhase {
+    const cut = this.cut;
+    if (cut === null) return 'find';
+    return cut.sweep ? 'sweep' : cut.scanned !== null ? 'scan' : 'delete';
+  }
 
   /** One call after thread `after`: the thread id the cursor may move to, and whether threads are left. */
   step(after: string): { through: string; more: boolean } {
     const cut = this.cut;
     if (cut !== null && cut.threadId > after) {
+      if (cut.sweep) {
+        const batch = [...cut.lines].slice(0, this.limit);
+        for (const id of batch) cut.lines.delete(id);
+        deleteLines(this.db, cut.threadId, batch);
+        if (cut.lines.size > 0) return { through: after, more: true };
+        this.cut = null;
+        return { through: cut.threadId, more: true };
+      }
       if (cut.scanned !== null) {
         // The rows of the next chunk, ties on its last start included.
         const end = this.db.query('SELECT started_at FROM processes WHERE thread_id = ? AND started_at >= ? AND started_at < ? ORDER BY started_at LIMIT 1 OFFSET ?')
@@ -151,9 +203,10 @@ export class TracePrune {
         cut.scanned = to >= cut.cutoff ? null : to;
         return { through: after, more: true };
       }
-      if (deleteBelow(this.db, cut.threadId, cut.cutoff, cut.kept, this.limit) === this.limit) return { through: after, more: true };
-      this.cut = null;
-      return { through: cut.threadId, more: true };
+      if (deleteBelow(this.db, cut.threadId, cut.cutoff, cut.kept, this.limit, cut.lines) === this.limit) return { through: after, more: true };
+      // The thread now holds what it keeps: its lines are checked against its few remaining rows.
+      cut.sweep = true;
+      return { through: after, more: true };
     }
     this.cut = null;
     // Threads in id order, each counted up to the threshold on the primary key.
@@ -169,7 +222,7 @@ export class TracePrune {
       if (n === over) {
         const cutoff = cutoffOf(this.db, row.threadId, PROCESS_ROWS_KEPT);
         if (cutoff !== null) {
-          this.cut = { threadId: row.threadId, cutoff, scanned: Number.MIN_SAFE_INTEGER, kept: new Set() };
+          this.cut = { threadId: row.threadId, cutoff, scanned: Number.MIN_SAFE_INTEGER, kept: new Set(), lines: new Set(), sweep: false };
           return { through, more: true };
         }
       }
@@ -185,30 +238,18 @@ export class TracePrune {
  * rowid done, or null once none is left.
  */
 export function internOldCommandLines(db: Database, afterRowid: number, limit: number): number | null {
-  const rows = db.query('SELECT rowid AS rowid, command_line AS text FROM processes WHERE rowid > ? AND command_line IS NOT NULL ORDER BY rowid LIMIT ?')
-    .all(afterRowid, limit) as { rowid: number; text: string }[];
+  const rows = db.query('SELECT rowid AS rowid, thread_id AS threadId, command_line AS text FROM processes WHERE rowid > ? AND command_line IS NOT NULL ORDER BY rowid LIMIT ?')
+    .all(afterRowid, limit) as { rowid: number; threadId: string; text: string }[];
   if (rows.length === 0) return null;
   const ids = new Map<string, number>();
   const update = db.query('UPDATE processes SET command_id = ?, command_line = NULL WHERE rowid = ? AND command_line = ?');
   db.transaction(() => {
     for (const row of rows) {
-      let id = ids.get(row.text);
-      if (id === undefined) ids.set(row.text, id = internCommandLine(db, row.text));
+      const key = `${row.threadId}\0${row.text}`;
+      let id = ids.get(key);
+      if (id === undefined) ids.set(key, id = internCommandLine(db, row.threadId, row.text));
       update.run(id, row.rowid, row.text);
     }
   })();
   return rows.at(-1)!.rowid;
-}
-
-/**
- * Deletes the command lines no process row names any more, among at most
- * `limit` lines after id `afterId`. Returns the last id looked at, or null
- * once none is left.
- */
-export function deleteUnusedCommandLines(db: Database, afterId: number, limit: number): number | null {
-  const last = db.query('SELECT MAX(id) AS id FROM (SELECT id FROM command_lines WHERE id > ? ORDER BY id LIMIT ?)').get(afterId, limit) as { id: number | null };
-  if (last.id === null) return null;
-  db.query(`DELETE FROM command_lines WHERE id > ? AND id <= ?
-    AND NOT EXISTS (SELECT 1 FROM processes WHERE command_id = command_lines.id)`).run(afterId, last.id);
-  return last.id;
 }

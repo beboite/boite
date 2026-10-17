@@ -54,3 +54,49 @@ test('trail events already stored are kept three days, every other event thirty,
     expect(journal.getSetting('events:trail-pruned-through')).toBe(written.findLastIndex(([age]) => age > 3) + 1);
   } finally { journal.close(); }
 });
+
+test('a trail event written under an id freed by a deletion is still pruned after three days', () => {
+  const journal = new Journal(join(dir, 'journal.db'));
+  try {
+    const day = 86_400_000, now = 100 * day;
+    const insert = journal.db.query('INSERT INTO events (thread_id, ts, type, version, payload) VALUES (?, ?, ?, 1, \'{}\')');
+    const trail = () => (journal.db.query("SELECT id FROM events WHERE type = 'message.started' ORDER BY id").all() as { id: number }[]).map(row => row.id);
+    for (let id = 1; id <= 5; id++) insert.run('thr_a', now - 10 * day, 'turn.finished');
+    // The newest events belong to a thread removed after the walk passed them.
+    for (let id = 6; id <= 10; id++) insert.run('thr_b', now - 10 * day, 'turn.finished');
+    while (pruneEventsOnce(journal, now));
+    expect(journal.getSetting('events:trail-pruned-through')).toBe(10);
+    journal.deleteThreads(['thr_b']);
+    // SQLite hands ids 6 to 8 out again.
+    for (let n = 0; n < 3; n++) insert.run('thr_a', now - day, 'message.started');
+    expect(trail()).toEqual([6, 7, 8]);
+    while (pruneEventsOnce(journal, now + 3 * day));
+    expect(trail()).toEqual([]);
+
+    // The walk itself deleting the newest events leaves the cursor on the last id.
+    for (let n = 0; n < 3; n++) insert.run('thr_a', now, 'message.started');
+    while (pruneEventsOnce(journal, now + 4 * day));
+    expect(journal.getSetting('events:trail-pruned-through')).toBe(5);
+    insert.run('thr_a', now + 4 * day, 'message.started');
+    while (pruneEventsOnce(journal, now + 8 * day));
+    expect(trail()).toEqual([]);
+  } finally { journal.close(); }
+});
+
+test('opening a journal builds no planner statistics; the retention ticks build them one ANALYZE at a time', () => {
+  const journal = new Journal(join(dir, 'journal.db'));
+  try {
+    for (let n = 0; n < 50; n++) journal.db.query("INSERT INTO events (thread_id, ts, type, version, payload) VALUES ('thr_a', ?, 'turn.finished', 1, '{}')").run(n);
+    const stats = () => journal.db.query("SELECT 1 FROM sqlite_master WHERE name = 'sqlite_stat1'").get() === null
+      ? [] : (journal.db.query('SELECT DISTINCT tbl FROM sqlite_stat1 ORDER BY tbl').all() as { tbl: string }[]).map(row => row.tbl);
+    expect(stats()).toEqual([]);
+    const pending = journal.staleStatistics(true);
+    expect(pending).toContain('ANALYZE "main"."events"');
+    expect(() => journal.analyze('DROP TABLE events')).toThrow('expected an ANALYZE statement');
+    for (const statement of pending) journal.analyze(statement);
+    expect(stats()).toContain('events');
+    // Nothing left stale, after the migration or after a quiet day.
+    expect(journal.staleStatistics(true)).toEqual([]);
+    expect(journal.staleStatistics()).toEqual([]);
+  } finally { journal.close(); }
+});

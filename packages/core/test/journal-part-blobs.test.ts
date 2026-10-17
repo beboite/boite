@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { TOOL_OUTPUT_PREVIEW_CHARS, previewToolOutputs, type Message, type MessagePart } from '@boite/contracts';
 import { Journal } from '../src/journal.ts';
-import { BLOB_MIN_CHARS, moveInlineValues, previewDigests } from '../src/journal/part-blobs.ts';
+import { BLOB_MIN_CHARS, moveInlineOutputs, moveInlineValues, previewDigests, recodePartBlobs } from '../src/journal/part-blobs.ts';
 import { compactAll, schema35Journal } from './fixtures/journal-schema35.ts';
 
 let dir: string, journal: Journal;
@@ -86,7 +86,7 @@ test('a row written before part_blobs keeps its values inline and reads as it wa
   expect(blobRows()).toEqual([]);
 });
 
-test('a row written before part_blobs moves its large values out once, and reads the same', () => {
+test('a row written before part_blobs moves its large values out once, and reads the same', async () => {
   const insert = journal.db.query("INSERT INTO messages (id, thread_id, turn_id, role, parts, state, created_at) VALUES (?, 'thr_a', 'trn_a', 'assistant', ?, 'complete', 1)");
   const old: MessagePart[] = [read(0), { type: 'text', text: 'small' }, read(1)];
   insert.run('old', JSON.stringify(old));
@@ -95,15 +95,15 @@ test('a row written before part_blobs moves its large values out once, and reads
   const newBlobs = blobRows();
   const isOpen = () => false;
   // A message still streaming waits for a later pass.
-  expect(moveInlineValues(journal.db, 0, () => true)).toBe(-1);
+  expect(await moveInlineValues(journal.db, 0, () => true)).toBe(-1);
   expect(journal.db.query("SELECT parts FROM messages WHERE id = 'old'").get()).toEqual({ parts: JSON.stringify(old) });
 
-  const first = moveInlineValues(journal.db, 0, isOpen)!;
+  const first = (await moveInlineValues(journal.db, 0, isOpen))!;
   expect(first).toBe(journal.messageRowid('thr_a', 'old')!);
   expect(rowBytes('old')).toBeLessThan(2_000);
   expect(journal.getMessage('old')?.parts).toEqual(old);
   // Rows in the new shape are small and never picked; nothing is left.
-  expect(moveInlineValues(journal.db, first, isOpen)).toBeNull();
+  expect(await moveInlineValues(journal.db, first, isOpen)).toBeNull();
   expect(blobRows().filter(row => (row as { messageId: string }).messageId === 'new')).toEqual(newBlobs);
 });
 
@@ -158,7 +158,7 @@ test('a tool output moves out from 4 KiB, and a page reads it whole up to the in
   expect(previewToolOutputs([page])).toEqual(previewToolOutputs([{ ...page, parts: [small, medium, large] }]));
 });
 
-test('a schema 35 journal reads the same before and after the background passes, which compress and move its values', () => {
+test('a schema 35 journal reads the same before and after the background passes, which compress and move its values', async () => {
   journal.close();
   const file = join(dir, 'old.db');
   const old = schema35Journal(file);
@@ -179,7 +179,7 @@ test('a schema 35 journal reads the same before and after the background passes,
   expect(before.map(message => message.parts)).toEqual([[big, { type: 'text', text: 'done' }], [medium, { type: 'text', text: 'between' }, large]]);
   expect(codecs()).toEqual([{ messageId: 'old_a', partIndex: 0, field: 'output', codec: 0, type: 'text', preview: 0, chars: null }]);
 
-  compactAll(journal);
+  await compactAll(journal);
   expect((codecs() as { messageId: string; partIndex: number; codec: number }[]).map(row => [row.messageId, row.partIndex, row.codec]))
     .toEqual([['old_a', 0, 1], ['old_b', 0, 1], ['old_b', 2, 1]]);
   expect(rowBytes('old_b')).toBeLessThan(2_000);
@@ -189,5 +189,34 @@ test('a schema 35 journal reads the same before and after the background passes,
   // The digest of the whole output is unchanged, and with it a resume proof.
   expect(previewDigests.get(pageAfter[0]!.parts[0]!)).toBe(proofBefore!);
   // Finished: a second run finds nothing to do.
-  expect(compactAll(journal)).toBe(0);
+  expect(await compactAll(journal)).toBe(0);
+});
+
+test('a message written while its values were compressed keeps that write, and the next pass moves the new values', async () => {
+  const insert = journal.db.query("INSERT INTO messages (id, thread_id, turn_id, role, parts, state, created_at) VALUES ('msg_a', 'thr_a', 'trn_a', 'assistant', ?, 'complete', 1)");
+  const first = toolPart('first output line\n'.repeat(400)), second = toolPart('second output line\n'.repeat(400));
+  insert.run(JSON.stringify([first]));
+  const pass = moveInlineOutputs(journal.db, 0, 1024 * 1024, () => false);
+  // The pass awaits the thread pool; a core of the previous version rewrites the row meanwhile.
+  journal.db.query("UPDATE messages SET parts = ? WHERE id = 'msg_a'").run(JSON.stringify([second]));
+  expect(await pass).toBe(0);
+  expect(journal.getMessage('msg_a')?.parts).toEqual([second]);
+  expect(codecs()).toEqual([]);
+  expect(await moveInlineOutputs(journal.db, 0, 1024 * 1024, () => false)).toBe(journal.messageRowid('thr_a', 'msg_a')!);
+  expect(journal.getMessage('msg_a')?.parts).toEqual([second]);
+  expect(codecs()).toHaveLength(1);
+});
+
+test('a value that starts with a byte order mark keeps it, compressed or recoded', async () => {
+  const output = `﻿${'BOM output line\n'.repeat(400)}`;
+  const stored = () => (journal.getMessage('msg_a')?.parts[0] as { output: string }).output;
+  journal.putMessage({ id: 'msg_a', threadId: 'thr_a', turnId: 'trn_a', role: 'assistant', parts: [toolPart(output)], state: 'complete', createdAt: 1 });
+  expect((codecs() as { codec: number }[]).map(row => row.codec)).toEqual([1]);
+  expect(stored()).toBe(output);
+  // Stored as text, as a value that does not compress is, it reads and is recoded the same.
+  journal.db.query("UPDATE part_blobs SET data = CAST(? AS TEXT), codec = 0, preview = NULL, chars = NULL WHERE message_id = 'msg_a'").run(Buffer.from(output));
+  expect(stored()).toBe(output);
+  expect(await recodePartBlobs(journal.db, 0, 1024 * 1024)).toBeGreaterThan(0);
+  expect((codecs() as { codec: number }[]).map(row => row.codec)).toEqual([1]);
+  expect(stored()).toBe(output);
 });

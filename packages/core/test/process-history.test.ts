@@ -255,7 +255,7 @@ test('a thread keeps its newest 2,000 trace rows, its live rows and the rows its
   expect(rows().slice(0, 3)).toEqual([2, 3, 110]);
 });
 
-test('a schema 35 trace has its command lines stored once and every thread over the limit pruned in the background, agent cards kept', () => {
+test('a schema 35 trace has its command lines stored once and every thread over the limit pruned in the background, agent cards kept', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'boite-trace-'));
   const file = join(dir, 'journal.db');
   const old = schema35Journal(file);
@@ -277,10 +277,10 @@ test('a schema 35 trace has its command lines stored once and every thread over 
     const listed = (threadId: string) => journal.listProcesses(threadId, 5_000);
     const before = { done: listed('thr_done'), small: listed('thr_small') };
     expect(before.done[0]).toMatchObject({ pid: 2609, commandLine: 'bash hooks/pre-tool.sh' });
-    compactAll(journal);
+    await compactAll(journal);
     const count = (sql: string) => (journal.db.query(sql).get() as { n: number }).n;
     expect(count('SELECT COUNT(*) AS n FROM processes WHERE command_line IS NOT NULL')).toBe(0);
-    // One row per distinct command line, the pruned rows' included until the daily cleanup.
+    // One row per distinct command line of each thread.
     expect(count('SELECT COUNT(*) AS n FROM command_lines')).toBe(5);
     const rows = journal.db.query("SELECT pid FROM processes WHERE thread_id = 'thr_done' ORDER BY started_at").all().map(row => (row as { pid: number }).pid);
     expect(rows).toHaveLength(2_003);
@@ -289,12 +289,11 @@ test('a schema 35 trace has its command lines stored once and every thread over 
     expect(listed('thr_small')).toEqual(before.small);
     expect(nativeAgents(journal, 'thr_done').map(agent => [agent.name, agent.status])).toEqual([['Claude Code', 'done']]);
 
-    // A new row names its command line too; a thread deleted leaves its lines to the daily cleanup.
+    // A new row names its command line too; a thread deleted takes its lines along.
     journal.putProcess({ threadId: 'thr_small', pid: 500, parentPid: null, exe: 'git', commandLine: 'git status 0', startedAt: 500, exitedAt: null, exitCode: null, cpuMs: null, peakMemoryBytes: null, ioBytes: null });
     expect(count('SELECT COUNT(*) AS n FROM command_lines')).toBe(5);
     expect(listed('thr_small')[0]).toMatchObject({ pid: 500, commandLine: 'git status 0' });
     journal.deleteThreads(['thr_small']);
-    compactAll(journal, Date.now() + 86_400_001);
     expect((journal.db.query('SELECT text FROM command_lines ORDER BY id').all() as { text: string }[]).map(row => row.text))
       .toEqual(['bash -c claude', 'claude -p "Review parsing" --model opus', 'bash hooks/pre-tool.sh']);
   } finally {
@@ -312,22 +311,66 @@ test('the background trace prune reads and deletes a bounded batch per call, kee
     });
     journal.db.transaction(() => {
       put(1, 'bash', 'bash -c claude', null);
-      for (let pid = 10; pid < 8_010; pid++) put(pid, 'rustc', 'rustc --edition 2024', 1);
+      for (let pid = 10; pid < 8_010; pid++) if (pid !== 5_000) put(pid, 'rustc', `rustc --crate-name c${pid}`, 1);
       put(5_000, 'claude', 'claude -p "Review parsing" --model opus', 1);
     })();
-    const count = () => (journal.db.query("SELECT COUNT(*) AS n FROM processes WHERE thread_id = 'thr_long'").get() as { n: number }).n;
+    const count = (table = 'processes') => (journal.db.query(`SELECT COUNT(*) AS n FROM ${table} WHERE thread_id = 'thr_long'`).get() as { n: number }).n;
     const trace = new TracePrune(journal.db, 1_000);
     let through = '', calls = 0;
     for (let more = true; more; calls++) {
-      const before = count();
+      const before = [count(), count('command_lines')];
       ({ through, more } = trace.step(through));
-      expect(before - count()).toBeLessThanOrEqual(1_000);
+      expect(before[0]! - count()).toBeLessThanOrEqual(1_000);
+      expect(before[1]! - count('command_lines')).toBeLessThanOrEqual(1_000);
     }
     // Chunks of the old rows read, then batches deleted, then the walk past the last thread.
     expect(calls).toBeGreaterThan(10);
     const pids = (journal.db.query("SELECT pid FROM processes WHERE thread_id = 'thr_long' ORDER BY started_at").all() as { pid: number }[]).map(row => row.pid);
     expect(pids).toHaveLength(2_002);
     expect(pids.slice(0, 3)).toEqual([1, 5_000, 6_010]);
+    // The command lines only the deleted rows named went with them.
+    expect(count('command_lines')).toBe(2_002);
+  } finally {
+    journal.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+test('removing a thread, an incognito one at the next start included, removes its command lines and keeps the copy another thread holds', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'boite-trace-'));
+  const file = join(dir, 'journal.db');
+  let journal = new Journal(file);
+  try {
+    const thread = (id: string, incognito: boolean) => journal.putThread({
+      id, projectId: 'prj', title: id, titleSource: 'user', providerId: 'echo', accountId: 'acc', model: null, effort: 'high', cwd: dir, branch: null,
+      permissionMode: 'default', status: 'idle', unread: false, archived: false, pinned: false, sessionId: null, load: null, context: null, createdAt: 1, updatedAt: 1, ...(incognito ? { incognito: true } : {}),
+    });
+    const put = (threadId: string, pid: number, commandLine: string) => journal.putProcess({
+      threadId, pid, parentPid: null, exe: 'bash', commandLine, startedAt: pid, exitedAt: pid + 1, exitCode: 0, cpuMs: 1, peakMemoryBytes: null, ioBytes: null,
+    });
+    const lines = () => (journal.db.query('SELECT thread_id AS threadId, text FROM command_lines ORDER BY id').all() as { threadId: string; text: string }[])
+      .map(row => `${row.threadId} ${row.text}`);
+    thread('thr_secret', true);
+    thread('thr_kept', false);
+    thread('thr_gone', false);
+    put('thr_secret', 1, 'curl -H "Authorization: Bearer secret"');
+    put('thr_secret', 2, 'git status');
+    put('terminal:thr_secret:1', 3, 'vim secret-notes.txt');
+    put('thr_kept', 4, 'git status');
+    put('thr_gone', 5, 'make');
+    journal.deleteThreads(['thr_gone']);
+    expect(lines()).toEqual(['thr_secret curl -H "Authorization: Bearer secret"', 'thr_secret git status', 'terminal:thr_secret:1 vim secret-notes.txt', 'thr_kept git status']);
+
+    // The next start erases the incognito conversation, its terminals and its command lines.
+    journal.close();
+    journal = new Journal(file);
+    expect(lines()).toEqual(['thr_kept git status']);
+    expect(journal.listProcesses('thr_kept', 10).map(row => row.commandLine)).toEqual(['git status']);
+
+    // A thread's own prune drops the lines only its deleted rows named.
+    put('thr_kept', 6, 'cargo build');
+    put('thr_kept', 7, 'git status');
+    expect(journal.pruneProcesses('thr_kept', 1)).toBe(2);
+    expect(lines()).toEqual(['thr_kept git status']);
   } finally {
     journal.close();
     rmSync(dir, { recursive: true, force: true });

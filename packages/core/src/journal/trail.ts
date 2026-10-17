@@ -13,6 +13,8 @@ export const TRAIL_ONLY = new Set(['message.started', 'message.part', 'artifact.
  */
 export const UNWRITTEN = new Set(['message.part', 'artifact.published']);
 export const TRAIL_TEXT_CHARS = 1024;
+/** The setting holding the id the trail walk passed (`pruneTrail`). */
+export const TRAIL_CURSOR = 'events:trail-pruned-through';
 
 export function trailOf(value: unknown): unknown {
   if (typeof value === 'string') {
@@ -43,6 +45,20 @@ export function pruneTrail(db: Database, afterId: number, before: number, limit:
   if (through > afterId) {
     db.query('DELETE FROM events WHERE id > ? AND id <= ? AND ts < ? AND type IN (SELECT value FROM json_each(?))')
       .run(afterId, through, before, JSON.stringify([...TRAIL_ONLY]));
+    through = Math.min(through, lastEventId(db));
   }
   return { through, done };
+}
+
+const lastEventId = (db: Database): number => (db.query('SELECT COALESCE(MAX(id), 0) AS id FROM events').get() as { id: number }).id;
+
+/**
+ * Brings the trail cursor back to the last event id after a deletion. Event
+ * ids are rowids without AUTOINCREMENT: once the newest events are deleted,
+ * SQLite hands their ids out again, and a cursor past them would never walk
+ * the new events. Call it in the deleting transaction.
+ */
+export function rewindTrailCursor(db: Database): void {
+  // The TEXT column stores the id as the JSON `getSetting` parses.
+  db.query('UPDATE settings SET value = ?2 WHERE key = ?1 AND CAST(value AS INTEGER) > ?2').run(TRAIL_CURSOR, lastEventId(db));
 }

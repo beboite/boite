@@ -11,8 +11,7 @@ import { compactionSteps, compactOnce } from '../../src/journal/retention.ts';
 export function schema35Journal(file: string): Database {
   new Journal(file).close();
   const db = new Database(file);
-  db.exec(`DROP INDEX processes_by_command;
-    ALTER TABLE processes DROP COLUMN command_id;
+  db.exec(`ALTER TABLE processes DROP COLUMN command_id;
     DROP TABLE command_lines;
     ALTER TABLE part_blobs DROP COLUMN codec;
     ALTER TABLE part_blobs DROP COLUMN preview;
@@ -22,10 +21,10 @@ export function schema35Journal(file: string): Database {
 }
 
 /** Runs every background compaction step to its end, as the timer would over many ticks. */
-export function compactAll(journal: Journal, now = Date.now()): number {
+export async function compactAll(journal: Journal, now = Date.now()): Promise<number> {
   const steps = compactionSteps(journal);
   let ticks = 0;
-  for (let result = compactOnce(journal, steps, now); result !== 'done'; result = compactOnce(journal, steps, now)) {
+  for (let result = await compactOnce(steps, now); result !== 'done'; result = await compactOnce(steps, now)) {
     if (result === 'busy') throw new Error('compaction: a message is still open');
     if (++ticks > 10_000) throw new Error('compaction: more than 10,000 ticks');
   }
