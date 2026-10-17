@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import type { RpcEvents } from '@boite/contracts';
 import { Bus } from '../src/bus.ts';
 import { Journal } from '../src/journal.ts';
+import { TracePrune } from '../src/journal/processes.ts';
 import { createPosixPlatform } from '../src/platform/posix.ts';
 import type { GuardEventSink, NativeProcessInfo, ProcessEventSink, ProcessPlatform } from '../src/platform/types.ts';
 import { ProcRegistry } from '../src/procs.ts';
@@ -296,6 +297,37 @@ test('a schema 35 trace has its command lines stored once and every thread over 
     compactAll(journal, Date.now() + 86_400_001);
     expect((journal.db.query('SELECT text FROM command_lines ORDER BY id').all() as { text: string }[]).map(row => row.text))
       .toEqual(['bash -c claude', 'claude -p "Review parsing" --model opus', 'bash hooks/pre-tool.sh']);
+  } finally {
+    journal.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the background trace prune reads and deletes a bounded batch per call, keeping an agent whose parent sits chunks earlier', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'boite-trace-'));
+  const journal = new Journal(join(dir, 'journal.db'));
+  try {
+    const put = (pid: number, exe: string, commandLine: string, parentPid: number | null) => journal.putProcess({
+      threadId: 'thr_long', pid, parentPid, exe, commandLine, startedAt: pid, exitedAt: pid + 1, exitCode: 0, cpuMs: 1, peakMemoryBytes: null, ioBytes: null,
+    });
+    journal.db.transaction(() => {
+      put(1, 'bash', 'bash -c claude', null);
+      for (let pid = 10; pid < 8_010; pid++) put(pid, 'rustc', 'rustc --edition 2024', 1);
+      put(5_000, 'claude', 'claude -p "Review parsing" --model opus', 1);
+    })();
+    const count = () => (journal.db.query("SELECT COUNT(*) AS n FROM processes WHERE thread_id = 'thr_long'").get() as { n: number }).n;
+    const trace = new TracePrune(journal.db, 1_000);
+    let through = '', calls = 0;
+    for (let more = true; more; calls++) {
+      const before = count();
+      ({ through, more } = trace.step(through));
+      expect(before - count()).toBeLessThanOrEqual(1_000);
+    }
+    // Chunks of the old rows read, then batches deleted, then the walk past the last thread.
+    expect(calls).toBeGreaterThan(10);
+    const pids = (journal.db.query("SELECT pid FROM processes WHERE thread_id = 'thr_long' ORDER BY started_at").all() as { pid: number }[]).map(row => row.pid);
+    expect(pids).toHaveLength(2_002);
+    expect(pids.slice(0, 3)).toEqual([1, 5_000, 6_010]);
   } finally {
     journal.close();
     rmSync(dir, { recursive: true, force: true });

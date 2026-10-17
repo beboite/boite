@@ -113,7 +113,7 @@ const toolPart = (output: string, status: 'done' | 'running' = 'done'): Extract<
   ({ type: 'tool', toolId: `t-${output.length}`, name: 'Bash', input: { command: 'ls' }, inputText: '{"command":"ls"}', output, status });
 
 test('values are stored compressed or as text, and every read path gives them back whole', () => {
-  const image: MessagePart = { type: 'image', mimeType: 'image/png', data: screenshot(9) };
+  const image: MessagePart = { type: 'image', mimeType: 'image/png', data: screenshot(9), alt: null };
   const parts: MessagePart[] = [read(0), image, { ...read(1), status: 'running' }];
   journal.putMessage({ id: 'msg_a', threadId: 'thr_a', turnId: 'trn_a', role: 'assistant', parts, state: 'complete', createdAt: 1 });
   expect(codecs()).toEqual([
@@ -128,7 +128,7 @@ test('values are stored compressed or as text, and every read path gives them ba
     expect(journal.getMessage(id)?.parts).toEqual(parts);
     const page = journal.listMessagePage('thr_a', { limit: 10, toolPreviews: true }).messages.find(message => message.id === id)!;
     // A finished output reads as its preview, a running one whole, an image whole.
-    expect(page.parts).toEqual([{ ...read(0), output: screenshot(0).slice(0, TOOL_OUTPUT_PREVIEW_CHARS), outputDeferred: true }, image, parts[2]]);
+    expect(page.parts).toEqual([{ ...read(0), output: screenshot(0).slice(0, TOOL_OUTPUT_PREVIEW_CHARS), outputDeferred: true }, image, parts[2]!]);
     expect(journal.messagePart(id, 0)?.part).toEqual(parts[0]);
     expect(journal.messagePart(id, 1)?.part).toEqual(image);
   };

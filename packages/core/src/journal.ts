@@ -178,11 +178,6 @@ export class Journal {
     if (!this.closed) this.db.exec('PRAGMA optimize');
   }
 
-  /** The trace rows of each thread past what it keeps, one thread per call (`ProcessRows.pruneNextThread`). */
-  pruneNextProcessThread(afterThreadId: string): string | null {
-    return this.closed ? null : this.processes.pruneNextThread(afterThreadId);
-  }
-
   countEvents(type?: string): number {
     const row =
       type === undefined

@@ -88,36 +88,94 @@ export class ProcessRows {
    */
   prune(threadId: string, keep = PROCESS_ROWS_KEPT): number {
     this.exits.delete(threadId);
-    const cutoff = this.db.query('SELECT started_at FROM processes WHERE thread_id = ? ORDER BY started_at DESC LIMIT 1 OFFSET ?')
-      .get(threadId, keep - 1) as { started_at: number } | null;
+    const cutoff = cutoffOf(this.db, threadId, keep);
     if (cutoff === null) return 0;
-    const agents = (this.db.query(`SELECT p.pid, p.parent_pid, p.exe, COALESCE(p.command_line, c.text) AS command_line, p.started_at FROM ${PROCESS_FROM}
-      WHERE p.thread_id = ? AND p.started_at < ? AND ${AGENT_EXE}`).all(threadId, cutoff.started_at) as AgentRow[])
-      .filter(row => row.parent_pid !== null && processAgentCommand({ exe: row.exe, commandLine: row.command_line }) !== null);
-    const kept = new Set<string>();
-    const parent = this.db.query('SELECT started_at FROM processes WHERE thread_id = ? AND pid = ? AND started_at <= ? ORDER BY started_at DESC LIMIT 1');
-    for (const row of agents) {
-      kept.add(`${row.pid}:${row.started_at}`);
-      const found = parent.get(threadId, row.parent_pid, row.started_at) as { started_at: number } | null;
-      if (found !== null) kept.add(`${row.parent_pid}:${found.started_at}`);
-    }
-    return this.db.query(`DELETE FROM processes WHERE thread_id = ? AND exited_at IS NOT NULL AND started_at < ?
-      AND (pid || ':' || started_at) NOT IN (SELECT value FROM json_each(?))`).run(threadId, cutoff.started_at, JSON.stringify([...kept])).changes;
+    return deleteBelow(this.db, threadId, cutoff, keptBelow(this.db, threadId, Number.MIN_SAFE_INTEGER, cutoff), -1);
   }
+}
 
-  /**
-   * The next thread after `afterThreadId`, in id order, holding more than
-   * `PROCESS_ROWS_KEPT` plus `PROCESS_ROWS_SLACK` rows, pruned. A thread that
-   * finished before pruning ran at every 500 exits kept its whole trace.
-   * Returns that thread's id, or null once none is left. Walks the
-   * `processes_by_started` index, never the rows.
-   */
-  pruneNextThread(afterThreadId: string): string | null {
-    const row = this.db.query(`SELECT thread_id AS threadId FROM processes WHERE thread_id > ?
-      GROUP BY thread_id HAVING COUNT(*) > ? ORDER BY thread_id LIMIT 1`).get(afterThreadId, PROCESS_ROWS_KEPT + PROCESS_ROWS_SLACK) as { threadId: string } | null;
-    if (row === null) return null;
-    this.prune(row.threadId);
-    return row.threadId;
+/** The `started_at` below which a thread's rows may go, or null when it holds no more than `keep`. */
+function cutoffOf(db: Database, threadId: string, keep: number): number | null {
+  const row = db.query('SELECT started_at FROM processes WHERE thread_id = ? ORDER BY started_at DESC LIMIT 1 OFFSET ?').get(threadId, keep - 1) as { started_at: number } | null;
+  return row?.started_at ?? null;
+}
+
+/** The agent CLI rows started in `[from, to)` and their parents, as `pid:started_at` keys. */
+function keptBelow(db: Database, threadId: string, from: number, to: number): string[] {
+  const agents = (db.query(`SELECT p.pid, p.parent_pid, p.exe, COALESCE(p.command_line, c.text) AS command_line, p.started_at FROM ${PROCESS_FROM}
+    WHERE p.thread_id = ? AND p.started_at >= ? AND p.started_at < ? AND ${AGENT_EXE}`).all(threadId, from, to) as AgentRow[])
+    .filter(row => row.parent_pid !== null && processAgentCommand({ exe: row.exe, commandLine: row.command_line }) !== null);
+  const kept: string[] = [];
+  const parent = db.query('SELECT started_at FROM processes WHERE thread_id = ? AND pid = ? AND started_at <= ? ORDER BY started_at DESC LIMIT 1');
+  for (const row of agents) {
+    kept.push(`${row.pid}:${row.started_at}`);
+    const found = parent.get(threadId, row.parent_pid, row.started_at) as { started_at: number } | null;
+    if (found !== null) kept.push(`${row.parent_pid}:${found.started_at}`);
+  }
+  return kept;
+}
+
+/** Deletes finished rows started before `cutoff` that `kept` does not name, at most `limit` (-1: all). */
+function deleteBelow(db: Database, threadId: string, cutoff: number, kept: Iterable<string>, limit: number): number {
+  return db.query(`DELETE FROM processes WHERE rowid IN (SELECT rowid FROM processes WHERE thread_id = ? AND started_at < ? AND exited_at IS NOT NULL
+    AND (pid || ':' || started_at) NOT IN (SELECT value FROM json_each(?)) LIMIT ?)`).run(threadId, cutoff, JSON.stringify([...kept]), limit).changes;
+}
+
+/** The thread a `TracePrune` is cutting: where its scan for agent rows stands, then what it deletes. */
+interface TraceCut { threadId: string; cutoff: number; scanned: number | null; kept: Set<string> }
+
+/**
+ * Cuts every thread's trace to what `ProcessRows.prune` keeps, in calls that
+ * each read or delete about `limit` rows, so a thread holding hundreds of
+ * thousands of rows never holds the event loop: a call finds the next thread
+ * past `PROCESS_ROWS_KEPT` plus `PROCESS_ROWS_SLACK`, later calls walk its
+ * older rows for agent CLI rows, then delete the rest. A thread that finished
+ * before pruning ran at every 500 exits kept its whole trace. The thread in
+ * progress lives in memory: after a restart it is walked again.
+ */
+export class TracePrune {
+  private cut: TraceCut | null = null;
+
+  constructor(private readonly db: Database, private readonly limit: number) {}
+
+  /** One call after thread `after`: the thread id the cursor may move to, and whether threads are left. */
+  step(after: string): { through: string; more: boolean } {
+    const cut = this.cut;
+    if (cut !== null && cut.threadId > after) {
+      if (cut.scanned !== null) {
+        // The rows of the next chunk, ties on its last start included.
+        const end = this.db.query('SELECT started_at FROM processes WHERE thread_id = ? AND started_at >= ? AND started_at < ? ORDER BY started_at LIMIT 1 OFFSET ?')
+          .get(cut.threadId, cut.scanned, cut.cutoff, this.limit) as { started_at: number } | null;
+        const to = end === null ? cut.cutoff : Math.max(end.started_at, cut.scanned + 1);
+        for (const key of keptBelow(this.db, cut.threadId, cut.scanned, to)) cut.kept.add(key);
+        cut.scanned = to >= cut.cutoff ? null : to;
+        return { through: after, more: true };
+      }
+      if (deleteBelow(this.db, cut.threadId, cut.cutoff, cut.kept, this.limit) === this.limit) return { through: after, more: true };
+      this.cut = null;
+      return { through: cut.threadId, more: true };
+    }
+    this.cut = null;
+    // Threads in id order, each counted up to the threshold on the primary key.
+    const next = this.db.query('SELECT thread_id AS threadId FROM processes WHERE thread_id > ? ORDER BY thread_id LIMIT 1');
+    const count = this.db.query('SELECT COUNT(*) AS n FROM (SELECT 1 FROM processes WHERE thread_id = ? LIMIT ?)');
+    const over = PROCESS_ROWS_KEPT + PROCESS_ROWS_SLACK + 1;
+    let through = after;
+    for (let read = 0; read < this.limit;) {
+      const row = next.get(through) as { threadId: string } | null;
+      if (row === null) return { through, more: false };
+      const { n } = count.get(row.threadId, over) as { n: number };
+      read += n;
+      if (n === over) {
+        const cutoff = cutoffOf(this.db, row.threadId, PROCESS_ROWS_KEPT);
+        if (cutoff !== null) {
+          this.cut = { threadId: row.threadId, cutoff, scanned: Number.MIN_SAFE_INTEGER, kept: new Set() };
+          return { through, more: true };
+        }
+      }
+      through = row.threadId;
+    }
+    return { through, more: true };
   }
 }
 
@@ -142,7 +200,15 @@ export function internOldCommandLines(db: Database, afterRowid: number, limit: n
   return rows.at(-1)!.rowid;
 }
 
-/** Deletes the command lines no process row names any more. Returns how many went. */
-export function deleteUnusedCommandLines(db: Database): number {
-  return db.query('DELETE FROM command_lines WHERE NOT EXISTS (SELECT 1 FROM processes WHERE command_id = command_lines.id)').run().changes;
+/**
+ * Deletes the command lines no process row names any more, among at most
+ * `limit` lines after id `afterId`. Returns the last id looked at, or null
+ * once none is left.
+ */
+export function deleteUnusedCommandLines(db: Database, afterId: number, limit: number): number | null {
+  const last = db.query('SELECT MAX(id) AS id FROM (SELECT id FROM command_lines WHERE id > ? ORDER BY id LIMIT ?)').get(afterId, limit) as { id: number | null };
+  if (last.id === null) return null;
+  db.query(`DELETE FROM command_lines WHERE id > ? AND id <= ?
+    AND NOT EXISTS (SELECT 1 FROM processes WHERE command_id = command_lines.id)`).run(afterId, last.id);
+  return last.id;
 }
