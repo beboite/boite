@@ -24,8 +24,8 @@ const quotas = new URLSearchParams(location.search).get('view') === 'quotas';
 const zoomed = quotas ? Promise.resolve() : startZoom();
 
 // The language before the first frame, so nothing is drawn in English and
-// swapped a tick later, and `<html lang>` is right for the first paint. A
-// language other than English is its own chunk, which index.html preloaded.
+// swapped a tick later, and `<html lang>` is right for the first paint. Every
+// language, English included, is its own chunk, which index.html preloaded.
 // A promise chain rather than a top-level await: with one, Rolldown split the
 // entry into twice as many startup files. The quota window is a chunk of its own.
 void startLocale()

@@ -57,18 +57,24 @@ provider's own name.
 | `packages/ui/src/lib/strings.ts` | What every component imports: `strings` in the language of the moment, and `fill`. |
 | `packages/ui/src/lib/strings.en.ts` | English. Every user-facing sentence of the UI, and the shape every translation mirrors. |
 | `packages/ui/src/lib/strings.fr.ts` | French, typed `Translation`: the English catalogue's shape, literals widened, every sentence optional. |
-| `packages/ui/src/lib/i18n.svelte.ts` | The choice, the detection, and the proxy `strings.ts` re-exports. |
+| `packages/ui/src/lib/i18n.svelte.ts` | The choice, the detection, `fill`, and the proxy `strings.ts` re-exports. |
+| `packages/ui/catalogue-plugin.ts` | The build step that writes each translation over English, so its chunk is whole. |
 
 `strings` is a proxy over the catalogue of the moment, not one of the two
 objects. A component writing `{strings.settings.theme}` in its markup is
 subscribed to the language by the read itself, so the sentence swaps when the
 language does, with no prop, no context and no store. Writing to it throws.
 
-English is in the startup bundle; every other language is a chunk of its
-own, fetched only on a device that speaks it. `main.ts` waits for it before the
-first frame, so a French device never draws English and swaps a tick later,
-and a small script the build puts in `index.html` (`lib/locale-preload.ts`)
-starts that fetch beside the entry's. A switch in the settings keeps the screen
+Every language, English included, is a chunk of its own, and a device fetches
+only the one it speaks. The build writes each translation over English
+(`catalogue-plugin.ts`): the French chunk holds French where French has a
+sentence and English where it has not, in English's key order, so a French
+device never downloads the English catalogue. `scripts/ci/translations.ts` and
+the `Translation` type still read the source files, so a sentence French lacks
+is still reported. `main.ts` waits for the catalogue before the first frame, so
+a French device never draws English and swaps a tick later, and a small script
+the build puts in `index.html` (`lib/locale-preload.ts`) starts that fetch
+beside the entry's. A switch in the settings keeps the screen
 in the current language until the new one has arrived, then swaps all of it.
 
 Components import sentences from `lib/strings`. Only `i18n.svelte.ts` reads

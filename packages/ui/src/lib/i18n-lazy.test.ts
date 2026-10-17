@@ -47,3 +47,19 @@ test('the boot resolves once the stored language can answer', async () => {
   await setLocaleSetting('system');
   expect(strings.common.no).toBe('no');
 });
+
+test('a French device boots on the French chunk alone, never fetching English', async () => {
+  vi.resetModules();
+  vi.doMock('./strings.en', () => { throw new Error('a French device fetched the English catalogue'); });
+  try {
+    window.localStorage.setItem(LOCALE_STORAGE_KEY, 'fr');
+    const fresh = await import('./i18n.svelte');
+    await fresh.startLocale();
+    expect(fresh.activeLocale()).toBe('fr');
+    expect(fresh.strings.common.yes).toBe('oui');
+    // The chunk is whole (catalogue-plugin.ts): every key English has answers.
+    expect(Object.keys(fresh.strings.common)).toContain('no');
+  } finally {
+    vi.doUnmock('./strings.en');
+  }
+});
