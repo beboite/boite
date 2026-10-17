@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use super::health::{endpoint_of, health, probe, read_core_file, Probe};
 use super::spawn::spawn_core;
+use super::starting::{read_starting, STARTING_CAP};
 use super::{CoreState, Resolved, HELD, POLL_INTERVAL};
 use crate::shell_log::{self, Level};
 use serde_json::json;
@@ -118,6 +119,9 @@ pub(super) fn resolve_core(state: &CoreState) -> Result<Resolved, String> {
 
     let ready = match running_child(state) {
         Some(ready) => ready,
+        // A core an earlier shell started is compacting its journal and holds
+        // the data directory's lock: a second one would only fail. Wait for it.
+        None if read_starting(&launch.directory).is_some() => Arc::new(AtomicBool::new(false)),
         None => {
             // Asked again here: stopping an older core above takes seconds.
             if state.held.load(Ordering::SeqCst) {
@@ -156,7 +160,8 @@ pub(super) fn resolve_core(state: &CoreState) -> Result<Resolved, String> {
                 }
             }
         }
-        if started.elapsed() >= launch.timeout {
+        // Past the timeout only while the core says it is still at work before serving.
+        if started.elapsed() >= launch.timeout && (started.elapsed() >= STARTING_CAP || read_starting(&launch.directory).is_none()) {
             break;
         }
         std::thread::sleep(POLL_INTERVAL);

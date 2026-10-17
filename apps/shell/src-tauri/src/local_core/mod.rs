@@ -18,6 +18,7 @@ pub(crate) mod health;
 mod locate;
 mod resolve;
 mod spawn;
+mod starting;
 #[cfg(test)]
 mod tests;
 
@@ -25,6 +26,7 @@ pub(crate) use locate::resolve_data_dir;
 use locate::{core_command, CoreCommand};
 use resolve::resolve_core;
 use spawn::Spawned;
+use starting::{read_starting, Starting, STARTING_CAP};
 
 /// How long a core the shell started gets to answer. A warm start takes about
 /// a second; the first start of a freshly installed sidecar, scanned by the
@@ -188,6 +190,15 @@ pub(crate) async fn core_endpoint(app: AppHandle, webview: Webview) -> Result<Co
     .map_err(|error| format!("the endpoint task did not finish: {error}"))?
 }
 
+/// What the core does before it serves, while it says so: the window shows it
+/// in place of its plain waiting message.
+#[tauri::command]
+pub(crate) fn core_starting(app: AppHandle, webview: Webview) -> Result<Option<Starting>, String> {
+    quota_window::only_ui(&webview)?;
+    let state = app.try_state::<CoreState>().ok_or("the shell has not set up its core yet")?;
+    Ok(read_starting(&state.launch.directory))
+}
+
 /// What the last resolution settled on.
 struct Settled {
     outcome: Result<CoreEndpoint, String>,
@@ -211,7 +222,8 @@ impl Settled {
 /// callers only the first to see the dead core resolves; the others wait for it.
 fn current_endpoint(state: &CoreState) -> Result<CoreEndpoint, String> {
     let patience = state.launch.patience();
-    let settled = wait_for_endpoint(&state.slot, patience)?;
+    let starting = || read_starting(&state.launch.directory).is_some();
+    let settled = wait_for_endpoint(&state.slot, patience, &starting)?;
     reap_child(state);
     if !settled.stale() {
         return settled.outcome;
@@ -227,7 +239,7 @@ fn current_endpoint(state: &CoreState) -> Result<CoreEndpoint, String> {
             serde_json::json!({ "pid": settled.pid, "generation": settled.generation + 1 }));
         publish(&state.slot, resolve_core(state));
     }
-    wait_for_endpoint(&state.slot, patience)?.outcome
+    wait_for_endpoint(&state.slot, patience, &starting)?.outcome
 }
 
 /// Collects the exit of a core this shell started, if it exited. On Linux and
@@ -273,25 +285,28 @@ fn publish(slot: &(Mutex<Slot>, Condvar), outcome: Result<Resolved, String>) {
     ready.notify_all();
 }
 
-fn wait_for_endpoint(slot: &(Mutex<Slot>, Condvar), patience: Duration) -> Result<Settled, String> {
+/// Waits up to `patience` for the resolution, longer while `starting` says the
+/// core announced long work before it serves (`STARTING_CAP` at most).
+fn wait_for_endpoint(slot: &(Mutex<Slot>, Condvar), patience: Duration, starting: &dyn Fn() -> bool) -> Result<Settled, String> {
     let (lock, ready) = slot;
-    let deadline = Instant::now() + patience;
+    let begun = Instant::now();
+    let mut deadline = begun + patience;
     let mut guard = lock
         .lock()
         .map_err(|_| "the core state is poisoned".to_string())?;
 
     while !guard.done {
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        if remaining.is_zero() {
-            return Err("no core answered within the start timeout".to_string());
+        let now = Instant::now();
+        if now >= deadline {
+            if begun.elapsed() >= STARTING_CAP || !starting() {
+                return Err("no core answered within the start timeout".to_string());
+            }
+            deadline = now + patience;
         }
-        let (next, timeout) = ready
-            .wait_timeout(guard, remaining)
+        let (next, _) = ready
+            .wait_timeout(guard, deadline - now)
             .map_err(|_| "the core state is poisoned".to_string())?;
         guard = next;
-        if timeout.timed_out() && !guard.done {
-            return Err("no core answered within the start timeout".to_string());
-        }
     }
 
     let outcome = match (guard.endpoint.as_ref(), guard.error.as_ref()) {

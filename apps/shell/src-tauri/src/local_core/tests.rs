@@ -9,7 +9,8 @@ use std::process::{Child, Command, Stdio};
 /// A stand-in core. `serve` writes `core.json` into its `--data-dir`,
 /// answers `/health` with its version and pid and stops on an authorised
 /// `POST /shutdown`; `fail` exits at once with a reason on stderr, as the
-/// real core does on a held lock; `hang` never answers.
+/// real core does on a held lock; `hang` never answers; `compact` announces
+/// its work in `core.starting.json` for 5 s, then serves.
 const FAKE_CORE: &str = r#"
 const [version, mode] = process.argv.slice(2);
 const dir = process.argv[process.argv.indexOf('--data-dir') + 1];
@@ -17,7 +18,13 @@ if (mode === 'fail') {
   console.error(`error: another core is already running on ${dir} (pid 1)`);
   process.exit(3);
 }
-if (mode === 'serve') {
+if (mode === 'compact') {
+  const status = `${dir}/core.starting.json`;
+  await Bun.write(status, JSON.stringify({ pid: process.pid, phase: 'compacting', startedAt: Date.now(), bytes: 1 }));
+  await Bun.sleep(5000);
+  (await import('node:fs')).rmSync(status);
+}
+if (mode === 'serve' || mode === 'compact') {
   const token = 'test-token';
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
     const url = new URL(request.url);
@@ -235,6 +242,34 @@ fn a_slow_resident_core_is_left_running_and_a_slow_owned_one_is_stopped() {
     let error = resolve_core(&owned).err().expect("a core that never answers is not adopted");
     assert!(error.contains("did not write"), "{error}");
     assert!(spawned_pid(&owned).is_none(), "an owned core that never answered is stopped");
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn a_core_compacting_its_journal_is_waited_on_past_the_timeout_and_says_so() {
+    let _process_guard = crate::process_test_guard();
+    let directory = scratch("compact");
+    let state = state(&directory, "2.0.0", fake_command(&directory, "2.0.0", "compact"), false, Duration::from_secs(2));
+    let watcher = {
+        let directory = directory.clone();
+        std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(20);
+            loop {
+                if let Some(starting) = starting::read_starting(&directory) { return Some(starting); }
+                if Instant::now() > deadline { return None; }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        })
+    };
+    let outcome = resolve_core(&state);
+    state.kill_child();
+    let seen = watcher.join().unwrap().expect("the core announced its work");
+    assert_eq!(seen.phase, "compacting");
+    assert!(outcome.is_ok(), "{:?}", outcome.err());
+    // Gone once the core serves, and a file a dead core left counts for nothing.
+    assert!(starting::read_starting(&directory).is_none());
+    std::fs::write(directory.join("core.starting.json"), r#"{"pid":4294967294,"phase":"compacting","startedAt":1,"bytes":1}"#).unwrap();
+    assert!(starting::read_starting(&directory).is_none());
     std::fs::remove_dir_all(directory).unwrap();
 }
 

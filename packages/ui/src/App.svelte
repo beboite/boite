@@ -2,7 +2,7 @@
   import { errorText } from './lib/errors';
   import { onMount, untrack } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
-  import { takeNotificationTarget } from './lib/endpoint';
+  import { shellStarting, takeNotificationTarget } from './lib/endpoint';
   import { watchAgentBrowser } from './lib/agent-browser-watch';
   import { watchDevices } from './lib/device-watch';
   import { browserProfiles } from './lib/browser-profiles.svelte';
@@ -58,6 +58,16 @@
   // The machine the window opened on may still give way to one that answers: until then nothing of it is drawn.
   const booted = $derived(store.booted && !(workspace.waiting && store === workspace.primary));
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
+  // A core compacting its journal once before it serves: the start says so rather than only "Starting".
+  let compacting = $state(false);
+  $effect(() => {
+    if (!inShell || booted) { compacting = false; return; }
+    let live = true;
+    const look = () => void shellStarting().then(starting => { if (live) compacting = starting?.phase === 'compacting'; });
+    look();
+    const timer = setInterval(look, 1000);
+    return () => { live = false; clearInterval(timer); };
+  });
   // A page the agent opens brings its browser forward in the panel, on every client (lib/agent-browser-watch.ts).
   $effect(() => {
     const threadId = store.openThread?.id;
@@ -506,7 +516,7 @@
 
   <div class="body" class:mobile-covered={!inShell && store.page === 'chat' && (mobileScreen !== 'chat' || mobileRecovery)} class:panel-maximized={rightPanel.maximized && !rightPanel.floating && store.panelOpen} class:sidebar-folded={sidebarFolded}>
     {#if !booted}
-      <p class="empty boot">{strings.app.loading}</p>
+      <p class="empty boot" class:long={compacting}>{compacting ? strings.app.compacting : strings.app.loading}</p>
     {:else if wideRecovery}
       <div class="wide-recovery" data-testid="wide-recovery"><MobileConnect {store} onpaired={() => {}} /></div>
     {:else if store.connection === 'closed' && !store.core}
@@ -688,6 +698,7 @@
   .boot {
     margin: auto;
   }
+  .boot.long { max-width: 360px; padding: 0 24px; text-align: center; }
 
   .wide-recovery { flex: 1; min-width: 0; display: flex; overflow-y: auto; padding: 16px 24px; }
   .notice {
