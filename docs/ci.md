@@ -153,7 +153,7 @@ The tested installer becomes the release artifact.
 | UI entry chunk | 595,200 |
 | UI files, excluding `.br` and `.gz` copies | 5,028,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,379,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,380,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
@@ -187,6 +187,12 @@ and the batched process records of PR #566 measure 4,378,383 core JavaScript
 bytes after a fresh `bun run build:core` on Windows, against 4,355,066 for
 `7c7327ab` built the same way; Windows CI measured 4,378,339. They add 23,317
 bytes, none of them in `main.js`. The core limit becomes 4,379,000.
+
+On 2026-10-17, the lazy MCP proxy dropping a call cancelled during its
+server's start, and refusing a request whose session ended while its body
+came, measure 4,379,352 core JavaScript bytes after a fresh `bun run
+build:core` on Windows, against 4,378,787 before them. They add 565 bytes; the
+core limit becomes 4,380,000.
 
 On 2026-10-16, the server update recovery (PR #552) on `origin/main` at
 `08c11d82` measures 4,353,036 core JavaScript bytes after a fresh `bun run

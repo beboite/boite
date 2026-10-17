@@ -146,6 +146,8 @@ interface Session {
   upstream: Upstream | null;
   starting: Promise<Upstream> | null;
   pending: Map<number, Waiting>;
+  /** Calls waiting for the server's start, by the client's id: a cancel that comes meanwhile drops the call. */
+  queued: Map<Id, { cancelled: boolean }>;
   /** The client's GET streams, for what the server says outside any call. */
   listeners: Set<EventStream>;
   /** Open POST streams, newest last: a server request during a call goes to the call's stream. */
@@ -314,6 +316,8 @@ export class LazyMcp {
   async #post(request: Request, registration: Registration, name: string, server: StdioServer): Promise<Response> {
     let body: unknown;
     try { body = await request.json(); } catch { return json(failure(null, -32700, 'the body is not JSON'), 400); }
+    // The session may have ended while its body came: nothing starts for a released registration.
+    if (this.#registrations.get(registration.id) !== registration) return new Response('this MCP registration ended with its session', { status: 404 });
     const messages = (Array.isArray(body) ? body : [body]).filter(isRecord) as Message[];
     if (messages.length === 0) return json(failure(null, -32600, 'expected a JSON-RPC message'), 400);
 
@@ -359,6 +363,7 @@ export class LazyMcp {
       upstream: null,
       starting: null,
       pending: new Map(),
+      queued: new Map(),
       listeners: new Set(),
       calls: new Set(),
       servedTools: null,
@@ -404,9 +409,13 @@ export class LazyMcp {
   #fromClient(session: Session, message: Message): void {
     // The core says it to the real server itself, right after its handshake.
     if (message.method === 'notifications/initialized') return;
+    const requestId = message.params?.requestId;
+    if (message.method === 'notifications/cancelled' && (typeof requestId === 'string' || typeof requestId === 'number')) {
+      const queued = session.queued.get(requestId);
+      if (queued !== undefined) { queued.cancelled = true; return; }
+    }
     if (!this.#live(session)) return;
     if (message.method === 'notifications/cancelled') {
-      const requestId = message.params?.requestId;
       for (const [internal, waiting] of session.pending) {
         if (waiting.clientId !== requestId) continue;
         this.#send(session, { ...message, params: { ...message.params, requestId: internal } });
@@ -418,11 +427,17 @@ export class LazyMcp {
   }
 
   async #forward(session: Session, message: Message, stream: EventStream): Promise<void> {
+    const queued = { cancelled: false };
+    session.queued.set(message.id!, queued);
     try { await this.#ensure(session); } catch (error) {
-      stream.send(failure(message.id, -32603, startFailure(session, error)));
+      if (!queued.cancelled) stream.send(failure(message.id, -32603, startFailure(session, error)));
       stream.settle();
       return;
+    } finally {
+      if (session.queued.get(message.id!) === queued) session.queued.delete(message.id!);
     }
+    // A cancelled request gets no answer, and the server never sees it.
+    if (queued.cancelled) { stream.settle(); return; }
     const internal = ++this.#ids;
     session.pending.set(internal, { clientId: message.id!, stream });
     this.#send(session, { ...message, id: internal });

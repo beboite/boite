@@ -1164,11 +1164,14 @@ replaces the config's server of the same name, so the CLI starts none of them.
 The first session of a server starts it for the handshake and saves what it
 answered (`initialize` result and the tools, prompts, resources and templates
 lists) in the journal setting `mcp-manifest:<fingerprint>`, keyed by command,
-arguments and environment. Later sessions with the same MCP protocol version
+arguments and environment. The folder is not in the key: each worktree would
+start every server once more. Later sessions with the same MCP protocol version
 get the handshake, the lists, `ping` and `logging/setLevel` from that manifest
 without a process. The first other request starts the real server under the
 thread, in the thread's folder, with the CLI's environment plus the server's
-own and the agent variables, then forwards it. The server stays for the rest of
+own and the agent variables, then forwards it. A request that comes during the
+server's handshake waits for it, and one the CLI cancels meanwhile is dropped
+unanswered. The server stays for the rest of
 the session. Its own requests (roots, sampling, elicitation) reach the CLI on
 its GET stream, or on its newest open POST stream when there is none. Once a
 server is live, the core reads its lists again and saves them; when its tools

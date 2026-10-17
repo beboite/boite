@@ -62,7 +62,7 @@ test('a session gets its servers from what they answered before, and starts one 
   const cwd = join(harness.dataDir, 'work');
   mkdirSync(cwd, { recursive: true });
   const startsFile = join(harness.dataDir, 'starts.txt');
-  const server: StdioServer = { command: process.execPath, args: [FIXTURE], env: { LAZY_MCP_STARTS: startsFile, LAZY_MCP_OWN: 'own', LAZY_MCP_INIT_DELAY_MS: '300' } };
+  const server: StdioServer = { command: process.execPath, args: [FIXTURE], env: { LAZY_MCP_STARTS: startsFile, LAZY_MCP_OWN: 'own', LAZY_MCP_INIT_DELAY_MS: '1000' } };
   const servers = new Map([['fixture', server]]);
   const lazy = harness.core.lazyMcp;
 
@@ -98,9 +98,18 @@ test('a session gets its servers from what they answered before, and starts one 
   const calling = post(url, token, { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'echo', arguments: { said: 'hi' } } }, session);
   // A call that comes during the server's handshake waits for its end, and the server is not started twice.
   await waitFor(() => starts(startsFile) === 2, 5000);
-  const during = await post(url, token, { jsonrpc: '2.0', id: 8, method: 'tools/call', params: { name: 'echo', arguments: { said: 'during' } } }, session);
-  expect(during.messages[0]!.error).toBeUndefined();
-  expect(JSON.parse(during.messages[0]!.result.content[0].text).arguments).toEqual({ said: 'during' });
+  const during = post(url, token, { jsonrpc: '2.0', id: 8, method: 'tools/call', params: { name: 'echo', arguments: { said: 'during' } } }, session);
+  let handshakeEnded = false;
+  void during.then(() => { handshakeEnded = true; });
+  // One cancelled meanwhile gets no answer and never reaches the server. The handshake takes a second: both calls are in by then.
+  const dropped = post(url, token, { jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'echo', arguments: { said: 'dropped' } } }, session);
+  await Bun.sleep(200);
+  expect((await post(url, token, { jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 9 } }, session)).status).toBe(202);
+  expect(handshakeEnded).toBe(false);
+  const answered = (await during).messages[0]!;
+  expect(answered.error).toBeUndefined();
+  expect(JSON.parse(answered.result.content[0].text).arguments).toEqual({ said: 'during' });
+  expect((await dropped).messages).toEqual([]);
   const called = await calling;
   expect(called.messages).toHaveLength(1);
   expect(called.messages[0]!.id).toBe(3);
@@ -127,6 +136,31 @@ test('a session gets its servers from what they answered before, and starts one 
   lazy.release(second.id);
   await waitFor(() => lazy.running() === 0, 5000);
   expect((await post(url, token, { jsonrpc: '2.0', id: 7, method: 'ping' }, session)).status).toBe(404);
+});
+
+test('a session released while a request body comes starts no server', async () => {
+  const client = await harness.connect();
+  const { threadId } = await echoThread(harness, client);
+  const token = harness.core.agents.tokenFor(threadId as never);
+  const startsFile = join(harness.dataDir, 'starts.txt');
+  const lazy = harness.core.lazyMcp;
+  const { id, entries } = lazy.register(threadId as never, harness.dataDir, { ...process.env }, new Map([['fixture', { command: process.execPath, args: [FIXTURE], env: { LAZY_MCP_STARTS: startsFile } }]]));
+  // A never seen server: its `initialize` would start it. The release comes between the two halves of the body.
+  const text = JSON.stringify({ jsonrpc: '2.0', id: 0, method: 'initialize', params: INIT });
+  let finish!: () => void;
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(text.slice(0, 10)));
+      finish = () => { controller.enqueue(new TextEncoder().encode(text.slice(10))); controller.close(); };
+    },
+  });
+  const response = fetch(entries.fixture!.url, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', accept: 'application/json, text/event-stream' }, body, duplex: 'half' } as RequestInit);
+  await Bun.sleep(200);
+  lazy.release(id);
+  finish();
+  expect((await response).status).toBe(404);
+  expect(starts(startsFile)).toBe(0);
+  expect(lazy.running()).toBe(0);
 });
 
 test('only the stdio servers of the user config are taken, without the ones the project turned off or the CLI expands', () => {
