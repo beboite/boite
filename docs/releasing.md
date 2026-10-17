@@ -310,8 +310,10 @@ update used to leave the previous build's chunks beside the new ones and an
 uninstall left them all: an install updated since 2026-09-28 held 3,614 files
 and 243 MB, about 108 MB of them stale. The installer hook now removes both
 directories once the core of that install has stopped, before the copy, and
-the uninstall hook removes them too (`windows/hooks.nsh`). Nothing else in the
-install directory is touched.
+the uninstall hook removes them too (`windows/hooks.nsh`), once before the
+template's deletions and once after, since `RMDir /r` skips a file still held
+open without failing; what is still held then goes at the next restart where
+Windows allows it. Nothing else in the install directory is touched.
 
 The identifier is fresh, so Boite installs beside Boite Legacy rather than over
 it. To see the exact file list a build produced, read

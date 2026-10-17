@@ -139,6 +139,12 @@ describe.skipIf(!ready)('installer hooks', () => {
       '    !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"',
       '  !endif',
       '  Delete "$INSTDIR\\boite-core.exe"',
+      // The rest of the template's uninstall: shortcuts, registry, uninstaller.
+      '  Sleep 2000',
+      // Where the template inserts it, after its own deletions.
+      '  !ifmacrodef NSIS_HOOK_POSTUNINSTALL',
+      '    !insertmacro NSIS_HOOK_POSTUNINSTALL',
+      '  !endif',
       'SectionEnd',
     ].join('\r\n');
     writeFileSync(join(base, 'hooktest.nsi'), script);
@@ -223,7 +229,22 @@ describe.skipIf(!ready)('installer hooks', () => {
     expect(bundles(installed.install)).toEqual({ core: false, ui: false, kept: true });
 
     const removed = await running('uninstall');
+    // A scanner or an editor holding a chunk, without delete sharing, through
+    // the hooks' first pass; it lets go once the template's deletions ran.
+    const held = join(removed.install, STALE[0][0]);
+    const holding = join(base, 'holding.txt');
+    const holder = Bun.spawn(['powershell', '-NoProfile', '-NonInteractive', '-Command',
+      `$f = [IO.File]::Open('${held}', 'Open', 'Read', 'Read'); Set-Content '${holding}' 'held';`
+        + ` while (Test-Path '${join(removed.install, 'boite-core.exe')}') { Start-Sleep -Milliseconds 50 }; $f.Close()`], {
+      stdout: 'ignore', stderr: 'ignore', windowsHide: true,
+    });
+    started.push(holder.pid);
+    for (const deadline = Date.now() + 20_000; !existsSync(holding);) {
+      if (Date.now() > deadline) throw new Error('the holder never opened its file');
+      await Bun.sleep(50);
+    }
     expect(await run([join(base, 'uninstall.exe'), '/S', `_?=${removed.install}`])).toBe(0);
+    expect(await exited(holder)).toBe(0);
     // Ended by the installer, whatever code that leaves.
     expect(await exited(removed.shell)).not.toBe('still running');
     expect(await exited(removed.core)).toBe(0);

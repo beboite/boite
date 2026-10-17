@@ -184,10 +184,21 @@
   ${EndIf}
 !macroend
 
-; Here rather than after the template's deletions, which end with `RMDir
-; "$INSTDIR"`: that only removes an empty directory. A core that would not stop
-; was moved aside above and goes with its install.
+; Before the template's deletions, so its final `RMDir "$INSTDIR"`, which only
+; removes an empty directory, finds the two directories gone. A core that would
+; not stop was moved aside above and goes with its install.
 !macro NSIS_HOOK_PREUNINSTALL
   !insertmacro BOITE_STOP_CORE 0
   !insertmacro BOITE_CLEAR_BUNDLES
+!macroend
+
+; And again after them: `RMDir /r` skips a file someone still holds open (a
+; scanner, an editor) without failing the uninstall, and that file kept `core`
+; or `ui`, and so the install directory, alive. What is still held now goes at
+; the next restart where Windows allows it; the directory goes once empty.
+!macro NSIS_HOOK_POSTUNINSTALL
+  StrCmp $INSTDIR "" +4
+    RMDir /r /REBOOTOK "$INSTDIR\core"
+    RMDir /r /REBOOTOK "$INSTDIR\ui"
+    RMDir "$INSTDIR"
 !macroend
