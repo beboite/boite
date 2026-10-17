@@ -511,7 +511,8 @@
         rememberAnchor();
         const anchor = anchors.current;
         onMeasured(batch);
-        void tick().then(() => restoreAnchor(anchor));
+        // A row growing below moves no scroll position: the gap a later notch down is measured against grows with it.
+        void tick().then(() => { restoreAnchor(anchor); if (box.scrollTop === scrollTop) scrolledGap = box.scrollHeight - box.scrollTop - box.clientHeight; });
       });
     });
     boxes = observer;
@@ -535,8 +536,7 @@
     const resized = height !== scrolledHeight;
     scrolledHeight = height;
     // The browser keeping the text in place as a row above grows moves the list down, never nearer its bottom.
-    const distance = height - box.scrollTop - box.clientHeight, closer = distance < scrolledGap - 1;
-    scrolledGap = distance;
+    const distance = height - box.scrollTop - box.clientHeight, closer = distance < scrolledGap - 1; scrolledGap = distance;
     // Pulled up by a finger or the scrollbar thumb, the list leaves the bottom as the wheel does.
     if (hold.held && box.scrollTop < scrollTop - 1) leftBottom = true;
     const moved = edge.moved(box);

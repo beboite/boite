@@ -388,6 +388,8 @@ test('a row growing above a reader just off the bottom leaves the reader there',
   await page.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: box.x, y: box.y, deltaX: 0, deltaY: -30 });
   await page.waitFor(`document.querySelector('${jump}')`);
   await page.evaluate('new Promise((done) => setTimeout(done, 300))');
+  const gap = `(() => { const t = document.querySelector('${timeline}'); return t.scrollHeight - t.clientHeight - t.scrollTop; })()`;
+  const before = await page.evaluate<number>(gap);
   // At rest the browser keeps the text in place as a row above grows, a picture loading or a block
   // highlighted, and that moves the list down. Before, the descent took the bottom back inside its 80 px.
   const gaps = await page.evaluate<number[]>(`new Promise((done) => {
@@ -402,6 +404,14 @@ test('a row growing above a reader just off the bottom leaves the reader there',
     const frame = () => { gaps.push(box.scrollHeight - box.clientHeight - box.scrollTop); if (performance.now() - start < 500) requestAnimationFrame(frame); else done(gaps); };
     frame();
   })`);
-  expect(Math.min(...gaps)).toBeGreaterThan(20);
+  expect(Math.min(...gaps)).toBeGreaterThanOrEqual(before - 2);
+  expect(Math.max(...gaps)).toBeLessThanOrEqual(before + 2);
   expect(await page.evaluate<boolean>(`!!document.querySelector('${jump}')`)).toBe(true);
-});
+
+  // The last row growing below moves no scroll position; a notch down into the 80 px still takes the bottom back.
+  await page.evaluate(`(() => { const grown = document.createElement('div'); grown.style.height = '100px'; [...document.querySelectorAll('${timeline} [data-mid]')].at(-1).firstElementChild.append(grown); })()`);
+  await page.waitFor(`${gap} > 120`);
+  await page.evaluate('new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))');
+  await page.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: box.x, y: box.y, deltaX: 0, deltaY: 70 });
+  await page.waitFor(`!document.querySelector('${jump}')`, 2_000);
+}, 30_000);
