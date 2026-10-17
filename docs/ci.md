@@ -150,12 +150,20 @@ The tested installer becomes the release artifact.
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 593,500 |
+| UI entry chunk | 594,000 |
 | UI files, excluding `.br` and `.gz` copies | 5,019,500 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 4,356,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-17, opening an untouched conversation's panel on its launcher
+(PR #563) merged with `origin/main` at `acb17c0a` measures 593,610 UI entry
+bytes on Windows CI, 197 over that main's 593,413: the store's wide-window
+`MediaQuery` and the untouched layout live in `right-panel.svelte.ts`, which
+the entry loads. The entry limit is 594,000, which the Agents tab's list of
+every machine's agents (PR #568) set without a note; the other limits stay
+unchanged.
 
 On 2026-10-17, Windows CI measured a 593,177-byte UI entry chunk for
 `origin/main` at `7c7327ab`, already over its 593,000 limit after PRs #558 to

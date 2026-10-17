@@ -46,7 +46,7 @@ test('no button shows its icon smaller than it was drawn', async () => {
   found.push(...await squeezed('chat'));
 
   // Every surface of the right panel, one at a time, back to the launcher in between.
-  await page.click(id('panel-toggle'));
+  // A conversation nobody touched opens its panel on the launcher by itself on a wide window.
   await page.waitFor(`document.querySelector('${id('panel-launcher')}')`);
   for (const kind of ['agents', 'trace', 'changes', 'files', 'tasks']) {
     if (!await page.evaluate<boolean>(`!!document.querySelector('${id(`launch-${kind}`)}')`)) continue;
