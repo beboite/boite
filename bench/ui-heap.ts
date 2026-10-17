@@ -59,7 +59,8 @@ class Session {
   private constructor(private readonly socket: WebSocket) {
     socket.addEventListener('message', (event) => {
       const message = JSON.parse(String(event.data)) as { id?: number; result?: Record<string, unknown>; error?: { message: string }; method?: string; params?: Record<string, unknown> };
-      if (message.method) this.listeners.get(message.method)?.(message.params ?? {});
+      const listener = typeof message.method === 'string' ? this.listeners.get(message.method) : undefined;
+      if (typeof listener === 'function') listener(message.params ?? {});
       if (typeof message.id !== 'number') return;
       const pending = this.#pending.get(message.id);
       if (!pending) return;
