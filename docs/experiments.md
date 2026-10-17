@@ -183,8 +183,8 @@ Elements opt in with `data-preload-thread="<thread id>"` or
 `data-preload-view="settings" | "agents"`; one capture listener on the window
 reads them, so a sidebar row costs nothing to mark. The owning machine is the
 nearest `data-machine-id`, else the active one. Thread rows, the spawn marker,
-the parent chip, the resources page, workflow steps and the agents panel's
-"Open thread" are marked. On a data saver or a slow-2G, 2G or 3G
+the parent title in a subagent's header, the resources page, workflow steps and
+the agents panel's subagent rows are marked. On a data saver or a slow-2G, 2G or 3G
 link, touch presses wait for their click; the mouse keeps preloading. A row of
 a machine that is no longer connected preloads nothing, and a press whose
 page was refused leaves the click to ask again.

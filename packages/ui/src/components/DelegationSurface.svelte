@@ -1,7 +1,6 @@
 <script lang="ts">
   import ContextModeBadge from './ContextModeBadge.svelte';
-  import { ArrowLeft, Pause, Play, Plus, RotateCcw, Settings, Square, Trash2, UsersRound, Workflow } from '@lucide/svelte';
-  import { onDestroy } from 'svelte';
+  import { Pause, Play, Plus, RotateCcw, Settings, Square, Trash2, UsersRound, Workflow } from '@lucide/svelte';
   import { DEFAULT_DELEGATION_CONFIG, threadActive, threadBusy, type DelegationConfig, type DelegationProfile } from '@boite/contracts';
   import type { BoundPanel, Surface } from '../lib/right-panel.svelte';
   import { fill, strings } from '../lib/strings';
@@ -11,7 +10,6 @@
   import { modelLogoId, modelMakerName } from '../lib/provider-logos';
   import { isLive, runProgress } from '../lib/workflow-view';
   import EffortSlider from './EffortSlider.svelte';
-  import DelegationTranscript from './DelegationTranscript.svelte';
   import ModelPicker from './ModelPicker.svelte';
   import ProviderLogo from './ProviderLogo.svelte';
   import StatusMark from './StatusMark.svelte';
@@ -23,8 +21,9 @@
 
   /**
    * What this conversation handed out: its workflow runs, its subagents and the
-   * provider's own. A run opens its graph, a subagent its conversation. Nothing
-   * is launched from here; the agent does that.
+   * provider's own. A run opens its graph here; a subagent opens in the chat,
+   * whose header names the parent above it. Nothing is launched from here; the
+   * agent does that.
    */
   let { store, surface, panel }: { store: Store; surface: Surface; panel: BoundPanel } = $props();
   let settings = $state(false);
@@ -37,7 +36,6 @@
   let agents = $derived(view?.agents ?? []);
   let native = $derived((view?.nativeAgents ?? []).filter(agent => agent.source !== 'process'));
   let processes = $derived((view?.nativeAgents ?? []).filter(agent => agent.source === 'process'));
-  let selected = $derived(agents.find(agent => agent.thread.id === store.delegationSelectedAgentId) ?? null);
   let liveAgents = $derived(agents.filter(agent => agentProgress(agent).active));
   /** Finished subagents, the most recent first: the one that just reported is the one to read. */
   let doneAgents = $derived(agents.filter(agent => !agentProgress(agent).active).sort((a, b) => endOf(b) - endOf(a)));
@@ -54,7 +52,6 @@
     void store.loadDelegation(threadId);
     void store.loadWorkflows(threadId);
   });
-  onDestroy(() => { void store.selectDelegatedAgent(null); });
 
   function showRun(runId: string | undefined): void {
     panel.update(surface.id, { runId });
@@ -147,11 +144,9 @@
     }
   }
 
-  async function openChild(): Promise<void> {
-    if (!selected) return;
-    const id = selected.thread.id;
-    await store.selectDelegatedAgent(null);
-    await store.open(id);
+  /** A subagent reads like any conversation: it opens in the chat, not in this panel. */
+  function openChild(agent: Agent): void {
+    void store.open(agent.thread.id);
   }
 </script>
 
@@ -176,7 +171,7 @@
   {@const tokens = tokensOf(agent)}
   {@const outcome = outcomeOf(agent)}
   {@const wait = agent.thread.backgroundWait ?? null}
-  <button type="button" class="member" class:selected={selected?.thread.id === agent.thread.id} data-testid="delegation-member" data-agent-id={agent.thread.id} data-status={progress.status} onclick={() => void store.selectDelegatedAgent(agent.thread.id)}>
+  <button type="button" class="member" data-testid="delegation-member" data-agent-id={agent.thread.id} data-status={progress.status} data-preload-thread={agent.thread.id} onclick={() => openChild(agent)}>
     <span class="avatar" role="img" aria-label={route.maker} title={route.maker}>
       <ProviderLogo providerId={route.logo} size={20} />
       {#if progress.active}<StatusMark {...markOf(agent)} corner />{/if}
@@ -262,7 +257,7 @@
         {/if}
       </div>
     {:else if view}
-      <div class="team" class:detail={selected !== null}>
+      <div class="team">
         <div class="members" aria-label={strings.delegation.heading}>
           {#if liveRuns.length || liveAgents.length}
             <section class="group" data-testid="delegation-active">
@@ -280,24 +275,10 @@
           {/if}
         </div>
 
-        {#if selected}
-          <article class="detail-pane" data-testid="delegation-detail">
-            <header>
-              <button type="button" class="ghost small icon back" aria-label={strings.delegation.backToTeam} onclick={() => void store.selectDelegatedAgent(null)}><ArrowLeft size={15} /></button>
-              <div><strong>{selected.thread.title}</strong><small>{routeOf(selected).label}</small></div>
-              <button type="button" class="quiet small" data-testid="delegation-open-thread" data-preload-thread={selected.thread.id} onclick={() => void openChild()}><span class="ui-label">{strings.delegation.openThread}</span></button>
-              {#if threadBusy(selected.thread)}<button type="button" class="danger small" onclick={() => void store.stopDelegatedAgent(selected.thread.id)}><Square size={11} fill="currentColor" /><span class="ui-label">{strings.delegation.stop}</span></button>{/if}
-              {#if selected.thread.backgroundWait?.state === 'interrupted'}<button type="button" class="quiet small resume" title={strings.delegation.resumeAgentHint} disabled={resuming.has(selected.thread.id)} onclick={() => void resume(selected)}><RotateCcw size={12} /><span class="ui-label">{strings.delegation.resumeAgent}</span></button>{/if}
-            </header>
-            {#if store.delegationThread}
-              <div class="transcript"><DelegationTranscript messages={store.delegationThread.messages} /></div>
-            {/if}
-          </article>
-        {/if}
       </div>
       {#if !agents.length && !runs.length && !native.length && !processes.length}<p class="empty" data-testid="delegation-empty">{config.enabled ? strings.delegation.empty : strings.delegation.enabledHint}</p>{/if}
-      {#if !selected && native.length}<NativeAgents agents={native} />{/if}
-      {#if !selected && processes.length}<NativeAgents agents={processes} source="process" />{/if}
+      {#if native.length}<NativeAgents agents={native} />{/if}
+      {#if processes.length}<NativeAgents agents={processes} source="process" />{/if}
     {/if}
 
     {#if store.delegationError}<p class="error" role="alert">{store.delegationError}</p>{/if}
@@ -315,7 +296,6 @@
   .settings { flex: none; padding: 4px 16px 14px; }
   .profiles-head { margin-top: 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .error { margin: 12px 16px; color: var(--color-danger); font-size: var(--text-sm); }
-  .team:not(.detail) { flex: none; }
   .switch-row { min-height: var(--control-lg); padding: 6px 0; display: flex; align-items: center; gap: 14px; }
   .switch-row > span, .profiles-head > span { flex: 1; min-width: 0; }
   .switch-row small, .profiles-head small { display: block; margin-top: 2px; color: var(--color-muted-foreground); font-size: var(--text-xs); line-height: 1.4; font-weight: normal; }
@@ -324,16 +304,14 @@
   .profile { display: grid; grid-template-columns: minmax(90px, .8fr) minmax(140px, 1fr) auto var(--control-sm); gap: 6px; align-items: center; }
   .profile > input { min-width: 0; }
   .pause { margin-top: 10px; }
-  .team { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr; }
-  .team.detail { grid-template-columns: minmax(160px, .42fr) minmax(0, 1fr); }
-  .team.detail .members { border-right: 1px solid var(--color-border); }
+  .team { flex: none; display: grid; grid-template-columns: 1fr; }
   .members { min-height: 0; padding: 4px 8px 10px; overflow-y: auto; }
   .group + .group { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--color-border); }
   .group-head { padding: 10px 9px 6px; display: flex; align-items: center; gap: 6px; color: var(--color-muted-foreground); font-size: var(--text-xs); font-weight: 600; }
   .group-head .count { padding: 1px 6px; border-radius: 999px; background: var(--color-surface-3); font-variant-numeric: tabular-nums; font-weight: 500; }
   .member { width: 100%; height: auto; padding: 10px 9px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 0 10px; border: 1px solid transparent; border-radius: var(--radius-md); background: transparent; text-align: left; }
   .member + .member { margin-top: 2px; }
-  .member:hover, .member.selected { background: var(--color-hover); border-color: var(--color-border); }
+  .member:hover { background: var(--color-hover); border-color: var(--color-border); }
   .avatar { --ring: var(--color-background); position: relative; width: 30px; height: 30px; display: grid; place-items: center; border-radius: var(--radius-md); background: var(--color-surface-2); border: 1px solid var(--color-border); }
   .avatar.run { color: var(--color-muted-foreground); }
   .member-main { min-width: 0; display: grid; gap: 6px; padding-top: 1px; }
@@ -354,24 +332,8 @@
   .resume-row { padding: 0 9px 6px 49px; }
   .result { grid-column: 2 / -1; margin-top: 8px; padding: 6px 9px; border-radius: var(--radius-sm); background: var(--color-surface-2); color: color-mix(in srgb, var(--color-foreground) 82%, transparent); font-size: var(--text-xs); line-height: 1.45; }
   .result > span { display: -webkit-box; -webkit-box-orient: vertical; line-clamp: 3; -webkit-line-clamp: 3; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
-  .team.detail .result, .team.detail .meta, .team.detail .note, .team.detail .resume-row { display: none; }
-  .team.detail .member { grid-template-columns: auto minmax(0, 1fr); }
-  .detail-pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-  .detail-pane > header { flex: none; min-height: 48px; padding: 7px 9px; display: flex; align-items: center; gap: 7px; border-bottom: 1px solid var(--color-border); }
-  .detail-pane > header > div { flex: 1; min-width: 0; }
-  .detail-pane > header strong, .detail-pane > header small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .detail-pane > header small { color: var(--color-muted-foreground); font-size: var(--text-xs); }
-  .back { display: none; }
-  .transcript { flex: 1; min-height: 0; display: flex; overflow: hidden; }
   @container (max-width: 520px) {
     .profile { grid-template-columns: minmax(0, 1fr) auto; }
     .profile > :global(.picker) { grid-column: 1 / -1; }
-    .team.detail { grid-template-columns: 1fr; }
-    .team.detail .members { display: none; }
-    .back { display: inline-flex; }
-    .detail-pane > header { display: grid; grid-template-columns: var(--control-sm) minmax(0, 1fr) auto; }
-    .detail-pane > header > div { grid-column: 2 / -1; }
-    .detail-pane > header > .quiet:not(.back) { grid-column: 2; justify-self: start; }
-    .detail-pane > header > .danger, .detail-pane > header > .quiet.resume { grid-column: 3; }
   }
 </style>
