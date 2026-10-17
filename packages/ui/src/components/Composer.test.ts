@@ -1004,15 +1004,15 @@ test('a pasted image becomes a chip, comes off again, and rides the prompt', asy
   paste(pngFile());
   await waitFor(() => chips().length === 1);
   expect(chips()[0]?.getAttribute('title')).toBe('[Image 1] · pixel.png');
-  expect(query<HTMLImageElement>('[data-testid=composer-attachment] img').getAttribute('src')).toBe(
-    `data:image/png;base64,${PIXEL}`
-  );
+  // No decoder here to make a thumbnail: the tile draws the picture by URL, never a data: string.
+  const tile = query<HTMLImageElement>('[data-testid=composer-attachment] img').getAttribute('src');
+  expect(tile).toMatch(/^blob:/);
   input().focus();
   query<HTMLButtonElement>('[data-testid=composer-image-open]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-image-preview]') !== null);
   expect(document.activeElement).toBe(input());
   await type('Keep writing while looking');
-  expect(query<HTMLImageElement>('[data-testid=composer-image-preview] img').getAttribute('src')).toBe(`data:image/png;base64,${PIXEL}`);
+  expect(query<HTMLImageElement>('[data-testid=composer-image-preview] img').getAttribute('src')).toBe(tile);
   press('Escape');
   await waitFor(() => document.querySelector('[data-testid=composer-image-preview]') === null);
   expect(input().value).toBe('Keep writing while looking');
@@ -1075,6 +1075,47 @@ test('a pasted image becomes a chip, comes off again, and rides the prompt', asy
   // What went out left the composer, text and picture together.
   expect(input().value).toBe('');
   expect(document.querySelector('[data-testid=composer-attachments]')).toBeNull();
+});
+
+test('a picture tile draws a small thumbnail, the preview the bytes by URL, both revoked when it leaves', async ({ app: _app }) => {
+  await store.open('t-trace');
+  await waitFor(() => store.openThread?.id === 't-trace' && !store.busy);
+  await waitFor(() => document.querySelector('[data-testid=composer-attach]') !== null);
+  let made = 0;
+  const created = vi.fn((blob: Blob) => `blob:test/${++made}-${blob.type}`);
+  const revoked = vi.fn();
+  const decoded = vi.fn(async (_blob: Blob, _options?: ImageBitmapOptions) => ({ width: 1, height: 1, close: vi.fn() }));
+  class Canvas {
+    constructor(readonly width: number, readonly height: number) {}
+    getContext() { return { drawImage: vi.fn(), imageSmoothingQuality: 'low' }; }
+    async convertToBlob(options: ImageEncodeOptions) { return new Blob(['thumb'], { type: options.type }); }
+  }
+  const native = { createObjectURL: URL.createObjectURL, revokeObjectURL: URL.revokeObjectURL };
+  Object.assign(URL, { createObjectURL: created, revokeObjectURL: revoked });
+  vi.stubGlobal('createImageBitmap', decoded);
+  vi.stubGlobal('OffscreenCanvas', Canvas);
+  try {
+    paste(pngFile());
+    await waitFor(() => document.querySelector('[data-testid=composer-attachment] img') !== null);
+    const tile = query<HTMLImageElement>('[data-testid=composer-attachment] img').getAttribute('src');
+    // The tile never decodes the picture whole: it draws a WebP made once at twice its size.
+    expect(tile).toBe('blob:test/1-image/webp');
+    expect(decoded).toHaveBeenCalledTimes(1);
+    expect(decoded.mock.calls[0]![1]).toMatchObject({ resizeWidth: 1, resizeHeight: 1 });
+
+    query<HTMLButtonElement>('[data-testid=composer-image-open]').click();
+    await waitFor(() => document.querySelector('[data-testid=composer-image-preview]') !== null);
+    expect(query<HTMLImageElement>('[data-testid=composer-image-preview] img').getAttribute('src')).toBe('blob:test/2-image/png');
+    await type('one more letter');
+    expect(created).toHaveBeenCalledTimes(2);
+
+    query<HTMLButtonElement>('[data-testid=composer-attachment-remove]').click();
+    await waitFor(() => document.querySelector('[data-testid=composer-attachments]') === null);
+    expect(revoked.mock.calls.map(([url]) => url).sort()).toEqual(['blob:test/1-image/webp', 'blob:test/2-image/png']);
+  } finally {
+    vi.unstubAllGlobals();
+    Object.assign(URL, native);
+  }
 });
 
 function pendingCard(): HTMLElement {

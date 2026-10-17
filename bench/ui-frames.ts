@@ -69,7 +69,7 @@ async function buildBundle(outDir: string): Promise<void> {
     name: 'bench-ui-frames-bridge',
     transform(code: string, id: string) {
       if (id.replaceAll('\\', '/') !== join(UI, 'src/main.ts').replaceAll('\\', '/')) return;
-      return `${code}\nimport { store as __store } from './lib/store.svelte.ts';\nglobalThis.__bench = { store: __store };\n`;
+      return `${code}\nimport { store as __store } from './lib/store.svelte.ts';\nimport { rightPanel as __panel } from './lib/right-panel.svelte.ts';\nglobalThis.__bench = { store: __store, panel: __panel };\n`;
     },
   };
   await build({ root: UI, plugins: [bridge], define: { 'import.meta.env.DEV': 'true' }, build: { outDir, emptyOutDir: true, ...(process.env.BENCH_MINIFY === '0' ? { minify: false } : {}) }, logLevel: 'warn' });
@@ -147,6 +147,8 @@ const SCROLLER = `(() => { let best = null; for (const el of document.querySelec
  * paragraphs keep text arriving on screen through the measured window.
  */
 const PROMPT = 'Streaming bench paragraph with enough words to wrap across the column.\n\n'.repeat(60);
+/** A TypeScript file just under `HIGHLIGHT_LIMIT` (200,000 characters): the largest text the editor highlights. */
+const LARGE_FILE = Array.from({ length: 2600 }, (_, index) => `export function step${index}(input: { id: string; count: number }): string { return \`\${input.id}:\${input.count + ${index}}\`; }\n`).join('').slice(0, 190_000);
 const SETUP = `
   window.__long = [];
   // Each key's latency: from the keydown's own timestamp to the task after the
@@ -263,6 +265,20 @@ async function main(): Promise<void> {
       await page.evaluate(`(() => { const s = globalThis.__bench.store; const key = s.openThread?.id ?? 'draft'; const state = s.composerStates[key]; state.attachments = [{ kind: 'image', mimeType: 'image/png', name: 'bench.png', data: 'iVBORw0KGgo'.repeat(140000) }]; })()`);
       await Bun.sleep(300);
     };
+    /** A thousand idle threads more in the sidebar, laid over the fake's own rows. */
+    const manyThreads = async (count = 1000): Promise<void> => {
+      await page.evaluate(`(() => { const s = globalThis.__bench.store; const base = JSON.parse(JSON.stringify(s.threads.find(t => t.projectId) ?? s.threads[0])); const now = Date.now(); s.threads = [...s.threads, ...Array.from({ length: ${count} }, (_, i) => ({ ...base, id: 't-bench-' + i, title: 'Bench thread number ' + i + ' with a title long enough', status: 'idle', unread: i % 7 === 0, archived: false, updatedAt: new Date(now - i * 60000).toISOString(), createdAt: new Date(now - i * 60000).toISOString() }))]; })()`);
+      await Bun.sleep(1500);
+    };
+    // A wheel down the thread list, over the sidebar at the left of the window.
+    const sidebarWheel = (distance = -9000, speed = 2400): void => {
+      void page.send('Input.synthesizeScrollGesture', { x: 120, y: Math.round(H * 0.5), yDistance: distance, speed, gestureSourceType: 'mouse' }).catch(() => {});
+    };
+    /** Writes the large file in the open thread's folder and opens it in the panel, not awaited: its highlight runs in the measured window. */
+    const openLargeFile = async (): Promise<void> => {
+      await page.call(`async function (text) { const s = globalThis.__bench.store; await s.client.call('files.write', { threadId: s.openThread.id, path: 'bench-large.ts', text }); }`, LARGE_FILE);
+      await page.evaluate(`(() => { const s = globalThis.__bench.store; globalThis.__bench.panel.for(s.threadKey(s.openThread.id)).openFile('bench-large.ts'); })()`);
+    };
     const activity = `(() => { const t = globalThis.__bench.store.openThread; t.activity = { goal: { objective: 'Verify the bench', status: 'running', iterations: 1, error: null }, loop: null, tasks: Array.from({ length: 12 }, (_, i) => ({ id: 't' + i, text: 'Bench task number ' + i + ' with a line long enough to wrap', status: i < 4 ? 'completed' : i === 4 ? 'in_progress' : 'pending' })) }; })()`;
     const openActivity = async (): Promise<void> => {
       await page.evaluate(activity);
@@ -298,6 +314,9 @@ async function main(): Promise<void> {
         wheel();
       },
       'scroll under activity': async () => { await open('open=recent&stream=tokens&long=1'); await stream(); await openActivity(); wheel(); },
+      'sidebar scroll': async () => { await open('open=recent'); await manyThreads(); sidebarWheel(); },
+      // A 190,000-character TypeScript file opened in the panel: its first highlight runs inside the window.
+      'large file highlight': async () => { await open('open=recent'); await openLargeFile(); },
       'onboarding tour': async () => {
         await page.send('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: DPR, mobile: false });
         await page.send('Page.navigate', { url: `http://127.0.0.1:${uiPort}/?fake=1&open=recent&tour=1` });

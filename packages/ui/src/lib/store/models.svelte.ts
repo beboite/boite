@@ -14,6 +14,35 @@ export function probeKey(providerId: ProviderId, accountId: string): string {
 }
 
 const MODEL_CATALOG_MAX_AGE_MS = 5 * 60_000;
+/** A burst of probes writes the model cache once, this long after the first of them. */
+export const MODEL_CACHE_WRITE_MS = 1_000;
+
+/**
+ * True when `live` would serialize to the JSON `stored` was parsed from: an
+ * undefined field or a function is absent, an undefined array entry is null.
+ * The order of keys does not matter. It stops at the first difference and
+ * builds no string, where comparing two `JSON.stringify` results serialized
+ * every provider and account on each accounts list.
+ */
+export function sameJson(live: unknown, stored: unknown): boolean {
+  if (live === stored) return true;
+  if (live === undefined) return stored === null;
+  if (typeof live !== 'object' || live === null || typeof stored !== 'object' || stored === null) return false;
+  if (Array.isArray(live)) {
+    if (!Array.isArray(stored) || live.length !== stored.length) return false;
+    for (let index = 0; index < live.length; index++) if (!sameJson(live[index] ?? null, stored[index])) return false;
+    return true;
+  }
+  if (Array.isArray(stored)) return false;
+  const values = stored as Record<string, unknown>;
+  let count = 0;
+  for (const [key, value] of Object.entries(live)) {
+    if (value === undefined || typeof value === 'function') continue;
+    count++;
+    if (!Object.hasOwn(values, key) || !sameJson(value, values[key])) return false;
+  }
+  return count === Object.keys(values).length;
+}
 
 /**
  * What the composer runs on: the remembered choice, the per-provider model
@@ -86,16 +115,48 @@ export class Models {
   }
 
   #modelCacheKey(): string { return 'boite.models.v1:' + JSON.stringify([this.ctx.store.endpointUrl, this.ctx.store.core?.dataDir]); }
+  #saveTimer: ReturnType<typeof setTimeout> | null = null;
+  #saveKey = '';
+  #onPageHide: (() => void) | null = null;
+
+  /**
+   * Writes the probed models to `localStorage` at most once a
+   * `MODEL_CACHE_WRITE_MS`, the state at the end of the burst; leaving the
+   * page writes what waits at once. Every probe used to serialize providers,
+   * accounts and all the lists on the main thread.
+   */
   saveModels(): void {
+    this.#saveKey = this.#modelCacheKey();
+    if (this.#saveTimer !== null) return;
+    this.#saveTimer = setTimeout(() => this.flushModels(), MODEL_CACHE_WRITE_MS);
+    if (this.#onPageHide === null && typeof window !== 'undefined') {
+      this.#onPageHide = () => this.flushModels();
+      window.addEventListener('pagehide', this.#onPageHide);
+    }
+  }
+
+  /** The write `saveModels` holds, now. */
+  flushModels(): void {
+    if (this.#saveTimer === null) return;
+    clearTimeout(this.#saveTimer);
+    this.#saveTimer = null;
+    if (this.#onPageHide !== null) {
+      window.removeEventListener('pagehide', this.#onPageHide);
+      this.#onPageHide = null;
+    }
     const s = this.ctx.store;
-    try { localStorage.setItem(this.#modelCacheKey(), JSON.stringify({ providers: s.providers, accounts: s.accounts, models: this.probedModels })); }
+    try { localStorage.setItem(this.#saveKey, JSON.stringify({ providers: s.providers, accounts: s.accounts, models: this.probedModels })); }
     catch { /* Storage unavailable: keep the in-memory cache. */ }
   }
+
   restoreModels(): void {
     const s = this.ctx.store;
+    const key = this.#modelCacheKey();
+    // A write still held is what the cache holds now.
+    this.flushModels();
     try {
-      const cached = JSON.parse(localStorage.getItem(this.#modelCacheKey()) ?? 'null');
-      if (!cached || JSON.stringify(cached.providers) !== JSON.stringify(s.providers) || JSON.stringify(cached.accounts) !== JSON.stringify(s.accounts)) return;
+      const cached = JSON.parse(localStorage.getItem(key) ?? 'null');
+      if (!cached || !sameJson(s.providers, cached.providers ?? null) || !sameJson(s.accounts, cached.accounts ?? null)) return;
       const entries = Object.entries(cached.models ?? {}).filter(([, models]) => Array.isArray(models) && models.every(m => typeof m?.id === 'string' && typeof m?.name === 'string'));
       this.probedModels = { ...Object.fromEntries(entries) as Record<string, ModelInfo[]>, ...this.probedModels };
     } catch { /* A missing or malformed cache is read again from the agent. */ }

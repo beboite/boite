@@ -5,12 +5,16 @@ import { createSubscriber } from 'svelte/reactivity';
  * or an `$effect` subscribes that reader; one interval runs while anything
  * reads the clock and the page is on screen, none once the last reader is
  * gone. Read outside a reactive context, `now` is simply the current time.
+ * A clock that `rests` also stops while the window is at rest
+ * (`<html data-at-rest>`, `lib/at-rest.ts`): sixteen working rows each wrote
+ * a new elapsed time every second, one style, layout and paint a second
+ * nobody watched.
  */
 export interface Clock {
   readonly now: number;
 }
 
-function clock(period: number): Clock {
+function clock(period: number, rests = false): Clock {
   let now = Date.now();
   let running = false;
   const subscribe = createSubscriber((update) => {
@@ -26,22 +30,27 @@ function clock(period: number): Clock {
       if (timer !== null) clearInterval(timer);
       timer = null;
     };
-    // A hidden page needs no clock; coming back it catches up at once.
-    const visibility = () => {
-      if (document.hidden) stop();
-      else {
+    const root = document.documentElement;
+    const idle = () => document.hidden || (rests && root.hasAttribute('data-at-rest'));
+    // A page nobody looks at needs no clock; coming back it catches up at once.
+    const wake = () => {
+      if (idle()) stop();
+      else if (timer === null) {
         tick();
         start();
       }
     };
     running = true;
     now = Date.now();
-    document.addEventListener('visibilitychange', visibility);
-    if (!document.hidden) start();
+    document.addEventListener('visibilitychange', wake);
+    const rest = rests && typeof MutationObserver !== 'undefined' ? new MutationObserver(wake) : null;
+    rest?.observe(root, { attributes: true, attributeFilter: ['data-at-rest'] });
+    if (!idle()) start();
     return () => {
       running = false;
       stop();
-      document.removeEventListener('visibilitychange', visibility);
+      document.removeEventListener('visibilitychange', wake);
+      rest?.disconnect();
     };
   });
   return {
@@ -55,5 +64,5 @@ function clock(period: number): Clock {
 /** List times ("3 min ago"): a minute's precision is all they show. */
 export const minuteClock = clock(30_000);
 
-/** Live durations of running work. */
-export const secondClock = clock(1_000);
+/** Live durations of running work; they rest with the window. */
+export const secondClock = clock(1_000, true);

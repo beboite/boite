@@ -8,13 +8,18 @@
  *
  * Run: bun bench/ui-at-rest.ts [--working 16] [--seconds 6] [--runs 1]
  *        [--only "working,working blurred"] [--bundle <dir>] [--ui <checkout>/packages/ui]
- *        [--software] [--css "<rules>"] [--profile <dir>] [--shots <dir>]
+ *        [--software] [--css "<rules>"] [--profile <dir>] [--shots <dir>] [--wait <seconds>]
  *
  * It composites on the machine's GPU through ANGLE on Direct3D 11, as WebView2
  * does, and stops if Chrome finds only a software renderer; `--software` uses
  * none. Headless Chrome follows no monitor: a smooth loop drew 150 to 340
  * frames a second here, what a fast monitor asks for. The figures hold
  * whatever else the machine runs.
+ *
+ * Each row also gives the long tasks (over 50 ms) the page ran from its load to
+ * the end of the window, and the JS heap after two forced collections at the
+ * end. `--wait <seconds>` leaves the scenario running that long before the
+ * window, for a heap read after minutes rather than seconds.
  *
  * "Blurred" scenarios are a window left visible while another application has
  * the focus: the page gets its `blur` and `document.hasFocus()` turns false.
@@ -41,10 +46,12 @@ const CSS = option('css');
 const PROFILE = option('profile');
 /** A PNG of each scenario as it was measured. */
 const SHOTS = option('shots');
+/** Seconds the scenario runs before the measured window. */
+const WAIT = Number(option('wait') ?? 0);
 
 /** Long enough that the answer still streams through the measured window. */
 const PROMPT = 'Streaming bench paragraph with enough words to wrap across the column.\n\n'.repeat(300);
-const SETUP = `try { localStorage.setItem(${JSON.stringify(ONBOARDING_STORAGE_KEY)}, ${JSON.stringify(JSON.stringify({ version: ONBOARDING_VERSION, at: 0 }))}); } catch {}`;
+const SETUP = `window.__long = []; try { new PerformanceObserver((list) => { for (const e of list.getEntries()) window.__long.push(e.duration); }).observe({ type: 'longtask', buffered: true }); } catch {} try { localStorage.setItem(${JSON.stringify(ONBOARDING_STORAGE_KEY)}, ${JSON.stringify(JSON.stringify({ version: ONBOARDING_VERSION, at: 0 }))}); } catch {}`;
 
 /** One DevTools connection: the browser's, or a page's. */
 class Session {
@@ -102,7 +109,7 @@ class Session {
   close(): void { this.socket.close(); }
 }
 
-interface Cost { renderer: number; gpu: number; browser: number; main: number; frames: number; fps: number }
+interface Cost { renderer: number; gpu: number; browser: number; main: number; frames: number; fps: number; longTasks: number; longMs: number; heapMiB: number }
 
 async function main(): Promise<void> {
   const own = option('bundle') === undefined;
@@ -235,11 +242,18 @@ async function main(): Promise<void> {
         const was = before.find((old) => old.id === entry.id);
         return was ? sum + entry.cpuTime - was.cpuTime : sum;
       }, 0) / seconds * 1000;
-      return { renderer: share('renderer'), gpu: share('GPU'), browser: share('browser'), main: (mainAfter - mainBefore) / seconds * 1000, frames: frames.length, fps: frames.length / seconds };
+      const long = await page.evaluate<number[]>('window.__long');
+      await page.send('HeapProfiler.collectGarbage');
+      await page.send('HeapProfiler.collectGarbage');
+      const { usedSize } = await page.send('Runtime.getHeapUsage') as { usedSize: number };
+      return {
+        renderer: share('renderer'), gpu: share('GPU'), browser: share('browser'), main: (mainAfter - mainBefore) / seconds * 1000, frames: frames.length, fps: frames.length / seconds,
+        longTasks: long.length, longMs: long.reduce((sum, duration) => sum + duration, 0), heapMiB: usedSize / 1048576,
+      };
     };
 
     console.log(`# ui-at-rest, ${WORKING} working threads, ${SECONDS} s windows, ${new Date().toISOString().slice(0, 10)}, ${compositing}`);
-    console.log('scenario | renderer ms/s | GPU ms/s | browser ms/s | renderer main ms/s | frames/s');
+    console.log(`scenario | renderer ms/s | GPU ms/s | browser ms/s | renderer main ms/s | frames/s | long tasks since load (ms) | JS heap MiB${WAIT ? `, after ${WAIT} s` : ''}`);
     for (const [name, scenario] of Object.entries(scenarios)) {
       if (ONLY && !ONLY.includes(name)) continue;
       for (let run = 0; run < RUNS; run++) {
@@ -255,7 +269,7 @@ async function main(): Promise<void> {
             functionDeclaration: `function (css) { const style = document.createElement('style'); style.textContent = css; document.head.append(style); }`,
             arguments: [{ value: CSS }],
           });
-          await Bun.sleep(1000);
+          await Bun.sleep(1000 + WAIT * 1000);
           if (PROFILE) { await page.send('Profiler.enable'); await page.send('Profiler.setSamplingInterval', { interval: 200 }); await page.send('Profiler.start'); }
           const written = () => page.evaluate<number>(`[...document.querySelectorAll('[data-testid=message]')].at(-1)?.textContent.length ?? 0`);
           const from = await written();
@@ -264,7 +278,7 @@ async function main(): Promise<void> {
           if (SHOTS) await Bun.write(join(SHOTS, `${name.replaceAll(' ', '-')}-${run + 1}.png`), Buffer.from(((await page.send('Page.captureScreenshot', { format: 'png' })) as { data: string }).data, 'base64'));
           if (PROFILE) { const { profile: cpu } = await page.send('Profiler.stop') as { profile: unknown }; await Bun.write(join(PROFILE, `${name.replaceAll(/[ ,]+/g, '-')}.cpuprofile`), JSON.stringify(cpu)); }
           const live = scenario.stream ? await page.evaluate<boolean>(`!!document.querySelector('.prose.live')`) : null;
-          console.log(`${name} | ${cost.renderer.toFixed(0)} | ${cost.gpu.toFixed(0)} | ${cost.browser.toFixed(0)} | ${cost.main.toFixed(0)} | ${cost.fps.toFixed(1)}${scenario.stream ? `, ${grew} characters streamed${live ? '' : ', the answer ended inside the window'}` : ''}`);
+          console.log(`${name} | ${cost.renderer.toFixed(0)} | ${cost.gpu.toFixed(0)} | ${cost.browser.toFixed(0)} | ${cost.main.toFixed(0)} | ${cost.fps.toFixed(1)} | ${cost.longTasks} (${cost.longMs.toFixed(0)}) | ${cost.heapMiB.toFixed(1)}${scenario.stream ? `, ${grew} characters streamed${live ? '' : ', the answer ended inside the window'}` : ''}`);
         } catch (error) {
           console.log(`${name} | failed: ${error instanceof Error ? error.message : String(error)}`);
         }
