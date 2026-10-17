@@ -31,10 +31,12 @@ rows, every live row and the rows a process agent card reads (the agent CLI and
 its parent, `native-agents.ts`). Older rows are deleted when a finished turn's
 sweep runs, when the registry forgets an idle thread, and every 500 exits of a
 thread that never goes idle (`journal/processes.ts`). The background passes of
-the journal also cut, one thread per tick and again daily, every thread holding
+the journal also cut, one thread at a time and again daily, every thread holding
 more than 500 rows past what it keeps, idle or not, so a thread that never runs
-again does not keep its whole trace. A row names its command line through
-`command_lines`, which holds each distinct line once. The rest stays until
+again does not keep its whole trace; a thread between 2,001 and 2,500 rows is
+left to the sweeps above. A row names its command line through
+`command_lines`, which holds each distinct line of a thread once and loses
+those lines with the rows that named them or with the thread. The rest stays until
 thread/project removal. Synthetic operations without a real thread lose their
 rows when the registry forgets them, 30 seconds after the last process exits.
 

@@ -90,16 +90,21 @@ runs on a statement finalized after use (`journal/statements.ts`): a cached
 statement keeps its last bound values alive. An append to
 `events(id, thread_id, ts, type, version, payload)` and its projection changes
 commit in one transaction. Events have versions but are not replayed to rebuild
-the tables. Retention runs one minute after startup and daily, deleting events
-older than 30 days in batches of 5,000 while retaining the latest agents revision,
-then runs `PRAGMA optimize`. Each open runs `PRAGMA optimize=0x10002`.
+the tables. Retention runs one minute after startup and daily. Its first ticks
+build the planner statistics a migration left missing, one `ANALYZE` per indexed
+table that has none, reading about 400 rows per index; the open itself analyzes
+nothing. It then deletes events older than 30 days in paced batches while
+retaining the latest agents revision, and the daily pass ends with
+`PRAGMA optimize`.
 Project removal explicitly clears thread-keyed tables; foreign keys are disabled.
 A newer journal schema is refused before writing, with the file and both versions.
 
 `message.part` and `artifact.published` events are not written: the message row
 holds the content and nothing reads them back. Those already stored, from
 before schema 36, are kept 3 days; retention walks them forward from the
-`events:trail-pruned-through` setting. `message.started` keeps only the first
+`events:trail-pruned-through` setting. Event ids are rowids that SQLite hands
+out again once the newest events are deleted, so every deletion of events
+brings that cursor back to the last id in the same transaction. `message.started` keeps only the first
 1,024 characters of each string. The types that are read back (`question.asked`,
 `question.answered`, `thread.memory`) keep their whole payload and have partial
 indexes, so startup and a thread open no longer scan the events table.
@@ -123,20 +128,39 @@ parts that changed since its last committed write, and a value whose digest
 matches the stored one is not written again. Rows written before schema
 31 kept their values inline, and before schema 36 kept tool outputs under
 32 KiB inline and every `part_blobs` value as text. Three minutes after startup
-the core brings them to the current shape, one bounded batch per tick 250 ms
-apart (`journal/retention.ts`): it moves values one message per tick, then
-outputs and recodes `part_blobs` rows about 2 MiB per tick, pauses while a
-message streams, and records where each pass stopped in a setting
-(`part-blobs:moved-through`, `part-blobs:outputs-moved-through`,
-`part-blobs:recoded-through`). A finished pass is never scanned again. The
-core never runs `VACUUM`: the pages these passes free are reused by later
-writes, and the file shrinks only through a manual `VACUUM`.
+the core brings them to the current shape in ticks 250 ms apart
+(`journal/retention.ts`): it moves values one message per tick, then outputs
+and recodes `part_blobs` rows, pauses while a message streams, and records
+where each pass stopped in a setting (`part-blobs:moved-through`,
+`part-blobs:outputs-moved-through`, `part-blobs:recoded-through`). A finished
+pass is never scanned again. Each step sizes its batch to the time its last
+tick took, aiming at 40 ms, and compresses on Bun's thread pool
+(`Bun.zstdCompress`) before a write guarded on the row it read, so a write
+made meanwhile wins.
+
+Space goes back to the disk once. When every one-time pass has finished and
+the trace was cut once, the next core start checks the journal before opening
+it (`journal/vacuum.ts`): with free pages over a quarter of the file and over
+256 MiB, and room on the volume for the live pages plus 512 MiB, it writes
+`core.starting.json`, copies the journal with `VACUUM INTO` in incremental
+auto-vacuum, checks the copy, syncs it and renames it over the journal. The
+shell waits past its start timeout while that file names a live core, and the
+window says the history is being compacted. From then on the compaction ticks
+give free pages back with `PRAGMA incremental_vacuum`, down to 16 MiB kept for
+later writes, and no VACUUM is needed again. The VACUUM runs before the
+journal opens because it holds the write lock for its whole length: at
+runtime every write would wait on it, and a copy made beside a live core
+would miss the writes made during the copy.
 
 A process trace row names its command line through `command_lines`, which holds
-each distinct line once, found by an xxHash64 digest. Schema 36 moves the lines
-of older rows there 2,000 rows per tick. The same background passes then cut
-every thread's trace to what it keeps, one thread per tick and again daily, and
-a daily pass deletes the lines no row names any more ([trace](trace.md)).
+each distinct line of a thread's trace once, found by thread and an xxHash64
+digest. Keyed by thread, a line goes with its thread: removing a thread, a
+project or an incognito conversation deletes its lines in the same
+transaction, and a line another thread also ran stays as that thread's own
+row. Schema 36 moves the lines of older rows there in paced batches. The same
+background passes cut a thread's trace back to what it keeps once it holds 500
+rows past the 2,000 it keeps, one thread at a time and again daily, and delete
+the lines only the deleted rows named ([trace](trace.md)).
 
 `native_agent_messages` names the messages holding an Agent, Task or subagent
 call, or a `nativeAgents` list, so `delegation.get` parses those messages only.
