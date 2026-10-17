@@ -607,6 +607,8 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
       print(shown.map(reading => `${reading.key} ${JSON.stringify(reading.value)} ${reading.page}#${reading.section}${reading.sensitive ? ' (changed from Settings only)' : ''}`), action === undefined ? readings : shown[0]);
     },
     ask: async () => {
+      // An agent once ran `boite ask help` for this text and drew a card reading "help".
+      if (rest.length === 1 && rest[0] === 'help') { print([USAGE], { help: USAGE }); return; }
       const text = want(0, 'a question');
       const options = rest.slice(1);
       const asked = await client.call('questions.ask', { threadId, text, ...(options.length > 0 ? { options } : {}), ...(parsed.multiple ? { multiple: true } : {}) });
@@ -668,11 +670,6 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
   try {
     parsed = parse(argv);
     if (parsed.positional.length === 0 || parsed.positional[0] === 'help') throw new Usage('');
-    // `boite ask help` once drew a card reading "help": a lone `help` after a
-    // command asks for this text. workflow has a help page of its own.
-    if (parsed.positional.length === 2 && parsed.positional[1] === 'help' && parsed.positional[0] !== 'workflow') {
-      throw new Usage('');
-    }
   } catch (error) {
     if (error instanceof Usage) {
       io.err((error.message.length === 0 ? USAGE : `${error.message}\n${USAGE}`) + '\n');

@@ -210,7 +210,7 @@ describe('usage', () => {
     // A lone help after a command is the same request, never a question titled "help".
     const ask = await boite(['ask', 'help']);
     expect(ask.code).toBe(0);
-    expect(ask.err).toContain('usage: boite');
+    expect(ask.out).toContain('usage: boite');
     const client = await harness.connect();
     expect(await client.call('questions.list', { threadId })).toEqual([]);
   });
