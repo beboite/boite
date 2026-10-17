@@ -18,6 +18,7 @@ import {
   opens
 } from './endpoint';
 import { strings } from './strings';
+import { threadAddress } from './chat-links';
 import { onReveal, reveal } from './reveal';
 import { AutoSettingsSync } from './auto-settings-sync.svelte';
 import { GroupLinks } from './group-links.svelte';
@@ -662,6 +663,16 @@ export class Workspace {
       } catch { /* Coordination off on this thread: no contact names the core. */ }
     }
     owner.error = strings.agentMessages.threadMissing;
+  }
+
+  /** A click on a thread link `renderMarkdown` drew opens that thread; true when it was one. */
+  followThreadLink(event: MouseEvent, owner: Store | undefined, from: string | undefined): boolean {
+    const anchor = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>('a[data-thread-address]') : null;
+    if (!anchor) return false;
+    event.preventDefault();
+    const address = threadAddress(anchor.dataset.threadAddress!);
+    if (address && owner) void this.openThreadLink(owner, from, address.where, address.threadId);
+    return true;
   }
 
   /** Resolve the authenticated core identity before using a machine-scoped thread id. */

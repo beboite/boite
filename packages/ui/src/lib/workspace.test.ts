@@ -833,6 +833,16 @@ test('a thread link in an answer opens the thread on the machine it names, else 
   await w.openThreadLink(a, id, null, 'thr_nowhere0000000000');
   expect(w.active).toBe(a);
   expect(a.error).toBe('No connected machine has this conversation.');
+  // No connected machine lists it: the one contact the reader's directory gives under that name opens.
+  const self = { coreId: (await a.coordinationIdentity()).coreId, threadId: id };
+  const contact = { coreId: 'far-core', threadId: 'thr_faraway000000000000', machine: 'Far PC' };
+  const call = a.client!.call.bind(a.client!);
+  vi.spyOn(a.client!, 'call').mockImplementation(async (method, params) => method === 'collaboration.get' ? { self } as never
+    : method === 'collaboration.directory' ? { agents: [contact, { ...contact, machine: 'Other', coreId: 'other-core' }], unavailable: [] } as never
+    : call(method, params as never));
+  const opened = vi.spyOn(w, 'openAgentThread').mockResolvedValue();
+  await w.openThreadLink(a, id, 'far-pc', contact.threadId);
+  expect(opened).toHaveBeenCalledWith(a, self, contact);
 });
 
 test('an unconnected core never opens a coincident local thread id', async () => {
