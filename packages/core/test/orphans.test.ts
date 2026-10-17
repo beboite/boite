@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -95,10 +95,14 @@ describe('orphan sweep', () => {
   });
 
   test('a finished turn stops what lost its parent, with its children, and nothing else', async () => {
-    bus.emit(...turn('turn.finished'));
-    await waitFor(() => job.stopped.length === 2, 2000);
-    expect(job.stopped.sort()).toEqual([103, 104]);
-    expect(procs.liveOf(THREAD).map((record) => record.pid).sort()).toEqual([100, 101, 105]);
+    const terminate = spyOn(job.platform, 'terminateProcess');
+    try {
+      bus.emit(...turn('turn.finished'));
+      await waitFor(() => job.stopped.length === 2, 2000);
+      expect(job.stopped.sort()).toEqual([103, 104]);
+      expect(terminate.mock.calls).toEqual([[THREAD, 103, 4000], [THREAD, 104, 4500]]);
+      expect(procs.liveOf(THREAD).map((record) => record.pid).sort()).toEqual([100, 101, 105]);
+    } finally { terminate.mockRestore(); }
   });
 
   test('a process younger than the grace is left alone', () => {

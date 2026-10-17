@@ -10,6 +10,7 @@ import {
   type NotifyKind
 } from '../notify';
 import { experimentOn } from '../experiments.svelte';
+import type { DropKind } from '../native-drop';
 import { clampSidebar, SIDEBAR_DEFAULT, writeLayout } from '../prefs';
 import { rightPanel, type BoundPanel } from '../right-panel.svelte';
 import { strings } from '../strings';
@@ -38,11 +39,11 @@ export class Layout {
   /** The desktop sidebar's remembered folded state. */
   sidebarCollapsed = $state(false);
   sidebarWidth = $state(SIDEBAR_DEFAULT);
-  /** A folder is being dragged over the window. */
-  dropping = $state(false);
+  /** What a drag from the system over the window would do: add a project or attach files. */
+  dropping = $state<DropKind | false>(false);
   search = $state('');
   /** The agent an outside link asked the Agents page to open, with a fresh key for repeated asks; the page takes it once. */
-  agentsTarget = $state<{ agentId: string; request: number } | null>(null);
+  agentsTarget = $state<{ agentId: string; request: number; pane?: 'settings'; kind?: 'profile' | 'group' | 'team' | 'mission' } | null>(null);
 
   constructor(private readonly ctx: StoreContext) {}
 
@@ -91,11 +92,15 @@ export class Layout {
     this.page = 'chat';
   }
 
-  /** The Agents page is an experiment: with it off, nothing leads there. */
-  showAgents(agentId: string | null = null): void {
+  /**
+   * The Agents page is an experiment: with it off, nothing leads there. `pane`
+   * opens the agent on its settings; `kind` names a group, a team or a mission
+   * instead of an agent.
+   */
+  showAgents(agentId: string | null = null, pane?: 'settings', kind?: 'profile' | 'group' | 'team' | 'mission'): void {
     if (!experimentOn('resident-agents')) return;
     this.ctx.threads.invalidateNavigation();
-    if (agentId) this.agentsTarget = { agentId, request: (this.agentsTarget?.request ?? 0) + 1 };
+    if (agentId) this.agentsTarget = { agentId, request: (this.agentsTarget?.request ?? 0) + 1, ...(pane ? { pane } : {}), ...(kind && kind !== 'profile' ? { kind } : {}) };
     this.page = 'agents';
     this.sidebarOpen = false;
   }

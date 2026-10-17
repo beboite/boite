@@ -1,14 +1,15 @@
 import { chmodSync, existsSync, lstatSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { stripVTControlCharacters } from 'node:util';
 import { dirname, join, resolve } from 'node:path';
 import type { Account, AccountId, ProviderDescriptor, ProviderId, RpcEvents, TerminalState } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { newId } from './ids.ts';
+import { stripAnsi } from './ansi.ts';
 import { invalidParams, messageOf, notFound, refused, unavailable } from './errors.ts';
 import { runAcpLogin, type AcpLoginRun } from './drivers/acp/login.ts';
+import { loginFolders, publishLoginCatalog } from './account-login.ts';
 import { probeThreadId } from './providers/probe.ts';
 import { activeSubscriptionProxy, subscriptionProxyEnv } from './subscription-proxy.ts';
-import { agentEnv, hostAgentsEnabled, launchPrefix, profileFor, resolveExecutable } from './providers/resolve.ts';
+import { agentEnv, hostAgentsEnabled, profileFor, resolveExecutable, resolveLaunch } from './providers/resolve.ts';
 import { sqliteHasRows } from './providers/sqlite-login.ts';
 import { browserNoopPath, browserNoopScript, currentOs, homePath } from './paths.ts';
 import { ISOLATION_DEFAULTS, shareKeys, shareProfile, unshareProfile, type ShareProblem } from './profile-share.ts';
@@ -18,6 +19,20 @@ import { logAccountStatus, logLoginState } from './account-log.ts';
 /** The thread a login process is traced under. It is a name, never a real thread. */
 export function loginThreadId(accountId: AccountId): string {
   return `login:${accountId}`;
+}
+
+/**
+ * The directory `accounts.add` made for this account under the data
+ * directory, real and not a link; null for the default account and for any
+ * other path. Only such a directory is Boite's to delete from.
+ */
+export function ownIsolationDir(dataDir: string, account: Pick<Account, 'id' | 'isolationDir'>): string | null {
+  const directory = account.isolationDir;
+  if (directory === null) return null;
+  const own = resolve(dataDir, 'accounts', account.id);
+  if (resolve(directory) !== own) return null;
+  if (existsSync(own) && lstatSync(own).isSymbolicLink()) return null;
+  return own;
 }
 
 const URL_IN_OUTPUT = /https:\/\/\S+/;
@@ -167,8 +182,7 @@ export class AccountStore {
     checkAgentReferences();
     checkActiveTurns();
     const directory = account.isolationDir;
-    if (directory !== null && (resolve(directory) !== resolve(this.core.dataDir, 'accounts', accountId)
-      || (existsSync(directory) && lstatSync(directory).isSymbolicLink()))) {
+    if (directory !== null && ownIsolationDir(this.core.dataDir, account) === null) {
       throw refused('the account isolationDir must be its own directory under accounts', { accountId, field: 'isolationDir' });
     }
     this.removing.add(accountId);
@@ -253,8 +267,8 @@ export class AccountStore {
     if (!this.core.providers.enabled(provider.id)) return this.check(accountId);
     if (provider.protocol !== 'codex-appserver' && provider.protocol !== 'claude-sdk') return this.check(accountId);
     const profile = profileFor(provider);
-    const executable = profile ? resolveExecutable(profile) : null;
-    if (!executable) throw refused(`${provider.name} is not installed`, { accountId, field: 'executable' });
+    const launch = resolveLaunch(profile);
+    if (!launch) throw refused(`${provider.name} is not installed`, { accountId, field: 'executable' });
     const threadId = `check:${accountId}`;
     let result: Pick<Account, 'status' | 'identity'>;
     this.core.providers.installs.acquire(provider.id);
@@ -262,7 +276,7 @@ export class AccountStore {
       const read = provider.protocol === 'codex-appserver'
         ? (await import('./drivers/codex/auth.ts')).readCodexAccount
         : (await import('./drivers/claude/auth.ts')).readClaudeAccount;
-      result = await read({ executable, args: [...launchPrefix(profile), ...(profile?.launch?.args ?? [])],
+      result = await read({ executable: launch.executable, args: [...launch.prefix, ...(profile?.launch?.args ?? [])],
         cwd: account.isolationDir ?? this.core.dataDir, env: agentEnv(provider, this.accountEnv(account, provider)),
         spawnChild: (cmd, args, opts) => {
           this.require(accountId);
@@ -466,7 +480,7 @@ export class AccountStore {
   }
 
   /**
-   * The login command typed into a shell the user drives, for a CLI whose
+   * The login command in a terminal the user drives, for a CLI whose
    * sign-in is a menu a pipe cannot answer. The shell runs with the account's
    * environment, in its directory. The default account is allowed here: it is
    * the user's own CLI in a terminal they see and type into, which is what the
@@ -531,8 +545,8 @@ export class AccountStore {
   private acpLogin(account: Account, provider: ProviderDescriptor, methodId: string): { ok: true } {
     const accountId = account.id;
     const profile = profileFor(provider);
-    const executable = profile === undefined ? null : resolveExecutable(profile);
-    if (executable === null) {
+    const launch = resolveLaunch(profile);
+    if (launch === null) {
       throw refused(`${provider.name} is not installed on this machine yet`, {
         accountId,
         providerId: provider.id,
@@ -542,14 +556,17 @@ export class AccountStore {
     const env = agentEnv(provider, this.accountEnv(account, provider));
 
     let acp: AcpLoginRun;
+    let folders: ReturnType<typeof loginFolders> | null = null;
     this.core.providers.installs.acquire(provider.id);
     try {
+      folders = loginFolders(this.core, account, provider, loginThreadId(accountId));
       acp = runAcpLogin({
         methodId,
-        executable,
-        args: [...launchPrefix(profile), ...(profile?.launch?.args ?? [])],
+        executable: launch.executable,
+        args: [...launch.prefix, ...(profile?.launch?.args ?? [])],
         cwd: account.isolationDir ?? this.core.dataDir,
-        env,
+        env: { ...env, ...folders.env },
+        catalogCwd: folders.catalogCwd,
         spawnChild: (cmd, args, opts) => this.core.procs.spawnChild(loginThreadId(accountId), cmd, args, opts),
         onLine: (line) => {
           this.onLoginLine(accountId, line);
@@ -557,23 +574,24 @@ export class AccountStore {
       });
     } catch (error) {
       this.core.providers.installs.release(provider.id);
+      void folders?.dispose();
       throw refused(`the ${provider.name} agent did not start: ${messageOf(error)}`, {
         accountId,
-        command: executable,
+        command: launch.executable,
       });
     }
 
     const run: LoginRun = { spawned: null, acp, url: null, lastLine: '', done: Promise.resolve() };
     this.logins.set(accountId, run);
     this.emitLogin(accountId, 'running', '', run);
-    run.done = this.finishAcpLogin(accountId, run, acp).finally(() => this.core.providers.installs.release(provider.id));
+    run.done = this.finishAcpLogin(accountId, run, acp, folders?.dispose).finally(() => this.core.providers.installs.release(provider.id));
     return { ok: true };
   }
 
   private codexLogin(account: Account, provider: ProviderDescriptor): { ok: true } {
     const profile = profileFor(provider);
-    const executable = profile ? resolveExecutable(profile) : null;
-    if (!executable) throw refused(`${provider.name} is not installed`, { accountId: account.id });
+    const launch = resolveLaunch(profile);
+    if (!launch) throw refused(`${provider.name} is not installed`, { accountId: account.id });
     const run: LoginRun = { spawned: null, acp: null, url: null, lastLine: '', done: Promise.resolve() };
     this.logins.set(account.id, run);
     this.core.providers.installs.acquire(provider.id);
@@ -583,7 +601,7 @@ export class AccountStore {
         const { runCodexLogin } = await import('./drivers/codex/auth.ts');
         // Cancellation may have arrived while the module loaded.
         if (run.cancelled) { this.logins.delete(account.id); this.emitLogin(account.id, 'failed', 'Sign-in cancelled', run, 1); return; }
-        const login = runCodexLogin({ executable, args: [...launchPrefix(profile), ...(profile?.launch?.args ?? [])],
+        const login = runCodexLogin({ executable: launch.executable, args: [...launch.prefix, ...(profile?.launch?.args ?? [])],
           cwd: account.isolationDir!, env: agentEnv(provider, this.accountEnv(account, provider)),
           spawnChild: (cmd, args, opts) => this.core.procs.spawnChild(loginThreadId(account.id), cmd, args, opts),
           onLine: line => this.onLoginLine(account.id, line),
@@ -623,23 +641,29 @@ export class AccountStore {
     return { ok: true };
   }
 
-  private async finishAcpLogin(accountId: AccountId, run: LoginRun, acp: AcpLoginRun): Promise<void> {
+  private async finishAcpLogin(accountId: AccountId, run: LoginRun, acp: AcpLoginRun, scratch?: () => Promise<void>): Promise<void> {
     let failure: string | null = null;
     try {
       await acp.done;
     } catch (error) {
       failure = messageOf(error);
     }
+    const catalog = acp.catalog === undefined ? null : await acp.catalog;
     acp.kill();
     this.core.procs.killTree(loginThreadId(accountId));
     await acp.exited;
+    // Removing an unpacked agent takes seconds; the sign-in result does not wait for it.
+    void scratch?.();
     if (!this.core.journal.isClosed()) {
       try {
         const provider = this.core.providers.require(this.require(accountId).providerId);
         if (!run.cancelled && provider.protocol === 'codex-appserver') {
           const checked = await this.verify(accountId);
           if (failure === null && checked.status !== 'ok') failure = 'Codex finished signing in but the account is not connected. Retry the connection.';
-        } else this.check(accountId, true);
+        } else {
+          const checked = this.check(accountId, true);
+          if (!run.cancelled && failure === null && checked.status === 'ok' && catalog !== null) void publishLoginCatalog(this.core, checked, provider, catalog, loginThreadId(accountId));
+        }
       } catch (error) { failure ??= messageOf(error); }
     }
     this.logins.delete(accountId);
@@ -720,7 +744,7 @@ export class AccountStore {
 
   /** One line of a login's output, whichever form it takes. */
   private onLoginLine(accountId: AccountId, line: string): void {
-    line = stripVTControlCharacters(line).trim();
+    line = stripAnsi(line).trim();
     const run = this.logins.get(accountId);
     if (run === undefined || line.length === 0) return;
     run.lastLine = line;
@@ -834,8 +858,11 @@ export function registerAccountMethods(core: Core): void {
   core.router.register('accounts.check', (params) => params.refresh === true ? core.accounts.verify(params.accountId) : core.accounts.check(params.accountId));
   core.router.register('accounts.login', (params) => core.accounts.login(params.accountId));
   core.router.register('accounts.logins', () => core.accounts.loginStates());
-  core.router.register('accounts.loginTerminal', (params) =>
-    core.accounts.loginTerminal(params.accountId, params.cols, params.rows));
+  core.router.register('accounts.loginTerminal', (params, ctx) => {
+    const state = core.accounts.loginTerminal(params.accountId, params.cols, params.rows);
+    core.terminals.watch(state.id, ctx.connection.id);
+    return state;
+  });
   core.router.register('accounts.loginCancel', (params) => core.accounts.loginCancel(params.accountId));
   core.router.register('accounts.loginInput', (params) => {
     if (typeof params.text !== 'string') throw invalidParams('a login input needs text', { field: 'text' });

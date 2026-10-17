@@ -85,13 +85,15 @@ function proxied(owner: boolean, status: 'ready' | 'unsupported' | (() => Promis
   return { call, showSettings };
 }
 
-test('a paired device sends the press to the Limits page, which shows the gateway, without asking for its quotas', async () => {
+test('a paired device opens the glance on the gateway bars, without forcing a refresh', async () => {
   const { call, showSettings } = proxied(false, 'ready', 'glance-proxy-phone');
   document.querySelector<HTMLButtonElement>('[data-testid="nav-limits"]')!.click();
   await settle();
-  expect(showSettings).toHaveBeenCalledWith('limits');
-  expect(document.querySelector('[data-testid="limits-glance"]')).toBeNull();
-  expect(call).not.toHaveBeenCalledWith('subscriptionProxy.quotas', expect.anything());
+  expect(showSettings).not.toHaveBeenCalled();
+  expect(document.querySelector('[data-testid="limits-glance"]')).not.toBeNull();
+  expect(document.querySelector('[data-testid="limits-glance-refresh"]')).toBeNull();
+  expect(call).toHaveBeenCalledWith('quotas.list', expect.objectContaining({ refresh: false }));
+  expect(call).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ refresh: true }));
 });
 
 test('the first press already knows whether Douane serves its quotas: the dashboard without the route, the bars with it', async () => {
@@ -143,4 +145,18 @@ test('a gateway that hangs does not hold the press: the glance opens within a fe
   await settle();
   expect(hanging.showSettings).not.toHaveBeenCalled();
   expect(document.querySelector('[data-testid="limits-glance"]')).not.toBeNull();
+});
+
+test('a replacement core at the same URL never shows the previous core quotas after a failed read', async () => {
+  const endpointUrl = 'glance-reused-address';
+  const first = { client: { call: async () => [quota], on: () => () => {} }, owner: true, endpointUrl, core: { dataDir: '/first' }, accounts: [] } as unknown as Store;
+  mounted = mount(LimitsGlance, { target: document.body, props: { store: first } });
+  press(); await settle();
+  expect(document.querySelectorAll('[data-testid="quota-provider"]')).toHaveLength(1);
+  await unmount(mounted); mounted = undefined; document.body.innerHTML = '';
+  const second = { ...first, core: { dataDir: '/second' }, client: { call: async () => { throw new Error('offline'); }, on: () => () => {} } } as unknown as Store;
+  mounted = mount(LimitsGlance, { target: document.body, props: { store: second } });
+  press(); await settle();
+  expect(document.querySelectorAll('[data-testid="quota-provider"]')).toHaveLength(0);
+  expect(document.querySelector('[data-testid="limits-glance-error"]')!.textContent).toContain('offline');
 });

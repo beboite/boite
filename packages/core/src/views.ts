@@ -10,6 +10,7 @@ import { mkdir, rename, unlink, writeFile } from 'node:fs/promises';
 import { closeSync, constants, fstatSync, openSync, readFileSync } from 'node:fs';
 import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { gzip, type InputType, type ZlibOptions } from 'node:zlib';
 import {
   VIEW_BLEED, VIEW_DEFAULT_HEIGHT, VIEW_MAX_BYTES, VIEW_NARROW_WIDTH, VIEW_ROUTE, VIEW_TITLE_MAX, VIEW_WIDTH,
   clampViewHeight, viewDocument, viewTitleOf,
@@ -21,6 +22,15 @@ import { messageOf, refused } from './errors.ts';
 import { newId } from './ids.ts';
 
 const VIEW_MIME = 'text/html';
+/**
+ * The snapshot gzipped once at publication, beside it: the view route sends it
+ * to a client that reads gzip, about five times fewer bytes on every mount.
+ * gzip rather than br because a phone on plain http is offered no br.
+ */
+export const VIEW_GZIP_SUFFIX = '.gz';
+// Not `promisify`: importing `node:util` costs every core start (startup-imports.test.ts).
+const gzipped = (data: InputType, options: ZlibOptions): Promise<Buffer> =>
+  new Promise((done, fail) => gzip(data, options, (error, result) => (error ? fail(error) : done(result))));
 
 /** What a page may embed from the disk, by extension. Anything else is refused by name. */
 const EMBEDDED: Record<string, string> = {
@@ -202,13 +212,14 @@ const notReady = (problems: string[]) => refused(`artifacts.view page is not rea
 
 /**
  * Publish a page as a view. The message is journalled where the command ran;
- * a client draws it at the end of the turn. Unlike a published file, it does
- * not cut the running answer in two: the answer reads as one text above it.
+ * a client draws it where a line of the turn's answer places it, else at the
+ * end of the turn. Unlike a published file, it does not cut the running answer
+ * in two where the command ran: only the answer's own line places it.
  */
 export async function publishView(core: Core, params: RpcParams<'artifacts.view'>): Promise<RpcResult<'artifacts.view'>> {
   const thread = core.threads.require(params.threadId);
   if (thread.archived) throw refused('artifacts.view needs an active thread', { threadId: thread.id });
-  const turn = core.journal.listTurns(thread.id).at(-1);
+  const turn = core.journal.lastTurn(thread.id);
   if (!turn) throw refused('artifacts.view needs a thread with a turn', { threadId: thread.id });
   const found = existingInside(thread.cwd, params.path, 'file', 'artifacts.view path');
   if (!/\.html?$/i.test(found.relative)) throw refused('artifacts.view path must be an HTML file', { path: params.path });
@@ -231,6 +242,8 @@ export async function publishView(core: Core, params: RpcParams<'artifacts.view'
   await rename(`${destination}.partial`, destination).catch(async (error: unknown) => { await unlink(`${destination}.partial`).catch(() => {}); throw error; });
   let committed = false;
   try {
+    // Written before the probe, so the headless check loads the copy clients will get.
+    await writeFile(`${destination}${VIEW_GZIP_SUFFIX}`, await gzipped(data, { level: 9 }), { flag: 'wx' });
     const name = basename(found.absolute);
     // The check loads the page exactly as a client will: from the view route, under its sandbox and policy, in a frame as wide as the client's.
     const ticket = core.fileTickets.mint(destination, VIEW_MIME, Date.now(), name, undefined, true);
@@ -254,6 +267,6 @@ export async function publishView(core: Core, params: RpcParams<'artifacts.view'
     core.bus.emit('message.completed', { threadId: thread.id, messageId: message.id, state: 'complete' });
     return { message, checked: probe !== null, advice: viewAdvice(source) };
   } finally {
-    if (!committed) await unlink(destination).catch(() => {});
+    if (!committed) await Promise.all([unlink(destination), unlink(`${destination}${VIEW_GZIP_SUFFIX}`)].map(removal => removal.catch(() => {})));
   }
 }

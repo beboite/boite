@@ -6,6 +6,7 @@ import type { Core } from './core.ts';
 import { invalidParams, refused } from './errors.ts';
 import type { AttentionReport } from './threads/focus.ts';
 import { deviceElsewhere, ownDevice } from './group/devices.ts';
+import { backgroundWaitOf } from './threads/records.ts';
 
 type Subscription = RpcParams<'push.subscribe'>;
 type Keys = { publicKey: string; privateKey: string };
@@ -93,10 +94,10 @@ export class PushStore {
       } else if (name === 'permission.requested' || name === 'question.asked') {
         const request = payload as RpcEvents['permission.requested'] | RpcEvents['question.asked'];
         const text = requestExcerpt(request);
-        this.notify(request.threadId, text ? { body: text } : { body: 'Needs your answer', label: 'needsYou' }, `request-${request.id}`);
+        this.notify(request.threadId, text ? { body: text } : { body: 'Needs your answer', label: 'needsYou' }, `request-${request.id}`, true);
       } else if (name === 'turn.finished') {
         const turn = payload as RpcEvents['turn.finished'];
-        if (this.closed || this.core.journal.isClosed() || (turn.status !== 'done' && turn.status !== 'error')) return;
+        if (this.closed || this.core.journal.isClosed() || (turn.status !== 'done' && turn.status !== 'error') || !this.reachable()) return;
         const thread = this.core.journal.getThread(turn.threadId);
         if (thread === null || !notifiesOnFinish(thread, turn, this.activeChildren(thread.id))) return;
         // The reply is the news; an error's own message is often a stack or a
@@ -117,12 +118,27 @@ export class PushStore {
     return null;
   }
 
-  /** The parent's delegated agents with a turn still under way. */
+  /** The parent's delegated agents with a turn still under way, or at rest waiting on their own background work. */
   private activeChildren(threadId: string): number {
-    const row = this.core.journal.db
-      .query("SELECT COUNT(*) AS count FROM threads WHERE parent_thread_id = ? AND status IN ('queued', 'running', 'waiting')")
-      .get(threadId) as { count: number };
-    return row.count;
+    const rows = this.core.journal.db
+      .query('SELECT id, status FROM threads WHERE parent_thread_id = ?')
+      .all(threadId) as { id: string; status: string }[];
+    return rows.filter(row => {
+      if (row.status === 'queued' || row.status === 'running' || row.status === 'waiting') return true;
+      const live = this.core.threads.agentState.background.get(row.id) ?? [];
+      if (live.length > 0) return true;
+      const thread = this.core.journal.getThread(row.id);
+      return thread !== null && backgroundWaitOf(this.core, thread, live)?.state === 'waiting';
+    }).length;
+  }
+
+  /**
+   * Whether a push could reach anybody: a subscription here, or another member
+   * a device paired with this machine gets its pushes through. Checked when the
+   * news happens, so a phone that subscribes mid-turn hears the next one.
+   */
+  private reachable(): boolean {
+    return Object.keys(this.subscriptions()).length > 0 || this.core.group.peers().length > 0;
   }
 
   private subscriptions(): Record<string, Subscription> {
@@ -208,11 +224,12 @@ export class PushStore {
    * The thread is on a screen someone is looking at, on any of their devices:
    * push would only interrupt. It waits instead. Using that screen after the
    * news arrived shows it was seen and drops it; looking away, a page going
-   * quiet or a lease nobody renews sends it.
+   * quiet or a lease nobody renews sends it. Requests for input go immediately:
+   * an attended thread does not prove the user noticed its question or permission.
    */
-  private notify(threadId: string, text: Pick<PushPayload, 'body' | 'label'>, tag: string) {
-    if (this.closed) return;
-    if (this.core.threads.focus.attended(threadId)) {
+  private notify(threadId: string, text: Pick<PushPayload, 'body' | 'label'>, tag: string, needsInput = false) {
+    if (this.closed || !this.reachable()) return;
+    if (!needsInput && this.core.threads.focus.attended(threadId)) {
       this.held.set(tag, { threadId, text, at: Date.now() });
       this.releaseHeld();
     } else this.deliverAll(threadId, text, tag);

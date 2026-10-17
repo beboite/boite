@@ -4,7 +4,7 @@ import { messageOf } from '../../errors.ts';
 import type { SpawnedChild } from '../../procs.ts';
 import { agentEnv, profileFor } from '../../providers/resolve.ts';
 import { writeLandsInside } from '../../workdir.ts';
-import type { QuestionAsk, TurnContext } from '../types.ts';
+import type { QuestionAsk, SessionContext } from '../types.ts';
 import { exitWithin } from '../exit.ts';
 import {
   addUsage,
@@ -48,6 +48,7 @@ import { museQuotaReading } from '../../quota-details.ts';
 import { handshake, mintUuidV7, MspError, MuseRpc } from './rpc.ts';
 import { MuseTurn } from './turn.ts';
 import { noteReady } from '../driver-log.ts';
+import { SessionRetention } from '../session-retention.ts';
 
 /** One question set still open, settled by an answer, a stop or the host itself. */
 interface OpenQuestion {
@@ -68,10 +69,10 @@ export function setMuseStartupDeadlineForTests(ms: number | null): void {
 
 /**
  * One `muse serve` process for a thread: one `initialize`, one `session/start`
- * or `session/resume`, then one `turn/start` per turn. With
- * `warmProcessMinutes` at zero the host goes with the turn; above zero it takes
- * the next turns of the thread until the idle window, a stop, an archive, core
- * shutdown or a changed setup ends it.
+ * or `session/resume`, then one `turn/start` per turn. Viewed and prepared
+ * sessions stay resident through navigation; other sessions follow the
+ * post-turn `warmProcessMinutes` policy. A stop, archive, shutdown or changed
+ * setup closes the host.
  */
 export class MuseSession {
   private child: SpawnedChild | null = null;
@@ -88,12 +89,18 @@ export class MuseSession {
   private exited: Promise<number | null> | null = null;
   private processClosed: Promise<void> = Promise.resolve();
   private idle: Timer | null = null;
+  private readonly retention = new SessionRetention();
   /** The turn waiting on the host's startup, which a stop ends by closing the host. */
   private opening: MuseTurn | null = null;
   private current: MuseTurn | null = null;
   private killTree: (() => void) | null = null;
-  private quotaSink: TurnContext['quota'] | null = null;
-  private contextSink: TurnContext['context'] | null = null;
+  private quotaSink: SessionContext['quota'] | null = null;
+  private contextSink: SessionContext['context'] | null = null;
+  /**
+   * The running turn's items, by id, for the deltas that name only the item.
+   * Item ids are per turn: the map is emptied when a turn ends, and an item of
+   * another turn is never recorded, so its deltas find nothing.
+   */
   private readonly items = new Map<string, { kind: string; revision: number }>();
   private readonly approvals = new Map<string, OpenApproval>();
   private readonly questions = new Map<string, OpenQuestion>();
@@ -109,7 +116,24 @@ export class MuseSession {
   ) { }
 
   usable(key: string, warmMs: number): boolean {
-    return !this.ended && !this.closing && this.key === key && warmMs > 0 && this.warmMs > 0;
+    return !this.ended && !this.closing && this.key === key && this.retention.reusable(warmMs, this.warmMs);
+  }
+
+  setViewed(viewed: boolean): void {
+    this.retention.setViewed(viewed);
+    this.clearIdle();
+    if (!viewed && !this.busy() && !this.ended) this.armIdle();
+  }
+
+  async prepare(ctx: SessionContext, forTurn = false): Promise<void> {
+    this.retention.prepare(forTurn);
+    this.clearIdle();
+    try { await this.start(ctx); }
+    catch (error) { this.drop(); throw error; }
+    finally {
+      ctx.finishStartup?.();
+      if (!this.ended && !this.busy() && !this.retention.viewed) this.armIdle();
+    }
   }
 
   busy(): boolean {
@@ -118,6 +142,7 @@ export class MuseSession {
 
   attach(turn: MuseTurn, warmMs: number): void {
     this.warmMs = warmMs;
+    this.retention.beginTurn();
     this.running += 1;
     this.clearIdle();
     this.queue = this.queue.then(async () => {
@@ -189,7 +214,7 @@ export class MuseSession {
     });
   }
 
-  close(reason: string | null, ctx?: TurnContext): void {
+  close(reason: string | null, ctx?: SessionContext): void {
     if (this.ended) return;
     this.closing = true;
     if (reason !== null && ctx !== undefined) ctx.log('warn', `muse session: ${reason}`);
@@ -283,7 +308,7 @@ export class MuseSession {
    * sent only when the host reports something else. The effort rides on
    * `turn/start` itself.
    */
-  private async align(rpc: MuseRpc, sessionId: string, ctx: TurnContext): Promise<void> {
+  private async align(rpc: MuseRpc, sessionId: string, ctx: SessionContext): Promise<void> {
     const model = modelOf(ctx);
     if (model !== null && model !== this.modelId) {
       await rpc.command('session/setModel', { sessionId, model: { modelId: model, providerId: META_PROVIDER } });
@@ -303,23 +328,27 @@ export class MuseSession {
 
   private endTurn(turn: MuseTurn, drop: boolean): void {
     turn.settle();
+    // Turns run one at a time: what the map holds was this turn's.
+    this.items.clear();
     this.running = Math.max(0, this.running - 1);
-    if (drop || this.closing || this.warmMs <= 0) {
+    if (drop || this.closing || this.retention.idleMs(this.warmMs) <= 0) {
       this.drop();
       return;
     }
-    if (this.running === 0) this.armIdle();
+    if (this.running === 0 && !this.retention.viewed) this.armIdle();
   }
 
   // -- the process ----------------------------------------------------------
 
-  private start(ctx: TurnContext): Promise<void> {
+  private start(ctx: SessionContext): Promise<void> {
     if (this.starting === null) this.starting = noteReady(ctx, 'Muse', () => this.open(ctx), undefined, () => this.opening?.isStopped === true || this.closing || this.ended);
     return this.starting;
   }
 
-  private async open(ctx: TurnContext): Promise<void> {
+  private async open(ctx: SessionContext): Promise<void> {
+    if (this.ended) throw new Error('the muse session was closed before it started');
     this.quotaSink = ctx.quota ?? null;
+    this.contextSink = ctx.context;
     const executable = museExecutable(ctx.provider);
     const posture = MODE_POSTURE[ctx.thread.permissionMode];
     const child = ctx.spawnChild(executable, [...(profileFor(ctx.provider)?.launch?.args ?? []), ...posture.flags], {
@@ -397,7 +426,7 @@ export class MuseSession {
     this.approvalMode = session.approvalMode?.mode ?? null;
   }
 
-  private watch(child: SpawnedChild, ctx: TurnContext, rpc: MuseRpc): void {
+  private watch(child: SpawnedChild, ctx: SessionContext, rpc: MuseRpc): void {
     let closed = (): void => undefined;
     this.processClosed = new Promise<void>(resolve => { closed = resolve; });
     child.stderr.setEncoding('utf8');
@@ -471,6 +500,7 @@ export class MuseSession {
     for (const question of this.questions.values()) question.settle();
     this.questions.clear();
     this.approvals.clear();
+    this.items.clear();
     this.rpc?.fail('the muse session was closed');
     this.rpc = null;
     const child = this.child;
@@ -493,10 +523,11 @@ export class MuseSession {
   }
 
   private armIdle(): void {
+    this.clearIdle();
     this.idle = setTimeout(() => {
       this.idle = null;
       this.drop();
-    }, this.warmMs);
+    }, this.retention.idleMs(this.warmMs));
     this.idle?.unref?.();
   }
 
@@ -617,10 +648,10 @@ export class MuseSession {
     const revision = typeof item.revision === 'number' ? item.revision : 0;
     const seen = this.items.get(item.itemId);
     if (seen !== undefined && seen.revision >= revision && revision > 0) return;
-    this.items.set(item.itemId, { kind: item.kind, revision });
     const terminal = item.status !== undefined && item.status !== 'inProgress';
 
     if (item.kind === 'compaction') {
+      this.items.set(item.itemId, { kind: item.kind, revision });
       if (!terminal) return;
       if (item.outcome === 'failed') {
         const reason = item.reason ?? item.failureReason ?? 'Muse could not compact the context';
@@ -645,6 +676,7 @@ export class MuseSession {
 
     // Items of another turn (a queued one, a replay) are not this card's.
     if (item.turnId !== undefined && item.turnId !== null && item.turnId !== turn.turnId) return;
+    this.items.set(item.itemId, { kind: item.kind, revision });
     switch (item.kind) {
       case 'agentMessage':
         turn.appendSnapshot(item.itemId, 'text', 'text', item.text);
@@ -677,6 +709,7 @@ export class MuseSession {
     const itemId = textOf(params['itemId']);
     const delta = textOf(params['delta']);
     if (itemId.length === 0 || delta.length === 0) return;
+    if (typeof params['turnId'] === 'string' && params['turnId'] !== turn.turnId) return;
     const kind = this.items.get(itemId)?.kind;
     const field = typeof params['field'] === 'string' ? params['field'] : 'text';
     if (kind === 'agentMessage' && field === 'text') turn.appendDelta(itemId, field, 'text', delta);

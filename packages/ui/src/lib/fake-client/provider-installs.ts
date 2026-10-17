@@ -33,7 +33,7 @@ function harnessUpdate(ctx: FakeContext, providerId: string): HarnessUpdate {
   return update;
 }
 
-function updateHarness(ctx: FakeContext, providerId: string): RpcResult<'providers.update'> {
+export function updateHarness(ctx: FakeContext, providerId: string): RpcResult<'providers.update'> {
   const update = harnessUpdate(ctx, providerId);
   if (update.state === 'updating') throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${update.name} is already updating` });
   if (update.latest !== null && update.current === update.latest) {

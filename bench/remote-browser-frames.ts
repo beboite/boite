@@ -1,26 +1,30 @@
 // Frames a second a viewer gets from the agent's browser, end to end through a
 // scratch core: the core starts its own headless Chromium for the
 // conversation, the owner opens a moving page in it as the agent would, and a
-// paired phone asks `browser.remoteFrame` on the viewer's schedule. Latency is
-// added on the phone's side, half before and half after each call; bandwidth
-// is not limited. The page animates, so no frame is unchanged.
+// paired phone asks `browser.remoteFrame` on the viewer's schedule, naming the
+// frame it shows (`after`) as RemoteBrowser.svelte does. Latency is added on
+// the phone's side, half before and half after each call; bandwidth is not
+// limited. The page animates; `--still` drops the animation, so a viewer should
+// receive next to nothing. Each row gives the pictures and the base64 bytes a
+// second, and on Linux the CPU of the core's Chrome processes, read from /proc.
 //
-//   bun bench/remote-browser-frames.ts [--seconds 8] [--rtt 0,80,200]
+//   bun bench/remote-browser-frames.ts [--seconds 8] [--rtt 0,80,200] [--still]
 //
 // "before" is the viewer's schedule up to 2026-10-03: a fixed 300 ms pause
 // after each frame. "after" is nextPollDelay from remote-browser-view.ts.
 // Until 2026-10-05 the frames came from the desktop shell's tab through the
 // core (results/2026-10-03-remote-browser-frames.md); they now come from the
 // core's own browser, so those numbers do not compare with new runs.
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
+import type { RemoteBrowserFrame, RemoteBrowserUnchanged } from '../packages/contracts/src/index.ts';
 import { connect } from '../packages/core/src/client.ts';
 import { nextPollDelay, type PollState } from '../packages/ui/src/lib/remote-browser-view.ts';
 
-const { values } = parseArgs({ options: { seconds: { type: 'string', default: '8' }, rtt: { type: 'string', default: '0,80,200' } } });
-const seconds = Number(values.seconds), rtts = values.rtt.split(',').map(Number);
+const { values } = parseArgs({ options: { seconds: { type: 'string', default: '8' }, rtt: { type: 'string', default: '0,80,200' }, still: { type: 'boolean', default: false } } });
+const seconds = Number(values.seconds), rtts = values.rtt.split(',').map(Number), still = values.still;
 const root = join(import.meta.dir, '..');
 const before = ({ roundTrip, unchanged, failures }: PollState) => {
   if (failures > 0) return Math.min(8000, 1200 * 2 ** Math.min(3, failures - 1));
@@ -32,10 +36,23 @@ const words = 'Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiu
 const page = `<!doctype html><meta charset=utf-8><title>bench</title><style>body{font:16px system-ui;margin:0;padding:24px;background:#fafafa;color:#222}
 .hero{height:320px;background:radial-gradient(circle at 30% 40%,#f7c,#38f 40%,#123 80%);border-radius:12px}
 .card{display:inline-block;width:340px;margin:10px;padding:12px;background:white;box-shadow:0 2px 8px #0002;vertical-align:top}
-.spin{width:80px;height:80px;background:conic-gradient(red,yellow,lime,cyan,blue,magenta,red);border-radius:50%;animation:s 1s linear infinite}@keyframes s{to{transform:rotate(1turn)}}</style>
+.spin{width:80px;height:80px;background:conic-gradient(red,yellow,lime,cyan,blue,magenta,red);border-radius:50%;${still ? '' : 'animation:s 1s linear infinite'}}@keyframes s{to{transform:rotate(1turn)}}</style>
 <div class=hero></div><div class=spin></div><h1>Résultats de recherche</h1>${Array.from({ length: 12 }, (_, i) => `<div class=card><h3>Carte ${i}</h3><p>${words}</p><input placeholder="Champ ${i}"><button>Valider</button></div>`).join('')}`;
 
 const dataDir = mkdtempSync(join(tmpdir(), 'boite-remote-frames-'));
+/** CPU seconds used so far by the Chrome processes of this run's profile, or null without /proc. */
+const chromeCpu = (): number | null => {
+  if (!existsSync('/proc/self/stat')) return null;
+  let ticks = 0;
+  for (const pid of readdirSync('/proc').filter(name => /^\d+$/.test(name))) {
+    try {
+      if (!readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes(dataDir) || !/chrom/i.test(readFileSync(`/proc/${pid}/comm`, 'utf8'))) continue;
+      const fields = readFileSync(`/proc/${pid}/stat`, 'utf8').split(') ')[1]!.split(' ');
+      ticks += Number(fields[11]) + Number(fields[12]);
+    } catch { /* the process ended */ }
+  }
+  return ticks / 100;
+};
 const site = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response(page, { headers: { 'content-type': 'text/html;charset=utf-8' } }) });
 const core = Bun.spawn([process.execPath, join(root, 'packages/core/src/main.ts'), '--port', '0', '--data-dir', dataDir], { stdout: 'ignore', stderr: 'ignore', windowsHide: true, env: { ...process.env, BOITE_ECHO: '1', BOITE_HOST_AGENTS: '0', BOITE_CORE_RESIDENT: '0', BOITE_TELEMETRY_URL: '' } });
 const closers: (() => void)[] = [];
@@ -62,27 +79,33 @@ try {
   await phone.call('threads.subscribe', { threadId: thread.id });
 
   const median = (a: number[]) => a.length ? Math.round([...a].sort((x, y) => x - y)[Math.floor(a.length / 2)]!) : 0;
-  console.log(`remote-browser-frames ${new Date().toISOString()} Bun ${Bun.version}, the core's headless browser at 1200x1300, frames shrunk to 780 px, ${seconds} s per run`);
+  console.log(`remote-browser-frames ${new Date().toISOString()} Bun ${Bun.version}, the core's headless browser at 1200x1300, ${still ? 'a still page' : 'a moving page'}, frames shrunk to 780 px, ${seconds} s per run`);
   for (const rtt of rtts) {
     for (const [name, schedule] of [['before', before], ['after', nextPollDelay]] as const) {
       const trips: number[] = [], sizes: number[] = [];
-      let refused = 0, failures = 0, roundTrip = 0;
-      const end = performance.now() + seconds * 1000;
+      let refused = 0, failures = 0, roundTrip = 0, unchanged = 0, kept = 0, shown: { id: string; base64: string } | null = null;
+      const cpu = chromeCpu(), began = performance.now(), end = began + seconds * 1000;
       while (performance.now() < end) {
         const started = performance.now();
         let retry = false;
         try {
           await Bun.sleep(rtt / 2);
-          const frame = await phone.call('browser.remoteFrame', { threadId: thread.id, maxWidth: 780 });
+          const frame: RemoteBrowserFrame | RemoteBrowserUnchanged = await phone.call('browser.remoteFrame', { threadId: thread.id, maxWidth: 780, ...(shown ? { after: shown.id } : {}) });
           await Bun.sleep(rtt / 2);
-          roundTrip = performance.now() - started; failures = 0;
-          trips.push(roundTrip); sizes.push(frame.base64.length);
+          roundTrip = Math.max(0, performance.now() - started - (frame.waitedMs ?? 0)); failures = 0;
+          if ('unchanged' in frame) { unchanged++; kept++; }
+          else {
+            unchanged = shown?.base64 === frame.base64 ? unchanged + 1 : 0;
+            shown = frame; trips.push(roundTrip); sizes.push(frame.base64.length);
+          }
         } catch (error) {
           if (/wait before requesting/.test(String(error))) { refused++; retry = true; } else { failures++; console.error(String(error)); }
         }
-        await Bun.sleep(retry ? 250 : schedule({ roundTrip, unchanged: 0, failures }));
+        await Bun.sleep(retry ? 250 : schedule({ roundTrip, unchanged, failures }));
       }
-      console.log(`rtt ${String(rtt).padStart(3)} ms ${name.padEnd(6)}: ${(trips.length / seconds).toFixed(1)} frames/s, trip ${median(trips)} ms, ${Math.round(median(sizes) / 1024)} KiB base64 a frame, ${refused} early refusals`);
+      const elapsed = (performance.now() - began) / 1000, used = cpu === null ? null : chromeCpu()! - cpu;
+      const bytes = sizes.reduce((sum, size) => sum + size, 0);
+      console.log(`rtt ${String(rtt).padStart(3)} ms ${name.padEnd(6)}: ${(trips.length / elapsed).toFixed(1)} frames/s, ${(kept / elapsed).toFixed(1)} unchanged/s, trip ${median(trips)} ms, ${Math.round(median(sizes) / 1024)} KiB base64 a frame, ${Math.round(bytes / 1024 / elapsed)} KiB/s, ${used === null ? 'Chrome CPU unread' : `Chrome ${Math.round(used / elapsed * 100)} % of a core`}, ${refused} early refusals`);
     }
   }
 } finally {

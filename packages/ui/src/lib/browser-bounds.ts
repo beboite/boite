@@ -1,6 +1,9 @@
 import type { SurfaceRect } from './browser-bridge';
 import { currentZoom, subscribeZoom } from './zoom';
 
+const OVERLAYS = [':popover-open', 'dialog[open]', '[role="dialog"]', '[role="menu"]', '[role="listbox"]']
+  .map(selector => `${selector}:not([aria-hidden="true"])`).join(',');
+
 /** Measure when the layout changes. Keep following finite layout animations until they settle. */
 export function watchBrowserBounds(node: HTMLElement, send: (rect: SurfaceRect | null, covered: boolean) => void): () => void {
   const doc = node.ownerDocument;
@@ -20,8 +23,10 @@ export function watchBrowserBounds(node: HTMLElement, send: (rect: SurfaceRect |
     if (closed || doc.hidden) return;
     const rect = node.getBoundingClientRect();
     // Native child webviews paint above the document's top layer. Park them
-    // while a menu/dialog overlaps, including its closing animation.
-    const covered = [...doc.querySelectorAll<HTMLElement>(':popover-open,dialog[open],[role="dialog"],[role="menu"],[role="listbox"]')].some(overlay => {
+    // while a menu/dialog overlaps, including its closing animation. A layer
+    // hidden from assistive tech is decoration: the edge scrollbars keep a
+    // full-window popover open, which would park every page for good.
+    const covered = [...doc.querySelectorAll<HTMLElement>(OVERLAYS)].some(overlay => {
       const box = overlay.getBoundingClientRect();
       return box.width > 0 && box.height > 0 && win.getComputedStyle(overlay).visibility !== 'hidden'
         && box.left < rect.right && box.right > rect.left && box.top < rect.bottom && box.bottom > rect.top;

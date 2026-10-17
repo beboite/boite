@@ -19,15 +19,14 @@
   import TitleBar from './components/TitleBar.svelte';
   import { Closing } from './lib/closing.svelte';
   import { focusComposer } from './lib/focus';
-  import { runCommand } from './lib/commands.svelte';
+  import { handleAppKey } from './lib/app-keys';
   import { confirm } from './lib/confirm.svelte';
   import { startGlass } from './lib/glass';
   import { installExternalLinks } from './lib/links';
   import { installDropNavigationGuard } from './lib/drop-navigation';
-  import { isQuitChord, QUIT_HOLD_MS } from './lib/quit-hold';
+  import { QUIT_HOLD_MS } from './lib/quit-hold';
   import { closingStores, confirmedQuitHold, desktopQuit, installQuitGuard } from './lib/shell-quit';
   import { notificationWords, onNotificationOpen, storeNotificationWords } from './lib/notify';
-  import { closeTabs } from './lib/panel-close';
   import { strings } from './lib/strings';
   import { experimentOn } from './lib/experiments.svelte';
   import { installWhipEscape } from './lib/whip.svelte';
@@ -38,14 +37,18 @@
   import { tourRequested, tourSeen } from './lib/onboarding.svelte';
   import { prefetchAllowed, prefetchNames, warmPages, whenIdle } from './lib/prefetch';
   import { startTheme } from './lib/theme';
-  import { setZoom, stepZoom, wantedZoom, ZOOM_DEFAULT, zoomKey } from './lib/zoom';
   import { appName, appUpdater } from './lib/app-update.svelte';
+  import { reportDesktopUpdates } from './lib/desktop-update.svelte';
   import MobileNavigation from './components/MobileNavigation.svelte';
   import MobileConnect from './components/MobileConnect.svelte';
   import { attentionCount, syncAppBadge } from './lib/badge';
   import { startViewport } from './lib/viewport';
+  import { watchRest } from './lib/at-rest';
+  import { watchLoopPhase } from './lib/loop-phase';
   import { WsClient } from './lib/client';
   import { listenForInstall } from './lib/pwa';
+  import { appPage } from './lib/app-origin';
+  import { localNetwork } from './lib/local-network.svelte';
   import { mobileOverlay } from './lib/mobile-history';
   import { startViewHistory } from './lib/view-history.svelte';
   import { agentAutoLink } from './lib/agent-links.svelte';
@@ -186,8 +189,12 @@
 
   onMount(() => {
     const stopViewport = startViewport();
+    const stopRest = watchRest();
+    const stopLoopPhase = watchLoopPhase();
     const stopInstall = listenForInstall();
     const stopAutoLink = agentAutoLink.start();
+    // Another machine of the group reads this computer's app updates from its core.
+    const stopDesktopReport = reportDesktopUpdates(() => workspace.machines.map((machine) => machine.store));
     let stopAppUpdater: () => void = () => undefined;
     let updateDelay: number | undefined;
     const updateFrame = typeof requestAnimationFrame === 'function'
@@ -209,6 +216,8 @@
     };
     const pageshow = (event: PageTransitionEvent) => { if (event.persisted) resume(); };
     const offline = () => { for (const machine of workspace.machines) if (machine.store.client instanceof WsClient) machine.store.client.offline(); };
+    // The app's page is public and every machine is on a private address: Chrome lets its sockets through once "Local network" is allowed.
+    const stopLocalNetwork = appPage() ? localNetwork.start(resume) : () => undefined;
     document.addEventListener('visibilitychange', visibility);
     window.addEventListener('online', resume);
     window.addEventListener('offline', offline);
@@ -221,11 +230,15 @@
     navigator.serviceWorker?.addEventListener('message', notification);
     return () => {
       stopViewport();
+      stopRest();
+      stopLoopPhase();
       stopAutoLink();
+      stopDesktopReport();
       stopInstall();
       if (updateFrame !== undefined) cancelAnimationFrame(updateFrame);
       if (updateDelay !== undefined) clearTimeout(updateDelay);
       stopAppUpdater();
+      stopLocalNetwork();
       document.removeEventListener('visibilitychange', visibility);
       window.removeEventListener('online', resume);
       window.removeEventListener('offline', offline);
@@ -285,7 +298,9 @@
       && (error === strings.errors.unpaired || error === strings.errors.revoked);
     // A machine that may still give way to one that answers has nothing to report yet.
     const held = workspace.waiting && owner === workspace.primary;
-    if (!error || pairingNotice || held) {
+    // Chrome refuses every socket until "Local network" is allowed: the recovery screen says so, and "socket error" says nothing more.
+    const blocked = mobileRecovery && localNetwork.state === 'denied';
+    if (!error || pairingNotice || held || blocked) {
       toast.hide();
       return;
     }
@@ -395,8 +410,8 @@
       };
     }
 
-    // A folder dragged from the Explorer: the shell reports it, the core
-    // refuses anything that is not a directory, the toast repeats why.
+    // A drag from the Explorer: the shell says what each path is, a folder
+    // becomes a project and a file goes to the message being written.
     let unlisten: (() => void) | undefined;
     let disposed = false;
     let stopTray: (() => void) | undefined;
@@ -414,18 +429,9 @@
       const stop = () => stops.forEach((off) => off());
       if (disposed) stop(); else stopTray = stop;
     });
-    void import('@tauri-apps/api/webview').then(async ({ getCurrentWebview }) => {
-      const stop = await getCurrentWebview().onDragDropEvent((event) => {
-        const payload = event.payload;
-        if (payload.type === 'enter') store.dropping = true;
-        else if (payload.type === 'leave') store.dropping = false;
-        else if (payload.type === 'drop') {
-          store.dropping = false;
-          void workspace.addLocalProjects(payload.paths);
-        }
-      });
-      if (disposed) stop();
-      else unlisten = stop;
+    void import('./lib/native-drop').then(async ({ listenNativeDrop }) => {
+      const stop = await listenNativeDrop(workspace);
+      if (disposed) stop(); else unlisten = stop;
     });
     return () => {
       disposed = true;
@@ -473,15 +479,6 @@
    */
   let modal = $derived((tour && deferred.Onboarding !== undefined) || confirm.current !== null || store.imports !== null || store.projectPickerOpen || (store.connectDialog !== null && deferred.ConnectFlow !== undefined));
 
-  /** A key that belongs to whatever the user is typing in, not to the app. */
-  function typing(event: KeyboardEvent): boolean {
-    const target = event.target;
-    return (
-      target instanceof HTMLElement &&
-      (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
-    );
-  }
-
   /**
    * Every app chord goes through the keyboard table (`lib/keybindings.ts`,
    * the defaults under the user's `keybindings.json`), so a moved key moves
@@ -489,91 +486,7 @@
    * the one chord that stays where it is.
    */
   function onkeydown(event: KeyboardEvent) {
-    if (quitHold && isQuitChord(event)) {
-      event.preventDefault();
-      quitHold.press();
-      return;
-    }
-    // Ctrl+=, Ctrl+- and Ctrl+0 zoom the whole interface in the shell, except
-    // inside a browser surface's own chrome, whose page walks its own ladder.
-    // A browser tab keeps its native zoom.
-    const zoom = inShell ? zoomKey(event) : null;
-    if (zoom !== null && !(event.target instanceof Element && event.target.closest('[data-testid=browser-surface]'))) {
-      event.preventDefault();
-      void setZoom(zoom === 0 ? ZOOM_DEFAULT : stepZoom(wantedZoom(), zoom)).catch((error: unknown) => {
-        store.error = errorText(error);
-      });
-      return;
-    }
-    // A dialog waiting for an answer owns the keyboard: a chord under it moves
-    // an app the user cannot see, and the call it is asking about stays
-    // pending. Each dialog answers its own keys on the capture phase.
-    if (modal) return;
-    const command = store.commandForKey(event);
-    if (command === null) {
-      if (event.key === 'Escape' && !event.defaultPrevented && !event.isComposing) {
-        if (store.sidebarOpen) store.sidebarOpen = false;
-        else if (!typing(event) && store.page === 'chat' && (store.busy || store.openThread?.activity?.goal?.status === 'active' || store.openThread?.activity?.loop?.status === 'active')) {
-          event.preventDefault();
-          void store.stop();
-        }
-      }
-      return;
-    }
-    switch (command) {
-      case 'palette':
-        // The palette: threads across every project and the app's commands.
-        event.preventDefault();
-        store.paletteOpen = !store.paletteOpen;
-        break;
-      case 'panel':
-        if (!store.openThread) return;
-        event.preventDefault();
-        store.togglePanel();
-        break;
-      case 'browser': {
-        // The conversation's browser, the one its agent drives, on every client.
-        if (!store.openThread) return;
-        event.preventDefault();
-        const open = store.panel.surfaces.find((surface) => surface.kind === 'agent-browser');
-        if (open) store.panel.activate(open.id);
-        else store.panel.open('agent-browser');
-        break;
-      }
-      case 'changes':
-      case 'files':
-      case 'tasks': {
-        // A paired device reads the working tree, not the project's todos.
-        if (!store.openThread || (command === 'tasks' && !store.owner)) return;
-        event.preventDefault();
-        // The panel lives in the chat: from the settings the key brings the chat
-        // back with the surface open, rather than toggling what nobody sees.
-        if (store.page !== 'chat') {
-          store.showChat();
-          store.panel.open(command);
-        } else store.panel.toggleKind(command);
-        break;
-      }
-      case 'close-surface': {
-        // The active surface, never the window: only while the panel is showing.
-        const active = store.panel.activeSurfaceId;
-        if (!store.panelOpen || !active || typing(event)) return;
-        event.preventDefault();
-        void closeTabs(store.panel, 'close', active);
-        break;
-      }
-      case 'stash':
-        // The composer stashes what it holds; here the browser's save dialog is
-        // kept shut wherever the focus is.
-        event.preventDefault();
-        break;
-      case 'send-and-draft':
-        // The composer's own, on the keydown it saw first.
-        break;
-      default:
-        event.preventDefault();
-        runCommand(store, command, inShell);
-    }
+    handleAppKey(event, { store, inShell, modal, quitHold });
   }
 
 </script>
@@ -587,7 +500,7 @@
   <ThreadPreparation {store} visible={documentVisible && (inShell || mobileScreen === 'chat')} />
 {/if}
 
-<div class="app" class:shell={inShell} class:ready={booted} class:phone-chat={!inShell && !mobileRecovery && store.page === 'chat' && mobileScreen === 'chat'} class:off-chat={!inShell && store.page !== 'chat'} class:quitting style:--typing-state={documentVisible ? 'running' : 'paused'} bind:this={appRoot}>
+<div class="app" class:shell={inShell} class:ready={booted} class:phone-chat={!inShell && !mobileRecovery && store.page === 'chat' && mobileScreen === 'chat'} class:off-chat={!inShell && store.page !== 'chat'} class:quitting bind:this={appRoot}>
   {#if !inShell && booted}<MobileNavigation {store} recover={mobileRecovery} bind:screen={mobileScreen} />{/if}
   <TitleBar {store} />
 
@@ -660,7 +573,7 @@
   </div>
 
   {#if store.dropping}
-    <DropOverlay />
+    <DropOverlay kind={store.dropping} />
   {/if}
 
   {#if quitHint.shown}
@@ -878,7 +791,10 @@
     .app:not(.shell) .body { grid-row: 2; grid-column: 1; }
     /* The header owns the top safe area; pages keep clear of the home indicator. */
     .app.off-chat .body { padding-bottom: env(safe-area-inset-bottom, 0px); box-sizing: border-box; }
-    .body.mobile-covered { visibility: hidden; pointer-events: none; }
+    /* Skips layout and paint of the chat streaming behind the list; its DOM, state and scroll stay as they were.
+       Skipped content does not advance its animations, so the switch waits for the exits the cover started
+       (a menu closing) to end, and lifts at once on return. */
+    .body.mobile-covered { visibility: hidden; pointer-events: none; content-visibility: hidden; transition: content-visibility 0s var(--dur-whip) allow-discrete; }
     .scrim {
       display: block;
       position: fixed;

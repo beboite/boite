@@ -1,6 +1,7 @@
 import { PROTOCOL_VERSION, RPC_PATH } from '@boite/contracts';
 import type {
   CoreInfo,
+  HelloAccepted,
   Principal,
   RpcError,
   RpcEventName,
@@ -27,6 +28,8 @@ export interface ConnectOptions {
   device?: object;
   /** Extra upgrade headers. The bench names a `Host` here to be served as a remote client. */
   headers?: Record<string, string>;
+  /** The newer events this client takes in place of their older form (`hello` `accepts`). */
+  accepts?: HelloAccepted[];
 }
 
 export interface CoreClient {
@@ -171,6 +174,7 @@ export async function connect(url: string, token: string, options: ConnectOption
     ...(options.relay === undefined ? {} : { relay: options.relay }),
     protocolVersion: PROTOCOL_VERSION,
     client: options.client ?? { name: 'test', version: '2.0.0-beta.1' },
+    ...(options.accepts === undefined ? {} : { accepts: options.accepts }),
   }, Math.max(1, deadline - Date.now())).catch(error => { socket.close(); throw error; })) as { core: CoreInfo; principal: Principal; session?: { id: string; token: string }; threadId?: ThreadId; device?: string };
   if (hello.core.protocolVersion !== PROTOCOL_VERSION) {
     socket.close();

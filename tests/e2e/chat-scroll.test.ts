@@ -80,7 +80,7 @@ beforeAll(async () => {
   url = `http://127.0.0.1:${port}/?fake=1&open=recent&long=1`;
   page = await BrowserPage.launch({ url });
 }, 60_000);
-afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
+afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
 for (const phone of [false, true]) {
   const name = phone ? 'phone' : 'desktop';
@@ -376,3 +376,45 @@ test('a pinned conversation follows its answer on every frame, and a wheel turne
   await page.click(jump);
   await page.waitFor(`!document.querySelector('${jump}') && (() => { const t = document.querySelector('${timeline}'); return t.scrollHeight - t.clientHeight - t.scrollTop < 2; })()`);
 }, 45_000);
+
+test('a row growing above a reader just off the bottom leaves the reader there', async () => {
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 844, deviceScaleFactor: 1, mobile: false });
+  await page.navigate(url);
+  await page.waitFor('window.__boiteTest?.workspace.active.booted');
+  await page.evaluate(`window.__boiteTest.workspace.active.open('t-long')`);
+  await page.waitFor(`document.querySelectorAll('${timeline} [data-mid]').length > 3`);
+  // An untouched conversation opens its panel on the launcher at this width: once
+  // it is in, the chat column keeps its width while the rows are measured.
+  await page.waitFor(`document.querySelector('[data-testid=panel-launcher]')`);
+  await settled();
+  const box = await page.evaluate<{ x: number; y: number }>(`(() => { const r = document.querySelector('${timeline}').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  await page.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: box.x, y: box.y, deltaX: 0, deltaY: -30 });
+  await page.waitFor(`document.querySelector('${jump}')`);
+  await page.evaluate('new Promise((done) => setTimeout(done, 300))');
+  const gap = `(() => { const t = document.querySelector('${timeline}'); return t.scrollHeight - t.clientHeight - t.scrollTop; })()`;
+  const before = await page.evaluate<number>(gap);
+  // At rest the browser keeps the text in place as a row above grows, a picture loading or a block
+  // highlighted, and that moves the list down. Before, the descent took the bottom back inside its 80 px.
+  const gaps = await page.evaluate<number[]>(`new Promise((done) => {
+    const box = document.querySelector('${timeline}');
+    const top = box.getBoundingClientRect().top;
+    const row = [...box.querySelectorAll('[data-mid]')].filter(node => node.getBoundingClientRect().bottom < top).at(-1);
+    const grown = document.createElement('div');
+    grown.style.height = '40px';
+    row.firstElementChild.append(grown);
+    const gaps = [];
+    const start = performance.now();
+    const frame = () => { gaps.push(box.scrollHeight - box.clientHeight - box.scrollTop); if (performance.now() - start < 500) requestAnimationFrame(frame); else done(gaps); };
+    frame();
+  })`);
+  expect(Math.min(...gaps)).toBeGreaterThanOrEqual(before - 2);
+  expect(Math.max(...gaps)).toBeLessThanOrEqual(before + 2);
+  expect(await page.evaluate<boolean>(`!!document.querySelector('${jump}')`)).toBe(true);
+
+  // The last row growing below moves no scroll position; a notch down into the 80 px still takes the bottom back.
+  await page.evaluate(`(() => { const grown = document.createElement('div'); grown.style.height = '100px'; [...document.querySelectorAll('${timeline} [data-mid]')].at(-1).firstElementChild.append(grown); })()`);
+  await page.waitFor(`${gap} > 120`);
+  await page.evaluate('new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))');
+  await page.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: box.x, y: box.y, deltaX: 0, deltaY: 70 });
+  await page.waitFor(`!document.querySelector('${jump}')`, 2_000);
+}, 30_000);

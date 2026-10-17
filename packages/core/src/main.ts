@@ -38,6 +38,8 @@ interface CoreFile {
   token: string;
   pid: number;
   startedAt: number;
+  /** `ProcessPlatform.startKey` of this core, where the OS has one (Linux). */
+  startKey?: string;
   version: string;
 }
 
@@ -148,6 +150,21 @@ function startedAfter(pid: number, lockedAt: number | null, startedAt: (pid: num
   return started !== null && started > lockedAt + LOCK_CLOCK_MARGIN_MS;
 }
 
+/** Is the live process wearing `pid` the core that wrote the lock? */
+function sameRun(
+  pid: number,
+  lockedAt: number | null,
+  lockedKey: string | null,
+  startedAt: (pid: number) => number | null,
+  bootedAt: () => number,
+  startKey: (pid: number) => string | null,
+): boolean {
+  const key = lockedKey === null ? null : startKey(pid);
+  if (key !== null) return key === lockedKey;
+  const beforeBoot = lockedAt !== null && lockedAt < bootedAt() - LOCK_CLOCK_MARGIN_MS;
+  return !beforeBoot && !startedAfter(pid, lockedAt, startedAt);
+}
+
 /**
  * The journal holds every conversation and the push private key. Under the
  * usual umask a Linux home directory would leave it readable by any local
@@ -175,11 +192,15 @@ export function prepareDataDir(dataDir: string): void {
  * holder that started after the lock was written is not the core that wrote it.
  * Nor is any process when the lock predates the last boot: that is the only
  * test macOS can make, since `startedAt` cannot read a start time there.
+ * Where the OS names a run with a key (Linux), the key decides alone: the
+ * Linux start time and boot time both follow every step of the wall clock,
+ * so after an NTP step the live holder would look like a stranger.
  */
 export function lockDataDir(
   dataDir: string,
   startedAt: (pid: number) => number | null = processPlatform.startedAt,
   bootedAt: () => number = () => Date.now() - uptime() * 1000,
+  startKey: (pid: number) => string | null = pid => processPlatform.startKey?.(pid) ?? null,
 ): () => void {
   const file = join(dataDir, 'core.lock');
   const release = (): void => {
@@ -192,22 +213,24 @@ export function lockDataDir(
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       const handle = openSync(file, 'wx');
-      writeFileSync(handle, `${JSON.stringify({ pid: process.pid, startedAt: Date.now() }, null, 2)}\n`, 'utf8');
+      const key = startKey(process.pid);
+      writeFileSync(handle, `${JSON.stringify({ pid: process.pid, startedAt: Date.now(), ...(key === null ? {} : { startKey: key }) }, null, 2)}\n`, 'utf8');
       closeSync(handle);
       return release;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
       let holder: number | null = null;
       let lockedAt: number | null = null;
+      let lockedKey: string | null = null;
       try {
-        const parsed = JSON.parse(readFileSync(file, 'utf8')) as Partial<{ pid: number; startedAt: number }>;
+        const parsed = JSON.parse(readFileSync(file, 'utf8')) as Partial<{ pid: number; startedAt: number; startKey: string }>;
         holder = typeof parsed.pid === 'number' ? parsed.pid : null;
         lockedAt = typeof parsed.startedAt === 'number' ? parsed.startedAt : null;
+        lockedKey = typeof parsed.startKey === 'string' ? parsed.startKey : null;
       } catch {
         holder = null;
       }
-      const beforeBoot = lockedAt !== null && lockedAt < bootedAt() - LOCK_CLOCK_MARGIN_MS;
-      if (holder !== null && holder !== process.pid && !beforeBoot && alive(holder) && !startedAfter(holder, lockedAt, startedAt)) {
+      if (holder !== null && holder !== process.pid && alive(holder) && sameRun(holder, lockedAt, lockedKey, startedAt, bootedAt, startKey)) {
         throw new Error(
           `another core is already running on ${dataDir} (pid ${holder}). Close it, or start this one with --data-dir on a directory of its own.`,
         );
@@ -394,11 +417,13 @@ export function main(argv: string[]): void {
     return;
   }
   withUtf8Locale(process.env, process.platform);
-  if (argv[0] === 'update-apply') {
+  // The update worker, and the recovery its unit runs however the worker ended.
+  if (argv[0] === 'update-apply' || argv[0] === 'update-recover') {
+    const command = argv[0];
     void (async () => {
-      if (!processPlatform.serverUpdates || !argv[1]) throw new Error('update-apply expects a private server update plan on Linux');
-      const { applyServerUpdate } = await import('./server-update/apply.ts');
-      await applyServerUpdate(argv[1], processPlatform.serverUpdates);
+      if (!processPlatform.serverUpdates || !argv[1]) throw new Error(`${command} expects a private server update plan on Linux`);
+      const { applyServerUpdate, recoverServerUpdate } = await import('./server-update/apply.ts');
+      await (command === 'update-apply' ? applyServerUpdate : recoverServerUpdate)(argv[1], processPlatform.serverUpdates);
     })().catch(error => { process.stderr.write(`boite-core update: ${messageOf(error)}\n`); process.exitCode = 1; });
     return;
   }
@@ -424,9 +449,6 @@ export function main(argv: string[]): void {
         process.stderr.write(
           `pairing link for the ${grant.role} role, good for one use until ${new Date(grant.expiresAt).toISOString()}\n`,
         );
-        if (grant.code && grant.codeExpiresAt) {
-          process.stderr.write(`or type the code ${grant.code} in the installed app, until ${new Date(grant.codeExpiresAt).toISOString()}\n`);
-        }
         process.exit(0);
       },
       (error: unknown) => {
@@ -523,12 +545,15 @@ export function main(argv: string[]): void {
       core.log('info', `listening on ${host} because listenOnLan is ${settings.listenOnLan ? 'on' : 'off'}`);
     }
 
+    // The shell tells this core from a later process that got its pid by this key.
+    const startKey = processPlatform.startKey?.(process.pid) ?? null;
     const state: CoreFile = {
       port: server.port,
       host,
       token,
       pid: process.pid,
       startedAt: core.startedAt,
+      ...(startKey === null ? {} : { startKey }),
       version: core.version,
     };
     // The file carries the token that owns this core, so it is the owner's to

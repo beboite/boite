@@ -1,0 +1,73 @@
+import { expect } from 'vitest';
+import { RpcErrorCode, type AgentProfile } from '@boite/contracts';
+import { test } from '../test/fake-client';
+import type { FakeClient } from './fake-client';
+
+async function agent(client: FakeClient, name = 'Mira'): Promise<AgentProfile> {
+  return client.call('agents.profile.save', { value: { name, domain: '', instructions: '', avatar: '', status: 'active', tools: [], projectIds: [],
+    selection: { providerId: 'echo', accountId: 'a-echo', model: 'echo-1', effort: null, permissionMode: 'default' } } });
+}
+
+const prompts = async (client: FakeClient, threadId: string) => (await client.call('threads.get', { threadId })).messages
+  .filter((message) => message.role === 'user').map((message) => (message.parts[0]?.type === 'text' ? message.parts[0].text : ''));
+
+test('fake agent setting cards: read, request, refusals, apply with an edit and the answer the thread reads', async ({ createClient }) => {
+  const client = await createClient({ delayMs: 0 });
+  const mira = await agent(client);
+  const { id: threadId } = await client.call('threads.create', { projectId: 'p-boite', providerId: 'echo', accountId: 'a-echo' });
+  await client.call('turns.start', { threadId, prompt: 'hello' });
+  await client.settled();
+
+  const read = await client.call('agents.settings.read', { threadId, agent: 'mira' });
+  expect(read.agentName).toBe('Mira');
+  expect(read.settings.find((setting) => setting.key === 'projects')).toEqual({ key: 'projects', value: [], choices: [{ id: 'p-boite', label: 'boite' }, { id: 'p-notes', label: 'notes' }] });
+  expect(read.settings.find((setting) => setting.key === 'effort')?.choices?.map((choice) => choice.id)).toEqual(['low', 'high']);
+
+  // Unknown agent, a value its settings refuse, an unnamed agent from an ordinary thread.
+  await expect(client.call('agents.settings.request', { threadId, agent: 'Nobody', key: 'projects', value: ['boite'], reason: 'r' })).rejects.toMatchObject({ code: RpcErrorCode.Refused, data: { field: 'agent' } });
+  await expect(client.call('agents.settings.request', { threadId, agent: 'Mira', key: 'model', value: 'gpt-9', reason: 'r' })).rejects.toMatchObject({ code: RpcErrorCode.Refused, data: { field: 'value', key: 'model' } });
+  await expect(client.call('agents.settings.request', { threadId, key: 'projects', value: ['boite'], reason: 'r' })).rejects.toMatchObject({ code: RpcErrorCode.Refused, data: { field: 'agent' } });
+
+  const { questionId, setting } = await client.call('agents.settings.request', { threadId, agent: 'Mira', key: 'projects', value: { add: ['boite', 'notes'] }, reason: 'Two projects to follow' });
+  expect(setting).toEqual({ agentId: mira.id, agentName: 'Mira', key: 'projects', value: ['p-boite', 'p-notes'], previous: [] });
+  const [question] = await client.call('questions.list', { threadId });
+  expect(question).toMatchObject({ id: questionId, async: true, text: 'Two projects to follow', options: [{ id: 'refuse', label: 'Refuse' }], agentSetting: setting });
+  // One card per agent and key on a thread.
+  await expect(client.call('agents.settings.request', { threadId, agent: 'Mira', key: 'projects', value: ['notes'], reason: 'again' })).rejects.toMatchObject({ data: { field: 'key' } });
+  // A paired device cannot apply it.
+  const phone = await createClient({ delayMs: 0, principal: 'session' });
+  await expect(phone.call('agents.settings.apply', { threadId, questionId })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+
+  await expect(client.call('agents.settings.apply', { threadId, questionId, value: ['nowhere'] })).rejects.toMatchObject({ data: { field: 'value' } });
+  const saved = await client.call('agents.settings.apply', { threadId, questionId, value: ['p-notes'] });
+  expect(saved.projectIds).toEqual(['p-notes']);
+  await client.settled();
+  expect(await client.call('questions.list', { threadId })).toEqual([]);
+  const part = (await client.call('threads.get', { threadId })).messages.flatMap((message) => message.parts).find((entry) => entry.type === 'question');
+  expect(part).toMatchObject({ agentSetting: setting, answer: { optionIds: ['changed'], value: ['p-notes'] } });
+  expect((await prompts(client, threadId)).at(-1)).toBe('> Two projects to follow\n\nchanged: the user set Mira\'s projects to ["notes"], not ["boite","notes"]');
+  await expect(client.call('agents.settings.apply', { threadId, questionId })).rejects.toMatchObject({ code: RpcErrorCode.NotFound });
+});
+
+test('fake agent setting cards settle from the agent\'s own settings, and the [agent-settings] marker asks for a project', async ({ createClient }) => {
+  const client = await createClient({ delayMs: 0 });
+  const mira = await agent(client);
+  const { id: threadId } = await client.call('threads.create', { projectId: 'p-notes', providerId: 'echo', accountId: 'a-echo' });
+  await client.call('turns.start', { threadId, prompt: 'look after this [agent-settings]' });
+  await client.settled();
+  const [card] = await client.call('questions.list', { threadId });
+  expect(card?.agentSetting).toEqual({ agentId: mira.id, agentName: 'Mira', key: 'projects', value: ['p-notes'], previous: [] });
+
+  const effort = await client.call('agents.settings.request', { threadId, agent: mira.id, key: 'effort', value: 'low', reason: 'Quicker answers' });
+  // The settings page saves the same projects the card proposed and another effort than it asked.
+  const now = (await client.call('agents.snapshot', {})).profiles.find((profile) => profile.id === mira.id)!;
+  await client.call('agents.profile.save', { id: mira.id, expectedRevision: now.revision, value: { ...now, projectIds: ['p-notes'], selection: { ...now.selection, effort: 'high' } } });
+  await client.settled();
+  expect(await client.call('questions.list', { threadId })).toEqual([]);
+  const parts = (await client.call('threads.get', { threadId })).messages.flatMap((message) => message.parts).filter((entry) => entry.type === 'question');
+  expect(parts.map((entry) => entry.type === 'question' && [entry.questionId, entry.answer?.optionIds[0]])).toEqual([[card!.id, 'applied'], [effort.questionId, 'changed']]);
+  // One change settles both cards; the answers reach the thread as prompts.
+  const read = (await prompts(client, threadId)).join('\n\n');
+  expect(read).toContain(`> ${card!.text}\n\napplied: Mira's projects are now ["notes"]`);
+  expect(read).toContain('> Quicker answers\n\nchanged: the user set Mira\'s effort to "high", not "low"');
+});

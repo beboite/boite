@@ -104,6 +104,9 @@
   onblur={() => contextMenu.close()}
   onscrollcapture={(event) => {
     if (root && event.target instanceof Node && root.contains(event.target)) return;
+    // A scroll beside what the menu points at leaves it in place: the timeline settling or following a stream.
+    const anchor = contextMenu.anchor;
+    if (anchor?.isConnected && event.target instanceof Node && !event.target.contains(anchor)) return;
     contextMenu.close();
   }}
 />

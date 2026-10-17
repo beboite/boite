@@ -30,7 +30,7 @@ beforeAll(async () => {
   page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&open=recent`, experiments: ['goal2'] });
   await page.waitFor(`document.querySelector('${id('composer-input')}')`);
 }, 60_000);
-afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
+afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
 test.each([['desktop', false], ['phone', true]] as const)('a reviewed goal shows its failed review, the next one running, then the pass (%s)', async (name, phone) => {
   await size(phone);

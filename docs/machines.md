@@ -22,6 +22,11 @@ The client saves the exchanged session key and discards the grant
 connects remembered machines. A fresh local core without threads yields to a
 remembered core on the same computer that already has them.
 
+Repairing the primary connection saves its accepted device credential or session
+key before reporting the handshake as ready. Draft storage and list loading may
+still be pending; reloading then needs no new pairing link. Connecting another
+machine saves its credentials without replacing the primary startup endpoint.
+
 A machine that is off does not hold the others back. When the machine the
 window opens on has not said hello after two seconds, the other remembered
 machines are connected without it, and the window opens on the first that
@@ -67,7 +72,11 @@ the group: **Remove from the group** on the device's row does that, on every
 machine. The primary core stays attached.
 
 If a machine goes offline, its known rows remain visible and its machine badge
-shows the disconnected state. Other hosts remain usable. WebSocket reconnection
+shows the disconnected state. A turn those rows last saw at work is only a last
+known state: the row reads "Unreachable" with that state in its tooltip instead
+of spinning and counting time, a folded project drops its summary mark, its
+working counter loses its colour, and the Threads count leaves the machine out.
+Other hosts remain usable. WebSocket reconnection
 reloads the host's project and thread summaries. An initial connection whose
 handshake does not finish within twelve seconds can be retried from Machines.
 Once the machine has said hello, loading its lists is waited for however long
@@ -76,7 +85,9 @@ it takes on a slow link; the connection is never dropped for it.
 The client detects silent remote sockets (`packages/ui/src/lib/client.ts`).
 On a remote host, 25 seconds without any
 frame while no call waits for its answer sends a `hello`, which the core
-answers on an open connection with its info and nothing else. If no frame of
+answers on an open connection with its info and nothing else. That `hello`
+carries no token and no device signature, since the core reads none of its
+params once the socket is authenticated. If no frame of
 any kind arrives within 15 seconds, the socket is replaced and the calls it
 carried fail with "connection lost; check the conversation before resending".
 While a call waits, silence may be its answer still downloading, one frame of
@@ -116,9 +127,9 @@ running or waiting when the connection went.
 
 A key a remote core refuses is not retried: the machine shows as closed with
 the reason. A page opened on its own core with no key says the device is not in
-its group yet. A phone then scans or types the code of **Add a device** from any
-machine of the group ([phone](phone.md#adding-a-phone)); a computer's browser
-pastes the copied link under **Add a machine**. Both are the affected machine's
+its group yet. A phone then scans the QR code of **Add a device** from any
+machine of the group, or pastes its link ([phone](phone.md#adding-a-phone)); a
+computer's browser pastes the copied link under **Add a machine**. Both are the affected machine's
 **Add again** control too. Only a connected machine is refused as already
 connected.
 
@@ -133,20 +144,24 @@ when renaming.
 Settings, Machines and updates shows each machine on one row: its icon, its
 name, whether it is connected and one word about its updates. The row's chevron
 opens its details: its address, Boite's version on that machine with its
-update, its agents with theirs and the automatic update switch, Settings for
+update (on another Windows PC, its desktop app as its window reports it,
+[updated from here](updates.md#the-desktop-app-of-another-pc)), its agents
+with theirs and the automatic update switch, Settings for
 this machine and Remove machine. A machine alone on its list shows its details
 without a click. Before this, a machine appeared twice, once as an updates
 card listing every agent version and once as a connection.
 
 One Check for updates button at the top reads everything again: the desktop
 app, Boite on every machine connected with full control, and the agents there.
+Update all beside it, shown while something can update, installs all of it
+([update everything](updates.md#update-everything)).
 The row's word is the most pressing of what it finds: a failed update, then
 one in progress, then one available, then a check in progress, then Up to
 date. A row says nothing until something has answered.
 
 The group card lists the machines, then the phones and browsers of the group,
-and has one button, **Add a device**, which draws the QR code and its code
-([groups](groups.md#using-it)). Phone app keeps the Tailscale HTTPS switch and
+and has one button, **Add a device**, which draws the QR code and offers the
+link ([groups](groups.md#using-it)). Phone app keeps the Tailscale HTTPS switch and
 Reachable on the local network in view, and folds the address of a reverse
 proxy of one's own under Use another HTTPS address.
 
@@ -268,10 +283,15 @@ metadata comes from the execution machine's `gh pr list`, using the branch
 associated with the thread. A shared checkout's current branch alone does not
 identify a thread's PR. Non-repositories and detached checkouts have no PR.
 Lookups share the common Git directory across worktrees: `git remote -v` is
-cached for five minutes and the newest 200 PRs for one minute, errors included.
+cached for five minutes and the newest 200 PRs for 15 seconds; a failed read is
+kept 15 seconds. The merged-PR archive reads the same two caches.
 A missing branch gets its own lookup only when that list was full. At most two
 commands run at once, each with a ten-second deadline through `procs` as
-`pull-request:<threadId>`. Folded projects defer lookups until opened.
+`pull-request:<threadId>`. Folded projects defer lookups until opened. A client
+asks again every 15 seconds while the thread works and once a minute at rest,
+not while its page is hidden. These rounds skip a merged PR; a status change, a
+remount, a reconnect and Refresh PR still ask, so a newer PR on the same branch
+replaces it.
 
 When a machine drops, its cards stay listed, greyed, and still open. The client
 asks nothing of the core then: it shows the timeline it last read for that
@@ -296,6 +316,14 @@ meanwhile is put back on the written one first; a choice for another agent or
 account is ignored. A new thread needs the core, so a
 draft keeps its text until the machine returns. A machine offline since the app
 started has no cards to open: the client keeps no copy of the thread list.
+
+Archiving or restoring a project of a machine that is offline still works: the
+project moves at once and the choice is kept on this device, per core, in
+localStorage (`boite.pendingArchive.v1`). The machine's next project list is
+shown with those choices laid over it, then each is sent with
+`projects.archive`. A call lost with the connection waits for the next
+reconnect; a refused one, or a project the machine no longer lists, drops the
+choice (`store/projects.svelte.ts`).
 
 A lookup the user did not ask for fails quietly, and once `gh` is missing or
 signed out the core stops starting it. The thread menu's refresh reads the

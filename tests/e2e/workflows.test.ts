@@ -21,14 +21,15 @@ beforeAll(async () => {
   page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&team=1`, windowSize: { width: 1680, height: 1000 } });
   await page.waitFor(`document.querySelector('${id('thread-row')}[data-thread-id="t-trace"]')`);
 }, 60_000);
-afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
+afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
 test('the chat card opens the run top to bottom, an arrow per dependency, in the panel at its default width', async () => {
   await page.click(`${id('thread-row')}[data-thread-id="t-trace"]`);
   await page.waitFor(`document.querySelector('${id('workflow-activity')}')`);
   expect(await page.text(id('workflow-activity'))).toContain('1/5 steps');
   await page.waitFor(`document.querySelector('${id('active-subagents')}')?.textContent.includes('1 workflow')`);
-  expect(await page.text(id('active-subagents'))).toContain('1 active subagent');
+  // The running subagent, and the one at rest on its own background work.
+  expect(await page.text(id('active-subagents'))).toContain('2 active subagents');
   await capture('workflow-card.png');
   await page.click(id('workflow-activity'));
   await page.waitFor(`document.querySelector('${id('workflow-graph')}')?.dataset.layout === 'rows'`);
@@ -47,7 +48,7 @@ test('the chat card opens the run top to bottom, an arrow per dependency, in the
   await capture('workflow-rows-wide.png');
   await page.evaluate(`document.querySelectorAll('${id('workflow-node')}')[1].click()`);
   await page.waitFor(`document.querySelectorAll('${id('workflow-instance')}').length === 3`);
-  await page.waitFor(`document.querySelector('${id('workflow-output')}') || document.querySelector('.transcript')`);
+  await page.waitFor(`document.querySelector('${id('workflow-output')}') || document.querySelector('${id('workflow-open-thread')}')`);
   await capture('workflow-step.png');
   await page.click(id('workflow-back'));
   expect(page.errors()).toEqual([]);

@@ -1,5 +1,6 @@
 import { expect, test } from 'vitest';
 import { flushSync, mount, tick, unmount } from 'svelte';
+import { threadBusy } from '@boite/contracts';
 import { FakeClient } from '../lib/fake-client';
 import { Store } from '../lib/store.svelte';
 import DelegationSurface from './DelegationSurface.svelte';
@@ -70,11 +71,23 @@ test('one list holds the workflow runs and the subagents, and a run opens its gr
     expect(agents.length).toBeGreaterThan(0);
     // Working subagents and finished ones sit in separate groups, every one of them once.
     const ids = (group: string) => [...document.querySelectorAll<HTMLElement>(`[data-testid=${group}] [data-testid=delegation-member]`)].map(row => row.dataset.agentId);
-    const active = agents.filter(agent => ['queued', 'running', 'waiting'].includes(agent.thread.status)).map(agent => agent.thread.id);
+    const active = agents.filter(agent => threadBusy(agent.thread)).map(agent => agent.thread.id);
     expect(active.length).toBeGreaterThan(0);
     expect(ids('delegation-active')).toEqual(active);
     expect(ids('delegation-finished')).toContain('t-team-done');
     expect(ids('delegation-active').length + ids('delegation-finished').length).toBe(agents.length);
+    // A subagent whose turn ended on its own background work is still at work: it says what it waits for, and since when.
+    expect(ids('delegation-active')).toContain('t-team-waiting');
+    const waiting = document.querySelector<HTMLElement>('[data-agent-id=t-team-waiting]')!;
+    expect(waiting.dataset.status).toBe('background');
+    expect(waiting.querySelector('[data-testid=delegation-member-wait]')!.textContent).toMatch(/^Waiting on test_emotes\s*1m \d\ds$/);
+    // Work that ended without waking it leaves it interrupted, with the reason and a Resume.
+    expect(ids('delegation-finished')).toContain('t-team-interrupted');
+    const interrupted = document.querySelector<HTMLElement>('[data-agent-id=t-team-interrupted]')!;
+    expect(interrupted.dataset.status).toBe('interrupted');
+    expect(interrupted.querySelector('.outcome')!.textContent).toBe('Interrupted');
+    expect(interrupted.querySelector('[data-testid=delegation-member-wait]')!.textContent).toBe('release build ended without waking it: its agent process was ended');
+    expect(document.querySelectorAll('[data-testid=delegation-resume]')).toHaveLength(1);
     // A row leads with the model's mark and name; the task it was given is not repeated there.
     const done = document.querySelector<HTMLElement>('[data-agent-id=t-team-done]')!;
     expect(done.querySelector('[data-logo]')!.getAttribute('data-logo')).toBe('codex');
@@ -109,12 +122,13 @@ test('one list holds the workflow runs and the subagents, and a run opens its gr
     instances[0]!.click();
     await settle();
     expect(document.querySelector('[data-testid=workflow-output]')?.textContent).toContain('"bugs"');
-    expect(store.delegationSelectedAgentId).toBe(run.nodes[1]!.instances[0]!.threadId);
+    // The item's conversation is one click away, in the chat: the panel draws none.
+    expect(document.querySelector('[data-testid=workflow-open-thread]')?.getAttribute('data-preload-thread')).toBe(run.nodes[1]!.instances[0]!.threadId);
+    expect(store.delegationSelectedAgentId).toBeNull();
 
     document.querySelector<HTMLButtonElement>('[data-testid=workflow-back]')!.click();
     await settle();
     expect(document.querySelector('[data-testid=workflow-graph]')).not.toBeNull();
-    expect(store.delegationSelectedAgentId).toBeNull();
 
     document.querySelector<HTMLButtonElement>('[data-testid=workflow-pause]')!.click();
     await settle();
@@ -127,6 +141,31 @@ test('one list holds the workflow runs and the subagents, and a run opens its gr
     await unmount(shown.component);
     await render(shown);
     expect(document.querySelectorAll('[data-testid=delegation-run]')).toHaveLength(1);
+  } finally {
+    await close(shown);
+  }
+});
+
+test('a subagent and a step run by one subagent open in the chat, not in the panel', async () => {
+  const shown = await show({ delayMs: 0, delegationDemo: true });
+  const { store } = shown;
+  try {
+    document.querySelector<HTMLButtonElement>('[data-agent-id=t-team-done]')!.click();
+    await settle();
+    expect(store.openThread?.id).toBe('t-team-done');
+    expect(store.openThread?.parentThreadId).toBe('t-trace');
+    expect(document.querySelector('[data-testid=delegation-detail], [data-testid=delegation-transcript]')).toBeNull();
+
+    await store.open('t-trace');
+    const run = store.workflowsOf('t-trace')[0]!;
+    const single = run.nodes.find(node => node.instances.length === 1 && node.instances[0]!.threadId)!;
+    expect(single).toBeDefined();
+    store.panel.update(store.panel.active!.id, { runId: run.id });
+    await render(shown);
+    document.querySelector<HTMLButtonElement>(`[data-testid=workflow-node][data-node-id=${single.id}]`)!.click();
+    await settle();
+    expect(store.openThread?.id).toBe(single.instances[0]!.threadId);
+    expect(document.querySelector('[data-testid=workflow-detail]')).toBeNull();
   } finally {
     await close(shown);
   }

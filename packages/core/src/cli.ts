@@ -11,7 +11,7 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
-import { AGENT_ENV, SETTINGS_PAGES, VIEW_HELP } from '@boite/contracts';
+import { AGENT_ENV, AGENT_SETTING_KEYS, SETTINGS_PAGES, VIEW_HELP } from '@boite/contracts';
 import { VIEW_EXAMPLE } from './view-example.ts';
 import type { AgentTask, GitChange, PanelSurface, Todo } from '@boite/contracts';
 import { connect } from './client.ts';
@@ -60,7 +60,12 @@ ${CONTROL_HELP}
                                  user's Device panel, capture and drive it
   pr list|refresh                this conversation's linked pull requests
   pr link|unlink <url>           attach or remove a PR link; does not change GitHub
-  view <file.html>               draw an HTML page at the end of your answer
+  pr watch [<url|number>]        wake this thread when the PR's checks fail or
+                                 pass, a review or comment lands or it starts
+                                 to conflict; end your turn instead of polling
+  pr unwatch [<url|number>]      stop one watch, or all of this thread's
+  view <file.html>               draw an HTML page in your answer, where a
+                                 line ![title](file.html) places it
                                  (--title <text>); view help has the rules
                                  and the app's look, view example a full page
   preview <file.html>             open a local HTML artifact with its assets
@@ -89,6 +94,13 @@ ${CONTROL_HELP}
                                  a card with a button to that Settings page,
                                  for what is not one value: a provider login,
                                  a pairing (pages: ${SETTINGS_PAGES.join(', ')})
+  settings agent [key]           a persistent agent's settings a card may
+                                 change: ${AGENT_SETTING_KEYS.join(', ')}
+                                 (--agent <name>; yours in your own conversation)
+  settings agent request <key> <value> --why <text>
+                                 a card asking the user to change one, such as
+                                 projects +boite -old or a list; the outcome
+                                 arrives as a message (applied, changed, refused)
   task list                      the agent's task list
   task add <text>                add a task (id t1, t2, ...)
   task start|done|remove <id>    move or drop one task
@@ -122,15 +134,21 @@ ${CONTROL_HELP}
   delegate spawn <brief>         start a subagent on one bounded job; its result
                                  comes back as a message (--model <provider/model>,
                                  --effort <level>, --speed <tier>, --title <title>,
-                                 --profile <id>, and a context mode: --context
+                                 --profile <id>, --worktree for a git worktree of
+                                 its own branched from your HEAD instead of your
+                                 checkout, and a context mode: --context
                                  light|neutral, --keep|--drop <parts>, --tools
                                  <Tool,...>, --rules <text>|--rules-file <path>)
   delegate list                  every subagent and workflow: state, model, time
   delegate send <thread-id> <text>
-                                 steer or reuse a subagent, or ask the parent
+                                 steer or reuse a subagent, or ask the parent;
+                                 to a subagent that asks something, the answer
   delegate stop [thread-id]      stop one subagent, or all of them
-  delegate wait [thread-id]      block until children finish (--timeout <s>,
-                                 default 600, max 3600); only with nothing else to do
+  delegate resume [thread-id]    continue stopped subagents, or one, and the
+                                 workflows a pause or a restart held
+  delegate wait [thread-id]      block until children finish or one asks something
+                                 (--timeout <s>, default 600, max 3600); only with
+                                 nothing else to do
   delegate result <child> <turn> [offset]
                                  read a bounded page of full assistant text
   delegate profiles              the owner's named routes
@@ -146,9 +164,10 @@ ${CONTROL_HELP}
   workflow start <template>      run a kept plan by name or id
 
   Outside a thread, threads, thread, questions, answer, permissions, allow,
-  deny, stewards and projects need no --thread: the owner drives every thread,
-  and a message it sends is its own prompt. Inside a thread they act as the
-  steward the owner made it, and its messages reach threads as the steward's.
+  deny and projects need no --thread: the owner drives every thread, and a
+  message it sends is its own prompt. Inside a persistent agent's conversation
+  they reach the threads of the projects entrusted to it, and its messages
+  reach them as that agent's.
 
   --core <url>                   another core, with its token in BOITE_TOKEN
                                  (an owner token, or a paired device's session)
@@ -256,6 +275,21 @@ export function settingValue(raw: string): unknown {
   }
 }
 
+/**
+ * An agent setting as typed: `projects` takes `+name -name` edits or a list
+ * (`a,b`, `a b` or JSON), the other keys a value as `settingValue` reads it.
+ */
+export function agentSettingArg(key: string, tokens: string[]): unknown {
+  const raw = tokens.join(' ').trim();
+  if (key !== 'projects') return settingValue(raw);
+  if (raw.startsWith('[') || raw.startsWith('{')) return settingValue(raw);
+  const items = raw.split(/[\s,]+/).filter(item => item.length > 0);
+  const edits = items.filter(item => /^[+-]./.test(item));
+  if (edits.length === 0) return items;
+  if (edits.length !== items.length) throw new Usage('settings agent request projects takes +name -name edits or a list, not both');
+  return { add: edits.filter(item => item.startsWith('+')).map(item => item.slice(1)), remove: edits.filter(item => item.startsWith('-')).map(item => item.slice(1)) };
+}
+
 /** `resources#limits` into a page and a card. */
 function settingsPlace(raw: string): { page: string; section?: string } {
   const parts = raw.split('#');
@@ -326,7 +360,17 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
     },
     pr: async () => {
       const action = rest[0] ?? 'list';
-      if (!['list', 'refresh', 'link', 'unlink'].includes(action) || rest.length > (action === 'link' || action === 'unlink' ? 2 : 1)) throw new Usage('pr expects list, refresh, link <url> or unlink <url>');
+      if (!['list', 'refresh', 'link', 'unlink', 'watch', 'unwatch'].includes(action) || rest.length > (action === 'list' || action === 'refresh' ? 1 : 2)) throw new Usage('pr expects list, refresh, link <url>, unlink <url>, watch [<url|number>] or unwatch [<url|number>]');
+      if (action === 'watch') {
+        const watch = await client.call('threads.watchPullRequest', { threadId, ...(rest[1] === undefined ? {} : { url: rest[1] }) });
+        print([`watching #${watch.number} ${watch.url}: ${watchStatus(watch)}`, 'Boite wakes this thread when it changes: end your turn, do not poll.'], watch);
+        return;
+      }
+      if (action === 'unwatch') {
+        const left = await client.call('threads.unwatchPullRequest', { threadId, ...(rest[1] === undefined ? {} : { url: rest[1] }) });
+        print(left.length ? left.map(watch => `still watching #${watch.number} ${watch.url}: ${watchStatus(watch)}`) : ['no pull request watched'], left);
+        return;
+      }
       const result = action === 'link' || action === 'unlink'
         ? await client.call(action === 'link' ? 'threads.linkPullRequest' : 'threads.unlinkPullRequest', { threadId, url: want(1, 'a pull request URL') })
         : await client.call('threads.pullRequests', { threadId, refresh: action === 'refresh' });
@@ -370,6 +414,7 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
         ...(parsed.requestId === undefined ? {} : { requestId: parsed.requestId }), ...(parsed.timeout === undefined ? {} : { timeout: parsed.timeout }),
         ...(parsed.title === undefined ? {} : { title: parsed.title }), ...(parsed.model === undefined ? {} : { model: parsed.model }),
         ...(parsed.effort === undefined ? {} : { effort: parsed.effort }), ...(parsed.speed === undefined ? {} : { speed: parsed.speed }), ...(parsed.profile === undefined ? {} : { profile: parsed.profile }),
+        ...(parsed.worktree === true ? { worktree: true } : {}),
         ...(parsed.context === undefined ? {} : { context: contextRequest(parsed, readRules) }),
       }, print);
     },
@@ -482,12 +527,14 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
       if (rest[0] === 'example') { print([VIEW_EXAMPLE], { example: VIEW_EXAMPLE }); return; }
       const result = await client.call('artifacts.view', { threadId, path: absolute(io.cwd, want(0, 'an HTML file')), ...(parsed.title === undefined ? {} : { title: parsed.title }) });
       const view = result.message.parts[0]?.type === 'artifact' ? result.message.parts[0].view : undefined;
+      const source = view?.source ?? rest[0]!;
+      const line = `![${(view?.title ?? '').replace(/[\s[\]]+/g, ' ').trim()}](${/[\s()<>]/.test(source) ? `<${source}>` : source})`;
       print([
         `view: ${view?.title ?? rest[0]}`,
         result.checked
           ? `checked: loaded without an error, ${view?.height}px tall on a desktop${view?.narrowHeight ? `, ${view.narrowHeight}px on a phone` : ''}`
           : 'checked: no, this machine has no browser to load it in; read the page once more before you answer',
-        'shown: under your final text when this turn ends. Do not announce it or repeat what it shows.',
+        `place: ${line} alone on a line of your answer, right after the paragraph it explains. Without that line it is drawn under your final text when this turn ends. Do not announce it or repeat what it shows.`,
         ...result.advice.map(advice => `advice: ${advice}`),
       ], result);
     },
@@ -528,6 +575,33 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
         ], asked);
         return;
       }
+      if (action === 'agent') {
+        const agent = parsed.agent === undefined ? {} : { agent: parsed.agent };
+        if (rest[1] === 'request') {
+          if (parsed.why === undefined || parsed.why.trim().length === 0) throw new Usage('settings agent request needs --why <text>, the reason the user reads on the card');
+          const key = want(2, `a key: ${AGENT_SETTING_KEYS.join(', ')}`);
+          if (rest.length < 4) throw new Usage('settings agent request needs a value after the key');
+          const asked = await client.call('agents.settings.request', { threadId, reason: parsed.why, key, value: agentSettingArg(key, rest.slice(3)), ...agent });
+          const setting = asked.setting;
+          print([
+            `requested: ${asked.questionId}`,
+            `change: ${setting.agentName}'s ${setting.key} ${JSON.stringify(setting.previous)} -> ${JSON.stringify(setting.value)}`,
+            'card: Apply, or the user changes it in the agent\'s settings',
+            'Keep working. The outcome arrives as a message quoting your reason; without one, nothing changed.',
+          ], asked);
+          return;
+        }
+        if (rest.length > 2) throw new Usage('settings agent expects a key or request <key> <value>');
+        const read = await client.call('agents.settings.read', { threadId, ...agent });
+        const shown = rest[1] === undefined ? read.settings : read.settings.filter(reading => reading.key === rest[1]);
+        if (shown.length === 0) throw new Usage(`settings agent: unknown key ${rest[1]}; the keys are ${AGENT_SETTING_KEYS.join(', ')}`);
+        const named = (reading: (typeof shown)[number], value: unknown): string => JSON.stringify(reading.key === 'projects' && Array.isArray(value) ? value.map(id => reading.choices?.find(choice => choice.id === id)?.label ?? id) : value ?? null);
+        print([
+          `agent: ${read.agentName} (${read.agentId})`,
+          ...shown.map(reading => `${reading.key} ${named(reading, reading.value)}${reading.choices?.length ? `\n    choices: ${reading.choices.map(choice => choice.label === choice.id ? choice.id : `${choice.label} (${choice.id})`).join(', ')}` : ''}`),
+        ], rest[1] === undefined ? read : shown[0]);
+        return;
+      }
       if (rest.length > 1) throw new Usage('settings expects a key, request <key> <value> or open <page>');
       const readings = await client.call('agent.settings', { threadId });
       const shown = action === undefined ? readings : readings.filter(reading => reading.key === action);
@@ -535,6 +609,8 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
       print(shown.map(reading => `${reading.key} ${JSON.stringify(reading.value)} ${reading.page}#${reading.section}${reading.sensitive ? ' (changed from Settings only)' : ''}`), action === undefined ? readings : shown[0]);
     },
     ask: async () => {
+      // An agent once ran `boite ask help` for this text and drew a card reading "help".
+      if (rest.length === 1 && rest[0] === 'help') { print([USAGE], { help: USAGE }); return; }
       const text = want(0, 'a question');
       const options = rest.slice(1);
       const asked = await client.call('questions.ask', { threadId, text, ...(options.length > 0 ? { options } : {}), ...(parsed.multiple ? { multiple: true } : {}) });
@@ -628,7 +704,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
       const { runBoiteMcp } = await import('./mcp/server.ts');
       await runBoiteMcp(client, target.threadId, io.err, () => connect(target.url, target.token, { client: { name: 'mcp-wait', version: CORE_VERSION }, requestTimeoutMs: 3_605_000 }));
     } else {
-      const caller: Caller = io.env[AGENT_ENV.coreUrl] && io.env[AGENT_ENV.token] && io.env[AGENT_ENV.threadId] ? 'steward' : 'owner';
+      const caller: Caller = io.env[AGENT_ENV.coreUrl] && io.env[AGENT_ENV.token] && io.env[AGENT_ENV.threadId] ? 'agent' : 'owner';
       await run(parsed, io, client, target.threadId, print, caller);
     }
     return 0;
@@ -651,4 +727,14 @@ export function processIo(): CliIo {
     env: process.env,
     cwd: process.cwd(),
   };
+}
+
+/** One line on what a watch last saw, for `boite pr watch` and `unwatch`. */
+export function watchStatus(watch: import('@boite/contracts').PullRequestWatch): string {
+  const paused = watch.paused ? `paused until ${new Date(watch.paused.until).toISOString()} (${watch.paused.reason === 'rate-limit' ? 'GitHub rate limit' : watch.paused.message})` : null;
+  const seen = watch.seen;
+  if (!seen) return paused ?? 'not read yet';
+  const { total, running, failed } = seen.checks;
+  const checks = total === 0 ? 'no checks' : `${total} checks, ${running} running, ${failed} failed`;
+  return [`head ${seen.head}`, checks, seen.conflicting ? `conflicts with ${seen.base}` : null, paused].filter(Boolean).join('; ');
 }

@@ -15,7 +15,7 @@ export const POOL_PROVIDERS: readonly ProviderId[] = ['antigravity', 'antigravit
 export const MANIFEST_MAX_BYTES = 64 * 1024;
 
 const FIELDS = ['schema', 'id', 'name', 'version', 'description', 'homepage', 'executable', 'artifacts', 'provides'] as const;
-const FEATURES = ['accountPools', 'desktopApp'] as const;
+const FEATURES = ['accountPools', 'desktopApp', 'gateway'] as const;
 const ID_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
 const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
 const EXECUTABLE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
@@ -141,13 +141,14 @@ class Reader {
     this.keys(value, 'provides.', FEATURES);
     const provides: PluginManifest['provides'] = {};
     if (value['accountPools'] !== undefined) provides.accountPools = this.pools(value['accountPools']);
-    if (value['desktopApp'] !== undefined) {
-      const app = value['desktopApp'];
-      // No fields today: a key here is a feature this core does not know.
-      if (!isRecord(app)) this.refuse('provides.desktopApp', 'an empty object', app);
-      const extra = Object.keys(app)[0];
-      if (extra !== undefined) this.refuse(`provides.desktopApp.${extra}`, 'absent: desktopApp takes no fields', extra);
-      provides.desktopApp = {};
+    // No fields today for either: a key there is a feature this core does not know.
+    for (const feature of ['desktopApp', 'gateway'] as const) {
+      const block = value[feature];
+      if (block === undefined) continue;
+      if (!isRecord(block)) this.refuse(`provides.${feature}`, 'an empty object', block);
+      const extra = Object.keys(block)[0];
+      if (extra !== undefined) this.refuse(`provides.${feature}.${extra}`, `absent: ${feature} takes no fields`, extra);
+      provides[feature] = {};
     }
     return provides;
   }
@@ -219,6 +220,10 @@ export function providesApp(manifest: PluginManifest): boolean {
   return manifest.provides.desktopApp !== undefined;
 }
 
+export function providesGateway(manifest: PluginManifest): boolean {
+  return manifest.provides.gateway !== undefined;
+}
+
 /**
  * The account pool commands, the contract a plugin that provides
  * `accountPools` answers. `list` prints JSON on stdout; the other three change
@@ -234,9 +239,10 @@ export const POOL_COMMANDS = {
 /** What the owner is shown before an install: every command line Boite may run, and what a desktop app is handed. */
 export function commandsOf(manifest: PluginManifest): string[] {
   const run = (args: readonly string[]) => [manifest.executable, ...args].join(' ');
-  const app = providesApp(manifest)
-    ? [manifest.executable, `environment: BOITE_CORE_URL=<this core> BOITE_TOKEN=<the owner token> BOITE_PLUGIN_ID=${manifest.id}`]
-    : [];
+  const app = [
+    ...(providesApp(manifest) ? [manifest.executable, `environment: BOITE_CORE_URL=<this core> BOITE_TOKEN=<the owner token> BOITE_PLUGIN_ID=${manifest.id}`] : []),
+    ...(providesGateway(manifest) ? [`${manifest.executable} --config <its data directory>/${manifest.executable}.toml`] : []),
+  ];
   if (poolsOf(manifest).length === 0) return app;
   return [
     ...app,

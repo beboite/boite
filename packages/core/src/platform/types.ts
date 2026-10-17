@@ -93,9 +93,10 @@ export interface ProcessPlatform {
   /** Normal priority during agent initialization; platform CPU and memory caps still apply. */
   startup?(threadId: string, active: boolean): void;
   terminate(threadId: string): boolean;
-  /** One process the thread's job reported, through the handle held since its start. */
-  terminateProcess(threadId: string, pid: number): boolean;
-  terminateUnassigned(pid: number): void;
+  /** A held Windows handle, or a matching registered/sampled Linux birth. */
+  terminateProcess(threadId: string, pid: number, startedAt?: number | null): boolean;
+  /** Windows' fallback tree kill, for a pid outside the job: `killAll` waits for a returned promise. */
+  terminateUnassigned(pid: number): void | Promise<unknown>;
   sample(threadId: string): ProcessSample | null;
   /** Toggle optional detailed counters without changing protection sampling. */
   watchResources?(active: boolean): void;
@@ -127,6 +128,13 @@ export interface ProcessPlatform {
    * wearing it today.
    */
   startedAt(pid: number): number | null;
+  /**
+   * How the OS names one run of the process holding `pid`, where `startedAt`
+   * is not absolute: Linux rebuilds it from a boot time that moves with every
+   * step of the wall clock. Two equal keys are the same run. Absent where
+   * `startedAt` is enough.
+   */
+  startKey?(pid: number): string | null;
   /**
    * The same reading for a process that is still running: null too once it has
    * exited, even while something keeps a handle on it. The orphan sweep asks

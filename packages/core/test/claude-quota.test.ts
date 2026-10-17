@@ -46,6 +46,8 @@ test('the plan windows come from the CLI itself, with no prompt sent and the pro
   expect(asked).toEqual({ skipBehaviors: true });
   expect(options?.pathToClaudeCodeExecutable).toBe(process.execPath);
   expect(options?.tools).toEqual([]);
+  // An empty `mcpServers` alone lets the CLI start every user-scope MCP server.
+  expect(options).toMatchObject({ mcpServers: {}, strictMcpConfig: true });
   expect(prompts).toEqual([]);
   expect(closes).toBe(1);
   expect(killed.count).toBe(1);

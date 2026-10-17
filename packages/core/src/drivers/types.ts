@@ -15,6 +15,7 @@ import type {
   QuestionAnswer,
   QuestionOption,
   SettingAsk,
+  AgentSettingAsk,
   RequestId,
   ThreadId,
   ThreadSummary,
@@ -23,15 +24,26 @@ import type {
   Usage,
 } from '@boite/contracts';
 import type { SpawnedChild, SpawnedProcess, SpawnOptions } from '../procs.ts';
+import type { LazyServerEntry, StdioServer } from '../mcp/lazy.ts';
 
 /**
  * The only way a driver writes anything. It journals and emits in one call, so
  * no driver ever touches SQLite or a socket.
  */
+type ToolPart = Extract<MessagePart, { type: 'tool' }>;
+export type ToolPatch = Partial<Pick<ToolPart, 'name' | 'input' | 'inputText' | 'output' | 'status' | 'documents' | 'summary'>>;
+
 export interface EmitSink {
   startMessage(role: MessageRole): MessageId;
   delta(messageId: MessageId, partIndex: number, text: string): void;
   part(messageId: MessageId, partIndex: number, part: MessagePart): void;
+  /**
+   * Sets fields of a tool part already written and keeps the rest as stored,
+   * so a driver need not hold a finished call's input and output to label or
+   * correct its card. A field given as undefined is removed. Does nothing when
+   * that part is not a tool.
+   */
+  patchTool(messageId: MessageId, partIndex: number, fields: ToolPatch): void;
   complete(messageId: MessageId, state: Message['state']): void;
 }
 
@@ -57,6 +69,8 @@ export interface QuestionAsk {
    */
   async?: boolean;  /** A settings card (`settings.request`), always asynchronous. */
   setting?: SettingAsk;
+  /** An agent setting card (`agents.settings.request`), always asynchronous. */
+  agentSetting?: AgentSettingAsk;
 }
 
 /**
@@ -109,6 +123,12 @@ export interface TurnContext {
   sessionBefore?: { costUsd: number; tokens: number };
   /** The isolation environment of this account, empty for the provider's own login. */
   accountEnv: Record<string, string>;
+  /**
+   * Boite's guide for a driver that puts it in its agent's system prompt
+   * (`takesSystemGuide`); the prompt then does not carry it. Absent for the
+   * other drivers, and when a context mode or the brain turns the guide off.
+   */
+  systemGuide?: string;
   /**
    * `warmProcessMinutes` as it stands when this turn starts. Zero means the
    * driver drops its process with the turn; above zero it may keep it for that
@@ -178,6 +198,14 @@ export interface TurnContext {
   /** Release the launch priority once the native session has initialized. */
   finishStartup?(): void;
   /**
+   * The user's stdio MCP servers for a CLI the driver starts, reached through
+   * the core and started on their first call (`mcp/lazy.ts`): the entries
+   * that replace them, by name, and the release to call once that CLI exited.
+   * `env` is the CLI's own environment. Null when the core gives sessions the
+   * servers as configured.
+   */
+  lazyMcp?(env: Record<string, string | undefined>, servers: Map<string, StdioServer>): { entries: Record<string, LazyServerEntry>; release(): void } | null;
+  /**
    * Terminates every process this thread launched, grandchildren included,
    * through the registry that traced them. For a driver whose only stop is the
    * process itself: the agent's own tools die with it instead of outliving it.
@@ -188,8 +216,8 @@ export interface TurnContext {
 /** Native session setup without a prompt, a turn or a message sink. */
 export type SessionContext = Pick<TurnContext,
   'thread' | 'account' | 'provider' | 'sessionId' | 'resumeAt' | 'sessionBefore' |
-  'accountEnv' | 'warmProcessMinutes' | 'log' | 'diagnostic' | 'authenticationFailed' | 'commands' | 'context' | 'hook' |
-  'background' | 'backgroundFinished' | 'wake' | 'spawnChild' | 'finishStartup'>;
+  'accountEnv' | 'systemGuide' | 'warmProcessMinutes' | 'log' | 'diagnostic' | 'authenticationFailed' | 'commands' | 'context' | 'hook' |
+  'background' | 'backgroundFinished' | 'wake' | 'spawnChild' | 'finishStartup' | 'killTree' | 'quota' | 'lazyMcp'>;
 
 export type DiagnosticLevel = 'debug' | 'info' | 'warn' | 'error';
 /** Scalars only: never a prompt, a tool input or output, a command line or a token. */
@@ -223,7 +251,18 @@ export interface TurnResult {
    * entry (`Turn.checkpoint`). Absent when the driver has none.
    */
   checkpoint?: { sessionId: string; entry: string };
+  /**
+   * The provider refused the turn for availability, not for a fault of the
+   * request, and said so unambiguously: `capacity` when the model is at
+   * capacity right now (Codex `serverOverloaded`, Claude `overloaded_error`),
+   * `usage-limit` when the account's subscription window is spent, with its
+   * reset when the agent reported one. The core retries or resumes on it
+   * (`threads/retries.ts`); a driver that cannot tell leaves it out.
+   */
+  refusal?: TurnRefusal;
 }
+
+export type TurnRefusal = { kind: 'capacity' } | { kind: 'usage-limit'; resetsAt: number | null };
 
 export type PromptCacheLife = Pick<import('@boite/contracts').PromptCache, 'ttlSeconds' | 'maxSeconds' | 'source'>;
 
@@ -265,6 +304,8 @@ export interface ProbeContext {
   accountEnv: Record<string, string>;
   /** The core's data directory: the probe session belongs to no project. */
   cwd: string;
+  /** Core-selected composing/viewed workspace whose already prepared host may answer discovery. */
+  catalogThread?: ThreadSummary;
   /** Also read this model's own effort scale, for an agent that names it per model. */
   model?: string;
   /** The registry that traces the probe process, under the thread `probe:<providerId>:<accountId>`. */
@@ -317,6 +358,12 @@ export interface TitleContext {
 export interface ProbeFilter {
   providerId?: ProviderId;
   accountId?: AccountId;
+  /**
+   * The user asked to read the catalog again: nothing about the agent or the
+   * account changed. A driver drops what it cached, but a live session that is
+   * still opening reads a catalog as fresh as the refresh itself.
+   */
+  refresh?: true;
 }
 
 /** A native fork is unpublished until the caller validates its source and writes the branch. */
@@ -335,7 +382,7 @@ export interface Driver {
   /** A separate, tool-free request. No native session or chat transcript is changed. */
   sideQuestion?(ctx: SideQuestionContext): Promise<string>;
   /** Initialize or resume a session without submitting a prompt. Unsupported protocols remain cold. */
-  prepare?(ctx: SessionContext): Promise<void>;
+  prepare?(ctx: SessionContext, options?: { forTurn?: boolean }): Promise<void>;
   /** Keep a viewed session resident; releasing the last viewer starts its idle grace. */
   setViewed?(threadId: ThreadId, viewed: boolean): void;
   /**
@@ -346,6 +393,12 @@ export interface Driver {
   probe?(ctx: ProbeContext): Promise<ProbeResult>;
   /** What the last probe read, without running one. Null when nothing was probed. */
   probedModels?(providerId: ProviderId, accountId: AccountId): ModelInfo[] | null;
+  /**
+   * Takes a `session/new` answer another process of this account read (the
+   * sign-in's) as the account's probe, so no probe process starts for it.
+   * Answers the models it now lists, or null for a driver that keeps no probes.
+   */
+  rememberSession?(provider: ProviderDescriptor, accountId: AccountId, created: unknown): Promise<ModelInfo[] | null>;
   /** Drop cached probes: a reload, a changed account, a removed one. */
   forgetProbes?(filter?: ProbeFilter): void;
   /**

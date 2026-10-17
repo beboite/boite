@@ -1,14 +1,17 @@
 <script lang="ts">
   import { errorText } from '../lib/errors';
-  import { Check, ChevronDown, ChevronLeft, ChevronRight, Circle, CircleCheck, CircleDot, Hand, ListTodo, MessageCircleQuestionMark, Pause, Play, Repeat, Reply, Settings2, Target, X } from '@lucide/svelte';
+  import { Bot, Check, ChevronDown, ChevronLeft, ChevronRight, Circle, CircleCheck, CircleDot, Hand, ListTodo, MessageCircleQuestionMark, Pause, Play, Repeat, Reply, Settings2, ShieldQuestion, Target, X } from '@lucide/svelte';
+  import type { ThreadSummary } from '@boite/contracts';
   import { focusComposer } from '../lib/focus';
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
+  import { permissionSentence } from '../lib/tool-summary';
   import { dockRoom, questionDock } from '../lib/question-dock.svelte';
-  import { ignoreQuestions, replyOf, repliesOf, sendAnswer, writeAnswer } from '../lib/question-reply.svelte';
+  import { ignoreQuestions, releaseWaiting, replyOf, repliesOf, sendAnswer, writeAnswer } from '../lib/question-reply.svelte';
   import QuestionCard from './QuestionCard.svelte';
   import SettingRequestCard from './SettingRequestCardLoader.svelte';
   import { settingHeading } from '../lib/setting-requests';
+  import AgentSettingCard from './AgentSettingCardLoader.svelte';
 
   let { store, reserveInComposer = false, onroom }: {
     store: Store;
@@ -24,13 +27,21 @@
    * top of the goal, the loop and the tasks, rather than in the timeline where
    * a running turn would push them out of sight. Several stack behind a pager;
    * each keeps what was picked or typed while another is on screen.
+   *
+   * A sub-agent has no row of its own, so whatever its conversation asks the
+   * user, stopped or not, waits here too, named by the child's title with a
+   * way into it. Its question is answered from its card, never from this
+   * thread's composer (`replyTarget` keeps to the open thread); a permission
+   * is answered in the child's own conversation.
    */
-  let asked = $derived(store.openThread ? store.pendingQuestions.filter((question) => question.async === true && question.threadId === store.openThread?.id) : []);
+  let children = $derived(new Map(store.openThread ? store.threads.filter((row) => row.parentThreadId === store.openThread?.id && !row.archived).map((row) => [row.id, row] as const) : []));
+  let asked = $derived(store.openThread ? store.pendingQuestions.filter((question) => (question.async === true && question.threadId === store.openThread?.id) || children.has(question.threadId)) : []);
+  let waits = $derived(store.pendingPermissions.filter((request) => children.has(request.threadId)));
   let shownId = $state<string | null>(null);
   let shown = $derived(asked.find((question) => question.id === shownId) ?? asked[0]);
   let at = $derived(shown ? asked.indexOf(shown) : 0);
   let questionOpen = $state(true);
-  let inline = $derived(asked.length > 0);
+  let inline = $derived(asked.length > 0 || waits.length > 0);
   // A new question comes up open, even over one the user folded, and so does
   // another thread's: the dock stays mounted while the open thread changes, and
   // a count would miss a question that replaces another.
@@ -54,12 +65,14 @@
   });
   // The composer answers the question on screen when the agent stopped for none.
   $effect(() => { repliesOf(store).docked = shown?.id ?? null; });
+  // A question that arrived while the user wrote takes the composer once it is empty and quiet.
+  $effect(() => releaseWaiting(store));
   function page(step: -1 | 1) {
     const next = asked[(at + step + asked.length) % asked.length];
     if (next) shownId = next.id;
   }
 
-  let visible = $derived(Boolean(asked.length > 0 || activity?.goal && !activity.goal.dismissed || activity?.loop || activity?.tasks.length && !activity.tasksDismissed));
+  let visible = $derived(Boolean(asked.length > 0 || waits.length > 0 || activity?.goal && !activity.goal.dismissed || activity?.loop || activity?.tasks.length && !activity.tasksDismissed));
   // Keep completed content mounted during the fade out, without occupying chat space.
   let tasks = $derived(activity?.tasksDismissed && visible ? [] : activity?.tasks ?? []);
   let goal = $derived(activity?.goal?.dismissed && visible ? null : activity?.goal);
@@ -146,16 +159,29 @@
   }
 </script>
 
-{#if activity || asked.length > 0}
+{#snippet openChild(child: ThreadSummary)}
+  {@const hint = fill(strings.activity.openSubagentHint, { title: child.title })}
+  <button type="button" class="ghost small open-child" title={hint} aria-label={hint} data-testid="activity-open-subagent" onclick={() => void store.open(child.id)}>{strings.activity.openSubagent}</button>
+{/snippet}
+
+{#snippet fromChild(child: ThreadSummary, testid: string)}
+  <div class="from-child" data-testid={testid}>
+    <Bot size={14} />
+    <span class="ui-label">{fill(strings.activity.subagentAsks, { title: child.title })}</span>
+    {@render openChild(child)}
+  </div>
+{/snippet}
+
+{#if activity || asked.length > 0 || waits.length > 0}
   <section class="activity" class:inline class:hidden={!visible} use:measure data-testid="thread-activity" aria-label={shown ? strings.activity.question : strings.activity.tasks} inert={!visible}>
     {#if shown}
       <div class="questions" data-testid="activity-questions" data-count={asked.length}>
         <div class="activity-row question-row">
-          {#if shown.setting}<Settings2 size={16} />{:else}<MessageCircleQuestionMark size={16} />{/if}
+          {#if shown.setting}<Settings2 size={16} />{:else if shown.agentSetting}<Bot size={16} />{:else}<MessageCircleQuestionMark size={16} />{/if}
           <button type="button" class="ghost objective question-toggle" aria-expanded={questionOpen}
             title={questionOpen ? strings.activity.questionFold : strings.activity.questionUnfold} data-testid="activity-question-toggle"
             onclick={() => (questionOpen = !questionOpen)}>
-            <span class="question-line ui-label">{questionOpen ? (shown.setting ? settingHeading(shown.setting) : strings.chat.questionAsyncHeading) : shown.text}</span>
+            <span class="question-line ui-label">{questionOpen ? (shown.setting ? settingHeading(shown.setting) : shown.agentSetting ? fill(strings.agentSettingRequest.heading, { name: shown.agentSetting.agentName }) : strings.chat.questionAsyncHeading) : shown.text}</span>
             <ChevronDown size={16} class={questionOpen ? 'turned' : ''} />
           </button>
           {#if replyOf(store, shown.id).replying}
@@ -175,8 +201,24 @@
           <div>
             {#each asked as question (question.id)}
               {@const reply = replyOf(store, question.id)}
-              <div hidden={question.id !== shown.id} data-testid="activity-question" data-question={question.id}>
-                {#if question.setting}
+              {@const child = children.get(question.threadId)}
+              <div hidden={question.id !== shown.id} data-testid="activity-question" data-question={question.id} data-thread={question.threadId}>
+                {#if child}
+                  {@render fromChild(child, 'activity-subagent-question')}
+                {/if}
+                {#if question.agentSetting}
+                <AgentSettingCard
+                  {store}
+                  threadId={question.threadId}
+                  questionId={question.id}
+                  text={question.text}
+                  setting={question.agentSetting}
+                  answer={null}
+                  pending
+                  docked
+                  respond={(optionId) => store.answerQuestion(question.threadId, question.id, [optionId])}
+                />
+                {:else if question.setting}
                 <SettingRequestCard
                   {store}
                   text={question.text}
@@ -192,7 +234,7 @@
                   options={question.options}
                   allowText={question.allowText}
                   multiple={question.multiple}
-                  async
+                  async={question.async === true}
                   docked
                   answer={null}
                   pending
@@ -201,13 +243,30 @@
                   drafted={reply.drafted}
                   submit={() => sendAnswer(store, question)}
                   skip={() => store.skipQuestion(question.threadId, question.id)}
-                  onwrite={() => writeAnswer(store, question.id)}
+                  onwrite={child ? undefined : () => writeAnswer(store, question.id)}
                 />
                 {/if}
               </div>
             {/each}
           </div>
         </div>
+      </div>
+    {/if}
+    {#if waits.length > 0}
+      <div class="waits" data-testid="activity-subagent-permissions">
+        {#each waits as request (request.id)}
+          {@const child = children.get(request.threadId)}
+          {#if child}
+            <div class="wait" data-testid="activity-subagent-permission" data-thread={request.threadId}>
+              <ShieldQuestion size={16} />
+              <span class="wait-text">
+                <span>{fill(strings.activity.subagentPermission, { title: child.title })}</span>
+                <span class="meta">{permissionSentence(request.toolName, request.input)}</span>
+              </span>
+              {@render openChild(child)}
+            </div>
+          {/if}
+        {/each}
       </div>
     {/if}
     {#each ['goal', 'loop'] as kind (kind)}
@@ -327,7 +386,17 @@
   .activity.inline { position: relative; bottom: auto; inset-inline: auto; z-index: auto; background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; border: none; border-bottom: 1px solid var(--color-border); border-radius: 0; box-shadow: none; padding: 8px 4px 4px; }
   .activity-row { display: flex; align-items: center; gap: 8px; min-height: var(--control); min-width: 0; padding: 0 2px 0 8px; }
   /* The questions sit above the goal, the loop and the tasks, a hairline between. */
-  .questions + :is(.entry, .tasks-toggle) { margin-top: 4px; border-top: 1px solid var(--color-border); padding-top: 4px; }
+  .questions + :is(.entry, .tasks-toggle, .waits), .waits + :is(.entry, .tasks-toggle) { margin-top: 4px; border-top: 1px solid var(--color-border); padding-top: 4px; }
+  /* A sub-agent's request: whose it is, muted, and the way into its conversation on the right. */
+  .from-child, .wait { display: flex; align-items: center; gap: 8px; min-height: var(--control); min-width: 0; padding: 0 2px 0 8px; }
+  .from-child { color: var(--color-muted-foreground); }
+  .from-child > :global(svg) { flex: none; margin-inline: 1px; }
+  .from-child > .ui-label { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .wait > :global(svg) { flex: none; color: var(--color-live); }
+  /* Two stacked lines keep their full line boxes: a trimmed `.ui-label` would lay them over each other. */
+  .wait-text { display: flex; flex-direction: column; flex: 1; min-width: 0; padding-block: 4px; line-height: 1.35; }
+  .wait-text > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .open-child { flex: none; padding-inline: 10px; color: var(--color-accent); }
   .question-row > :global(svg) { color: var(--color-live); }
   .question-toggle { display: flex; align-items: center; gap: 6px; height: var(--control-sm); padding: 0 6px; font-weight: 400; color: var(--color-foreground); justify-content: flex-start; }
   .question-toggle > :global(svg) { flex: none; color: var(--color-muted-foreground); transition: transform var(--dur-2) var(--ease-out-quint); }
@@ -352,7 +421,7 @@
   .entry.blocked { border-radius: var(--radius-md); background: color-mix(in srgb, var(--color-live) 6%, transparent); }
   .entry.blocked .activity-row > :global(svg:first-child) { color: var(--color-live); }
   .blocker { display: flex; align-items: center; gap: 8px; min-height: var(--control); padding: 0 4px 4px 13px; }
-  .waiting-dot { flex: none; width: 6px; height: 6px; margin-inline: 5px; border-radius: var(--radius-full); background: var(--color-live); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-live) 22%, transparent); animation: pulse 1.8s ease-in-out infinite; }
+  .waiting-dot { flex: none; width: 6px; height: 6px; margin-inline: 5px; border-radius: var(--radius-full); background: var(--color-live); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-live) 22%, transparent); animation: pulse 1.8s var(--loop-ease-in-out-54) infinite var(--loops); }
   .blocker p { flex: 1; min-width: 0; margin: 0; line-height: 1.45; overflow-wrap: anywhere; }
   .ask { font-weight: 600; color: var(--color-foreground); }
   .hint { color: var(--color-muted-foreground); }
@@ -391,7 +460,7 @@
   [data-verdict='partial'] { --verdict: var(--color-live); }
   [data-verdict='fail'], [data-verdict='missing'] { --verdict: var(--color-danger); }
   [data-verdict='running'] { --verdict: var(--color-accent); }
-  .verdict[data-verdict='running']::before { animation: pulse 1.8s ease-in-out infinite; }
+  .verdict[data-verdict='running']::before { animation: pulse 1.8s var(--loop-ease-in-out-54) infinite var(--loops); }
   .verdict-name { color: var(--verdict); font-weight: 600; }
   .open-review { margin-top: 4px; padding-inline: 6px; color: var(--color-accent); }
   .error { color: var(--color-danger); margin: 2px 8px 6px; overflow-wrap: anywhere; }

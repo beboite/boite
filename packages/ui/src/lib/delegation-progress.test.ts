@@ -19,6 +19,22 @@ test('only successful finished turns count as completed, with active status taki
   } finally { client.close(); }
 });
 
+test('a child at rest on its own background work is still active, never completed; one that never woke is interrupted', async () => {
+  const client = new FakeClient({ delayMs: 0, delegationDemo: true });
+  try {
+    await client.connect();
+    const { agents } = await client.call('delegation.get', { threadId: 't-trace' });
+    const waiting = agents.find(agent => agent.thread.id === 't-team-waiting')!;
+    const interrupted = agents.find(agent => agent.thread.id === 't-team-interrupted')!;
+    expect(agentProgress(waiting)).toMatchObject({ active: true, status: 'background', finishedAt: null });
+    expect(waiting.settlement).toBeUndefined();
+    expect(agentProgress(interrupted)).toMatchObject({ active: false, status: 'interrupted' });
+    expect(interrupted.settlement).toBe('settled');
+    expect(teamProgress([waiting])).toMatchObject({ active: true, completed: 0, finishedAt: null });
+    expect(teamProgress([waiting, interrupted])).toMatchObject({ completed: 0, interrupted: 1 });
+  } finally { client.close(); }
+});
+
 test('each launch gets its own card after the message it followed, and history outside the window waits for its page', async () => {
   const client = new FakeClient({ delayMs: 0, delegationDemo: true });
   try {

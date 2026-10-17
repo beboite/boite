@@ -17,13 +17,13 @@ import {
   type Account,
   type BackgroundTask,
   type AgentLetter,
-  type StewardGrant,
   type BrainStatus,
   type CoordinationConfig,
   type CoordinationPeer,
   type CoreInfo,
   type CoreLogRecord,
   type DelegationConfig,
+  type DelegationWorktree,
   type HarnessUpdate,
   type HooksStatus,
   type ImportableSession,
@@ -47,6 +47,7 @@ import {
   type SchedulerState,
   type Settings,
   type ServerUpdateStatus,
+  type DesktopUpdateStatus,
   type SpeechConfig,
   type SpeechStatus,
   type TelemetryState,
@@ -59,6 +60,7 @@ import {
 } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { FakeAgents } from '../fake-agents';
+import { settleAgentSettings } from './agent-settings';
 import type { FakeFinishedTurn } from '../fake-usage';
 import { activityMethods, finishActivityTurn } from './activity';
 import { FakeBus } from './bus';
@@ -72,12 +74,16 @@ import { fakeSpeechModels } from './speech';
 import { createAgentSession } from './threads';
 import { startTurn, stopTurn } from './turns';
 import { FakeWorkflows } from './workflows';
-import { initialServerUpdate } from './server-update';
+import { initialDesktopUpdate, initialServerUpdate } from './server-update';
 import { observeLog } from './logs';
 import type { FakeWorktree } from './worktrees';
 
-/** One handler per contract method; plugins, agents and workflows answer from their own classes. */
-export type FakeMethods = { [M in Exclude<RpcMethodName, `plugins.${string}` | `agents.${string}` | `workflows.${string}`>]: (params: RpcParams<M>) => Promise<RpcResult<M>> };
+/**
+ * One handler per contract method; plugins, agents and workflows answer from
+ * their own classes. `resident.*` is called only by a persistent agent's own
+ * `boite` command, never by the UI: the fake core answers it as unknown.
+ */
+export type FakeMethods = { [M in Exclude<RpcMethodName, `plugins.${string}` | `agents.${string}` | `workflows.${string}` | `resident.${string}`>]: (params: RpcParams<M>) => Promise<RpcResult<M>> };
 
 export interface FakeClientOptions {
   /** Milliseconds between two streamed chunks. Tests pass 0. */
@@ -91,16 +97,33 @@ export interface FakeClientOptions {
   chunkSize?: number;
   /** Seeds one thread of 400 messages, what `?fake=1&long=1` opens the list on. */
   long?: boolean;
+  /** Seeds this many more threads of 400 messages, `t-long-1` and on: what `?fake=1&long=1&copies=16` fills the reading cache with. */
+  longCopies?: number;
   /** Seeds one thread of forty messages and 11.5 MiB of tool calls, what `?fake=1&heavy=1` opens the list on. */
   heavy?: boolean;
+  /** Seeds this many more threads at work, their load sampled every second: what `?fake=1&working=16` shows. */
+  working?: number;
+  /** Seeds this many threads that work without end, what `?fake=1&load=16` streams (`load.ts`). */
+  load?: number;
+  /** Milliseconds between two ticks of that load, 100 unless `&loadtick=<ms>` says otherwise. */
+  loadTickMs?: number;
   /** A fresh machine with no agents, accounts or projects, for the setup flow. */
   uninstalled?: boolean;
   /** Adds a deterministic active team for visual checks on `?fake=1&team=1`. */
   delegationDemo?: boolean;
-  /** A steward thread with a letter it sent, a notice it received and a thread its agent started, on `?fake=1&steward=1`. */
-  stewardDemo?: boolean;
+  /** Two parents at work, one whose sub-agents ask a question and a permission, on `?fake=1&subagents=1`. */
+  subagentsDemo?: boolean;
+  /** An agent with an entrusted project, a picture, a memory pass and a notice, on `?fake=1&agents=1`. */
+  agentsDemo?: boolean;
+  /** Two pull request watches on the trace thread, one paused by GitHub's rate limit, on `?fake=1&watch=1`. */
+  watchDemo?: boolean;
   /** Who this client is. `'session'` makes it a paired phone, refused like one. */
   principal?: Principal;
+  /**
+   * Methods this core answers `unknown method` to, like a machine on an older
+   * Boite; `?fake=1&missing=diagnostics.summary,diagnostics.export` sets them.
+   */
+  missing?: readonly string[];
   /**
    * A round trip, in milliseconds, each call waits half of on the way out and
    * half on the way back, like a remote machine; `?fake=1&rtt=150` sets it.
@@ -111,6 +134,12 @@ export interface FakeClientOptions {
   coreId?: string;
   coreName?: string;
   publicUrl?: string;
+  /**
+   * A desktop app's core: its server updates by hand and its window reports
+   * the app's updater, offered at `?desktopUpdate=<phase>`. The second fake
+   * machine is one when that parameter is set.
+   */
+  desktopApp?: boolean;
 }
 
 function roundTrip(): number {
@@ -138,8 +167,12 @@ export class FakeContext {
   readonly logTurns = new Map<string, string>();
   readonly logProcesses = new Map<string, string>();
   serverUpdate: ServerUpdateStatus = initialServerUpdate();
+  /** The desktop app's updater as this machine's window reported it; null with no window, or on a server. */
+  desktopUpdate: DesktopUpdateStatus | null = null;
   readonly bus: FakeBus;
   readonly agents: FakeAgents;
+  /** A settle of the agent setting cards is queued after the current change. */
+  private settlingAgentCards = false;
   readonly plugins: FakePlugins;
   readonly workflows: FakeWorkflows;
   /** How far in the past the demo seeds its run, so its steps show real durations. */
@@ -176,10 +209,10 @@ export class FakeContext {
   readonly delegationLetters = new Map<ThreadId, AgentLetter[]>();
   readonly delegationTurns = new Map<ThreadId, number>();
   readonly delegationRequests = new Map<string, { fingerprint: string; threadId: ThreadId }>();
+  /** A child's own worktree, as `delegation.spawn` with `worktree` records it. */
+  readonly delegationWorktrees = new Map<ThreadId, DelegationWorktree>();
   readonly delegationSendRequests = new Map<string, { fingerprint: string; letter: AgentLetter }>();
   readonly letters = new Map<ThreadId, AgentLetter[]>();
-  /** Steward grants by steward thread (`stewards.ts`). */
-  readonly stewards = new Map<ThreadId, StewardGrant>();
   readonly peers = new Map<string, CoordinationPeer>();
   readonly groupReads = new Map<string, { groupId: string; epoch: number }>();
   /** The group this fake core is in, shared by reference with the other fake cores of it. */
@@ -249,6 +282,7 @@ export class FakeContext {
   readonly rttMs: number;
   readonly chunkSize: number | undefined;
   readonly long: boolean;
+  readonly longCopies: number;
   readonly heavy: boolean;
   readonly quotaExtras: boolean;
   /**
@@ -260,16 +294,23 @@ export class FakeContext {
   constructor(options: FakeClientOptions = {}) {
     this.quotaExtras = options.quotaExtras ?? (typeof location !== 'undefined' && new URLSearchParams(location.search).get('quotaExtras') === '1');
     this.bus = new FakeBus(options.principal ?? 'owner');
-    this.agents = new FakeAgents(revision => this.emit('agents.changed', { revision }), {
+    this.agents = new FakeAgents(revision => {
+      this.emit('agents.changed', { revision });
+      // As the core: a change to any agent may answer a card, settled once per burst after it commits.
+      if (this.settlingAgentCards) return;
+      this.settlingAgentCards = true;
+      queueMicrotask(() => { this.settlingAgentCards = false; settleAgentSettings(this); });
+    }, {
       create: (agent, sessionId, work) => createAgentSession(this, agent, sessionId, work),
       start: (threadId, prompt, agent) => { Object.assign(this.thread(threadId), agent.selection); return this.startTurn(threadId, prompt); },
       stop: threadId => { void this.stopTurn(threadId); },
-      protocol: providerId => this.providers.find(p => p.id === providerId)?.protocol,
       thread: threadId => this.threads.get(threadId),
       goal: (threadId, objective) => {
         const methods = activityMethods(this);
         void (objective === null ? methods['threads.activity.control']({ threadId, kind: 'goal', action: 'remove' }) : methods['threads.activity.set']({ threadId, goal: { objective } })).catch(() => {});
       },
+      // A project's folder holds files: a brain root refuses it.
+      occupied: path => this.projects.some(p => p.path.replace(/[\\/]+$/, '') === path),
     });
     this.plugins = new FakePlugins({
       emit: (event, payload) => this.emit(event, payload),
@@ -296,8 +337,13 @@ export class FakeContext {
     this.rttMs = options.rttMs ?? roundTrip();
     this.chunkSize = options.chunkSize ?? tokenStream();
     this.long = options.long ?? false;
+    this.longCopies = options.longCopies ?? 0;
     this.heavy = options.heavy ?? false;
     const coreId = options.coreId ?? `fake-core-${secureId()}`;
+    if (options.desktopApp) {
+      this.serverUpdate = { ...this.serverUpdate, mode: 'manual', phase: 'idle', version: null, publishedAt: null, received: 0, total: null, error: null };
+      this.desktopUpdate = initialDesktopUpdate();
+    }
     this.identity = {
       coreId,
       name: options.coreName ?? 'This PC',
@@ -322,8 +368,9 @@ export class FakeContext {
     };
     this.core = {
       version: '2.0.0-beta.1',
+      coreId,
       protocolVersion: PROTOCOL_VERSION,
-      features: { threadSnapshots: true, chunkedAnswers: true, readingPages: true, deferredToolParts: true, deviceKeys: true },
+      features: { draftPreparation: true, attachmentUploads: true, threadSnapshots: true, chunkedAnswers: true, readingPages: true, messagePositions: true, deferredToolParts: true, deviceKeys: true, revealMachines: true, loadEvents: true, desktopUpdates: true, gatewayMove: true },
       os: 'windows',
       channel: 'stable',
       pid: 4242,

@@ -13,6 +13,7 @@ mod browser;
 mod browser_control;
 mod channel;
 mod closing;
+mod dropped;
 mod failure;
 mod instance;
 mod local_core;
@@ -37,7 +38,7 @@ mod whip;
 unsafe extern "C" {}
 
 use serde_json::json;
-use tauri::{AppHandle, Manager, Webview, WindowEvent};
+use tauri::{AppHandle, Emitter, Manager, Webview, WindowEvent};
 use watchdog::Seen;
 
 use channel::Channel;
@@ -110,6 +111,8 @@ fn shell_context<R: tauri::Runtime>() -> tauri::Context<R> {
 
 pub fn run() {
     let launched = std::time::Instant::now();
+    // `run` is on the main thread: the watchdog names it in a hang dump.
+    platform::watch::remember_main_thread();
     platform::before_webview();
     // The channel is read here and nowhere else: the compiled bundle identifier
     // is the only thing that says which install this executable is. Nothing
@@ -200,6 +203,8 @@ pub fn run() {
         local_files::open_local_file,
         local_files::open_chat_file,
         attachments::save_attachment,
+        dropped::dropped_entries,
+        dropped::dropped_file,
         attachment_download::save_attachment_url,
         window::shell_ready,
         window::show_window,
@@ -245,6 +250,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(app_updater)
         .manage(Reveal::default())
+        .manage(dropped::Dropped::default())
         .manage(whip::WhipState::default())
         .manage(quota_window::HoverState::default())
         .manage(CloseBehavior { enabled: AtomicBool::new(close_to_tray), path: preferences_path })
@@ -254,12 +260,11 @@ pub fn run() {
             commands(invoke)
         })
         .setup(move |app| {
+            // From the process start to here: the context, the instance lock, the
+            // command table, Tauri's builder and its event loop.
+            phase("pre-setup", launched);
             let setup = std::time::Instant::now();
             let handle = app.handle().clone();
-            match tauri::webview_version() {
-                Ok(version) => shell_log::info("startup", "shell.webview", format!("web view runtime {version}"), json!({ "webviewVersion": version })),
-                Err(error) => shell_log::warn("startup", "shell.webview", format!("the web view runtime version is unknown: {error}"), json!({})),
-            }
             match login_item {
                 Ok(item) => { app.manage(item); }
                 Err(error) => eprintln!("[shell] starting at login cannot be offered: {error}"),
@@ -270,19 +275,23 @@ pub fn run() {
             if in_tray { handle.state::<Reveal>().stay_hidden(); }
             let launch = Launch::new(channel, directory.clone(), handle.path().resource_dir().ok(),
                 handle.package_info().version.to_string());
-            app.manage(CoreState::new(launch));
             app.manage(tray::QuitGuard::default());
+            app.manage(CoreState::new(launch));
+            // As soon as it can, so the core starts while WebView2 does: building
+            // the window holds this thread for several hundred milliseconds, and
+            // the core used to wait behind it for no reason (bench/startup.ts).
+            start_core(&handle);
+            phase("core-dispatch", setup);
+            match tauri::webview_version() {
+                Ok(version) => shell_log::info("startup", "shell.webview", format!("web view runtime {version}"), json!({ "webviewVersion": version })),
+                Err(error) => shell_log::warn("startup", "shell.webview", format!("the web view runtime version is unknown: {error}"), json!({})),
+            }
             if owns_directory {
                 let waking = handle.clone();
                 if let Err(error) = instance::listen(&directory, move || show_main(&waking)) {
                     eprintln!("[shell] a second launch will not bring this window back: {error}");
                 }
             }
-            // First, so the core starts while WebView2 does: building the window
-            // holds this thread for several hundred milliseconds, and the core
-            // used to wait behind it for no reason (bench/startup.ts).
-            start_core(&handle);
-            phase("core-dispatch", setup);
             #[cfg(target_os = "macos")]
             window::install_macos_menu(&handle, channel)?;
             let building = std::time::Instant::now();
@@ -290,7 +299,9 @@ pub fn run() {
             phase("main-window", building);
             platform::watch::remember_main_window(&window);
             platform::watch::watch_webview(&window);
-            watchdog::start(handle.clone(), platform::watch::main_window_hung);
+            // Only the paths of the last drag on this window can be read back.
+            dropped::watch(&window);
+            watchdog::start(handle.clone());
             if !hidden() {
                 let tray = std::time::Instant::now();
                 // The window works without a tray: closing it then quits.
@@ -305,6 +316,7 @@ pub fn run() {
                 if autostart::starts_in_tray(at_login, handle.tray_by_id("boite").is_some(), hidden()) {
                     // Nothing on screen: the page does not paint until the tray shows it.
                     browser::park_all(&handle);
+                    window::main_memory(&handle, true);
                 } else { show_main(&handle); }
             }
 
@@ -342,6 +354,13 @@ pub fn run() {
                     watchdog::saw(if *focused { Seen::Focused } else { Seen::Blurred });
                     shell_log::debug("window", "shell.window.focus", if *focused { "the window gained focus" } else { "the window lost focus" },
                         json!({ "focused": focused }));
+                    // The page pauses its endless animations behind another
+                    // application (packages/ui/src/lib/at-rest.ts) and asks
+                    // `user_presence` which window is in front: this is the
+                    // cue, since a webview's own blur misses some switches.
+                    if let Err(error) = closing.emit_to(browser::MAIN_LABEL, "window://focus", *focused) {
+                        eprintln!("[shell] the focus change could not be emitted: {error}");
+                    }
                 }
                 WindowEvent::Moved(_) => {
                     watchdog::saw(Seen::Moved);

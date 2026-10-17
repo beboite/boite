@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { LoaderCircle, Radar } from '@lucide/svelte';
-  import type { ThreadSummary } from '@boite/contracts';
+  import { Bot, CircleAlert, CloudOff, GitPullRequest, LoaderCircle, Radar } from '@lucide/svelte';
+  import { pullRequestWatchWaits, type ThreadSummary } from '@boite/contracts';
   import { backgroundLabel } from '../lib/background';
   import { secondClock } from '../lib/clock.svelte';
   import { ago, elapsed, exactTime } from '../lib/format';
@@ -9,29 +9,40 @@
   import type { WorkingChildren } from '../lib/thread-rows';
 
   /**
-   * `subagents`: the thread's delegated agents still at work, from its store.
-   * `countSubagents`: the row says how many beside the radar, where no hover
-   * shows the title (a phone).
+   * `subagents`: the thread's delegated agents at work or asking, from its
+   * store. Their count rides a chip beside the state, in every state, so a
+   * parent at work says it has children on a computer and a phone alike.
+   * `away`: its machine is not connected, so a turn it last saw at work may have
+   * ended long ago. The row says so instead of spinning and counting time.
    */
-  let { thread, now, subagents = null, countSubagents = false }: { thread: Pick<ThreadSummary, 'status' | 'unread' | 'runningSince' | 'requestSince' | 'backgroundWork' | 'openQuestions' | 'lastUserMessageAt' | 'createdAt'>; now: number; subagents?: WorkingChildren | null; countSubagents?: boolean } = $props();
+  let { thread, now, subagents = null, away = false }: { thread: Pick<ThreadSummary, 'status' | 'unread' | 'runningSince' | 'requestSince' | 'backgroundWork' | 'openQuestions' | 'lastUserMessageAt' | 'createdAt'> & Partial<Pick<ThreadSummary, 'backgroundWait' | 'pullRequestWatches'>>; now: number; subagents?: WorkingChildren | null; away?: boolean } = $props();
 
   function earliest(a: number | null | undefined, b: number | null | undefined): number | null {
     return a == null ? b ?? null : b == null ? a : Math.min(a, b);
   }
-  let kind = $derived(threadState(thread, subagents?.count ?? 0));
+  let kind = $derived(threadState(thread, subagents));
+  /** A delegated agent's wait on its own background work: what it waits for, or what ended without waking it. */
+  let wait = $derived(thread.backgroundWait ?? null);
   /** The states that count time: the turn, its sub-agents, or the work it left running. */
-  let live = $derived(kind === 'working' || kind === 'delegating' || kind === 'monitoring' || kind === 'background');
+  let live = $derived(kind === 'working' || kind === 'delegating' || kind === 'monitoring' || kind === 'background' || kind === 'watching');
+  /** The pull requests the row still waits on: their checks run. */
+  let watches = $derived((thread.pullRequestWatches ?? []).filter(pullRequestWatchWaits));
+  /** What was under way when the machine went away is only its last known state. */
+  let stale = $derived(away && (live || kind === 'queued'));
   /**
    * Working and monitoring count from the user's request, so a pause to watch
-   * CI and the turn that resumes after it do not reset the clock. A shell left
+   * CI and the turn that resumes after it do not reset the clock; watching a
+   * pull request counts the same way, from its watch on an older core. A shell left
    * running counts from its own start: it may outlive many requests. A request
    * never starts after the turn that carries it on.
    */
   let since = $derived(
-    kind === 'working' ? earliest(thread.requestSince, thread.runningSince)
+    stale ? null
+    : kind === 'working' ? earliest(thread.requestSince, thread.runningSince)
     : kind === 'monitoring' ? thread.requestSince ?? thread.backgroundWork?.since ?? null
+    : kind === 'watching' ? thread.requestSince ?? (watches.length ? Math.min(...watches.map(watch => watch.since)) : null)
     : kind === 'delegating' ? subagents?.since ?? null
-    : live ? thread.backgroundWork?.since ?? null : null);
+    : live ? thread.backgroundWork?.since ?? (wait?.state === 'waiting' ? wait.since : null) : null);
   /** Counting time reads the second clock, only while the agent works: the list's clock ticks far slower. */
   let spent = $derived(since === null ? null : elapsed(Math.max(secondClock.now, now) - since));
   let label = $derived.by(() => {
@@ -44,28 +55,49 @@
     }
     if (kind === 'monitoring' || kind === 'background') {
       const head = spent === null ? strings.sidebar.state[kind] : fill(kind === 'monitoring' ? strings.sidebar.state.monitoringFor : strings.sidebar.state.backgroundFor, { elapsed: spent });
-      return `${head}\n${backgroundLabel(thread.backgroundWork?.kinds ?? [])}`;
+      const what = wait?.state === 'waiting' ? fill(strings.sidebar.state.awaiting, { what: wait.for }) : backgroundLabel(thread.backgroundWork?.kinds ?? []);
+      return `${head}\n${what}`;
+    }
+    if (kind === 'watching') {
+      const head = watches.length === 1 ? strings.sidebar.state.watching : fill(strings.sidebar.state.watchingMany, { count: String(watches.length) });
+      return `${head}\n${watches.map(watch => `#${watch.number}`).join(', ')}${spent === null ? '' : `\n${spent}`}`;
+    }
+    if (kind === 'interrupted' && wait?.state === 'interrupted') {
+      return `${strings.sidebar.state.interrupted}\n${fill(strings.sidebar.state.interruptedBy, { what: wait.for, reason: strings.sidebar.state.interruption[wait.reason] })}`;
     }
     return strings.sidebar.state[kind];
   });
-  /** What the delegating row shows beside its radar: the time, and the count where asked. */
-  let delegatingText = $derived.by(() => {
-    if (!countSubagents) return spent ?? strings.sidebar.state.delegating;
-    const count = subagents?.count ?? 0;
-    const agents = count === 1 ? strings.sidebar.state.subagentsOne : fill(strings.sidebar.state.subagentsMany, { count: String(count) });
-    return spent === null ? agents : `${agents} · ${spent}`;
+  /**
+   * The sub-agents chip: how many work, or, when none does, how many still ask.
+   * A child asking turns it to the waiting colour and says so in its title.
+   */
+  let chip = $derived.by(() => {
+    const count = subagents?.count ?? 0, asking = subagents?.asking ?? 0;
+    if (count === 0 && asking === 0) return null;
+    const many = (one: string, other: string, n: number) => n === 1 ? one : fill(other, { count: String(n) });
+    const atWork = count > 0 ? many(strings.sidebar.state.subagentsOne, strings.sidebar.state.subagentsMany, count) : null;
+    const asks = asking > 0 ? many(strings.sidebar.state.subagentsAskingOne, strings.sidebar.state.subagentsAskingMany, asking) : null;
+    return { shown: count > 0 ? count : asking, asking: asking > 0, label: [atWork, asks].filter(Boolean).join('\n') };
   });
 </script>
 
-{#if kind === null}
+{#if stale && kind !== null}
+  {@const was = fill(strings.sidebar.state.unreachableWas, { state: strings.sidebar.state[kind] })}
+  <span class="when state unreachable" data-testid="thread-state" data-state="unreachable" title={was} aria-label={was}>
+    <CloudOff size={11} aria-hidden="true" /><span class="ui-label">{strings.sidebar.state.unreachable}</span>
+  </span>
+{:else if kind === null}
   <span class="when" title={exactTime(thread.lastUserMessageAt ?? thread.createdAt)}>{ago(thread.lastUserMessageAt ?? thread.createdAt, now)}</span>
 {:else}
   <span class="when state {kind}" data-testid="thread-state" data-state={kind} title={label} aria-label={label}>
     {#if kind === 'working'}<LoaderCircle size={11} class="spinner" aria-hidden="true" /><span class="ui-label">{spent ?? strings.sidebar.state.working}</span>
-    {:else if kind === 'delegating'}<Radar size={11} class="pulse" aria-hidden="true" /><span class="ui-label" data-testid="thread-state-text">{delegatingText}</span>
+    {:else if kind === 'delegating'}<Radar size={11} class="pulse" aria-hidden="true" /><span class="ui-label" data-testid="thread-state-text">{spent ?? strings.sidebar.state.delegating}</span>
     {:else if kind === 'monitoring'}<Radar size={11} class="pulse" aria-hidden="true" /><span class="ui-label">{spent ?? strings.sidebar.state.monitoring}</span>
     {:else if kind === 'background'}<span class="dot pulse" aria-hidden="true"></span><span class="ui-label">{spent ?? strings.sidebar.state.background}</span>
+    {:else if kind === 'watching'}<GitPullRequest size={11} class="pulse" aria-hidden="true" /><span class="ui-label">{spent ?? strings.sidebar.state.watching}</span>
+    {:else if kind === 'interrupted'}<CircleAlert size={11} aria-hidden="true" /><span class="ui-label">{strings.sidebar.state.interrupted}</span>
     {:else}<span class="ui-label">{label}</span>{/if}
+    {#if chip}<span class="agents" class:asking={chip.asking} data-testid="thread-subagents" data-count={chip.shown} role="img" title={chip.label} aria-label={chip.label}><Bot size={11} aria-hidden="true" /><span class="ui-label">{chip.shown}</span></span>{/if}
   </span>
 {/if}
 
@@ -92,17 +124,37 @@
   .error {
     color: var(--color-danger);
   }
+  /* Its background work ended without waking it: it stopped short and needs a resume. */
+  .interrupted {
+    color: var(--color-danger);
+  }
   .done {
     color: var(--color-success);
   }
-  .queued {
+  .queued,
+  .unreachable {
     color: var(--color-muted-foreground);
   }
   /* The turn ended, the agent did not: same colour as working, a slower sign. */
   .delegating,
   .monitoring,
-  .background {
+  .background,
+  .watching {
     color: var(--color-accent);
+  }
+  /* The sub-agents chip: the state's own colour on a faint wash of it, the waiting colour once a child asks. */
+  .agents {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    height: 16px;
+    padding: 0 4px;
+    margin-left: 2px;
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, currentColor 14%, transparent);
+  }
+  .agents.asking {
+    color: var(--color-live);
   }
   .dot {
     flex: none;
@@ -113,11 +165,11 @@
   }
   .state :global(.spinner) {
     flex: none;
-    animation: spin 1s linear infinite;
+    animation: spin 1s steps(60) infinite var(--loops);
   }
   .state :global(.pulse) {
     flex: none;
-    animation: pulse 1.6s var(--ease-out-quint) infinite;
+    animation: pulse 1.6s var(--loop-ease-out-quint-48) infinite var(--loops);
   }
   /* An endless loop stops under reduced motion; the ring keeps its colour. */
   @media (prefers-reduced-motion: reduce) { .state :global(.spinner), .state :global(.pulse) { animation: none; } }

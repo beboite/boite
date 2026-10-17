@@ -5,6 +5,14 @@ import { answerEach, calls, claudeThread, harness, runTurn, scripted, useClaudeH
 
 useClaudeHarness();
 
+/** Synthetic profile flags reach only this test core's isolated accounts. */
+function accountFlags(disabled: boolean): void {
+  for (const profile of Object.values(harness.core.providers.require('claude').profiles)) {
+    if (profile) profile.env = { ...profile.env, BOITE_GUIDES: disabled ? '0' : '1',
+      CLAUDE_CODE_DISABLE_CLAUDE_MDS: disabled ? '1' : '0', BOITE_CONTEXT: 'profile-context', BOITE_TEST_CONTEXT_KEEP: 'kept' };
+  }
+}
+
 /** A parent on the scripted Claude, its first turn done, and a spawn that returns the child's first query. */
 async function team() {
   const client = await harness.connect();
@@ -24,15 +32,18 @@ async function team() {
 }
 
 test('a light child starts with its brief, its hooks and a few tools; a plain one keeps the whole setup', async () => {
+  accountFlags(false);
   const { spawn } = await team();
 
   const { child, call } = await spawn('light', 'light');
   expect(child.contextMode).toMatchObject({ label: 'light', instructions: false, guides: false, mcp: false, hooks: true });
   expect(call.options).toMatchObject({ tools: [...LIGHT_TOOLS], strictMcpConfig: true, mcpServers: {}, disallowedTools: ['Agent', 'Task', 'Workflow'] });
-  expect(call.options.env).toMatchObject({ CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1', BOITE_CONTEXT: 'light', BOITE_GUIDES: '0' });
+  expect(call.options.env).toMatchObject({ CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1', BOITE_CONTEXT: 'light', BOITE_GUIDES: '0', BOITE_TEST_CONTEXT_KEEP: 'kept' });
   // The user's settings stay: their hooks still guard the child and their compaction window applies.
   expect(call.options.settingSources).toEqual(['user', 'project', 'local']);
   expect(call.options.settings).not.toHaveProperty('disableAllHooks');
+  // Claude Code's model-tuned prompt stays (Haiku's own autonomy section rides on it); Boite's guide does not.
+  expect(call.options.systemPrompt).toEqual({ type: 'preset', preset: 'claude_code', excludeDynamicSections: true });
   expect(call.prompts[0]).toContain('Count the lines of README.md');
   expect(call.prompts[0]).not.toContain('You are a Boite subagent of');
 
@@ -40,12 +51,25 @@ test('a light child starts with its brief, its hooks and a few tools; a plain on
   expect(plain.child.contextMode).toBeUndefined();
   expect(plain.call.options.tools).toBeUndefined();
   expect(plain.call.options.strictMcpConfig).toBeUndefined();
-  expect(plain.call.options.env?.['CLAUDE_CODE_DISABLE_CLAUDE_MDS']).toBeUndefined();
-  expect(plain.call.options.env?.['BOITE_CONTEXT']).toBeUndefined();
+  expect(plain.call.options.env).toMatchObject({ CLAUDE_CODE_DISABLE_CLAUDE_MDS: '0', BOITE_GUIDES: '1', BOITE_CONTEXT: 'profile-context', BOITE_TEST_CONTEXT_KEEP: 'kept' });
   expect(plain.call.prompts[0]).toContain('You are a Boite subagent of');
+
+  accountFlags(true);
+  // Rules keep this otherwise full request as an explicit, non-null context mode.
+  const kept = await spawn('kept', { preset: 'full', rules: 'Keep all configured context.' });
+  expect(kept.child.contextMode).toMatchObject({ instructions: true, guides: true });
+  expect(kept.call.options.env?.['CLAUDE_CODE_DISABLE_CLAUDE_MDS']).toBeUndefined();
+  expect(kept.call.options.env?.['BOITE_GUIDES']).toBeUndefined();
+  expect(kept.call.options.env).toMatchObject({ BOITE_CONTEXT: 'custom', BOITE_TEST_CONTEXT_KEEP: 'kept' });
+
+  const plainDisabled = await spawn('plain-disabled');
+  expect(plainDisabled.child.contextMode).toBeUndefined();
+  expect(plainDisabled.call.options.env).toMatchObject({ CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1', BOITE_GUIDES: '0',
+    BOITE_CONTEXT: 'profile-context', BOITE_TEST_CONTEXT_KEEP: 'kept' });
 });
 
 test('a neutral child with rules runs no user hook, keeps every tool and reads the rules first', async () => {
+  accountFlags(false);
   const { spawn } = await team();
   const rules = 'Review as a stranger: no house style, no prior decisions.';
   const { child, call } = await spawn('neutral', { preset: 'neutral', keep: ['mcp'], rules });
@@ -53,7 +77,7 @@ test('a neutral child with rules runs no user hook, keeps every tool and reads t
   expect(call.options.settings).toMatchObject({ disableAllHooks: true });
   expect(call.options.tools).toBeUndefined();
   expect(call.options.strictMcpConfig).toBeUndefined();
-  expect(call.options.env).toMatchObject({ CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1', BOITE_CONTEXT: 'custom' });
+  expect(call.options.env).toMatchObject({ CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1', BOITE_GUIDES: '0', BOITE_CONTEXT: 'custom', BOITE_TEST_CONTEXT_KEEP: 'kept' });
   expect(call.prompts[0]!.startsWith('Rules for this conversation')).toBe(true);
   expect(call.prompts[0]).toContain(rules);
 });

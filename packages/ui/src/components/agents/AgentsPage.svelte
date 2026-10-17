@@ -1,13 +1,14 @@
 <script lang="ts">
   import { onMount, untrack, type Component } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
-  import { ArrowLeft, Bot, Brain, CalendarClock, Ellipsis, History, MessageSquare, Settings2, Target, Users } from '@lucide/svelte';
+  import { ArrowLeft, Bot, Brain, CalendarClock, Ellipsis, History, MessageSquare, Settings2, SquareArrowOutUpRight, Target, Users } from '@lucide/svelte';
   import type { AgentScope } from '@boite/contracts';
-  import { AgentsView, agentChats, attentionOf, chatKey, liveThreads, missionHome, missionPreset, missionsOf, type AgentChat, type AgentEntryKind, type AgentFocus, type AgentSelection } from '../../lib/agents.svelte';
+  import { AgentsView, agentsFilter, chatKey, chatsOf, missionHome, missionPreset, missionsOf, type AgentChat, type AgentEntryKind, type AgentFocus, type AgentSelection } from '../../lib/agents.svelte';
   import { mobileOverlay } from '../../lib/mobile-history';
   import type { Store } from '../../lib/store.svelte';
   import { fill, strings } from '../../lib/strings';
   import { avatarStatus } from '../../lib/thread-state';
+  import { workspace } from '../../lib/workspace.svelte';
   import Menu from '../Menu.svelte';
   import InfoTip from '../InfoTip.svelte';
   import AgentsRail from './AgentsRail.svelte';
@@ -35,6 +36,12 @@
   let creating = $state<Creating | null>(null);
   /** The pane the header opened; null is the record's first pane. */
   let pane = $state<Pane | null>(null);
+  /**
+   * Each link from elsewhere draws the pane afresh: the page stays mounted
+   * behind a thread, and a settings form opened before a card applied would
+   * show the values it read then.
+   */
+  let visit = $state(0);
   /** The conversation a mission was opened from: its back arrow returns there. */
   let origin = $state<AgentSelection | null>(null);
   /** A message the user asked to plan instead of sending: the planned tasks open with it. */
@@ -44,9 +51,24 @@
   const icons: Record<Pane, Component<{ size?: number; strokeWidth?: number }>> = { conversation: MessageSquare, members: Users, missions: Target, activity: History, memory: Brain, routines: CalendarClock, settings: Settings2, tasks: Target };
   const paneLabel = (p: Pane) => (p === 'routines' ? labels.planned : p === 'conversation' ? labels.backToChat : labels[p]);
   const snapshot = $derived(view.snapshot);
-  const attention = $derived(snapshot ? attentionOf(snapshot, store.threads) : { work: [], review: [] });
-  const chats = $derived(snapshot ? agentChats(snapshot, view.seen.messages, view.readAt, attention) : []);
-  const live = $derived(snapshot ? liveThreads(snapshot, store.threads) : new Map());
+  const own = $derived(chatsOf(view));
+  const chats = $derived(own.chats);
+  const live = $derived(own.live);
+  /**
+   * The list shows every connected machine's agents, the way the thread list
+   * shows every machine's threads. The page itself works on one machine at a
+   * time: a row of another opens that machine. A filter holds only while the
+   * page is on the machine it names.
+   */
+  const machines = $derived(workspace.machinesOr(store));
+  const here = $derived(machines.find(m => m.store === store) ?? null);
+  const filter = $derived(here && agentsFilter.machine === here.id ? here.id : null);
+  const others = $derived(filter ? [] : machines.filter(m => m.store !== store).map(machine => ({ machine, view: AgentsView.of(machine.store) })));
+  const lists = $derived([
+    ...(here ? [{ machine: here, view, chats, live }] : []),
+    ...others.map(({ machine, view: other }) => ({ machine, view: other, ...chatsOf(other) }))
+  ]);
+  const elsewhere = $derived(lists.some(l => l.view !== view && l.chats.length > 0));
   /**
    * A team folded into its group opens as that group, and a record that is gone
    * lets go. A desktop opens on the newest conversation, a phone on the list.
@@ -112,10 +134,26 @@
     if (liveHere || chat?.status === 'running') return { text: labels.running, tone: 'running' };
     if (profile?.status === 'archived') return { text: labels.archived };
     if (profile?.status === 'paused' || chat?.status === 'paused') return { text: labels.paused };
-    if (profile) return { text: profile.domain || labels.idle };
+    if (profile) return { text: [profile.domain || labels.idle, ...(entrusted.length ? [fill(labels.looksAfter, { names: entrusted.join(', ') })] : [])].join(' · ') };
     return { text: members.map(a => a.name).join(', ') };
   });
 
+  /** The projects the owner entrusted to this agent, by name, as this machine lists them. */
+  const entrusted = $derived(profile?.projectIds?.flatMap(id => store.projects.find(p => p.id === id)?.name ?? []) ?? []);
+  /**
+   * The thread of an agent's own conversation: what it did, tools and code
+   * included. The conversation itself shows none of it, so the menu opens it.
+   */
+  const workThread = $derived(profile ? snapshot?.sessions.find(s => s.agentId === profile.id && s.scope.kind === 'agent' && s.scope.id === profile.id)?.threadId ?? null : null);
+  const SEE_WORK = 'see-work';
+  const menuItems = $derived([
+    ...layout.more.filter(p => p !== 'routines').map(p => ({ id: p, label: paneLabel(p), glyph: icons[p], active: current === p })),
+    ...(workThread ? [{ id: SEE_WORK, label: labels.seeWork, glyph: SquareArrowOutUpRight }] : []),
+  ]);
+  function pick(id: string) {
+    if (id === SEE_WORK) { if (workThread) void store.open(workThread); return; }
+    toggle(id as Pane);
+  }
   const missions = $derived(snapshot && partner ? missionsOf(snapshot, partner) : []);
   const teamMissions = $derived(team && snapshot ? snapshot.missions.filter(m => m.teamId === team.id) : []);
   const scopes = $derived<AgentScope[]>([
@@ -140,6 +178,12 @@
   $effect(() => { if (level) return mobileOverlay(back); });
 
   onMount(() => { view.start(); return () => view.pause(); });
+  // The other machines' snapshots load while their rows are listed.
+  $effect(() => {
+    const shown = others.map(o => o.view);
+    untrack(() => { for (const other of shown) other.start(); });
+    return () => { for (const other of shown) other.pause(); };
+  });
   // On a phone an open conversation hides the tab bar. The root carries it as a
   // class: `.app:has(.agents-page.detail-open)` made the whole app a `:has()`
   // subject, rechecked on every node mounted anywhere.
@@ -160,7 +204,7 @@
   $effect(() => {
     const target = store.agentsTarget;
     if (!target) return;
-    untrack(() => { open({ kind: 'profile', id: target.agentId }); store.agentsTarget = null; });
+    untrack(() => { open({ kind: target.kind ?? 'profile', id: target.agentId }); if (target.pane) pane = target.pane; visit++; store.agentsTarget = null; });
   });
 
   function open(next: AgentFocus, from: AgentSelection | null = null) {
@@ -198,8 +242,8 @@
   </header>
 {/snippet}
 
-<section class="agents-page" class:detail-open={!!chosen || !!creating} class:no-agents={!!snapshot && !chats.length} data-testid="agents-page">
-  <AgentsRail {view} {chats} {active} {live} onfocus={next => open(next)} oncreate={kind => { creating = { kind }; }} />
+<section class="agents-page" class:detail-open={!!chosen || !!creating} class:no-agents={!!snapshot && !chats.length && !elsewhere} data-testid="agents-page">
+  <AgentsRail {view} {lists} {filter} {active} onfocus={next => open(next)} oncreate={kind => { creating = { kind }; }} />
 
   <main class="agents-main framed">
     {#if view.error || view.loadError}
@@ -240,14 +284,14 @@
               <CalendarClock size={16} strokeWidth={1.75} />{#if planned}<span class="ui-label">{planned}</span>{/if}
             </button>
           {/if}
-          {#if layout.more.length}
-            <Menu placement="bottom" align="end" variant="ghost" label={labels.more} testid="agent-panes" items={layout.more.filter(p => p !== 'routines').map(p => ({ id: p, label: paneLabel(p), glyph: icons[p], active: current === p }))} onpick={id => toggle(id as Pane)}>
+          {#if menuItems.length}
+            <Menu placement="bottom" align="end" variant="ghost" label={labels.more} testid="agent-panes" items={menuItems} onpick={pick}>
               <Ellipsis size={18} strokeWidth={1.75} />
             </Menu>
           {/if}
         </nav>
       </header>
-      {#key `${selected.kind}:${selected.id}:${current}`}
+      {#key `${selected.kind}:${selected.id}:${current}:${visit}`}
         <div class="agents-body" class:chat={current === 'conversation'}>
           {#if current === 'conversation' && conversation}
             <AgentConversation {view} scope={conversation} live={liveHere} onschedule={profile ? plan : undefined} />
@@ -279,7 +323,7 @@
     {:else}
       <div class="agent-welcome" data-testid="agents-empty">
         <Bot size={32} strokeWidth={1.5} />
-        <p>{labels.noAgents}</p>
+        <p>{elsewhere && here ? fill(labels.noAgentsOn, { machine: here.label }) : labels.noAgents}</p>
         <p class="hint">{labels.welcomeHint}</p>
         {#if store.owner}<button type="button" class="primary" onclick={() => { creating = { kind: 'profile' }; }} data-testid="agents-first">{labels.createAgent}</button>{/if}
       </div>

@@ -1,6 +1,6 @@
 import { secureId } from './secure-id';
 import { errorText } from './errors';
-import { RpcErrorCode, providerEnabled, type Account, type AccountQuota, type ProviderSummary, type SubscriptionProxyQuotas } from '@boite/contracts';
+import { RpcErrorCode, providerEnabled, type Account, type AccountQuota, type CoreInfo, type ProviderSummary, type SubscriptionProxyQuotas } from '@boite/contracts';
 import { RpcFailure, type Client } from './client';
 import { fill, strings } from './strings';
 
@@ -103,6 +103,8 @@ export class QuotaReader {
   completed = $state.raw<string[]>([]);
   /** Why the newest read failed, null once one lands. */
   error = $state<string | null>(null);
+  /** The core refused a paired device the read: it predates devices reading limits. */
+  outdated = $state(false);
   /** A refresh asked by hand, still inside its shown minimum. */
   #held = $state(false);
   #hold: ReturnType<typeof setTimeout> | undefined;
@@ -164,11 +166,13 @@ export class QuotaReader {
       if (request === this.#latest) {
         this.accept(rows);
         this.error = null;
+        this.outdated = false;
       }
     } catch (error) {
       if (request === this.#latest) {
         this.rows ??= [];
-        this.error = errorText(error);
+        this.outdated = error instanceof RpcFailure && error.code === RpcErrorCode.Refused;
+        this.error = this.outdated ? null : errorText(error);
         throw error;
       }
     } finally {
@@ -202,7 +206,8 @@ export class GatewayReader {
   private pending: Promise<void> | null = null;
 
   /**
-   * An older core, which does not know the method, leaves the gateway its dashboard.
+   * An older core, which does not know the method or refuses it to a paired
+   * device, leaves the gateway its dashboard.
    * A transport failure says nothing about the gateway: the state stays as it was,
    * so the next `known()` asks again.
    */
@@ -211,7 +216,7 @@ export class GatewayReader {
     const running = (async () => {
       try { this.accept(await client.call('subscriptionProxy.quotas', { refresh })); }
       catch (error) {
-        if (error instanceof RpcFailure && error.code === RpcErrorCode.MethodNotFound)
+        if (error instanceof RpcFailure && (error.code === RpcErrorCode.MethodNotFound || error.code === RpcErrorCode.Refused))
           this.accept({ status: 'unsupported', providers: [], updatedAt: null, checkedAt: null, error: null });
       }
     })();
@@ -240,7 +245,10 @@ export function gatewayReader(key: string): GatewayReader {
 const readers = new Map<string, QuotaReader>();
 
 /** One reader per core, so a page opened again starts from what the last one saw. */
-export function quotaReader(key: string): QuotaReader {
+export function quotaReader(endpointUrl: string, core?: Pick<CoreInfo, 'dataDir' | 'coreId'> | null): QuotaReader {
+  // An address can belong to a different installation after reconnecting.
+  // URL-only rows from older clients have no core identity, so leave them unread.
+  const key = JSON.stringify([endpointUrl, core?.dataDir, core?.coreId]);
   let reader = readers.get(key);
   if (!reader) {
     reader = new QuotaReader(key);

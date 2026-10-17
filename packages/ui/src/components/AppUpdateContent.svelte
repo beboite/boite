@@ -68,17 +68,14 @@
     {/if}
 
     <div class="actions">
-      {#if update.phase === 'ready'}
+      {#if update.phase === 'ready' || update.phase === 'available'}
+        <!-- One click for both: a release still to download installs once it is verified. -->
         <button type="button" class="primary" disabled={appUpdateInstall.preparing} onclick={() => { beforeInstall(); void appUpdateInstall.request(updater); }} data-testid="app-update-install">
           <span class="ui-label">{strings.appUpdate.install}</span>
         </button>
       {:else if update.phase === 'waiting'}
         <button type="button" disabled={updater.cancelling} aria-busy={updater.cancelling} onclick={() => { void updater.cancelInstall(); }} data-testid="app-update-cancel">
           <span class="ui-label">{strings.common.cancel}</span>
-        </button>
-      {:else if update.phase === 'available'}
-        <button type="button" onclick={() => updater.download()} data-testid="app-update-download">
-          <span class="ui-label">{strings.appUpdate.download}</span>
         </button>
       {:else if update.phase === 'error'}
         <button type="button" onclick={() => updater.check(update.channel)} data-testid="app-update-retry">
@@ -139,7 +136,7 @@
   .track { height: 3px; margin-top: 8px; overflow: hidden; border-radius: var(--radius-sm); background: var(--color-surface-3); }
   .track span { display: block; height: 100%; border-radius: inherit; background: var(--color-foreground); transition: width var(--dur-2) var(--ease-out-quint); }
   .track.indeterminate span { opacity: 0.4; }
-  .actions :global(.spinning) { animation: spin 1s linear infinite; }
+  .actions :global(.spinning) { animation: spin 1s linear infinite var(--loops); }
   @media (prefers-reduced-motion: reduce) { .actions :global(.spinning) { animation: none; } }
   :global(html[data-motion='reduced']) .actions :global(.spinning) { animation: none; }
 </style>

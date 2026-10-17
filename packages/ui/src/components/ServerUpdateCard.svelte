@@ -10,6 +10,31 @@
   let progress = $derived(state?.total ? Math.min(100, 100 * state.received / state.total) : null);
   let connected = $derived(store.connection === 'ready');
   let checked = $derived(state?.checkedAt ? fill(strings.appUpdate.lastChecked, { time: time(state.checkedAt) }) : undefined);
+  /** A desktop app's core there: its window reports the app's updater, which takes this card's place. */
+  let desktop = $derived(state?.mode === 'systemd' ? null : updater.desktop);
+  let desktopFailure = $derived(state?.mode === 'systemd' ? null : updater.desktopFailure);
+  let desktopVersion = $derived(desktop?.version ?? desktopFailure?.version ?? null);
+  let desktopActive = $derived(!!desktop && ['downloading', 'waiting', 'installing'].includes(desktop.phase));
+  /** Taken by that machine's core, which waits for its agents before the window installs. */
+  let desktopTaken = $derived(desktopVersion !== null && updater.desktopRequested === desktopVersion);
+  let desktopOffered = $derived(desktopVersion !== null && !desktopActive && !desktopTaken && (desktopFailure !== null || ['available', 'ready', 'error'].includes(desktop?.phase ?? '')));
+  /** Only the Windows installer runs with nobody at that machine to answer it. */
+  let desktopHere = $derived(store.core?.os === 'windows');
+  let desktopProgress = $derived(desktop?.total ? Math.min(100, 100 * desktop.received / desktop.total) : null);
+  function desktopText(): string {
+    if (desktopFailure) return desktopFailure.message;
+    if (desktopTaken) return strings.updateAll.waiting;
+    switch (desktop?.phase) {
+      case 'checking': return strings.appUpdate.checking;
+      case 'available': return fill(strings.appUpdate.available, { version: desktop.version ?? '' });
+      case 'downloading': return desktop.total ? fill(strings.appUpdate.downloading, { received: bytes(desktop.received), total: bytes(desktop.total) }) : fill(strings.appUpdate.downloaded, { received: bytes(desktop.received) });
+      case 'ready': return strings.desktopUpdate.ready;
+      case 'waiting': case 'installing': return strings.desktopUpdate.installing;
+      case 'current': return strings.desktopUpdate.current;
+      case 'error': return desktop.error ?? strings.appUpdate.failed;
+      default: return strings.appUpdate.idle;
+    }
+  }
   $effect(() => { if (connected && store.owner && !state && !updater.legacy && !updater.busy && !updater.error) void updater.load(); });
   function phaseText(): string {
     switch (state?.phase) {
@@ -26,6 +51,29 @@
 </script>
 
 <div class="server-update" data-testid="server-update-card">
+  {#if desktop || desktopFailure}
+  <div class="update-row" data-testid="desktop-update">
+    <div class="version">
+      <span class="ui-label">{strings.desktopUpdate.heading}</span>
+      <span class="number ui-label">{desktop?.currentVersion ?? store.core?.version ?? ''}</span>
+      {#if desktopVersion && (desktopOffered || desktopActive || desktopTaken)}<span class="next"><ArrowRight size={12} aria-hidden="true" /><span class="number target ui-label" data-testid="desktop-update-target">{desktopVersion}</span></span>{/if}
+    </div>
+    {#if store.owner && desktopOffered && desktopHere}
+      <button class="primary small" disabled={!connected || updater.preparing} onclick={() => void updater.installDesktop(label)} data-testid="desktop-update-install"><Download size={14} /><span class="ui-label">{desktopFailure ? strings.common.retry : strings.appUpdate.readyAction}</span></button>
+    {/if}
+  </div>
+  <p class="status" class:error={!!desktopFailure || desktop?.phase === 'error'} role="status" aria-live="polite" data-testid="desktop-update-status">{desktopText()}</p>
+  {#if desktop?.phase === 'downloading'}
+    <div class="track" role="progressbar" aria-label={strings.desktopUpdate.progress}
+      aria-valuemin={desktopProgress === null ? undefined : 0} aria-valuemax={desktopProgress === null ? undefined : 100} aria-valuenow={desktopProgress === null ? undefined : Math.round(desktopProgress)}>
+      <span style:width={desktopProgress === null ? '40%' : `${desktopProgress}%`}></span>
+    </div>
+  {/if}
+  {#if desktopOffered && !desktopHere}<p class="status">{strings.desktopUpdate.elsewhere}</p>{/if}
+  {#if desktopVersion && (desktopOffered || desktopActive)}
+    <a class="release" href={`https://github.com/beboite/boite/releases/tag/v${encodeURIComponent(desktopVersion)}`} target="_blank" rel="noopener noreferrer"><span class="ui-label">{strings.serverUpdate.release}</span><ExternalLink size={12} /></a>
+  {/if}
+  {:else}
   <div class="update-row">
     <div class="version">
       <span class="ui-label">{strings.serverUpdate.heading}</span>
@@ -70,6 +118,7 @@
       <a class="release" href="https://github.com/beboite/boite/blob/main/docs/server.md" target="_blank" rel="noopener noreferrer"><span class="ui-label">{strings.serverUpdate.guide}</span><ExternalLink size={12} /></a>
     </details>
   {/if}
+  {/if}
   {#if updater.error}<p class="error" role="alert">{updater.error}</p><button class="ghost small" disabled={!connected || updater.busy} onclick={() => void updater.load()}><span class="ui-label">{strings.common.retry}</span></button>{/if}
 </div>
 
@@ -98,7 +147,7 @@
   details p { line-height: 1.5; }
   summary { cursor: pointer; }
   code { display: block; overflow-wrap: anywhere; }
-  :global(.spinning) { animation: spin 1s linear infinite; }
+  :global(.spinning) { animation: spin 1s linear infinite var(--loops); }
   @media (max-width: 720px) {
     .update-row { flex-wrap: wrap; }
     button, .metadata .release { min-height: var(--touch-target); }

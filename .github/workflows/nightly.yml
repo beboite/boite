@@ -125,6 +125,7 @@ jobs:
 
   # Signed for the phone app's own address, or the previous release's APK taken
   # back when apps/android, the host and the key are unchanged (docs/android.md).
+  # The app's version is its own, not this release's.
   android:
     name: Android
     needs: revision
@@ -135,7 +136,6 @@ jobs:
       ANDROID_KEYSTORE_PASSWORD: ${{ !inputs.dry-run && secrets.ANDROID_KEYSTORE_PASSWORD || '' }}
     with:
       release: ${{ !inputs.dry-run }}
-      version: ${{ needs.revision.outputs.version }}
 
   image:
     name: Server image
@@ -190,7 +190,7 @@ jobs:
           merge-multiple: true
           path: artifacts
       # Beside the desktop files, which updater-manifest.ts checks one by one.
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: android-apk
           path: android

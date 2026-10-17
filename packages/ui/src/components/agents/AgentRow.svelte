@@ -2,6 +2,8 @@
   import type { Snippet } from 'svelte';
   import type { ThreadSummary } from '@boite/contracts';
   import { fill, strings } from '../../lib/strings';
+  import type { Machine } from '../../lib/workspace.svelte';
+  import MachineIcon from '../MachineIcon.svelte';
   import ThreadState from '../ThreadState.svelte';
 
   /**
@@ -10,7 +12,7 @@
    * right (the same words and colours as a thread: working with its time,
    * needs you, or when it last moved), and one muted line under it.
    */
-  let { title, open = false, unread = 0, live = null, waiting = false, at, now, detail = '', testid, onclick, picture, aside }: {
+  let { title, open = false, unread = 0, live = null, waiting = false, away = false, at, now, detail = '', machine, testid, onclick, picture, aside }: {
     title: string;
     open?: boolean;
     unread?: number;
@@ -18,10 +20,14 @@
     live?: ThreadSummary | null;
     /** Something waits on the user here even with no turn running: a decision, a result to review. */
     waiting?: boolean;
+    /** Its machine is not connected: a turn it last saw running reads as unreachable. */
+    away?: boolean;
     /** The row's last activity, read when nothing runs. */
     at: number;
     now: number;
     detail?: string;
+    /** The machine it runs on, drawn before the picture once there are two, as on a thread's row. */
+    machine?: Machine;
     testid?: string;
     onclick: () => void;
     picture: Snippet;
@@ -40,15 +46,18 @@
   });
 </script>
 
-<div class="agent-row" class:open class:unread={unread > 0} class:meta={!!detail}>
+<div class="agent-row" class:open class:unread={unread > 0} class:meta={!!detail} class:on-machine={!!machine} data-machine-id={machine?.id}>
   <button type="button" class="ghost row" aria-current={open ? 'page' : undefined} title={title} {onclick} data-testid={testid}>
     <span class="headline">
+      {#if machine}
+        <span class="machine" class:offline={away} title={`${machine.label} · ${strings.connection[machine.store.connection]}`} aria-label={machine.label}><MachineIcon icon={machine.icon} os={machine.store.core?.os} /></span>
+      {/if}
       <span class="picture">{@render picture()}</span>
       <span class="title">{title}</span>
       {#if aside}{@render aside()}
       {:else}
         {#if unread > 0 && !waiting && !live}<span class="unread-count" role="img" aria-label={fill(strings.agents.unread, { count: String(unread) })}>{unread}</span>{/if}
-        <ThreadState thread={shown} {now} />
+        <ThreadState thread={shown} {now} {away} />
       {/if}
     </span>
     {#if detail}<span class="detail">{detail}</span>{/if}
@@ -64,8 +73,12 @@
   .row:active:not(:disabled) { transform: none; }
   .headline { display: flex; align-items: center; gap: 8px; min-width: 0; }
   .picture { display: inline-flex; flex: none; }
+  .machine { display: inline-flex; align-items: center; flex: none; color: var(--color-muted-foreground); }
+  .machine.offline { color: var(--color-danger); }
   .title { flex: 1; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-foreground); font-weight: 400; }
   .unread .title { font-weight: 600; }
   .unread-count { flex: none; min-width: 18px; height: 18px; padding: 0 5px; display: grid; place-items: center; border-radius: 999px; background: var(--color-accent); color: var(--color-accent-ink); font-size: var(--text-xs); font-weight: 600; }
   .detail { padding-left: 30px; text-align: left; font-size: var(--text-xs); color: var(--color-muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The machine's icon and its gap before the picture: the line still starts under the name. */
+  .on-machine .detail { padding-left: 51px; }
 </style>

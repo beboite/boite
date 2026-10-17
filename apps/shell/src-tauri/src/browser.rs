@@ -19,7 +19,7 @@
 
 mod popups;
 
-use popups::{close_popups, new_window};
+use popups::{close_popups, follow_surface, new_window};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::{LazyLock, Mutex};
@@ -222,6 +222,9 @@ struct Surfaces {
     /// The last rectangle the UI gave each agent surface, which comes back
     /// when the surface does and sizes it while it waits off screen.
     rects: HashMap<String, SurfaceRect>,
+    /// Pages the user browses that were hidden and put to sleep, so the next
+    /// show gives each its normal memory level back once.
+    asleep: HashSet<String>,
 }
 
 /// An agent surface: the core's agent browser drives it through the UI, and
@@ -281,6 +284,20 @@ impl Surfaces {
     fn forget(&mut self, label: &str) {
         self.shown.remove(label);
         self.rects.remove(label);
+        self.asleep.remove(label);
+    }
+
+    /// True when hiding `label` should put its page to sleep now: a page the
+    /// user browses, not asleep already. The UI's own page keeps running in
+    /// the tray for its toasts and its connection, and an agent surface is
+    /// never hidden: the core puts its page to sleep instead.
+    fn sleep(&mut self, label: &str) -> bool {
+        label != MAIN_LABEL && !is_agent_label(label) && self.asleep.insert(label.to_owned())
+    }
+
+    /// True when `label` slept and is shown now: its memory level goes back to normal.
+    fn wake(&mut self, label: &str) -> bool {
+        self.asleep.remove(label)
     }
 
     /// How the webview `label` is placed now. Hiding a WebView2 stops its page
@@ -343,13 +360,25 @@ fn reconcile<R: Runtime>(app: &AppHandle<R>, labels: Vec<String>) {
             // call that re-enters a window handler must not find it held.
             let placement = surfaces().placement(&label);
             let outcome = match &placement {
-                Placement::Show => view.show(),
-                Placement::Hide => view.hide(),
+                Placement::Show => {
+                    if surfaces().wake(&label) { crate::platform::memory_level(&view, false); }
+                    view.show()
+                }
+                // A page the user browses stops painting once hidden, and sleeps
+                // too: hidden, WebView2 still runs its timers and animations, and
+                // its memory is trimmed as the tray does for the UI's own page.
+                Placement::Hide => view.hide().map(|_| if surfaces().sleep(&label) {
+                    crate::platform::memory_level(&view, true);
+                    crate::platform::suspend(&view);
+                }),
                 Placement::At(rect) => view.set_bounds(bounds_of(rect)).and_then(|_| view.show()),
                 Placement::OffScreen(width, height) => view.set_bounds(off_screen(*width, *height)).and_then(|_| view.show()),
             };
             if let Err(error) = outcome {
                 eprintln!("[shell] the webview {label} could not be placed as {placement:?}: {error}");
+            }
+            if let Some(id) = label.strip_prefix(LABEL_PREFIX).filter(|_| is_agent_label(&label)) {
+                follow_surface(&handle, id, matches!(placement, Placement::Show | Placement::At(_)));
             }
         }
     };
@@ -394,6 +423,7 @@ pub fn close_all<R: Runtime>(app: &AppHandle<R>) {
         let mut surfaces = surfaces();
         surfaces.shown.clear();
         surfaces.rects.clear();
+        surfaces.asleep.clear();
     }
     #[cfg(windows)]
     {
@@ -964,6 +994,25 @@ mod tests {
         assert_eq!(surfaces.placement(MAIN_LABEL), Placement::Hide);
         // A surface id that merely contains "agent-" is not an agent surface.
         assert_eq!(surfaces.placement("boite-browser:browser:agent-1"), Placement::Hide);
+    }
+
+    // A page the user left in a hidden tab ran 30 minutes at 1.5 cores and
+    // grew to 14 GB (2026-10-17): hidden, a WebView2 still runs its scripts.
+    #[test]
+    fn a_hidden_user_page_sleeps_once_and_wakes_once_while_the_ui_and_agent_pages_never_sleep() {
+        let mut surfaces = Surfaces::default();
+        let user = "boite-browser:browser:1";
+        assert!(surfaces.sleep(user));
+        // A second hide, one per resize of a parked window, does not ask again.
+        assert!(!surfaces.sleep(user));
+        assert!(surfaces.wake(user));
+        assert!(!surfaces.wake(user));
+        assert!(surfaces.sleep(user));
+        surfaces.forget(user);
+        assert!(!surfaces.wake(user));
+        // The UI's page hides with a parked window and keeps running; an agent page sleeps through the core.
+        assert!(!surfaces.sleep(MAIN_LABEL));
+        assert!(!surfaces.sleep("boite-browser:agent-1"));
     }
 
     #[test]

@@ -2,7 +2,7 @@
 import type { PermissionMode } from '@boite/contracts';
 import { messageOf, unavailable } from '../../errors.ts';
 import type { SpawnedChild } from '../../procs.ts';
-import { agentEnv, launchPrefix, profileFor, resolveExecutable } from '../../providers/resolve.ts';
+import { agentEnv, profileFor, resolveLaunch } from '../../providers/resolve.ts';
 import { LineSplitter, STDOUT_LINE_MAX, stderrLines } from '../lines.ts';
 import type { TurnContext } from '../types.ts';
 import { conversationOf, rowOf, STDERR_MAX, textOf, type Row } from './events.ts';
@@ -213,8 +213,8 @@ export class AgySession {
 
   private async open(ctx: TurnContext): Promise<void> {
     const profile = profileFor(ctx.provider);
-    const executable = profile === undefined ? null : resolveExecutable(profile);
-    if (executable === null) {
+    const launch = resolveLaunch(profile);
+    if (launch === null) {
       throw unavailable(`no ${ctx.provider.id} executable on this machine`, { providerId: ctx.provider.id });
     }
     if (this.previous !== null) await this.previous;
@@ -223,7 +223,7 @@ export class AgySession {
     const model = await this.launchModel(ctx);
     if (this.ended) return;
     const args = [
-      ...launchPrefix(profile),
+      ...launch.prefix,
       ...(profile?.launch?.args ?? []),
       ...STREAM_ARGS,
       ...(this.sessionId === null ? [] : ['--conversation', this.sessionId]),
@@ -234,7 +234,7 @@ export class AgySession {
       ...modeArgs(ctx.thread.permissionMode),
       PRINT_FLAG,
     ];
-    const child = ctx.spawnChild(executable, args, {
+    const child = ctx.spawnChild(launch.executable, args, {
       cwd: ctx.thread.cwd,
       env: agentEnv(ctx.provider, ctx.accountEnv),
     });

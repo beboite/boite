@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import type { AgentCommand, ImageAttachment } from '@boite/contracts';
 import { resolveDataDir } from '../../paths.ts';
 import { ANTHROPIC_DEFAULT, openAiCacheLife } from '../../prompt-cache.ts';
-import type { PromptCacheLife, TurnContext } from '../types.ts';
+import type { PromptCacheLife, SessionContext } from '../types.ts';
 import { AGENT_ENV, AGENT_OWN_MODEL, SESSION_ROOT } from './protocol.ts';
 import type { PiAssistantMessage, PiCommand } from './protocol.ts';
 
@@ -97,7 +97,7 @@ function stringify(value: unknown): string | null {
  * isolation directory, or under the core's data directory for an account on the
  * provider's own location, which must never write into the user's real `~/.pi`.
  */
-export function sessionDirOf(ctx: TurnContext): string {
+export function sessionDirOf(ctx: SessionContext): string {
   const base = ctx.account.isolationDir ?? resolveDataDir();
   return join(base, SESSION_ROOT, ctx.thread.id);
 }
@@ -108,7 +108,7 @@ export function sessionDirOf(ctx: TurnContext): string {
  * `default` is Boite's own id for "the agent keeps its own", so it sends
  * nothing at all.
  */
-export function modelArgs(ctx: TurnContext): string[] {
+export function modelArgs(ctx: SessionContext): string[] {
   const model = ctx.thread.model;
   if (model === null || model === AGENT_OWN_MODEL) return [];
   return ['--model', ctx.thread.effort === null ? model : `${model}:${ctx.thread.effort}`];
@@ -124,7 +124,7 @@ export function modelArgs(ctx: TurnContext): string[] {
  * in here: pi has no approval gate in RPC mode, so nothing about it ever
  * reaches the agent and changing it would drop a process for nothing.
  */
-export function sessionKey(ctx: TurnContext): string {
+export function sessionKey(ctx: SessionContext): string {
   const model = ctx.thread.model;
   return JSON.stringify({
     ownModel: model === null || model === AGENT_OWN_MODEL,

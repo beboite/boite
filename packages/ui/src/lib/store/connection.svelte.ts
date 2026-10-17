@@ -107,10 +107,10 @@ export class Connection {
     await this.ctx.threads.unsubscribe();
   }
 
-  async connectEndpoint(endpoint: Endpoint): Promise<void> {
+  async connectEndpoint(endpoint: Endpoint, rememberActive = false): Promise<void> {
     const s = this.ctx.store;
     s.closeDeviceInvite();
-    this.attachEndpoint(endpoint, false);
+    this.attachEndpoint(endpoint, rememberActive);
     const client = this.ctx.client;
     let timedOut = false;
     // Only a handshake that never finished is given up on. Once the machine
@@ -150,17 +150,26 @@ export class Connection {
         this.paired = false;
         const { FakeClient } = await import('../fake-client');
         // `&long=1` adds the four-hundred-message thread the windowed list is
-        // looked at on, `&heavy=1` the forty messages and 11.5 MiB of tool calls
-        // a long agent session leaves, `&principal=session` answers as a paired
-        // phone, so the screens a device is refused can be walked without pairing one.
+        // looked at on (`&copies=<n>` n more for the reading cache), `&heavy=1` the forty messages and 11.5 MiB of tool calls
+        // a long agent session leaves, `&working=<n>` n more threads at work, `&principal=session` answers as a paired
+        // phone, so the screens a device is refused can be walked without pairing one,
+        // `&missing=<method>,...` answers those methods like an older machine,
+        // and `&load=<n>` adds n threads that stream without end (`&loadtick=<ms>`).
         s.attach(
           new FakeClient({
             long: params.get('long') === '1',
+            ...(params.get('copies') ? { longCopies: Number(params.get('copies')) } : {}),
             heavy: params.get('heavy') === '1',
+            ...(params.get('working') ? { working: Number(params.get('working')) } : {}),
+            ...(params.get('load') ? { load: Number(params.get('load')) } : {}),
+            ...(params.get('loadtick') ? { loadTickMs: Number(params.get('loadtick')) } : {}),
             delegationDemo: params.get('team') === '1',
-            stewardDemo: params.get('steward') === '1',
+            agentsDemo: params.get('agents') === '1',
+            subagentsDemo: params.get('subagents') === '1',
+            watchDemo: params.get('watch') === '1',
             uninstalled: params.get('uninstalled') === '1',
-            ...(params.get('principal') === 'session' ? { principal: 'session' as const } : {})
+            ...(params.get('principal') === 'session' ? { principal: 'session' as const } : {}),
+            ...(params.get('missing') ? { missing: params.get('missing')!.split(',') } : {})
           })
         );
       } else {
@@ -564,7 +573,11 @@ export class Connection {
       if (current()) apply(value); else cancel?.();
     }).catch(error => { cancel?.(); if (current()) this.ctx.fail(error); });
     const primary = [
-      slice(client.call('projects.list', {}), rows => { s.projects = retainRows(s.projects, projectRead.apply(rows, s.projects)); this.ctx.projects.bootListAt = Date.now(); }, () => projectRead.cancel()),
+      slice(client.call('projects.list', {}), rows => {
+        s.projects = retainRows(s.projects, this.ctx.projects.withPendingArchives(projectRead.apply(rows, s.projects)));
+        this.ctx.projects.bootListAt = Date.now();
+        void this.ctx.projects.sendPendingArchives(rows);
+      }, () => projectRead.cancel()),
       slice(client.call('threads.list', {}), rows => {
         s.threads = reconcileRows(s.threads, threadRead.apply(rows, s.threads));
         const read = reopened && s.openThread?.unread === false ? s.threads.find(t => t.id === s.openThread?.id) : undefined;
@@ -603,8 +616,6 @@ export class Connection {
       // Beside the lists, not among them: the machines of the group are connected once it answers.
       void s.loadGroup();
       void s.refreshMemory();
-      // Grants already read may have changed while the machine was away; unread ones wait for the settings.
-      if (s.stewards !== null) void s.loadStewards();
       if (open && reopened && s.openThread?.id === open.id) {
         await this.ctx.delegation.refreshDelegated(client);
         if (!current() || s.openThread?.id !== open.id) return;

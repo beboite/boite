@@ -9,7 +9,7 @@ let server: { close(): Promise<void> };
 let port: number;
 const id = (value: string) => `[data-testid="${value}"]`;
 beforeAll(async () => { port = await freePort(); server = await startUi(port); }, 60_000);
-afterAll(async () => { await server?.close(); });
+afterAll(async () => { await server?.close(); }, 30_000);
 
 for (const width of [1280, 390]) {
   test(`visibility options work in both views and preserve manual archives at ${width}px`, async () => {
@@ -44,7 +44,7 @@ for (const width of [1280, 390]) {
         expect(await page.evaluate(`document.querySelector('${id(`${prefix}grouping-options`)}').getAttribute('aria-expanded')`)).toBe('true');
       };
       const shot = async (state: string) => {
-        await page.evaluate('Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])');
+        await page.settleAnimations();
         await page.screenshot(join(import.meta.dir, '.artifacts', `visibility-${state}-${width}.png`));
       };
       await showThreadView(page, 'projects', prefix);
@@ -116,7 +116,7 @@ for (const width of [1280, 390]) {
       const row = (project: string, thread: string) => `${project} ${width < 720 ? '.row' : id('thread-row')}[data-thread-id="${thread}"]`;
       const click = async (selector: string) => { await page.evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'center'})`); await page.click(selector); };
       const shot = async (name: string) => {
-        await page.evaluate('Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])');
+        await page.settleAnimations();
         await page.screenshot(join(import.meta.dir, '.artifacts', `project-groups-${name}-${width}.png`));
       };
       await page.waitFor(`document.querySelector('${first}')`);

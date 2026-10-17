@@ -493,6 +493,21 @@ test('fake delegation enforces family access and keeps request IDs idempotent', 
   await expect(client.call('delegation.spawn', { ...params, threadId: first.thread.id, requestId: 'nested' })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
 });
 
+test('fake delegation mirrors the core: a child question ends the wait and the parent answers it; worktree children get a branch', async ({ createClient }) => {
+  const client = await createClient({ delayMs: 0 });
+  await client.call('delegation.configure', { threadId: 't-trace', config: { ...DEFAULT_DELEGATION_CONFIG, enabled: true } });
+  const child = await client.call('delegation.spawn', { threadId: 't-trace', task: 'Ask a question first', requestId: 'asker' });
+  const waited = await client.call('delegation.wait', { threadId: 't-trace', agentId: child.thread.id, timeoutMs: 5000 });
+  expect(waited.state).toBe('needs_input');
+  expect(waited.agents[0]!.needsInput).toEqual([expect.objectContaining({ kind: 'question', options: ['Short', 'Long'], blocking: true })]);
+  const sent = await client.call('delegation.send', { threadId: 't-trace', toThreadId: child.thread.id, text: 'long', requestId: 'answer' });
+  expect(sent).toMatchObject({ status: 'delivered', answered: waited.agents[0]!.needsInput![0]!.id });
+  expect((await client.call('delegation.get', { threadId: 't-trace' })).agents.find(agent => agent.thread.id === child.thread.id)!.needsInput).toBeUndefined();
+  const isolated = await client.call('delegation.spawn', { threadId: 't-trace', task: 'Edit on a branch', worktree: true, requestId: 'isolated' });
+  expect(isolated.worktree).toMatchObject({ state: 'pending', branch: isolated.thread.branch, path: isolated.thread.cwd });
+  await expect(client.call('delegation.spawn', { threadId: 't-trace', task: 'Edit', worktree: 'yes' as unknown as boolean, requestId: 'bad' })).rejects.toMatchObject({ code: RpcErrorCode.InvalidParams });
+});
+
 test('fake delegation gives a child a speed only when asked, by id or label, with the core\'s refusals', async ({ createClient }) => {
   const client = await createClient({ delayMs: 0 });
   // The parent runs fast on a model the agent listed; reading it is what fills the catalog.
@@ -620,7 +635,7 @@ test('fake agent.addProject registers a folder once, with a line in the caller, 
 test('paired fake clients can inspect, message and stop delegation but cannot configure or spawn', async ({ createClient }) => {
   const phone = await createClient({ delayMs: 0, principal: 'session', delegationDemo: true });
   const view = await phone.call('delegation.get', { threadId: 't-trace' });
-  expect(view.agents).toHaveLength(2);
+  expect(view.agents).toHaveLength(4);
   await expect(phone.call('delegation.configure', { threadId: 't-trace', config: view.config })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
   await expect(phone.call('delegation.spawn', { threadId: 't-trace', profileId: 'reviewer', task: 'No', requestId: 'phone-spawn' })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
   await expect(phone.call('delegation.send', { threadId: 't-trace', toThreadId: view.agents[0]!.thread.id, text: 'Status?', requestId: 'phone-send' })).resolves.toMatchObject({ origin: 'user' });

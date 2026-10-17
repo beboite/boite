@@ -234,7 +234,8 @@ export class ThreadCards {
     this.foldAsyncCard(request.id, answer);
     this.asyncChanged(request.threadId);
     pending.resolve(answer);
-    this.threads.deferred.deliverAnswer(request.threadId, `> ${request.text}\n\n${answerTextOf(request, answer)}`);
+    const text = request.agentSetting === undefined ? answerTextOf(request, answer) : this.core.workforce.settingCards.answerText(request.agentSetting, answer);
+    this.threads.deferred.deliverAnswer(request.threadId, `> ${request.text}\n\n${text}`);
   }
 
   /**
@@ -268,9 +269,19 @@ export class ThreadCards {
    * when it holds the proposed value and as changed when it holds another.
    */
   settleSettings(next: Settings): void {
+    this.settle(request => (request.setting === undefined ? null : settledSetting(request.setting, next)), 'a settings change');
+  }
+
+  /**
+   * Every open card `pick` has an answer for settles with it; `close` closes it
+   * unanswered. A card a nested settle already took is passed over.
+   */
+  settle(pick: (request: QuestionRequest) => QuestionAnswer | 'close' | null, by: string): void {
     for (const pending of [...this.questions.values()]) {
-      const answer = pending.request.setting === undefined ? null : settledSetting(pending.request.setting, next);
-      if (answer !== null) this.settleAsync(pending, answer, 'a settings change');
+      if (!this.questions.has(pending.request.id)) continue;
+      const answer = pick(pending.request);
+      if (answer === 'close') this.skipQuestion({ threadId: pending.request.threadId, questionId: pending.request.id }, by);
+      else if (answer !== null) this.settleAsync(pending, answer, by);
     }
   }
 
@@ -299,10 +310,9 @@ export class ThreadCards {
   }
 
   /** An asynchronous card drawn in the running turn, or under the last one, in a message of its own. */
-  private drawAsync(thread: ThreadSummary, ask: QuestionAsk): { questionId: RequestId } {
-    const turns = this.core.journal.listTurns(thread.id);
-    const turn = turns.find(t => t.status === 'running') ?? turns.at(-1);
-    if (turn === undefined) throw refused('the thread has no turn to ask in yet', { threadId: thread.id });
+  drawAsync(thread: ThreadSummary, ask: QuestionAsk): { questionId: RequestId } {
+    const turn = this.core.journal.runningTurn(thread.id) ?? this.core.journal.lastTurn(thread.id);
+    if (turn === null) throw refused('the thread has no turn to ask in yet', { threadId: thread.id });
     const ticket = this.askQuestion(thread, turn, ask);
     const part: Extract<MessagePart, { type: 'question' }> = { type: 'question', questionId: ticket.questionId, ...ask, answer: null };
     const message: Message = { id: newId('msg_'), threadId: thread.id, turnId: turn.id, role: 'assistant', parts: [part], state: 'complete', createdAt: Date.now() };
@@ -373,6 +383,7 @@ export class ThreadCards {
       multiple: ask.multiple,
       ...(ask.async === true ? { async: true } : {}),
       ...(ask.setting === undefined ? {} : { setting: ask.setting }),
+      ...(ask.agentSetting === undefined ? {} : { agentSetting: ask.agentSetting }),
       createdAt: Date.now(),
     };
     let resolve: (answer: QuestionAnswer | null) => void = () => undefined;
@@ -402,7 +413,7 @@ export class ThreadCards {
     let restored = 0;
     for (const request of this.core.journal.openAsyncQuestions()) {
       if (this.questions.has(request.id) || this.core.journal.getThread(request.threadId)?.archived !== false) continue;
-      for (const message of this.core.journal.walkTurnMessages(request.threadId, request.turnId)) {
+      for (const message of this.core.journal.walkTurnMessages(request.threadId, request.turnId, { blobs: false })) {
         const partIndex = message.parts.findIndex(part => part.type === 'question' && part.questionId === request.id && (part.answer ?? null) === null);
         if (partIndex < 0) continue;
         const part = message.parts[partIndex] as Extract<MessagePart, { type: 'question' }>;

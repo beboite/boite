@@ -222,3 +222,23 @@ test('a video the device cannot play offers its download, and a failed one can a
     expect(query<HTMLAnchorElement>('[data-testid=media-fallback-download]').href).toBe(url);
   } finally { canPlayType.mockRestore(); }
 });
+test('a video mounted again keeps the size it loaded at while its metadata comes back', () => {
+  // The timeline mounts a row again when it scrolls back over it: a player that
+  // starts at the browser's default size moved the rows below, and the window
+  // dropped and mounted it again in a loop.
+  const canPlayType = vi.spyOn(HTMLMediaElement.prototype, 'canPlayType').mockReturnValue('maybe');
+  try {
+    const props = { file: { type: 'file' as const, name: 'demo.mp4', mimeType: 'video/mp4', data: btoa('mp4 bytes') }, threadId: 'thread-video', messageId: 'message-video', partIndex: 0 };
+    running = mount(ChatFile, { target: document.body, props }); flushSync();
+    expect(query('.clip').classList.contains('boxed')).toBe(false);
+    const video = query<HTMLVideoElement>('video');
+    Object.defineProperties(video, { videoWidth: { value: 1280 }, videoHeight: { value: 720 } });
+    video.dispatchEvent(new Event('loadedmetadata')); flushSync();
+    unmount(running!, { outro: false }); running = null;
+
+    running = mount(ChatFile, { target: document.body, props }); flushSync();
+    const clip = query<HTMLElement>('.clip');
+    expect(clip.classList.contains('boxed')).toBe(true);
+    expect(clip.getAttribute('style')).toContain('aspect-ratio: 1280 / 720');
+  } finally { canPlayType.mockRestore(); }
+});

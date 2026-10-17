@@ -1,7 +1,7 @@
 import { expect, test, vi } from 'vitest';
 import type { AccountQuota, RpcEvents } from '@boite/contracts';
 import type { Client } from './client';
-import { QuotaReader, REFRESH_SHOWN_MS } from './quota-reader.svelte';
+import { quotaReader, QuotaReader, REFRESH_SHOWN_MS } from './quota-reader.svelte';
 
 const row = (id: string, used = 20): AccountQuota => ({
   accountId: id, providerId: id, providerName: id, label: id, enabled: true,
@@ -114,4 +114,26 @@ test('switching an account off still reads, and a failed read keeps its reason u
   f.calls[2]!.resolve([row('fast', 60)]);
   await retry;
   expect(reader.error).toBeNull();
+});
+
+test.each([
+  [{ dataDir: '/first', coreId: undefined }, { dataDir: '/second', coreId: undefined }],
+  [{ dataDir: '/same', coreId: 'first-core' }, { dataDir: '/same', coreId: 'second-core' }],
+])('cores at one URL keep separate quota readers and persisted rows: %j, %j', (first, second) => {
+  const endpoint = `quota-cache-${first.dataDir}`;
+  const original = quotaReader(endpoint, first);
+  original.accept([row('first-account')]);
+  const replacement = quotaReader(endpoint, second);
+  expect(replacement.rows).toBeNull();
+  replacement.accept([row('second-account')]);
+  expect(original.rows).toEqual([row('first-account')]);
+  expect(quotaReader(endpoint, first)).toBe(original);
+  expect(new QuotaReader(JSON.stringify([endpoint, first.dataDir, first.coreId])).rows).toEqual([row('first-account')]);
+  expect(new QuotaReader(JSON.stringify([endpoint, second.dataDir, second.coreId])).rows).toEqual([row('second-account')]);
+});
+
+test('legacy URL-only rows are not assigned to a newly identified core', () => {
+  const endpoint = 'quota-cache-legacy';
+  new QuotaReader(endpoint).accept([row('old-account')]);
+  expect(quotaReader(endpoint, { dataDir: '/replacement' }).rows).toBeNull();
 });

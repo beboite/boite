@@ -118,6 +118,10 @@ export class ServerUpdates {
 
   private async prepare(offer: ServerOffer, abort: AbortController): Promise<void> {
     const installation = this.installation!;
+    // A worker cut off with its recovery, by a power cut, left its files beside the installation.
+    try { (await import('./server-update/apply.ts')).clearStaleUpdates(dirname(installation.directory)); }
+    catch (error) { this.core.log('warn', `server update cleanup: ${messageOf(error)}`); }
+    if (abort.signal.aborted || this.closed) return;
     const id = randomUUID();
     const directory = join(dirname(installation.directory), `.boite-update-${id}`);
     this.directory = directory;
@@ -132,7 +136,7 @@ export class ServerUpdates {
       const archive = join(directory, 'payload.zip');
       archiveHash = await downloadPayload(offer, archive, abort.signal, progress);
       if (abort.signal.aborted) return;
-      unpackPayload(archive, join(directory, 'stage'), offer.version);
+      await unpackPayload(archive, join(directory, 'stage'), offer.version, abort.signal);
     }
     if (abort.signal.aborted || this.closed) return;
     const plan: ServerUpdatePlan = { id, installation, dataDir: this.core.dataDir, version: offer.version,
@@ -155,8 +159,13 @@ export class ServerUpdates {
         }
       } else {
         let admission: 'accepted' | 'busy' | 'unsupported';
+        const admit = () => writeFileSync(join(directory, 'admitted'), id, { mode: 0o600 });
         try {
-          admission = this.core.requestIdleShutdown(() => writeFileSync(join(directory, 'admitted'), id, { mode: 0o600 }));
+          // Idle installs at once; busy work ends its tool call, 30 s at most, and resumes
+          // after the restart, as a desktop update does. Waiting for idle held a server
+          // with an agent working for hours on "Waiting for work to finish" for good.
+          admission = this.core.requestIdleShutdown(admit);
+          if (admission === 'busy') admission = this.core.requestUpdateHandoff(admit);
         } catch (error) {
           this.cancelFiles(); this.abort = null; this.poll = null;
           this.move({ phase: 'error', error: messageOf(error) });

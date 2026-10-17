@@ -559,7 +559,7 @@ function ensureWorker(port: number): void {
     };
     // No timeout: the Worker sleeps in the kernel until a packet comes, and
     // teardown posts one of its own to wake it.
-    const start: JobsWorkerStart = { port, stop: shared, waitMs: INFINITE, inspectAccess: INSPECT_ACCESS };
+    const start: JobsWorkerStart = { port, stop: shared, waitMs: INFINITE, inspectAccess: INSPECT_ACCESS, globalKey: GLOBAL_JOB_KEY };
     created.postMessage(start);
     // Typed structurally: the bench type-checks this file under the DOM lib, whose Worker has no unref.
     (created as { unref?: () => void }).unref?.();
@@ -660,7 +660,7 @@ function onWorkerMessage(message: JobsWorkerMessage): void {
 
 function onJobPacket(message: number, key: number, pid: number, handle = 0): void {
   if (key === GLOBAL_JOB_KEY) {
-    // Starts and exits also reach the global job. Only the thread owns their trace.
+    // The Worker posts only the global budget alert; this stays for any other.
     if (handle !== 0) native?.close(handle);
     if (message === MSG_JOB_MEMORY_LIMIT) sink?.memoryLimit(tracked.get(pid)?.threadId ?? null, 'budget');
     return;

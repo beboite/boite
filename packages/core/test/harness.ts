@@ -26,12 +26,14 @@ export interface TestCoreOptions {
   settings?: Partial<Settings>;
   boiteGuide?: boolean;
   onShutdown?: () => void;
+  retentionPassMs?: number;
+  pullRequestWatches?: CoreOptions['pullRequestWatches'];
 }
 
 const HOST_AGENT_OPT_INS = [
   'BOITE_E2E_CLAUDE', 'BOITE_E2E_CODEX', 'BOITE_E2E_GROK', 'BOITE_E2E_GROK_QUOTA', 'BOITE_E2E_GROK_PROXY',
   'BOITE_E2E_OPENCODE', 'BOITE_E2E_OPENCODE2', 'BOITE_E2E_PI', 'BOITE_E2E_AGY', 'BOITE_E2E_ANTIGRAVITY',
-  'BOITE_E2E_ANTIGRAVITY_INSTALL', 'BOITE_E2E_INSTALLS', 'BOITE_E2E_KEBACC_INSTALL',
+  'BOITE_E2E_ANTIGRAVITY_INSTALL', 'BOITE_E2E_INSTALLS', 'BOITE_E2E_PLUGIN_INSTALL',
   'BOITE_BENCH_CLAUDE', 'BOITE_BENCH_HOST_AGENTS',
 ];
 
@@ -78,10 +80,12 @@ export async function startTestCore(options: TestCoreOptions = {}): Promise<Test
   process.env.BOITE_TERMINAL_SHELL = process.platform === 'win32' ? (process.env.ComSpec ?? 'C:\\Windows\\System32\\cmd.exe') : '/bin/sh';
 
   const token = newToken();
-  const core = new Core({ dataDir, token, onShutdown: options.onShutdown, bundleHash: options.bundleHash, serverUpdates: options.serverUpdates });
+  const core = new Core({ dataDir, token, onShutdown: options.onShutdown, bundleHash: options.bundleHash, serverUpdates: options.serverUpdates, retentionPassMs: options.retentionPassMs, pullRequestWatches: options.pullRequestWatches });
   // The scripted agents echo their prompt, and the line that teaches `boite ask`
   // would ride along in every reply: a test that wants it turns it back on.
-  core.settings.set({ asyncQuestions: false, ...options.settings });
+  core.settings.set({ asyncQuestions: false, shortAnswers: false, ...options.settings });
+  // An install never reads the real update sources on GitHub: a test that needs one sets its own.
+  core.plugins.updateSources = {};
   // Keep scripted replies limited to test input unless testing session context.
   if (!options.boiteGuide) core.journal.setSetting('brain', { path: null, enabled: false, boiteGuide: false });
 
@@ -196,4 +200,14 @@ export async function removeDir(dir: string, attempts = 20): Promise<void> {
       await new Promise<void>((resolve) => setTimeout(resolve, 25));
     }
   }
+}
+
+/**
+ * Subagents and memory passes off for a persistent agent: what a scenario
+ * reads then stays within the echo driver's 2,000-token context window, which
+ * the subagent guide would fill and compact in the middle of it.
+ */
+export async function quietAgent(client: { call: Awaited<ReturnType<TestCore['connect']>>['call'] }, agent: { id: string; revision: number }) {
+  const runtime = await client.call('agents.runtime.get', { agentId: agent.id });
+  return client.call('agents.runtime.configure', { agentId: agent.id, expectedRevision: agent.revision, config: { ...runtime, subagents: { ...runtime.subagents, enabled: false }, autoMemory: false } });
 }

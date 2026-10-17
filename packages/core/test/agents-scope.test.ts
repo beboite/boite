@@ -8,7 +8,7 @@ test('a shared member cannot import another group context and loses access when 
   try {
     const c = await h.connect(); h.core.workforce.setLimits({ ...h.core.workforce.limits(), paused: true });
     const account = (await c.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
-    const agent = await c.call('agents.profile.save', { value: { name: 'Member', domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' }, status: 'active', tools: ['messages', 'memory'], accountIntegration: 'provider' } });
+    const agent = await c.call('agents.profile.save', { value: { name: 'Member', domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' }, status: 'active', tools: ['messages', 'memory'] } });
     const group = (name: string) => c.call('agents.group.save', { value: { name, memberIds: [agent.id], mode: 'mentions', maxTurns: 6, maxTurnsPerAgent: 2, paused: false } });
     const a = await group('Private'); const b = await group('Shared');
     const aScope: AgentScope = { kind: 'group', id: a.id }; const bScope: AgentScope = { kind: 'group', id: b.id };

@@ -1,4 +1,4 @@
-import type { AgentAddress, AgentLetter, AgentRelation, Message, ThreadStatus, Turn } from '@boite/contracts';
+import type { AgentAddress, AgentLetter, AgentProfile, AgentRelation, Message, ThreadStatus, Turn } from '@boite/contracts';
 import type { Store } from './store.svelte';
 
 export type MailDirection = 'incoming' | 'outgoing';
@@ -71,8 +71,10 @@ export interface Discussion {
   /** Known only for a conversation on this machine. */
   status?: ThreadStatus;
   relation?: AgentRelation;
-  /** The other end is the steward of this thread's project. */
-  steward: boolean;
+  /** The other end is the persistent agent the owner entrusted this thread's project to. */
+  resident: boolean;
+  /** That agent, when the agents directory knows the thread it writes from. */
+  agent?: Pick<AgentProfile, 'id' | 'name' | 'avatar'>;
   entries: AgentMail[];
   sent: number;
   received: number;
@@ -88,23 +90,31 @@ function agentOf(value: string | undefined): { providerId?: string; model?: stri
 /**
  * The thread's mail as discussions, the most recent first. A local thread's
  * live summary wins over what a letter recorded when it was written: titles
- * change and agents finish.
+ * change and agents finish. `agents` names the persistent agent behind a
+ * thread of this machine (the agents directory, with the Agents experiment
+ * on): a resident discussion takes that agent's name. `history` is the
+ * thread's whole mail when `mail` is a part of it: a part holding only this
+ * thread's letters learns the other agent from what it wrote earlier.
  */
-export function discussionsOf(mail: AgentMail[], store: Pick<Store, 'threads' | 'projects'> & Partial<Pick<Store, 'delegation'>>): Discussion[] {
+export function discussionsOf(mail: AgentMail[], store: Pick<Store, 'threads' | 'projects'> & Partial<Pick<Store, 'delegation'>>,
+  agents?: { agentOfThread(threadId: string): AgentProfile | null }, history?: AgentMail[]): Discussion[] {
   const byPeer = new Map<string, AgentMail[]>();
   for (const entry of mail) byPeer.set(entry.peer, [...(byPeer.get(entry.peer) ?? []), entry]);
   const discussions = [...byPeer].map(([key, entries]): Discussion => {
     const last = entries.at(-1)!;
-    const heard = entries.findLast(entry => entry.direction === 'incoming' && entry.letter.origin !== 'notice')?.letter.from;
+    const heard = (entries.findLast(entry => entry.direction === 'incoming') ?? history?.findLast(entry => entry.peer === key && entry.direction === 'incoming'))?.letter.from;
     const told = entries.findLast(entry => entry.direction === 'outgoing')?.letter;
     const address = last.direction === 'outgoing' ? last.letter.to : last.letter.from;
     const here = key.startsWith('here/');
     const live = here ? store.threads?.find(thread => thread.id === address.threadId) ?? store.delegation?.agents.find(agent => agent.thread.id === address.threadId)?.thread : undefined;
     const fromLetters = agentOf(heard?.agent);
-    const notice = entries.find(entry => entry.letter.origin === 'notice')?.letter.from;
+    const relation = entries.findLast(entry => entry.relation)?.relation;
+    const resident = relation === 'resident' || entries.some(entry => entry.direction === 'incoming' && entry.letter.origin === 'resident');
+    const found = resident && here ? agents?.agentOfThread(address.threadId) : null;
+    const agent = found ? { id: found.id, name: found.name, avatar: found.avatar } : undefined;
     return {
       key, address, self: last.self,
-      title: live?.title || heard?.title || told?.toTitle || notice?.title || address.threadId,
+      title: agent?.name || live?.title || heard?.title || told?.toTitle || address.threadId,
       project: (live && store.projects?.find(project => project.id === live.projectId)?.name) || heard?.project || told?.toProject || last.projectName,
       ...(here ? {} : { machine: heard?.machine || told?.toMachine }),
       ...(live ? { providerId: live.providerId, model: live.model ?? undefined } : fromLetters),
@@ -112,8 +122,7 @@ export function discussionsOf(mail: AgentMail[], store: Pick<Store, 'threads' | 
       about: heard?.resources?.trim() || undefined,
       // A letter's status is the sender's when it wrote, nearly always running: only a live summary says what it does now.
       status: live?.status,
-      relation: entries.findLast(entry => entry.relation)?.relation,
-      steward: entries.some(entry => entry.direction === 'incoming' && entry.letter.origin === 'steward'),
+      relation, resident, ...(agent ? { agent } : {}),
       entries, last,
       sent: entries.filter(entry => entry.direction === 'outgoing').length,
       received: entries.filter(entry => entry.direction === 'incoming').length,
@@ -166,11 +175,11 @@ export function groupAgentMail(timeline: Message[], mail: AgentMail[]): { timeli
   return { timeline: rows, groups };
 }
 
-/** The relations worth a tag: who started or delegated whom, and the steward. */
+/** The relations worth a tag: who started or delegated whom, and the agent that looks after the project. */
 export type Hierarchy = Exclude<AgentRelation, 'project' | 'other-project' | 'machine'>;
 /** The tag of a discussion; where a thread runs is said by its project and machine instead. */
-export function hierarchyOf(discussion: Pick<Discussion, 'relation' | 'steward'>): Hierarchy | undefined {
-  if (discussion.steward) return 'steward';
+export function hierarchyOf(discussion: Pick<Discussion, 'relation' | 'resident'>): Hierarchy | undefined {
+  if (discussion.resident) return 'resident';
   const relation = discussion.relation;
   return relation === 'project' || relation === 'other-project' || relation === 'machine' ? undefined : relation;
 }

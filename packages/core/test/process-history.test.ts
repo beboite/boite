@@ -4,6 +4,7 @@ import { Bus } from '../src/bus.ts';
 import { createPosixPlatform } from '../src/platform/posix.ts';
 import type { GuardEventSink, NativeProcessInfo, ProcessEventSink, ProcessPlatform } from '../src/platform/types.ts';
 import { ProcRegistry } from '../src/procs.ts';
+import { nativeAgents } from '../src/native-agents.ts';
 import { DEFAULT_SETTINGS } from '../src/settings.ts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
@@ -48,7 +49,7 @@ beforeEach(async () => {
     machineMemory: () => ({ totalBytes: 32 * 1024 ** 3, availableBytes: 24 * 1024 ** 3 }),
     terminateProcess: (_threadId, pid) => { stopped.push(pid); return true; },
   };
-  procs = new ProcRegistry(harness.core.journal, bus, platform, { forgetDelayMs: FORGET_MS });
+  procs = new ProcRegistry(harness.core.journal, bus, platform, { forgetDelayMs: FORGET_MS, loadIntervalMs: 20, idleLoadIntervalMs: 20 });
 });
 
 afterEach(async () => {
@@ -205,4 +206,45 @@ test('an id with no thread behind it leaves no rows once it is forgotten, a thre
 
   await waitFor(() => harness.core.journal.listProcesses('plugin:fetch:2', 10).length === 0, 2000);
   expect(harness.core.journal.listProcesses(threadId, 10)).toHaveLength(1);
+});
+
+test('a thread that never goes idle forgets the pids that exited past the forget delay', async () => {
+  const threadId = 'terminal:watcher';
+  sink.started(threadId, 500, { exe: 'shell', commandLine: null, parentPid: null, startedAt: 1, incarnation: '1' });
+  for (let pid = 1000; pid < 2000; pid++) {
+    sink.started(threadId, pid, { exe: 'rustc', commandLine: null, parentPid: 500, startedAt: pid, incarnation: String(pid) });
+    sink.exited(threadId, pid, { ...EXIT, startedAt: pid, incarnation: String(pid) });
+  }
+  expect(procs.knownCount(threadId)).toBe(1001);
+  // Twice the delay: a sweep runs at most once per delay, after the entries aged past it.
+  await Bun.sleep(FORGET_MS * 2 + 100);
+  expect(procs.liveOf(threadId).map(record => record.pid)).toEqual([500]);
+  expect(procs.knownCount(threadId)).toBe(1);
+});
+
+test('a thread keeps its newest 2,000 trace rows, its live rows and the rows its agent cards read', async () => {
+  const client = await harness.connect();
+  const { threadId } = await echoThread(harness, client);
+  const run = (pid: number, exe: string, commandLine: string | null, parentPid: number | null, exit = true) => {
+    sink.started(threadId, pid, { exe, commandLine, parentPid, startedAt: pid, incarnation: String(pid) });
+    if (exit) sink.exited(threadId, pid, { ...EXIT, startedAt: pid, incarnation: String(pid) });
+  };
+  run(1, 'shell', null, null, false);
+  run(2, 'bash', 'bash -c claude', 1);
+  run(3, 'claude', 'claude -p "Review parsing" --model opus', 2);
+  for (let pid = 10; pid < 2110; pid++) run(pid, 'rustc', 'rustc --edition 2024', 1);
+  const rows = () => harness.core.journal.db.query('SELECT pid FROM processes WHERE thread_id = ? ORDER BY started_at').all(threadId).map(row => (row as { pid: number }).pid);
+  expect(rows()).toHaveLength(2103);
+  // The exit wrote its columns into the start's row.
+  expect(harness.core.journal.listProcesses(threadId, 1)).toMatchObject([{ pid: 2109, exitCode: 0, cpuMs: 5, commandLine: 'rustc --edition 2024' }]);
+
+  expect(harness.core.journal.pruneProcesses(threadId)).toBe(100);
+  expect(rows().slice(0, 4)).toEqual([1, 2, 3, 110]);
+  expect(rows()).toHaveLength(2003);
+  expect(nativeAgents(harness.core.journal, threadId).map(agent => [agent.name, agent.status])).toEqual([['Claude Code', 'done']]);
+
+  // The thread going idle prunes again: the root's row is no longer live.
+  sink.exited(threadId, 1, { ...EXIT, startedAt: 1, incarnation: '1' });
+  await waitFor(() => rows().length === 2002, 2000);
+  expect(rows().slice(0, 3)).toEqual([2, 3, 110]);
 });

@@ -55,7 +55,7 @@ describe('crash recovery', () => {
       expect(next.journal.getTurn(turn.id)).toEqual(held);
       expect(next.scheduler.state().queued.map(entry => entry.turnId)).toEqual([turn.id, discarded.id]);
       expect(next.scheduler.state().running).toEqual([]);
-      await expect(reader.call('threads.archive', { threadId: first.threadId, onlyIfIdle: true })).rejects.toThrow('pending');
+      await expect(reader.call('threads.archive', { threadId: first.threadId, onlyIfIdle: true })).rejects.toThrow('expected an idle conversation family');
       expect(next.journal.getTurn(turn.id)).toEqual(held);
       expect((await reader.call('turns.start', input)).id).toBe(turn.id);
       expect(next.threads.get(first.threadId).messages).toHaveLength(1);
@@ -208,6 +208,16 @@ describe('crash recovery', () => {
       await next.close();
       await removeDir(harness.dataDir);
     }
+  });
+
+  test('a crashed core whose shutdown is slow throws nothing from its delegation tick', async () => {
+    const harness = await startTestCore();
+    crash(harness);
+    // The delegation tick runs every second: a slow shutdown (Windows CI) lets it fire on the closed journal.
+    await Bun.sleep(1200);
+    expect(harness.core.journal.isClosed()).toBe(true);
+    await stopWithoutCleanup(harness);
+    await removeDir(harness.dataDir);
   });
 
   test('a core that starts on a clean journal recovers nothing', async () => {

@@ -16,6 +16,99 @@ everything is current. Each remote machine keeps its own
 [server update card](server.md#updating-from-the-app) and owner-only
 [agent update controls](agent-updates.md) under its row's details.
 
+## Update everything
+
+An update button sits in the sidebar's foot, beside the limits and Settings,
+whenever something can update: this desktop app, Boite on a machine connected
+with full control, or an agent there. Its card opens above the foot, bottom
+left, and lists each machine with what it would install, the running version
+beside the new one. A dot on the button marks a release not yet put off.
+
+On a wide window the card opens by itself once per release, as soon as a
+check finds it, and never during the tour. It takes no focus. It has two
+buttons:
+
+- Update the app downloads this desktop app's release alone. It shows only
+  when the app has a release; once that release is downloaded it becomes
+  Restart.
+- Update all (Update when there is one thing) starts everything at once. With
+  only the app to update, Update the app is the one button.
+
+Its close button, Remind me later, puts off those releases, after a restart
+too. A newer release lights the dot and opens the card again. A press
+elsewhere only closes the card.
+
+On a phone the card stays closed until the button is pressed, and opens as a
+sheet. Settings, Machines and updates has the same Update all beside Check for
+updates.
+
+Update all sends one `core.updateEverything` request to each machine, all at
+once, naming the agents and the Boite release the card showed. Each core then
+orders its own work, so a remote machine needs nothing more from this window
+and no machine waits for another:
+
+1. Every agent's update starts, pausing its running threads between two tool
+   calls ([agent updates](agent-updates.md#turns-in-flight)).
+2. Boite's own download starts beside their updaters, once each agent counts
+   as updating: an update can first wait on a version check, and a quick
+   download must not reach the idle gate in that gap.
+3. The release installs through the idle gate, which counts an agent update as
+   work under way, its pause and its registry reads included: the restart
+   cannot replace the core under a half-written agent install. Any other work
+   hands off at once: running turns end their tool call, 30 seconds at most,
+   and resume after the restart ([server](server.md#updating-from-the-app)).
+
+This computer's app downloads at the same moment and never restarts by
+itself. Once its release is verified, the card offers Restart, disabled while
+an agent of this computer's core still updates, because the restart stops
+that core. Remote machines go on without it.
+
+Each part shows its own progress in the card: download percentage, the
+threads an agent waits for, Waits for work to finish, Restarting, or Failed
+with the reason on hover. A part that lands keeps its row with a check and Up
+to date for about a second, then the row slides away, so the list empties
+one row at a time. A machine whose core is restarting keeps its row on
+Restarting until it answers again. A failed part stays in the card and the
+button tries it again. The card ends on Everything is up to date, which
+puts itself away after a few seconds, or on "Boite is ready: restart it to
+finish." with Restart. A core released before this request receives the same
+updates one call each, without that ordering.
+
+### The desktop app of another PC
+
+Another Windows PC of the group shows its desktop app as a Boite row under
+its name, and Settings, Machines and updates shows a Desktop app block with an
+Update button on that machine's details instead of the manual server guide.
+Only that PC's own window can run its installer, so the request goes through
+its core:
+
+1. The window reports its updater to the core its shell started, on every
+   change (`core.desktopUpdateReport`). The core accepts the report only from
+   that window: the core token on loopback with client `shell`. A member of
+   the group, a phone, a browser tab or a plugin is refused by field. The core
+   keeps the last report until that window's socket closes, and relays it to
+   owner connections (`core.desktopUpdateChanged`, `core.desktopUpdateStatus`).
+2. Update all, or Update on the block, sends `core.updateEverything` with
+   `app`, the version the report offered. The core starts the agents named,
+   waits until none of them is updating, then sends `ui.appUpdate` to that
+   window alone. Meanwhile the row reads Waits for work to finish.
+3. The window checks the version against its own offer, downloads it if
+   needed and installs it with no dialog there: the owner's click on the other
+   machine is the consent. It shows a short notice first. The shell then does
+   the restart handoff below and relaunches on the new version.
+
+The row follows the window's download, then Restarting while that PC is out of
+reach. A window that closes to install keeps its last report on the core, so
+the row never reads as done before that PC answers on the new version.
+
+With no window open on that PC (its shell quit, the core left resident), the
+answer carries `appError`, "Boite is not open on <machine>", and the row shows
+Failed with that reason. A window hidden in the tray still counts as open.
+Only Windows PCs get the row and the button: a .deb asks for the administrator
+password through `pkexec` and the macOS installer can ask too, with nobody at
+that machine to answer. A core without `features.desktopUpdates` in its hello
+shows no desktop row, as before.
+
 ## Boite and Boite Nightly
 
 Choose Boite for regular releases or Boite Nightly for checked daily builds
@@ -23,7 +116,7 @@ from `main` ([CI schedule](ci.md#boite-de-nuit)). Nightlies may contain
 unfinished changes.
 
 Changing the channel immediately checks for its newest signed release and
-downloads it. Returning from nightly to Boite permits a lower version. Both
+offers it. Returning from nightly to Boite permits a lower version. Both
 channels use the same install location, bundle identifier and `boite2` data
 directory. Projects, accounts and journal files stay in place. The Windows
 installer retains the name Boite. A nightly build calls itself boite (de nuit)
@@ -46,8 +139,11 @@ The first automatic check starts eight seconds after the desktop UI mounts,
 then repeats every six hours. The card's Check for updates button checks at
 once; it stays in the card during a check, disabled, and only makes way for
 the download progress and the install action. Checks and downloads run one at
-a time. A ready update is kept until installation or
-a channel change, without downloading the same version every six hours.
+a time. A release found is announced at once and downloads only when asked:
+an automatic download first held the announcement back for as long as the
+download took. Install and restart downloads it after the confirmation and
+installs as soon as it is verified. A ready update is kept until installation
+or a channel change, without downloading the same version every six hours.
 
 No request has a total deadline, because an installer on a slow link may take
 minutes. Each one gets 15 seconds to connect and fails after 30 seconds without
@@ -72,7 +168,9 @@ it for an update. No installer runs if the request is refused or the exit
 cannot be confirmed. The shell holds reconnects until installation takes over,
 so the window cannot relaunch the old executable. An installation failure
 releases that hold; the core then starts again and resumes the threads as it
-would after the update. Remote cores are not touched by the desktop updater.
+would after the update. The desktop updater never installs on another
+machine by itself: another PC's app installs through that PC's own window
+([the desktop app of another PC](#the-desktop-app-of-another-pc)).
 
 A core released before the handoff answers 404 to that request. The shell then
 falls back to the earlier rule, once, for that update: it polls
@@ -160,7 +258,7 @@ which asks for the administrator password; an AppImage replaces its own file,
 which must stay writable. The macOS update replaces the application bundle in
 place, so a copy still running from the mounted DMG cannot update. Debug builds, Boite Dev, hidden test shells and browser clients cannot install
 an update. The updater belongs to the local desktop, even while the UI displays
-a remote machine. [Agent updates](agent-updates.md) are separate, as are
+a remote machine; another machine asks it through its core, never directly. [Agent updates](agent-updates.md) are separate, as are
 [server image updates](server.md).
 
 The first version containing this updater must be installed manually. It only

@@ -14,7 +14,7 @@ beforeAll(async () => {
   await page.waitFor(`document.querySelector('[data-testid="composer-effort"]')`, 40_000);
 }, 60_000);
 // Closing Chrome and its profile can take seconds on a loaded Windows runner.
-afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
+afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
 test('text and icons share a vertical centre across reading fonts, menus and phone controls', async () => {
   const pairs: [string, string][] = [

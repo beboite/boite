@@ -5,14 +5,15 @@ import type { SpawnedChild } from '../../procs.ts';
 import { profileFor, resolveExecutable } from '../../providers/resolve.ts';
 import type { LiveTurnSettings, SessionContext, TurnContext } from '../types.ts';
 import { hookReport } from './hooks.ts';
-import { authenticationFailureOf, backgroundKind, commandsOf, isAuthenticationFailure, restoredCost, subagentOf } from './mapping.ts';
+import { authenticationFailureOf, authenticationSuspectOf, backgroundKind, commandsOf, isAuthenticationFailure, restoredCost, subagentOf } from './mapping.ts';
 import { toolGate } from './permissions.ts';
-import { childEnv, liveSetup, PROMPT_EFFORT, PromptQueue, STDERR_MAX } from './query.ts';
+import { agentEnv, liveSetup, PROMPT_EFFORT, PromptQueue, STDERR_MAX, THINKING_DISPLAY_FLAG } from './query.ts';
 import type { ClaudeDeps, LiveSetup } from './query.ts';
 import type { ClaudeTurn } from './turn.ts';
 import { SessionRetention } from '../session-retention.ts';
 import { CONTEXT_ENV, CONTEXT_GUIDES_ENV } from '../../context-mode.ts';
 import { noteClaudeMessage } from './diagnostics.ts';
+import { userStdioServers, type LazyServerEntry } from '../../mcp/lazy.ts';
 
 /** How long `stop()` lets the CLI end its turn before the abort signal takes it. */
 /** Claude Code's own subagent and workflow tools; `Task` is the older name of `Agent`. */
@@ -35,6 +36,11 @@ const ORPHANS_MAX = 5_000;
 const WAKE_TEXT = 'Background work finished';
 
 type Timer = ReturnType<typeof setTimeout>;
+
+/** `api_retry`: the CLI is running a request that failed and will try again. */
+function isApiRetry(message: SDKMessage): boolean {
+  return message.type === 'system' && message.subtype === 'api_retry';
+}
 
 /** What the driver has to do for a session that ends, and for turns it hands back. */
 export interface SessionHooks {
@@ -59,6 +65,8 @@ export class ClaudeSession {
   private readonly prompts = new PromptQueue();
   private readonly timers = new Set<Timer>();
   private readonly waiting: ClaudeTurn[] = [];
+  /** Turns whose prompt was queued, or which adopted the CLI's own run. */
+  private readonly steerable = new WeakSet<ClaudeTurn>();
   /** What the CLI runs in the background, as its last `background_tasks_changed` said. */
   private background: BackgroundTask[] = [];
   private readonly backgroundFinishers = new Map<string, NonNullable<SessionContext['backgroundFinished']>[]>();
@@ -73,6 +81,8 @@ export class ClaudeSession {
    * took over before that run finished: they close that run, not the turn.
    */
   private foreignResults = 0;
+  /** The uuids of the messages each turn put in the prompt stream: its prompt and its steers. */
+  private readonly promptIds = new WeakMap<ClaudeTurn, Set<string>>();
   /** No `init` yet: what the CLI writes before it is about an earlier process. */
   private beforeInit = true;
   /**
@@ -94,6 +104,8 @@ export class ClaudeSession {
   private closing = false;
   private ended = false;
   private loginRejected = false;
+  /** An `authentication_failed` frame whose result has not said yet whether it was a 401 or a 403. */
+  private authSuspect = false;
   /** The last `total_cost_usd` this CLI process reported, which the next result includes. */
   private costSoFar = 0;
   /** A resumed session's earlier turns, until the first result says whether the CLI restored them. */
@@ -141,7 +153,8 @@ export class ClaudeSession {
     if (!viewed) this.afterTurns();
   }
 
-  prepare(): Promise<void> {
+  prepare(forTurn = false): Promise<void> {
+    this.retention.prepare(forTurn);
     if (!this.started) {
       this.started = true;
       this.applied = liveSetup(this.ctx.thread);
@@ -166,6 +179,7 @@ export class ClaudeSession {
   }
 
   attach(turn: ClaudeTurn, warmMs: number): void {
+    this.retention.beginTurn();
     this.warmMs = warmMs;
     this.ctx = turn.ctx;
     this.clearIdle();
@@ -182,7 +196,10 @@ export class ClaudeSession {
         if (!adopted && message.type === 'result') continue;
         this.receive(message, true);
       }
-      if (adopted) return;
+      if (adopted) {
+        this.steerable.add(turn);
+        return;
+      }
       // The CLI's own run is still going: its result is not this turn's.
       if (!replay.some(message => message.type === 'result')) this.foreignResults += 1;
     } else {
@@ -200,7 +217,9 @@ export class ClaudeSession {
       this.started = true;
       // The options the query opens on are this turn's: nothing to apply yet.
       this.applied = liveSetup(turn.ctx.thread);
-      this.prompts.push(turn.promptText(), turn.ctx.attachments);
+      this.send(turn, turn.promptText(), turn.ctx.attachments);
+      this.forgetPrompt(turn);
+      this.steerable.add(turn);
       void this.run(turn);
       return;
     }
@@ -212,10 +231,25 @@ export class ClaudeSession {
 
   /** User follow-ups enter the active query's stream with its existing setup. */
   async steer(turn: ClaudeTurn, text: string, attachments: TurnContext['attachments'] = []): Promise<boolean> {
-    if (this.head() !== turn || turn.settled || turn.isStopped || !this.query || this.closing || this.ended) return false;
+    if (this.head() !== turn || !this.steerable.has(turn) || turn.settled || turn.isStopped || !this.query || this.closing || this.ended) return false;
     // The CLI reads this live stream while working, without interrupting its agent loop.
-    this.prompts.push(text, attachments);
+    this.send(turn, text, attachments);
     return true;
+  }
+
+  private send(turn: ClaudeTurn, text: string, attachments: TurnContext['attachments']): void {
+    const id = this.prompts.push(text, attachments);
+    const ids = this.promptIds.get(turn);
+    if (ids === undefined) this.promptIds.set(turn, new Set([id]));
+    else ids.add(id);
+  }
+
+  /** The result names one of this turn's messages: the CLI took it into the run this result ends. */
+  private answers(turn: ClaudeTurn, result: Extract<SDKMessage, { type: 'result' }>): boolean {
+    const ids = this.promptIds.get(turn);
+    if (ids === undefined) return false;
+    const named = result.user_message_uuids ?? (result.user_message_uuid === undefined ? [] : [result.user_message_uuid]);
+    return named.some(id => ids.has(id));
   }
 
   async setPermissionMode(turn: ClaudeTurn, mode: PermissionMode): Promise<boolean> {
@@ -312,7 +346,22 @@ export class ClaudeSession {
     if (turn.isStopped || this.closing || this.ended) return;
     if (!(await this.applyLive(turn))) return;
     if (turn.isStopped || this.closing || this.ended) return;
-    this.prompts.push(turn.promptText(), turn.ctx.attachments);
+    this.send(turn, turn.promptText(), turn.ctx.attachments);
+    this.forgetPrompt(turn);
+    this.steerable.add(turn);
+  }
+
+  /**
+   * Once a turn's prompt is in the stream, the session keeps its callbacks and
+   * setup but not its prompt, images or `continuation`, which reads them: a
+   * warm or viewed session would otherwise hold the last photo until the next
+   * turn. The turn's own context stays whole, since a stranded turn pushes it
+   * again elsewhere; `thread` stays shared with it.
+   */
+  private forgetPrompt(turn: ClaudeTurn): void {
+    if (this.ctx !== turn.ctx) return;
+    const { prompt: _prompt, attachments: _attachments, continuation: _continuation, ...kept } = turn.ctx;
+    this.ctx = kept;
   }
 
   /**
@@ -428,11 +477,15 @@ export class ClaudeSession {
   // -- the query ------------------------------------------------------------
 
   private async run(first?: ClaudeTurn): Promise<void> {
+    const lazy = this.lazyServers(this.ctx);
     try {
-      const options = this.options(this.ctx);
+      const options = this.options(this.ctx, lazy?.entries ?? null);
       const queryFn = await this.deps.loadQuery();
       // Loading the SDK is the first await of the session, so a stop can land here.
       if (!first?.isStopped && !this.closing) {
+        // This frame lives as long as the CLI: holding the first turn here would
+        // keep its tool outputs and images for the whole warm session.
+        first = undefined;
         this.query = queryFn({ prompt: this.prompts.stream(), options });
         // The next turn's setters have something to talk to from here on.
         this.markReady();
@@ -447,12 +500,45 @@ export class ClaudeSession {
       this.finish(null);
     } catch (error) {
       this.finish(messageOf(error));
+    } finally {
+      // The CLI is gone: the servers it started through the core go too.
+      lazy?.release();
     }
+  }
+
+  /**
+   * The user's stdio MCP servers, reached through the core so that each
+   * starts on its first call instead of with the CLI. None for a context mode
+   * that starts without MCP, and the servers as configured when the core
+   * cannot take them over.
+   */
+  private lazyServers(ctx: SessionContext): ReturnType<NonNullable<SessionContext['lazyMcp']>> {
+    const mode = ctx.thread.contextMode ?? null;
+    if (ctx.lazyMcp === undefined || (mode !== null && !mode.mcp)) return null;
+    try {
+      const servers = userStdioServers(ctx.accountEnv.CLAUDE_CONFIG_DIR ?? process.env.CLAUDE_CONFIG_DIR, ctx.thread.cwd);
+      return ctx.lazyMcp(this.cliEnv(ctx), servers);
+    } catch (error) {
+      ctx.log('warn', `claude: MCP servers start with the CLI: ${messageOf(error)}`);
+      return null;
+    }
+  }
+
+  private cliEnv(ctx: SessionContext): Record<string, string | undefined> {
+    const mode = ctx.thread.contextMode ?? null;
+    return mode === null ? agentEnv(ctx.accountEnv) : {
+      ...agentEnv(ctx.accountEnv),
+      [CONTEXT_ENV]: mode.label,
+      [CONTEXT_GUIDES_ENV]: mode.guides ? undefined : '0',
+      CLAUDE_CODE_DISABLE_CLAUDE_MDS: mode.instructions ? undefined : '1',
+    };
   }
 
   /** `replayed` is an adopted message handed to the turn that opened for it: already diagnosed when it came. */
   private receive(message: SDKMessage, replayed = false): void {
-    const authFailure = authenticationFailureOf(message);
+    if (authenticationSuspectOf(message)) this.authSuspect = true;
+    const authFailure = authenticationFailureOf(message, this.authSuspect);
+    if (message.type === 'result' && subagentOf(message) === null) this.authSuspect = false;
     if (authFailure !== null) {
       this.loginRejected = true;
       (this.head()?.ctx ?? this.ctx).authenticationFailed?.();
@@ -467,6 +553,7 @@ export class ClaudeSession {
     if (message.type === 'system' && message.subtype === 'init') {
       for (const report of this.fastReports.splice(0)) report(message.fast_mode_state);
     }
+    if (message.type === 'system' && (message.subtype === 'init' || message.subtype === 'status')) this.noteMode(message.permissionMode);
     if (this.replayed(message)) return;
     // Counted once here, with or without a turn: an adopted message is handed
     // to the turn that opens for it later.
@@ -478,9 +565,16 @@ export class ClaudeSession {
     }
     if (this.sessionId !== null) turn.noteSession(this.sessionId);
     if (message.type === 'result' && this.foreignResults > 0) {
-      this.foreignResults -= 1;
-      if (typeof message.total_cost_usd === 'number') this.costSoFar = message.total_cost_usd;
-      return;
+      // A prompt that reaches the CLI while its own run is still between tool
+      // rounds is folded into that run (CLI 2.1.300): one result answers both,
+      // and it names the prompt. Without that name it is the CLI's own result.
+      if (this.answers(turn, message)) {
+        this.foreignResults = 0;
+      } else {
+        this.foreignResults -= 1;
+        if (typeof message.total_cost_usd === 'number') this.costSoFar = message.total_cost_usd;
+        return;
+      }
     }
     // `total_cost_usd` counts from the start of the CLI process, so on a warm
     // query every result after the first carries the turns before it too. The
@@ -500,6 +594,18 @@ export class ClaudeSession {
       if (turn.sessionLost || this.loginRejected) this.close(null);
       this.endTurn(turn);
     }
+  }
+
+  /**
+   * The permission mode the CLI says it runs in. Claude can switch it by
+   * itself: EnterPlanMode puts it in plan, and an ExitPlanMode the user
+   * refused leaves it there. Recording it makes the next turn's `applyLive`
+   * see the drift and put the thread's own mode back, instead of sending
+   * nothing because the thread's setting did not move.
+   */
+  private noteMode(mode: string | undefined): void {
+    if (typeof mode !== 'string' || mode.length === 0 || this.applied === null) return;
+    this.applied.permissionMode = mode as LiveSetup['permissionMode'];
   }
 
   /** True for the empty result that closes a resume's report of dead background tasks. */
@@ -595,7 +701,10 @@ export class ClaudeSession {
     // Bookkeeping before any output (a task list, a notification) is kept for
     // the turn that may come, but holds nothing: the linger and the warm rule
     // still close the CLI if no output follows.
-    if (!this.woken && message.type !== 'assistant' && message.type !== 'stream_event') return;
+    // A retried API call is the CLI's own run already under way, before any
+    // output: an unavailable or rate-limited model retries for minutes, and the
+    // idle window must not end the CLI in the middle and lose the wake.
+    if (!this.woken && message.type !== 'assistant' && message.type !== 'stream_event' && !isApiRetry(message)) return;
     this.clearIdle();
     this.clearLinger();
     if (this.woken) return;
@@ -612,7 +721,10 @@ export class ClaudeSession {
   /** The loop is over: the CLI is gone, so nothing of this session survives. */
   private finish(reason: string | null): void {
     if (this.ended) return;
-    if (reason !== null && isAuthenticationFailure(reason)) (this.head()?.ctx ?? this.ctx).authenticationFailed?.();
+    // A CLI gone between its `authentication_failed` frame and the result that
+    // would have named the status: the label is all there is to go on.
+    if ((reason !== null && isAuthenticationFailure(reason)) || this.authSuspect) (this.head()?.ctx ?? this.ctx).authenticationFailed?.();
+    this.authSuspect = false;
     this.ended = true;
     // Nothing waits on a query that will never open.
     this.markReady();
@@ -679,7 +791,7 @@ export class ClaudeSession {
     this.timers.add(timer);
   }
 
-  private options(ctx: SessionContext): Options {
+  private options(ctx: SessionContext, lazyMcp: Record<string, LazyServerEntry> | null = null): Options {
     const profile = profileFor(ctx.provider);
     const executable = profile === undefined ? null : resolveExecutable(profile);
     if (executable === null) {
@@ -702,6 +814,18 @@ export class ClaudeSession {
       // This enables the live setter; permissionMode still controls the actual approvals.
       allowDangerouslySkipPermissions: true,
       pathToClaudeCodeExecutable: executable,
+      // Claude Code's own prompt, tuned per model by Anthropic, with Boite's guide
+      // appended. Without a preset the SDK sends an empty one and the model gets a
+      // single identity line. Working directory and memory path go to the first
+      // message, so every thread and worktree shares one cached system prompt.
+      // The CLI records the prompt on a session's first request and reuses it
+      // until compaction, so a resumed session keeps the one it started with.
+      systemPrompt: {
+        type: 'preset',
+        preset: 'claude_code',
+        excludeDynamicSections: true,
+        ...(ctx.systemGuide ? { append: ctx.systemGuide } : {}),
+      },
       settingSources: ['user', 'project', 'local'],
       // Subagents in Boite are Boite conversations (`boite delegate spawn`), so the user
       // can follow, steer and stop them; the CLI's own subagent tools never reach the model.
@@ -709,20 +833,25 @@ export class ClaudeSession {
       // A context mode: what the conversation starts without (docs/context-modes.md).
       ...(mode?.tools ? { tools: [...mode.tools] } : {}),
       ...(mode && !mode.mcp ? { strictMcpConfig: true, mcpServers: {} } : {}),
+      // A server given here replaces the user's own of the same name, which then never starts.
+      ...(lazyMcp !== null ? { mcpServers: lazyMcp } : {}),
       settings: {
         fastMode: setup.fastMode,
+        // Memory belongs to the user's brain and Boite's own notes, not to a
+        // per-folder store the preset would otherwise tell the agent to write.
+        autoMemoryEnabled: false,
         ...(setup.disableHooks ? { disableAllHooks: true } : {}),
       },
       includePartialMessages: true,
       // Every run of the user's own hooks, for the ledger Settings shows.
       includeHookEvents: true,
+      // A CLI driven through the SDK asks the API to leave its reasoning out
+      // ("omitted"): the thinking blocks arrive empty. A summary of it costs the
+      // same thinking tokens. Only the display moves: whether and how much the
+      // model thinks stays the CLI's call (effort, `alwaysThinkingEnabled`).
+      extraArgs: { [THINKING_DISPLAY_FLAG]: 'summarized' },
       abortController: this.abortController,
-      env: mode === null ? childEnv(ctx.accountEnv) : {
-        ...childEnv(ctx.accountEnv),
-        [CONTEXT_ENV]: mode.label,
-        ...(mode.guides ? {} : { [CONTEXT_GUIDES_ENV]: '0' }),
-        ...(mode.instructions ? {} : { CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1' }),
-      },
+      env: this.cliEnv(ctx),
       canUseTool: this.gate.canUseTool,
       hooks: {
         PreToolUse: [{ hooks: [this.gate.preToolUse] }],

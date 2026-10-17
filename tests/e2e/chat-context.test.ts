@@ -10,7 +10,7 @@ beforeAll(async () => {
   page = await BrowserPage.launch({url:`http://127.0.0.1:${port}/?fake=1&open=recent`,windowSize:{width:1300,height:850}});
   await page.waitFor(`document.querySelector('[data-thread-id]')`);
 }, 90000);
-afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
+afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
 async function update(code: string) {
   await page.evaluate(`(async () => { const {workspace} = await import('/src/lib/workspace.svelte.ts'); const store = workspace.active; const thread = store.openThread; ${code} })()`);
@@ -90,8 +90,8 @@ test('silent work has no typing bubble, live text stays visible, and receipts fo
   await update(`thread.messages.at(-1).parts.at(-1).status = 'done';`);
   await page.waitFor(`!document.querySelector('[data-testid="typing-indicator"]')`);
   await update(`thread.messages.at(-1).parts.push({type:'thinking',text:'Checking the result',startedAt:Date.now()});`);
-  // Reasoning right after a call folds into that call's line, which says it is thinking.
-  await page.waitFor(`document.querySelector('[data-testid="tool-group"][data-live="true"] [data-testid="tool-group-label"]')?.textContent === 'Thinking'`);
+  // Reasoning right after a call folds into that call's line, which says what it is thinking about.
+  await page.waitFor(`document.querySelector('[data-testid="tool-group"][data-live="true"] [data-testid="tool-group-label"]')?.textContent === 'Checking the result'`);
   expect(await page.evaluate(`document.querySelector('[data-testid="thinking-part"]') === null`)).toBe(true);
   expect(await page.evaluate(`document.querySelector('[data-testid="typing-indicator"]') === null`)).toBe(true);
   await update(`thread.messages.push({...thread.messages[0],id:'thinking-steer',createdAt:Date.now(),parts:[{type:'text',text:'Check the desktop too.'}]});`);

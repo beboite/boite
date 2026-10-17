@@ -142,13 +142,19 @@ test('drafts survive reload and composer menus stay above the chrome', async () 
     await escape(page);
     await page.type('[data-testid=composer-input]', 'Unsent reply');
 
+    // The panel's animations as they start: a slow runner can read the panel
+    // after its slide ended, when `.entered` has already set it to none.
+    await page.evaluate(`(() => { window.panelAnimations = []; document.addEventListener('animationstart', (event) => {
+      if (event.target instanceof Element && event.target.matches('[data-testid=right-panel]')) window.panelAnimations.push(event.animationName);
+    }, true); })()`);
     await page.click('[data-testid=panel-toggle]');
-    await page.waitFor('document.querySelector("[data-testid=right-panel]")');
-    expect(await page.evaluate('getComputedStyle(document.querySelector("[data-testid=right-panel]")).animationName')).toBe('slide-left');
+    await page.waitFor('document.querySelector("[data-testid=right-panel]") && window.panelAnimations.length > 0');
+    expect(await page.evaluate('window.panelAnimations')).toEqual(['slide-left']);
     await page.settleAnimations();
     await page.screenshot(join(import.meta.dir, '.artifacts', 'panels-desktop.png'));
     await page.click('[data-testid=panel-close]');
-    expect(await page.evaluate('getComputedStyle(document.querySelector("[data-testid=right-panel]")).animationName')).toBe('slide-right-out');
+    await page.waitFor('window.panelAnimations.length > 1');
+    expect(await page.evaluate('window.panelAnimations')).toEqual(['slide-left', 'slide-right-out']);
     await page.waitFor('!document.querySelector("[data-testid=right-panel]")');
     await page.click('[data-testid=terminal-toggle]');
     await page.waitFor('document.querySelector("[data-testid=terminal-drawer]")');

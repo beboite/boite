@@ -1,4 +1,4 @@
-import type { Settings, TitleModel } from './index.ts';
+import type { ModelFavorite, ModelFavorites, Settings, TitleModel } from './index.ts';
 import { BROWSER_PROFILE_NAME_MAX, BROWSER_PROFILES_MAX, browserProfileIdError, DEFAULT_BROWSER_PROFILE, PRIVATE_BROWSER_PROFILE, type BrowserProfile } from './browser';
 
 // Both supported hosts expose URL; contracts otherwise need no DOM or Node types.
@@ -9,6 +9,60 @@ declare const URL: new (value: string) => {
 export const BROWSER_ORIGINS_MAX = 32;
 /** A model id is a name, never a paragraph. */
 const TITLE_MODEL_MAX = 200;
+/** Starred models kept for all of the owner's machines. */
+export const MODEL_FAVORITES_MAX = 200;
+/** A provider id, model id, model name or account label in a favorite. */
+const FAVORITE_TEXT_MAX = 200;
+
+/** One line of printable text of 1 to `FAVORITE_TEXT_MAX` characters, trimmed, or null. */
+function favoriteText(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  return text.length > 0 && text.length <= FAVORITE_TEXT_MAX && !/[\u0000-\u001f]/.test(text) ? text : null;
+}
+
+/**
+ * Which of two favorite lists wins, above zero when `a` does: the later `at`,
+ * then the greater content, so two lists of the same time never flip back and
+ * forth. Missing reads as the empty list of time 0. Core and clients decide alike.
+ */
+export function compareModelFavorites(a: ModelFavorites | null | undefined, b: ModelFavorites | null | undefined): number {
+  const left = a ?? { at: 0, items: [] }, right = b ?? { at: 0, items: [] };
+  if (left.at !== right.at) return left.at - right.at;
+  const content = (list: ModelFavorites) => JSON.stringify(list.items.map(item => [item.providerId, item.model.id, item.model.name, item.account ?? null]));
+  const x = content(left), y = content(right);
+  return x < y ? -1 : x > y ? 1 : 0;
+}
+
+/**
+ * The patch to store over `stored`: a favorite list that loses to the stored
+ * one is dropped, so two clients writing at once leave the later list.
+ */
+export function keepLaterFavorites(stored: Settings, patch: Partial<Settings>): Partial<Settings> {
+  if (patch.modelFavorites === undefined || compareModelFavorites(patch.modelFavorites, stored.modelFavorites) >= 0) return patch;
+  const { modelFavorites: _older, ...rest } = patch;
+  return rest;
+}
+
+/** The favorites as stored: each field trimmed, unknown keys dropped, a repeat kept once. Null when one is malformed. */
+function checkModelFavorites(value: unknown): Settings['modelFavorites'] | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const { at, items } = value as { at?: unknown; items?: unknown };
+  if (typeof at !== 'number' || !Number.isSafeInteger(at) || at < 0 || !Array.isArray(items) || items.length > MODEL_FAVORITES_MAX) return null;
+  const kept: ModelFavorite[] = [];
+  const seen = new Set<string>();
+  for (const raw of items as Partial<ModelFavorite>[]) {
+    if (typeof raw !== 'object' || raw === null) return null;
+    const providerId = favoriteText(raw.providerId), id = favoriteText(raw.model?.id), name = favoriteText(raw.model?.name);
+    const account = raw.account === undefined ? undefined : favoriteText(raw.account);
+    if (providerId === null || id === null || name === null || account === null) return null;
+    const key = JSON.stringify([providerId, id, account ?? null]);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    kept.push({ providerId, model: { id, name }, ...(account === undefined ? {} : { account }) });
+  }
+  return { at, items: kept };
+}
 
 /**
  * The moments the core can compact at. All of them sit between two turns: the
@@ -37,7 +91,7 @@ export interface AutoCompact {
 }
 
 const NUMERIC_KEYS = ['warmProcessMinutes', 'agentCpuCapPercent', 'threadMemoryCapMb', 'agentMemoryBudgetPercent', 'memoryReserveMb'] as const;
-const BOOLEAN_KEYS = ['listenOnLan', 'focusGuard', 'muteAgents', 'reapOrphans', 'memoryProtection', 'autoUpdateHarnesses', 'asyncQuestions', 'agentLogAccess'] as const;
+const BOOLEAN_KEYS = ['listenOnLan', 'focusGuard', 'muteAgents', 'reapOrphans', 'memoryProtection', 'autoUpdateHarnesses', 'asyncQuestions', 'shortAnswers', 'agentLogAccess', 'autoResumeLimitedThreads'] as const;
 /** Keys whose value is a percentage of the machine, so anything past 100 is a mistake. */
 const PERCENT_KEYS = ['agentCpuCapPercent'] as const;
 
@@ -94,9 +148,17 @@ export function checkSettingsPatch(patch: Partial<Settings>): SettingsPatchCheck
         return `${url.origin}${dashboard ? url.pathname : url.pathname.replace(/\/$/, '')}${dashboard ? url.hash : ''}`;
       } catch { return null; }
     };
+    const mode: unknown = (proxy as { mode?: unknown }).mode;
+    if (mode !== undefined && mode !== 'remote' && mode !== 'local') {
+      return { ok: false, field: 'subscriptionProxy', message: 'subscriptionProxy.mode must be remote, local or absent' };
+    }
+    if (mode === 'local' && proxy.kind !== 'douane') {
+      return { ok: false, field: 'subscriptionProxy', message: 'subscriptionProxy.mode local runs Douane: kind must be douane' };
+    }
     const baseUrl = address(proxy.baseUrl, false), dashboardUrl = address(proxy.dashboardUrl, true);
     if (!baseUrl || !dashboardUrl) return { ok: false, field: 'subscriptionProxy', message: 'subscriptionProxy URLs must be HTTP or HTTPS addresses without credentials or query; only the dashboard may have a fragment' };
-    next.subscriptionProxy = { enabled: proxy.enabled, kind: proxy.kind, baseUrl, dashboardUrl };
+    // Absent stays absent: settings saved before the local mode read as remote and compare unchanged.
+    next.subscriptionProxy = { enabled: proxy.enabled, kind: proxy.kind, baseUrl, dashboardUrl, ...(mode === undefined ? {} : { mode }) };
   }
   // Older clients and saved settings may still carry the retired launch limits.
   Reflect.deleteProperty(next, 'maxConcurrentTurns');
@@ -213,6 +275,13 @@ export function checkSettingsPatch(patch: Partial<Settings>): SettingsPatchCheck
       return { ok: false, field: 'autoCompact', message: `autoCompact.moments must list at least one of ${MOMENTS.join(', ')}` };
     }
     next.autoCompact = { tokens: tokens as number | null, moments: MOMENTS.filter((moment) => moments.includes(moment)) };
+  }
+  if (patch.modelFavorites !== undefined) {
+    const favorites = checkModelFavorites(patch.modelFavorites);
+    if (favorites === null) {
+      return { ok: false, field: 'modelFavorites', message: `modelFavorites must be { at, items }: at a time in milliseconds, items at most ${MODEL_FAVORITES_MAX} of { providerId, model: { id, name }, account? }, each text 1 to ${FAVORITE_TEXT_MAX} characters on one line` };
+    }
+    next.modelFavorites = favorites;
   }
   return { ok: true, patch: next };
 }

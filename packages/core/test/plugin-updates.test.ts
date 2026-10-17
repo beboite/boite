@@ -117,6 +117,21 @@ describe('an update source', () => {
     expect(t.store.state('seat-pool')).toMatchObject({ version: '1.1.0', availableVersion: '1.1.0', updates: { available: null } });
   }, 30_000);
 
+  test('a first install reads the source before downloading, and a source that fails leaves the pinned entry', async () => {
+    const t = await setup();
+    t.publish(new Error('git fetch failed: could not resolve host'));
+    await t.installed('1.0.0');
+    expect(t.store.state('seat-pool').updates?.error).toBe('git fetch failed: could not resolve host');
+    await t.client.call('plugins.uninstall', { id: 'seat-pool' });
+
+    // Never checked while it was not installed, the source still names the release a first install brings.
+    t.clock.now += 11_000;
+    t.publish(release('1.1.0'));
+    await t.installed('1.1.0');
+    expect(t.reads()).toBe(2);
+    expect(t.asked).toEqual(['https://plugins.example.invalid/seat-pool-1.0.0', 'https://plugins.example.invalid/seat-pool-1.1.0']);
+  }, 30_000);
+
   test('the same or an older version is not offered, and an older one says why', async () => {
     const t = await setup();
     await t.installed('1.0.0');
@@ -142,7 +157,7 @@ describe('an update source', () => {
   test('a manifest for another plugin, or one that changes what the owner reviewed, is ignored', async () => {
     const t = await setup();
     const cases: [Record<string, unknown> | string | null, string][] = [
-      [release('1.1.0', { id: 'kebacc-switcher' }), 'is for "kebacc-switcher", not "seat-pool"'],
+      [release('1.1.0', { id: 'bots' }), 'is for "bots", not "seat-pool"'],
       [release('1.1.0', { name: 'Official Boite security' }), 'changes name from "Seat pool"'],
       [release('1.1.0', { homepage: 'https://elsewhere.example.invalid' }), 'changes homepage'],
       [release('1.1.0', { executable: 'other' }), 'changes executable'],
@@ -226,7 +241,7 @@ describe('an update source', () => {
 
   test('only a recommended plugin naming a source is checked, and a paired device reaches none of it', async () => {
     const t = await setup();
-    await expect(t.client.call('plugins.checkUpdates', { id: 'kebacc-switcher' })).rejects.toThrow('plugin kebacc-switcher has no update source');
+    await expect(t.client.call('plugins.checkUpdates', { id: 'pool-switcher' })).rejects.toThrow('plugin pool-switcher has no update source');
     expect(t.store.state('seat-pool').updates?.source).toEqual(SOURCE);
     t.store.updateSources = {};
     expect(t.store.state('seat-pool').updates).toBeNull();

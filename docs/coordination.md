@@ -52,11 +52,16 @@ delegation mail. A subagent's results and its coordination letters land in the
 same discussion.
 
 In the chat, a burst of mail shows one row per discussion it touched, in the
-order they started: the other conversation's title, a tag for how it relates to
-this thread, its project and machine, the last thing said and how many letters
-went each way. Ordinary messages and activity markers separate bursts. A burst
+order they started: which way it went, the other conversation's title, a tag
+for how it relates to this thread, its project and machine and the last thing
+said. A row that only received sits on the right in the accent under "Received
+from", like the letters reaching this thread in the discussion; a row that only
+sent sits on the left under "Sent to"; a row with both says "Exchange with" and
+how many letters went each way. A row that only sent still shows the other
+agent's provider, read from an earlier letter of that discussion. Ordinary
+messages and activity markers separate bursts. A burst
 that touched more than four discussions lists four and a line that opens the
-rest. Notices to a steward stay one quiet line.
+rest.
 
 A row opens the Discussions tab in the right panel on that discussion, scrolled
 to the first letter of the burst, which flashes once. The tab lists every
@@ -65,7 +70,8 @@ place and last words. Opening one shows the back and forth: what reaches this
 thread's agent sits on the right in the accent color, like the user's prompts;
 its own letters sit on the left, like its answers. A delegation prompt the user
 typed sits on the right under "You", a subagent's result is labelled "Result",
-and the steward's letters keep the steward's color on the left. Letters of one
+and the letters of the agent the project is entrusted to keep that agent's color
+and name on the left. Letters of one
 side a few minutes apart share one time stamp, a silence of twenty minutes gets
 a line of its own, and a reply to an earlier letter quotes it. Two checkmarks
 mark an outgoing letter that was received or delivered; an unconfirmed, expired or
@@ -77,22 +83,38 @@ the list beside the open discussion; a narrow one or a phone swaps them, with a
 back arrow.
 
 The tag says who started or delegated whom: Started this thread, Started from
-here, Parent, Subagent, Steward, or Looked after for a thread a steward looks
-after. The core works it out when it reads letters out
-(`AgentLetter.relation`), from the journal, so a delegation or a steward grant
-that began later still shows.
+here, Parent, Subagent, or Looks after the project for the persistent agent
+the owner entrusted the thread's project to. The core works it out when it
+reads letters out (`AgentLetter.relation`), from the journal, so a delegation
+or an entrusted project that began later still shows.
 
-## Stewards and notices
+An answer that names a thread the way `boite agents` prints it (`thr_x`,
+`<machine>/thr_x` or `<core-id>/thr_x`) in a code span links to it, and so
+does a bare one with [Chat files and previews](chat-files.md) on
+(`lib/chat-links.ts`), as does a Markdown link whose destination is one; an id
+inside a path (`thr_x.ts`, `src\thr_x`) stays text. Reasoning, a tool's
+Markdown documents and a mission's results and artifacts link a code-span
+thread the same way; a mission names no thread, so from there only a connected
+machine listing the id opens it. A click
+(`workspace.followThreadLink`) opens it on a connected machine that lists the
+thread: this one when none is named, the one the address names, only this one
+for `here`. Otherwise this thread's contacts name its core, and last the one
+machine listing the id opens, since an agent may know it by another name. A
+thread no connected machine or contact holds leaves a notice instead.
 
-A letter from the [steward](stewards.md) the owner assigned to a thread's
-project carries `origin: 'steward'` and is labelled as the steward's in the
-timeline. The provider reads it in its own section, as direction from the
-user's delegate that is still not the user and grants no approval. Notices
-(`origin: 'notice'`) are the core telling a steward that one of its threads
-finished, failed, asked or waits on a permission. Both pass the communication
-settings of the threads involved, wait six hours instead of fifteen minutes,
-and stop when the owner revokes the grant or pauses the steward. Only the local
-core sets either origin; a remote letter's origin is never believed.
+## Letters from the agent of a project
+
+A letter from the [persistent agent](agents.md#projects-entrusted-to-an-agent)
+the owner entrusted a thread's project to carries `origin: 'resident'` and is
+labelled with that agent in the timeline. The provider reads it in its own
+section, as direction from the user's delegate that is still not the user and
+grants no approval; the thread does not answer it by letter, since the agent
+reads the thread's final answer from a notice when the turn ends. Such a letter
+passes the communication settings of the thread, waits six hours instead of
+fifteen minutes, and is rejected once the project is no longer entrusted to the
+agent or the agent is paused. Only the local core sets the origin; a remote
+letter's origin is never believed. The core's notices to the agent are not
+letters: they reach it as work in its own conversation.
 
 ## Reaching another computer
 
@@ -167,7 +189,7 @@ message is not mistaken for noise: `from.thread` is the sender's conversation
 title, `from.address` what `boite agents read` takes, `from.relation` how it
 relates to the recipient ("started this thread; its request is your task", "a
 thread you started; it reports to you", "your parent", "your subagent", the
-steward, same project, another project or machine), `from.project`,
+agent the project is entrusted to, same project, another project or machine), `from.project`,
 `from.machine` when it is elsewhere, `from.agent`, `from.branch`,
 `from.status` and `from.about`, what it works on. `about` is the sender's
 declared resources; a sender on the same core without any falls back to the

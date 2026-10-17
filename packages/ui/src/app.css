@@ -199,9 +199,9 @@
   --color-accent-soft: color-mix(in oklch, var(--color-accent) 18%, transparent);
   --color-accent-ink: #101013;
   --color-reasoning: var(--color-accent);
-  /* What a steward sends: the accent turned away round the wheel, so its letters never read as the user's own. */
-  --color-steward: oklch(66% 0.15 calc(var(--accent-hue) + 150));
-  --color-steward-soft: color-mix(in oklch, var(--color-steward) 14%, transparent);
+  /* What the agent looking after a project sends: the accent turned away round the wheel, so its letters never read as the user's own. */
+  --color-resident: oklch(66% 0.15 calc(var(--accent-hue) + 150));
+  --color-resident-soft: color-mix(in oklch, var(--color-resident) 14%, transparent);
   --accent-spectrum: linear-gradient(to right, oklch(68% .19 0), oklch(68% .19 60), oklch(68% .19 120), oklch(68% .19 180), oklch(68% .19 240), oklch(68% .19 300), oklch(68% .19 360));
   --picker-white: #ffffff;
   --picker-black: #000000;
@@ -383,6 +383,9 @@
   --dur-slide-out: 200ms;
   /* How long a Settings card a conversation pointed at stays ringed. */
   --dur-flash: 1800ms;
+  /* The tour's scenes play like a GIF: reduced motion leaves these two alone. */
+  --dur-demo-step: 220ms;
+  --dur-demo-word: 150ms;
   --ease-slide: cubic-bezier(0.2, 0, 0, 1);
   --z-whip: 100;
   --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
@@ -669,7 +672,7 @@
 .answer-bubble { width: fit-content; max-width: 100%; padding: 12px 16px; }
 @media (max-width: 720px) { .answer-bubble { padding: 10px 14px; } }
 .typing { display: inline-flex; align-items: center; gap: 4px; min-height: 24px; color: var(--color-muted-foreground); }
-.typing > span { width: 5px; height: 5px; border-radius: var(--radius-full); background: currentColor; animation: typing var(--dur-typing) ease-in-out infinite; animation-play-state: var(--typing-state, running); }
+.typing > span { width: 5px; height: 5px; border-radius: var(--radius-full); background: currentColor; animation: typing var(--dur-typing) ease-in-out infinite var(--loops); }
 .typing > span:nth-child(2) { animation-delay: var(--dur-typing-step); }
 .typing > span:nth-child(3) { animation-delay: calc(var(--dur-typing-step) * 2); }
 /* A Settings card a settings card in a conversation pointed at: one accent ring
@@ -786,7 +789,7 @@ html[data-chat-width='full'] {
 @supports not (color: color-mix(in oklch, red 50%, blue)) {
   :root {
     --color-accent-soft: oklch(68% 0.19 var(--accent-hue) / 0.18);
-    --color-steward-soft: oklch(66% 0.15 calc(var(--accent-hue) + 150) / 0.14);
+    --color-resident-soft: oklch(66% 0.15 calc(var(--accent-hue) + 150) / 0.14);
   }
 }
 
@@ -808,6 +811,30 @@ html[data-motion='reduced'] {
   --dur-3: 0.01ms;
   --dur-slide: 0.01ms;
   --dur-slide-out: 0.01ms;
+}
+
+/* Every endless animation but a tour picture's plays `var(--loops)`
+   (render-cost.test.ts): paused while the page is hidden, another application
+   is in front of its window or nobody has touched the PC for two minutes
+   (`lib/at-rest.ts`). A loop on screen keeps the compositor drawing at the
+   monitor's rate, whoever looks. */
+:root { --loops: running; }
+:root[data-at-rest] { --loops: paused; }
+
+/* A loop on screen in front of the user still draws only when it changes:
+   a spinner turns in `steps()` and a pulse eases down these staircases, one
+   step a 60th of a second, the easing of the same name sampled at each step's
+   middle. `lib/loop-phase.ts` starts every loop on the same 60 Hz grid, so
+   sixteen rows step together and the compositor draws 60 frames a second,
+   not one a refresh of a 144 Hz monitor. The name gives the steps a keyframe
+   interval: 48 for the 0.8 s halves of a 1.6 s pulse. */
+:root {
+  --loop-ease-out-quint-48: linear(0.047 0% 2.08%, 0.137 2.08% 4.17%, 0.223 4.17% 6.25%, 0.304 6.25% 8.33%, 0.38 8.33% 10.42%, 0.449 10.42% 12.5%, 0.513 12.5% 14.58%, 0.571 14.58% 16.67%, 0.623 16.67% 18.75%, 0.67 18.75% 20.83%, 0.711 20.83% 22.92%, 0.748 22.92% 25%, 0.781 25% 27.08%, 0.809 27.08% 29.17%, 0.835 29.17% 31.25%, 0.857 31.25% 33.33%, 0.876 33.33% 35.42%, 0.893 35.42% 37.5%, 0.908 37.5% 39.58%, 0.921 39.58% 41.67%, 0.932 41.67% 43.75%, 0.942 43.75% 45.83%, 0.951 45.83% 47.92%, 0.958 47.92% 50%, 0.965 50% 52.08%, 0.97 52.08% 54.17%, 0.975 54.17% 56.25%, 0.979 56.25% 58.33%, 0.983 58.33% 60.42%, 0.986 60.42% 62.5%, 0.988 62.5% 64.58%, 0.991 64.58% 66.67%, 0.992 66.67% 68.75%, 0.994 68.75% 70.83%, 0.995 70.83% 72.92%, 0.996 72.92% 75%, 0.997 75% 77.08%, 0.998 77.08% 79.17%, 0.999 79.17% 81.25%, 0.999 81.25% 83.33%, 0.999 83.33% 85.42%, 1 85.42% 87.5%, 1 87.5% 89.58%, 1 89.58% 91.67%, 1 91.67% 93.75%, 1 93.75% 95.83%, 1 95.83% 97.92%, 1 97.92% 100%);
+  --loop-ease-out-quint-36: linear(0.062 0% 2.78%, 0.181 2.78% 5.56%, 0.291 5.56% 8.33%, 0.392 8.33% 11.11%, 0.482 11.11% 13.89%, 0.562 13.89% 16.67%, 0.631 16.67% 19.44%, 0.691 19.44% 22.22%, 0.742 22.22% 25%, 0.786 25% 27.78%, 0.822 27.78% 30.56%, 0.853 30.56% 33.33%, 0.879 33.33% 36.11%, 0.901 36.11% 38.89%, 0.919 38.89% 41.67%, 0.934 41.67% 44.44%, 0.946 44.44% 47.22%, 0.957 47.22% 50%, 0.965 50% 52.78%, 0.973 52.78% 55.56%, 0.978 55.56% 58.33%, 0.983 58.33% 61.11%, 0.987 61.11% 63.89%, 0.99 63.89% 66.67%, 0.993 66.67% 69.44%, 0.995 69.44% 72.22%, 0.996 72.22% 75%, 0.997 75% 77.78%, 0.998 77.78% 80.56%, 0.999 80.56% 83.33%, 0.999 83.33% 86.11%, 1 86.11% 88.89%, 1 88.89% 91.67%, 1 91.67% 94.44%, 1 94.44% 97.22%, 1 97.22% 100%);
+  --loop-ease-out-quint-66: linear(0.034 0% 1.52%, 0.101 1.52% 3.03%, 0.165 3.03% 4.55%, 0.227 4.55% 6.06%, 0.286 6.06% 7.58%, 0.343 7.58% 9.09%, 0.396 9.09% 10.61%, 0.446 10.61% 12.12%, 0.493 12.12% 13.64%, 0.537 13.64% 15.15%, 0.578 15.15% 16.67%, 0.616 16.67% 18.18%, 0.651 18.18% 19.7%, 0.683 19.7% 21.21%, 0.713 21.21% 22.73%, 0.74 22.73% 24.24%, 0.765 24.24% 25.76%, 0.787 25.76% 27.27%, 0.808 27.27% 28.79%, 0.827 28.79% 30.3%, 0.844 30.3% 31.82%, 0.859 31.82% 33.33%, 0.874 33.33% 34.85%, 0.886 34.85% 36.36%, 0.898 36.36% 37.88%, 0.909 37.88% 39.39%, 0.918 39.39% 40.91%, 0.927 40.91% 42.42%, 0.935 42.42% 43.94%, 0.942 43.94% 45.45%, 0.948 45.45% 46.97%, 0.954 46.97% 48.48%, 0.959 48.48% 50%, 0.964 50% 51.52%, 0.968 51.52% 53.03%, 0.972 53.03% 54.55%, 0.975 54.55% 56.06%, 0.978 56.06% 57.58%, 0.981 57.58% 59.09%, 0.983 59.09% 60.61%, 0.986 60.61% 62.12%, 0.988 62.12% 63.64%, 0.989 63.64% 65.15%, 0.991 65.15% 66.67%, 0.992 66.67% 68.18%, 0.993 68.18% 69.7%, 0.994 69.7% 71.21%, 0.995 71.21% 72.73%, 0.996 72.73% 74.24%, 0.997 74.24% 75.76%, 0.997 75.76% 77.27%, 0.998 77.27% 78.79%, 0.998 78.79% 80.3%, 0.999 80.3% 81.82%, 0.999 81.82% 83.33%, 0.999 83.33% 84.85%, 0.999 84.85% 86.36%, 1 86.36% 87.88%, 1 87.88% 89.39%, 1 89.39% 90.91%, 1 90.91% 92.42%, 1 92.42% 93.94%, 1 93.94% 95.45%, 1 95.45% 96.97%, 1 96.97% 98.48%, 1 98.48% 100%);
+  --loop-ease-in-out-48: linear(0 0% 2.08%, 0.002 2.08% 4.17%, 0.005 4.17% 6.25%, 0.01 6.25% 8.33%, 0.017 8.33% 10.42%, 0.026 10.42% 12.5%, 0.037 12.5% 14.58%, 0.049 14.58% 16.67%, 0.064 16.67% 18.75%, 0.08 18.75% 20.83%, 0.098 20.83% 22.92%, 0.118 22.92% 25%, 0.14 25% 27.08%, 0.164 27.08% 29.17%, 0.19 29.17% 31.25%, 0.217 31.25% 33.33%, 0.246 33.33% 35.42%, 0.277 35.42% 37.5%, 0.309 37.5% 39.58%, 0.342 39.58% 41.67%, 0.376 41.67% 43.75%, 0.411 43.75% 45.83%, 0.446 45.83% 47.92%, 0.482 47.92% 50%, 0.518 50% 52.08%, 0.554 52.08% 54.17%, 0.589 54.17% 56.25%, 0.624 56.25% 58.33%, 0.658 58.33% 60.42%, 0.691 60.42% 62.5%, 0.723 62.5% 64.58%, 0.754 64.58% 66.67%, 0.783 66.67% 68.75%, 0.81 68.75% 70.83%, 0.836 70.83% 72.92%, 0.86 72.92% 75%, 0.882 75% 77.08%, 0.902 77.08% 79.17%, 0.92 79.17% 81.25%, 0.936 81.25% 83.33%, 0.951 83.33% 85.42%, 0.963 85.42% 87.5%, 0.974 87.5% 89.58%, 0.983 89.58% 91.67%, 0.99 91.67% 93.75%, 0.995 93.75% 95.83%, 0.998 95.83% 97.92%, 1 97.92% 100%);
+  --loop-ease-in-out-54: linear(0 0% 1.85%, 0.001 1.85% 3.7%, 0.004 3.7% 5.56%, 0.008 5.56% 7.41%, 0.014 7.41% 9.26%, 0.02 9.26% 11.11%, 0.029 11.11% 12.96%, 0.039 12.96% 14.81%, 0.05 14.81% 16.67%, 0.063 16.67% 18.52%, 0.077 18.52% 20.37%, 0.093 20.37% 22.22%, 0.11 22.22% 24.07%, 0.129 24.07% 25.93%, 0.15 25.93% 27.78%, 0.171 27.78% 29.63%, 0.194 29.63% 31.48%, 0.219 31.48% 33.33%, 0.245 33.33% 35.19%, 0.272 35.19% 37.04%, 0.3 37.04% 38.89%, 0.329 38.89% 40.74%, 0.359 40.74% 42.59%, 0.389 42.59% 44.44%, 0.421 44.44% 46.3%, 0.452 46.3% 48.15%, 0.484 48.15% 50%, 0.516 50% 51.85%, 0.548 51.85% 53.7%, 0.579 53.7% 55.56%, 0.611 55.56% 57.41%, 0.641 57.41% 59.26%, 0.671 59.26% 61.11%, 0.7 61.11% 62.96%, 0.728 62.96% 64.81%, 0.755 64.81% 66.67%, 0.781 66.67% 68.52%, 0.806 68.52% 70.37%, 0.829 70.37% 72.22%, 0.85 72.22% 74.07%, 0.871 74.07% 75.93%, 0.89 75.93% 77.78%, 0.907 77.78% 79.63%, 0.923 79.63% 81.48%, 0.937 81.48% 83.33%, 0.95 83.33% 85.19%, 0.961 85.19% 87.04%, 0.971 87.04% 88.89%, 0.98 88.89% 90.74%, 0.986 90.74% 92.59%, 0.992 92.59% 94.44%, 0.996 94.44% 96.3%, 0.999 96.3% 98.15%, 1 98.15% 100%);
+  --loop-ease-in-out-72: linear(0 0% 1.39%, 0.001 1.39% 2.78%, 0.002 2.78% 4.17%, 0.005 4.17% 5.56%, 0.008 5.56% 6.94%, 0.011 6.94% 8.33%, 0.016 8.33% 9.72%, 0.021 9.72% 11.11%, 0.028 11.11% 12.5%, 0.035 12.5% 13.89%, 0.043 13.89% 15.28%, 0.051 15.28% 16.67%, 0.061 16.67% 18.06%, 0.072 18.06% 19.44%, 0.083 19.44% 20.83%, 0.095 20.83% 22.22%, 0.108 22.22% 23.61%, 0.122 23.61% 25%, 0.137 25% 26.39%, 0.152 26.39% 27.78%, 0.169 27.78% 29.17%, 0.186 29.17% 30.56%, 0.204 30.56% 31.94%, 0.222 31.94% 33.33%, 0.242 33.33% 34.72%, 0.262 34.72% 36.11%, 0.282 36.11% 37.5%, 0.303 37.5% 38.89%, 0.325 38.89% 40.28%, 0.348 40.28% 41.67%, 0.37 41.67% 43.06%, 0.393 43.06% 44.44%, 0.417 44.44% 45.83%, 0.44 45.83% 47.22%, 0.464 47.22% 48.61%, 0.488 48.61% 50%, 0.512 50% 51.39%, 0.536 51.39% 52.78%, 0.56 52.78% 54.17%, 0.583 54.17% 55.56%, 0.607 55.56% 56.94%, 0.63 56.94% 58.33%, 0.652 58.33% 59.72%, 0.675 59.72% 61.11%, 0.697 61.11% 62.5%, 0.718 62.5% 63.89%, 0.738 63.89% 65.28%, 0.758 65.28% 66.67%, 0.778 66.67% 68.06%, 0.796 68.06% 69.44%, 0.814 69.44% 70.83%, 0.831 70.83% 72.22%, 0.848 72.22% 73.61%, 0.863 73.61% 75%, 0.878 75% 76.39%, 0.892 76.39% 77.78%, 0.905 77.78% 79.17%, 0.917 79.17% 80.56%, 0.928 80.56% 81.94%, 0.939 81.94% 83.33%, 0.949 83.33% 84.72%, 0.957 84.72% 86.11%, 0.965 86.11% 87.5%, 0.972 87.5% 88.89%, 0.979 88.89% 90.28%, 0.984 90.28% 91.67%, 0.989 91.67% 93.06%, 0.992 93.06% 94.44%, 0.995 94.44% 95.83%, 0.998 95.83% 97.22%, 0.999 97.22% 98.61%, 1 98.61% 100%);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -1204,6 +1231,17 @@ details[open] > summary .fold-caret {
 
 .disclosure-fold.open { grid-template-rows: 1fr; opacity: 1; }
 .disclosure-fold > * { min-height: 0; overflow: hidden; }
+
+/* A closed body stops being styled and laid out once its close has run: a
+   group opened once kept every call it built in each layout of its row. The
+   transition sits on the closed state only, so a close waits for the track
+   and an open shows the body at once. */
+@supports (transition-behavior: allow-discrete) {
+  .disclosure-fold:not(.open) > * {
+    content-visibility: hidden;
+    transition: content-visibility var(--dur-3) allow-discrete;
+  }
+}
 
 /* Instant folds and chevrons for whoever asked for less motion. */
 @media (prefers-reduced-motion: reduce) {

@@ -16,6 +16,7 @@ import { registerTailscaleMethods } from './tailscale.ts';
 import { registerFirewallMethods } from './firewall.ts';
 import { registerSettingsMethods } from './settings.ts';
 import { registerSubscriptionProxy } from './subscription-proxy.ts';
+import { registerGatewayMove } from './gateway-move.ts';
 import { registerThreadMethods } from './threads/rpc.ts';
 import { registerTraceMethods } from './trace.ts';
 import { registerUsageMethods } from './usage.ts';
@@ -23,12 +24,13 @@ import { registerPushMethods } from './push.ts';
 import { registerSpeechMethods } from './speech.ts';
 import { registerTelemetry } from './telemetry.ts';
 import { registerCoordination } from './coordination.ts';
-import { registerStewardMethods } from './stewards.ts';
+import { registerResidentMethods } from './agents/projects.ts';
 import { registerGroupMethods } from './group/rpc.ts';
 import { registerTerminalMethods } from './terminals.ts';
 import { registerWorkflowMethods } from './workflows.ts';
 import { registerWorktreeMethods } from './worktree-sweep.ts';
 import { reveal } from './reveal.ts';
+import { updateEverything } from './update-everything.ts';
 
 /** Adding a module is one file plus one line here. `hello` is the server's own. */
 export function registerModules(core: Core): void {
@@ -47,6 +49,9 @@ export function registerModules(core: Core): void {
   core.router.register('core.updateStatus', params => core.serverUpdates.status(params.refresh));
   core.router.register('core.updateInstall', params => core.serverUpdates.install(params.version));
   core.router.register('core.updateCancel', () => core.serverUpdates.cancel());
+  core.router.register('core.updateEverything', params => updateEverything(core, params));
+  core.router.register('core.desktopUpdateReport', (params, ctx) => core.desktopUpdates.report(params, ctx.connection));
+  core.router.register('core.desktopUpdateStatus', () => core.desktopUpdates.snapshot());
   registerPersistentAgents(core);
   core.router.register('brain.status', () => core.brain.status());
   core.router.register('brain.configure', params => core.brain.configure(params));
@@ -54,13 +59,15 @@ export function registerModules(core: Core): void {
   registerHookMethods(core);
   registerTelemetry(core);
   registerCoordination(core);
-  registerStewardMethods(core);
+  registerResidentMethods(core);
   registerGroupMethods(core);
   registerSpeechMethods(core);
   registerPushMethods(core);
   core.router.register('threads.activity.set', (params) => core.activity.set(params));
   core.router.register('threads.activity.control', (params) => core.activity.control(params));
-  core.router.register('quotas.list', (params) => core.quotas.list(params.refresh, params.requestId));
+  // Progress is for the window that asked: every other client would drop it on its requestId.
+  core.router.register('quotas.list', (params, ctx) => core.quotas.list(params.refresh, params.requestId,
+    (quota) => ctx.connection.sendEvent('quotas.progress', { requestId: params.requestId!, quota })));
   core.router.register('quotas.configure', (params) => core.quotas.configure(params.accountId, params.enabled));
   core.router.register('quotas.reset', (params) => core.quotas.resets.reset(params.accountId, params.confirmed));
   core.router.register('plugins.list', () => core.plugins.list());
@@ -72,6 +79,8 @@ export function registerModules(core: Core): void {
   core.router.register('plugins.accounts', (params) => core.plugins.accounts(params.id, params.refresh));
   core.router.register('plugins.accountAction', (params) => core.plugins.accountAction(params));
   core.router.register('plugins.app', (params) => core.plugins.app(params));
+  core.router.register('plugins.autostart', (params) => core.plugins.autostart(params));
+  core.router.register('plugins.gateway', (params) => core.plugins.gateway(params));
   core.router.register('plugins.checkUpdates', (params) => core.plugins.checkUpdates(params));
   core.router.register('ui.reveal', (params) => reveal(core, params));
   registerProjectMethods(core);
@@ -87,7 +96,9 @@ export function registerModules(core: Core): void {
     return core.delegation.spawn(params);
   });
   core.router.register('delegation.send', (params, ctx) => core.delegation.send(params, ctx.connection.identity.principal === 'agent' ? 'agent' : 'user'));
-  core.router.register('delegation.stop', params => ({ stopped: core.delegation.stop(params.threadId, params.agentId) }));
+  // The agent's own stop leaves a pause it may lift; the owner's, one only the owner's next message releases.
+  core.router.register('delegation.stop', (params, ctx) => ({ stopped: core.delegation.stop(params.threadId, params.agentId, ctx.connection.identity.principal === 'agent' ? 'agent' : 'stop') }));
+  core.router.register('delegation.resume', (params, ctx) => core.delegation.resume(params.threadId, params.agentId, ctx.connection.identity.principal));
   registerWorkflowMethods(core, probe);
   registerUpdateMethods(core);
   registerAccountMethods(core);
@@ -97,6 +108,7 @@ export function registerModules(core: Core): void {
   registerUsageMethods(core);
   registerSettingsMethods(core);
   registerSubscriptionProxy(core);
+  registerGatewayMove(core);
   registerKeybindingMethods(core);
   registerSessionMethods(core);
   registerTailscaleMethods(core);

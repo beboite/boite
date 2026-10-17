@@ -4,7 +4,7 @@
   import { restorePreviewMentions } from '../lib/preview-mentions';
   import { AGENT_PREFIX, isAgentCommand, runCommand } from '../lib/commands.svelte';
   import { agentSlashItems, boiteSlashItems, listKey, mentionQueryOf, slashQueryOf, type ChipCommand } from '../lib/composer-menus';
-  import { attachFiles } from '../lib/composer-attachments';
+  import { attachFiles, receiveDroppedFiles } from '../lib/composer-attachments';
   import { rewindComposerEdit } from '../lib/composer-edit';
   import { fitHeight, selfSizing } from '../lib/composer-size';
   import { editComposerInput, insertImageReference, removeImageReferences, touchesImageReference, trackImageSend } from '../lib/composer-images';
@@ -14,7 +14,7 @@
   import { unresolvedAssetId } from '../lib/draft-attachments';
   import { focusWithin } from '../lib/focus';
   import { touchScreen } from '../lib/device';
-  import { ignoreQuestions, repliesOf, replyTarget, sendAnswer } from '../lib/question-reply.svelte';
+  import { ignoreQuestions, noteTyping, repliesOf, replyTarget, sendAnswer } from '../lib/question-reply.svelte';
   import { emptyBox, returnPrompt, sentPrompts, textEntries, type ComposerState, type SentPrompt } from '../lib/composer-queue';
   import { rankItems, type PaletteItem } from '../lib/palette';
   import { clearStash, DRAFT_STASH_KEY, readStash, writeStash } from '../lib/prefs';
@@ -287,7 +287,7 @@
     }
     // A host whose undo could not be cancelled already rewrote the box: the old path keeps its references.
     const nativeUndo = input.inputType === 'historyUndo' || input.inputType === 'historyRedo';
-    const state = stateForInput();
+    const state = stateForInput(); noteTyping(store, key);
     // The state still holds the text before this edit: that is the step undo returns to.
     if (!nativeUndo) {
       const kind = touchesImageReference(state.text, state.attachments, pendingEdit) ? 'big' : editKind(input.inputType, pendingEdit);
@@ -450,7 +450,7 @@
     void take(files);
   }
 
-  /** File drops belong to the composer. */
+  $effect(() => receiveDroppedFiles(take)); // File drops belong to the composer, in the shell too (`lib/native-drop.ts`).
   function ondragover(event: DragEvent) {
     if (!Array.from(event.dataTransfer?.items ?? []).some((item) => item.kind === 'file')) return;
     event.preventDefault();

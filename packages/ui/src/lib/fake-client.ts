@@ -1,3 +1,5 @@
+import { startupMethods, resetStartup } from './fake-client/startup';
+import { seedWorking } from './fake-client/working-seed';
 import { sweepMergedPrFixtures, type MergedPrFixture } from './fake-client/merged-pr-archive';
 import {
   RPC_CHUNK_BYTES,
@@ -6,6 +8,7 @@ import {
   type CoreLogContext,
   type HookRun,
   type MemoryEvent,
+  type ProcessRecord,
   type Principal,
   type RpcEventName,
   type RpcEvents,
@@ -13,17 +16,23 @@ import {
   type RpcParams,
   type RpcResult,
   type ThreadId,
+  type ThreadRetry,
+  type ThreadWorktreeRemoval,
 } from '@boite/contracts';
 import { RpcFailure, type CallOptions, type ClientState, type EventHandler, type ObservableClient } from './client';
+import { closedFailure } from './rpc-error';
 import { accountMethods } from './fake-client/accounts';
 import { activityMethods, pauseActivity } from './fake-client/activity';
 import { brainMethods } from './fake-client/brain';
 import { FakeContext, type FakeClientOptions, type FakeMethods } from './fake-client/context';
 import { hookMethods, recordHookRun } from './fake-client/hooks';
 import { logMethods, seedDiagnostics } from './fake-client/logs';
-import { coordinationMethods, registerCore, unregisterCore } from './fake-client/coordination';
-import { seedStewardDemo, stewardMethods } from './fake-client/stewards';
+import { coordinationMethods, registerCore, trusts, unregisterCore } from './fake-client/coordination';
 import { delegationMethods, seedDelegationDemo } from './fake-client/delegation';
+import { seedSubagentsDemo } from './fake-client/subagents-demo';
+import { seedAgentsDemo } from './fake-client/agents-demo';
+import { agentSettingMethods } from './fake-client/agent-settings';
+import type { AgentSettingMethod } from './fake-agents';
 import { groupMethods } from './fake-client/group';
 import { pairingMethods } from './fake-client/pairing';
 import { projectMethods } from './fake-client/projects';
@@ -36,10 +45,12 @@ import { clearRequestsOf, requestMethods } from './fake-client/requests';
 import { resourceMethods } from './fake-client/resources';
 import { seed } from './fake-client/seed';
 import { settingsMethods } from './fake-client/settings';
-import { DEVICE_METHODS, toSummary } from './fake-client/shared';
+import { gatewayMoveMethods } from './fake-client/gateway-move';
+import { DEVICE_METHODS } from './fake-client/shared';
 import { speechMethods } from './fake-client/speech';
 import { terminalMethods } from './fake-client/terminals';
 import { capabilityMethods } from './fake-client/capabilities';
+import { agentShapeMethods } from './fake-client/agent-shape';
 import { deleteExpiredDoneThreads, purgeDeletedThreads, threadMethods } from './fake-client/threads';
 import { threadMoveMethods } from './fake-client/thread-move';
 import { spawnMethods } from './fake-client/spawn';
@@ -50,10 +61,12 @@ import { devicesMethods } from './fake-client/devices';
 import { pullRequestMethods } from './fake-client/pull-requests';
 import { worktreeMethods } from './fake-client/worktrees';
 import { serverUpdateMethods } from './fake-client/server-update';
+import { planRetry, retryMethods, seedRetry } from './fake-client/retry';
 import { closeSideQuestions } from './fake-client/side-questions';
 import { holdAfterRestart } from './fake-client/recovery';
 import { journalInspectionMethods } from './fake-client/journal-inspection';
 import { forkReturnMethods } from './fake-client/fork-return';
+import { startLoad } from './fake-client/load';
 
 export type { FakeClientOptions } from './fake-client/context';
 
@@ -78,18 +91,35 @@ function reportSlices(result: unknown, onProgress: (received: number, total: num
 export class FakeClient implements ObservableClient {
   readonly #ctx: FakeContext;
   readonly #methods: FakeMethods;
+  readonly #missing: ReadonlySet<string>;
+  readonly #agentSettings: ReturnType<typeof agentSettingMethods>;
   #mergedPrSweep: Promise<number> | null = null;
   #doneSweep: Promise<void> | null = null;
   #transportGeneration = 0;
+  readonly #stopWorking: () => void;
+  #stopLoad: () => void = () => undefined;
 
   constructor(options: FakeClientOptions = {}) {
     const ctx = new FakeContext(options);
     this.#ctx = ctx;
     this.#methods = this.#answer(ctx);
+    this.#missing = new Set(options.missing ?? []);
+    this.#agentSettings = agentSettingMethods(ctx);
     registerCore(ctx);
     seed(ctx);
     if (options.delegationDemo) seedDelegationDemo(ctx);
-    if (options.stewardDemo) seedStewardDemo(ctx);
+    if (options.agentsDemo) seedAgentsDemo(ctx);
+    if (options.subagentsDemo) seedSubagentsDemo(ctx);
+    seedRetry(ctx);
+    this.#stopWorking = seedWorking(ctx, options.working ?? 0);
+    if (options.watchDemo) {
+      const at = Date.now();
+      const watch = (number: number) => ({ url: `https://github.com/beboite/boite/pull/${number}`, repository: 'beboite/boite', number, since: at - 600_000 });
+      ctx.thread('t-trace').pullRequestWatches = [
+        { ...watch(512), paused: null, seen: { checkedAt: at - 30_000, head: '3e535df', base: 'main', checks: { total: 26, running: 4, failed: 1 }, conflicting: false } },
+        { ...watch(498), paused: { reason: 'rate-limit', until: at + 240_000, message: 'API rate limit exceeded' }, seen: { checkedAt: at - 300_000, head: '2f257f4', base: 'main', checks: { total: 26, running: 0, failed: 0 }, conflicting: true } },
+      ];
+    }
     if (options.uninstalled) {
       ctx.providers = ctx.providers.filter(provider => provider.id !== 'echo').map(provider => ({
         ...provider, available: false, executable: null,
@@ -108,6 +138,7 @@ export class FakeClient implements ObservableClient {
       ctx.usageSeeded = false;
       ctx.scheduler = { ...ctx.scheduler, running: [], queued: [] };
     }
+    if (options.load) this.#stopLoad = startLoad(ctx, options.load, options.loadTickMs);
     // After a first launch has cleared the threads, so no record names one that is gone.
     seedDiagnostics(ctx);
   }
@@ -147,6 +178,11 @@ export class FakeClient implements ObservableClient {
   holdAfterRestart(threadId: ThreadId, prompt: string) {
     return holdAfterRestart(this.#ctx, threadId, prompt);
   }
+  /** A fixture for a retry the core planned: the thread's row carries it until it is cancelled. */
+  planRetry(threadId: ThreadId, retry: ThreadRetry) {
+    planRetry(this.#ctx, threadId, retry);
+  }
+
 
   /**
    * Takes a folder off the fake's disk, as a repository deleted outside the
@@ -155,6 +191,18 @@ export class FakeClient implements ObservableClient {
    */
   loseFolder(path: string): void {
     this.#ctx.goneFolders.add(pathKey(path));
+  }
+
+  /**
+   * What the core's settled worktree cleanup leaves behind: the thread's
+   * folder gone from the fake's disk and the removal on its summary.
+   */
+  removeWorktree(threadId: ThreadId, removal: Omit<ThreadWorktreeRemoval, 'path'>): void {
+    const thread = this.#ctx.threads.get(threadId);
+    if (!thread) throw new Error(`no fake thread ${threadId}`);
+    this.#ctx.goneFolders.add(pathKey(thread.cwd));
+    thread.worktreeRemoved = { ...removal, path: thread.cwd };
+    this.#ctx.touch(thread);
   }
 
   setMergedPrFixture(threadId: ThreadId, fixture: MergedPrFixture): void {
@@ -192,7 +240,9 @@ export class FakeClient implements ObservableClient {
 
   close(): void {
     const ctx = this.#ctx;
+    this.#stopWorking();
     closeSideQuestions(ctx);
+    this.#stopLoad();
     ctx.agents.close();
     unregisterCore(ctx);
     for (const thread of ctx.threads.values()) pauseActivity(ctx, thread);
@@ -242,22 +292,24 @@ export class FakeClient implements ObservableClient {
     const { bus } = this.#ctx;
     const generation = this.#transportGeneration;
     if (bus.state !== 'ready' && method !== 'hello') {
-      throw new RpcFailure({ code: RpcErrorCode.Internal, message: 'not connected' });
+      throw closedFailure();
     }
     await this.#ctx.tick();
     if (this.#ctx.rttMs > 0) await this.#ctx.leg();
     if (generation !== this.#transportGeneration || (bus.state !== 'ready' && method !== 'hello')) {
       throw new RpcFailure({ code: RpcErrorCode.Internal, message: 'connection changed before RPC dispatch' });
     }
+    if (this.#missing.has(method)) throw new RpcFailure({ code: RpcErrorCode.MethodNotFound, message: `unknown method ${method}` });
     // The fixture has no thread-bound agent token; do not widen this scoped read.
     if (bus.principal === 'agent' && (method === 'threads.capabilities' || method === 'threads.mergeBack')) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method} requires a thread-bound agent identity` });
-    if (bus.principal === 'agent' && (method === 'core.logs' || method === 'projects.setAutoArchiveMergedPr' || method === 'quotas.reset')) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method} is not one of the agent's methods` });
+    if (bus.principal === 'agent' && (method === 'core.logs' || method === 'projects.setAutoArchiveMergedPr' || method === 'projects.setAutoRemoveWorktrees' || method === 'quotas.reset')) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method} is not one of the agent's methods` });
     // The router's gate, word for word: deny by default, `hello` before it.
     if (bus.principal === 'session' && method !== 'hello' && !DEVICE_METHODS.has(method)) {
       throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method} is for the owner only` });
     }
     if (bus.principal === 'session' && method === 'agents.message.send' && (params as RpcParams<'agents.message.send'>).threadId !== undefined) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'agents.message.send: paired devices must omit threadId and speak as the user' });
     if (bus.principal === 'session' && method === 'git.diff' && ![undefined, '', 'HEAD'].includes((params as RpcParams<'git.diff'>).ref)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'git.diff: paired devices compare the working tree with HEAD only' });
+    if (bus.principal === 'session' && (method === 'quotas.list' || method === 'subscriptionProxy.quotas') && (params as { refresh?: unknown }).refresh === true) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method}: paired devices read the last reading; refresh must be false or absent` });
     const result = await bus.hold(this.#dispatch(method, params)) as RpcResult<M>;
     if (this.#ctx.rttMs > 0) {
       // An answer still on its way back when the socket changed never arrives.
@@ -268,7 +320,9 @@ export class FakeClient implements ObservableClient {
     }
     if (options.onProgress) reportSlices(result, options.onProgress);
     // The real client writes its set from the answer, never from the request.
-    if (method === 'threads.subscribe') {
+    if (method === 'threads.create' && (params as RpcParams<'threads.create'>).subscribe) {
+      bus.clientSubscribed.add((result as RpcResult<'threads.create'>).id);
+    } else if (method === 'threads.subscribe') {
       bus.clientSubscribed.add((params as RpcParams<'threads.subscribe'>).threadId);
     } else if (method === 'threads.get' && (result as RpcResult<'threads.get'>).opened) {
       const request = params as RpcParams<'threads.get'>;
@@ -282,19 +336,23 @@ export class FakeClient implements ObservableClient {
 
   /**
    * One tick of the core's load sampler (`packages/core/src/procs.ts`): the
-   * thread's summary with a fresh `load` and the timestamp it already had,
-   * pushed once a second for every thread with a live process. It is not a
-   * `touch`: a load sample moves no row in the sidebar.
+   * thread's fresh `load` alone, as `thread.load`, which this client's hello
+   * accepts. It is not a `touch`: a load sample moves no row in the sidebar.
    */
   sampleLoad(threadId: ThreadId, processes = 1): void {
     const thread = this.#ctx.thread(threadId);
     thread.load = { processes, cpuPercent: 12, memoryBytes: 48 * 1024 * 1024 };
-    this.#ctx.emit('thread.updated', structuredClone(toSummary(thread)));
+    this.#ctx.emit('thread.load', { threadId, load: structuredClone(thread.load) });
   }
 
   /** A line of the core's own log, as `core.log` carries it: a failed scheduler, a guard at work. */
   emitCoreLog(level: RpcEvents['core.log']['level'], message: string, context: CoreLogContext = {}): void {
     this.#ctx.emit('core.log', { level, message, at: this.#ctx.now(), ...context });
+  }
+
+  /** A traced process starting, or ending once `exitedAt` is set, as the core's `procs.ts` announces it to the thread's subscribers. */
+  traceProcess(record: ProcessRecord): void {
+    this.#ctx.emitToThread(record.threadId, record.exitedAt === null ? 'process.started' : 'process.exited', structuredClone(record));
   }
 
   emitMemory(event: MemoryEvent): void {
@@ -347,6 +405,10 @@ export class FakeClient implements ObservableClient {
 
   #dispatch(method: RpcMethodName, rawParams: unknown): Promise<unknown> {
     const ctx = this.#ctx;
+    if (Object.hasOwn(this.#agentSettings, method)) {
+      const handler = this.#agentSettings[method as AgentSettingMethod] as (params: unknown) => unknown;
+      return Promise.resolve().then(() => handler(rawParams));
+    }
     if (method.startsWith('agents.')) return Promise.resolve(ctx.agents.call(method as Extract<RpcMethodName, `agents.${string}`>, rawParams));
     if (ctx.plugins.handles(method)) return ctx.plugins.call(method, rawParams);
     if (ctx.workflows.handles(method)) return ctx.workflows.call(method, rawParams);
@@ -359,6 +421,7 @@ export class FakeClient implements ObservableClient {
 
   #dropPending(message: string, dropped = false): void {
     this.#transportGeneration += 1;
+    resetStartup(this.#ctx);
     this.#ctx.speechRequests.clear();
     this.#ctx.bus.dropPending(message, dropped);
   }
@@ -377,12 +440,15 @@ export class FakeClient implements ObservableClient {
       ...brainMethods(ctx),
       ...logMethods(ctx),
       ...serverUpdateMethods(ctx),
+      ...retryMethods(ctx),
       ...hookMethods(ctx),
       ...pairingMethods(ctx),
       ...projects,
       ...projectIconMethods(ctx),
       ...threads,
+      ...startupMethods(ctx, threads),
       ...capabilityMethods(ctx),
+      ...agentShapeMethods(ctx),
       ...forkReturnMethods(ctx),
       ...journalInspectionMethods(ctx),
       ...threadMoveMethods(ctx),
@@ -395,10 +461,10 @@ export class FakeClient implements ObservableClient {
       ...terminalMethods(ctx),
       ...resourceMethods(ctx),
       ...settingsMethods(ctx),
+      ...gatewayMoveMethods(ctx),
       ...speechMethods(ctx),
       ...delegationMethods(ctx),
       ...coordinationMethods(ctx),
-      ...stewardMethods(ctx, () => methods),
       ...groupMethods(ctx),
       ...todoMethods(ctx),
       ...workdirMethods(ctx, () => methods),
@@ -410,7 +476,18 @@ export class FakeClient implements ObservableClient {
       'ui.reveal': async (params) => {
         const { target } = params;
         if (target.kind === 'agent' && (target.agentId.length === 0 || target.agentId.length > 200)) {
-          throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'ui.reveal target must be { kind: "thread", threadId }, { kind: "agent", agentId } or { kind: "update" }' });
+          throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'ui.reveal target must be { kind: "thread", threadId, coreId? }, { kind: "agent", agentId, coreId? } or { kind: "update" }' });
+        }
+        if (target.kind !== 'update' && target.coreId !== undefined) {
+          // This core's own id is this core; another machine must be one it knows, as the real core checks.
+          if (target.coreId === ctx.identity.coreId) {
+            const { coreId: _self, ...local } = target;
+            ctx.emit('ui.reveal', { target: local });
+            return { delivered: 1 };
+          }
+          if (!trusts(ctx, target.coreId)) {
+            throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `ui.reveal target.coreId ${target.coreId} is not this core's id, a machine of its group or a machine trusted for coordination` });
+          }
         }
         ctx.emit('ui.reveal', { target });
         return { delivered: 1 };

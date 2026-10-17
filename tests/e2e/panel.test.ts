@@ -34,7 +34,7 @@ beforeAll(async () => {
   // A cold vite and a cold Chromium on a loaded runner: the budget readability.test.ts gives the same start.
 }, 90_000);
 
-afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
+afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
 test('the browser follows layout changes without measuring its slot on every idle frame', async () => {
   await onStore(`store.panel.closeAll(); store.panel.open('browser');`);

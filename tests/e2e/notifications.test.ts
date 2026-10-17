@@ -11,11 +11,11 @@ beforeAll(async () => {
   page = await BrowserPage.launch({url:`http://127.0.0.1:${port}/?fake=1&open=recent`,windowSize:{width:1300,height:850}});
   await page.waitFor(`document.querySelector('[data-thread-id]')`);
 }, 90000);
-afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
+afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 test('minor errors disappear after five seconds on desktop and phone', async () => {
   for (const viewport of [{width:1300,height:850,mobile:false}, {width:390,height:844,mobile:true}]) {
     await page.send('Emulation.setDeviceMetricsOverride',{...viewport,deviceScaleFactor:1});
-    await page.evaluate(`Promise.all(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {})))`);
+    await page.settleAnimations();
     await page.evaluate(`(async () => {
       const {workspace} = await import('/src/lib/workspace.svelte.ts');
       workspace.active.reportError('og.jpg: file does not exist (os error 2)', 'minor');
@@ -32,7 +32,7 @@ test('minor errors disappear after five seconds on desktop and phone', async () 
     expect(await page.evaluate(`performance.now() - window.__minorErrorAt`)).toBeLessThan(7_000);
     expect(await page.evaluate(`window.__boiteTest.workspace.active.error`)).toBeNull();
     await page.send('Emulation.setDeviceMetricsOverride',{...viewport,deviceScaleFactor:1});
-    await page.evaluate(`Promise.all(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {})))`);
+    await page.settleAnimations();
     await page.screenshot(join(import.meta.dir,'.artifacts', viewport.mobile ? 'minor-error-phone-after.png' : 'minor-error-desktop-after.png'));
   }
 }, 20_000);
@@ -44,7 +44,7 @@ test('notification stays readable and can be dismissed', async () => {
   // Errors remain visible beyond the ordinary toast lifetime.
   await page.evaluate(`new Promise(resolve => setTimeout(resolve, 8500))`);
   expect(await page.evaluate(`document.querySelector('[data-testid="error-toast"]') !== null`)).toBe(true);
-  await page.evaluate(`Promise.all(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {})))`);
+  await page.settleAnimations();
   await page.screenshot(join(import.meta.dir,'.artifacts/notification-desktop.png'));
   expect(await page.evaluate(`document.querySelector('[data-testid="error-toast"]').textContent`)).toContain('conversation is saved');
   expect(await page.evaluate(`(() => {const p = document.querySelector('.notification-card p'); return p.scrollHeight <= p.clientHeight && getComputedStyle(p).whiteSpace === 'pre-wrap';})()`)).toBe(true);
@@ -102,7 +102,7 @@ test('a failed turn offers a compact link to its thread on desktop and phone', a
     expect(text).toContain('Open thread');
     expect(text).not.toContain('trn-cyber');
     expect(text).not.toContain('cybersecurity');
-    await page.evaluate(`Promise.all(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {})))`);
+    await page.settleAnimations();
     expect(await page.evaluate(`(() => {const r = document.querySelector('[data-testid="error-toast"]').getBoundingClientRect();return r.left >= 0 && r.right <= innerWidth && r.height < 150;})()`)).toBe(true);
     await page.screenshot(join(import.meta.dir, '.artifacts', viewport.mobile ? 'thread-error-phone.png' : 'thread-error-desktop.png'));
     await page.click('[data-testid="error-toast"] .open-thread');
@@ -144,9 +144,9 @@ test('unsupported goals identify the host without sending a normal turn', async 
   await page.waitFor(`document.querySelector('[data-testid="error-toast"]')?.textContent.includes('Update Boite on Older host')`);
   expect(await page.evaluate(`window.__normalTurns`)).toBe(0);
   await page.evaluate(`document.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));`);
-  await page.evaluate(`Promise.all(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {})))`);
+  await page.settleAnimations();
   await page.screenshot(join(import.meta.dir,'.artifacts/goal-compat-desktop.png'));
   await page.send('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
-  await page.evaluate(`Promise.all(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {})))`);
+  await page.settleAnimations();
   await page.screenshot(join(import.meta.dir,'.artifacts/goal-compat-phone.png'));
 });

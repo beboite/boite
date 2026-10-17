@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { normalizeCoreLogText, RpcErrorCode, type ProcessRecord, type RpcEvents, type Turn } from '@boite/contracts';
 import { Bus } from '../src/bus.ts';
-import { DiagnosticLogs, LOG_FILE_COUNT, LOG_MESSAGE_CHARS, redactLogText } from '../src/logs.ts';
+import { DiagnosticLogs, LOG_FILE_COUNT, LOG_MESSAGE_CHARS, redactLogText, SHORT_PROCESS_MS } from '../src/logs.ts';
 import { runCli } from '../src/cli.ts';
 import { connect } from '../src/client.ts';
 import { setDriver } from '../src/drivers/index.ts';
@@ -106,7 +106,7 @@ describe('bounded persistent diagnostics', () => {
       bus.emit('message.delta', { threadId: turn.threadId, messageId: 'msg_test', partIndex: 0, text: 'private streamed text' });
       bus.afterCommit(() => {
         bus.emit('turn.finished', { ...turn, status: 'error', finishedAt: 4, error: 'private provider result' });
-        bus.emit('process.exited', { ...proc, exitedAt: 5, exitCode: 0 });
+        bus.emit('process.exited', { ...proc, exitedAt: proc.startedAt + SHORT_PROCESS_MS, exitCode: 0 });
       });
       const records = await logs.query({ threadId: turn.threadId });
       expect(records.map(record => record.event)).toEqual(['process.exited', 'turn.finished', 'process.started', 'turn.started', 'turn.queued']);
@@ -117,6 +117,35 @@ describe('bounded persistent diagnostics', () => {
       expect(records[0]?.data).toMatchObject({ pid: 123, exe: 'provider', exitCode: 0 });
       expect(records[1]?.durationMs).toBe(2);
     } finally { bus.dispose(); await logs.close(); rmSync(directory, { recursive: true, force: true }); }
+  });
+
+  test('short clean processes count in one batch per turn; crashed, unknown and running ones keep their own records', async () => {
+    const directory = temporary();
+    const logs = new DiagnosticLogs(directory);
+    const bus = new Bus(); logs.attach(bus);
+    try {
+      bus.afterCommit(() => bus.emit('turn.started', turn));
+      const quick = (pid: number, exe: string, exitCode: number | null = 0) => {
+        const started = { ...proc, pid, exe, startedAt: 10_000 + pid };
+        bus.afterCommit(() => { bus.emit('process.started', started); bus.emit('process.exited', { ...started, exitedAt: started.startedAt + 30, exitCode, cpuMs: 5 }); });
+      };
+      quick(1, '/usr/bin/bash.exe');
+      quick(2, '/usr/bin/bash.exe');
+      quick(3, 'C:\\Git\\usr\\bin\\sed.exe');
+      quick(4, '/usr/bin/bash.exe', 0xC0000005);
+      // An exit whose status the OS did not give: the batch could not say how it ended.
+      quick(6, '/usr/bin/git.exe', null);
+      bus.afterCommit(() => bus.emit('process.started', { ...proc, pid: 5, exe: '/bin/cargo', startedAt: 10_005 }));
+    } finally { bus.dispose(); await logs.close(); }
+    // Closing writes what was still gathering.
+    const reader = new DiagnosticLogs(directory);
+    try {
+      const records = (await reader.query({ threadId: turn.threadId })).filter(record => record.source === 'processes');
+      expect(records.map(record => `${record.event} ${record.data?.pid ?? ''}`).sort()).toEqual(['process.batch ', 'process.exited 4', 'process.exited 6', 'process.started 4', 'process.started 5', 'process.started 6']);
+      const batch = records.find(record => record.event === 'process.batch')!;
+      expect(batch).toMatchObject({ level: 'debug', turnId: turn.id, at: 10_001, durationMs: 32, message: '3 short processes ran: bash.exe 2, sed.exe 1', data: { count: 3, cpuMs: 15, exes: 'bash.exe 2, sed.exe 1' } });
+      expect(records.find(record => record.event === 'process.exited' && record.data?.pid === 4)?.level).toBe('warn');
+    } finally { await reader.close(); rmSync(directory, { recursive: true, force: true }); }
   });
 
   test('initialization and append failures report once, cannot recurse or interrupt app work, and still permit recent queries', async () => {
@@ -213,6 +242,45 @@ describe('bounded persistent diagnostics', () => {
       const newest = await reader.query({ limit: 1 });
       expect(newest.map(record => record.event)).toEqual(['recent']);
     } finally { await reader.close(); rmSync(directory, { recursive: true, force: true }); }
+  });
+
+  test('a query with `since` skips the files last written before it, a client clock skew allowed', async () => {
+    const directory = temporary();
+    mkdirSync(join(directory, 'logs'), { recursive: true });
+    const now = Date.now();
+    // Each file holds a record dated now, which only a file still being written can hold:
+    // finding it in a file written long before `since` means the file was read.
+    const file = (name: string, modifiedAgoMs: number): void => {
+      const path = join(directory, 'logs', name);
+      writeFileSync(path, `${JSON.stringify({ id: `${name}:1`, runId: 'old', at: now, level: 'info', source: 'test', event: 'file', message: name })}\n`, { mode: 0o600 });
+      utimesSync(path, (now - modifiedAgoMs) / 1000, (now - modifiedAgoMs) / 1000);
+    };
+    file('core.0.ndjson', 0);
+    file('core.1.ndjson', 5 * 60_000);
+    file('core.2.ndjson', 60 * 60_000);
+    file('core.3.ndjson', 0);
+    file('shell.0.ndjson', 2 * 60 * 60_000);
+    file('shell.1.ndjson', 0);
+    const reader = new DiagnosticLogs(directory);
+    try {
+      const names = async (since?: number): Promise<string[]> => (await reader.query({ since, limit: 100 })).map(record => record.message).sort();
+      expect(await names()).toEqual(['core.0.ndjson', 'core.1.ndjson', 'core.2.ndjson', 'core.3.ndjson', 'shell.0.ndjson', 'shell.1.ndjson']);
+      // core.1 is within the skew of `since`; core.2 is older, so it and every older rotation stay closed.
+      expect(await names(now - 1000)).toEqual(['core.0.ndjson', 'core.1.ndjson', 'shell.1.ndjson']);
+    } finally { await reader.close(); rmSync(directory, { recursive: true, force: true }); }
+  });
+
+  test('memory keeps only what the files do not hold: a written record is answered from its file', async () => {
+    const directory = temporary();
+    const logs = new DiagnosticLogs(directory, [], undefined, 1024);
+    try {
+      logs.record('info', 'written');
+      // Longer than a whole file: never written, so memory still answers for it.
+      logs.record('info', `too large ${'x'.repeat(2000)}`);
+      expect((await logs.query({})).map(record => record.message.slice(0, 9))).toEqual(['too large', 'written']);
+      rmSync(join(directory, 'logs', 'core.0.ndjson'));
+      expect((await logs.query({})).map(record => record.message.slice(0, 9))).toEqual(['too large']);
+    } finally { await logs.close(); rmSync(directory, { recursive: true, force: true }); }
   });
 
   test('a burst cannot grow the pending queue and persists an explicit loss count', async () => {

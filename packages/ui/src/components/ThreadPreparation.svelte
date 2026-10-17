@@ -10,13 +10,16 @@
   const focus = new ConversationFocus();
   let attentive = $state(false);
   onMount(() => watchAttention((value) => { attentive = value; }, (at) => focus.activity(at)));
+  // Each list is a string, so a keystroke that leaves it unchanged stops here:
+  // typing reruns only the composer filter, never the walk over every thread.
+  const composerIds = $derived(JSON.stringify(Object.entries(store.composerStates)
+    .filter(([id, input]) => id !== DRAFT_STASH_KEY && !!(input.text || input.attachments.length || input.previewReferences?.length || input.queued.length || input.sending || input.editing))
+    .map(([id]) => id)));
+  const panelIds = $derived(JSON.stringify(store.threads.filter((row) => rightPanel.drafts.get(store.threadKey(row.id))?.size).map((row) => row.id)));
   $effect(() => {
     const client = store.connection === 'ready' ? store.client : null;
     const thread = store.openThread;
-    const protectedIds = new Set(Object.entries(store.composerStates)
-      .filter(([id, input]) => id !== DRAFT_STASH_KEY && !!(input.text || input.attachments.length || input.previewReferences?.length || input.queued.length || input.sending || input.editing))
-      .map(([id]) => id));
-    for (const row of store.threads) if (rightPanel.drafts.get(store.threadKey(row.id))?.size) protectedIds.add(row.id);
+    const protectedIds = new Set<string>([...JSON.parse(composerIds) as string[], ...JSON.parse(panelIds) as string[]]);
     focus.update(client, visible && store.page === 'chat' && thread && !thread.archived ? thread.id : null, [...protectedIds], !store.draftsReadable, attentive);
   });
   onDestroy(() => focus.close());

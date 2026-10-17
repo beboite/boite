@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { CircleAlert, FishingHook, MessageCircleQuestionMark, Settings2 } from '@lucide/svelte';
+  import { Bot, CircleAlert, FishingHook, MessageCircleQuestionMark, Settings2 } from '@lucide/svelte';
   import { showDockedQuestion } from '../lib/question-dock.svelte';
   import { replyOf, repliesOf, sendAnswer, writeAnswer } from '../lib/question-reply.svelte';
   import type { Account, MemoryEvent, Message } from '@boite/contracts';
@@ -12,12 +12,13 @@
   import PlanCard from './PlanCard.svelte';
   import QuestionCard from './QuestionCard.svelte';
   import SettingRequestCard from './SettingRequestCardLoader.svelte';
+  import AgentSettingCard from './AgentSettingCardLoader.svelte';
   import Prose from './Prose.svelte';
   import ChatFile from './ChatFile.svelte';
   import InlineView from './InlineView.svelte';
   import ToolGroup from './ToolGroup.svelte';
   import { activityShown, runKey, type ActivityPart } from '../lib/tool-groups';
-  import { memoryPartRuns } from '../lib/memory-timeline';
+  import { MessageRuns } from '../lib/memory-timeline';
   import { chatPrefs } from '../lib/chat-prefs.svelte';
   import { shownText as shownTextOf } from '../lib/timeline-rows';
   import MemoryRow from './MemoryRow.svelte';
@@ -28,6 +29,7 @@
    * `signedOut` is the thread's account when it is signed out, so an error can
    * carry the way back in. `from` and `to` name the parts to draw when the
    * timeline cut a long message in several rows (lib/timeline-rows.ts).
+   * `views` are the pages its turn published, for its answer to place.
    */
   let {
     store,
@@ -38,7 +40,8 @@
     signedOut,
     showModel,
     latestInTurn = true,
-    memoryEvents = []
+    memoryEvents = [],
+    views
   }: {
     store: Store;
     threadId: string;
@@ -49,6 +52,7 @@
     showModel: boolean;
     latestInTurn?: boolean;
     memoryEvents?: MemoryEvent[];
+    views?: readonly Message[];
   } = $props();
 
   function lastTextIndex(message: Message): number {
@@ -60,7 +64,9 @@
     store.openThread?.progress?.turnId === message.turnId && store.openThread.progress.phase === 'compacting');
   const caretAt = $derived(message.state === 'streaming' ? lastTextIndex(message) : -1);
   const end = $derived(to ?? message.parts.length);
-  const runs = $derived(memoryPartRuns(message.parts, memoryEvents, from, end, chatPrefs.groupChanges));
+  // A run over the same parts stays the same object, so a new part does not redraw the groups above it.
+  const runList = new MessageRuns();
+  const runs = $derived(runList.build(message.parts, memoryEvents, from, end, chatPrefs.groupChanges));
   const toolRunning = $derived(message.parts.some(part => part.type === 'tool' && part.status === 'running') ||
     latestInTurn && store.openThread?.messages.some(current => current.turnId === message.turnId && current.role === 'assistant' && current.parts.some(part => part.type === 'tool' && part.status === 'running')));
   const isBackground = (toolId: string) => store.openThread?.background?.some((task) => task.toolId === toolId) ?? false;
@@ -93,7 +99,7 @@
       {@const thinkingLive = message.state === 'streaming' && lastAt === message.parts.length - 1 && tail?.type === 'thinking' && tail.finishedAt == null}
       {#if activityShown(activity, thinkingLive)}
       <div class="part" data-kind={activity.every((part) => part.type === 'thinking') ? 'thinking' : 'tool'}>
-        <ToolGroup parts={activity} {thinkingLive} {isBackground}
+        <ToolGroup parts={activity} {thinkingLive} {isBackground} {store} {threadId}
           loadOutput={toolId => store.loadToolOutput(threadId, message.id, toolId)} />
       </div>
       {/if}
@@ -105,7 +111,8 @@
     <div class="part" data-kind={part.type}>
       {#if part.type === 'text'}
         <Prose text={shownText} live={index === caretAt && part.complete !== true} bubble={message.role === 'assistant'}
-          typing={!compacting && latestInTurn && !toolRunning && message.role === 'assistant' && store.connection === 'ready' && store.openThread?.status === 'running' && index === message.parts.length - 1 && index === caretAt && part.complete !== true} {store} {threadId} />
+          typing={!compacting && latestInTurn && !toolRunning && message.role === 'assistant' && store.connection === 'ready' && store.openThread?.status === 'running' && index === message.parts.length - 1 && index === caretAt && part.complete !== true} {store} {threadId}
+          views={message.role === 'assistant' ? views : undefined} />
         {#if part.omitted}<p class="omitted" data-testid="text-omitted">{fill(strings.chat.textOmitted, { count: count(part.omitted) })}</p>{/if}
 
       {:else if part.type === 'artifact' && part.view}
@@ -124,10 +131,21 @@
       {:else if part.type === 'question' && part.async === true && (part.answer ?? null) === null && store.pendingQuestions.some((q) => q.id === part.questionId)}
         <!-- Waiting in the dock above the composer: here only a line that brings it up. -->
         <button type="button" class="ghost docked-question" data-testid="question-docked" title={strings.chat.questionOpen} onclick={() => showDockedQuestion(part.questionId)}>
-          {#if part.setting}<Settings2 size={15} strokeWidth={1.75} />{:else}<MessageCircleQuestionMark size={15} strokeWidth={1.75} />{/if}
+          {#if part.setting}<Settings2 size={15} strokeWidth={1.75} />{:else if part.agentSetting}<Bot size={15} strokeWidth={1.75} />{:else}<MessageCircleQuestionMark size={15} strokeWidth={1.75} />{/if}
           <span class="docked-text ui-label">{part.text}</span>
           <span class="docked-hint ui-label">{strings.chat.questionDocked}</span>
         </button>
+      {:else if part.type === 'question' && part.agentSetting}
+        <AgentSettingCard
+          {store}
+          threadId={message.threadId}
+          questionId={part.questionId}
+          text={part.text}
+          setting={part.agentSetting}
+          answer={part.answer ?? null}
+          pending={store.pendingQuestions.some((q) => q.id === part.questionId)}
+          respond={(optionId) => store.answerQuestion(message.threadId, part.questionId, [optionId])}
+        />
       {:else if part.type === 'question' && part.setting}
         <SettingRequestCard
           {store}
@@ -227,6 +245,11 @@
   /* An answer is read at its own measure; cards keep the whole column. */
   .part[data-kind='text'] {
     max-width: var(--prose);
+  }
+
+  /* One that places pages gives each its column and keeps the measure on its text (Prose). */
+  .part[data-kind='text']:has(> :global(.flow)) {
+    max-width: none;
   }
 
 

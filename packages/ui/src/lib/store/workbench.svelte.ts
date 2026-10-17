@@ -14,6 +14,7 @@ import type {
   ThreadResources,
   Todo
 } from '@boite/contracts';
+import { TRACE_LIMIT } from '@boite/contracts';
 import { untrack } from 'svelte';
 import { strings } from '../strings';
 import { coreHref } from '../endpoint';
@@ -77,7 +78,8 @@ export class Workbench {
   }
 
   resources = $state<ThreadResources[]>([]);
-  trace = $state<ProcessRecord[]>([]);
+  /** Replaced whole, never changed in place: no proxy over every record. */
+  trace = $state.raw<ProcessRecord[]>([]);
   /**
    * The todo cards of each project, keyed by project id: the list is the
    * project's, so every thread of it shows the same one.
@@ -104,7 +106,8 @@ export class Workbench {
       const snapshot = await client.call('trace.get', { threadId: open.id });
       if (!current()) return;
       const changed = this.trace.filter(record => baseline.find(previous => sameProcess(previous, record)) !== record);
-      this.trace = [...changed, ...snapshot.filter(record => !changed.some(newer => sameProcess(newer, record)))];
+      // Events that came during the read stay ahead of it, within the same bound.
+      this.trace = [...changed, ...snapshot.filter(record => !changed.some(newer => sameProcess(newer, record)))].slice(0, TRACE_LIMIT);
     } catch (error) {
       if (current()) this.ctx.fail(error);
     }
@@ -130,12 +133,13 @@ export class Workbench {
     }
   }
 
-  async gitDiff(threadId: ThreadId, path: string, ref?: string): Promise<GitDiff | null> {
+  /** `oldPath` is the origin `git.status` gave the path, null for none; undefined lets the core ask git. */
+  async gitDiff(threadId: ThreadId, path: string, ref?: string, oldPath?: string | null): Promise<GitDiff | null> {
     const client = this.ctx.client;
     const clientGeneration = this.ctx.clientGeneration;
     if (!client) return null;
     try {
-      const result = await client.call('git.diff', { threadId, path, ...(ref === undefined ? {} : { ref }) });
+      const result = await client.call('git.diff', { threadId, path, ...(ref === undefined ? {} : { ref }), ...(oldPath === undefined ? {} : { oldPath }) });
       return this.ctx.currentClient(client, clientGeneration) ? result : null;
     } catch (error) {
       if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
@@ -230,6 +234,18 @@ export class Workbench {
       const projectId = todos[0]?.projectId ?? project;
       if (projectId === null) return;
       this.todos = { ...this.todos, [projectId]: todos };
+    } catch (error) {
+      if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
+    }
+  }
+
+  /** Stops one pull request watch; the thread's row and panel follow from `thread.updated`. A phone may too. */
+  async unwatchPullRequest(threadId: ThreadId, url: string): Promise<void> {
+    const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
+    if (!client) return;
+    try {
+      await client.call('threads.unwatchPullRequest', { threadId, url });
     } catch (error) {
       if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
     }

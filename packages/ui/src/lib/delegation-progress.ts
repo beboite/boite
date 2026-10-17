@@ -1,14 +1,22 @@
-import { threadActive, type DelegatedAgent } from '@boite/contracts';
+import { threadActive, threadBusy, type DelegatedAgent } from '@boite/contracts';
 
-/** An idle thread alone is not evidence that its task completed. */
+/**
+ * An idle thread alone is not evidence that its task completed. `background`:
+ * its turn ended on its own background work, which wakes it, so it is still at
+ * work. `interrupted`: that work ended without waking it.
+ */
 export function agentProgress(agent: DelegatedAgent) {
-  const active = threadActive(agent.thread.status);
-  const status = active ? agent.thread.status : agent.lastTurn?.status ?? agent.thread.status;
+  const active = threadBusy(agent.thread);
+  const wait = agent.thread.backgroundWait ?? null;
+  const status = threadActive(agent.thread.status) ? agent.thread.status
+    : wait?.state === 'waiting' ? 'background' as const
+    : wait?.state === 'interrupted' ? 'interrupted' as const
+    : agent.lastTurn?.status ?? agent.thread.status;
   return {
     active,
     status,
     startedAt: agent.thread.createdAt,
-    finishedAt: active ? null : agent.lastTurn?.finishedAt ?? null
+    finishedAt: active ? null : wait?.state === 'interrupted' ? wait.at : agent.lastTurn?.finishedAt ?? null
   };
 }
 
@@ -19,6 +27,7 @@ export function teamProgress(agents: DelegatedAgent[]) {
     completed: states.filter(state => state.status === 'done').length,
     failed: states.filter(state => state.status === 'error').length,
     stopped: states.filter(state => state.status === 'stopped').length,
+    interrupted: states.filter(state => state.status === 'interrupted').length,
     startedAt: states.length ? Math.min(...states.map(state => state.startedAt)) : null,
     finishedAt: states.length && states.every(state => state.finishedAt !== null)
       ? Math.max(...states.map(state => state.finishedAt!)) : null

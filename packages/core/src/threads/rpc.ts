@@ -1,11 +1,12 @@
 import { stat } from 'node:fs/promises';
-import type { AccountId, ProviderId, ThreadId } from '@boite/contracts';
+import { pullRequestAddress, type AccountId, type ProviderId, type ThreadId } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { invalidParams, refused } from '../errors.ts';
 import type { ProviderProbe } from '../providers/probe.ts';
 import { defaultModel, needsModelDiscovery } from './selection.ts';
 import { LinkedPullRequests } from '../linked-pull-requests.ts';
 import { threadCapabilities } from './capabilities.ts';
+import { agentShape } from './agent-shape.ts';
 import { steerUser } from './user-steering.ts';
 import { readToolOutput, readToolPart } from './records.ts';
 import { readMessageAttachment } from './attachment-read.ts';
@@ -28,6 +29,37 @@ async function requireCwd(core: Core, threadId: ThreadId): Promise<void> {
       threadId, cwd: thread.cwd, field: 'cwd', expected: 'an existing folder',
     });
   }
+}
+
+/** `12` or `#12`, else null. */
+function pullRequestNumber(input: string): number | null {
+  const match = /^#?([1-9]\d{0,9})$/.exec(input.trim());
+  return match ? Number(match[1]) : null;
+}
+
+/**
+ * The pull request `boite pr watch` names: a linked one by URL or number, a
+ * new URL linked first (which checks it on GitHub), or with nothing named
+ * the conversation's only linked one, or its only open one.
+ */
+async function watchTarget(linked: LinkedPullRequests, threadId: ThreadId, input: string | undefined): Promise<string> {
+  const saved = linked.saved(threadId);
+  const listed = saved.map(pr => pr.url).join(', ');
+  if (input === undefined) {
+    const open = saved.filter(pr => pr.state === 'OPEN');
+    const only = saved.length === 1 ? saved[0] : open.length === 1 ? open[0] : undefined;
+    if (only) return only.url;
+    throw refused(saved.length ? `this conversation links several pull requests (${listed}); name the one to watch` : 'this conversation has no linked pull request: run boite pr link <url> first, or name its URL', { field: 'url', expected: 'a pull request URL or number' });
+  }
+  const number = pullRequestNumber(input);
+  if (number !== null) {
+    const matches = saved.filter(pr => pr.number === number);
+    if (matches.length === 1) return matches[0]!.url;
+    throw refused(matches.length ? `several linked pull requests are #${number}; name it by URL` : `no linked pull request is #${number}; name its URL to link and watch it`, { field: 'url', expected: listed || 'a pull request URL' });
+  }
+  const { url } = pullRequestAddress(input);
+  if (!saved.some(pr => pr.url.toLowerCase() === url.toLowerCase())) await linked.link(threadId, url);
+  return url;
 }
 
 export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
@@ -54,6 +86,7 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
     return { ok: true };
   });
   core.router.register('threads.capabilities', params => threadCapabilities(core, params.threadId));
+  core.router.register('threads.agentShape', params => agentShape(core, params.threadId));
   const pullRequests = core.pullRequests;
   const linked = new LinkedPullRequests(core, (threadId, url) => pullRequests.detail(threadId, url));
   core.router.register('threads.pullRequestReview', async p => {
@@ -68,6 +101,15 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
   core.router.register('threads.linkPullRequest', p => linked.link(p.threadId, p.url));
   core.router.register('threads.unlinkPullRequest', p => linked.unlink(p.threadId, p.url));
   core.router.register('threads.pullRequest', params => pullRequests.read(params.threadId, params.refresh === true));
+  core.router.register('threads.watchPullRequest', async p => core.pullRequestWatches.watch(p.threadId, await watchTarget(linked, p.threadId, p.url)));
+  core.router.register('threads.unwatchPullRequest', p => {
+    if (p.url === undefined) return core.pullRequestWatches.unwatch(p.threadId);
+    const number = pullRequestNumber(p.url);
+    const watched = core.pullRequestWatches.of(p.threadId);
+    const matches = number === null ? [] : watched.filter(watch => watch.number === number);
+    if (number !== null && matches.length !== 1) throw refused(matches.length ? `several watched pull requests are #${number}; name it by URL` : `this conversation does not watch #${number}`, { field: 'url', expected: watched.map(watch => watch.url).join(', ') || 'a watched pull request' });
+    return core.pullRequestWatches.unwatch(p.threadId, matches[0]?.url ?? p.url);
+  });
   core.router.register('threads.compact', async (params) => {
     await requireCwd(core, params.threadId);
     return core.threads.compact(params.threadId, params.expectedSelectionVersion);
@@ -76,13 +118,26 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
   core.router.register('threads.mergeBack', params => core.threads.branching.mergeBack(params));
   core.router.register('threads.fork', (params) => core.threads.fork(params.threadId, params.messageId, params.worktree === true));
   core.router.register('threads.list', (params) => core.threads.list(params));
-  core.router.register('threads.create', async (params) => {
+  core.router.register('drafts.prepare', (params, ctx) => core.drafts.prepare(ctx.connection.id, params));
+  core.router.register('drafts.release', async (params, ctx) => {
+    await core.drafts.release(ctx.connection.id, params.preparationId);
+    return { ok: true };
+  });
+  core.router.register('attachments.upload', (params, ctx) => core.attachmentUploads.upload(ctx.connection.id, params.attachment));
+  core.router.register('attachments.release', async (params, ctx) => {
+    await core.attachmentUploads.release(ctx.connection.id, params.ids);
+    return { ok: true };
+  });
+  core.router.register('threads.create', async (params, ctx) => {
     // A thread made in a folder that is gone could never run a turn: refused here, by the folder.
     const project = core.projects.require(params.projectId);
     await core.projects.requireFolder(project.id);
     const provider = core.providers.require(params.providerId);
     await discover(provider.id, params.accountId, params.model ?? defaultModel(provider), params.effort ?? null, params.speed ?? null);
-    return params.worktree === undefined ? core.threads.create(params) : core.threads.createInWorktree(params);
+    const adopted = await core.drafts.claim(ctx.connection.id, params);
+    const thread = adopted ?? (params.worktree === undefined ? core.threads.create(params) : await core.threads.createInWorktree(params));
+    if (params.subscribe === true) ctx.connection.subscriptions.add(thread.id);
+    return thread;
   });
   // The blurs of a light page are made before it is read, never between the
   // read and the answer (`MediaPreviews.warm`).
@@ -91,8 +146,8 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
     const thread = core.threads.get(params.threadId, params.after, params);
     if (!params.open) return thread;
     ctx.connection.subscriptions.add(params.threadId);
-    // Live tool parts reach this socket the way its pages do.
-    ctx.connection.transport = { compactTools: params.compactTools, compactToolParts: params.compactToolParts };
+    // Live tool parts, files and pictures reach this socket the way its pages do.
+    ctx.connection.transport = { compactTools: params.compactTools, compactToolParts: params.compactToolParts, compactFiles: params.compactFiles, compactImages: params.compactImages };
     if (params.open.previous && params.open.previous !== params.threadId) ctx.connection.subscriptions.delete(params.open.previous);
     if (params.open.markRead) { core.threads.markRead(params.threadId); thread.unread = false; }
     return { ...thread, opened: params.open.requests === false ? {} : {
@@ -100,7 +155,9 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
     } };
   });
   core.router.register('messages.list', async (params) => {
-    if (params.compactImages === true) await core.media.warm(params.threadId, params.before ?? params.after, params.limit);
+    // A page read by position warms the pictures around its own first message, not the thread's last page.
+    const near = Number.isSafeInteger(params.from) && params.from! >= 0 ? core.journal.messageIdAt(params.threadId, params.from!) : params.before ?? params.after;
+    if (params.compactImages === true && near !== null) await core.media.warm(params.threadId, near, params.limit);
     return core.threads.messages(params);
   });
   core.router.register('messages.toolOutput', (params) => readToolOutput(core, params));
@@ -156,12 +213,15 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
   });
   core.router.register('turns.start', async (params, ctx) => {
     await requireCwd(core, params.threadId);
-    return core.threads.startTurn(params.threadId, params.prompt, params.attachments ?? [], params.expectedSelectionVersion, undefined, undefined, params.clientRequestId, undefined, params.previewReferences ?? [], undefined, undefined, ctx.connection.sentFrom ?? null);
+    const attachments = await core.attachmentUploads.resolve(ctx.connection.id, params.attachments ?? [], params.attachmentIds);
+    return core.threads.startTurn(params.threadId, params.prompt, attachments, params.expectedSelectionVersion, undefined, undefined, params.clientRequestId, undefined, params.previewReferences ?? [], undefined, undefined, ctx.connection.sentFrom ?? null);
   });
   core.router.register('turns.stop', (params, ctx) => {
     const by = ctx.connection.identity.principal === 'agent' ? `agent of ${ctx.connection.identity.threadId}` : `${ctx.connection.identity.principal} from ${ctx.connection.sentFrom?.client ?? 'a client'}`;
     core.activity.pauseAll(params.threadId);
-    const stopped = core.threads.stopTurn(params.threadId);
+    // Stop ends what would wake the thread again, its pull request watches included.
+    const unwatched = core.pullRequestWatches.endThread(params.threadId);
+    const stopped = core.threads.stopTurn(params.threadId) || unwatched > 0;
     // After the stop, so an unknown thread (which throws) logs nothing, and with what it did.
     core.logs.info(`Stop requested by the ${by}: ${stopped ? 'a turn was stopped' : 'nothing was running'}`, { source: 'turns', event: 'turn.stop-asked', threadId: params.threadId, data: { principal: ctx.connection.identity.principal, client: ctx.connection.sentFrom?.client ?? null, stopped } });
     return { stopped };
@@ -170,6 +230,7 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
     if (params.action === 'resume') await requireCwd(core, params.threadId);
     return core.threads.recoverTurn(params);
   });
+  core.router.register('turns.cancelRetry', (params) => ({ cancelled: core.threads.cancelRetry(params.threadId) }));
   core.router.register('turns.steer', params => steerUser(core, core.threads, params));
   core.router.register('permissions.list', (params) => core.threads.listPermissions(params.threadId));
   core.router.register('permissions.answer', (params) => {

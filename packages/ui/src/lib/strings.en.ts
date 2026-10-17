@@ -9,8 +9,8 @@ export const strings = {
     clearKey: 'Remove saved key', save: 'Save proxy', saved: 'Proxy saved',
     configure: 'Configure proxy', native: 'Show account limits',
     showDashboard: 'Show proxy dashboard',
-    openDashboard: 'Open dashboard',
-    signInHint: 'Sign in with Open dashboard, then reload here. If the page stays blank, this dashboard may block embedded views.',
+    openGateway: 'Open {name}',
+    signInHint: 'Sign in with Open {name}, then reload here. If the page stays blank, this dashboard may block embedded views.',
     mixedContent: 'This page uses HTTPS. Set an HTTPS dashboard URL to view it here, or open the HTTP dashboard separately.',
     enabledHint: 'When on, the accounts signed in on this machine are no longer used for Claude and Codex, nor for Grok behind Douane.',
     /** The single account a proxied provider shows. */
@@ -24,6 +24,41 @@ export const strings = {
     entryStatus: { ready: 'Ready', cooldown: 'Cooling down', error: 'Error', disabled: 'Disabled' },
     creditOf: '{remaining} of {limit}',
     creditUsed: '{used} used',
+    /** Where the gateway runs: a URL the user types, or Douane run by this machine's core. */
+    where: 'Where the gateway runs',
+    remote: 'Remote gateway', local: 'Douane on this machine',
+    localHint: 'The Douane plugin, installed and run by Boite from Settings > Plugins. The proxy points at its loopback port by itself, and follows it if the port changes.',
+    localMissing: 'The Douane plugin is not installed on this machine.',
+    localStopped: 'The Douane plugin is stopped.',
+    localStarting: 'The Douane plugin is starting.',
+    localRunning: 'Douane {version} answers on 127.0.0.1:{port}.',
+    openPlugins: 'Open Plugins',
+    /** Moving this machine's sign-ins and OpenCode keys into Douane. */
+    move: {
+      open: 'Move my connections to Douane',
+      openHint: 'Douane takes the sign-ins and API keys this machine already has, so nobody signs in again or pastes a key.',
+      title: 'Move connections to Douane',
+      intro: 'Claude, Codex and Grok sign-ins move: their tokens rotate, so once Douane holds one it serves that agent through the gateway and this machine\'s copy stops working. Turning the gateway off later means signing in again here. API keys are copied as they are.',
+      loading: 'Reading this machine\'s sign-ins',
+      empty: 'Nothing here that Douane can take.',
+      token: 'Management token (optional)',
+      tokenHint: 'Only for a Douane whose admin API asks for one. It stays on this machine and is never shown again.',
+      tokenSaved: 'A management token is saved; leave empty to keep it.',
+      clearToken: 'Remove saved token',
+      confirm: 'Move {count}',
+      moving: 'Moving',
+      failed: 'Could not move: {error}',
+      login: '{provider} sign-in',
+      copilot: 'GitHub Copilot sign-in',
+      endpoint: '{source} API key',
+      opencodeGo: 'OpenCode Go key',
+      route: 'served as {route}',
+      outcomes: { moved: 'Moved', present: 'Already there', refused: 'Refused', missing: 'No longer here' },
+      reasons: {
+        signedOut: 'Not signed in', unreadable: 'Login file unreadable', noAddress: 'No known API address',
+        otherApi: 'Not an OpenAI-compatible API', otherSignIn: 'Douane cannot take this sign-in', routeTaken: 'Route used by another endpoint',
+      },
+    },
   },
   /** A settings card an agent put in the conversation (`boite settings request|open`). */
   settingRequest: {
@@ -55,6 +90,7 @@ export const strings = {
     compactAny: 'At any size',
     keys: {
       asyncQuestions: 'Let agents ask without stopping',
+      shortAnswers: 'Short answers',
       titleModel: 'Title model',
       threadDoneRetentionDays: 'Delete done threads after',
       threadDeletionRetentionDays: 'Purge deleted threads after',
@@ -73,6 +109,7 @@ export const strings = {
       browserOrigins: 'Allowed browser origins',
       warmProcessMinutes: 'Keep an agent warm after its turn',
       autoCompact: 'Automatic compaction',
+      autoResumeLimitedThreads: 'Resume threads after a usage limit',
     },
     /** What 0 means for the settings where it is not a number. */
     zero: {
@@ -82,6 +119,39 @@ export const strings = {
       threadDoneRetentionDays: 'Never',
       threadDeletionRetentionDays: 'Never',
       warmProcessMinutes: 'Released at once',
+    },
+  },
+  /** A card asking the user to change one setting of a persistent agent (`agents.settings.request`). */
+  agentSettingRequest: {
+    heading: 'Suggested change to {name}',
+    apply: 'Apply',
+    show: 'Open its settings',
+    refuse: 'Refuse',
+    guestHint: 'Only the computer running Boite can change an agent\'s settings.',
+    projectsHint: 'Untick a project to leave it out.',
+    entrust: 'Entrust',
+    takeBack: 'Take back',
+    loadFailed: 'This agent setting card did not load.',
+    to: 'to',
+    applied: 'Applied',
+    changed: 'Set to {value} instead',
+    refused: 'Refused',
+    closed: 'Closed without an answer',
+    on: 'On',
+    off: 'Off',
+    none: 'None',
+    noProjects: 'No project',
+    defaultEffort: 'Default',
+    minutes: '{count} min',
+    /** A plain question a persistent agent asked without stopping, shown in its conversation. */
+    send: 'Send',
+    keys: {
+      projects: 'Projects',
+      model: 'Model',
+      effort: 'Reasoning effort',
+      autoMemory: 'Update memory after each task',
+      subagents: 'Subagents',
+      maxRunMinutes: 'Maximum minutes per execution',
     },
   },
   remoteBrowser: {
@@ -174,8 +244,6 @@ export const strings = {
     addMemory: 'Add memory', text: 'Text', scope: 'Scope', sources: 'Sources', ownerMemory: 'Added by you',
     searchKnowledge: 'Search memory and resources', expiresAt: 'Expires at, optional', expired: 'Expired', expireMemory: 'Expire now',
     engine: 'Background work', concurrency: 'Concurrent agents', engineHint: 'Closing this page leaves work running on the connected core.',
-    kebacc: 'External kebacc experiment', kebaccHint: 'Use the external kebacc-switcher plugin for Antigravity CLI. Boite does not switch or rotate these accounts.',
-    experimentOff: 'Enable the experiment in background settings first.',
     idle: 'Available', offline: 'Agents could not be loaded from this machine. Reconnect or update its core.', retry: 'Retry',
     stale: 'Connection lost. This is the last received state. Work may still be running on the host.',
     history: 'History',
@@ -188,7 +256,7 @@ export const strings = {
     contexts: 'Conversation contexts', memories: 'Memories', toEveryone: 'Everyone',
     missionMembers: 'Agents on this mission', dangerZone: 'Stop the engine', dangerHint: 'Stops every agent on this core and disconnects its clients.',
     stopEngine: 'Stop this core', stopEngineBody: 'Stops all work on this core and disconnects its clients. Started work will need review before resuming. Reopen Boite on the host to start the core again.',
-    createAgent: 'Create an agent', noAgents: 'No agents yet', more: 'More', noMatch: 'Nothing matches',
+    createAgent: 'Create an agent', noAgents: 'No agents yet', noAgentsOn: 'No agents on {machine} yet', more: 'More', noMatch: 'Nothing matches',
     noMessagesYet: 'No messages yet', noMissions: 'No missions yet', previewFrom: '{name}: {text}', unread: '{count} unread',
     backToChat: 'Back to the conversation', backTo: 'Back to {name}', editRoles: 'Edit roles', startChat: 'Start the conversation',
     asks: '{name} asks you',
@@ -204,6 +272,11 @@ export const strings = {
     machineUnreachable: '{name} is not connected. Reconnect it, then create the agent again.', whatItDoesHint: 'Its standing instructions. You can change them later in its settings.',
     namePlaceholder: 'Mira, Scout, Pixel', whatItDoes: 'What it does', instructionsPlaceholder: 'For example: every morning, read the new issues and sum them up in five lines.',
     ownedBy: '{name} runs this thread', ownedHint: 'Talk to {name} in its conversation. This thread shows what it does.', openAgent: 'Open {name}',
+    projects: 'Projects', projectsHint: 'It follows their threads, starts new ones, answers their questions and tells you what matters.', noProjects: 'Open a project first.', looksAfter: 'Looks after {names}',
+    seeWork: 'See its work', aboutProjects: 'About your projects', memoryUpdated: 'Memory updated', memoryUpdating: 'Updating memory',
+    autoMemory: 'Update memory after each task', autoMemoryHint: 'A small helper rewrites its notes from what you asked and what it answered.',
+    brainFolder: 'Brain folder', brainFolderHint: 'Where every agent keeps its instructions and notes on this machine. Changing it moves them all.', brainDefault: 'Default, in Boite’s data folder',
+    brainChange: 'Change', brainUseDefault: 'Use default', brainMove: 'Move brains here', brainPath: 'Folder on this machine', brainBrowse: 'Browse', brainParent: 'Parent folder', brainUseFolder: 'Use this folder',
     robot: {
       family: 'Style', shape: 'Shape', color: 'Color', eyes: 'Eyes', top: 'Accessory', shuffle: 'Shuffle', customize: 'Customize', done: 'Done',
       option: '{part} {n}', families: { jelly: 'Jelly', bubble: 'Bubble', capsule: 'Capsule', retro: 'Retro' },
@@ -328,6 +401,9 @@ export const strings = {
     ids: 'Ids',
     agent: 'Agent',
     parent: 'Started by',
+    turn: 'Turn',
+    request: 'Request',
+    run: 'Run',
     export: 'Export anonymized logs',
     exportHint: 'The last 24 hours in one text file a developer can read: environment, grouped problems, threads and the timeline.',
     exportDone: 'Saved {name} ({size}).',
@@ -352,7 +428,9 @@ export const strings = {
     close: 'Close',
     agentAccess: 'Agents can read anonymized logs',
     agentAccessHint: 'An agent can check whether Boite itself failed and draft an issue about it. It reads the anonymized view only, never the files on disk.',
-    failed: 'Diagnostics did not load: {reason}'
+    failed: 'Diagnostics did not load: {reason}',
+    outdated: 'Boite on {machine} is older than these diagnostics: its log shows below, but the status, the export and the report need an update. Update it in Settings, Machines and updates.',
+    outdatedHere: 'Boite on this machine is older than these diagnostics: its log shows below, but the status, the export and the report need an update. Update it in Settings, Machines and updates.'
   },
   telemetry: {
     heading: 'Privacy and analytics',
@@ -380,7 +458,7 @@ export const strings = {
     microphoneTestHint: 'Speak to check the level. This test stays on your device.',
     heading: 'Voice', description: 'The microphone beside Send, up to two minutes at a time. The text waits in the composer until you send it.',
     start: 'Dictate', stop: 'Finish dictation', listening: 'Listening', opening: 'Waiting for microphone', transcribing: 'Transcribing',
-    private: 'On this core only', cloud: 'Transcribed by your API provider', retry: 'Retry transcription',
+    private: 'On this core only', cloud: 'Transcribed by your API provider', retry: 'Retry transcription', discard: 'Discard recording',
     live: 'Live preview', previewFailed: 'Live preview paused. Finish to transcribe the full recording.',
     local: 'Local', api: 'API', engine: 'Engine',
     engineHint: 'Local transcribes on this machine and the audio never leaves it. API sends the audio to Groq or OpenRouter with your key.',
@@ -477,14 +555,25 @@ export const strings = {
     atWork: '{count} at work', atWorkFilter: 'Show only the conversations at work',
     draftTitle: 'What would you like to do?', draftHint: 'Start a task, ask a question, or pick up your work.',
     pairTitle: 'Your Boite, on your phone',
-    pairBody: 'On any of your machines, open Settings, Machines, Add a device. Then scan its code here, or type it.',
+    pairBody: 'On any of your machines, open Settings, Machines, Add a device, then scan its QR code here.',
     pairStep: 'On your computer: Settings, Machines, Add a device.',
     pairInstalled: 'Just installed Boite? Add it here too: the iPhone app keeps its connection separately from the browser.',
-    pairPrivacy: 'The code works once and expires within minutes. This phone then reaches every machine of the group.',
+    pairPrivacy: 'The QR code works once and expires within minutes. This phone then reaches every machine of the group.',
     scanInApp: 'Use the Scan button here rather than the Camera app: the camera opens the link in Safari, which keeps a connection of its own.',
     pairingRequired: 'Add this app to your group',
     offlineTitle: 'Waiting for your computer',
     offlineBody: 'Keep Boite running on your computer and check your connection. If you use Tailscale, keep it connected on both devices.',
+    localNetworkTitle: 'Allow the local network',
+    localNetworkBody: 'Your machines are on your local network, and your browser blocks Boite from it. In the browser that runs the app (Chrome or another), open Settings, Site settings, Local network and allow {host}. On Android, also allow Nearby devices for that browser in its app settings.',
+    troubleshoot: 'Troubleshoot', troubleshootSteps: 'Connection checks',
+    checkLocalNetwork: 'Local network',
+    checkLocalNetworkHint: 'In the browser that runs the app: Settings, Site settings, Local network, allow {host}.',
+    localNetworkStates: { granted: 'Allowed', denied: 'Blocked', prompt: 'Not answered' },
+    checkNearby: 'Nearby devices',
+    checkNearbyHint: 'In Android settings: Apps, the browser that runs the app, Permissions, Nearby devices, Allow. Android asks for it on top of Local network.',
+    checkReach: 'Reach {host}', checkOpen: 'Open',
+    checkReachHint: 'Open it in a browser tab. If the page does not load, this phone cannot reach the machine: check Tailscale, the VPN or the Wi-Fi.',
+    localNetworkAsk: 'When your browser asks, allow Boite to reach devices on your local network: your machines are there.',
     emptyTitle: 'Start a conversation',
     emptyBody: 'Send a task to an agent. Your conversations will appear here.',
     emptyActivity: 'All caught up',
@@ -503,19 +592,14 @@ export const strings = {
     label: 'Machine name', icon: 'Machine icon', icons: { desktop: 'Desktop', laptop: 'Laptop', server: 'Server', rack: 'Server rack', cloud: 'Cloud', cpu: 'Processor' }, link: 'Link from another machine', add: 'Add machine', adding: 'Connecting', connect: 'Connect',
     addHint: 'On a machine of your group, open Settings, Machines, Add a device, copy the link and paste it here.',
     scan: 'Scan the code', pasteLink: 'Paste the link', scanTitle: 'Scan the code',
-    typeCode: 'Type the code', codeLabel: 'Code', codePlaceholder: 'ABCD-EFGH',
-    codeHint: 'The 8-character code shown under the QR code, on any machine of your group.',
-    codeInvalid: 'A code has 8 letters and digits, like ABCD-EFGH.',
-    hostLabel: 'Machine address', hostPlaceholder: 'boite.example.com',
-    hostInvalid: 'Type the HTTPS address of the machine that shows the code, like boite.example.com.',
-    codeInsecure: 'This code leads to a plain HTTP address, which the app cannot open. Show the code on a machine that has an HTTPS address.',
+    linkInsecure: 'This link leads to a plain HTTP address, which the app cannot open. Add the device from a machine that has an HTTPS address.',
     scanHint: 'On any of your machines, open Settings, Machines, Add a device and point the camera at its QR code.',
     scanStarting: 'Starting the camera', scanClose: 'Close the camera',
     scanErrors: {
-      insecure: 'The camera needs an HTTPS address. Open Boite through its HTTPS address, or type the code.',
-      denied: 'Camera access was refused. Allow it for this site in the browser settings, or type the code.',
-      missing: 'No camera was found on this device. Type the code instead.',
-      failed: 'The camera could not start. Type the code instead.'
+      insecure: 'The camera needs an HTTPS address. Open Boite through its HTTPS address, or paste the link.',
+      denied: 'Camera access was refused. Allow it for this site in the browser settings, or paste the link.',
+      missing: 'No camera was found on this device. Paste the link instead.',
+      failed: 'The camera could not start. Paste the link instead.'
     },
     linkReaches: 'This link connects to {host}.', linkReplaces: 'This link connects to {host}, listed here as {machine}. It replaces the key held for it.', linkConnected: 'This link is for {host}, already connected here as {machine}.',
     remove: 'Remove machine', removeTitle: 'Remove {machine}?',
@@ -541,6 +625,7 @@ export const strings = {
     syncStages: { settings: 'the settings', keybindings: 'the keybindings', brain: 'the brain switches' },
     syncProviders: 'Still to sign in on this machine: {providers}. Sign-ins never leave the machine they were made on.',
     syncOpenProviders: 'Open its providers',
+    threadFailed: 'A thread failed here: {thread}',
     agentLinkAddressRequired: 'Update both machines to relay through the app, or set a reachable HTTPS address for {machine} in General settings.',
   },
   group: {
@@ -559,9 +644,10 @@ export const strings = {
     copied: 'Copied',
     addDevice: 'Add a device', adding: 'Preparing',
     addOlder: 'Boite on {machine} is too old to add a device. Update it under Updates on this page, then come back.',
-    addHint: 'Scan the code with a phone, or type the code in its Boite app. On a computer, copy the link and paste it under Join. Works once.',
+    scanTitle: 'Scan with your phone',
+    addHint: 'Open Boite on the phone and tap Scan the code. On a computer, copy the link and paste it under Join.',
     qr: 'The link that adds a device, as a QR code',
-    copyLink: 'Copy link', code: 'Code', link: 'Link for a computer',
+    copyLink: 'Copy link', link: 'Link for a computer',
     expires: 'Works once, until {time}',
     device: 'Device', phone: 'Phone', browser: 'Browser', devicesList: 'Devices of the group',
     deviceAdded: 'Added on {machine}',
@@ -634,16 +720,27 @@ export const strings = {
     progress: 'Server update download',
     release: 'What\'s new',
     details: 'Details',
-    timing: 'Installation waits for agents and background work to finish. You can keep chatting or cancel while it waits.',
+    timing: 'Agents finish their current tool call, 30 seconds at most, then the server updates, restarts and resumes them. An agent update under way finishes first.',
     backup: 'Conversations and settings are backed up. If startup fails, the previous version is restored.',
     reconnect: 'Connected devices reconnect automatically.',
     confirmTitle: 'Update {machine}?',
-    confirmBody: 'Version {version} will install when work finishes. Your conversations are backed up.',
+    confirmBody: 'Agents finish their current tool call, 30 seconds at most. Version {version} then installs and they resume after the restart. Your conversations are backed up.',
     manualTitle: 'Manual update',
     docker: 'After agents finish, run this in the Compose directory:',
     manual: 'Use the guide to update this installation.',
     legacy: 'Update it once manually to enable this button.',
     guide: 'Update guide'
+  },
+  desktopUpdate: {
+    heading: 'Desktop app',
+    progress: 'Desktop app update download',
+    ready: 'Downloaded, ready to install',
+    installing: 'Installing, Boite restarts there',
+    current: 'Up to date',
+    elsewhere: 'Install this update on that machine itself: its installer may ask for a confirmation.',
+    confirmTitle: 'Update Boite on {machine}?',
+    confirmBody: 'Version {version} installs once the agents there are done. Boite restarts on {machine} and running work resumes.',
+    requested: 'Another machine is installing Boite {version} here. Boite restarts in a moment.'
   },
   appUpdate: {
     released: 'Released {time}',
@@ -672,11 +769,33 @@ export const strings = {
     retained: 'Changing channels keeps your conversations and settings.',
     check: 'Check for updates',
     checkingAction: 'Checking',
-    download: 'Download',
     install: 'Install and restart',
     readyAction: 'Update',
     installTitle: 'Install the Boite update?',
     installBody: 'Agents finish their current tool call, 30 seconds at most. Boite then updates, restarts and resumes them.',
+  },
+  updateAll: {
+    heading: 'Updates',
+    trigger: 'Updates available',
+    busy: 'Updating',
+    run: 'Update all',
+    app: 'Update the app',
+    retry: 'Try again',
+    later: 'Remind me later',
+    restarts: 'Boite downloads its release, then asks to restart. Threads resume where they were.',
+    summary: (count: number) => count === 1 ? '1 update' : `${count} updates`,
+    downloading: (percent: number | null) => percent === null ? 'Downloading' : `Downloading ${percent}%`,
+    ready: 'Restart to finish',
+    restartsNext: 'Restart once the agents are done',
+    waiting: 'Waits for work to finish',
+    installing: 'Restarting',
+    updating: 'Updating',
+    waitingFor: (count: number) => count === 1 ? 'Waits for a thread to pause' : `Waits for ${count} threads to pause`,
+    failed: 'Failed',
+    done: 'Up to date',
+    allDone: 'Everything is up to date',
+    finish: 'Boite is ready: restart it to finish.',
+    restart: 'Restart'
   },
 
   connection: {
@@ -753,7 +872,10 @@ export const strings = {
 
   drop: {
     title: 'Drop to add a project',
-    body: 'Each folder becomes a project. Files are refused.'
+    body: 'Each folder becomes a project. Files go to the message.',
+    attachTitle: 'Drop to attach',
+    attachBody: 'The files go to the message you are writing.',
+    noComposer: 'Open a conversation to attach the dropped files.'
   },
 
   sidebar: {
@@ -787,7 +909,8 @@ export const strings = {
     groupWorkingRow: 'Working threads',
     groupIdleRow: 'Idle projects',
     customOrderShort: 'Custom',
-    autoArchiveMergedPrHint: 'A worktree conversation leaves the list for Done once its branch is merged. Its worktree, branch and history stay. Applies to this project.',
+    autoArchiveMergedPrHint: 'A worktree conversation leaves the list for Done once its branch is merged. Its history stays. Applies to this project.',
+    autoRemoveWorktreesHint: 'An hour after every conversation in a worktree is done or archived, Boite deletes the worktree if nothing would be lost: its last commit is on another branch, or a merged pull request has that exact commit. A merged branch goes too. Uncommitted changes always stay. Applies to this project.',
     noActiveProjects: 'No conversations need attention.',
     markDone: 'Mark done',
     doneToast: 'Marked "{title}" done',
@@ -799,6 +922,16 @@ export const strings = {
     reopenThread: 'Move to Recent',
     reopenNamedThread: 'Move "{title}" to Recent',
     doneNotice: 'This thread is done. Move it to Recent to continue.',
+    /** Above the composer, or the done notice, of a thread whose worktree Boite removed. */
+    worktreeGone: {
+      title: 'Worktree removed',
+      merged: 'Boite removed this thread\'s worktree {when}, after #{number} was merged.',
+      clean: 'Boite removed this thread\'s worktree {when}: every commit in it was already on another branch.',
+      branchDeleted: 'Branch {branch} was deleted.',
+      branchKept: 'Branch {branch} is still there.',
+      archived: 'Moved to Recent, this thread has no folder to work in.',
+      live: 'A new message here has no folder to run in. Start a new thread to keep working.'
+    },
     allProjects: 'All projects',
     filterProject: 'Filter by project',
     recentOrder: 'Recent activity',
@@ -822,6 +955,7 @@ export const strings = {
     manageProject: 'Manage project',
     worktreeDefault: 'Worktree by default',
     autoArchiveMergedPr: 'Hide merged PR conversations',
+    autoRemoveWorktrees: 'Remove settled worktrees',
     backToProjectMenu: 'Back',
     viewArchivedThreads: 'View archived threads',
     importSession: 'Import a Claude Code session',
@@ -857,15 +991,36 @@ export const strings = {
       delegating: 'Sub-agents',
       delegatingOne: 'Waiting on 1 sub-agent',
       delegatingMany: 'Waiting on {count} sub-agents',
-      /** What a phone row shows beside the radar: how many sub-agents are at work. */
-      subagentsOne: '1 sub-agent',
-      subagentsMany: '{count} sub-agents',
+      /** The chip a parent's row carries while its delegated agents work, in every state. */
+      subagentsOne: '1 sub-agent at work',
+      subagentsMany: '{count} sub-agents at work',
+      /** The same chip once a sub-agent asks the user something: the parent reads Needs you. */
+      subagentsAskingOne: '1 sub-agent needs you',
+      subagentsAskingMany: '{count} sub-agents need you',
       /** The turn ended, the agent still watches something: a monitor it left going. */
       monitoring: 'Monitoring',
       monitoringFor: 'Monitoring for {elapsed}',
       /** The turn ended, the agent still runs a shell, a subagent or a workflow. */
       background: 'In background',
-      backgroundFor: 'In background for {elapsed}'
+      backgroundFor: 'In background for {elapsed}',
+      /** The turn ended, Boite watches pull requests for the agent and wakes it when they need it. */
+      watching: 'Watching PR',
+      watchingMany: 'Watching {count} PRs',
+      /** A delegated agent's turn ended on its own background work, which wakes it: what it waits for. */
+      awaiting: 'Waiting on {what}',
+      /** That work ended without waking it: the agent stopped there, its result never came. */
+      interrupted: 'Interrupted',
+      /** Its machine stopped answering while it worked: what it does now is unknown until the machine is back. */
+      unreachable: 'Unreachable',
+      unreachableWas: 'Machine unreachable. Last known state: {state}',
+      interruptedBy: '{what} ended without waking it: {reason}',
+      interruption: {
+        'error': 'the task failed',
+        'cancelled': 'the task was cancelled',
+        'no-longer-reported': 'its process ended',
+        'session-ended': 'its agent process was ended',
+        'core-restarted': 'Boite or the PC restarted'
+      }
     },
     /** A folded project's mark for the threads it hides: `2 threads: Needs you`. */
     rollupOne: '1 thread: {state}',
@@ -957,6 +1112,34 @@ export const strings = {
     importing: 'Importing',
   },
 
+  /** What a Claude thread's last request started with, from the context meter. */
+  agentShape: {
+    open: 'What the agent sees',
+    title: 'What the agent sees',
+    intro: 'The system prompt and tools of the last request, as Claude Code recorded it.',
+    loading: 'Reading the transcript',
+    failed: 'Could not read the transcript: {error}',
+    noSession: 'No request yet: send a first message.',
+    noTranscript: 'The session transcript is not on this machine any more.',
+    unrecorded: 'This Claude Code version records no request details. Update it to 2.1.300 or later.',
+    system: 'System prompt',
+    tools: 'Tools',
+    block: 'Block {n}',
+    truncated: 'Cut here; the block holds {chars} characters.',
+    description: 'description {chars}',
+    omitted: '{n} more, counted in the total',
+    estimate: 'about {tokens} tokens',
+    estimateHint: 'Characters divided by four: an estimate, not the provider\'s count.',
+    chars: '{n} chars',
+    model: 'Model',
+    effort: 'Effort',
+    thinking: 'Thinking',
+    maxTokens: 'Max output',
+    betas: 'Betas',
+    version: 'Claude Code',
+    sent: 'Sent',
+  },
+
   /** Images on their way to an agent, files given with an answer, and the full-screen viewer. */
   media: {
     sourceTooLarge: '{name} weighs {size}: Boite shrinks images of {max} at most, so it was left out.',
@@ -1001,6 +1184,11 @@ export const strings = {
     questionNext: 'Next question',
     questionFold: 'Fold the question',
     questionUnfold: 'Open the question',
+    /** A sub-agent's question or permission, docked in its parent: whose it is, and the way into its conversation. */
+    subagentAsks: 'Asked by {title}',
+    subagentPermission: '{title} waits for your permission',
+    openSubagent: 'Open',
+    openSubagentHint: 'Open {title}',
     loop: 'Loop',
     tasks: 'Tasks',
     taskCount: '{done}/{total} tasks',
@@ -1091,12 +1279,26 @@ export const strings = {
     defaultLong: 'Edits and runs commands in this folder without asking, asks to go beyond it'
   },
 
+  /** agy asks nothing in print mode: what its mode does not allow, it refuses by itself. */
+  permissionModeAgy: {
+    default: 'agy settings',
+    defaultLong: 'Follows agy\'s own permission setting and refuses what it would ask about',
+    acceptEditsLong: 'Edits files without asking, refuses commands that need approval',
+    draft: "with agy's own permission settings"
+  },
+
   thread: {
     recoveryTitle: 'Prompt saved before restart',
     recoveryBody: 'This prompt has not been sent to the agent. Resume it with its saved model and account, or remove it from the queue.',
     recoveryTarget: 'Saved selection: {model} · {account}',
     recoveryResume: 'Resume prompt',
     recoveryDiscard: 'Remove from queue',
+    retryCapacityTitle: 'Model at capacity',
+    retryCapacityBody: 'Trying again in {time}, try {attempt} of {attempts}.',
+    retryCapacityCancel: 'Stop retrying',
+    retryLimitTitle: 'Usage limit reached',
+    retryLimitBody: 'Resumes at {time}, once the limit has reset, in {in}.',
+    retryLimitCancel: 'Do not resume',
     contextDetails: 'Context',
     contextInput: 'Input',
     contextCache: 'Cached input',
@@ -1374,12 +1576,16 @@ export const strings = {
     replyTo: 'In reply to',
     /** A burst touched more discussions than the timeline lists. */
     more: '+{count} more',
+    /** What a timeline row says above the other agent's name: which way the burst went. */
+    sentOne: 'Sent to', sentMany: '{count} messages sent to',
+    receivedOne: 'Received from', receivedMany: '{count} messages received from',
+    exchanged: 'Exchange with',
+    /** A thread link in an answer that no connected machine or contact holds. */
+    threadMissing: 'No connected machine has this conversation.',
     /** Who started or delegated whom. Where a conversation runs is said by its project and machine, not a tag. */
     relation: {
-      starter: 'Started this thread', started: 'Started from here', parent: 'Parent', child: 'Subagent', steward: 'Steward', stewarded: 'Looked after'
-    },
-    /** What the core told this steward about the threads it looks after. */
-    noticeOne: '1 thread notice', noticeMany: '{count} thread notices'
+      starter: 'Started this thread', started: 'Started from here', parent: 'Parent', child: 'Subagent', resident: 'Looks after the project'
+    }
   },
   coordination: {
     options: 'Advanced settings',
@@ -1403,31 +1609,9 @@ export const strings = {
       queued: 'Waiting', received: 'Waiting', delivered: 'Sent', uncertain: 'Unconfirmed', expired: 'Expired', rejected: 'Failed'
     }
   },
-  steward: {
-    chipFor: 'Steward: {name}',
-    lookedAfterBy: 'Looked after by {name}',
-    heading: 'Steward',
-    enable: 'This agent looks after projects',
-    enableHint: 'It reads every thread there, steers them, answers their questions and tidies them up while you are away.',
-    ownerOnly: 'Only the owner can make an agent a steward. This device can see what it looks after.',
-    unavailable: 'A subagent or a persistent agent session cannot be a steward.',
-    allProjects: 'All projects', allProjectsHint: 'Projects added later included.',
-    projects: 'Projects', projectsEmpty: 'No project to look after on this machine.',
-    capabilities: 'What it may do',
-    risky: 'Risky',
-    capability: {
-      message: { label: 'Send messages', hint: 'Its messages reach the threads, even where communication is off.' },
-      spawn: { label: 'Start threads', hint: 'Start new threads in its projects.' },
-      archive: { label: 'Archive', hint: 'Archive and restore threads.' },
-      move: { label: 'Move', hint: 'Move threads between its projects and add project folders.' },
-      stop: { label: 'Stop and rename', hint: 'Stop a running turn and rename threads.' },
-      answer: { label: 'Answer questions', hint: 'Answer or skip the questions agents ask you.' },
-      permissions: { label: 'Answer permissions', hint: 'Allow or deny tool permission requests in your place.' },
-      remove: { label: 'Delete threads', hint: 'Delete threads. A deleted thread stays restorable for a while.' }
-    },
-    notify: 'Notify on thread events',
-    notifyHint: 'A finished turn, a failure, a question or a waiting permission wakes the steward.',
-    chipOne: 'Steward · 1 project', chipMany: 'Steward · {count} projects', chipAll: 'Steward · all projects'
+  /** The persistent agent the owner entrusted a project to, where its project and threads show it. */
+  resident: {
+    lookedAfterBy: 'Looked after by {name}'
   },
   contextMode: {
     light: 'Light',
@@ -1455,8 +1639,6 @@ export const strings = {
     parent: 'Parent thread',
     activeOne: '1 active subagent',
     activeMany: '{count} active subagents',
-    loadingTranscript: 'Loading the selected conversation',
-    noTranscript: 'This subagent has not written anything yet.',
     configure: 'Settings',
     enabled: 'Let this conversation start subagents',
     enabledHint: 'The agent can hand parts of a task to other agents. Each one works in its own conversation and reports back here.',
@@ -1471,9 +1653,7 @@ export const strings = {
     removeProfile: 'Remove this model',
     pause: 'Pause subagents',
     resume: 'Resume subagents',
-    openThread: 'Open conversation',
     backToTeam: 'Back to the subagents',
-    stop: 'Stop',
     stopAll: 'Stop all',
     send: 'Send to the subagent',
     startedOne: 'Started 1 subagent',
@@ -1485,6 +1665,15 @@ export const strings = {
     showTeam: 'View subagents',
     stoppedStatus: 'Stopped',
     failedStatus: 'Failed',
+    /** Its turn ended on its own background work, which wakes it: not finished. */
+    waitingStatus: 'Waiting',
+    /** That work ended without waking it: its result never came. */
+    interruptedStatus: 'Interrupted',
+    interrupted: '{count} interrupted',
+    resumeAgent: 'Resume',
+    resumeAgentHint: 'Ask this subagent to check how its background work ended and finish its task',
+    /** What Resume sends the interrupted subagent. */
+    resumeAgentText: 'Your background work ({what}) ended without waking you: {reason}. Check how it ended, then finish your task.',
     activeSection: 'Active',
     finishedSection: 'Finished'
   },
@@ -1509,7 +1698,6 @@ export const strings = {
     result: 'Result',
     output: 'Output',
     items: 'Executions',
-    conversation: 'Conversation',
     openThread: 'Open conversation',
     back: 'Back to the graph',
     close: 'Close details',
@@ -1579,6 +1767,9 @@ export const strings = {
     installInSettings: 'Install in Settings',
     effortTitle: 'Reasoning effort',
     speed: 'Response speed',
+    /** The reasoning chip of a model whose agent keeps its own level until one is picked. */
+    effortDefault: 'Default',
+    effortDefaultHint: 'Let the agent pick its own level for this model',
     standardSpeed: 'Standard speed',
     favorites: 'Favorites',
     favorite: 'Add to favorites',
@@ -1697,7 +1888,21 @@ export const strings = {
     markDone: 'Confirm it is done',
     removeTodo: 'Remove this todo',
     collapse: 'Fold this section',
-    expand: 'Unfold this section'
+    expand: 'Unfold this section',
+    /** The pull requests the agent asked Boite to watch (`boite pr watch`). */
+    watchSection: 'Pull request watches',
+    noWatches: 'No pull request watched',
+    watchHint: 'Boite reads the pull request on GitHub about once a minute and wakes the agent when a check fails, the checks pass, a review or comment lands or the branch conflicts',
+    watchNotRead: 'Not read yet',
+    watchNoChecks: 'No checks',
+    watchChecks: '{total} checks',
+    watchRunning: '{count} running',
+    watchFailed: '{count} failed',
+    watchConflict: 'Conflicts with {base}',
+    watchRateLimited: 'GitHub rate limit, next read {time}',
+    watchUnreachable: 'GitHub out of reach, next read {time}',
+    stopWatch: 'Stop watching',
+    stopWatchOf: 'Stop watching #{number}'
   },
 
   /** The file tree and the file viewer, the two surfaces reading the working directory. */
@@ -2001,7 +2206,6 @@ export const strings = {
     unpriced: 'No price for {providers}: no public rate and no reported cost.',
     unreported: '{count} turns reported no usage. They count as turns only.',
     limits: 'Limits',
-    limitsOwner: 'Subscription limits are read on the computer that runs Boite. Open this page there to see them.',
     refresh: 'Refresh usage',
     loading: 'Reading usage',
     failed: 'Could not read usage: {error}',
@@ -2186,6 +2390,8 @@ export const strings = {
     reapOrphansHint: 'Ten seconds after a turn, a process whose parent has exited is stopped. Windows only.',
     asyncQuestions: 'Let agents ask without stopping',
     asyncQuestionsHint: 'Teaches agents the boite ask command when a session starts. Codex already asks this way.',
+    shortAnswers: 'Short answers',
+    shortAnswersHint: 'Asks every agent, on every message, for the result first in a few plain sentences, without preamble, recap or running commentary. Facts, numbers and commands stay.',
     titleModel: 'Title model',
     titleModelHint: 'Names a thread after its first answer. Automatic uses the thread\'s own agent on its small model.',
     titleModelAuto: 'Automatic',
@@ -2348,6 +2554,7 @@ export const strings = {
 
   quotas: {
     machineAccounts: 'Account limits for {machine}',
+    outdated: 'Update Boite on this machine to see its limits on this device.',
     usingCredits: 'Using credits',
     reorder: 'Reorder {name}. Drag or use the arrow keys.',
     bankedReset: '{count} banked reset',
@@ -2400,6 +2607,8 @@ export const strings = {
     slowHint: 'Antigravity can take up to two minutes to answer.',
     tracked: 'Tracked accounts',
     trackedHint: 'Boite only asks the accounts switched on here.',
+    autoResume: 'Resume threads after a usage limit',
+    autoResumeHint: 'A thread stopped by a subscription usage limit resumes by itself a minute after the limit resets, once per limit window. Stop, a new message or a changed model cancels it.',
     providers: 'Manage providers',
     unavailable: 'No quota reading available.',
     refresh: 'Refresh quotas',
@@ -2481,18 +2690,17 @@ export const strings = {
   },
   plugins: {
     heading: 'Plugins',
+    /** A desktop app asked to show a thread or an agent on a machine this window does not have. */
+    revealUnknownMachine: 'The thread or agent an app asked to show is on a machine this window is not connected to. Add it in Settings, Machines and updates.',
+    revealMachineOffline: 'The thread or agent an app asked to show is on {machine}, which is not connected right now.',
     intro: 'A plugin is a program that runs on the machine hosting your core, checked against the SHA-256 its manifest publishes.',
     installedHeading: 'Installed',
-    installedEmpty: 'No plugin installed yet. Install a recommended one or add one from a git URL.',
     recommendedHeading: 'Recommended',
-    recommendedAllInstalled: 'Every recommended plugin is installed.',
-    recommendedBy: 'Recommended by Boite',
     install: 'Install',
     update: 'Update to {version}',
     reinstall: 'Reinstall',
     remove: 'Uninstall',
     stateInstalled: 'Installed',
-    stateAvailable: 'Not installed',
     stateInstalling: 'Downloading and checking',
     stateError: 'Install failed',
     stateRejected: 'Refused by Boite',
@@ -2518,7 +2726,7 @@ export const strings = {
     urlPlaceholder: 'https://github.com/owner/repo',
     refLabel: 'Branch, tag or commit',
     refPlaceholder: 'Default branch',
-    inspect: 'Read manifest',
+    inspect: 'Preview',
     inspecting: 'Reading',
     previewSource: 'Source',
     previewReplaces: 'Replaces',
@@ -2539,6 +2747,17 @@ export const strings = {
     appStart: 'Start',
     appStop: 'Stop',
     appRestart: 'Restart',
+    startWithBoite: 'Start with Boite',
+    /** A gateway plugin: run in the background on a loopback port, for the subscription proxy. */
+    gateway: 'Gateway',
+    gatewayRunning: '{version} on 127.0.0.1:{port}',
+    gatewayStarting: 'Starting',
+    gatewayUpdating: 'Updating',
+    gatewayCrashed: 'Crashed',
+    gatewayData: 'Its sign-ins and database live in {dir}, and stay there when it is uninstalled.',
+    removeGatewayBody: 'Deletes the program in Boite\'s data directory. Its sign-ins, settings and database stay in {dir}, ready for the next install.',
+    previewGateway: 'Gateway',
+    previewGatewayBody: 'Runs in the background on this machine, on a loopback port, with no access to Boite. The subscription proxy can point at it.',
     trust: 'This program runs with your permissions on the machine hosting your core. Install it only if you trust whoever publishes it.',
     confirmAdd: 'Install {name}',
     refusedTitle: 'Boite refused this plugin',
@@ -2577,6 +2796,8 @@ export const strings = {
     unpaired: 'This device is not in this machine\'s group yet. Add it with the code from Add a device.',
     olderCore: 'Boite on {machine} is too old for this. Update it in Settings, Machines and updates, then try again.',
     olderCoreHere: 'This machine runs a Boite too old for this. Update it in Settings, Machines and updates, then try again.',
+    notConnected: '{machine} is not connected. Boite reconnects by itself once it answers again.',
+    notConnectedHere: 'This machine is not connected. Boite reconnects by itself once it answers again.',
     pairingLink: 'That is not a link to add a device. Copy the link shown by Add a device on the other machine; it starts with http and contains ?grant=.'
   },
 
@@ -2635,14 +2856,15 @@ export const strings = {
     /** Boite Legacy's trade offer: picking a row is the tour's last click. */
     privacy: {
       title: 'SELL YOUR SOUL TO BOITE!',
-      intro: 'Boite counts a few anonymous usage stats so we know what to fix first. Your messages, files and accounts never leave your machine, the app works the same either way, and you can change your mind anytime in Settings.',
+      intro: 'A few anonymous stats tell us what to fix first. Your messages, files and accounts never leave your machine.',
       question: 'Deal?',
       video: 'Trade offer meme',
       basic: 'NO! Just the basic counters',
       basicDefault: '(default)',
-      basicHint: 'Counts of active installs, launches, conversations and turn outcomes. The usage IDs change every day. No profile.',
+      basicHint: 'Anonymous counters, no profile.',
       deal: 'DEAL',
-      dealHint: 'Adds the public models you pick, reasoning level, speed and permission modes, durations and token volumes, under a stable random ID. Private models count as "other". It helps a lot. Thank you!',
+      dealHint: 'Also the models and settings you use. Thank you!',
+      details: 'Basic: active installs under a hashed random ID, and launches, conversations and turn outcomes under IDs that change every day. No profile. Deal adds the public models you pick, reasoning level, speed and permission modes, durations and token volumes, under a stable random ID; private models count as "other". The app works the same either way, and Settings changes it anytime.',
       optOut: "If you REALLY don't want to help Boite:",
       offLabel: 'turn everything off :c',
       doc: 'What is collected'

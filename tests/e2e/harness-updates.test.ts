@@ -33,11 +33,12 @@ beforeAll(async () => {
 }, 60_000);
 beforeEach(async () => { page = await BrowserPage.launch({ url }); await size(1400); await page.waitFor(`document.querySelector('${id('nav-settings')}') && window.__boiteTest?.workspace.machines.length === 2`); }, 30_000);
 afterEach(async () => { await page?.close(); }, 15_000);
-afterAll(async () => { await server?.close(); }, 15_000);
+afterAll(async () => { await server?.close(); }, 30_000);
 
 test('agent updates stay in Machines and Update and Skip target their own machine on desktop and phone', async () => {
   expect(await page.evaluate(`document.querySelector('${id('harness-update-notices')}') === null`)).toBe(true);
-  expect(await page.evaluate(`document.querySelector('${id('nav-app-update')}') === null`)).toBe(true);
+  // Announced in the foot instead, bottom left.
+  await page.waitFor(`document.querySelector('${id('nav-updates')}')`);
   await capture('harness-updates-chat');
   await machines();
   expect((await page.text(id('settings-tab-machines'))).trim()).toBe('Machines and updates');
@@ -47,7 +48,7 @@ test('agent updates stay in Machines and Update and Skip target their own machin
   expect(await page.evaluate(`document.querySelectorAll('${id('machine-details-toggle')}[aria-expanded="false"]').length`)).toBe(2);
   await page.waitFor(`document.querySelectorAll('${id('machine-updates-state')}[data-state="available"]').length === 2`);
   expect(await page.evaluate(`document.querySelector('[data-settings-section="updates"]') === null`)).toBe(true);
-  expect(await page.evaluate(`document.querySelector('${id('app-update-popover')}') === null`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('${id('updates-card')}') === null`)).toBe(true);
   await capture('harness-updates-folded');
   await unfold();
   await capture('harness-updates-desktop');

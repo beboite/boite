@@ -10,7 +10,7 @@ let page: BrowserPage;
 let url: string;
 const id = (name: string) => `[data-testid="${name}"]`;
 async function capture(name: string) {
-  await page.evaluate(`Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])`);
+  await page.settleAnimations();
   await page.screenshot(join(import.meta.dir, '.artifacts', name));
 }
 beforeAll(async () => {
@@ -20,7 +20,7 @@ beforeAll(async () => {
   page = await BrowserPage.launch({ url, windowSize: { width: 1300, height: 850 } });
   await page.waitFor(`document.querySelectorAll('${id('thread-row')}').length === 8`);
 }, 30_000);
-afterAll(async () => { await page?.close(); await server?.close(); });
+afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
 test('recent view filters one owning project and creates its draft', async () => {
   await showThreadView(page, 'recent');

@@ -3,7 +3,8 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { connect, type CoreClient } from '../../packages/core/src/client.ts';
-import { waitForCoreEndpoint } from './desktop-smoke-endpoint.ts';
+import { startupSeconds, waitForCoreEndpoint } from './desktop-smoke-endpoint.ts';
+import { startupEvidence } from './desktop-smoke-evidence.ts';
 
 const executable = resolve(process.argv[2] ?? '');
 if (!process.argv[2] || !existsSync(executable)) throw new Error('Expected an installed shell executable');
@@ -42,8 +43,14 @@ const stderr = new Response(child.stderr).text();
 const failures: unknown[] = [];
 try {
   const file = join(data, 'core.json');
-  const deadline = Date.now() + 30_000;
-  const endpoint = await waitForCoreEndpoint(file, { deadline, exitCode: () => child.exitCode });
+  const seconds = startupSeconds(process.env.BOITE_SMOKE_STARTUP_SECONDS);
+  const launched = performance.now();
+  const endpoint = await waitForCoreEndpoint(file, { deadline: Date.now() + seconds * 1000, seconds, exitCode: () => child.exitCode })
+    .catch((error: unknown) => {
+      console.error(startupEvidence(child.pid, join(data, 'logs')));
+      throw error;
+    });
+  console.log(`Installed core published its endpoint ${((performance.now() - launched) / 1000).toFixed(1)} s after launch (budget ${seconds} s)`);
   corePid = endpoint.pid;
   const origin = `http://127.0.0.1:${endpoint.port}`;
   const health = await (await fetch(`${origin}/health`, { signal: AbortSignal.timeout(5000) })).json() as { ok: boolean; pid: number };

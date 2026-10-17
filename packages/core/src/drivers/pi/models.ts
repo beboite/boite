@@ -1,7 +1,7 @@
 import { withLogDiagnostic } from '../../log-errors.ts';
 import type { EffortLevel, ModelInfo, ProviderDescriptor } from '@boite/contracts';
 import { messageOf, unavailable } from '../../errors.ts';
-import { launchPrefix, profileFor, resolveExecutable } from '../../providers/resolve.ts';
+import { profileFor, resolveLaunch } from '../../providers/resolve.ts';
 import type { ProbeContext } from '../types.ts';
 import { agentEnv, textOf } from './mapping.ts';
 import { AGENT_OWN_MODEL, PROBE_TIMEOUT_MS, STDERR_MAX, THINKING_LEVELS } from './protocol.ts';
@@ -51,12 +51,16 @@ function supportedLevels(model: PiModel): string[] {
 /**
  * A model's `ModelInfo.effort`. A scale of one level is no choice at all, which
  * is what a model without reasoning answers, so it carries no effort block.
+ * `current` is the level the probe's session runs this model on, known only for
+ * the model it is on; every other model gets no default, so a thread picking it
+ * sends no level and pi keeps its own, clamped to that model, rather than a
+ * guessed `off`.
  */
-function effortOf(model: PiModel, wanted: string): ModelInfo['effort'] | null {
+function effortOf(model: PiModel, current: string | null): ModelInfo['effort'] | null {
   const ids = supportedLevels(model);
   if (ids.length < 2) return null;
   const levels: EffortLevel[] = ids.map((id) => ({ id, label: effortLabel(id) }));
-  return { levels, default: ids.includes(wanted) ? wanted : (ids[0] ?? '') };
+  return current !== null && ids.includes(current) ? { levels, default: current } : { levels };
 }
 
 /** pi's provider ids are lowercase; the picker shows them with a capital. */
@@ -69,7 +73,7 @@ interface PiListing {
   models: PiModel[];
   /** The model the session is on, as `<provider>/<id>`, or an empty string. */
   current: string;
-  /** The thinking level the session is on, the default effort of every model. */
+  /** The thinking level the session is on: the default effort of the current model, and of it alone. */
   thinkingLevel: string;
   /** `get_available_thinking_levels`: the scale of the current model, and of it alone. */
   sessionLevels: string[];
@@ -98,7 +102,7 @@ function modelsFrom(provider: ProviderDescriptor, listing: PiListing): ModelInfo
     const full = `${providerId}/${id}`;
     if (seen.has(full)) continue;
     seen.add(full);
-    const effort = effortOf(entry, listing.thinkingLevel);
+    const effort = effortOf(entry, full === listing.current ? listing.thinkingLevel : null);
     models.push({
       id: full,
       name: `${providerLabel(providerId)} / ${entry.name ?? id}`,
@@ -119,13 +123,13 @@ function modelsFrom(provider: ProviderDescriptor, listing: PiListing): ModelInfo
  */
 export async function readModels(ctx: ProbeContext): Promise<ModelInfo[]> {
   const profile = profileFor(ctx.provider);
-  const executable = profile === undefined ? null : resolveExecutable(profile);
-  if (executable === null) {
+  const launch = resolveLaunch(profile);
+  if (launch === null) {
     throw unavailable(`no ${ctx.provider.id} executable on this machine`, { providerId: ctx.provider.id });
   }
 
   let lastStderr = '';
-  const child = ctx.spawnChild(executable, [...launchPrefix(profile), ...(profile?.launch?.args ?? []), '--no-session'], {
+  const child = ctx.spawnChild(launch.executable, [...launch.prefix, ...(profile?.launch?.args ?? []), '--no-session'], {
     cwd: ctx.cwd,
     env: agentEnv(ctx.accountEnv),
   });

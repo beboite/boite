@@ -26,7 +26,7 @@ export async function sideQuestion(deps: ClaudeDeps, ctx: SideQuestionContext): 
       ...(ctx.thread.model === null ? {} : { model: ctx.thread.model }),
       ...(effortLevel === null ? {} : { effort: effortLevel }),
       maxTurns: 1,
-      tools: [], allowedTools: [], mcpServers: {}, settingSources: [],
+      tools: [], allowedTools: [], mcpServers: {}, strictMcpConfig: true, settingSources: [],
       persistSession: false,
       includePartialMessages: false,
       pathToClaudeCodeExecutable: executable,

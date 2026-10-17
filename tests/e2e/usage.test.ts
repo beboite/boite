@@ -52,7 +52,7 @@ beforeAll(async () => {
   await scheme('dark');
   await viewport(1280, 800);
 }, 60_000);
-afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
+afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
 test('the desktop page charts each day by provider, reads a column on hover and keys, and lists models and threads', async () => {
   await openUsage();
@@ -309,12 +309,14 @@ test('quotas expose banked resets, a confirmed budget and Codex credit balances 
   expect(page.errors()).toEqual([]);
 }, 60_000);
 
-test('a paired device reads the history and is told where the limits are', async () => {
+test('a paired device reads the limit bars, without refresh or monitoring switches', async () => {
   await viewport(1280, 800);
   await page.navigate(`${origin}/?fake=1&principal=session`);
   await openLimits();
-  await page.waitFor(`document.querySelector('[data-testid=usage-limits-owner]')`);
-  expect(await count('[data-testid=usage-limit-account]')).toBe(0);
+  await page.waitFor(`document.querySelectorAll('[data-testid=usage-limit-account]').length > 0`);
+  expect(await count('[data-testid=limits-refresh]')).toBe(0);
+  expect(await count('[data-testid=quota-monitor]')).toBe(0);
+  expect(await count('[data-testid=limits-error]')).toBe(0);
   await capture('usage-device.png');
   expect(page.errors()).toEqual([]);
 }, 60_000);

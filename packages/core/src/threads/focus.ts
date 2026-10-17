@@ -124,7 +124,15 @@ export class ThreadFocus {
   }
 
   hasProtectedInput(threadId: ThreadId): boolean {
-    if (this.protectAll.size) return true;
+    return this.protectAll.size > 0 || this.hasReportedInput(threadId);
+  }
+
+  /**
+   * Input a client named on this thread. A client that cannot read its drafts
+   * protects every thread for automatic passes, but it names none, so it never
+   * stops the user from marking one conversation done.
+   */
+  hasReportedInput(threadId: ThreadId): boolean {
     for (const ids of this.protectedInputs.values()) if (ids.has(threadId)) return true;
     return false;
   }
@@ -161,7 +169,7 @@ export class ThreadFocus {
     // A removed account leaves nothing to warm until the user picks another.
     if (this.core.journal.getAccount(thread.accountId) === null) return;
     const account = this.core.accounts.require(thread.accountId);
-    assertDriverRunnable(provider.protocol, this.core.providers.list().loaded.find(item => item.id === provider.id), account);
+    assertDriverRunnable(provider.protocol, this.core.providers.summary(provider.id), account);
     if (!await stat(thread.cwd).then(value => value.isDirectory(), () => false)) return;
     if (this.closed || this.core.stopping || !this.viewed(threadId)) return;
     const latest = this.core.threads.require(threadId);

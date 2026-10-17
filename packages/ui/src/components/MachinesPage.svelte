@@ -3,7 +3,7 @@
   import { ConnectionGroup } from '../lib/connection-group.svelte';
   import { GroupLinks } from '../lib/group-links.svelte';
   import InfoTip from './InfoTip.svelte';
-  import { ArrowUpRight, ChevronDown, RefreshCw, Settings2, Trash2, ScanLine } from '@lucide/svelte';
+  import { ArrowUpRight, ChevronDown, CircleArrowDown, RefreshCw, Settings2, Trash2, ScanLine } from '@lucide/svelte';
   import { machineHealth, workspace, machineIcons, type Machine } from '../lib/workspace.svelte';
   import { store as primary } from '../lib/store.svelte';
   import { confirm } from '../lib/confirm.svelte';
@@ -17,10 +17,20 @@
   import HarnessUpdatesCard from './HarnessUpdatesCard.svelte';
   import AppUpdateContent from './AppUpdateContent.svelte';
   import { appUpdater, showAppUpdateUi } from '../lib/app-update.svelte';
+  import { updateEverything } from '../lib/update-everything.svelte';
   import { machineUpdateState, type MachineUpdateState } from '../lib/machine-updates';
   import PairMachine from './PairMachine.svelte';
   import type { Store } from '../lib/store.svelte';
-  let { mobile = false }: { mobile?: boolean } = $props();
+  let { mobile = false, onopenthread }: { mobile?: boolean; onopenthread?: () => void } = $props();
+  /** The thread a failure on that machine was about: opening it shows the cause in its chat, and clears the line. */
+  function openFailedThread(machine: Machine) {
+    const owner = machine.store;
+    const threadId = owner.errorThreadId;
+    if (!threadId) return;
+    owner.error = null;
+    onopenthread?.();
+    void workspace.select(owner, threadId);
+  }
   const uid = $props.id();
   const migration = new ConnectionGroup(workspace);
   onDestroy(() => migration.stop());
@@ -78,7 +88,8 @@
     if (store.connection !== 'ready') return null;
     return machineUpdateState({
       server: store.localCore ? null : store.serverUpdater.busy ? { phase: 'checking' } : store.serverUpdater.snapshot,
-      app: store.localCore && showAppUpdateUi() ? appUpdater.snapshot : null,
+      // Another machine's desktop app counts once its window reports it, where it can be updated from here.
+      app: store.localCore ? (showAppUpdateUi() ? appUpdater.snapshot : null) : store.core?.os === 'windows' ? (store.serverUpdater.desktopFailure ? { phase: 'error' } : store.serverUpdater.desktop) : null,
       agents: store.owner ? store.harnessUpdates : []
     });
   }
@@ -98,7 +109,7 @@
       if (showAppUpdateUi()) appUpdater.check();
       await Promise.all(workspace.machines.filter(machine => machine.store.connection === 'ready' && machine.store.owner).flatMap(machine => [
         machine.store.loadHarnessUpdates(true),
-        ...(machine.store.localCore ? [] : [machine.store.serverUpdater.load(true)])
+        ...(machine.store.localCore ? [] : [machine.store.serverUpdater.load(true), machine.store.serverUpdater.loadDesktop()])
       ]));
     } finally {
       checking = false;
@@ -161,9 +172,16 @@
   <section class="connections-section" id="settings-machines" aria-label={strings.machines.heading}>
   <header class="head">
     <h1 class="ui-label-box"><span class="ui-label">{strings.settings.tabs.machines}</span><InfoTip topic={strings.settings.tabs.machines} text={strings.machines.intro} /></h1>
+    <div class="head-actions">
     <button type="button" class="ghost small" data-testid="updates-check-all" disabled={checking || !workspace.machines.some(machine => machine.store.connection === 'ready')} aria-busy={checking} onclick={() => void checkAll()}>
       <RefreshCw size={13} class={checking ? 'spinning' : undefined} /><span class="ui-label">{checking ? strings.appUpdate.checkingAction : strings.appUpdate.check}</span>
     </button>
+    {#if updateEverything.offered}
+      <button type="button" class="primary small" data-testid="updates-run-all" disabled={updateEverything.running} aria-busy={updateEverything.running} onclick={() => void updateEverything.run()}>
+        <CircleArrowDown size={13} /><span class="ui-label">{strings.updateAll.run}</span>
+      </button>
+    {/if}
+    </div>
   </header>
 
   <!-- The desktop app updates the computer it runs on, whichever machine the window shows. -->
@@ -268,8 +286,14 @@
           {/if}
           {#if mobile && machine.store.pairingRequired && (machine.store.error === strings.errors.unpaired || machine.store.error === strings.errors.revoked)}
             <p class="pair-hint">{strings.mobile.pairInstalled}</p>
-          <!-- A remote machine switched off has nothing to explain; this PC's own core failing to start does. -->
-          {:else if machine.store.error && away(machine) !== 'offline'}<p class="error">{machine.store.error}</p>{/if}
+          <!-- A thread's failure carries the thread's title, never its cause: say it is a thread, and open it. -->
+          {:else if machine.store.error && machine.store.errorThreadId}
+            <div class="error thread-failed" data-testid="machine-thread-failed">
+              <p>{fill(strings.machines.threadFailed, { thread: machine.store.error })}</p>
+              <button class="ghost small" data-testid="machine-thread-failed-open" onclick={() => openFailedThread(machine)}><span class="ui-label">{strings.notify.openThread}</span><ArrowUpRight size={13} /></button>
+            </div>
+          <!-- A remote machine switched off has nothing to explain; this PC's own core failing to start does. A call that found it away repeats its status. -->
+          {:else if machine.store.error && away(machine) !== 'offline' && !(away(machine) === 'lost' && machine.store.errorOffline)}<p class="error">{machine.store.error}</p>{/if}
         </section>
       {/each}
     </div>
@@ -305,6 +329,7 @@
     gap: 16px;
     margin-bottom: 16px;
   }
+  .head-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
   h1 {
     font-size: var(--text-lg);
     margin: 0;
@@ -403,11 +428,11 @@
   .updates[data-state='available'] { color: var(--color-accent); }
   .updates[data-state='failed'] { color: var(--color-danger); }
   .fold :global(svg) { transition: transform var(--dur-2) var(--ease-out-quint); }
-  .head :global(.spinning) { animation: spin 1s linear infinite; }
+  .head :global(.spinning) { animation: spin 1s linear infinite var(--loops); }
   :global(html[data-motion='reduced']) .head :global(.spinning) { animation: none; }
   .fold.open :global(svg) { transform: rotate(180deg); }
   .details { padding: 12px 0 4px 52px; }
-  .address { display: flex; flex-wrap: wrap; gap: 4px 8px; margin: 0; font-size: var(--text-sm); color: var(--color-muted-foreground); }
+  .address { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin: 0; font-size: var(--text-sm); color: var(--color-muted-foreground); }
   .address .value { color: var(--color-subtle); overflow-wrap: anywhere; }
   .detail-actions { display: flex; flex-wrap: wrap; gap: 4px 8px; margin: 12px 0 0 -8px; }
   .detail-actions:empty { display: none; }
@@ -455,6 +480,14 @@
     overflow-wrap: anywhere;
     margin-top: 8px;
   }
+  .thread-failed {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .thread-failed p { margin: 0; min-width: 0; }
+  .thread-failed button { flex: none; }
   .pair-hint { color: var(--color-muted-foreground); font-size: var(--text-sm); line-height: 1.6; margin: 12px 0 0; }
   @media (prefers-reduced-motion: reduce) {
     .fold :global(svg) {

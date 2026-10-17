@@ -8,17 +8,18 @@ import type {
   DelegatedAgent,
   DelegationConfig,
   DelegationView,
-  StewardGrant,
-  StewardGrantInput,
   Thread,
   ThreadId,
+  ThreadLoad,
   ThreadSummary
 } from '@boite/contracts';
 import type { Client } from '../client';
 import { untrack } from 'svelte';
 import { strings } from '../strings';
-import { mergeResumed, patchRow, resumeRequest } from '../thread-rows';
+import { mergeResumed, patchFields, patchLoad, patchRow, resumeRequest } from '../thread-rows';
 import type { StoreContext } from './context';
+import { lightPage } from './reading-pages.svelte';
+import { INITIAL_MESSAGE_PAGE, INITIAL_PAGE_BYTES } from '@boite/contracts';
 
 interface RefreshJob {
   client: Client;
@@ -86,16 +87,11 @@ export class Delegation {
   delegationEpoch = 0;
   delegationSelectionEpoch = 0;
   delegationConfigureEpoch = 0;
-  /** Every steward grant on this machine, read when Communication settings open. Null until read. */
-  stewards = $state<StewardGrant[] | null>(null);
-  stewardsSaving = $state(false);
-  stewardsError = $state<string | null>(null);
-  stewardsEpoch = 0;
   /** The one child transcript shown in Agents, beside the normal open-thread subscription. */
   delegationSubscribedThreadId: ThreadId | null = null;
   private readonly coordinationRefresh = new ViewRefresh();
   private readonly delegationRefresh = new ViewRefresh();
-  private teamRead: { client: Client; threadId: ThreadId; updates: Map<ThreadId, ThreadSummary> } | null = null;
+  private teamRead: { client: Client; threadId: ThreadId; updates: Map<ThreadId, ThreadSummary>; loads: Map<ThreadId, ThreadLoad> } | null = null;
 
   constructor(private readonly ctx: StoreContext) {}
 
@@ -152,51 +148,6 @@ export class Delegation {
     }
   }
 
-  /** Reads every grant; a `stewards.changed` reads them again once they were read. */
-  async loadStewards(): Promise<void> {
-    const s = this.ctx.store;
-    const client = this.ctx.client;
-    if (!client || untrack(() => s.connection) !== 'ready') return;
-    const epoch = this.stewardsEpoch;
-    try {
-      const grants = await client.call('stewards.list', {});
-      if (this.ctx.client === client && this.stewardsEpoch === epoch) { this.stewards = grants; this.stewardsError = null; }
-    } catch (error) {
-      if (this.ctx.client === client && this.stewardsEpoch === epoch) this.stewardsError = errorText(error);
-    }
-  }
-
-  /** Makes a thread's agent the steward of projects, or replaces its grant. Owner only. */
-  async setSteward(grant: StewardGrantInput): Promise<void> {
-    await this.saveSteward(async client => {
-      const saved = await client.call('stewards.set', { grant });
-      return [...(this.stewards ?? []).filter(entry => entry.threadId !== saved.threadId), saved];
-    });
-  }
-
-  async revokeSteward(threadId: ThreadId): Promise<void> {
-    await this.saveSteward(async client => {
-      await client.call('stewards.revoke', { threadId });
-      return (this.stewards ?? []).filter(entry => entry.threadId !== threadId);
-    });
-  }
-
-  private async saveSteward(write: (client: Client) => Promise<StewardGrant[]>): Promise<void> {
-    const client = this.ctx.client;
-    if (!client || !this.ctx.store.owner || this.stewardsSaving) return;
-    const epoch = ++this.stewardsEpoch;
-    this.stewardsSaving = true;
-    this.stewardsError = null;
-    try {
-      const grants = await write(client);
-      if (this.ctx.client === client && this.stewardsEpoch === epoch) this.stewards = grants;
-    } catch (error) {
-      if (this.ctx.client === client) this.stewardsError = errorText(error);
-    } finally {
-      if (this.ctx.client === client && this.stewardsEpoch === epoch) this.stewardsSaving = false;
-    }
-  }
-
   async loadDelegation(threadId = this.ctx.store.openThread?.id): Promise<void> {
     const s = this.ctx.store;
     const client = this.ctx.client;
@@ -210,7 +161,7 @@ export class Delegation {
     await this.delegationRefresh.request(client, threadId, `${epoch}:${generation}`, false, current, async (_directory, latest) => {
       this.delegationLoading = true;
       this.delegationError = null;
-      const pending = { client, threadId, updates: new Map<ThreadId, ThreadSummary>() };
+      const pending = { client, threadId, updates: new Map<ThreadId, ThreadSummary>(), loads: new Map<ThreadId, ThreadLoad>() };
       this.teamRead = pending;
       try {
         const view = await client.call('delegation.get', { threadId });
@@ -218,6 +169,8 @@ export class Delegation {
         for (const agent of view.agents) {
           const summary = pending.updates.get(agent.thread.id);
           if (summary) patchRow(agent.thread, summary);
+          const load = pending.loads.get(agent.thread.id);
+          if (load) patchLoad(agent.thread, load);
         }
         this.delegation = view;
         const selected = this.delegationSelectedAgentId;
@@ -226,7 +179,7 @@ export class Delegation {
           await s.selectDelegatedAgent(null);
         } else if (selected && this.delegationThread?.id === selected) {
           const summary = view.agents.find(agent => agent.thread.id === selected)?.thread;
-          if (summary) Object.assign(this.delegationThread, summary);
+          if (summary) patchFields(this.delegationThread, summary);
         }
       } catch (error) {
         if (current()) this.delegationError = this.ctx.reason(error);
@@ -237,6 +190,14 @@ export class Delegation {
     });
   }
 
+  /** A `thread.load` on a team row, kept for a team read in flight like a whole row. */
+  patchLoad(threadId: ThreadId, load: ThreadLoad): void {
+    const agent = this.delegation?.agents.find(agent => agent.thread.id === threadId);
+    if (agent) patchLoad(agent.thread, load);
+    const pending = this.teamRead;
+    if (pending?.client === this.ctx.client) pending.loads.set(threadId, load);
+  }
+
   /** Load-only changes update team rows without fetching the team's messages again. */
   patchThread(summary: ThreadSummary): void {
     const agent = this.delegation?.agents.find(agent => agent.thread.id === summary.id);
@@ -244,7 +205,7 @@ export class Delegation {
     const pending = this.teamRead;
     const open = this.ctx.store.openThread;
     if (pending?.client === this.ctx.client && pending?.threadId === open?.id &&
-      summary.parentThreadId === (open?.parentThreadId ?? open?.id)) pending.updates.set(summary.id, summary);
+      summary.parentThreadId === (open?.parentThreadId ?? open?.id)) { pending.updates.set(summary.id, summary); pending.loads.delete(summary.id); }
   }
 
   #delegationRootId(): ThreadId | null {
@@ -300,7 +261,8 @@ export class Delegation {
     if (threadId === null) return;
     const current = (): boolean => epoch === this.delegationSelectionEpoch && client === this.ctx.client;
     const subscribed = threadId !== threads.subscribedThreadId ? client.call('threads.subscribe', { threadId }) : null;
-    const fetched = client.call('threads.get', { threadId });
+    // The transcript draws a call's name and status, never its output.
+    const fetched = client.call('threads.get', { threadId, limit: INITIAL_MESSAGE_PAGE, maxBytes: INITIAL_PAGE_BYTES, ...lightPage(this.ctx) });
     // A run that a newer selection overtakes returns early and never awaits the read.
     fetched.catch(() => undefined);
     try {
@@ -412,7 +374,7 @@ export class Delegation {
     const epoch = this.delegationSelectionEpoch;
     const current = () => epoch === this.delegationSelectionEpoch && client === this.ctx.client && this.delegationThread === held;
     try {
-      const thread = await client.call('threads.get', resumeRequest(threadId, held));
+      const thread = await client.call('threads.get', { ...resumeRequest(threadId, held), maxBytes: INITIAL_PAGE_BYTES, ...lightPage(this.ctx) });
       if (!current()) return;
       mergeResumed(held, thread);
       this.delegationThread = thread;

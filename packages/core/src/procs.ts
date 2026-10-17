@@ -1,16 +1,20 @@
 import { spawn as spawnNodeChild } from 'node:child_process';
 import type { ChildProcessByStdio } from 'node:child_process';
 import type { Readable, Writable } from 'node:stream';
-import type { AgentResourceSnapshot, ProcessRecord, Settings, ThreadId, ThreadLoad, ThreadSummary, TraceCapability, Turn } from '@boite/contracts';
+import type { AgentResourceSnapshot, ProcessRecord, Settings, ThreadId, ThreadLoad, TraceCapability, Turn } from '@boite/contracts';
 import type { Bus } from './bus.ts';
 import type { Journal } from './journal.ts';
 import { MemoryGuard } from './memory-guard.ts';
 import type { MemoryProcess } from './memory-guard-logic.ts';
 import { processPlatform } from './platform/index.ts';
 import { type KnownProcess, type ProcessIdentity, unseenIdentity } from './process-identity.ts';
-import { stopGroup } from './platform/posix-kill.ts';
+import { killBunChild, stopGroup } from './platform/posix-kill.ts';
 import type { GuardStatus, NativeProcessExit, NativeProcessInfo, ProcessPlatform } from './platform/types.ts';
 import { ResourceCollection } from './resource-usage.ts';
+import { orphansOf } from './process-orphans.ts';
+import { forgetOnMissing, resolveSpawnCommand, startResolved } from './spawn-command.ts';
+import { BUSY_CPU_PERCENT, IDLE_LOAD_INTERVAL_MS, LOAD_INTERVAL_MS, LoadPace, worthPushing } from './load-pace.ts';
+import { launchOf } from './git/command.ts';
 
 export interface SpawnOptions {
   /** Bounded normal-priority initialization, ended explicitly when the agent is ready. */
@@ -79,12 +83,8 @@ interface Entry {
   usage(): { cpuMs: number; peakMemoryBytes: number } | null;
 }
 
-/** How far a value moves before the load is worth another `thread.updated`. */
-const CPU_EPSILON_PERCENT = 1;
-const MEMORY_EPSILON_BYTES = 1024 * 1024;
-const LOAD_INTERVAL_MS = 1000;
 export const STARTUP_PRIORITY = { ms: 30_000 };
-/** How long a thread with nothing running keeps its pid history, for a late job event. */
+/** How long an exited pid stays in its thread's history, for a late job event. */
 const FORGET_DELAY_MS = 30_000;
 /**
  * How long a thread stays idle after its turn before what it left behind is
@@ -100,14 +100,11 @@ const OWN_GROUP = process.platform !== 'win32';
 
 export interface ProcRegistryOptions {
   orphanGraceMs?: number;
-  /** How long an idle thread is kept before it is forgotten. Tests shorten it. */
+  /** How long an idle thread, or an exited pid of a busy one, is kept before it is forgotten. Tests shorten it. */
   forgetDelayMs?: number;
-  /**
-   * The row a load tick hands the clients. A client replaces its row with it,
-   * so it has to carry what the stored summary lacks (the running clock, the
-   * background work); the core passes its own builder.
-   */
-  summarize?: (thread: ThreadSummary) => ThreadSummary;
+  /** The load tick while something works, and while everything is idle. Tests shorten them. */
+  loadIntervalMs?: number;
+  idleLoadIntervalMs?: number;
   /** Persists what the platform and the guards say, which the live log only names. */
   diagnostic?: (message: string, context: { event: string; threadId?: ThreadId; data?: Record<string, string | number | null> }) => void;
 }
@@ -131,17 +128,26 @@ export class ProcRegistry {
   private readonly forgetTimers = new Map<ThreadId, ReturnType<typeof setTimeout>>();
   private readonly lastLoad = new Map<ThreadId, ThreadLoad>();
   private readonly resources: ResourceCollection;
-  /** What was last sent as `thread.updated`. A plain read must never move it. */
+  /**
+   * What was last sent as `thread.load`. A plain read must never move it. A
+   * scope with no thread behind it (a terminal, the devices) records its load
+   * here too, so the thread table is asked again only when the load moves.
+   */
   private readonly lastPushed = new Map<ThreadId, ThreadLoad>();
-  private readonly loadTimer: ReturnType<typeof setInterval>;
+  private readonly loadPace: LoadPace;
+  /** Threads between `turn.started` and `turn.finished`: the tick stays fast for them. */
+  private readonly running = new Set<ThreadId>();
+  /** The previous tick saw a thread above `BUSY_CPU_PERCENT` or a process count change. */
+  private loadBusy = false;
+  /** When exited pids were last dropped from `known`. */
+  private knownSweptAt = 0;
   /** A sweep waiting for the thread to stay idle, cancelled by its next turn. */
   private readonly sweepTimers = new Map<ThreadId, ReturnType<typeof setTimeout>>();
-  /** Group stops still inside their grace, off Windows: what `killAll` waits for. */
+  /** Group stops still inside their grace off Windows, and taskkill fallbacks on it: what `killAll` waits for. */
   private readonly stops = new Set<Promise<void>>();
   private reapOrphans = true;
   private readonly orphanGraceMs: number;
   private readonly forgetDelayMs: number;
-  private readonly summarize: (thread: ThreadSummary) => ThreadSummary;
   private readonly stopListening: () => void;
   private closing: Promise<void> | null = null;
   private accepting = true;
@@ -161,13 +167,19 @@ export class ProcRegistry {
     this.resources = new ResourceCollection(platform);
     this.orphanGraceMs = options.orphanGraceMs ?? ORPHAN_GRACE_MS;
     this.forgetDelayMs = options.forgetDelayMs ?? FORGET_DELAY_MS;
-    this.summarize = options.summarize ?? ((thread) => thread);
     this.stopListening = this.bus.onAny((name, payload) => {
       if (name === 'turn.started') {
-        this.cancelSweep((payload as Turn).threadId);
+        const { threadId } = payload as Turn;
+        this.cancelSweep(threadId);
         this.platform.warm();
+        this.running.add(threadId);
+        this.loadPace.hurry();
       }
-      else if (name === 'turn.finished') this.scheduleSweep((payload as Turn).threadId);
+      else if (name === 'turn.finished') {
+        const { threadId } = payload as Turn;
+        this.running.delete(threadId);
+        this.scheduleSweep(threadId);
+      }
     });
     this.platform.retain({
       started: (threadId, pid, info) => {
@@ -211,10 +223,10 @@ export class ProcRegistry {
         try { options.diagnostic?.(`Focus and audio guard: ${message}`, { event: 'guard.warning.detail' }); } catch { /* Observability must not break the guard's callback. */ }
       },
     });
-    this.loadTimer = setInterval(() => {
-      this.sampleLoad();
-    }, LOAD_INTERVAL_MS);
-    if (typeof this.loadTimer.unref === 'function') this.loadTimer.unref();
+    // Fast while a turn runs, a task-manager view leases the numbers, memory is under pressure, a startup is boosted or a process was busy.
+    this.loadPace = new LoadPace(() => this.sampleLoad(), () => this.running.size > 0 || this.resources.active
+      || this.memory.state !== 'ok' || this.startups.size > 0 || this.loadBusy,
+    options.loadIntervalMs ?? LOAD_INTERVAL_MS, options.idleLoadIntervalMs ?? IDLE_LOAD_INTERVAL_MS);
   }
 
   capability(): TraceCapability {
@@ -223,6 +235,7 @@ export class ProcRegistry {
 
   watchResources(connectionId: string, watch: boolean | undefined): void {
     this.resources.watch(connectionId, watch);
+    if (this.resources.active) this.loadPace.hurry();
   }
 
   unwatchResources(connectionId: string): void {
@@ -256,7 +269,8 @@ export class ProcRegistry {
     for (const threadId of this.startups.keys()) this.finishStartup(threadId);
     for (const timer of this.sweepTimers.values()) clearTimeout(timer);
     this.sweepTimers.clear();
-    clearInterval(this.loadTimer);
+    this.loadPace.close();
+    this.running.clear();
     this.resources.close();
     for (const timer of this.exitTimers.values()) clearTimeout(timer);
     this.exitTimers.clear();
@@ -268,10 +282,10 @@ export class ProcRegistry {
 
   spawn(threadId: ThreadId, cmd: string, args: string[], opts: SpawnOptions = {}): SpawnedProcess {
     this.assertAccepting();
-    const env: Record<string, string | undefined> = { ...process.env, ...(opts.env ?? {}) };
+    const [command, env] = launchOf(cmd, { ...process.env, ...(opts.env ?? {}) });
     const extra = Math.max(0, Math.floor(opts.extraPipes ?? 0));
-    const proc = Bun.spawn({
-      cmd: [cmd, ...args],
+    const proc = startResolved(command, env, (executable) => Bun.spawn({
+      cmd: [executable, ...args],
       cwd: opts.cwd,
       env,
       ...(extra
@@ -279,7 +293,7 @@ export class ProcRegistry {
         : { stdin: 'ignore' as const, stdout: 'pipe' as const, stderr: 'pipe' as const }),
       windowsHide: opts.showWindow !== true,
       detached: OWN_GROUP,
-    }) as ChildProcess;
+    }) as ChildProcess);
     const fds = extra ? (proc.stdio as unknown[]).slice(3).map(Number) : undefined;
     if (opts.showWindow === true) this.shown.add(threadId);
 
@@ -309,9 +323,9 @@ export class ProcRegistry {
    */
   spawnPiped(threadId: ThreadId, cmd: string, args: string[], opts: SpawnOptions = {}): SpawnedPipedProcess {
     this.assertAccepting();
-    const env = opts.env ?? process.env;
-    const proc = Bun.spawn({
-      cmd: [cmd, ...args],
+    const [command, env] = launchOf(cmd, opts.env ?? process.env);
+    const proc = startResolved(command, env, (executable) => Bun.spawn({
+      cmd: [executable, ...args],
       cwd: opts.cwd,
       env,
       stdin: 'pipe',
@@ -319,7 +333,7 @@ export class ProcRegistry {
       stderr: 'pipe',
       windowsHide: true,
       detached: OWN_GROUP,
-    });
+    }));
 
     const record = this.register(threadId, proc.pid, cmd, args, {
       root: opts.agentRoot !== false,
@@ -369,10 +383,10 @@ export class ProcRegistry {
     const record = this.register(threadId, proc.pid, cmd, args, {
       root: false,
       kill: () => {
-        if (process.platform === 'win32') {
-          proc.kill();
-          return;
-        }
+        if (process.platform === 'win32') return proc.kill();
+        // Interactive jobs have separate groups: capture their descendants
+        // before the shell exits and reparents jobs that ignore its hang-up.
+        if (process.platform === 'linux' && this.platform.terminateProcess(threadId, proc.pid)) return;
         // An interactive shell ignores SIGTERM. A hang-up is what closing a
         // terminal sends: the shell exits on it and passes it to its jobs.
         proc.kill('SIGHUP');
@@ -410,9 +424,11 @@ export class ProcRegistry {
    */
   spawnChild(threadId: ThreadId, cmd: string, args: string[], opts: SpawnOptions = {}): SpawnedChild {
     this.assertAccepting();
-    const child = spawnNodeChild(cmd, args, {
+    const [command, env] = launchOf(cmd, opts.env);
+    const executable = resolveSpawnCommand(command, env ?? process.env);
+    const child = spawnNodeChild(executable, args, {
       cwd: opts.cwd,
-      env: opts.env,
+      env,
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
       detached: OWN_GROUP,
@@ -434,7 +450,8 @@ export class ProcRegistry {
     });
     // A child that never starts emits 'error' and no 'exit'; without this it
     // would stay in the live registry for the rest of the session.
-    child.once('error', () => {
+    child.once('error', (error) => {
+      forgetOnMissing(command, executable, error);
       this.onExit(threadId, record.pid, null, undefined, record);
     });
 
@@ -576,6 +593,11 @@ export class ProcRegistry {
     return this.live.get(threadId)?.size ?? 0;
   }
 
+  /** How many pids the thread's history holds, live and recently exited. Read by the tests. */
+  knownCount(threadId: ThreadId): number {
+    return this.known.get(threadId)?.size ?? 0;
+  }
+
   finishStartup(threadId: ThreadId): void {
     const startup = this.startups.get(threadId);
     if (!startup) return;
@@ -614,13 +636,9 @@ export class ProcRegistry {
     for (const entry of entries) {
       if (terminated && !this.unassigned.has(entry.record.pid)) continue;
       if (entry.record.pid <= 0) continue;
-      this.platform.terminateUnassigned(entry.record.pid);
-      try {
-        const stop = entry.kill();
-        if (stop !== undefined) this.trackStop(stop);
-      } catch {
-        // already exited
-      }
+      // The child's own kill waits for the tree kill: once the root is gone, taskkill /T finds no tree.
+      const fallback = this.platform.terminateUnassigned(entry.record.pid);
+      this.trackStop(fallback instanceof Promise ? fallback.then(() => killEntry(entry), () => killEntry(entry)) : killEntry(entry));
     }
     return entries.length;
   }
@@ -636,7 +654,8 @@ export class ProcRegistry {
     return Promise.all([...this.stops]).then(() => undefined);
   }
 
-  private trackStop(stop: Promise<void>): void {
+  private trackStop(stop: Promise<void> | undefined): void {
+    if (stop === undefined) return;
     this.stops.add(stop);
     void stop.finally(() => this.stops.delete(stop));
   }
@@ -663,45 +682,11 @@ export class ProcRegistry {
   sweepOrphans(threadId: ThreadId, now: number = Date.now()): number[] {
     const byPid = this.live.get(threadId);
     if (byPid === undefined || this.journal.isClosed()) return [];
-    const entries = [...byPid.values()];
-    const stopping = new Map<number, Entry>();
-    for (const entry of entries) {
-      const { record } = entry;
-      const parentPid = record.parentPid;
-      if (parentPid === null || parentPid === process.pid) continue;
-      if (now - nativeBirth(entry) < this.orphanGraceMs) continue;
-      const parent = byPid.get(parentPid);
-      if (parent !== undefined && !bornAfter(parent, entry)) continue;
-      // The registry is a copy, and a missed event leaves it short of a parent.
-      // A millisecond lookup must not override a captured newer incarnation.
-      if (parent === undefined || parent.identity.startedAt === null || entry.identity.startedAt === null) {
-        const running = this.platform.runningSince(parentPid);
-        if (running !== null && running <= nativeBirth(entry)) continue;
-      }
-      stopping.set(record.pid, entry);
-    }
+    const stopping = orphansOf(byPid, now, this.orphanGraceMs, pid => this.platform.runningSince(pid));
     if (stopping.size === 0) return [];
-    // An orphan's own children still have a live parent: they go with it. One
-    // index by parent, then one walk down, so a deep tree costs its size.
-    const children = new Map<number, Entry[]>();
-    for (const entry of entries) {
-      const { record } = entry;
-      if (record.parentPid === null) continue;
-      const siblings = children.get(record.parentPid);
-      if (siblings === undefined) children.set(record.parentPid, [entry]);
-      else siblings.push(entry);
-    }
-    const pending = [...stopping.values()];
-    for (let parent = pending.pop(); parent !== undefined; parent = pending.pop()) {
-      for (const child of children.get(parent.record.pid) ?? []) {
-        if (stopping.has(child.record.pid) || bornAfter(parent, child)) continue;
-        stopping.set(child.record.pid, child);
-        pending.push(child);
-      }
-    }
     const stopped: number[] = [];
-    for (const { record } of stopping.values()) {
-      if (!this.platform.terminateProcess(threadId, record.pid)) continue;
+    for (const { record, identity } of stopping.values()) {
+      if (!this.platform.terminateProcess(threadId, record.pid, identity.startedAt)) continue;
       stopped.push(record.pid);
       this.bus.emit('core.log', {
         level: 'info',
@@ -730,6 +715,8 @@ export class ProcRegistry {
     const timer = setTimeout(() => {
       this.sweepTimers.delete(threadId);
       this.sweepOrphans(threadId);
+      // A finished turn bounds the thread's trace too (journal/processes.ts).
+      if (!this.journal.isClosed()) this.journal.pruneProcesses(threadId);
     }, this.orphanGraceMs);
     timer.unref();
     this.sweepTimers.set(threadId, timer);
@@ -769,6 +756,8 @@ export class ProcRegistry {
     this.exitTimers.delete(pid);
     this.unassigned.delete(pid);
     this.live.get(threadId)?.delete(pid);
+    const known = this.known.get(threadId)?.get(pid);
+    if (known !== undefined && known.identity === entry.identity) known.exitedAt = Date.now();
     if ((this.live.get(threadId)?.size ?? 0) === 0) {
       this.lastLoad.delete(threadId); this.lastPushed.delete(threadId);
       this.resources.forget(threadId);
@@ -789,7 +778,7 @@ export class ProcRegistry {
       if (fromJob.peakMemoryBytes !== null) record.peakMemoryBytes = fromJob.peakMemoryBytes;
       if (fromJob.ioBytes !== null) record.ioBytes = fromJob.ioBytes;
     }
-    this.journal.putProcess(record);
+    this.journal.finishProcess(record);
 
     this.bus.emit('process.exited', { ...record });
   }
@@ -816,10 +805,23 @@ export class ProcRegistry {
       // The thread's Job Object too: an id minted per call would otherwise hold
       // one kernel handle for the life of the core.
       this.platform.forget(threadId);
-      if (!this.journal.isClosed()) this.journal.forgetProcessesWithoutThread(threadId);
+      if (!this.journal.isClosed()) { this.journal.forgetProcessesWithoutThread(threadId); this.journal.pruneProcesses(threadId); }
     }, this.forgetDelayMs);
     timer.unref();
     this.forgetTimers.set(threadId, timer);
+  }
+
+  /**
+   * A thread that never goes idle (a terminal running a watcher, a persistent
+   * agent) would otherwise keep every pid it ever traced. A late job event
+   * arrives within seconds, so an exit older than the forget delay is dropped.
+   */
+  private forgetExited(threadId: ThreadId, byPid: Map<number, Entry>, now: number): void {
+    const known = this.known.get(threadId);
+    if (known === undefined) return;
+    for (const [pid, process] of known) {
+      if (process.exitedAt !== undefined && now - process.exitedAt >= this.forgetDelayMs && !byPid.has(pid)) known.delete(pid);
+    }
   }
 
   private measure(threadId: ThreadId, processes: number, memory?: MemoryProcess[]): ThreadLoad {
@@ -837,19 +839,29 @@ export class ProcRegistry {
   private sampleLoad(): void {
     if (this.journal.isClosed()) return;
     this.resources.sync();
-    this.resources.sampledAt = Date.now();
+    const now = Date.now();
+    this.resources.sampledAt = now;
     const processes: MemoryProcess[] = [];
+    const sweepKnown = now - this.knownSweptAt >= this.forgetDelayMs;
+    if (sweepKnown) this.knownSweptAt = now;
+    let busy = false;
+    let live = false;
     for (const [threadId, byPid] of this.live) {
       if (byPid.size === 0) continue;
+      live = true;
+      if (sweepKnown) this.forgetExited(threadId, byPid, now);
       const load = this.measure(threadId, byPid.size, processes);
+      const previous = this.lastLoad.get(threadId);
+      if (previous === undefined || previous.processes !== load.processes || load.cpuPercent >= BUSY_CPU_PERCENT) busy = true;
       this.lastLoad.set(threadId, load);
       this.memory.sampleThrottle(threadId, byPid.values());
       if (!worthPushing(this.lastPushed.get(threadId), load)) continue;
-      const thread = this.journal.getThread(threadId);
-      if (thread === null) continue;
       this.lastPushed.set(threadId, load);
-      this.bus.emit('thread.updated', { ...this.summarize(thread), load });
+      // A terminal, the devices or the browser have no row to patch.
+      if (this.journal.getThread(threadId) === null) continue;
+      this.bus.emit('thread.load', { threadId, load });
     }
+    this.loadBusy = busy;
     for (const threadId of [...this.lastLoad.keys()]) {
       if ((this.live.get(threadId)?.size ?? 0) > 0) continue;
       this.lastLoad.delete(threadId);
@@ -857,14 +869,15 @@ export class ProcRegistry {
       this.lastPushed.delete(threadId);
     }
     if (this.resources.active) this.platform.finishResources?.();
+    // No agent process: nothing to kill, and recovery from pressure still gets its samples.
+    if (!live && this.memory.state === 'ok') { this.memory.rest(); return; }
     this.memory.sample(processes.reduce((sum, process) => sum + process.bytes, 0), processes, (victim) => {
       const entry = this.live.get(victim.threadId)?.get(victim.pid);
       if (entry?.root) return false;
       if (this.capability().os === 'windows') return entry !== undefined && this.platform.terminateProcess(victim.threadId, victim.pid);
       try {
         if (entry === undefined) return this.platform.terminateProcess(victim.threadId, victim.pid);
-        const stop = entry.kill();
-        if (stop !== undefined) this.trackStop(stop);
+        this.trackStop(entry.kill() ?? undefined);
         return true;
       } catch {
         return false;
@@ -873,28 +886,7 @@ export class ProcRegistry {
   }
 }
 
-/** A Bun child's kill: its whole group off Windows, the process itself on Windows. */
-function killBunChild(proc: Bun.Subprocess): Promise<void> | undefined {
-  if (OWN_GROUP) return stopGroup(proc.pid, () => proc.exitCode === null && proc.signalCode === null);
-  proc.kill();
-  return undefined;
-}
-
-function nativeBirth(entry: Entry): number {
-  return entry.identity.startedAt ?? entry.record.startedAt;
-}
-
-function bornAfter(parent: Entry, child: Entry): boolean {
-  if (parent.identity.incarnation !== null && child.identity.incarnation !== null) {
-    try { return BigInt(parent.identity.incarnation) > BigInt(child.identity.incarnation); }
-    catch { /* A platform without numeric native identities uses its birth clock. */ }
-  }
-  return nativeBirth(parent) > nativeBirth(child);
-}
-
-function worthPushing(previous: ThreadLoad | undefined, next: ThreadLoad): boolean {
-  if (previous === undefined) return true;
-  if (previous.processes !== next.processes) return true;
-  if (Math.abs(previous.cpuPercent - next.cpuPercent) > CPU_EPSILON_PERCENT) return true;
-  return Math.abs(previous.memoryBytes - next.memoryBytes) > MEMORY_EPSILON_BYTES;
+/** An entry's own kill, and the group stop that may follow it. */
+function killEntry(entry: Entry): Promise<void> | undefined {
+  try { return entry.kill() ?? undefined; } catch { return undefined; /* already exited */ }
 }

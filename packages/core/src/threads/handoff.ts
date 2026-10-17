@@ -52,6 +52,11 @@ export class RestartHandoff {
   private settle: (() => void) | null = null;
   /** Each inherited entry stays durable until its continuation starts or is explicitly excluded. */
   private inherited: HandoffRecord | null = null;
+  /**
+   * The previous core stopped through a handoff this core carries on, rather
+   * than dying: what delegation and workflows cut then resumes too.
+   */
+  readonly handedOver: boolean;
 
   constructor(private readonly core: Core, private readonly threads: ThreadStore) {
     const stored = core.journal.getSetting(KEY);
@@ -62,6 +67,7 @@ export class RestartHandoff {
         core.log('warn', 'the restart handoff left by the previous core is older than an hour or unreadable: nothing resumes');
       }
     }
+    this.handedOver = this.inherited !== null;
     core.bus.onAny((name, payload) => this.observe(name, payload));
   }
 
@@ -181,7 +187,7 @@ export class RestartHandoff {
           this.core.scheduler.enqueue(turn, turn.execution?.accountId ?? thread.accountId);
           resumed += 1;
         } else if (admitted === null && entry.was === 'running' && turn.status === 'stopped') {
-          const continuation = this.threads.startTurn(thread.id, this.resumePrompt(turn), [], undefined, 'resume', undefined, this.requestId(entry));
+          const continuation = this.threads.startTurn(thread.id, this.continuation(turn), [], undefined, 'resume', undefined, this.requestId(entry));
           this.remember(entry, continuation.id);
           resumed += 1;
         } else this.consume(entry);
@@ -227,11 +233,12 @@ export class RestartHandoff {
 
   /**
    * The cut turn's own request goes along: a turn stopped in its first second
-   * may never have reached the agent's session.
+   * may never have reached the agent's session. Delegation and workflows
+   * continue the children a handoff cut with it too.
    */
-  private resumePrompt(turn: Turn): string {
+  continuation(turn: Turn): string {
     const opening = turn.execution?.operation === 'resume'
-      ? Array.from(this.core.journal.walkTurnMessages(turn.threadId, turn.id)).find(message => message.role === 'system') ?? null
+      ? Array.from(this.core.journal.walkTurnMessages(turn.threadId, turn.id, { blobs: false })).find(message => message.role === 'system') ?? null
       : this.core.journal.lastUserMessage(turn.threadId, turn.id);
     const text = (opening?.parts ?? []).map(part => part.type === 'text' ? part.text : '').join('').trim();
     // A second restart over a resumed turn sends the same note, not a note about a note.
@@ -243,8 +250,9 @@ export class RestartHandoff {
 
   /**
    * Sub-threads and persistent agent sessions belong to delegation, workflows
-   * and the agent runtime, which pause across a restart and resume on the
-   * user's word. A compaction or a coordination wake is not worth repeating.
+   * and the agent runtime, which carry their own work across a handoff
+   * (`Delegation.resumeAfterRestart`, `Workflows.resumeAfterRestart`) and
+   * pause after a crash. A compaction or a coordination wake is not worth repeating.
    */
   private resumable(turnId: TurnId, threadId: ThreadId, was: Entry['was']): boolean {
     const turn = this.core.journal.getTurn(turnId);

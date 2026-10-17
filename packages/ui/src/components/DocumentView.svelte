@@ -3,20 +3,21 @@
   import { strings } from '../lib/strings';
   import DiffView from './DiffView.svelte';
   import Prose from './Prose.svelte';
+  import type { Store } from '../lib/store.svelte';
 
   /** One document a tool call produced, under the card's input and output. */
-  let { doc }: { doc: ToolDocument } = $props();
+  let { doc, store, threadId }: { doc: ToolDocument; store?: Store; threadId?: string } = $props();
 </script>
 
 <div class="document" data-testid="tool-document" data-kind={doc.kind}>
   {#if doc.kind === 'diff'}
-    <DiffView path={doc.path} oldText={doc.oldText} newText={doc.newText} />
+    <DiffView path={doc.path} oldText={doc.oldText} newText={doc.newText} {doc} />
   {:else if doc.kind === 'markdown'}
     {#if doc.title !== null}
       <div class="section-label">{doc.title}</div>
     {/if}
     <div class="markdown">
-      <Prose text={doc.text} />
+      <Prose text={doc.text} {store} {threadId} />
     </div>
   {:else}
     <img

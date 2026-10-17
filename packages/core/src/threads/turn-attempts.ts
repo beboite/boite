@@ -1,4 +1,4 @@
-import type { Account, PermissionMode, ProviderDescriptor, ProviderId, RpcEvents, ThreadId, ThreadSummary, Turn, TurnId, Usage } from '@boite/contracts';
+import type { Account, PermissionMode, ProviderDescriptor, ProviderId, RpcEvents, ThreadId, ThreadRetry, ThreadSummary, Turn, TurnId, Usage } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { releaseThread } from '../drivers/index.ts';
 import type { Driver, TurnHandle, TurnResult } from '../drivers/types.ts';
@@ -7,7 +7,7 @@ import type { ThreadStore } from '../threads.ts';
 import { totalTokens } from '../usage.ts';
 import { LivePermissions } from './live-permissions.ts';
 import { LiveSettings } from './live-settings.ts';
-import { saveThread, setThreadStatus } from './records.ts';
+import { saveThread, setThreadStatus, withLoad } from './records.ts';
 import type { CarriedInput } from './turn-context.ts';
 
 /** The current attempt snapshots, shared with live controls and final settlement. */
@@ -34,6 +34,16 @@ export interface TurnAttemptTarget {
 export const STOP_DEADLINE = { ms: 10_000, forceMs: 2_000 };
 export const STOP_DEADLINE_ERROR = 'The agent did not stop in time; its processes were ended.';
 
+/**
+ * How long a turn the provider refused at capacity waits before each new try:
+ * three tries, after 30 s, 2 min and 5 min. Mutable so a test can shorten it.
+ */
+export const CAPACITY_RETRY = { delaysMs: [30_000, 120_000, 300_000] };
+/** What a try after capacity sends when the attempt before it had already written something. */
+export const CAPACITY_CONTINUE_PROMPT = 'The model was at capacity and your previous attempt stopped partway through. Continue the current task from where it stopped. Do not repeat completed work.';
+
+type RetryOutcome = 'retry' | 'stop' | 'cancel';
+
 interface StopDeadline {
   handle: TurnHandle;
   forced: { promise: Promise<TurnResult>; resolve: (result: TurnResult) => void };
@@ -56,6 +66,8 @@ export class TurnAttempts {
   private readonly pausing = new Map<ThreadId, ProviderId>();
   /** Paused turns: the provider they wait for, and what ends their pause early, a stop or the core closing. */
   private readonly paused = new Map<ThreadId, { providerId: ProviderId; leave: () => void }>();
+  /** Turns waiting to try again after the model was at capacity, and what ends the wait. */
+  private readonly retryWaits = new Map<ThreadId, { retry: ThreadRetry; leave: (outcome: RetryOutcome) => void }>();
 
   constructor(private readonly core: Core, private readonly threads: ThreadStore) {
     core.bus.onAny((name, payload) => {
@@ -108,7 +120,18 @@ export class TurnAttempts {
     this.stopRequested.delete(threadId);
     this.preparing.add(threadId);
     const checkpoint = this.threads.codeCheckpoints.begin(state.thread, turnId);
-    if (checkpoint) await checkpoint;
+    if (checkpoint && driver.prepare) {
+      const context = this.threads.contexts.makeSessionContext(state.thread, provider, account);
+      void driver.prepare(context, { forTurn: true }).catch(error => {
+        if (!this.stopRequested.has(threadId)) this.core.log('warn', `preparing the turn failed: ${String(error)}`, { source: provider.id, threadId, event: 'provider.prepareFailed' });
+      });
+    }
+    try { if (checkpoint) await checkpoint; }
+    catch (error) {
+      releaseThread(threadId);
+      this.core.procs.killTree(threadId);
+      throw error;
+    }
     this.preparing.delete(threadId);
     if (this.stopRequested.has(threadId)) return { status: 'stopped', sessionId: state.thread.sessionId, usage: null };
 
@@ -123,14 +146,39 @@ export class TurnAttempts {
     let attempt = 0;
     /** What started the next attempt, set where the loop goes round again. */
     let because = 'first attempt';
+    /** Tries already spent on a model at capacity, and whether any attempt of this turn wrote something. */
+    let capacityTries = 0;
+    let wroteBefore = false;
+    let afterCapacity = false;
     for (;;) {
       attempt += 1;
       state.thread.permissionMode = permissions.mode;
       const note = afterUpdate;
       afterUpdate = null;
       // The resumed session already holds what the first attempt took from the thread.
-      const context = this.threads.contexts.makeContext(state.thread, provider, account, state.running, note ? { memory: '', deferred: '', letters: '' } : carried, note?.prompt);
-      if (note) {
+      const continuing = afterCapacity && wroteBefore;
+      afterCapacity = false;
+      const context = this.threads.contexts.makeContext(state.thread, provider, account, state.running, note || continuing ? { memory: '', deferred: '', letters: '' } : carried, note?.prompt);
+      // Whether this attempt writes anything but an error: the agent's session then holds work a new try must not repeat.
+      let wrote = false;
+      const sink = context.emit;
+      context.emit = {
+        startMessage: role => sink.startMessage(role),
+        delta: (messageId, partIndex, text) => { wrote = true; sink.delta(messageId, partIndex, text); },
+        part: (messageId, partIndex, part) => { if (part.type !== 'error') wrote = true; sink.part(messageId, partIndex, part); },
+        // A patch changes a tool part already written.
+        patchTool: (messageId, partIndex, fields) => sink.patchTool(messageId, partIndex, fields),
+        complete: (messageId, messageState) => sink.complete(messageId, messageState),
+      };
+      if (continuing) {
+        // The native session already holds the request and what the agent did with it.
+        context.prompt = CAPACITY_CONTINUE_PROMPT;
+        context.attachments = [];
+        if (usage) context.sessionBefore = {
+          costUsd: (context.sessionBefore?.costUsd ?? 0) + (usage.costUsdEquivalent ?? 0),
+          tokens: (context.sessionBefore?.tokens ?? 0) + totalTokens(usage),
+        };
+      } else if (note) {
         // Shown once the context is built, so a fresh session's history does not carry it twice.
         this.threads.noteSystem(threadId, turnId, note.prompt, note.label, 'turn.resumedAfterUpdate');
         if (usage) context.sessionBefore = {
@@ -161,7 +209,7 @@ export class TurnAttempts {
       this.stopDeadlines.set(threadId, { handle, forced, timer: null });
       // A turn that starts while its agent waits to update pauses at its first tool boundary too.
       if (this.core.updates.wantsPause(provider.id)) this.pauseWanted.set(threadId, provider.id);
-      if (!resumed && !retriedLostSession && !queued.execution?.operation) this.threads.titles.autoTitle(threadId, turnId);
+      if (!resumed && !retriedLostSession && capacityTries === 0 && !queued.execution?.operation) this.threads.titles.autoTitle(threadId, turnId);
       result = await Promise.race([handle.done, forced.promise]);
       logAttemptEnd(this.core, threadId, turnId, attempt, result, performance.now() - attemptAt);
       permissions.detach();
@@ -180,6 +228,30 @@ export class TurnAttempts {
         retriedLostSession = true;
         state.running = { ...state.running, ...(state.running.execution ? { execution: { ...state.running.execution, sessionId: null, sessionGeneration: fresh.sessionGeneration ?? 0 } } : {}) };
         because = 'retry on a fresh session';
+        continue;
+      }
+      wroteBefore ||= wrote;
+      // The model was at capacity: the same turn tries again later, in the
+      // same native session. Nothing written yet: the same input goes again.
+      // Something written: a short continue prompt, so paid work is not redone.
+      if (result.status === 'error' && result.refusal?.kind === 'capacity' && capacityTries < CAPACITY_RETRY.delaysMs.length && !this.core.stopping) {
+        const delay = CAPACITY_RETRY.delaysMs[capacityTries]!;
+        capacityTries += 1;
+        usage = sumUsage(usage, result.usage);
+        this.keepSession(state, result);
+        const outcome = await this.waitToRetry(state, capacityTries, delay, provider);
+        if (outcome === 'stop') {
+          result = { status: 'stopped', sessionId: state.thread.sessionId, usage: null };
+          break;
+        }
+        if (outcome === 'cancel') {
+          // Its usage is counted above already.
+          result = { ...result, usage: null };
+          break;
+        }
+        setThreadStatus(this.core, threadId, 'running');
+        afterCapacity = true;
+        because = `retry ${capacityTries} of ${CAPACITY_RETRY.delaysMs.length} after the model was at capacity`;
         continue;
       }
       // Stopped between two tool calls for an agent update: the same turn
@@ -225,6 +297,60 @@ export class TurnAttempts {
     this.pauseWanted.delete(threadId);
     this.pausing.delete(threadId);
     this.paused.delete(threadId);
+    this.retryWaits.get(threadId)?.leave('stop');
+    this.retryWaits.delete(threadId);
+  }
+
+  /** The capacity retry a turn of this thread waits for, or null. */
+  retryOf(threadId: ThreadId): ThreadRetry | null {
+    return this.retryWaits.get(threadId)?.retry ?? null;
+  }
+
+  /** Gives up the capacity retry the thread waits for: its turn fails with the refusal. False when none waits. */
+  cancelRetry(threadId: ThreadId): boolean {
+    const wait = this.retryWaits.get(threadId);
+    if (wait === undefined) return false;
+    wait.leave('cancel');
+    return true;
+  }
+
+  /**
+   * Holds a turn the model refused at capacity until its next try. The thread
+   * stays running and shows the try and its time (`ThreadSummary.retry`); a
+   * stop, a cancel or the core closing ends the wait early.
+   */
+  private async waitToRetry(state: TurnAttemptState, attempt: number, delayMs: number, provider: ProviderDescriptor): Promise<RetryOutcome> {
+    const { threadId, turnId } = state;
+    this.handles.delete(threadId);
+    this.threads.handoff.forgetTools(threadId);
+    const retry: ThreadRetry = { kind: 'capacity', turnId, at: Date.now() + delayMs, attempt, attempts: CAPACITY_RETRY.delaysMs.length, resetsAt: null };
+    const left = Promise.withResolvers<RetryOutcome>();
+    const timer = setTimeout(() => left.resolve('retry'), delayMs);
+    timer.unref?.();
+    this.retryWaits.set(threadId, { retry, leave: outcome => left.resolve(outcome) });
+    quiet(() => this.core.logs.info(`${provider.name} refused the turn at capacity; try ${attempt} of ${retry.attempts} in ${Math.round(delayMs / 1000)} s`, {
+      source: 'turns', event: 'turn.capacity-retry.waiting', threadId, turnId, providerId: provider.id, data: { attempt, attempts: retry.attempts, delayMs },
+    }));
+    this.announce(threadId);
+    try {
+      const outcome = await left.promise;
+      const final = this.stopRequested.has(threadId) || this.core.stopping || this.core.journal.isClosed() ? 'stop' : outcome;
+      quiet(() => this.core.logs.info(final === 'retry' ? `Capacity retry ${attempt} starts` : `Capacity retry ${attempt} ${final === 'stop' ? 'ended by a stop' : 'cancelled'}`, {
+        source: 'turns', event: 'turn.capacity-retry.ended', threadId, turnId, data: { attempt, outcome: final },
+      }));
+      return final;
+    } finally {
+      clearTimeout(timer);
+      if (this.retryWaits.get(threadId)?.retry === retry) this.retryWaits.delete(threadId);
+      this.announce(threadId);
+    }
+  }
+
+  /** Tells every client the thread's row changed: its planned retry came or went. */
+  private announce(threadId: ThreadId): void {
+    if (this.core.journal.isClosed()) return;
+    const thread = this.core.journal.getThread(threadId);
+    if (thread !== null) quiet(() => this.core.bus.emit('thread.updated', withLoad(this.core, thread)));
   }
 
   /** The session a stopped attempt leaves goes on the thread, so a later stop keeps it too. */
@@ -330,6 +456,12 @@ export class TurnAttempts {
   }
 
   stopRunning(threadId: ThreadId): boolean {
+    const waiting = this.retryWaits.get(threadId);
+    if (waiting !== undefined) {
+      this.stopRequested.add(threadId);
+      waiting.leave('stop');
+      return true;
+    }
     const paused = this.paused.get(threadId);
     if (paused !== undefined) {
       this.stopRequested.add(threadId);
@@ -341,6 +473,8 @@ export class TurnAttempts {
     if (handle === undefined) {
       if (!this.preparing.has(threadId)) return false;
       this.stopRequested.add(threadId);
+      releaseThread(threadId);
+      this.core.procs.killTree(threadId);
       return true;
     }
     // An open card is what the driver is parked on. Aborting without answering

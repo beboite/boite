@@ -249,6 +249,7 @@ function stateFixture(order: 'before-query' | 'during-query' | 'no-settled' | 'n
         prompts += 1;
         accepted(message, ${order === 'before-query' || order === 'no-stats' ? 'true' : order === 'no-settled' ? "message.message !== '/report'" : 'false'});
       } else if (message.type === 'get_state') {
+        if (prompts === 0) { answer(message, { isStreaming: false }); return; }
         ${order === 'no-settled' ? '' : "send({ type: 'agent_settled' });"}
         // Deliberately never answer the state query.
       } else if (message.type === 'get_commands') answer(message, { commands: [] });
@@ -326,7 +327,7 @@ for (const order of ['before-query', 'during-query'] as const) {
         expect(await result).toMatchObject({ status: 'done' });
         expect(pending(peer!)).toBe(0);
       }
-      expect(stateReads).toBe(order === 'before-query' ? 0 : 2);
+      expect(stateReads).toBe(order === 'before-query' ? 1 : 3);
       expect((await client.call('threads.get', { threadId })).context?.tokens).toBe(40);
     } finally { intercepted.mockRestore(); }
   }, 5000);

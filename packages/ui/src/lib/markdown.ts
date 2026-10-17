@@ -1,4 +1,4 @@
-import { richInline, fileLike, linkHtml } from './chat-links';
+import { BracketLinks, richInline, codeLinkHtml, threadAddress, threadLinkHtml } from './chat-links';
 /**
  * The markdown an agent answer needs: paragraphs, headings, nested and task
  * lists, block quotes, tables, rules, fenced and inline code, bold, italic,
@@ -22,7 +22,9 @@ function inline(text: string, rich = false): string {
   // The lead stands in for a lookbehind (Safari before 16.4 cannot parse one): a
   // previous span always ends on a backtick, so consuming one character is equivalent.
   const protectedText = text.replace(/(^|[^`])(`+)(.+?)\2(?!`)/g, (_match, lead: string, _ticks: string, value: string) => {
-    code.push(`<code>${rich && fileLike(value) ? linkHtml(value, value) : escape(value)}</code>`);
+    // A thread is linked even without rich links: opening it needs no file access.
+    const link = rich ? codeLinkHtml(value) : threadAddress(value) ? threadLinkHtml(value, value) : null;
+    code.push(`<code>${link ?? escape(value)}</code>`);
     return `${lead}${marker}${code.length - 1}${marker}`;
   });
   // Format around opaque spans, then restore them without parsing their contents.
@@ -34,8 +36,20 @@ function inlineFormatting(text: string): string {
   out = out.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
   out = out.replace(/(^|[^*\w])\*([^*\n]+)\*(?!\w)/g, '$1<em>$2</em>');
   out = out.replace(/~~([^~\n]+)~~/g, '<del>$1</del>');
-  out = out.replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
-  return out;
+  return webLinks(out);
+}
+
+/** `[label](http://...)` as a link, in linear time where a regex retried from every `[`. */
+function webLinks(text: string): string {
+  if (!text.includes('](http')) return text;
+  const links = new BracketLinks(text, true);
+  let out = '';
+  let start = 0;
+  for (let link = links.next(0); link; link = links.next(link.end)) {
+    out += `${text.slice(start, link.index)}<a href="${link.target}" target="_blank" rel="noopener noreferrer">${link.label}</a>`;
+    start = link.end;
+  }
+  return out + text.slice(start);
 }
 
 const FENCE = /^```([\w+-]*)\s*$/;

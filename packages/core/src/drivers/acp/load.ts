@@ -49,3 +49,14 @@ export function rpcReason(error: unknown): string {
   const reason = typeof details === 'string' && details.length > 0 ? details : messageOf(error);
   return reason.slice(0, STDERR_MAX);
 }
+
+/**
+ * What a refused request tells the user. The agent's JSON-RPC message alone
+ * can be the bare "Internal error" the SDK maps any failure to, with the
+ * reason in `data.details`; OpenCode 2 also prefixes its own failures with it.
+ */
+export function failureText(error: unknown): string {
+  if (!rpcRefusal(error)) return messageOf(error);
+  const reason = rpcReason(error).replace(/^Internal error:\s*/i, '');
+  return reason.length > 0 ? reason : messageOf(error);
+}

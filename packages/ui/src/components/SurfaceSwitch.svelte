@@ -34,10 +34,6 @@
     // A reconnection is a new client: each directory follows its own.
     for (const owner of stores) { void owner.client; untrack(() => agentDirectory(owner).refresh()); }
   });
-  $effect(() => {
-    if (!on) return;
-    for (const owner of stores) if (owner.connection === 'ready' && owner.stewards === null) untrack(() => void owner.loadStewards());
-  });
 </script>
 
 {#snippet badge(work: WorkCount, testid: string)}
@@ -86,7 +82,7 @@
     line-height: 1;
   }
   .count.waiting { background: color-mix(in oklch, var(--color-live) 18%, transparent); color: var(--color-live); }
-  .pulse { width: 5px; height: 5px; border-radius: 50%; background: currentColor; animation: surface-pulse 1.6s var(--ease-out-quint) infinite; }
+  .pulse { width: 5px; height: 5px; border-radius: 50%; background: currentColor; animation: surface-pulse 1.6s var(--loop-ease-out-quint-48) infinite var(--loops); }
   @keyframes surface-pulse { 0%, 100% { opacity: 1; transform: none; } 50% { opacity: .35; transform: scale(.7); } }
   @media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
   :global(html[data-motion='reduced']) .pulse { animation: none; }

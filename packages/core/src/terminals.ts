@@ -2,7 +2,7 @@
  * Shells in a pseudo-terminal. A thread has up to `MAX_THREAD_TERMINALS`,
  * opened under the chat with Ctrl+J in the thread's working directory, and an
  * account whose CLI signs in through an interactive menu gets one with its
- * login command typed in. Each shell goes through `procs.spawnTerminal` under
+ * login command started in it. Each shell goes through `procs.spawnTerminal` under
  * its own trace id, never the thread's: stopping a turn must not take the
  * user's shell with it, and closing one tab must not take the others.
  */
@@ -157,7 +157,7 @@ export interface StartOptions {
   env: Record<string, string | undefined>;
   cols: number;
   rows: number;
-  /** A command typed into the shell once its prompt is up. */
+  /** A login command started before the POSIX shell, or typed at its Windows prompt. */
   type?: string[];
   onExit?: () => void;
   /** The thread a thread's shell belongs to, set on its log records. */
@@ -168,8 +168,44 @@ export interface StartOptions {
 
 export class TerminalStore {
   private readonly sessions = new Map<string, Session>();
+  /**
+   * The connections that attached each shell: `terminal.output` goes to them
+   * only. A window without that pane would drop the bytes anyway.
+   */
+  private readonly watchers = new Map<string, Set<string>>();
 
   constructor(private readonly core: Core) {}
+
+  /** The connection attached shell `id`: from now on its output reaches it. */
+  watch(id: string, connectionId: string): void {
+    const watching = this.watchers.get(id);
+    if (watching === undefined) this.watchers.set(id, new Set([connectionId]));
+    else watching.add(connectionId);
+  }
+
+  watches(id: string, connectionId: string): boolean {
+    return this.watchers.get(id)?.has(connectionId) === true;
+  }
+
+  /** The connection let go of shell `id`. */
+  unwatch(id: string, connectionId: string): void {
+    const watching = this.watchers.get(id);
+    watching?.delete(connectionId);
+    if (watching?.size === 0) this.watchers.delete(id);
+  }
+
+  /**
+   * The `terminal.exited` of shell `id` went out, after every line it printed:
+   * nobody watches it any more, unless a shell of the same id started since.
+   */
+  exitSent(id: string): void {
+    if (!this.sessions.has(id)) this.watchers.delete(id);
+  }
+
+  /** The socket closed: it watches nothing any more. */
+  disconnect(connectionId: string): void {
+    for (const id of [...this.watchers.keys()]) this.unwatch(id, connectionId);
+  }
 
   /** One of the thread's shells, started in its working directory the first time. */
   openThread(threadId: ThreadId, cols: number, rows: number, terminalId?: string): TerminalState {
@@ -235,7 +271,14 @@ export class TerminalStore {
     const decoder = new TextDecoder();
     let session: Session | null = null;
     let sequence = 0;
-    let typed = options.type === undefined;
+    // POSIX logins run as startup argv before opening the user's shell. A
+    // quiet profile may still be reading stdin, so PTY keystrokes cannot start them safely.
+    const prepared = process.platform !== 'win32' && options.type !== undefined;
+    const launch = prepared ? {
+      exe: '/bin/sh',
+      args: ['-c', `"$@"\nexec ${commandLine('posix', [shell.exe, ...shell.args])}`, 'boite-login', ...(options.type ?? [])],
+    } : shell;
+    let typed = options.type === undefined || prepared;
     let quiet: ReturnType<typeof setTimeout> | null = null;
     const typeNow = () => {
       if (typed || session === null) return;
@@ -268,7 +311,7 @@ export class TerminalStore {
     };
     let spawned;
     try {
-      spawned = this.core.procs.spawnTerminal(id, shell.exe, shell.args, {
+      spawned = this.core.procs.spawnTerminal(id, launch.exe, launch.args, {
         cwd: options.cwd,
         env,
         cols: options.cols,
@@ -289,7 +332,7 @@ export class TerminalStore {
       });
     } catch (error) {
       clearTimeout(fallback);
-      throw refused(`the shell ${shell.exe} did not start: ${messageOf(error)}`, { id, shell: shell.exe });
+      throw refused(`the shell ${launch.exe} did not start: ${messageOf(error)}`, { id, shell: launch.exe });
     }
     const openedAt = Date.now();
     const shellName = shell.exe.split(/[\\/]/).pop() ?? 'shell';
@@ -399,8 +442,11 @@ function requireString(value: unknown, field: string): string {
 
 export function registerTerminalMethods(core: Core): void {
   const router: Router = core.router;
-  router.register('terminals.open', (params) =>
-    core.terminals.openThread(requireString(params.threadId, 'threadId') as ThreadId, params.cols, params.rows, params.terminalId));
+  router.register('terminals.open', (params, ctx) => {
+    const state = core.terminals.openThread(requireString(params.threadId, 'threadId') as ThreadId, params.cols, params.rows, params.terminalId);
+    core.terminals.watch(state.id, ctx.connection.id);
+    return state;
+  });
   router.register('terminals.list', (params) => {
     const threadId = requireString(params.threadId, 'threadId') as ThreadId;
     core.threads.require(threadId);
@@ -412,6 +458,11 @@ export function registerTerminalMethods(core: Core): void {
   });
   router.register('terminals.resize', (params) =>
     core.terminals.resize(requireString(params.id, 'id'), params.cols, params.rows));
-  router.register('terminals.close', (params) => core.terminals.close(requireString(params.id, 'id')));
+  router.register('terminals.close', (params, ctx) => {
+    const id = requireString(params.id, 'id');
+    // The closing window's pane goes now; the others keep the last lines until `terminal.exited`.
+    core.terminals.unwatch(id, ctx.connection.id);
+    return core.terminals.close(id);
+  });
   router.register('terminals.history', (params) => core.terminals.history(requireString(params.id, 'id')));
 }

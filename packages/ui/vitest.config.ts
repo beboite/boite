@@ -20,7 +20,7 @@ export default defineConfig({
     globals: false,
     /* The app suite runs the fake on the wall clock (install steps, probes,
        retitles), and one long list renders for seconds on a CI runner: 5 s
-       left too little room. app.test.ts's waits stop at 8 s, inside this. */
+       left too little room. The app suite's waits (src/test/app.ts) stop at 8 s, inside this. */
     testTimeout: 15_000,
     /* lucide ships .svelte sources; inlined so the plugin above compiles them too */
     server: { deps: { inline: ['@lucide/svelte'] } }

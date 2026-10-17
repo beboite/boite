@@ -2,26 +2,43 @@ import type { ThreadId } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { refused } from '../errors.ts';
 
+/**
+ * Who asks for the family to be put away. The user marking one conversation
+ * done is `explicit`: only input a client reported on that family stops it.
+ * Automatic passes (retention) also respect a client that could not say which
+ * threads hold input, since they would discard it with nobody watching.
+ */
+export type CompletionRequest = 'explicit' | 'automatic';
+
+/** What still holds a member of the family, in words a refusal can show. */
+function pending(core: Core, id: ThreadId, status: string, scheduled: Set<ThreadId>, request: CompletionRequest): string | null {
+  const threads = core.threads;
+  if (['running', 'waiting', 'queued'].includes(status) || scheduled.has(id) || threads.runner.handles.has(id) || threads.runner.steering.has(id)) return 'a turn is still running';
+  if (threads.agentState.background.get(id)?.length) return 'background work is still running';
+  if (threads.moves.pendingOf(id)) return 'a move is still in progress';
+  if (threads.deferred.deferredAnswers.get(id)?.length || threads.deferred.pendingWakes.has(id)) return 'a message is still waiting to be delivered';
+  if (core.workflows.active(id)) return 'a workflow is still running';
+  if (request === 'explicit' ? threads.focus.hasReportedInput(id) : threads.focus.hasProtectedInput(id)) return 'unsent input is still open on a device';
+  if (threads.sideQuestions.active(id)) return 'a side question is still open';
+  if (threads.cards.listPermissions(id).length
+    || [...threads.cards.questions.values()].some(card => card.request.threadId === id)
+    || [...threads.cards.asyncCards.values()].some(card => card.threadId === id)) return 'a permission or question is still waiting for an answer';
+  return null;
+}
+
 /** The final, synchronous guard for Done; another client may have started work since the row was drawn. */
-export function assertIdleFamily(core: Core, threadId: ThreadId): void {
+export function assertIdleFamily(core: Core, threadId: ThreadId, request: CompletionRequest = 'automatic'): void {
   const family = core.journal.db.query('WITH RECURSIVE family(id) AS (SELECT ? UNION SELECT child.id FROM threads child JOIN family ON child.parent_thread_id = family.id) SELECT id FROM family').all(threadId) as { id: ThreadId }[];
   const scheduler = core.scheduler.state();
   const scheduled = new Set([...scheduler.running, ...scheduler.queued].map(turn => turn.threadId));
   for (const { id } of family) {
     const thread = core.journal.getThread(id);
     if (!thread) continue;
-    if (['running', 'waiting', 'queued'].includes(thread.status) || scheduled.has(id)
-      || core.threads.runner.handles.has(id) || core.threads.runner.steering.has(id)
-      || core.threads.agentState.background.get(id)?.length || core.threads.moves.pendingOf(id)
-      || core.threads.deferred.deferredAnswers.get(id)?.length || core.threads.deferred.pendingWakes.has(id)
-      || core.workflows.active(id)
-      || core.threads.focus.hasProtectedInput(id) || core.threads.sideQuestions.active(id)
-      || core.threads.cards.listPermissions(id).length
-      || [...core.threads.cards.questions.values()].some(card => card.request.threadId === id)
-      || [...core.threads.cards.asyncCards.values()].some(card => card.threadId === id)) {
-      throw refused('threadId: work or input is still pending; expected an idle conversation family', {
-        threadId, field: 'threadId', expected: 'an idle conversation family without pending input', activeThreadId: id,
-      });
-    }
+    const reason = pending(core, id, thread.status, scheduled, request);
+    if (reason === null) continue;
+    const where = id === threadId ? '' : ` in "${thread.title}"`;
+    throw refused(`threadId: ${reason}${where}; expected an idle conversation family`, {
+      threadId, field: 'threadId', expected: 'an idle conversation family without pending input', activeThreadId: id, reason,
+    });
   }
 }

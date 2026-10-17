@@ -24,6 +24,7 @@
     <span class="ui-label">{fill(strings.delegation.completed, { done: String(team.completed), total: String(agents.length) })}</span>
     {#if team.failed}<span class="failed ui-label">· {fill(strings.delegation.failed, { count: String(team.failed) })}</span>{/if}
     {#if team.stopped}<span class="ui-label">· {fill(strings.delegation.stopped, { count: String(team.stopped) })}</span>{/if}
+    {#if team.interrupted}<span class="failed ui-label">· {fill(strings.delegation.interrupted, { count: String(team.interrupted) })}</span>{/if}
   {/snippet}
 </ActivityCard>
 

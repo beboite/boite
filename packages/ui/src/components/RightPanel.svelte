@@ -5,6 +5,7 @@
   import { browserBridge } from '../lib/browser-bridge';
   import { stripOverflows } from '../lib/strip-overflow';
   import { contextMenu } from '../lib/context-menu.svelte';
+  import { longPress } from '../lib/long-press';
   import { controlMenu, CONTROLS_SECTION } from '../lib/controls';
   import type { ControlId } from '../lib/work-prefs.svelte';
   import { separator } from '../lib/menu';
@@ -327,6 +328,7 @@
           onkeydown={(event) => onTabKey(event, surface)}
           onmousedown={(event) => onTabPointerDown(event, surface)}
           oncontextmenu={(event) => openTabMenu(event, surface)}
+          use:longPress
         >
           <button
             type="button"

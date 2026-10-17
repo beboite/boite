@@ -146,6 +146,15 @@ the refusal across restarts: a session file alone cannot restore the connected
 status. A successful fresh CLI check or completed sign-in clears it. Billing,
 rate limits and failures inside subagents do not invalidate the account.
 
+An HTTP 403 does not either. The Claude CLI labels it `authentication_failed`
+as it does a 401, so the driver holds that label until the turn's result: a
+403 in its `api_error_status`, or in the frame's own text ("API Error: 403"),
+fails only that turn, with the API's words after "Claude refused this request;
+the account is still signed in." Any other status signs the account out, and
+so does a CLI that exits before its result. A 401 result signs it out even
+with no labelled frame before it. A new login cannot grant a
+permission, and a signed-out account would refuse every later turn.
+
 Changed account statuses and identities reach every client as `accounts.updated`.
 An unchanged passive check writes no journal row and sends no event.
 `accounts.rename` changes the label of any account, including a default CLI
@@ -190,8 +199,12 @@ The other shape is `login.acp`, for an ACP agent whose sign-in is the protocol's
 own `authenticate` call rather than a command. The core starts the agent itself
 under the same `login:<accountId>` thread, sends `initialize` then `authenticate`
 with the descriptor's method id, refuses a method the agent does not advertise,
-and gives up after five minutes. The sign-in link arrives as a line on the agent's
-stdout that is not JSON, and reaches the page the same way, in `url`. The agent
+and gives up after five minutes. Once signed in, the same process opens one
+session in an empty folder to list the account's models, so no second launch
+is needed to read them ([providers](providers.md#the-models-probe)). The sign-in link arrives as a line on the agent's
+stdout that is not JSON, and Antigravity writes it to stderr too; either line
+reaches the page whole, in `url` (a link cut to an error message's length asks
+Google for a scope that ends mid-URL). The agent
 holds a loopback listener for the redirect, so a browser on the core's machine
 finishes the flow on its own; from a phone, the redirect URL pasted into
 `accounts.loginInput` is fetched once by the core. What is accepted is narrow on
@@ -248,8 +261,11 @@ the same one as the thread terminal ([terminal.md](terminal.md)):
    `login:<accountId>`, with the account's environment and the isolation
    directory (or the home directory for the default account) as its working
    directory. Calling it again attaches to the running one.
-2. Once the prompt goes quiet, the core types the login command into it, as the
-   user would have: `& 'C:\path\opencode.exe' auth login` in PowerShell.
+2. On Windows, once the prompt goes quiet, the core types the login command
+   into it, as the user would have: `& 'C:\path\opencode.exe' auth login` in
+   PowerShell. On Linux and macOS, `/bin/sh -c` runs the command with its
+   arguments as given, then `exec`s the user's shell: a profile still reading
+   its input cannot swallow typed keys.
 3. The Providers page draws the shell under the provider's row. The user
    answers the CLI there and closes the terminal once signed in, or types `exit`.
 4. When the shell exits, the core rechecks the account and `accounts.updated`
@@ -304,6 +320,29 @@ agent has no other account to run on, are refused with `field: accountId` until
 `threads.update` gives it one; the composer then shows an Account removed chip
 that opens the model picker.
 
+## Transcripts Boite removes
+
+A Claude account Boite created keeps its sessions as
+`<dataDir>/accounts/<id>/projects/<folder>/<sessionId>.jsonl`, with a
+`<sessionId>/` folder beside it for subagent sidechains. When a deleted
+conversation is purged, or an incognito one is erased (by the user, when the
+core stops, or by the next core after one died with it open),
+`packages/core/src/threads/transcript-purge.ts` removes both for every session
+the conversation's turns named, current and earlier. It acts only where
+`ownIsolationDir` in `packages/core/src/accounts.ts` holds: the account's
+directory is exactly `<dataDir>/accounts/<id>` and not a link. A default account,
+whose directory is the user's own `~/.claude`, and an account pointed at a folder
+the user chose are never touched. A session another conversation still names,
+such as the source of a fork, stays: the journal is asked again right before
+each path goes, since the disk is awaited between paths. A session being
+imported is left alone, and an import of a session whose transcript is being
+removed is refused. Links inside `projects` are skipped.
+
+Only the `claude-sdk` driver is covered. Codex and pi file their sessions by date
+or under an id Boite does not keep, so their transcripts stay where the agent
+wrote them. A path that cannot be listed, read or removed, other than a missing
+one, is reported in one `warn` line per pass and never holds the purge back.
+
 ## A conversation follows its agent
 
 A thread records the account its last turn used, yet that account does not hold
@@ -342,3 +381,21 @@ after five minutes. A disabled paid-usage flag alone does not report quota data.
 
 [Plugins](plugins.md) can manage external CLI account pools. Boite does not
 rotate accounts automatically or relay provider requests.
+
+## Moving a login to Douane
+
+Settings can hand this machine's logins to a Douane gateway
+([providers](providers.md#moving-connections-to-douane)): the core reads each
+account's login file from the location above, its isolation directory or the
+CLI's default one, and posts it to Douane. Nothing is deleted here and the
+account stays as it is.
+
+It is a move, not a copy. Claude, Codex and Grok refresh tokens rotate: the
+first time Douane refreshes a login it received, the refresh token Boite still
+holds stops working. While the proxy is on, that does not matter, since the
+gateway serves the provider and the local account only lends its name. Turned
+off later, the proxy gives the account back with a dead login, which reads
+signed out at its next refusal: sign in again from Providers. OpenCode API
+keys and a GitHub Copilot sign-in do not rotate and keep working in both
+places. A test core (`BOITE_HOST_AGENTS=0`) lists isolated accounts only and
+never reads the user's own CLI logins.

@@ -31,7 +31,7 @@ const RETITLE_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-retitle.png')
 const IMPORT_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-import.png');
 const EXPERIMENTS_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-experiments.png');
 /** The cache `public/sw.js` opens, before the build appends its id; every other cache is deleted on activate. */
-const UI_CACHE_PREFIX = 'boite-ui-v3-';
+const UI_CACHE_PREFIX = 'boite-ui-v4-';
 
 let core: RunningCore;
 let page: BrowserPage;
@@ -67,7 +67,7 @@ afterAll(async () => {
   await core?.stop();
   if (projectDir !== undefined) await removeDirectory(projectDir);
   if (worktreesDir !== undefined) await removeDirectory(worktreesDir);
-}, 15_000);
+}, 30_000);
 
 test('the core serves the production bundle: no fake client, no Svelte dev runtime', async () => {
   const index = await (await fetch(`${core.url}/`)).text();
@@ -416,7 +416,8 @@ test(
     // user bubble carries the thumbnail as a part of the journalled message.
     expect(await page.evaluate<number>(`document.querySelectorAll('${testid('composer-attachment')}').length`)).toBe(0);
     const assistant = await page.evaluate<string>(ASSISTANT_TEXT);
-    expect(assistant).toMatch(/\[image image\/png, \d+ bytes, square\.png\] what is this square/);
+    // Boite's own lines can sit between the image the echo names first and the text typed.
+    expect(assistant).toMatch(/\[image image\/png, \d+ bytes, square\.png\][\s\S]*what is this square/);
     const images = await page.evaluate<string[]>(
       `Array.from(document.querySelectorAll('${testid('message')}[data-role=user] ${testid('image-part')}')).map((img) => img.getAttribute('src').slice(0, 22))`,
     );
@@ -507,9 +508,9 @@ test(
 test(
   'the trace panel lists what the turn launched, or says it launched nothing',
   async () => {
-    // The header button opens the panel itself; the trace is one card of its
-    // launcher, or the tab that is already there.
-    await page.click(testid('panel-toggle'));
+    // The header button opens the panel itself, unless a wide window already
+    // shows it; the trace is one card of its launcher, or the tab already there.
+    if (!(await page.evaluate<boolean>(`!!document.querySelector('${testid('right-panel')}')`))) await page.click(testid('panel-toggle'));
     await page.waitFor(
       `document.querySelector('${testid('launch-trace')}') || document.querySelector('${testid('trace-panel')}')`,
     );
@@ -845,6 +846,8 @@ test(
     const entries = await page.evaluate<string[]>(cachedPaths);
     expect(entries).toContain('/');
     expect(entries.filter((path) => path.startsWith('/assets/')).length).toBeGreaterThan(0);
+    // The browser reads English (`--lang=en-US`): the French catalogue the inline locale map names is never stored.
+    expect(entries.filter((path) => path.startsWith('/assets/strings.fr-'))).toEqual([]);
 
     // The core goes away, and the reload has nothing but that cache to load from.
     const { port, dataDir, token } = core;

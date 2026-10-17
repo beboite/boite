@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, setSystemTime, test } from 'bun:test';
+import { afterEach, beforeEach, expect, setSystemTime, spyOn, test } from 'bun:test';
 import { ATTENTION_LEASE_MS, notificationExcerpt, type RpcEvents, type Turn, type TurnExecution } from '@boite/contracts';
 import { createECDH, randomBytes } from 'node:crypto';
 import { connect } from '../src/client.ts';
@@ -178,12 +178,11 @@ test('no push about a thread someone is looking at and uses, on the PC or the ph
     harness.core.journal.putThread(other);
     let n = 0;
     const finish = (id: string) => harness.core.bus.emit('turn.finished', { id: `attention_${++n}`, threadId: id, status: 'done', queuedAt: 1, startedAt: 1, finishedAt: 2, usage: null, error: null, execution: { providerId: other.providerId, accountId: other.accountId, model: null, effort: null, permissionMode: other.permissionMode, sessionId: null, sessionGeneration: 0, selectionVersion: 0 } });
-    const ask = (id: string) => harness.core.bus.emit('question.asked', { id: `ask_${++n}`, threadId: id, text: 'Which branch?' } as RpcEvents['question.asked']);
     const delivered = async (count: number) => { await waitFor(() => deliveries.length === count); await Bun.sleep(30); expect(deliveries).toHaveLength(count); };
 
     // The phone in the foreground on the thread: news about it waits, news about another one goes.
     await phone.call('threads.focus', { threadId, attentive: true, idleMs: 0 });
-    finish(threadId); ask(threadId); finish(other.id);
+    finish(threadId); finish(threadId); finish(other.id);
     await delivered(1);
     expect(deliveries[0]!.threadId).toBe(other.id);
     // A touch on that screen afterwards shows it was seen: locking the phone then sends nothing.
@@ -193,7 +192,7 @@ test('no push about a thread someone is looking at and uses, on the PC or the ph
     await delivered(1);
     // The desktop window in front and used: the same. Use of another thread is not use of this one.
     await desktop.call('threads.focus', { threadId, attentive: true, idleMs: 0 });
-    ask(threadId);
+    finish(threadId);
     await Bun.sleep(5);
     await phone.call('threads.focus', { threadId: other.id, attentive: true, idleMs: 0 });
     await phone.call('threads.focus', { threadId: null });
@@ -202,7 +201,7 @@ test('no push about a thread someone is looking at and uses, on the PC or the ph
     await delivered(1);
     // A window in front that nobody used for a while is not believed; one with the thread merely open does not count.
     await desktop.call('threads.focus', { threadId, attentive: true, idleMs: 60_000 });
-    ask(threadId);
+    finish(threadId);
     await desktop.call('threads.focus', { threadId });
     finish(threadId);
     await delivered(3);
@@ -221,6 +220,24 @@ test('no push about a thread someone is looking at and uses, on the PC or the ph
     await expect(phone.call('threads.focus', { threadId, idleMs: -1 })).rejects.toThrow('idleMs');
   } finally { phone.close(); }
 });
+test('questions and permissions push immediately even when their thread is attended', async () => {
+  const paired = session();
+  harness.core.push.subscribe(paired.id, subscription());
+  const deliveries: { threadId: string; tag: string }[] = [];
+  harness.core.push.send = async (_target, payload) => { deliveries.push(JSON.parse(payload)); };
+  const desktop = await harness.connect();
+  const { threadId } = await echoThread(harness, desktop);
+  await desktop.call('threads.focus', { threadId, attentive: true, idleMs: 0 });
+  harness.core.bus.emit('question.asked', { id: 'focused_question', threadId, turnId: 'focused_turn', async: true, text: 'Subagents are paused. Continue?', options: [], allowText: true, multiple: false, createdAt: Date.now() });
+  harness.core.bus.emit('permission.requested', { id: 'focused_permission', threadId, turnId: 'focused_turn', toolName: 'Edit', input: {}, description: 'Allow file edit?', createdAt: Date.now() });
+  await waitFor(() => deliveries.length === 2);
+  expect(deliveries.map(row => row.tag).sort()).toEqual(['request-focused_permission', 'request-focused_question']);
+  expect(deliveries.every(row => row.threadId === threadId)).toBe(true);
+  await desktop.call('threads.focus', { threadId: null });
+  await Bun.sleep(30);
+  expect(deliveries).toHaveLength(2);
+});
+
 test('a notification carries the icon badge: the threads waiting on the user, the notified one included', async () => {
   const paired = session();
   harness.core.push.subscribe(paired.id, subscription());
@@ -285,4 +302,31 @@ test('a notification of one very long line is read in bounded time', () => {
     expect(notificationExcerpt(line).length).toBeLessThanOrEqual(141);
     expect(performance.now() - started).toBeLessThan(500);
   }
+});
+
+test('with no subscription and no other member, a finished turn prepares no push at all', async () => {
+  const sent: string[] = [];
+  harness.core.push.send = async (_target, payload) => { sent.push(payload); };
+  const forwarded: unknown[] = [];
+  harness.core.push.forward = async (_home, payload) => { forwarded.push(payload); };
+  const walk = spyOn(harness.core.journal, 'walkAgentMessagesBackwards');
+  const badge = spyOn(harness.core.push, 'badge');
+  try {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    const thread = harness.core.journal.getThread(threadId)!;
+    const finish = (id: string) => harness.core.bus.emit('turn.finished', { id, threadId, status: 'done', queuedAt: 1, startedAt: 1, finishedAt: 2, usage: null, error: null,
+      execution: { providerId: thread.providerId, accountId: thread.accountId, model: null, effort: null, permissionMode: thread.permissionMode, sessionId: null, sessionGeneration: 0, selectionVersion: 0 } });
+    walk.mockClear(); badge.mockClear();
+    finish('quiet_1');
+    harness.core.bus.emit('question.asked', { id: 'quiet_question', threadId, text: 'Which branch?' } as RpcEvents['question.asked']);
+    await Bun.sleep(30);
+    expect([walk.mock.calls.length, badge.mock.calls.length, sent.length, forwarded.length]).toEqual([0, 0, 0, 0]);
+    // Subscribed mid-thread: the next turn reaches the phone.
+    harness.core.push.subscribe(session().id, subscription());
+    finish('quiet_2');
+    await waitFor(() => sent.length === 1);
+    expect(walk.mock.calls.length).toBeGreaterThan(0);
+    expect(forwarded).toEqual([]);
+  } finally { walk.mockRestore(); badge.mockRestore(); }
 });

@@ -1,4 +1,4 @@
-import type { ImageAttachment, NativeAgentUpdate, QuestionAnswer, QuestionOption, ToolStatus, Usage } from '@boite/contracts';
+import type { AgentTask, ImageAttachment, NativeAgentUpdate, QuestionAnswer, QuestionOption, ToolStatus, Usage } from '@boite/contracts';
 import type { SessionContext, TurnContext } from '../types.ts';
 import type { CodexItem, CodexQuestion, CodexThreadOpened, CodexTokenUsage, ToolView } from './protocol.ts';
 import { AGENT_OWN_MODEL, COMMAND_TOOL_NAME, FILE_CHANGE_TOOL_NAME, SLEEP_TOOL_NAME } from './protocol.ts';
@@ -258,5 +258,14 @@ export function sessionKey(ctx: SessionContext): string {
     accountId: ctx.account.id,
     providerId: ctx.provider.id,
     env: ctx.accountEnv,
+  });
+}
+
+/** `turn/plan/updated`: the turn's tasks, keeping the wire's two in-progress spellings. Null for no plan. */
+export function planTasksOf(plan: unknown): AgentTask[] | null {
+  if (!Array.isArray(plan)) return null;
+  return plan.flatMap((entry, index) => {
+    if (!entry || typeof entry.step !== 'string') return [];
+    return [{ id: String(index), text: entry.step, status: entry.status === 'completed' ? 'completed' as const : entry.status === 'inProgress' || entry.status === 'in_progress' ? 'in_progress' as const : 'pending' as const }];
   });
 }

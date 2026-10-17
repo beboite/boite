@@ -1,6 +1,6 @@
 import { describe, expect, it, test } from 'vitest';
 import type { Message, MessagePart, Turn } from '@boite/contracts';
-import { countsOf, relativeTo, turnDiffs, turnFiles, turnFileTree, turnLineCounts, TurnFileCache, visibleTurnFiles, type TurnDiff } from './turn-files';
+import { countsOf, relativeTo, showsTurnFiles, turnDiffs, turnFiles, turnFileTree, turnLineCounts, TurnFileCache, type TurnDiff } from './turn-files';
 
 function tool(name: string, input: unknown, extra: Partial<Extract<MessagePart, { type: 'tool' }>> = {}): MessagePart {
   return { type: 'tool', toolId: `${name}-${Math.random()}`, name, input, output: null, status: 'done', ...extra };
@@ -13,10 +13,12 @@ test('active file summaries ignore unfinished calls, reuse diffs across text del
   const text = { type: 'text' as const, text: 'Checking' };
   const messages = [{ id: 'answer', role: 'assistant', turnId: 'turn', parts: [edit, text,
     tool('Write', { file_path: 'pending.ts', content: 'x' }, { status: 'running' })] }] as Message[];
-  const turns = [{ id: 'turn', status: 'running' }] as Turn[];
+  const turn = { id: 'turn', status: 'running' } as Turn;
+  expect(showsTurnFiles(turn, false)).toBe(false);
+  expect(showsTurnFiles(turn, true)).toBe(true);
+  expect(showsTurnFiles({ status: 'queued' }, true)).toBe(false);
   const cache = new TurnFileCache();
-  const read = () => visibleTurnFiles(messages, turns, new Set(['turn']), '/repo', true, cache).get('turn')!;
-  expect(visibleTurnFiles(messages, turns, new Set(['turn']), '/repo').size).toBe(0);
+  const read = () => cache.read('turn', messages, '/repo', true);
   const first = read();
   expect(first.files.map(file => file.path)).toEqual(['a.ts']);
   expect(first.diffs).toEqual([{ kind: 'diff', path: 'a.ts', oldText: 'old', newText: 'new' }]);
@@ -31,6 +33,37 @@ test('active file summaries ignore unfinished calls, reuse diffs across text del
   delete edit.documentsDeferred;
   expect(read().deferred).toEqual([]);
   expect(read().diffs[0]?.newText).toBe('whole');
+});
+
+test('a finished turn reads its calls again only when a part is replaced or a deferred call is filled in', () => {
+  const edit = tool('Edit', { file_path: 'a.ts' }, { documentsDeferred: true,
+    documents: [{ kind: 'diff', path: 'a.ts', oldText: '', newText: '' }] }) as Extract<MessagePart, { type: 'tool' }>;
+  const answer = { id: 'answer', role: 'assistant', turnId: 'turn', parts: [edit, tool('Write', { file_path: 'b.ts', content: 'b' })] } as Message;
+  const cache = new TurnFileCache();
+  const first = cache.read('turn', [answer], '/repo', false);
+  expect(first.deferred).toEqual([{ messageId: 'answer', toolId: edit.toolId }]);
+  expect(cache.read('turn', [answer], '/repo', false)).toBe(first);
+  // `loadToolOutput` fills the deferred call in place.
+  edit.documents = [{ kind: 'diff', path: 'a.ts', oldText: 'old', newText: 'new' }];
+  delete edit.documentsDeferred;
+  const loaded = cache.read('turn', [answer], '/repo', false);
+  expect(loaded).not.toBe(first);
+  expect(loaded.diffs.map(diff => diff.path)).toEqual(['a.ts', 'b.ts']);
+  expect(cache.read('turn', [answer], '/repo', false)).toBe(loaded);
+  answer.parts[1] = tool('Write', { file_path: 'c.ts', content: 'c' });
+  expect(cache.read('turn', [answer], '/repo', false).files.map(file => file.path)).toEqual(['a.ts', 'c.ts']);
+});
+
+test('a turn end that scrolls back finds its entry; the least recently read turn goes first', () => {
+  const answers = Array.from({ length: TurnFileCache.SIZE + 1 }, (_, at) =>
+    ({ id: `m${at}`, role: 'assistant', turnId: `t${at}`, parts: [tool('Write', { file_path: `${at}.ts`, content: '' })] }) as Message);
+  const cache = new TurnFileCache();
+  const read = (at: number) => cache.read(`t${at}`, [answers[at]!], '/repo', false);
+  const kept = answers.slice(0, TurnFileCache.SIZE).map((_, at) => read(at));
+  expect(read(0)).toBe(kept[0]);
+  read(TurnFileCache.SIZE);
+  expect(read(0)).toBe(kept[0]);
+  expect(read(1)).not.toBe(kept[1]);
 });
 
 describe('turnFiles', () => {

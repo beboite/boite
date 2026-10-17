@@ -31,6 +31,13 @@ with the desktop updater key and release version. Both stable and nightly
 publication require those signatures, include the archives in the checksums,
 and add separate server targets to `latest.json`. Docker images remain separate.
 
+The nightly also attaches the signed Android app as
+`boite-android-<MAJOR.MINOR.PATCH>.apk`. That version belongs to the app, not
+to the release: `apps/android/VERSION` holds `MAJOR.MINOR`, raised by hand, and
+the patch grows by one only when the APK is rebuilt. A release with no change
+to the app attaches the previous APK under its original name.
+[Android](android.md#the-app-version) has the full rule.
+
 - `build:ui` writes `packages/ui/dist`. That directory is what the core serves at
   `/` and what the shell bundles as its frontend. The Tauri config also runs it
   as its own before-build command, so a shell build never ships a UI older than
@@ -93,6 +100,9 @@ Install `patchelf` too. The shell build wrapper selects it from PATH for
 linuxdeploy. On ARM64 it preserves the compiled Bun sidecar, whose ELF load
 segments break after an RPATH rewrite. The exception checks that the sidecar
 only needs glibc libraries; CI compares the packaged core with the original.
+The AppImage bundler downloads AppRun and linuxdeploy from GitHub releases on
+every run. CI retries the bundle up to three times when that download answers a
+5xx (a 500 failed the 2026-10-14 nightly); any other bundling error fails at once.
 
 Portable CI runs `scripts/ci/desktop-smoke.ts <installed-shell>` against the
 Debian package, extracted AppImage and macOS application bundle. Signing, notarization and testing
@@ -323,8 +333,21 @@ command that holds the main thread over 250 ms is a `debug` line, over 2 s a
 `warn`. A watchdog posts a no-op to the main thread every second
 (`src/watchdog.rs`). When 5 s pass without an answer it writes one
 `shell.main-thread.blocked` error naming the running command or the last
-window event, plus `IsHungAppWindow` on Windows, then one
-`shell.main-thread.recovered` warning with the total blocked time.
+window event, plus `IsHungAppWindow` on Windows and the main thread's id. While
+the thread stays blocked it writes `shell.main-thread.still-blocked` errors at
+30 s, 2 min, 10 min and then every 30 min, with `blockedMs` counted from the
+episode's start and the same fields, so a shell Windows kills at shutdown still
+leaves how long it hung. On Windows each of these lines also lists the
+processes that own windows inside the main window (WebView2's browser process
+hosts the page there) and whether each one is hung: `foreignProcesses`,
+`foreignWindows`, `foreignHungWindows`. The first still-blocked line with the
+window reported hung starts a minidump of the shell, written from a thread of
+its own as `logs/shell-hang-<UTC time>.dmp` (thread info, handles, unloaded
+modules); the line names it in `dumpPath`, and `shell.main-thread.dumped` or
+`shell.main-thread.dump-failed` follows. One dump per run, and the two newest
+are kept. The stack of `mainThreadId` needs the PDB of the same build to show names.
+When the thread answers, one `shell.main-thread.recovered` warning gives the
+total blocked time.
 
 Resident cores append to `core-output.log`, truncated at startup above 8 MiB.
 `BOITE_CORE_RESIDENT=0` makes a Windows shell own its core through a

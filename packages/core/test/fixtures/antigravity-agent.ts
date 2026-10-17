@@ -8,16 +8,39 @@
  * Run as `bun <this file>`. `AGY_FAKE_LOG` names a file it appends to:
  * `initialize`, `env <NAME>=<value>` for the variables the account is supposed
  * to carry, `callback:<url>` with the redirect URL a test is meant to paste,
- * `fetched:<path>` when that URL is hit, and `authenticated`. The session token
- * lands under `GEMINI_HOME`, which is how the account is rechecked.
+ * `fetched:<path>` when that URL is hit, `authenticated`, `new:<cwd>` for
+ * each session it opens with its model list, and `prompt:<sessionId>` for a
+ * prompt, answered with one word. The session token lands under
+ * `GEMINI_HOME`, which is how the account is rechecked.
  */
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import { agent, ndJsonStream, PROTOCOL_VERSION } from '@agentclientprotocol/sdk';
 
-/** The variables a test asserts on: the isolation, the harness and the browser suppression. */
-const WATCHED = ['GEMINI_HOME', 'AGY_ACP_FORCE_FILE_STORAGE', 'ANTIGRAVITY_HARNESS_PATH', 'BROWSER', 'GEMINI_API_KEY'];
+/** The variables a test asserts on: the isolation, the harness, the browser suppression and where it unpacks. */
+const WATCHED = ['GEMINI_HOME', 'AGY_ACP_FORCE_FILE_STORAGE', 'ANTIGRAVITY_HARNESS_PATH', 'BROWSER', 'GEMINI_API_KEY', 'TEMP', 'TMP', 'TMPDIR'];
+
+/** The model option the real server answers `session/new` with, cut to three entries. */
+const MODEL_OPTION = {
+  type: 'select' as const,
+  id: 'model',
+  category: 'model' as const,
+  name: 'Model',
+  currentValue: 'gemini-3.7-flash-high',
+  options: [
+    { value: 'gemini-3.8-flash-high', name: 'Gemini 3.8 Flash (High)' },
+    { value: 'gemini-3.7-flash-high', name: 'Gemini 3.7 Flash (High)' },
+    { value: 'gemini-pro-agent', name: 'Gemini 3.1 Pro (High)' },
+  ],
+};
+
+/** The scopes of the real sign-in link: the third is the one a cut link loses. */
+const SCOPES = [
+  'https://www.googleapis.com/auth/cloud-platform',
+  'https://www.googleapis.com/auth/userinfo.email',
+  'https://www.googleapis.com/auth/userinfo.profile',
+];
 
 function log(line: string): void {
   const file = process.env['AGY_FAKE_LOG'];
@@ -76,16 +99,33 @@ const app = agent({ name: 'agy-fake' })
     log(`authenticate ${params.methodId}`);
     const callback = waitForCallback();
     log(`callback:${callback.url}`);
-    // Not JSON, and on stdout: the line the driver has to keep out of the
-    // protocol stream and hand to the Accounts page instead.
-    process.stdout.write(
-      `Open the following link to authenticate the ACP server: https://accounts.google.com/o/oauth2/v2/auth?client_id=fake&redirect_uri=${encodeURIComponent(callback.url)}\n`,
-    );
+    // As long as the real one: three scopes, a state and a PKCE challenge put
+    // it well past 400 characters.
+    const link = `https://accounts.google.com/o/oauth2/auth?response_type=code&client_id=${'1'.repeat(12)}-${'a'.repeat(32)}.apps.googleusercontent.com`
+      + `&redirect_uri=${encodeURIComponent(callback.url)}`
+      + `&scope=${encodeURIComponent(SCOPES.join(' '))}&state=fake-state&code_challenge=${'c'.repeat(43)}&code_challenge_method=S256&access_type=offline`;
+    // The real server writes it to stderr first, then, not JSON, on stdout: the
+    // line the driver keeps out of the protocol stream for the Accounts page.
+    process.stderr.write(`Open the following link to authenticate the ACP server: ${link}\n`);
+    await Bun.sleep(50);
+    process.stdout.write(`Open the following link to authenticate the ACP server: ${link}\n`);
     await callback.hit;
     callback.stop();
     writeToken();
     log('authenticated');
     return {};
+  })
+  .onRequest('session/new', ({ params }) => {
+    log(`new:${params.cwd}`);
+    return { sessionId: `agy-fake-${crypto.randomUUID().slice(0, 8)}`, configOptions: [MODEL_OPTION] };
+  })
+  .onRequest('session/prompt', async ({ params, client }) => {
+    log(`prompt:${params.sessionId}`);
+    await client.notify('session/update', {
+      sessionId: params.sessionId,
+      update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'pong' } },
+    });
+    return { stopReason: 'end_turn' as const };
   });
 
 app.connect(

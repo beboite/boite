@@ -1,10 +1,13 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { machineHealth, PRIMARY_PATIENCE_MS, Workspace } from './workspace.svelte';
+import { reveal } from './reveal';
 import { Store, store as primary } from './store.svelte';
 import { FakeClient } from './fake-client';
 import { upsertEnvironment } from './endpoint';
 import * as endpoints from './endpoint';
 import * as appOrigin from './app-origin';
+import * as draftJournal from './draft-journal';
+import { RpcErrorCode, type RpcMethodName } from '@boite/contracts';
 
 let workspace: Workspace | undefined;
 afterEach(() => {
@@ -95,9 +98,66 @@ test('a pairing link replaces the key of a machine that never stopped connecting
   // Retrying a refused key forever, as a phone whose session is gone does.
   a.connection = 'connecting';
   expect(await w.pair(`${url}/?grant=g2`, '')).toBe(true);
-  expect(connect).toHaveBeenCalledWith({ url, grant: 'g2', token: '' });
+  expect(connect).toHaveBeenCalledWith({ url, grant: 'g2', token: '' }, true);
   expect(w.error).toBeNull();
   expect(w.machines).toHaveLength(1);
+});
+
+test.each(['primary', 'secondary'] as const)('a %s pairing persists its reload endpoint before draft hydration finishes', async (kind) => {
+  const { w, a, b } = await setup();
+  b.client?.close(); b.detach();
+  const primaryUrl = 'https://primary.test';
+  const pairedUrl = kind === 'primary' ? primaryUrl : 'https://secondary.test';
+  const coreId = 'f'.repeat(64);
+  a.endpointUrl = primaryUrl;
+  a.localCore = false;
+  w.machines = [{ id: primaryUrl, label: 'Primary', store: a }];
+  const previous = { url: primaryUrl, token: 'fixture-primary', paired: true };
+  if (kind === 'primary') {
+    a.connection = 'closed';
+    endpoints.clearStoredEndpoint();
+  } else endpoints.storeEndpoint(previous);
+  let release!: () => void;
+  const gate = new Promise<null>(resolve => { release = () => resolve(null); });
+  const read = vi.spyOn(draftJournal, 'readDraftJournal').mockReturnValue(gate);
+  const backend = new FakeClient({ delayMs: 0, coreName: 'Paired machine' });
+  await backend.connect();
+  class PairingSocket {
+    onopen: (() => void) | null = null;
+    onmessage: ((event: { data: string }) => void) | null = null;
+    onclose: ((event: { code: number }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    constructor() { queueMicrotask(() => this.onopen?.()); }
+    send(raw: string) {
+      const frame = JSON.parse(raw) as { id: number; method: RpcMethodName; params: never };
+      void backend.call(frame.method, frame.params).then(result => {
+        const answer = frame.method === 'hello'
+          ? { core: { ...backend.core, coreId }, principal: 'session', device: 'fixture-device' } : result;
+        this.onmessage?.({ data: JSON.stringify({ jsonrpc: '2.0', id: frame.id, result: answer }) });
+      }, error => this.onmessage?.({ data: JSON.stringify({ jsonrpc: '2.0', id: frame.id,
+        error: { code: RpcErrorCode.Internal, message: String(error) } }) }));
+    }
+    close() { this.onclose?.({ code: 1000 }); }
+  }
+  vi.stubGlobal('WebSocket', PairingSocket);
+  let settled = false;
+  const pairing = w.pair(`${pairedUrl}/?grant=fixture-grant`, '').then(ok => { settled = true; return ok; });
+  try {
+    await waitFor(() => read.mock.calls.length === 1);
+    expect(w.machines.find(machine => machine.id === pairedUrl)?.store.connection).toBe('ready');
+    expect(settled).toBe(false);
+    expect(endpoints.readEnvironments().find(entry => entry.url === pairedUrl)).toMatchObject({ token: '', signs: coreId });
+    const expected = kind === 'primary' ? { url: pairedUrl, token: '', paired: true, signs: coreId } : previous;
+    expect(endpoints.readStoredEndpoint()).toEqual(expected);
+    expect(await endpoints.resolveEndpoint()).toEqual(expected);
+    release();
+    expect(await pairing).toBe(true);
+    expect(endpoints.readStoredEndpoint()).toEqual(expected);
+  } finally {
+    release(); await pairing;
+    w.close(); backend.close();
+    vi.unstubAllGlobals();
+  }
 });
 
 test('on the app\'s own address the first machine added is the page\'s, even after a first add that failed left it detached', async () => {
@@ -732,6 +792,62 @@ test('agent links resolve core identity despite identical thread ids and open bo
   await w.openAgentThread(a, { coreId: 'local', threadId: id }, { coreId: 'local', threadId: a.threads[1]!.id });
   expect(w.active).toBe(a);
   expect(a.openThread?.id).toBe(a.threads[1]!.id);
+});
+
+test('ui.reveal naming a machine opens its thread on that machine\'s Store, despite a coincident id here', async () => {
+  const { w, a, b } = await setup();
+  const id = a.threads[0]!.id;
+  await b.rename(id, 'Remote thread');
+  await w.select(a, id);
+  await reveal(w, a, { kind: 'thread', threadId: id, coreId: b.core!.coreId! }, async () => undefined);
+  expect(w.active).toBe(b);
+  expect(b.openThread?.title).toBe('Remote thread');
+  expect(a.openThread?.title).not.toBe('Remote thread');
+
+  // Found by its hello's id, or by the id the group brought it under before any hello; an unknown one is null.
+  expect(w.machineOf(b.core!.coreId!)?.store).toBe(b);
+  const twin = { id: 'twin', label: 'Remote', store: new Store(), coreId: 'brought-core' };
+  w.machines = [...w.machines, twin];
+  expect(w.machineOf('brought-core')?.store).toBe(twin.store);
+  expect(w.machineOf('nowhere')).toBeNull();
+});
+
+test('a thread link in an answer opens the thread on the machine it names, else where it is', async () => {
+  const { w, a, b } = await setup();
+  const id = a.threads[0]!.id;
+  const other = a.threads[1]!.id;
+  await w.select(a, id);
+  // Both machines list the id: no machine named keeps the reader's, a named one wins.
+  await w.openThreadLink(a, id, null, other);
+  expect(w.active).toBe(a);
+  expect(a.openThread?.id).toBe(other);
+  await w.openThreadLink(a, other, 'remote', id);
+  expect(w.active).toBe(b);
+  expect(b.openThread?.id).toBe(id);
+  // Only one machine lists it: that one, whatever name the agent knew it by.
+  a.threads = a.threads.filter(thread => thread.id !== other);
+  await w.openThreadLink(a, id, 'm2', other);
+  expect(w.active).toBe(b);
+  expect(b.openThread?.id).toBe(other);
+  await w.select(a, id);
+  await w.openThreadLink(a, id, null, 'thr_nowhere0000000000');
+  expect(w.active).toBe(a);
+  expect(a.error).toBe('No connected machine has this conversation.');
+  // `here` is the reader's machine only, even when another one lists the id.
+  await w.openThreadLink(a, id, 'here', other);
+  expect(w.active).toBe(a);
+  // The address names a machine that lists nothing: the reader's contacts say where it is, even
+  // when a connected machine holds a thread of that id, and the one under that name opens.
+  const self = { coreId: (await a.coordinationIdentity()).coreId, threadId: id };
+  const contact = { coreId: 'far-core', threadId: 'thr_faraway000000000000', machine: 'Far PC' };
+  a.threads = [...a.threads, { ...a.threads[0]!, id: contact.threadId }];
+  const call = a.client!.call.bind(a.client!);
+  vi.spyOn(a.client!, 'call').mockImplementation(async (method, params) => method === 'collaboration.get' ? { self } as never
+    : method === 'collaboration.directory' ? { agents: [contact, { ...contact, machine: 'Other', coreId: 'other-core' }], unavailable: [] } as never
+    : call(method, params as never));
+  const opened = vi.spyOn(w, 'openAgentThread').mockResolvedValue();
+  await w.openThreadLink(a, id, 'far-pc', contact.threadId);
+  expect(opened).toHaveBeenCalledWith(a, self, contact);
 });
 
 test('an unconnected core never opens a coincident local thread id', async () => {

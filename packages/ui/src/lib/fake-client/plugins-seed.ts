@@ -4,8 +4,6 @@ import { DATA_DIR } from './shared.ts';
 /** A fake plugin install ticks this many times, INSTALL_STEP_MS apart. */
 export const PLUGIN_STEPS = 8;
 
-const KEBACC_RELEASE = 'https://github.com/kebab1337420/kebacc-switch/releases/download/kebacc-v2.0.1';
-
 /** The account pool command lines the core shows, `<pool>` and `<email>` standing for the values. */
 export function poolCommands(executable: string): string[] {
   return [
@@ -22,6 +20,16 @@ export function appCommands(executable: string, pluginId: string): string[] {
   return [executable, `environment: BOITE_CORE_URL=<this core> BOITE_TOKEN=<the owner token> BOITE_PLUGIN_ID=${pluginId}`];
 }
 
+/** The line the core shows for a gateway: how it runs it. */
+export function gatewayCommands(executable: string): string[] {
+  return [`${executable} --config <its data directory>/${executable}.toml`];
+}
+
+/** A gateway the fake runs, as the core reports it once it answered `/health`. */
+export function runningGateway(version: string | null, pid: number, startedAt: number): NonNullable<PluginState['gateway']> {
+  return { enabled: true, autostart: true, status: 'running', port: 8787, version, pid, exitCode: null, error: null, startedAt, dataDir: `${DATA_DIR}\\douane` };
+}
+
 /** What the fake update sources publish: a check finds these when they differ from what is installed. */
 export const FAKE_RELEASES: Record<string, { version: string; commit: string; artifact: { url: string; sha256: string } }> = {
   bots: {
@@ -32,13 +40,12 @@ export const FAKE_RELEASES: Record<string, { version: string; commit: string; ar
 
 /**
  * Every state the Plugins page draws, in the order the core lists them: Bots,
- * recommended first, installed and running as a desktop app, with an update
- * source a check finds 0.1.10 at; kebacc-switcher,
- * recommended and not installed yet; then one added from a URL and installed,
- * one stuck mid-download, and one whose installed.json the core refuses.
+ * the one recommended plugin, installed and running as a desktop app, with an
+ * update source a check finds 0.1.10 at; then one added from a URL and
+ * installed, one stuck mid-download, and one whose installed.json the core refuses.
  */
 export function fakePlugins(): PluginState[] {
-  const base = { platform: 'win32-x64', progress: 0, error: null, rejected: null, app: null };
+  const base = { platform: 'win32-x64', progress: 0, error: null, rejected: null, app: null, gateway: null };
   const legacy = `${DATA_DIR}\\plugins\\pool-legacy\\installed.json`;
   return [
     {
@@ -47,7 +54,7 @@ export function fakePlugins(): PluginState[] {
       homepage: 'https://github.com/beboite/bots', version: '0.1.9', availableVersion: '0.1.9', status: 'installed', source: null,
       artifact: { url: 'https://github.com/beboite/bots/releases/download/v0.1.9/bots-x86_64-pc-windows-msvc.exe', sha256: 'b21ad5a3d248f8653808944021e4b84293eb0653abb1b65a76a265aaa3de5820' },
       commands: appCommands('bots', 'bots'), pools: [],
-      app: { enabled: true, status: 'running', pid: 4242, exitCode: null, error: null, startedAt: Date.parse('2026-10-10T08:00:00Z') },
+      app: { enabled: true, autostart: true, status: 'running', pid: 4242, exitCode: null, error: null, startedAt: Date.parse('2026-10-10T08:00:00Z') },
       updates: {
         source: { url: 'https://github.com/beboite/bots', ref: 'main' }, checking: false,
         checkedAt: Date.parse('2026-10-10T08:01:00Z'), nextCheckAt: Date.parse('2026-10-10T14:01:00Z'),
@@ -55,11 +62,17 @@ export function fakePlugins(): PluginState[] {
       }
     },
     {
-      ...base, id: 'kebacc-switcher', name: 'kebacc-switcher', origin: 'recommended',
-      description: 'Save and switch Claude, Codex and Antigravity CLI logins, with quota readings for each saved account.',
-      homepage: 'https://github.com/kebab1337420/kebacc-switch', version: null, availableVersion: '2.0.1', status: 'not-installed', source: null,
-      artifact: { url: `${KEBACC_RELEASE}/kebacc-x86_64-pc-windows-msvc.exe`, sha256: '9edc5c3af1db76e97a9c07e2fd1c3399ad8c9db22e0ad2684a1b885e33acc538' },
-      commands: poolCommands('kebacc'), pools: ['claude', 'codex', 'antigravity']
+      ...base, id: 'douane', name: 'Douane', origin: 'recommended',
+      description: 'Your Claude, Codex, Grok and Copilot subscriptions behind one local gateway, with quota routing and a dashboard. Boite\'s subscription proxy can point at it.',
+      homepage: 'https://github.com/beboite/douane', version: '0.3.0', availableVersion: '0.3.0', status: 'installed', source: null,
+      artifact: { url: 'https://github.com/beboite/douane/releases/download/v0.3.0/douane-windows-x64.exe', sha256: '7e1a3c5b9d2f4a6c8e0b1d3f5a7c9e2b4d6f8a0c1e3b5d7f9a2c4e6b8d0f1a3c' },
+      commands: gatewayCommands('douane'), pools: [],
+      gateway: runningGateway('0.3.0', 4343, Date.parse('2026-10-10T08:00:00Z')),
+      updates: {
+        source: { url: 'https://github.com/beboite/douane', ref: 'main' }, checking: false,
+        checkedAt: Date.parse('2026-10-10T08:01:00Z'), nextCheckAt: Date.parse('2026-10-10T14:01:00Z'),
+        available: null, ignored: null, error: null
+      }
     },
     {
       ...base, id: 'seat-pool', name: 'Seat pool', origin: 'url',
@@ -87,12 +100,6 @@ export function fakePlugins(): PluginState[] {
 
 export function fakePluginPools(): Record<string, PluginPool[]> {
   return {
-    'kebacc-switcher': ['claude', 'codex', 'antigravity'].map((provider) => ({
-      provider, accounts: [
-        { email: 'work@example.com', active: true, checkedSecondsAgo: 10, windows: [{ id: 'fiveHour', label: '5 hours', usedPercent: 32, resetsAt: null }, { id: 'sevenDay', label: 'Weekly', usedPercent: 74, resetsAt: null }] },
-        { email: 'personal@example.com', active: false, checkedSecondsAgo: 10, windows: [{ id: 'fiveHour', label: '5 hours', usedPercent: 8, resetsAt: null }] },
-      ]
-    })),
     'seat-pool': [{
       provider: 'opencode', accounts: [
         { email: 'team@example.com', active: true, checkedSecondsAgo: 42, windows: [{ id: 'fiveHour', label: '5 hours', usedPercent: 18, resetsAt: null }, { id: 'sevenDay', label: 'Weekly', usedPercent: 51, resetsAt: null }] },

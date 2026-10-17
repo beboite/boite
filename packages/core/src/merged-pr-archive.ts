@@ -1,11 +1,19 @@
 import type { ThreadSummary } from '@boite/contracts';
 import type { Core } from './core.ts';
+import { linkedPullRequestSignature } from './linked-pull-requests.ts';
 import { archiveState, archiveStateKey } from './merged-pr-archive-state.ts';
 import { repositoryOf, type PullRequests } from './pull-requests.ts';
 
 const ARCHIVE_SCAN_ROWS = 128;
 const ARCHIVE_PROOFS = 8;
 const ARCHIVE_YIELD_ROWS = 8;
+/** A thread whose PR is not merged is asked again after 5 minutes, then 10, 20 and so on up to an hour. */
+const NEGATIVE_FIRST_MS = 5 * 60_000;
+const NEGATIVE_LAST_MS = 60 * 60_000;
+const NEGATIVE_ENTRIES = 2_000;
+
+/** What a thread looked like when its proof failed: any update or new PR link starts over. */
+interface Negative { signature: string; delayMs: number; nextAt: number }
 
 /** Visibility maintenance owns one timer and one bounded, non-overlapping pass. */
 export class MergedPrArchive {
@@ -15,6 +23,8 @@ export class MergedPrArchive {
   private closed = false;
   private cursor = 0;
   private scanEnd = 0;
+  /** Threads whose last proof found nothing, so each lap does not ask git and GitHub again. */
+  private negative = new Map<string, Negative>();
   private readonly readyAt: number;
   constructor(private core: Core, private pullRequests: PullRequests, private settleMs = 60_000, graceMs = 90_000) {
     this.readyAt = Date.now() + graceMs;
@@ -114,7 +124,7 @@ export class MergedPrArchive {
       this.cursor = row.rowid;
       if (!row.candidate) continue;
       const thread = this.core.journal.getThread(row.id);
-      if (!thread || !this.eligibleWithScheduler(thread, busy ??= this.busyThreads())) continue;
+      if (!thread || this.backingOff(thread) || !this.eligibleWithScheduler(thread, busy ??= this.busyThreads())) continue;
       selected.push(thread);
       if (selected.length === ARCHIVE_PROOFS) break;
     }
@@ -124,6 +134,21 @@ export class MergedPrArchive {
     }
     return selected;
   }
+  private signature(thread: ThreadSummary): string {
+    return `${thread.updatedAt}\n${linkedPullRequestSignature(this.core.journal, thread.id)}`;
+  }
+  private backingOff(thread: ThreadSummary): boolean {
+    const entry = this.negative.get(thread.id);
+    return entry !== undefined && entry.signature === this.signature(thread) && Date.now() < entry.nextAt;
+  }
+  /** The same answer again doubles the wait; a changed thread starts at five minutes. */
+  private remember(thread: ThreadSummary, signature: string): void {
+    const previous = this.negative.get(thread.id);
+    const delayMs = previous?.signature === signature ? Math.min(previous.delayMs * 2, NEGATIVE_LAST_MS) : NEGATIVE_FIRST_MS;
+    this.negative.delete(thread.id);
+    this.negative.set(thread.id, { signature, delayMs, nextAt: Date.now() + delayMs });
+    if (this.negative.size > NEGATIVE_ENTRIES) this.negative.delete(this.negative.keys().next().value!);
+  }
   private async pass(signal: AbortSignal): Promise<number> {
     let archived = 0;
     const deadline = Date.now() + 30_000;
@@ -132,21 +157,24 @@ export class MergedPrArchive {
       if (Date.now() >= deadline || this.closed || signal.aborted || this.core.journal.isClosed()) break;
       const initial = archiveState(this.core.journal, thread.id);
       const generation = initial.generation;
+      const signature = this.signature(thread);
       try {
         const proof = await archiveRead(this.pullRequests.proveMerged(thread, signal), signal);
         if (this.closed || signal.aborted || this.core.journal.isClosed()) break;
+        if (!proof) { this.remember(thread, signature); continue; }
         const current = this.core.journal.getThread(thread.id);
-        if (!proof || !current || current.updatedAt !== thread.updatedAt || !this.eligible(current) || archiveState(this.core.journal, thread.id).generation !== generation) continue;
+        if (!current || current.updatedAt !== thread.updatedAt || !this.eligible(current) || archiveState(this.core.journal, thread.id).generation !== generation) continue;
         const state = archiveState(this.core.journal, thread.id);
         const restored = state.restoredCheckout;
-        if (state.dismissed?.includes(proof.url) || (restored && restored.cwd === thread.cwd && restored.branch === thread.branch && restored.projectId === thread.projectId)) continue;
+        if (state.dismissed?.includes(proof.url) || (restored && restored.cwd === thread.cwd && restored.branch === thread.branch && restored.projectId === thread.projectId)) { this.remember(thread, signature); continue; }
         this.core.journal.setSetting(archiveStateKey(thread.id), { ...state, binding: proof });
-        if (!await archiveRead(this.pullRequests.validateMergedCheckout(thread, proof, signal), signal)) continue;
+        if (!await archiveRead(this.pullRequests.validateMergedCheckout(thread, proof, signal), signal)) { this.remember(thread, signature); continue; }
         if (this.closed || signal.aborted || this.core.journal.isClosed()) break;
         // No await between the final state check and the visibility transaction.
-        if (this.core.threads.archiveMergedPr(thread, proof, generation)) archived++;
+        if (this.core.threads.archiveMergedPr(thread, proof, generation)) { archived++; this.negative.delete(thread.id); }
       } catch {
         // Missing auth, unavailable repositories and failed validation leave the conversation visible.
+        if (!signal.aborted && !this.closed) this.remember(thread, signature);
       }
     }
     return archived;

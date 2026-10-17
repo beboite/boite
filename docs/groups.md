@@ -45,17 +45,17 @@ a machine is not: it is as private as its transport ([the network](#the-network)
 ## Using it
 
 On any machine, in Settings, Machines, **Add a device**. A machine in no group
-starts one named after itself first. The card shows a QR code, a short code
-under it and **Copy link**:
+starts one named after itself first. The card shows a QR code and **Copy
+link**:
 
-- a phone scans the QR code from its Boite app, or types the code there
-  ([phone](phone.md#adding-a-phone));
+- a phone scans the QR code from its Boite app, or pastes the link there when
+  its camera cannot ([phone](phone.md#adding-a-phone));
 - a computer pastes the copied link under **Join** in its own Settings,
   Machines: its core joins the group. A computer alone in a group of its own,
   the one its phone brought, joins all the same and brings that phone along.
 
-The QR code and the code work once, for ten and five minutes. Whoever holds
-them gets in: treat them as credentials. The QR code carries the phone's part
+The QR code and the link work once, for ten minutes. Whoever holds them gets
+in: treat them as credentials. The QR code carries the phone's part
 alone, so it stays sparse enough for a camera across a room; the copied link
 carries the machine invitation after `#join=` as well.
 
@@ -170,19 +170,17 @@ kept in its storage (`lib/device-key.ts`, `@noble/ed25519`, since a page served
 over plain HTTP has no WebCrypto). Its id is the SHA-256 of the public key. The
 desktop app is no device: it is its machine's own.
 
-**Admission.** "Add a device" mints a one-time grant, drawn as a QR code and as a
-code `XXXX-XXXX` ([phone](phone.md#adding-a-phone)). The device says `hello`
-with that grant and `device: { publicKey, name, sig }`, where `sig` signs the
+**Admission.** "Add a device" mints a one-time grant, drawn as a QR code and
+carried by the copied link ([phone](phone.md#adding-a-phone)). The device says
+`hello` with that grant and `device: { publicKey, name, sig }`, where `sig` signs the
 grant itself with the key, so whoever reads the grant on the way cannot have
 another key admitted with it. The member spends the grant, writes the device in
 the roster under its own signature over the group, the device id and its role,
 and the socket is the device's from then on. The same key asking again with the
 same grant, after an answer lost on a weak link, gets the same answer; any other
-is refused as for a used link. A well-formed code typed on the page of a member
-that did not draw it is sent, sealed, to the other members (`group.redeem`),
-twenty a minute at most; the one that drew it admits the device and answers with
-the roster. A wrong code counts toward dropping the live codes only on the
-member it was typed at, so guesses typed there drop no other member's codes.
+is refused as for a used link. The link names the machine that drew it, so a
+device always says `hello` with the grant to that machine, whichever page it
+was opened from.
 
 **Hello.** From then on the device says `hello` with `device: { id, at, nonce,
 sig }` on any member, `sig` signing `boite-device-hello`, the id of that member,
@@ -271,14 +269,18 @@ a wrong one) is answered `Refused`, and a member it cannot reach `Unavailable`:
 never `Unauthorized`, which the client would take for its key on the member
 being revoked. A first frame that is not a hello is answered `Unauthorized`, as
 on a direct socket. A file or a view answers 404 for a machine that is not another member
-and 502 when that member does not answer. Until its key is checked, a relayed
+and 502 when that member does not answer. A relayed socket is deflated when
+the client asked for a host that is not loopback, and is held to a direct
+socket's outgoing budget: 32 MiB unread, a dropped send or 10 seconds without
+a drain closes it with 1013, and the client reconnects and loads a fresh
+snapshot. Until its key is checked, a relayed
 socket counts against the same bounds as a direct one: five seconds and 64 KB
 for its hello, and the places for sockets waiting on one. Revoking the key it
 came in with closes it, and its sockets to a machine that leaves the group are
 closed within fifteen seconds.
 
 While a member is reached through another, the client tries its own addresses
-once a minute and moves to the first that answers, so a phone back on the
+a minute after the last try, longer after each that fails, and moves to the first that answers, so a phone back on the
 tailnet, or a desktop given an HTTPS address, stops depending on the relaying
 machine. Settings, Machines names the machine a member is reached through.
 
@@ -323,7 +325,9 @@ coordination already uses (`POST /agent-messages`, operation `group.sync`):
 the receiver merges and answers with the result, which leaves both equal after
 one round trip. A member offers its roster on every change, every 15 seconds
 to members that have not agreed on it yet, and to all of them every five
-minutes. A merge whose result would not be a valid roster is not kept. A roster is accepted only from a current member, never readable, and
+minutes. A member that does not answer waits longer after each failed offer,
+from 30 seconds doubling up to five minutes; a different roster still goes to
+it at once, and any signed request from it ends the wait. A merge whose result would not be a valid roster is not kept. A roster is accepted only from a current member, never readable, and
 never from a machine linked by hand for agent messages. An answer that arrives
 after its sender was removed is dropped.
 
@@ -452,7 +456,12 @@ listed in the roster as a device.
 
 The UI does the client's part by itself (`lib/group-links.svelte.ts`). Each
 connected machine says which group it is in; for every member this client
-holds no key for, it finds an address that answers and connects. A device signs
+holds no key for, it finds an address that answers and connects. A member that
+does not answer is tried again a minute later, then after 2, 4, 8 and at most
+15 minutes. The wait goes back to a minute when the roster gives the member
+other addresses, and the next try comes at once when the network comes back or
+the hidden page is shown; nothing is tried by the clock while the page is
+hidden. A device signs
 its own way in there and is done: what a member lists is all it needs, and a
 machine its key opens that another one of the group no longer lists leaves its
 list. Its page's own machine, waiting for the device to be added, is taken over
@@ -553,10 +562,9 @@ address, where it is worth nothing once the member has given that address up.
 - A page served by a machine outside the device's group reaches nothing of that
   group: its origin is none of theirs. The Android app that opened one fixed
   machine's page was this case for anybody else's phone.
-- A typed code reaches the machine that drew it through the machine serving the
-  page, or, on the app's own address, through the machine whose address is
-  typed beside it. A page served by a machine outside the group reaches neither
-  way in, its origin being none of theirs: open the app's own address, or the
+- A scanned or pasted link reaches the machine that drew it, which it names.
+  A page served by a machine outside the group still holds none of the group's
+  keys, its origin being none of theirs: open the app's own address, or the
   drawing machine's, and scan there.
 - A machine that runs a version from before device keys drops them from the
   roster it keeps and lets no device key in. Update every member.
@@ -615,12 +623,12 @@ there, named in Settings, and again after a reload with the key it kept.
 `packages/core/test/group-devices.test.ts` runs real cores for device keys: a
 phone added on one member says hello on another with its signature and none
 made for a third machine, twice, or two minutes off; one revocation shuts it out
-of both; a code drawn on one member typed on another; a phone paired the older
+of both; a phone retrying its grant after a lost answer; a phone paired the older
 way handing over its key, kept when the machine that admitted it is removed; a
 machine alone with its phone joining a group and bringing it; a member learning
 where another is served from the first page socket, before any hello.
 `tests/e2e/group-devices.test.ts` puts two real cores behind two HTTPS reverse
 proxies, installs the phone app from the first one's address at phone width,
-scans the code the second one drew through Chromium's fake camera, lists and
+scans the QR code the second one drew through Chromium's fake camera, lists and
 answers conversations on both with no origin set by hand, then removes the phone
 on one machine and shows every machine refusing it.

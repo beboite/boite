@@ -1,0 +1,132 @@
+import { expect, test } from 'bun:test';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { AgentBrowser } from '../src/browser.ts';
+import { chromiumArgs, findChromium } from '../src/browser/chromium.ts';
+import { createBrowserFixture } from './browser/fixture.ts';
+
+const browserFixture = createBrowserFixture();
+const { real, url } = browserFixture;
+
+test('without a Chromium-based browser the status says why and nothing opens', async () => {
+  const { owner, agent, threadId } = browserFixture;
+  const previous = process.env.BOITE_BROWSER;
+  process.env.BOITE_BROWSER = '/nonexistent/chrome';
+  try {
+    await owner.call('threads.subscribe', { threadId });
+    const status = await owner.call('browser.remoteStatus', { threadId });
+    expect(status).toMatchObject({ live: false, available: false });
+    expect(status.reason).toContain('/nonexistent/chrome');
+    await expect(agent.call('browser.command', { threadId, action: { kind: 'open', url: 'http://127.0.0.1:1/' } })).rejects.toThrow('cannot start');
+  } finally {
+    if (previous === undefined) delete process.env.BOITE_BROWSER; else process.env.BOITE_BROWSER = previous;
+  }
+});
+
+test('the browser is found where each OS installs it, and BOITE_BROWSER alone when set', () => {
+  const { agent } = browserFixture;
+  const root = mkdtempSync(join(tmpdir(), 'boite-chromium-'));
+  try {
+    const edge = join(root, 'Microsoft', 'Edge', 'Application', 'msedge.exe');
+    mkdirSync(dirname(edge), { recursive: true }); writeFileSync(edge, '');
+    const none = () => null;
+    expect(findChromium({ ProgramFiles: root }, 'win32', none)).toEqual({ path: edge });
+    expect(findChromium({}, 'linux', name => name === 'chromium' ? '/usr/bin/chromium' : null)).toEqual({ path: '/usr/bin/chromium' });
+    expect(findChromium({ BOITE_BROWSER: edge }, 'linux', () => '/usr/bin/chromium')).toEqual({ path: edge });
+    expect(findChromium({ BOITE_BROWSER: join(root, 'gone') }, 'win32', () => '/usr/bin/chromium').path).toBeNull();
+    expect(findChromium({}, 'linux', none)).toMatchObject({ path: null, reason: expect.stringContaining('BOITE_BROWSER') });
+    expect(chromiumArgs('/profile', 'linux')).toEqual(expect.arrayContaining(['--headless=new', '--disable-software-rasterizer', '--use-angle=gl-egl', '--user-data-dir=/profile']));
+    expect(chromiumArgs('/profile', 'win32')).not.toContain('--use-angle=gl-egl');
+    expect(chromiumArgs('/profile', 'linux', 'Agent/1')).toEqual(expect.arrayContaining(['--disable-blink-features=AutomationControlled', '--user-agent=Agent/1']));
+    expect(chromiumArgs('/profile', 'linux').some(arg => arg.startsWith('--user-agent'))).toBe(false);
+    // The DevTools protocol goes over the browser's own pipes: no port for another process to reach.
+    for (const platform of ['linux', 'darwin'] as const) {
+      expect(chromiumArgs('/profile', platform)).toContain('--remote-debugging-pipe');
+      expect(chromiumArgs('/profile', platform).some(arg => arg.startsWith('--remote-debugging-port'))).toBe(false);
+    }
+    // Bun cannot open the pipe descriptors on Windows: a random port there, on loopback only.
+    expect(chromiumArgs('/profile', 'win32')).toEqual(expect.arrayContaining(['--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1']));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a deleted profile loses its folder even when its browser had already closed', async () => {
+  const { harness, owner, agent, threadId } = browserFixture;
+  const root = join(harness.dataDir, 'browser');
+  for (const name of ['default', 'p-keep', 'p-gone', 'private-00000000-0000-0000-0000-000000000000', 'Not A Profile']) mkdirSync(join(root, name), { recursive: true });
+  await owner.call('settings.set', { browserProfiles: [{ id: 'p-keep', name: 'Keep' }] });
+  // The first use of the agent browser looks at what is on disk.
+  await agent.call('browser.command', { threadId, action: { kind: 'status' } });
+  let names: string[] = [];
+  for (let i = 0; i < 50; i++) { names = readdirSync(root).sort(); if (!names.includes('p-gone')) break; await Bun.sleep(50); }
+  expect(names).toEqual(['Not A Profile', 'default', 'p-keep']);
+  // Deleting one in Settings later takes its folder too.
+  await owner.call('settings.set', { browserProfiles: [] });
+  for (let i = 0; i < 50 && readdirSync(root).includes('p-keep'); i++) await Bun.sleep(50);
+  expect(readdirSync(root).sort()).toEqual(['Not A Profile', 'default']);
+});
+
+real('each profile keeps its own cookies, across a restart of the browser; a private tab keeps none', async () => {
+  const { harness, owner, threadId } = browserFixture;
+  await owner.call('settings.set', { browserProfiles: [{ id: 'p-pro', name: 'Pro' }] });
+  const visit = async (browser: AgentBrowser, profile: string, write?: string) => {
+    const { tabId } = await browser.command({ threadId, action: { kind: 'open', url: url(), profile } });
+    if (write) await browser.command({ threadId, tabId, action: { kind: 'evaluate', expression: `document.cookie = 'login=${write}; max-age=3600'` } });
+    const cookie = (await browser.command({ threadId, tabId, action: { kind: 'evaluate', expression: 'document.cookie' } })).value;
+    await browser.command({ threadId, tabId, action: { kind: 'close' } });
+    return cookie;
+  };
+  expect(await visit(harness.core.browser, 'default', 'nuno')).toBe('login=nuno');
+  expect(await visit(harness.core.browser, 'Pro', 'work')).toBe('login=work');
+  expect(await visit(harness.core.browser, 'private', 'ghost')).toBe('login=ghost');
+  // Every browser process ends, as when the core stops; the next ones read the same folders.
+  await harness.core.browser.close();
+  const again = new AgentBrowser(harness.core);
+  try {
+    expect(await visit(again, 'default')).toBe('login=nuno');
+    expect(await visit(again, 'Pro')).toBe('login=work');
+    expect(await visit(again, 'private')).toBe('');
+  } finally { await again.close(); }
+}, 150_000);
+
+real('a sign-in is on disk while its tab is still open: a core killed there keeps it', async () => {
+  const { harness, threadId } = browserFixture;
+  const { tabId } = await harness.core.browser.command({ threadId, action: { kind: 'open', url: url() } });
+  await harness.core.browser.command({ threadId, tabId, action: { kind: 'evaluate', expression: "document.cookie = 'login=kept; max-age=3600'" } });
+  // A sign-in ends on a page change; nothing closes the tab or the browser here.
+  await harness.core.browser.command({ threadId, tabId, action: { kind: 'navigate', url: url() } });
+  const file = join(harness.core.dataDir, 'browser', 'default', 'boite-cookies.json');
+  const names = () => { try { return (JSON.parse(readFileSync(file, 'utf8')) as { name: string; value: string }[]).map(cookie => `${cookie.name}=${cookie.value}`); } catch { return []; } };
+  for (let i = 0; i < 100 && !names().includes('login=kept'); i++) await Bun.sleep(50);
+  expect(names()).toContain('login=kept');
+  await harness.core.browser.command({ threadId, tabId, action: { kind: 'close' } });
+}, 150_000);
+
+real('the owner copies a desktop profile into the agent browser: the profile is made here, its sign-ins open with it and outlive a restart', async () => {
+  const { harness, owner, agent, threadId } = browserFixture;
+  const cookies = [
+    { name: 'session', value: 'no-expiry', domain: '127.0.0.1', path: '/' },
+    { name: 'kept', value: 'a-month', domain: '127.0.0.1', path: '/', expires: Math.floor(Date.now() / 1000) + 30 * 86400, sameSite: 'Lax' as const },
+  ];
+  // Sign-ins are the owner's to hand over: never an agent's, never into a private tab, never malformed.
+  await expect(agent.call('browser.importCookies', { profile: { id: 'p-work', name: 'Work' }, cookies })).rejects.toThrow("agent's methods");
+  await expect(owner.call('browser.importCookies', { profile: { id: 'private' }, cookies })).rejects.toThrow('private');
+  await expect(owner.call('browser.importCookies', { profile: { id: 'p-work' }, cookies: [{ ...cookies[0]!, path: 'nope' }] })).rejects.toThrow('path');
+  expect(await owner.call('browser.importCookies', { profile: { id: 'p-work', name: 'Work' }, cookies })).toEqual({ imported: 2, profile: 'p-work' });
+  expect((await owner.call('settings.get', {})).browserProfiles).toEqual([{ id: 'p-work', name: 'Work' }]);
+  const read = async (browser: AgentBrowser, profile: string) => {
+    const { tabId } = await browser.command({ threadId, action: { kind: 'open', url: url(), profile } });
+    const value = (await browser.command({ threadId, tabId, action: { kind: 'evaluate', expression: 'document.cookie.split("; ").sort().join("; ")' } })).value;
+    await browser.command({ threadId, tabId, action: { kind: 'close' } });
+    return value;
+  };
+  expect(await read(harness.core.browser, 'Work')).toBe('kept=a-month; session=no-expiry');
+  expect(await read(harness.core.browser, 'default')).toBe('');
+  // A cookie without an expiry date is a sign-in too: it is still there after every browser process ended.
+  await harness.core.browser.close();
+  const again = new AgentBrowser(harness.core);
+  try {
+    expect(await read(again, 'Work')).toBe('kept=a-month; session=no-expiry');
+    expect(((await again.command({ threadId, action: { kind: 'status' } })).value as { tabs: unknown[] }).tabs).toEqual([]);
+  } finally { await again.close(); }
+}, 150_000);

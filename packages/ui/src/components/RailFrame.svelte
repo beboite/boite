@@ -9,6 +9,7 @@
   import { controlMenu } from '../lib/controls';
   import LimitsGlance from './LimitsGlance.svelte';
   import WhipButton from './WhipButton.svelte';
+  import UpdatesNotice from './UpdatesNotice.svelte';
   import ResizeHandle from './ResizeHandle.svelte';
 
   /**
@@ -55,6 +56,13 @@
 
   let rail = $state<HTMLElement | undefined>(undefined);
   let folded: boolean | undefined;
+  /**
+   * Whether this list was folded since it was drawn. Only then does its
+   * arrival slide in from the window's edge: a list drawn by a page change
+   * (Threads to Agents, back from Settings) or at boot replaces the one that
+   * stood there, so it stands still and only its rows change.
+   */
+  let wasFolded = $state(untrack(() => store.sidebarCollapsed));
   let sliding: ReturnType<typeof setTimeout> | undefined;
   let marked: HTMLElement | undefined;
 
@@ -74,6 +82,7 @@
     const now = store.sidebarCollapsed;
     const was = folded;
     folded = now;
+    if (now) wasFolded = true;
     const row = untrack(() => rail)?.parentElement;
     if (was === undefined || was === now || !row) return;
     unmark();
@@ -95,6 +104,7 @@
   class:drawer
   class:open={drawer && store.sidebarOpen}
   class:collapsed={store.sidebarCollapsed}
+  class:was-folded={wasFolded}
   style:--sidebar-width={`${store.sidebarWidth}px`}
   aria-label={label}
   data-testid={testid}
@@ -108,6 +118,7 @@
     {@render lead?.()}
     <span class="grow"></span>
     {@render foot?.()}
+    <UpdatesNotice />
     {#if work.shows('sidebar.limits')}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <span class="control" oncontextmenu={(event) => controlMenu(event, store, 'sidebar.limits')}><LimitsGlance {store} /></span>
@@ -183,6 +194,11 @@
     padding-top: 8px;
   }
   .grow { flex: 1; }
+  /* Five square buttons and their gaps need 220 pixels: below that, the
+     update button's arrival closes the gaps instead of pushing Settings out. */
+  @container sidebar (max-width: 219.98px) {
+    .foot:has(:global(.update-trigger)) { gap: 0; }
+  }
   .control {
     display: contents;
   }
@@ -217,7 +233,8 @@
       margin-left: calc(-1 * var(--slide-room));
       transition: margin-left var(--dur-slide-out) var(--ease-slide), opacity var(--dur-2) var(--ease-out-quint), display var(--dur-slide-out) allow-discrete;
     }
-    @starting-style { .rail:not(.collapsed) { opacity: 0; margin-left: calc(-1 * var(--slide-room)); } }
+    /* Unfolding only (`wasFolded`): a list drawn open stands where it is. */
+    @starting-style { .rail.was-folded:not(.collapsed) { opacity: 0; margin-left: calc(-1 * var(--slide-room)); } }
   }
   @media (max-width: 720px) {
     .rail.drawer {

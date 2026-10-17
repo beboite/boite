@@ -308,16 +308,18 @@ export function seedThreads() {
   return { finished, running, waiting, unread };
 }
 
-export function longThread(): Thread {
+export function longThread(id = 't-long'): Thread {
+  const prefix = id === 't-long' ? 'm-long' : `m-${id}`;
+  const turnId = id === 't-long' ? 'turn-long' : `turn-${id}`;
   const messages: Message[] = [];
   for (let index = 0; index < 400; index += 1) {
     const at = T0 + 400_000 + index * 1000;
     messages.push(
       index % 2 === 0
         ? {
-          id: `m-long-${index}`,
-          threadId: 't-long',
-          turnId: 'turn-long',
+          id: `${prefix}-${index}`,
+          threadId: id,
+          turnId,
           role: 'user',
           parts: [
             {
@@ -329,9 +331,9 @@ export function longThread(): Thread {
           createdAt: at
         }
         : {
-          id: `m-long-${index}`,
-          threadId: 't-long',
-          turnId: 'turn-long',
+          id: `${prefix}-${index}`,
+          threadId: id,
+          turnId,
           role: 'assistant',
           parts: [
             {
@@ -345,7 +347,7 @@ export function longThread(): Thread {
     );
   }
   return {
-    id: 't-long',
+    id,
     projectId: 'p-boite',
     providerId: 'echo',
     accountId: 'a-echo',
@@ -354,13 +356,13 @@ export function longThread(): Thread {
     permissionMode: 'default',
     archived: false,
     pinned: false,
-    title: 'Four hundred messages',
+    title: id === 't-long' ? 'Four hundred messages' : `Four hundred messages ${id.slice('t-long-'.length)}`,
     titleSource: 'prompt',
     cwd: 'C:\\src\\boite',
     branch: null,
     status: 'idle',
     unread: false,
-    sessionId: 'sess-long',
+    sessionId: id === 't-long' ? 'sess-long' : `sess-${id}`,
     load: null,
     context: null,
     createdAt: T0 + 400_000,
@@ -369,8 +371,8 @@ export function longThread(): Thread {
     commands: [],
     turns: [
       {
-        id: 'turn-long',
-        threadId: 't-long',
+        id: turnId,
+        threadId: id,
         status: 'done',
         queuedAt: T0 + 400_000,
         startedAt: T0 + 400_000,

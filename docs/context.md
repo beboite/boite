@@ -136,6 +136,13 @@ compact again. The timers live in memory: a core restart drops them, and the
 next finished turn arms a new one. The in-memory client implements `turn-end`
 and the threshold only; it has no background work and no cache to wait on.
 
+## Turns a provider refused
+
+A turn refused because the model was at capacity tries again by itself, and a
+thread stopped by a usage limit can resume once the window resets (opt-in).
+Both, their prompts and their guards are in
+[usage](usage.md#when-a-provider-refuses-a-turn).
+
 ## Pending prompts, goals and loops
 
 Enter during a running turn queues the message and its attachments; where the
@@ -270,15 +277,22 @@ replacement to the original thread on its owning machine.
 
 The core saves private file checkpoints before and after each conversation
 turn, for every driver. Unchanged files reuse their saved hashes after checking
-size, mode, inode and nanosecond modification/change timestamps, with metadata
-retained for at most four thread folders. Editing restores the changes made by the removed
+size, mode, inode and nanosecond modification/change timestamps. That metadata
+is kept per workspace folder, shared by the threads working in it, for at most
+100000 files in total; the least recently used folder goes first. Editing restores the changes made by the removed
 turns before truncating their messages. It preserves unrelated files and
 refuses a conflict with outside edits before changing either files or history.
 Git projects include tracked files and non-ignored untracked files; HEAD and
 the index stay unchanged. Other projects use a bounded file walk, excluding
 `.git`, `.boite`, `.agents`, `node_modules`, `AGENTS.md` and `.env` files.
 Backups include binary content, deletions, creations, permissions and symlinks,
-stored under the core data directory with content deduplicated per thread.
+stored under the core data directory. Each content is stored once in
+`checkpoints/objects/<first two hex digits>/<sha256>` and hard-linked into the
+folder of every thread that saved it, so each thread folder can rewind on its
+own. A file system without hard links gets a private copy per thread, and
+folders saved before the shared store keep working. A background pass at
+startup, and after a thread's checkpoints leave, deletes the shared files no
+thread links to any more.
 They survive restarts and leave with a permanently removed project or thread.
 
 Each snapshot is limited to 20000 files and 128 MiB of saved content. A file
@@ -312,7 +326,7 @@ ways, and the rewind result's `session` field says which one applied:
 | Driver | Behaviour |
 |---|---|
 | Claude | Exact. Each turn records `checkpoint: { sessionId, entry }`, the uuid of the last transcript entry it wrote. The next turn resumes that session with `resumeSessionAt: entry` and `forkSession: true`, so the CLI keeps the transcript up to the cut under a new session id and the original transcript is never shortened. A rewind closes the warm process first. |
-| Codex | Exact at a completed native turn boundary on the same account and session generation. A traced appserver calls `thread/fork` with the retained native turn ID as an inclusive boundary. Rewind prepares a new native session before restoring files and committing the journal cut. The source native transcript is unchanged. |
+| Codex | Exact at a completed native turn boundary on the same account and session generation. A traced appserver, started without plugins or connectors, calls `thread/fork` with the retained native turn ID as an inclusive boundary and every MCP server turned off for that call only. Rewind prepares a new native session before restoring files and committing the journal cut. The source native transcript is unchanged. |
 | ACP, Muse, pi, agy and echo | Seeded. The thread drops its native session. The next turn starts a fresh one carrying the kept history as bounded excerpts, the same [context transfer](model-switching.md#context-transfer) a change of account uses. |
 
 Claude falls back to the seeded path in four cases: the kept turn left no
@@ -352,6 +366,39 @@ The smaller ring opens details; it never starts compaction. The popup uses
 accent for uncached input, green for cached input, yellow for output and a
 neutral remainder for free capacity. These are provider token categories,
 not an estimated split between system instructions, files and tools.
+
+## What the agent sees
+
+On a Claude thread the context popup has a "What the agent sees" button. It
+opens the system prompt and the tool definitions of the thread's last API
+request, with that request's model, effort, thinking type, output limit,
+betas, Claude Code version and time. System blocks keep their order and
+expand to their text; tools are sorted largest first. Sizes are characters.
+The token figure is the characters of both divided by four, labelled as an
+estimate: it is not the provider's count and leaves out the messages.
+
+`threads.agentShape { threadId }` reads it, owner-only, and refuses a thread
+whose provider is not on the `claude-sdk` protocol with `field: 'providerId'`.
+The source is the session transcript, at
+`<config dir>/projects/<cwd, every non-alphanumeric character as ->/<sessionId>.jsonl`,
+the config directory being the account's isolation directory, else the
+provider's default (`CLAUDE_CONFIG_DIR`, then `~/.claude`), as
+[imports](../packages/core/src/imports.ts) finds it. Claude Code 2.1.300 and
+later write an `api-request-shape` record per distinct system and tool set and
+an `api-request` record per request naming its shape by hash
+(`packages/core/src/imports/claude-shape.ts`). The core reads the file
+backwards in 1 MiB chunks, decodes only lines carrying one of the two record
+types, skips lines above 8 MiB, and stops at the shape the last request names.
+The answer for a file is reused while its size and modification time hold.
+
+`status` explains an empty answer: `no-session` before the first turn,
+`no-transcript` when the file is gone, `unrecorded` when the CLI wrote no
+request shape (versions before 2.1.300). Each system block's text is cut at
+`AGENT_SHAPE_BLOCK_MAX` (32 000 characters) and all blocks together at
+`AGENT_SHAPE_TEXT_BUDGET` (200 000); a cut block says so and keeps its full
+size. At most `AGENT_SHAPE_ITEMS_MAX` (256) blocks and tools are listed; the
+rest are counted in the totals and in `omitted`. The in-memory client answers
+with a fixture shape written for it.
 
 ## Side questions
 

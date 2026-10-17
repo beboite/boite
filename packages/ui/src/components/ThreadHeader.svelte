@@ -1,11 +1,11 @@
 <script lang="ts">
   import AgentAvatar from './agents/AgentAvatar.svelte';
-  import { stewardOfThread } from '../lib/steward-view';
+  import { openResident, residentOfThread } from '../lib/resident';
   import { agentDirectory } from '../lib/agent-directory.svelte';
   import { entrust } from '../lib/thread-entrust';
   import { tick } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
-  import { ArrowLeft, ChevronDown, FolderInput, GitBranch, Network, PanelRight, Search, SquareTerminal, UsersRound, VenetianMask } from '@lucide/svelte';
+  import { ChevronDown, FolderInput, GitBranch, GitPullRequest, Network, PanelRight, Search, SquareTerminal, UsersRound, VenetianMask } from '@lucide/svelte';
   import { focusOnMount } from '../lib/actions';
   import { contextMenu } from '../lib/context-menu.svelte';
   import { pendingLine } from '../lib/thread-move.svelte';
@@ -16,6 +16,7 @@
   import { controlMenu } from '../lib/controls';
   import type { Store } from '../lib/store.svelte';
   import Menu from './Menu.svelte';
+  import { watchStatus } from '../lib/pull-request-watch';
   import ContextModeBadge from './ContextModeBadge.svelte';
   import CoordinationDialog from './CoordinationDialog.svelte';
   let { store }: { store: Store } = $props();
@@ -116,12 +117,21 @@
   }
   /** The agent this thread was entrusted to, if any. */
   let carrier = $derived(thread ? agentDirectory(store).entrustmentOf(thread.id) : null);
-  /** The steward looking after this thread, if its project has one. */
-  let watcher = $derived(thread ? stewardOfThread(store, thread) : null);
+  /** A subagent's header starts with the conversation that started it: "parent / subagent". */
+  let parentTitle = $derived(thread?.parentThreadId ? store.threads.find(entry => entry.id === thread!.parentThreadId)?.title ?? strings.delegation.parent : null);
+  /** The agent the owner entrusted this thread's project to, when the thread itself is not entrusted. */
+  let resident = $derived(thread ? residentOfThread(store, thread) : null);
 </script>
 
 <div class="thread-header" data-testid="thread-header" data-status={thread?.status}>
       {#if thread}
+        {#if thread.parentThreadId}
+          {@const parentId = thread.parentThreadId}
+          <button type="button" class="ghost crumb" data-testid="delegation-back-parent" data-preload-thread={parentId} title={strings.delegation.parent} onclick={() => void store.open(parentId)}>
+            <span class="ui-label">{parentTitle}</span>
+          </button>
+          <span class="crumb-sep" aria-hidden="true">/</span>
+        {/if}
         {#if renaming}
           <input
             class="rename"
@@ -192,26 +202,37 @@
         <span class="context-chip"><ContextModeBadge mode={thread.contextMode} testid="thread-context-mode" /></span>
       {/if}
 
-      {#if thread?.parentThreadId}
-        <button type="button" class="chip parent" data-testid="delegation-back-parent" data-preload-thread={thread!.parentThreadId} onclick={() => void store.open(thread!.parentThreadId!)}>
-          <ArrowLeft size={13} strokeWidth={1.75} />
-          <span class="ui-label">{strings.delegation.parent}</span>
-        </button>
-      {/if}
       {#if carrier}
         <!-- The agent this thread was entrusted to: its menu opens the agent or takes the thread back. -->
         <button type="button" class="chip entrusted" title={fill(strings.agents.entrustedTo, { name: carrier.agent.name })} data-testid="thread-entrusted-chip"
           onclick={(event) => carrierMenu(event.currentTarget)}>
           <AgentAvatar kind="profile" id={carrier.agent.id} name={carrier.agent.name} avatar={carrier.agent.avatar} size={16} />
-          <span class="steward-name ui-label">{fill(strings.agents.entrustedTo, { name: carrier.agent.name })}</span>
+          <span class="chip-name ui-label">{fill(strings.agents.entrustedTo, { name: carrier.agent.name })}</span>
         </button>
       {/if}
-      {#if watcher}
-        <!-- The steward that looks after this thread's project: what it may do here is its grant's. -->
-        <button type="button" class="chip steward" title={fill(strings.steward.lookedAfterBy, { name: watcher.thread.title })} data-testid="thread-steward-chip" onclick={() => void store.open(watcher.thread.id)}>
-          <AgentAvatar kind="profile" id={watcher.thread.id} name={watcher.thread.title} size={16} />
-          <span class="steward-name ui-label">{fill(strings.steward.chipFor, { name: watcher.thread.title })}</span>
+      {#if resident}
+        <!-- The agent that looks after this thread's project: a click opens its conversation. -->
+        <button type="button" class="chip resident" title={fill(strings.resident.lookedAfterBy, { name: resident.name })}
+          aria-label={fill(strings.resident.lookedAfterBy, { name: resident.name })} data-testid="thread-resident-chip" data-agent-id={resident.id}
+          onclick={() => openResident(store, resident!.id)}>
+          <AgentAvatar kind="profile" id={resident.id} name={resident.name} avatar={resident.avatar} size={16} />
+          <span class="chip-name ui-label">{fill(strings.resident.lookedAfterBy, { name: resident.name })}</span>
         </button>
+      {/if}
+      {#if thread && (thread.pullRequestWatches?.length ?? 0) > 0}
+        {@const watches = thread.pullRequestWatches ?? []}
+        <!-- What a watch saw and its Stop, on a phone too: a paired phone has no Tasks panel. -->
+        <span class="watch-chip" data-testid="thread-watches">
+          <Menu
+            items={watches.map((watch): MenuItem => ({ id: watch.url, label: fill(strings.tasks.stopWatchOf, { number: String(watch.number) }), hint: watchStatus(watch), title: watch.url, glyph: GitPullRequest }))}
+            onpick={(url) => void store.unwatchPullRequest(thread.id, url)}
+            label={strings.tasks.watchSection}
+            placement="bottom"
+            testid="thread-watches-trigger"
+          >
+            <GitPullRequest size={13} strokeWidth={1.75} /><span class="ui-label">{watches.map((watch) => `#${watch.number}`).join(' ')}</span>
+          </Menu>
+        </span>
       {/if}
       {#if thread?.branch && work.shows('header.branch')}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -310,17 +331,33 @@
     font-size: var(--text-sm);
   }
 
-  .steward { flex: 0 1 auto; min-width: 0; max-width: 220px; gap: 6px; padding-left: 4px; border-color: color-mix(in oklch, var(--color-steward) 45%, transparent); background: var(--color-steward-soft); color: var(--color-steward); cursor: pointer; }
+  .resident { flex: 0 1 auto; min-width: 0; max-width: 220px; gap: 6px; padding-left: 4px; border-color: color-mix(in oklch, var(--color-resident) 45%, transparent); background: var(--color-resident-soft); color: var(--color-resident); cursor: pointer; }
   .entrusted { flex: 0 1 auto; min-width: 0; max-width: 220px; gap: 6px; padding-left: 4px; border-color: color-mix(in oklch, var(--color-accent) 40%, transparent); background: var(--color-accent-soft); color: var(--color-accent); cursor: pointer; }
-  .steward-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .branch-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .branch :global(svg) { flex: none; }
+  .watch-chip { flex: none; display: inline-flex; color: var(--color-accent); }
+  .watch-chip :global(svg) { flex: none; }
 
   .trace {
     flex: none;
     padding: 0 10px 0 8px;
   }
-  .parent { gap: 4px; cursor: pointer; }
+  /* The parent's title, muted, then a slash: the subagent's own title reads last, in full weight. */
+  .crumb {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 30%;
+    height: var(--control);
+    padding: 0 6px;
+    margin-left: -6px;
+    color: var(--color-muted-foreground);
+    font-weight: 500;
+  }
+  .crumb > .ui-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .crumb:hover { color: var(--color-foreground); }
+  .crumb-sep { flex: none; margin: 0 -4px; color: var(--color-subtle); }
+  .crumb-sep + .title { margin-left: 0; }
   .incognito { gap: 4px; flex: none; }
   .context-chip { display: contents; }
 
@@ -355,6 +392,8 @@
     .trace { padding: 0; min-width: var(--touch-target); justify-content: center; }
     .trace .label, .incognito .label, .context-chip :global(.label) { display: none; }
     .context-chip :global(.chip) { min-width: var(--touch-target); justify-content: center; }
+    .resident { flex: none; padding: 0; min-width: var(--touch-target); justify-content: center; }
+    .resident .chip-name { display: none; }
     /* The title's sheet holds these on a phone. */
     .in-title-menu { display: none; }
     .rename { width: 100%; }
@@ -366,5 +405,8 @@
     .title-menu :global(.trigger) { min-width: 0; max-width: 100%; min-height: var(--touch-target); font-weight: 600; color: var(--color-foreground); }
     .title-text { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .title-menu :global(.trigger svg) { flex: none; color: var(--color-muted-foreground); }
+    .crumb { min-height: var(--touch-target); }
+    .crumb-sep { margin: 0; }
+    .crumb-sep ~ .title-menu { margin-left: 0; }
   }
 </style>

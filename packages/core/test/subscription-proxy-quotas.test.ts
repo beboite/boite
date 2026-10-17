@@ -79,7 +79,7 @@ test('quotas come from Douane through the core, in both display modes, with the 
 
   // Refresh asks again, and every client hears the answer.
   const progress: string[] = [];
-  harness.core.bus.onAny((name, payload) => { if (name === 'quotas.progress') progress.push((payload as RpcEvents['quotas.progress']).quota.accountId); });
+  owner.on('quotas.progress', (event) => progress.push(event.quota.accountId));
   await owner.call('quotas.list', { refresh: true, requestId: 'gateway-refresh' });
   expect(seen).toHaveLength(2);
   // Only the refresh asked by hand tells Douane to read its accounts first.
@@ -87,10 +87,13 @@ test('quotas come from Douane through the core, in both display modes, with the 
   expect(progress).toEqual(expect.arrayContaining(['proxy:claude:3b317ce1e503', 'proxy:antigravity:antigravity']));
   expect(events.at(-1)?.status).toBe('ready');
 
-  // Owner-only, like quotas.list: a paired phone gets nothing from the gateway.
+  // A paired phone reads the bars the core holds; asking Douane again stays the owner's.
   const { grant } = await owner.call('pairing.grant', {});
   const phone = await connect(harness.url, '', { grant, client: { name: 'pwa', version: 'test' } });
-  try { await expect(phone.call('subscriptionProxy.quotas', {})).rejects.toThrow('owner'); }
+  try {
+    expect((await phone.call('subscriptionProxy.quotas', {})).providers.map((provider) => provider.providerId)).toEqual(['claude', 'antigravity']);
+    await expect(phone.call('subscriptionProxy.quotas', { refresh: true })).rejects.toThrow('refresh must be false or absent');
+  }
   finally { phone.close(); }
 
   // Turning the proxy off drops the entries at once, from the quota rows every reader keeps too.

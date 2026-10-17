@@ -468,6 +468,9 @@ describe('server', () => {
       expect(body.bundleHash).toBe('loaded-bundle');
       const client = await bundled.connect();
       expect(client.core.bundleHash).toBe('loaded-bundle');
+      // The UI's liveness probe: a hello with no credential on an authenticated socket.
+      const probe = await client.call('hello', { protocolVersion: PROTOCOL_VERSION, client: { name: 'shell', version: '0' } });
+      expect(probe.core.bundleHash).toBe('loaded-bundle');
     } finally { await bundled.stop(); }
   });
 
@@ -668,6 +671,10 @@ describe('server', () => {
       expect(index.status).toBe(200);
       expect(index.headers.get('cache-control')).toBe('no-cache');
       const html = await index.text();
+      // Revalidating the shell with the tag it came with costs no body.
+      const again = await fetch(`${harness.url}/`, { headers: { 'if-none-match': index.headers.get('etag')! } });
+      expect(again.status).toBe(304);
+      expect(again.headers.get('cache-control')).toBe('no-cache');
 
       const worker = await fetch(`${harness.url}/sw.js`);
       expect(worker.status).toBe(200);

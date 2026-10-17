@@ -197,35 +197,63 @@ describe('a desktop app', () => {
     expect(app()).toMatchObject({ enabled: false, status: 'stopped', pid: null, startedAt: null });
     expect(fake.pids).toHaveLength(3);
     expect(fake.pids.filter(alive)).toEqual([]);
-    expect(JSON.parse(readFileSync(join(dir, 'app.json'), 'utf8'))).toEqual({ enabled: false });
+    expect(JSON.parse(readFileSync(join(dir, 'app.json'), 'utf8'))).toEqual({ enabled: false, autostart: true });
   });
 
-  test('stop disables it for good, start and restart bring it back, and the choice survives a new store', async () => {
+  test('stop keeps it off until a start, and the core start brings it back only while it starts with Boite', async () => {
     harness = await startQuietCore(); const client = await harness.connect();
     const dir = installBots(harness.dataDir);
     const fake = fakeApp(harness); fake.mode('stay');
     await client.call('plugins.app', { id: 'bots', action: 'start' });
     const first = fake.pids[0]!;
     const stopped = await client.call('plugins.app', { id: 'bots', action: 'stop' });
-    expect(stopped.app).toMatchObject({ enabled: false, status: 'stopped', pid: null, startedAt: null });
+    expect(stopped.app).toMatchObject({ enabled: false, autostart: true, status: 'stopped', pid: null, startedAt: null });
     expect(alive(first)).toBe(false);
-    expect(JSON.parse(readFileSync(join(dir, 'app.json'), 'utf8'))).toEqual({ enabled: false });
+    expect(JSON.parse(readFileSync(join(dir, 'app.json'), 'utf8'))).toEqual({ enabled: false, autostart: true });
 
-    // What the next core start reads: nothing launches.
-    const fresh = new PluginStore(harness.core);
-    expect(fresh.state('bots').app?.enabled).toBe(false);
+    // Started with Boite: the next core start launches it, a stop or not.
+    expect(new PluginStore(harness.core).state('bots').app).toMatchObject({ enabled: false, autostart: true });
     harness.core.plugins.startApps();
-    expect(fake.pids).toHaveLength(1);
+    await waitFor(() => fake.pids.length === 2 && app().status === 'running');
 
+    // Turned off, nothing running changes, and the next core start leaves it alone.
+    const off = await client.call('plugins.autostart', { id: 'bots', autostart: false });
+    expect(off.app).toMatchObject({ autostart: false, status: 'running' });
+    expect(JSON.parse(readFileSync(join(dir, 'app.json'), 'utf8'))).toEqual({ enabled: false, autostart: false });
+    await client.call('plugins.app', { id: 'bots', action: 'stop' });
+    harness.core.plugins.startApps();
+    expect(fake.pids).toHaveLength(2);
+
+    // A start makes it run without turning autostart back on.
     await client.call('plugins.app', { id: 'bots', action: 'restart' });
-    expect(app()).toMatchObject({ enabled: true, status: 'running' });
+    expect(app()).toMatchObject({ enabled: true, autostart: false, status: 'running' });
     const second = app().pid!;
     await client.call('plugins.app', { id: 'bots', action: 'restart' });
     expect(alive(second)).toBe(false);
     expect(app().pid).not.toBe(second);
-    expect(new PluginStore(harness.core).state('bots').app?.enabled).toBe(true);
+    expect(new PluginStore(harness.core).state('bots').app).toMatchObject({ enabled: true, autostart: false });
     await expect(client.call('plugins.app', { id: 'bots', action: 'pause' as 'stop' })).rejects.toThrow('start, stop or restart');
-    await expect(client.call('plugins.app', { id: 'kebacc-switcher', action: 'start' })).rejects.toThrow('Install kebacc-switcher first');
+    await expect(client.call('plugins.autostart', { id: 'bots', autostart: 'yes' as unknown as boolean })).rejects.toThrow('autostart must be true or false');
+    // A recommended plugin that is not installed has no app to start.
+    const pools = parseManifest({ ...manifest(), id: 'pool-switcher', name: 'Pool switcher', executable: 'pool', provides: { accountPools: { providers: ['claude'] } } }, 'recommended.json[1]');
+    harness.core.plugins.recommended = [...harness.core.plugins.recommended, pools];
+    await expect(client.call('plugins.app', { id: 'pool-switcher', action: 'start' })).rejects.toThrow('Install pool-switcher first');
+    await expect(client.call('plugins.autostart', { id: 'pool-switcher', autostart: true })).rejects.toThrow('Install pool-switcher first');
+
+    const { grant } = await client.call('pairing.grant', {});
+    const device = await connect(harness.url, '', { grant, client: { name: 'pwa', version: 'test' } });
+    try {
+      await expect(device.call('plugins.autostart', { id: 'bots', autostart: true })).rejects.toThrow('plugins.autostart is for the owner only');
+    } finally { device.close(); }
+  });
+
+  test('an app.json from before autostart starts with the core only if it was left enabled', async () => {
+    harness = await startQuietCore();
+    const dir = installBots(harness.dataDir);
+    writeFileSync(join(dir, 'app.json'), JSON.stringify({ enabled: false }));
+    expect(app()).toMatchObject({ enabled: false, autostart: false });
+    writeFileSync(join(dir, 'app.json'), JSON.stringify({ enabled: true }));
+    expect(app()).toMatchObject({ enabled: true, autostart: true });
   });
 
   test('the core start launches an enabled app, and close() kills it', async () => {

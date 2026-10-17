@@ -7,6 +7,7 @@
 import { closeSync, mkdirSync, openSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { readE2eReport } from './e2e-report.ts';
+import { assignShards, e2eFiles, readDurations } from '../scripts/ci/e2e-shards.ts';
 
 const mode = process.argv[2];
 if (mode === 'compare') {
@@ -39,9 +40,10 @@ mkdirSync(output, { recursive: true });
 const shell = join(root, 'tests/e2e/shell.test.ts');
 const files = readdirSync(join(root, 'tests/e2e'), { recursive: true, encoding: 'utf8' })
   .filter((name) => name.endsWith('.test.ts')).map((name) => join(root, 'tests/e2e', name)).sort();
-const browserFiles = files.filter((file) => file !== shell);
+// The same split as the CI shards: recorded seconds per file.
+const shards = assignShards(e2eFiles(root), readDurations().seconds, 3);
 const groups = mode === 'serial' ? [{ name: 'all', args: files }] : [
-  ...[1, 2, 3].map((shard) => ({ name: `browser-${shard}`, args: [...browserFiles, `--shard=${shard}/3`] })),
+  ...shards.map((shard, index) => ({ name: `browser-${index + 1}`, args: shard.files.map((file) => join(root, file)) })),
   { name: 'shell', args: [shell] },
 ];
 

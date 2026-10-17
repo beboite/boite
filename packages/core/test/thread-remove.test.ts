@@ -151,6 +151,11 @@ test('startup retains recoverable history with persisted zero days, then purges 
 }, 20_000);
 
 test('resident retention purges expired deletions and notifies clients without a list request', async () => {
+  // A core whose resident pass runs every 200 ms instead of every minute.
+  await client.close();
+  await harness.stop();
+  harness = await startTestCore({ settings: { focusGuard: false, muteAgents: false }, retentionPassMs: 200 });
+  client = await harness.connect();
   const { threadId } = await echoThread(harness, client);
   const turn = await client.call('turns.start', { threadId, prompt: 'history' });
   await waitFor(() => harness.core.journal.getTurn(turn.id)?.status === 'done');
@@ -164,6 +169,6 @@ test('resident retention purges expired deletions and notifies clients without a
   let notifications = 0;
   client.on('thread.deletionsUpdated', () => { notifications++; });
   harness.core.journal.db.query('UPDATE thread_deletions SET deleted_at = ? WHERE root_id = ?').run(Date.now() - 2 * 86_400_000, threadId);
-  await waitFor(() => harness.core.journal.listDeletedThreads().length === 0 && notifications > 0, 70_000);
+  await waitFor(() => harness.core.journal.listDeletedThreads().length === 0 && notifications > 0, 5_000);
   expect(harness.core.journal.listMessages(threadId)).toEqual([]);
-}, 75_000);
+});

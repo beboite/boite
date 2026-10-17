@@ -68,6 +68,7 @@ jobs:
       e2eTypes: ${{ steps.filter.outputs.e2eTypes }}
       stress: ${{ steps.filter.outputs.stress }}
       portable: ${{ steps.filter.outputs.portable }}
+      coreRunners: ${{ steps.filter.outputs.coreRunners }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -106,12 +107,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { os: ubuntu-24.04, name: Linux x64 }
-          - { os: ubuntu-24.04-arm, name: Linux arm64 }
-          - { os: windows-2025, name: Windows x64 }
-          - { os: macos-15, name: macOS arm64 }
-          - { os: macos-15-intel, name: macOS x64 }
+        # Pull requests leave out the Intel Mac; main keeps it (changes.ts).
+        include: ${{ fromJSON(needs.changes.outputs.coreRunners) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
@@ -173,9 +170,42 @@ jobs:
       - uses: ./.github/actions/setup
       - run: bun run check:e2e
 
+  # The UI the E2E shards and stress test, built once. Vite emits the same
+  # chunks on Linux and Windows except for a CSS color rounded in its sixth
+  # decimal and the gzip OS byte (docs/ci.md#e2e-preparation).
+  ui:
+    name: Build UI
+    needs: changes
+    if: needs.changes.outputs.stress == 'true' || (needs.changes.outputs.desktop == 'true' && needs.changes.outputs.e2e == 'true')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: bun run build:ui
+      - name: Build the fake-client E2E bundle
+        run: bun tests/e2e/lib/warm.ts --build-only tests/e2e/.artifacts/fake-ui
+      # The production UI keeps its dot folder: .well-known/assetlinks.json.
+      - uses: ./.github/actions/upload-artifact
+        with:
+          name: ui-dist
+          path: packages/ui/dist/
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 1
+      - uses: ./.github/actions/upload-artifact
+        with:
+          name: ui-e2e-fake
+          path: tests/e2e/.artifacts/fake-ui/
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 1
+
   stress:
     name: Stress fixtures
-    needs: changes
+    needs: [changes, ui]
     if: needs.changes.outputs.stress == 'true'
     runs-on: windows-2025
     timeout-minutes: 15
@@ -187,7 +217,10 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
-      - run: bun run build:ui
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: ui-dist
+          path: packages/ui/dist
       # Fixed protocol, unhealthy-core and echo fixtures use temporary data only.
       # Preserve all three distinct scenarios and their existing deadlines.
       - run: bun run test:stress
@@ -220,7 +253,7 @@ jobs:
 
   e2e:
     name: E2E ${{ matrix.shard }}/3
-    needs: changes
+    needs: [changes, ui]
     if: needs.changes.outputs.desktop == 'true' && needs.changes.outputs.e2e == 'true'
     strategy:
       fail-fast: false
@@ -236,16 +269,34 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
-      - run: bun run build:ui
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: ui-dist
+          path: packages/ui/dist
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: ui-e2e-fake
+          path: tests/e2e/.artifacts/fake-ui
+      # Chrome profiles and core data directories go to the runner's temp
+      # drive (D:). On C:, Chrome stalled page loads for 15 to 60 s while the
+      # UI server had answered: 8 stalls in 5 of 9 shard runs against 0 in 9,
+      # and 706 s of tests against 420 s (PR #513, 2026-10-15).
       - name: Prepare end-to-end tests
-        run: bun tests/e2e/lib/warm.ts $env:BOITE_E2E_FAKE_UI
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+        run: bun tests/e2e/lib/warm.ts --prebuilt $env:BOITE_E2E_FAKE_UI
       # Each runner has its own Vite cache. Files stay sequential within a shard.
       # The native shell file runs against the installer in the desktop job.
+      # Shards are cut on recorded seconds per file (scripts/ci/e2e-shards.ts).
       - name: Browser and core end-to-end tests
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
         run: |
-          $files = @(Get-ChildItem tests/e2e -Recurse -Filter *.test.ts | Where-Object { $_.FullName -ne (Join-Path $PWD 'tests/e2e/shell.test.ts') } | ForEach-Object { $_.FullName })
-          if ($files.Count -eq 0) { throw 'No browser or core E2E files found' }
-          bun test @files --shard=${{ matrix.shard }}/3
+          $files = @(bun scripts/ci/e2e-shards.ts ${{ matrix.shard }} 3)
+          if ($LASTEXITCODE -ne 0 -or $files.Count -eq 0) { throw 'No browser or core E2E files for this shard' }
+          bun test @files
       - uses: ./.github/actions/upload-artifact
         if: failure() || cancelled()
         with:

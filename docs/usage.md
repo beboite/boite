@@ -51,8 +51,8 @@ estimate](#the-api-estimate)).
   reads again whether the switch went on or off.
 - Providers refresh independently, with up to two accounts per provider in
   flight. Each `quotas.progress` event carries the request ID and one account's
-  result; the final response retains the account order. Both events and calls
-  remain owner-only.
+  result, and goes only to the connection that sent that request; the final
+  response retains the account order. Both events and calls remain owner-only.
 - In the tray and the limits tab, existing bars lose saturation while their
   account is pending. Each answer updates its bars and restores their colour
   with a transition. A slow provider does not hold up the others. Cache and
@@ -91,9 +91,10 @@ failure. It never quotes the body, which can echo a credential.
 - The cadence is the native one. A list within a minute of the last read
   reuses it, and the refresh button reads again. `subscriptionProxy.quotas`
   returns the gateway's state (`ready`, `unavailable`, `unsupported` or `off`)
-  and `subscriptionProxy.quotasUpdated` follows it. Both are owner-only, like
-  `quotas.list`. A phone with full control gets the rows from its core and
-  never reaches the gateway.
+  and `subscriptionProxy.quotasUpdated` follows it. A paired device reads both,
+  without `refresh: true`. A phone gets the rows from its core and never
+  reaches the gateway, so it draws the same native bars as the desktop instead
+  of embedding the dashboard.
 - Limits shows one heading per provider the gateway reports, then one card per
   entry. Each card has its window bars, reset times, plan, status and credits.
   An `average` entry is named by its provider and account count, such as
@@ -121,17 +122,20 @@ quota views update the label immediately while retaining their cached windows.
 | Source | Read behavior and limits |
 | --- | --- |
 | Claude | OAuth usage endpoint for file logins; Keychain, Credential Manager or expired-token logins fall back to asking the CLI for usage with `skipBehaviors: true`, no prompt queue, tools or hooks. Fallback can omit resets and paid usage. |
-| Codex | `account/rateLimits/read`, without opening a conversation |
+| Codex | `account/rateLimits/read`, without opening a conversation; a running session's `account/rateLimits/updated` refreshes it (below) |
 | Muse Code | Last `usage/changed` observation from an existing host supporting that event; no host or prompt starts to refresh limits |
 | Grok | Credit percentage or legacy credit amounts from the selected CLI login's billing endpoint |
 | OpenCode Go | Rolling, weekly and monthly limits from its Go usage API, using its own saved API login or the default account's `OPENCODE_API_KEY`. OpenCode 2 accounts read the key from their own database |
-| Antigravity CLI | Opt-in `agy -p /usage --output-format json` in a temporary directory, with version, output and timeout checks; no model prompt |
+| Antigravity | The managed server's sign-in under `GEMINI_HOME` (`antigravity-acp/acp_token.json`): its refresh token is traded for an access token, held in memory until a minute before it expires, then the Cloud Code `retrieveUserQuotaSummary` buckets (5 hours, weekly, per model group), or per-model `fetchAvailableModels` quotas for an account with no summary. Nothing is spawned |
+| Antigravity CLI | `agy -p /usage --output-format json` in a temporary directory, with version, output and timeout checks; no model prompt. The row `quota:antigravity-cli` belongs to the `antigravity-cli` provider, so switching the managed Antigravity server off leaves it alone. With no saved choice it is monitored once agy is found, and off otherwise |
 
-Quota readers live in `packages/core/src/quotas.ts` and `quota-readers.ts`, with
-Claude's fallback under `drivers/claude/quota.ts`. Successful snapshots cache for
+Quota readers live in `packages/core/src/quotas.ts`, `quota-readers.ts` and
+`antigravity-quota.ts`, with Claude's fallback under `drivers/claude/quota.ts`. Successful snapshots cache for
 one minute; manual refreshes are at least ten seconds apart and failures back
-off for five minutes. A failed read returns the last successful windows as stale
-with its error and timestamp. Unknown percentages remain unavailable. Failed
+off for five minutes. A change to one account (a rename, a login check, a
+removal) clears that account's cache alone; reads of other accounts in flight
+still land in theirs. A provider change clears every account. A failed read
+returns the last successful windows as stale with its error and timestamp. Unknown percentages remain unavailable. Failed
 reads never advertise old resets or credits as available. Unsupported providers
 report unsupported limits rather than using local token totals as quota.
 
@@ -139,6 +143,18 @@ Muse observations stay in memory per account with their original observation
 time, including over-quota readings. Before the first observation, after
 monitoring is disabled or with an older host, the source is unavailable. Its
 schema supplies no paid credit balance or banked resets.
+
+A running Codex session merges each sparse `account/rateLimits/updated`
+notification into a full `account/rateLimits/read` of that same process, read
+again once it is a minute old, and forwards the result to `QuotaStore.observe`
+(`drivers/codex/rate-limits.ts`). The store merges it into the last full read
+of that account: the windows it carries replace theirs, the others
+and the banked resets stay. The merged row stands as a successful read timed at
+its observation, so the next list returns it without starting an app-server
+until it is a minute old. Updates stand in for a read only within five minutes
+of the last full read and are dropped when no full read is held; the next list
+then reads again. A reading older than the one held is ignored, and
+`quotas.updated` goes out only when the values changed.
 
 ### Resets and paid allowances
 
@@ -334,14 +350,71 @@ its cost.
 On a subscription the figure is what the same tokens would cost on the API, not
 money spent.
 
+## When a provider refuses a turn
+
+Two refusals mean the provider is unavailable, not that the request is wrong.
+The driver reports them as `TurnResult.refusal`, only when the agent names
+them without doubt; any other failure ends the turn as before.
+
+| Driver | Model at capacity | Usage limit, with its reset |
+| --- | --- | --- |
+| Codex | `codexErrorInfo` `serverOverloaded`, or "Selected model is at capacity" | `usageLimitExceeded`; the reset is the latest spent window of `account/rateLimits/updated` |
+| Claude | assistant error `overloaded` (HTTP 529, after the CLI's own retries) | assistant error `rate_limit`; the reset is the `rate_limit_event` marked `rejected` |
+| echo | `[capacity:n]` | `[usage-limit:<ms>]` |
+
+ACP agents, pi, Grok, Antigravity and Muse report neither: their failures
+are never retried here.
+
+### Model at capacity
+
+The same turn tries again three times, after 30 s, 2 min and 5 min
+(`CAPACITY_RETRY` in `threads/turn-attempts.ts`). The thread stays running and
+its row carries `retry` (`kind: 'capacity'`, the try's number and time), which
+the conversation shows above the composer with a countdown and Stop retrying.
+An attempt that wrote nothing but the error sends the same input again. Once
+any attempt of the turn wrote text, reasoning or a tool call, the next try
+resumes the same native session with a short continue prompt and no
+attachments, so paid work is not redone. Stop ends the wait as a stopped turn;
+`turns.cancelRetry` ends it as the failure it was. After the third try the
+turn fails with the provider's sentence, as it did before. A core restart
+during a wait fails the turn the usual way.
+
+### Usage limit
+
+Settings > Limits has "Resume threads after a usage limit"
+(`autoResumeLimitedThreads`, off by default). With it on, a turn that failed
+on a usage limit plans one resume a minute after the window resets
+(`threads/limit-resume.ts`). The reset is the one the agent reported, else the
+latest window at 100 % in a fresh `quotas` read of the turn's account; with
+neither, nothing is planned. The plan sits in the journal setting
+`limit-resumes`, so a restart arms it again, and the row shows it as `retry`
+(`kind: 'usage-limit'`, `at`, `resetsAt`) with Do not resume.
+
+Nothing is planned for a failure whose window already reset (no retry loop),
+for a window the thread already resumed after, for a sub-thread or persistent
+agent, or for a compaction or wake turn. When the plan fires, it is dropped
+instead if the setting went off, the thread was archived, answered, stopped or
+is busy, its provider, account, model or session generation changed, a card
+waits for the user, or its subagent team is paused. A plan a core caught while
+dispatching is dropped at the next start, since its turn may have gone out.
+The resume is a `resume` turn with the request id `limit-resume_<turnId>`,
+labelled "Resumed after the usage limit reset", whose prompt asks the agent to
+continue without repeating work.
+
+`turns.cancelRetry` and `turns.stop` cancel either kind; a paired phone may
+call both, since cancelling spends nothing. `?fake=1&retry=capacity` and
+`?fake=1&retry=usage-limit` put each banner on a fake thread.
+
 ## Paired devices
 
 A phone may call `usage.history`: it returns sums over the same finished turns
 a device can already open, and the thread titles it names are the ones
 `threads.list` shows it. The reason sits beside the entry in
-`packages/core/src/access.ts`. `quotas.list` stays owner-only, so on a device
-the Limits tab says the limits are read on the computer that runs Boite. On a
-phone both pages are under Settings > Machines, as Usage and Limits.
+`packages/core/src/access.ts`. A device also reads `quotas.list` and
+`subscriptionProxy.quotas` with the bars the core holds: no refresh button, no
+monitoring switch, no reset. A core older than that refuses the read, and the
+Limits tab asks to update Boite on that machine. On a phone both pages are under
+Settings > Machines, as Usage and Limits.
 
 ## The fake client
 
@@ -355,6 +428,16 @@ so a reload shows the same history. Turns finished in the fake session are
 added on top, and the uninstalled mode (`?fake=1&uninstalled=1`) starts empty.
 
 ## Tests
+
+- `packages/core/test/turn-availability.test.ts`: capacity retries with the
+  same input and with the continue prompt, the three-try limit, Stop and
+  Cancel during a wait; usage limit resumes off, once per window, never for a
+  reset window, cancelled by a message, Stop, Cancel or a changed model, and
+  armed again after a restart.
+- `packages/core/test/codex.test.ts` and `claude.availability.test.ts`: each
+  driver's capacity and usage limit signals end to end.
+- `packages/ui/src/components/ThreadRetry.test.ts` and `LimitsPage.test.ts`:
+  the banner's countdown and cancel, and the switch.
 
 - `packages/core/test/usage-history.test.ts`: edge boundaries, the provider and
   model split, turns without usage, the Codex cache subtraction, pricing at

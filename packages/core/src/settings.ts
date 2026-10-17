@@ -1,7 +1,8 @@
-import { checkSettingsPatch, readSettings, DEFAULT_THREAD_DONE_RETENTION_DAYS, DEFAULT_THREAD_DELETION_RETENTION_DAYS, subscriptionProxyOf, type Settings } from '@boite/contracts';
+import { checkSettingsPatch, keepLaterFavorites, readSettings, DEFAULT_THREAD_DONE_RETENTION_DAYS, DEFAULT_THREAD_DELETION_RETENTION_DAYS, subscriptionProxyOf, type Settings, type SubscriptionProxy } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { writesTitles } from './drivers/index.ts';
 import { invalidParams } from './errors.ts';
+import { DOUANE_PLUGIN } from './plugins/gateway.ts';
 import { isAbsolute, resolve } from 'node:path';
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -48,6 +49,9 @@ export class SettingsStore {
       }
       storage.directory = resolve(storage.directory);
     }
+    // Local mode: Douane's kind and the Douane plugin's loopback URLs, whatever the client sent.
+    const proxy = checked.patch.subscriptionProxy;
+    if (proxy?.mode === 'local') checked.patch.subscriptionProxy = localProxy(proxy, this.core.plugins.gateways.port(DOUANE_PLUGIN));
     const titleModel = checked.patch.titleModel;
     if (titleModel !== undefined && titleModel !== null) {
       const provider = this.core.providers.get(titleModel.providerId);
@@ -61,9 +65,17 @@ export class SettingsStore {
     return checked.patch;
   }
 
+  /** The Douane plugin listens on another port: a proxy in local mode follows it. */
+  followGateway(port: number): void {
+    const proxy = this.get().subscriptionProxy;
+    if (proxy?.mode !== 'local') return;
+    const next = localProxy(proxy, port);
+    if (next.baseUrl !== proxy.baseUrl || next.dashboardUrl !== proxy.dashboardUrl || next.kind !== proxy.kind) this.set({ subscriptionProxy: next });
+  }
+
   set(patch: Partial<Settings>, persistPrivate?: () => void): Settings {
-    const checked = this.normalize(patch);
     const previous = this.get();
+    const checked = keepLaterFavorites(previous, this.normalize(patch));
     const next: Settings = { ...previous, ...checked };
     this.core.journal.append({ type: 'settings.changed', threadId: null, version: 1, payload: next }, () => {
       // Private credentials share the transaction, never its public event payload.
@@ -90,6 +102,11 @@ export class SettingsStore {
     this.core.group.settingsChanged();
     return next;
   }
+}
+
+/** The proxy in local mode as stored: Douane's kind and the plugin's loopback API and dashboard. */
+export function localProxy(proxy: SubscriptionProxy, port: number): SubscriptionProxy {
+  return { ...proxy, kind: 'douane', mode: 'local', baseUrl: `http://127.0.0.1:${port}/v1`, dashboardUrl: `http://127.0.0.1:${port}/admin/` };
 }
 
 export function registerSettingsMethods(core: Core): void {

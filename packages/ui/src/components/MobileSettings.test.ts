@@ -73,6 +73,17 @@ test('a thread archived on the phone comes back from its own settings list', asy
   expect((await client.call('projects.list', {})).find(project => project.id === managedProjectId)?.autoArchiveMergedPr).toBe(false);
   await store.setProjectAutoArchiveMergedPr(managedProjectId, true);
 
+  // The worktree removal policy sits beside it, on by default, and persists on the core.
+  query<HTMLButtonElement>('[data-testid=mobile-project-actions]').click();
+  await waitFor(() => document.querySelector('[data-value=manage]') !== null);
+  query<HTMLButtonElement>('[data-value=manage]').click();
+  await waitFor(() => document.querySelector('[data-value=auto-remove-worktrees]') !== null);
+  expect(query('[data-value=auto-remove-worktrees]').getAttribute('aria-checked')).toBe('true');
+  query<HTMLButtonElement>('[data-value=auto-remove-worktrees]').click();
+  await waitFor(() => store.projects.find(project => project.id === managedProjectId)?.autoRemoveWorktrees === false);
+  expect((await client.call('projects.list', {})).find(project => project.id === managedProjectId)?.autoRemoveWorktrees).toBe(false);
+  await store.setProjectAutoRemoveWorktrees(managedProjectId, true);
+
   expect(await archiveThread(store, 't-trace')).toBe(true);
   await waitFor(() => !store.threads.some((t) => t.id === 't-trace' && !t.archived));
   const account = (await client.call('accounts.list', {})).find(account => account.providerId === 'echo')!;

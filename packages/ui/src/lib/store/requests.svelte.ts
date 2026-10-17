@@ -1,5 +1,6 @@
 import type { Attachment, PermissionRequest, QuestionRequest, RequestId, ThreadId } from '@boite/contracts';
 import { mergeRequests, requestsOf, type RequestScope } from '../requests';
+import { needsUser } from '../thread-state';
 import type { StoreContext } from './context';
 import type { Client } from '../client';
 import { SnapshotReads } from './snapshot-reads';
@@ -23,15 +24,32 @@ export class Requests {
 
   /**
    * The two records exist for the cards of the thread on the screen, so they
-   * hold that thread and nothing else. Called when a thread opens, when the
-   * chat goes to a draft, and when a thread is archived or removed: before
-   * this, a page left open all day kept every request it had ever been told
-   * about.
+   * hold that thread and its direct children, whose questions its dock shows,
+   * and nothing else. Called when a thread opens, when the chat goes to a
+   * draft, and when a thread is archived or removed: before this, a page left
+   * open all day kept every request it had ever been told about.
    */
   keepRequestsOf(threadId: ThreadId | null): void {
-    const mine = (id: ThreadId): boolean => id === threadId;
+    const children = new Set(threadId === null ? [] : this.ctx.threads.threads.filter(row => row.parentThreadId === threadId).map(row => row.id));
+    const mine = (id: ThreadId): boolean => id === threadId || children.has(id);
     this.permissionRequests = requestsOf(this.permissionRequests, mine);
     this.questionRequests = requestsOf(this.questionRequests, mine);
+  }
+
+  /**
+   * The requests of the open thread's direct children that wait on the user,
+   * read from the core: the parent's dock carries them, and a child's
+   * `question.asked` or `permission.requested` may have gone out before this
+   * page listened. `only` reads that one child, the one that just turned to
+   * the user. A refused or failed read leaves the dock as it was.
+   */
+  readChildren(client: Client, parentId: ThreadId, only?: ThreadId): void {
+    for (const child of this.ctx.threads.threads) {
+      if (child.parentThreadId !== parentId || child.archived || !needsUser(child) || (only !== undefined && child.id !== only)) continue;
+      const permissions = this.permissionRead(client, child.id), questions = this.questionRead(client, child.id);
+      void permissions.promise.then(permissions.apply, () => undefined);
+      void questions.promise.then(questions.apply, () => undefined);
+    }
   }
 
   /** The same, for a thread that is gone while another one stays open. */

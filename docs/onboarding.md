@@ -20,13 +20,18 @@ persist immediately and remain editable there.
 | Quiet | Agents work without taking over the screen or speakers | Notifications, close to tray, focus guard, mute |
 | Privacy | The trade offer: anonymous counters, or the deal | Two consent rows that also close the tour, owner only |
 
-Localized miniatures use real provider marks and theme tokens. Scenes finish
-within four seconds, conversation demos within five. Their three buttons show
-dictation, agent switching and diffs. Dictation ends with a draft to review;
-switching shows the next provider's answer. While playing, a scene has an inner
-accent glow and hover/focus pause/replay controls; touch always shows controls.
-Pause retains them, completion leaves Replay, and reduced motion shows only the
-completed scene. Step dots provide progress.
+Localized miniatures use real provider marks and theme tokens. Scenes play
+within four seconds, conversation demos within five, then rest 2.4 s on their
+last frame and play again, like a GIF. A scene runs only while it is on screen
+in a shown window: one scrolled out of view or behind a hidden window holds its
+frame and starts where it stopped. Reduced motion does not stop the scenes or
+the trade offer clip, which are the tour's pictures; their timing comes from
+`--dur-demo-step` and `--dur-demo-word`, which reduced motion leaves alone, and
+only the glow around a scene stops. Their three buttons show dictation, agent
+switching and diffs. Dictation ends with a draft to review; switching shows the
+next provider's answer. While playing, a scene has an inner accent glow and
+hover/focus pause/replay controls; touch always shows controls. Pause holds the
+scene and its loop until resumed. Step dots provide progress.
 
 The privacy screen is Boite Legacy's: a title that turns red over ten seconds,
 the trade offer clip, and two rows. "NO! Just the basic counters" keeps the
@@ -35,7 +40,9 @@ and closes the tour two seconds later, at once under reduced motion. "Deal" turn
 on enhanced analytics and closes it. The "turn everything off" link under both
 rows saves Off and closes it. That screen has no Next button; Escape and the
 cross leave the counters as they are. On a window under 640 px tall the clip
-shrinks, and the line saying what is counted stays. Export and deletion
+shrinks, and the line saying what is counted stays. Each row says what it
+counts in one line; the full list of both tiers sits behind the "i" beside
+"Deal?", and "What is collected" links the analytics page. Export and deletion
 management remain in Settings.
 
 In the shell the scrim starts under the title bar, so the window can be dragged,

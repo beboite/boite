@@ -4,6 +4,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import { DEFAULT_DELEGATION_CONFIG, type AgentLetter, type Message } from '@boite/contracts';
 import MessageList from './MessageList.svelte';
 import { windowStats } from '../lib/message-window';
+import { TurnFileCache } from '../lib/turn-files';
 import { turnProgressStats } from '../lib/turn-progress.svelte';
 import { findHits } from '../lib/find';
 import type { Store } from '../lib/store.svelte';
@@ -82,8 +83,10 @@ test('the parent timeline retains one team row, updates completion counts and op
   running = mount(MessageList, { target: document.body, props: { store: owner, threadId: 't-trace', messages: owner.openThread!.messages } });
   flushSync();
   const row = document.querySelector<HTMLButtonElement>('[data-testid=delegation-activity]')!;
-  expect(row.textContent).toContain('Started 2 subagents');
-  expect(row.textContent).toContain('1/2 completed');
+  expect(row.textContent).toContain('Started 4 subagents');
+  // The one waiting on its own background work is not completed; the interrupted one says so.
+  expect(row.textContent).toContain('1/4 completed');
+  expect(row.textContent).toContain('1 interrupted');
   await owner.selectDelegatedAgent('t-team-running');
   // A workflow graph left open in the agents tab gives way to the team, the way the dock opens it.
   const graph = owner.panel.openWorkflow('run-left-open');
@@ -98,7 +101,7 @@ test('the parent timeline retains one team row, updates completion counts and op
   agent.lastTurn!.finishedAt = agent.thread.createdAt + 60_000;
   flushSync();
   expect(document.querySelectorAll('[data-testid=delegation-activity]')).toHaveLength(1);
-  expect(row.textContent).toContain('2/2 completed');
+  expect(row.textContent).toContain('2/4 completed');
   expect(row.querySelector('[data-testid=agent-elapsed]')?.textContent).toContain('1');
   // A child transcript must not claim that it launched its siblings.
   await unmount(running); running = null;
@@ -116,7 +119,7 @@ afterEach(async () => {
   document.body.innerHTML = '';
 });
 
-test('one model label covers a turn split across text and separate attachments, and the next turn names its own model', async ({ createStore }) => {
+test('one model label covers a turn split across text and separate attachments, which close the finished turn, and the next turn names its own model', async ({ createStore }) => {
   const { store: owner, client } = createStore({ delayMs: 0 });
   owner.attach(client);
   await owner.connect();
@@ -125,13 +128,18 @@ test('one model label covers a turn split across text and separate attachments, 
   const first = thread.turns[0]!;
   first.execution = { ...thread, providerId: 'codex', accountId: 'a-codex', model: 'gpt-6.1-sol', sessionGeneration: 0, selectionVersion: 0 };
   thread.turns.push({ ...first, id: 'turn-next', execution: { ...first.execution, model: 'gpt-6-astra' } });
+  const files = ['README.md', 'review-small.mp4', 'NOTES.md'].map((name, index): Message => ({
+    id: `m-file-${index}`, threadId: thread.id, turnId: first.id, role: 'assistant', state: 'complete', createdAt: index * 2 + 1,
+    parts: [{ type: 'file', name, mimeType: name.endsWith('.mp4') ? 'video/mp4' : 'text/markdown', data: 'ZmlsZQ==' }]
+  }));
+  // Published before, between and after what the agent wrote: the finished turn shows them under its last words.
   thread.messages = [
-    { id: 'm-intro', threadId: thread.id, turnId: first.id, role: 'assistant', state: 'complete', createdAt: 1, parts: [{ type: 'text', text: 'Here are the files.' }] },
-    ...['README.md', 'review-small.mp4', 'NOTES.md'].map((name, index): Message => ({
-      id: `m-file-${index}`, threadId: thread.id, turnId: first.id, role: 'assistant', state: 'complete', createdAt: index + 2,
-      parts: [{ type: 'file', name, mimeType: name.endsWith('.mp4') ? 'video/mp4' : 'text/markdown', data: 'ZmlsZQ==' }]
-    })),
-    { id: 'm-next', threadId: thread.id, turnId: 'turn-next', role: 'assistant', state: 'streaming', createdAt: 5, parts: [{ type: 'text', text: 'Next answer.\n\n' }] }
+    files[0]!,
+    { id: 'm-intro', threadId: thread.id, turnId: first.id, role: 'assistant', state: 'complete', createdAt: 2, parts: [{ type: 'text', text: 'Here are the files.' }] },
+    files[1]!,
+    { id: 'm-outro', threadId: thread.id, turnId: first.id, role: 'assistant', state: 'complete', createdAt: 4, parts: [{ type: 'text', text: 'That is all.' }] },
+    files[2]!,
+    { id: 'm-next', threadId: thread.id, turnId: 'turn-next', role: 'assistant', state: 'streaming', createdAt: 7, parts: [{ type: 'text', text: 'Next answer.\n\n' }] }
   ];
   running = mount(MessageList, { target: document.body, props: { store: owner, threadId: thread.id, messages: thread.messages } });
   flushSync();
@@ -139,7 +147,9 @@ test('one model label covers a turn split across text and separate attachments, 
   expect(labels).toHaveLength(2);
   expect(labels[0]!.closest('[data-mid]')?.getAttribute('data-mid')).toBe('m-intro');
   expect(labels[1]!.textContent).toContain('gpt-6-astra');
-  expect(document.querySelectorAll('[data-mid^=m-file-]')).toHaveLength(3);
+  expect([...document.querySelectorAll('[data-mid^=m-]')].map(node => node.getAttribute('data-mid')))
+    .toEqual(['m-intro', 'm-outro', 'm-file-0', 'm-file-1', 'm-file-2', 'm-next']);
+  expect(document.querySelector('[data-mid=m-file-2]')?.querySelector('[data-testid=turn-summary]')).not.toBeNull();
 });
 
 /**
@@ -153,6 +163,7 @@ const store = {
   messagesBefore: null,
   loadingOlder: false,
   loadOlder: async () => 0,
+  releaseOlder: () => 0,
   workflowsOf: () => []
 } as unknown as Store;
 
@@ -259,7 +270,11 @@ test('agent exchange summaries retain chronology without exposing their letters 
   expect(rows[2]).toContain('After coordination');
   expect(rows[3]).toContain('Deployment agent');
   expect(rows[3]).toContain('Restart postponed.');
-  expect([...document.querySelectorAll<HTMLElement>('[data-testid=agent-discussion-row]')].map(node => node.dataset.peer)).toEqual(['core-build/t-deploy', 'core-build/t-deploy']);
+  const exchanges = [...document.querySelectorAll<HTMLElement>('[data-testid=agent-discussion-row]')];
+  expect(exchanges.map(node => node.dataset.peer)).toEqual(['core-build/t-deploy', 'core-build/t-deploy']);
+  // Each row says which way it went: received on the right in the accent, sent on this agent's side.
+  expect(exchanges.map(node => [node.dataset.way, node.querySelector('[data-testid=agent-discussion-way]')?.textContent?.trim()]))
+    .toEqual([['in', 'Received from'], ['out', 'Sent to']]);
   expect(document.body.textContent).not.toContain('Boite agent coordination');
   expect(document.body.textContent).not.toContain('Awaiting provider turn');
 });
@@ -298,7 +313,7 @@ test('a completed mail-only turn keeps its footer below received and forwarded m
   const group = groups[0]!;
   const discussion = group.querySelector<HTMLElement>('[data-testid=agent-discussion-row]')!;
   expect(group.querySelectorAll('[data-testid=agent-discussion-row]')).toHaveLength(1);
-  expect(discussion.dataset).toMatchObject({ peer: 'core-peer/peer', count: '3' });
+  expect(discussion.dataset).toMatchObject({ peer: 'core-peer/peer', count: '3', way: 'both' });
   expect(discussion.querySelector('[data-testid=agent-discussion-title]')?.textContent).toBe('Peer');
   expect(discussion.querySelector('.counts')?.textContent?.replace(/\s/g, '')).toBe('12');
   expect(group.compareDocumentPosition(footers[1]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -327,6 +342,30 @@ test('the footer follows outgoing mail at the end of an ordinary answer', async 
   expect(articles().map(node => node.getAttribute('data-mid'))).toEqual(['msg-answer-with-mail', 'coordination:tail-mail']);
   expect(document.querySelectorAll('[data-testid=turn-summary]')).toHaveLength(1);
   expect(group.compareDocumentPosition(footer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
+test('a call finished in the running turn rereads only that turn files, never a finished one', async ({ createStore }) => {
+  window.localStorage.clear();
+  const { store: owner, client } = createStore({ delayMs: 0 });
+  owner.attach(client); await owner.connect(); await owner.open('t-trace');
+  const thread = owner.openThread!;
+  const done = { ...thread.turns[0]!, startedAt: 1, finishedAt: 15, status: 'done' as const };
+  const live = { ...done, id: 'turn-live', startedAt: 20, finishedAt: null, status: 'running' as const };
+  const write = (path: string) => ({ type: 'tool' as const, toolId: path, name: 'Write', input: { file_path: path, content: 'x' }, output: null, status: 'done' as const });
+  thread.memoryEvents = [];
+  thread.turns = [done, live];
+  thread.messages = [
+    { id: 'answer-done', threadId: thread.id, turnId: done.id, role: 'assistant', state: 'complete', createdAt: 10, parts: [write('a.ts')] },
+    { id: 'answer-live', threadId: thread.id, turnId: live.id, role: 'assistant', state: 'streaming', createdAt: 20, parts: [write('b.ts')] }
+  ];
+  running = mount(MessageList, { target: document.body, props: { store: owner, threadId: thread.id, messages: thread.messages } });
+  flushSync();
+  await vi.waitFor(() => expect(document.querySelectorAll('[data-testid=turn-files]')).toHaveLength(2));
+  const read = vi.spyOn(TurnFileCache.prototype, 'read');
+  onTestFinished(() => read.mockRestore());
+  thread.messages[1]!.parts.push(write('c.ts'));
+  flushSync();
+  expect(read.mock.calls.map(call => call[0])).toEqual([live.id]);
 });
 
 test('delegation mail opens its messages tab with local family identity, without duplicating coordination mail', async () => {
@@ -430,42 +469,6 @@ test('a burst of 33 agent messages stays in two counters as new mail arrives, an
   expect([...document.querySelectorAll<HTMLElement>('[data-testid=agent-discussion-row]')].map(node => node.dataset.count)).toEqual(['34', '1']);
 });
 
-test('a steward\'s thread and the thread its agent started keep their mail and prompt apart from the user\'s', async ({ ready }) => {
-  stubLayout(400);
-  const { store: owner, client } = await ready({ delayMs: 0, stewardDemo: true });
-  const [grant] = await client.call('stewards.list', {});
-  const steward = owner.threads.find(thread => thread.id === grant!.threadId)!;
-  const steer = (await client.call('collaboration.get', { threadId: steward.id })).messages.find(letter => letter.origin === 'steward')!;
-  await owner.open(steer.to.threadId);
-  await owner.loadCoordination(steer.to.threadId, false);
-  let thread = owner.openThread!;
-  const first = thread.messages.find(message => message.role === 'user')!;
-  running = mount(MessageList, { target: document.body, props: { store: owner, threadId: thread.id, messages: thread.messages } });
-  flushSync();
-  const prompt = document.querySelector<HTMLElement>(`[data-mid="${first.id}"] [data-testid=agent-prompt]`)!;
-  expect(prompt.classList.contains('agent')).toBe(true);
-  expect(prompt.querySelector('[data-testid=spawn-marker][data-direction=from]')?.textContent).toContain('Sent by the agent of');
-  expect(prompt.querySelector('[data-testid=spawn-marker-open]')?.textContent).toBe(steward.title);
-  expect(document.querySelectorAll('[data-testid=agent-prompt]')).toHaveLength(1);
-  const row = document.querySelector<HTMLButtonElement>('[data-testid=agent-discussion-row]');
-  expect(row?.classList.contains('steward')).toBe(true);
-  expect(row?.querySelector('[data-testid=agent-discussion-title]')?.textContent).toBe(steward.title);
-  expect(row?.querySelector('.tag')?.textContent).toBe('Steward');
-  await unmount(running!); running = null;
-
-  await owner.open(steward.id);
-  await owner.loadCoordination(steward.id, false);
-  thread = owner.openThread!;
-  running = mount(MessageList, { target: document.body, props: { store: owner, threadId: thread.id, messages: thread.messages } });
-  flushSync();
-  // The steward started that thread: the tag says so, and its notices stay one quiet line.
-  const rows = [...document.querySelectorAll<HTMLElement>('[data-testid=agent-discussion-row]')];
-  expect(rows.map(node => [node.querySelector('[data-testid=agent-discussion-title]')?.textContent, node.querySelector('.tag')?.getAttribute('data-relation')]))
-    .toEqual([[steer.toTitle, 'started']]);
-  expect([...document.querySelectorAll<HTMLElement>('[data-testid=agent-message-summary]')].map(node => [node.dataset.kind, node.textContent?.trim()]))
-    .toEqual([['notice', '1 thread notice']]);
-});
-
 /** A store whose thread still has older messages behind the window. */
 function pagedStore(overrides: Partial<Record<string, unknown>> = {}): {
   store: Store;
@@ -484,6 +487,7 @@ function pagedStore(overrides: Partial<Record<string, unknown>> = {}): {
       paged['loadingOlder'] = true;
       return new Promise<number>(() => {});
     },
+    releaseOlder: () => 0,
     workflowsOf: () => [],
     ...overrides
   };
@@ -593,8 +597,9 @@ test('a viewer opened from a row stays open, its files readable, once the rows l
   URL.createObjectURL = () => 'blob:capture';
   URL.revokeObjectURL = (url: string) => { revoked.push(url); };
   const messages = thread(500);
-  messages[250] = { id: 'm-250', threadId: 't-long', turnId: 'turn-1', role: 'user', parts: [{ type: 'image', mimeType: 'image/png', data: btoa('png'), alt: 'shot.png' }], state: 'complete', createdAt: 250 };
-  messages[251] = { ...messages[251]!, parts: [{ type: 'file', name: 'capture.png', mimeType: 'image/png', data: btoa('png bytes') }] };
+  // One turn of their own: a published file goes after the rest of its turn, which would part the two.
+  messages[250] = { id: 'm-250', threadId: 't-long', turnId: 'turn-250', role: 'user', parts: [{ type: 'image', mimeType: 'image/png', data: btoa('png'), alt: 'shot.png' }], state: 'complete', createdAt: 250 };
+  messages[251] = { ...messages[251]!, turnId: 'turn-250', parts: [{ type: 'file', name: 'capture.png', mimeType: 'image/png', data: btoa('png bytes') }] };
   stubLayout(messages.length * ESTIMATE);
   const owner = { ...store, openThread: null, composerStates: {}, busy: false } as unknown as Store;
   running = mount(MessageList, { target: document.body, props: { store: owner, threadId: 't-long', messages } });
@@ -651,7 +656,8 @@ test('a window opened around the reader pages down as they reach its bottom, and
   await live.open('t-long');
   expect(live.messagesAfter).toBe('m-long-119');
   const thread = live.openThread!;
-  stubLayout(thread.messages.length * ESTIMATE);
+  // The 80 messages above the window are sized too, so the list is that much taller.
+  stubLayout((thread.messages.length + 80) * ESTIMATE);
   running = mount(MessageList, { target: document.body, props: { store: live, threadId: 't-long', get messages() { return thread.messages; } } });
   await settle();
   const timeline = document.querySelector<HTMLElement>('[data-testid=timeline]')!;
@@ -664,6 +670,8 @@ test('a window opened around the reader pages down as they reach its bottom, and
   expect(thread.messages.at(40)?.id).toBe('m-long-120');
   expect(jumpButton()).not.toBeNull();
 
+  // The last page holds the end of the thread: the list spans all 400 messages from then on.
+  scrollHeight = 400 * ESTIMATE;
   jumpButton()!.click();
   await vi.waitFor(() => expect(live.messagesAfter).toBeNull());
   expect(thread.messages.at(-1)?.id).toBe('m-long-399');
@@ -809,6 +817,109 @@ test('the top of a paged list asks the store for the page above it, once', async
   timeline?.dispatchEvent(new Event('scroll'));
   await settle();
   expect(paged.calls()).toBe(1);
+});
+
+test('a first page too short to scroll asks for the page above it at once; a list past the screen waits for the reader', async () => {
+  // A first page holds about one screen: with nothing to scroll, no scroll event would ever ask.
+  const short = thread(3);
+  stubLayout(short.length * ESTIMATE);
+  const paged = pagedStore({ openThread: { id: 't-short', turns: [], messages: [] } });
+  running = mount(MessageList, { target: document.body, props: { store: paged.store, threadId: 't-short', messages: short } });
+  await settle();
+  expect(paged.calls()).toBe(1);
+  await unmount(running); running = null;
+
+  const long = thread(200);
+  stubLayout(long.length * ESTIMATE);
+  const tall = pagedStore({ openThread: { id: 't-tall', turns: [], messages: [] } });
+  running = mount(MessageList, { target: document.body, props: { store: tall.store, threadId: 't-tall', messages: long } });
+  await settle();
+  expect(tall.calls()).toBe(0);
+  await unmount(running); running = null;
+
+  // A list laid out with no height is hidden: it waits until it is shown.
+  stubLayout(short.length * ESTIMATE);
+  Object.defineProperty(Element.prototype, 'clientHeight', { configurable: true, get: () => 0 });
+  const hidden = pagedStore({ openThread: { id: 't-hidden', turns: [], messages: [] } });
+  running = mount(MessageList, { target: document.body, props: { store: hidden.store, threadId: 't-hidden', messages: short } });
+  await settle();
+  expect(hidden.calls()).toBe(0);
+});
+
+test('the scrollbar spans the whole thread, and a drag to the top reads the first page directly', async ({ createStore }) => {
+  const { store: live, client } = createStore({ delayMs: 0, long: true });
+  live.attach(client);
+  await live.connect();
+  await live.open('t-long');
+  const asked = vi.spyOn(live, 'loadRange');
+  const older = vi.spyOn(live, 'loadOlder');
+  stubLayout(400 * ESTIMATE);
+  running = mount(MessageList, { target: document.body, props: { store: live, threadId: 't-long', messages: live.openThread!.messages } });
+  await settle();
+
+  // Pinned to the first page, the 360 messages above it already worth their place.
+  expect(shownIds().at(-1)).toBe('m-long-399');
+  expect(Number.parseFloat(document.querySelector<HTMLElement>('[data-testid=timeline-above]')?.style.height ?? '0')).toBeGreaterThanOrEqual(360 * ESTIMATE);
+  expect(asked).not.toHaveBeenCalled();
+
+  const timeline = document.querySelector<HTMLElement>('[data-testid=timeline]')!;
+  timeline.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
+  timeline.scrollTop = 0;
+  timeline.dispatchEvent(new Event('scroll'));
+  await settle();
+  // What is on screen is a gap row, and the page asked for starts at the first message.
+  expect(document.querySelector<HTMLElement>('[data-testid=timeline-gap]')?.dataset['from']).toBe('0');
+  await vi.waitFor(() => expect(asked).toHaveBeenCalledWith(0, 120, expect.any(Function)));
+  await vi.waitFor(() => expect(live.openThread!.messages[0]?.id).toBe('m-long-0'));
+  // No walk down the cursor: the pages between were never read.
+  expect(older).not.toHaveBeenCalled();
+  expect(live.openThread!.messages).toHaveLength(160);
+});
+
+test('a reader scrolling up without a pause gets the page above before its gap reaches the screen', async ({ createStore }) => {
+  const { store: live, client } = createStore({ delayMs: 0, long: true });
+  live.attach(client);
+  await live.connect();
+  await live.open('t-long');
+  const asked = vi.spyOn(live, 'loadRange');
+  stubLayout(400 * ESTIMATE);
+  running = mount(MessageList, { target: document.body, props: { store: live, threadId: 't-long', messages: live.openThread!.messages } });
+  await settle();
+
+  const timeline = document.querySelector<HTMLElement>('[data-testid=timeline]')!;
+  timeline.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
+  // A wheel moves the view more often than frames are drawn. An ask put off by every move was never
+  // sent: the reader crossed the 360 unread messages on their estimate and landed at the top.
+  const gapBottom = 360 * ESTIMATE;
+  for (let top = timeline.scrollTop; top > gapBottom + 2 * VIEW_HEIGHT && asked.mock.calls.length === 0; top -= 40) {
+    timeline.scrollTop = top;
+    timeline.dispatchEvent(new Event('scroll'));
+    await new Promise((resolve) => setTimeout(resolve, 4));
+  }
+  expect(asked).toHaveBeenCalled();
+  expect(timeline.scrollTop).toBeGreaterThan(gapBottom + 2 * VIEW_HEIGHT);
+});
+
+test('with history still missing above, a streamed token rebuilds neither the rows nor the window', async ({ createStore }) => {
+  const { store: live, client } = createStore({ delayMs: 0, long: true });
+  live.attach(client);
+  await live.connect();
+  await live.open('t-long');
+  const thread = live.openThread!;
+  stubLayout(400 * ESTIMATE);
+  running = mount(MessageList, { target: document.body, props: { store: live, threadId: 't-long', get messages() { return thread.messages; } } });
+  await settle();
+  const last = thread.messages.at(-1)!;
+  const part = last.parts[0];
+  if (part?.type !== 'text') throw new Error('the long thread ends on a text part');
+  last.state = 'streaming';
+  await settle();
+  const before = { ...windowStats };
+  for (let delta = 0; delta < 100; delta += 1) { part.text += ' token'; flushSync(); }
+  await settle();
+  // The gap row in front of the 40 messages is the same row: a delta reads no slot and moves no window.
+  expect(windowStats.recomputes - before.recomputes).toBeLessThan(20);
+  expect(windowStats.slots - before.slots).toBeLessThan(20);
 });
 
 test('a thread whose first message is loaded asks for nothing at the top', async () => {
@@ -1049,12 +1160,18 @@ function rowsDrawn(): HTMLElement[] {
   return Array.from(document.querySelectorAll<HTMLElement>('[data-testid=message], [data-testid=message-rest]'));
 }
 
+/** The heavy thread whole: its first page holds about one screen, and the tests below walk rows, not pages. */
+async function openWhole(live: Store, threadId: string): Promise<void> {
+  await live.open(threadId);
+  while (live.messagesBefore !== null) if (await live.loadOlder() === 0) throw new Error(`${threadId} stopped paging`);
+}
+
 test('a turn of a thousand calls is drawn as a window of rows, and only its first row names the model', async ({ ready }) => {
   window.localStorage.clear();
   const { store: live } = await ready({ delayMs: 0, heavy: true });
-  await live.open('t-heavy');
+  await openWhole(live, 't-heavy');
   const messages = live.openThread?.messages ?? [];
-  // The whole 11.5 MiB conversation fits one page: nothing is left to load above it.
+  // Paged in whole: nothing is left to load above it.
   expect(messages).toHaveLength(40);
   expect(live.messagesBefore).toBeNull();
   const giant = messages.reduce((a, b) => (b.parts.length > a.parts.length ? b : a));
@@ -1102,7 +1219,7 @@ test('a turn of a thousand calls is drawn as a window of rows, and only its firs
 test('a scroll inside the rows already drawn redraws nothing and reads no tool call again', async ({ ready }) => {
   window.localStorage.clear();
   const { store: live } = await ready({ delayMs: 0, heavy: true });
-  await live.open('t-heavy');
+  await openWhole(live, 't-heavy');
   const messages = live.openThread?.messages ?? [];
   stubLayout(60_000);
   running = mount(MessageList, { target: document.body, props: { store: live, threadId: 't-heavy', messages } });
@@ -1133,7 +1250,7 @@ test('Ctrl+F opens the row of a long message that holds the match, not its first
   window.localStorage.clear();
   Range.prototype.getBoundingClientRect ??= () => new DOMRect(0, 0, 0, 0);
   const { store: live } = await ready({ delayMs: 0, heavy: true });
-  await live.open('t-heavy');
+  await openWhole(live, 't-heavy');
   const messages = live.openThread?.messages ?? [];
   const giant = messages.reduce((a, b) => (b.parts.length > a.parts.length ? b : a));
   // A word no other part holds, in a paragraph deep inside the giant message.
@@ -1168,7 +1285,7 @@ test('Ctrl+F opens the row of a long message that holds the match, not its first
 test('a place read inside a long message is saved by message with its row, and opened again on that row', async ({ ready }) => {
   window.localStorage.clear();
   const { store: live } = await ready({ delayMs: 0, heavy: true });
-  await live.open('t-heavy');
+  await openWhole(live, 't-heavy');
   const messages = live.openThread?.messages ?? [];
   const giant = messages.reduce((a, b) => (b.parts.length > a.parts.length ? b : a));
   stubLayout(60_000);

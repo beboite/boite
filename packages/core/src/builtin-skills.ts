@@ -72,7 +72,107 @@ duplicate.
 `,
 };
 
-export const BUILTIN_SKILLS: readonly BuiltinSkill[] = [REPORT_ISSUE_SKILL];
+export const PROVE_IT_SKILL: BuiltinSkill = {
+  name: 'boite-prove-it',
+  description: 'Check that a change works before calling it done, and put the proof in the answer: the deciding output, a capture, a clip or a boite view page.',
+  body: `# Prove it
+
+A change is done once you have seen it work. Size the check to the change: a
+typo needs none, a refactor needs its tests, a bug fix needs the symptom gone,
+a change on screen needs a look at the screen.
+
+## Check
+
+- Run the project's own commands (tests, type check, build) on the final
+  state. After a later edit, rerun only what it touched.
+- A bug: reproduce it first when you can, then show it no longer happens.
+- A visual change: capture the screen the user would look at and open the
+  image yourself. Desktop first, phone when the change reaches it.
+- Another agent's work: read its diff and its deciding output before you rely
+  on it.
+- When a login, a device or production stands in the way, run the closest
+  thing that does run and say what stays unchecked. A check you did not run
+  never passed.
+
+## Show
+
+Put the proof where the user reads, in the answer:
+
+| Proof | How |
+|---|---|
+| A command's result | The one deciding line, such as \`42 pass, 0 fail\` |
+| A screen, a render, a clip | \`boite attach <file>\` |
+| Before and after | Both files attached, or one \`boite view\` page side by side |
+| Numbers, a timeline, a comparison | A \`boite view\` page (skill boite-visual) |
+
+A link to a Markdown report proves nothing to the user: it opens as raw text.
+Notes for the next agent go in the project's docs, not in the answer.
+
+Close with what you ran, what it showed and what you did not verify, in one
+or two lines.
+`,
+};
+
+export const VISUAL_SKILL: BuiltinSkill = {
+  name: 'boite-visual',
+  description: 'Explain with a diagram, chart or simulator drawn by boite view, or an HTML file to keep. For a visual, a schema, a catch-up or a choice between options.',
+  body: `# Show it visually
+
+Three commands, three jobs:
+
+| Command | For |
+|---|---|
+| \`boite view <page.html>\` | A page drawn in your answer, after the paragraph it explains, in the app's look. The default for explaining. |
+| \`boite attach <file>\` | A file the user keeps or opens elsewhere: a capture, a clip, a PDF, a standalone HTML page. |
+| \`boite preview <file.html>\` | The project's own HTML, opened in the panel to try. |
+
+Read \`boite view help\` before your first page: it gives the page rules,
+classes and colors. This skill is about what to draw.
+
+## Start from the question
+
+Name the one question the reader has, then draw what answers it:
+
+| Question | Drawing |
+|---|---|
+| In what order? | A connected sequence with inputs, outputs and failure branches |
+| What belongs where? | A map with boundaries and what crosses them |
+| What if I pick this? | A switch that changes the diagram and its consequence together |
+| Why did it fail? | The expected path and the point where the real one stopped |
+| Which option? | The options side by side, the deciding difference marked |
+| How much? | A chart with real values, units and a baseline |
+
+A row of cards shows no cause and effect: draw the arrows and label what
+travels along them.
+
+## Keep it honest and small
+
+- Separate what was done and checked, what is proposed and what is unknown.
+  Mark invented example values as examples.
+- The first screen carries the answer; optional depth goes in \`<details>\`.
+- A control earns its place when using it changes what the reader sees. No
+  tabs that only split paragraphs.
+- Use the user's language and words, and define a term the first time.
+- Keep your written answer short and do not repeat what the page shows.
+
+## A file to keep
+
+When the user wants something to keep, share or print, write one
+self-contained HTML file (inline CSS and JavaScript, embedded images, nothing
+loaded from the network) and send it with \`boite attach\`. Run
+\`boite view\` on the same file to show it in the chat as well; its publish
+check catches script errors, remote resources and sideways scrolling.
+
+## Check
+
+\`boite view\` refuses a broken page and says why. For a page with controls,
+open the file in \`boite browser\`, use each control and read
+\`boite browser diagnostics\` before you publish.
+`,
+};
+
+/** The diagnostic skill comes first: it is listed only while agents may read the logs. */
+export const BUILTIN_SKILLS: readonly BuiltinSkill[] = [REPORT_ISSUE_SKILL, PROVE_IT_SKILL, VISUAL_SKILL];
 
 function render(skill: BuiltinSkill): string {
   return `---\nname: ${skill.name}\ndescription: ${JSON.stringify(skill.description)}\n---\n\n${skill.body}`;

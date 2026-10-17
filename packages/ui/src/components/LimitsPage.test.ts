@@ -1,6 +1,7 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import type { AccountQuota } from '@boite/contracts';
+import { RpcErrorCode, type AccountQuota } from '@boite/contracts';
+import { RpcFailure } from '../lib/client';
 import { SvelteMap } from 'svelte/reactivity';
 import { Store } from '../lib/store.svelte';
 import { strings } from '../lib/strings';
@@ -75,15 +76,27 @@ test('the last reading stays up while the next one loads, and only signed-in acc
   expect(document.querySelector('[data-testid="usage-limits"]')!.classList.contains('loading')).toBe(false);
 });
 
-test('a device is told where the limits are read, and asks for none', async () => {
-  const call = vi.fn(async () => []);
+test('a paired device draws the limit bars the core holds, with no refresh, switch or connect button', async () => {
+  const call = vi.fn(async () => [quota('Claude')]);
   mounted = mount(LimitsPage, { target: document.body, props: {
-    store: { client: { call, on: () => () => {} }, connection: 'ready', owner: false } as unknown as Store,
+    store: { client: { call, on: () => () => {} }, connection: 'ready', owner: false, endpointUrl: 'device-core', accounts: [] } as unknown as Store,
   } });
   await settle();
-  expect(document.querySelector('[data-testid="usage-limits-owner"]')).not.toBeNull();
+  expect(document.querySelectorAll('[data-testid="usage-limit-account"]')).toHaveLength(1);
   expect(document.querySelector('[data-testid="limits-refresh"]')).toBeNull();
-  expect(call).not.toHaveBeenCalled();
+  expect(document.querySelector('[data-testid="limits-tracked"]')).toBeNull();
+  expect(call).toHaveBeenCalledWith('quotas.list', expect.objectContaining({ refresh: false }));
+});
+
+test('a core that refuses a paired device its limits asks for an update instead of an error', async () => {
+  const call = vi.fn(async () => { throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'quotas.list is for the owner only' }); });
+  mounted = mount(LimitsPage, { target: document.body, props: {
+    store: { client: { call, on: () => () => {} }, connection: 'ready', owner: false, endpointUrl: 'device-older-core', accounts: [] } as unknown as Store,
+  } });
+  await settle();
+  expect(document.querySelector('[data-testid="limits-outdated"]')!.textContent).toBe(strings.quotas.outdated);
+  expect(document.querySelector('[data-testid="limits-error"]')).toBeNull();
+  expect(document.querySelector('[data-testid="limits-empty"]')).toBeNull();
 });
 
 test('the read waits for the socket, a failure shows with a retry, and a kept reading reads as stale', async () => {
@@ -161,7 +174,7 @@ test('renaming a tracked subscription updates cached cards immediately and cance
     expect(row().querySelector('.account')!.textContent).toBe('Personal');
     // No quota refresh is needed and the cache itself still has the older label.
     expect(read.mock.calls.filter(([method]) => method === 'quotas.list')).toHaveLength(1);
-    expect(quotaReader(store.endpointUrl ?? 'here').rows!.find(row => row.accountId === 'a-codex')!.label).toBe('Default');
+    expect(quotaReader(store.endpointUrl ?? 'here', store.core).rows!.find(row => row.accountId === 'a-codex')!.label).toBe('Default');
     row().querySelector<HTMLButtonElement>('[data-testid="account-rename"]')!.click(); flushSync();
     row().querySelector<HTMLInputElement>('[data-testid="account-name"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     await settle();
@@ -202,6 +215,28 @@ test('Douane quotas are native cards grouped by provider, with plan, status, cre
   } finally { store.detach(); client.close(); }
 });
 
+test('a paired phone shows Douane as native bars, never its embedded dashboard', async () => {
+  const store = new Store();
+  const client = new FakeClient({ delayMs: 0 });
+  store.attach(client);
+  await store.connect();
+  await client.call('subscriptionProxy.configure', { subscriptionProxy: douane });
+  store.detach();
+  client.becomes('session');
+  const phone = new Store();
+  phone.attach(client);
+  await phone.connect();
+  expect(phone.owner).toBe(false);
+  mounted = mount(LimitsPage, { target: document.body, props: { store: phone } });
+  try {
+    await vi.waitFor(() => expect(document.querySelectorAll('[data-testid="gateway-quotas"]')).toHaveLength(3));
+    expect(document.querySelector('[data-testid="subscription-proxy-dashboard-page"]')).toBeNull();
+    expect(document.querySelector('iframe')).toBeNull();
+    expect(document.querySelector('[data-testid="limits-error"]')).toBeNull();
+    expect(document.querySelector('[data-testid="gateway-quotas-error"]')).toBeNull();
+  } finally { phone.detach(); client.close(); }
+});
+
 test('CLIProxyAPI and a Douane without the route keep the embedded dashboard', async () => {
   for (const [kind, status] of [['cliproxyapi', 'unsupported'], ['douane', 'unsupported']] as const) {
     const call = vi.fn(async (method: string) => method === 'subscriptionProxy.quotas'
@@ -233,4 +268,19 @@ test('a failed Douane read shows once above its dimmed last bars', async () => {
   expect(document.querySelector('[data-testid="gateway-quotas-error"]')!.textContent).toContain(error);
   expect(document.body.textContent!.split(error)).toHaveLength(2);
   expect(document.querySelector('[data-testid="usage-limit-account"]')!.classList.contains('stale')).toBe(true);
+});
+test('the automatic resume switch saves the setting and a refusal puts it back', async () => {
+  const call = vi.fn(async () => [quota('Claude')]);
+  const saveSettings = vi.fn(async () => false);
+  const store = { client: { call, on: () => () => {} }, connection: 'ready', owner: true, endpointUrl: 'resume-core', accounts: [],
+    settings: { autoResumeLimitedThreads: false }, saveSettings } as unknown as Store;
+  mounted = mount(LimitsPage, { target: document.body, props: { store } });
+  await settle();
+  const toggle = document.querySelector<HTMLInputElement>('[data-testid="setting-auto-resume"]')!;
+  expect(toggle.checked).toBe(false);
+  expect(document.querySelector('#settings-limit-resume')?.textContent).toContain(strings.quotas.autoResume);
+  toggle.click();
+  await settle();
+  expect(saveSettings).toHaveBeenCalledWith({ autoResumeLimitedThreads: true });
+  expect(toggle.checked).toBe(false);
 });

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { ChevronRight } from '@lucide/svelte';
-  import { threadActive } from '@boite/contracts';
+  import { threadBusy } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import StatusMark from './StatusMark.svelte';
@@ -8,7 +8,8 @@
   import Elapsed from './Elapsed.svelte';
 
   let { store, threadId }: { store: Store; threadId: string } = $props();
-  let active = $derived((store.delegation?.agents ?? []).filter(agent => threadActive(agent.thread.status)));
+  /** At work in a turn, or waiting on its own background work: either way its result has not come back. */
+  let active = $derived((store.delegation?.agents ?? []).filter(agent => threadBusy(agent.thread)));
   let native = $derived((store.delegation?.nativeAgents ?? []).filter(agent => agent.status === 'running'));
   let runs = $derived(store.workflowsOf(threadId).filter(run => run.status === 'running'));
   let count = $derived(active.length + native.length);

@@ -8,7 +8,7 @@ test('the fake executes bounded groups, keeps native contexts distinct and refus
   const client = new FakeClient({ delayMs: 0 }); await client.connect();
   try {
     const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
-    const make = (name: string) => client.call('agents.profile.save', { value: { name, domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' as const }, status: 'active' as const, tools: ['messages'], accountIntegration: 'provider' as const } });
+    const make = (name: string) => client.call('agents.profile.save', { value: { name, domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' as const }, status: 'active' as const, tools: ['messages'] } });
     const a = await make('A'); const b = await make('B');
     const group = await client.call('agents.group.save', { value: { name: 'Round table', memberIds: [a.id, b.id], mode: 'autonomous', maxTurns: 3, maxTurnsPerAgent: 2, paused: false } });
     await client.call('agents.message.send', { scope: { kind: 'group', id: group.id }, recipientIds: [a.id], text: 'Review this design', requestId: 'fake_group_001' });
@@ -27,7 +27,7 @@ test('the fake keeps a fired once routine done, and a new date saved while pause
   const client = new FakeClient({ delayMs: 0 }); await client.connect();
   try {
     const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
-    const agent = await client.call('agents.profile.save', { value: { name: 'Scout', domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' as const }, status: 'active' as const, tools: ['messages'], accountIntegration: 'provider' as const } });
+    const agent = await client.call('agents.profile.save', { value: { name: 'Scout', domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' as const }, status: 'active' as const, tools: ['messages'] } });
     const routine = await client.call('agents.routine.save', { value: { agentId: agent.id, name: 'Tomorrow', prompt: 'Look once', schedule: { kind: 'once', at: Date.now() + 86400000 }, enabled: true, nextAt: null, lastWorkId: null, lastScheduledAt: null } });
     await client.call('agents.routine.run', { routineId: routine.id, requestId: 'fake_once_001' });
     const ran = (await client.call('agents.snapshot', {})).routines.find(r => r.id === routine.id)!;
@@ -44,7 +44,7 @@ test('the fake keeps a fired once routine done, and a new date saved while pause
 test('the fake denies persistent configuration and engine shutdown to paired devices', async () => {
   const client = new FakeClient({ delayMs: 0, principal: 'session' }); await client.connect();
   try {
-    await expect(client.call('agents.limits.set', { paused: false, backgroundConcurrency: 8, kebaccExperiment: true })).rejects.toThrow('owner');
+    await expect(client.call('agents.limits.set', { paused: false, backgroundConcurrency: 8 })).rejects.toThrow('owner');
     await expect(client.call('core.shutdown', {})).rejects.toThrow('owner');
     expect((await client.call('agents.snapshot', {})).profiles).toEqual([]);
   } finally { client.close(); }
@@ -73,7 +73,7 @@ test('the fake entrusts a thread like the core: refusals, the take-over message,
   const client = new FakeClient({ delayMs: 0, delegationDemo: true }); await client.connect();
   try {
     const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
-    const agent = await client.call('agents.profile.save', { value: { name: 'Ada', domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' as const }, status: 'active' as const, tools: ['messages'], accountIntegration: 'provider' as const } });
+    const agent = await client.call('agents.profile.save', { value: { name: 'Ada', domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' as const }, status: 'active' as const, tools: ['messages'] } });
     const threads = await client.call('threads.list', { includeArchived: true });
     const child = threads.find(t => t.parentThreadId)!;
     const thread = threads.find(t => !t.parentThreadId && !t.agentSessionId && !t.archived && t.projectId && t.status === 'idle')!;
@@ -93,5 +93,53 @@ test('the fake entrusts a thread like the core: refusals, the take-over message,
     expect(done.text).toBe(last.parts.flatMap(p => p.type === 'text' ? [p.text] : []).join('\n'));
     expect(snapshot.entrusted).toEqual([]);
     expect(opened.activity?.goal?.status).toBe('complete');
+  } finally { client.close(); }
+});
+
+test('the fake keeps entrusted projects and moves every brain with the root, each in a folder of its own', async () => {
+  const client = new FakeClient({ delayMs: 0 }); await client.connect();
+  try {
+    const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
+    const project = (await client.call('projects.list', {})).find(p => p.kind !== 'drafts')!;
+    const make = (name: string) => client.call('agents.profile.save', { value: { name, domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' as const }, status: 'active' as const, tools: ['messages'], projectIds: [project.id] } });
+    const ada = await make('Ada'); const lin = await make('Lin');
+    expect((await client.call('agents.snapshot', {})).profiles.find(a => a.id === ada.id)?.projectIds).toEqual([project.id]);
+    expect((await client.call('agents.runtime.get', { agentId: ada.id })).subagents).toMatchObject({ enabled: true, paused: false, anyModel: true });
+
+    const before = await client.call('agents.snapshot', {});
+    expect(before.brainRoot).toEqual({ path: '/agent-workspaces', custom: false });
+    await expect(client.call('agents.brain.root', { path: 'relative/brains' })).rejects.toThrow('absolute');
+    expect((await client.call('agents.snapshot', {})).brainRoot).toEqual(before.brainRoot);
+    // A folder that already holds files, a brain repository say, takes the brains in folders of their own.
+    expect(await client.call('agents.brain.root', { path: project.path })).toEqual({ path: project.path, custom: true });
+    expect((await client.call('agents.brain.get', { agentId: ada.id })).path).toBe(`${project.path}/ada`);
+
+    expect(await client.call('agents.brain.root', { path: '/srv/brains/' })).toEqual({ path: '/srv/brains', custom: true });
+    expect((await client.call('agents.snapshot', {})).brainRoot).toEqual({ path: '/srv/brains', custom: true });
+    expect((await client.call('agents.brain.get', { agentId: ada.id })).path).toBe('/srv/brains/ada');
+    expect((await client.call('agents.brain.get', { agentId: lin.id })).path).toBe('/srv/brains/lin');
+    await client.call('agents.brain.root', { path: null });
+    expect((await client.call('agents.brain.get', { agentId: ada.id })).path).toBe(`/agent-workspaces/${ada.id}/brain`);
+  } finally { client.close(); }
+});
+
+test('the agents demo seeds an entrusted project, a reply with a readable picture and its memory pass, and a notice', async () => {
+  const client = new FakeClient({ delayMs: 0, agentsDemo: true }); await client.connect();
+  try {
+    const snapshot = await client.call('agents.snapshot', {});
+    const project = (await client.call('projects.list', {})).find(p => p.kind !== 'drafts')!;
+    const [agent] = snapshot.profiles;
+    expect(agent?.projectIds).toEqual([project.id]);
+    const workOf = (runId: string | null) => snapshot.work.find(w => w.id === snapshot.runs.find(r => r.id === runId)?.workId);
+    const reply = snapshot.messages.find(m => m.files?.length)!;
+    expect(workOf(reply.sourceRunId)?.memory).toMatchObject({ status: 'done' });
+    const file = reply.files![0]!;
+    expect(file.part.mimeType).toMatch(/^image\//);
+    expect(await client.call('artifacts.read', { threadId: file.threadId, messageId: file.messageId, artifactId: file.part.id })).toMatchObject({ name: file.part.name });
+    expect(snapshot.sessions.find(s => s.agentId === agent!.id && s.scope.kind === 'agent')?.threadId).toBe(file.threadId);
+    const notice = snapshot.messages.find(m => workOf(m.sourceRunId)?.purpose === 'notice');
+    expect(notice?.replyTo).toBeNull();
+    // Dated in the order the core would have written them.
+    expect(snapshot.messages.map(m => m.senderId === null ? 'user' : m.files ? 'reply' : 'notice')).toEqual(['user', 'reply', 'notice']);
   } finally { client.close(); }
 });

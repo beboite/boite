@@ -38,8 +38,11 @@ xterm.js. xterm loads the first time a terminal opens, never at startup.
 - `terminals.open` starts a shell of the thread at the client's size, or attaches
   to the one already running and resizes it. The answer carries the last
   256 KiB of output, so a reload or a second window redraws the screen.
-- What the shell prints arrives as `terminal.output`, what the user types goes
-  back through `terminals.write`, and `terminals.resize` follows the drawer.
+- What the shell prints arrives as `terminal.output`, only on the connections
+  that attached that shell; its `terminal.exited` reaches every owner window,
+  so one that lays the pane out without having attached it drops it. What the
+  user types goes back through `terminals.write`, and `terminals.resize`
+  follows the drawer.
   The first output after a quiet moment goes out at once, so a typed key echoes
   without delay; output that keeps coming is sent every 16 ms as one event.
   The 256 KiB snapshot is exactly what those events carried so far.
@@ -51,8 +54,10 @@ xterm.js. xterm loads the first time a terminal opens, never at startup.
   shells, oldest first. A core without it runs a single shell per thread, and
   the drawer then offers no tab or split.
 - `terminals.close` stops the shell and waits for it to exit.
-  `terminal.exited` follows, and the drawer closes. Descendant termination
-  follows the platform limits below.
+  `terminal.exited` follows, and the drawer closes. On Linux the core first
+  signals the shell's descendants, checked by birth time, because a job started
+  in the background has its own process group and outlives the shell's hang-up.
+  Other descendant termination follows the platform limits below.
 - Archiving the thread and stopping the core close its shells too.
 
 A shell runs under the trace id `terminal:<threadId>`, or

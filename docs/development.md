@@ -27,9 +27,11 @@ with mode `0600`; the owner requests a phone link through Settings or
 `pairing.grant`. Stop the scratch core before removing its directory.
 
 One core holds `<dataDir>/core.lock`. Another refuses to start on the same data.
-A dead holder can be replaced. Windows and Linux also compare process start
-time to reject a reused PID more than two seconds newer than the lock; macOS
-retains a lock while its recorded PID is alive.
+A dead holder can be replaced. Linux compares the holder's start key (boot id
+and start ticks) with the one in the lock, so a stepped wall clock never frees
+it; Windows compares process start time to reject a reused PID more than two
+seconds newer than the lock; macOS retains a lock while its recorded PID is
+alive.
 
 | Option | Meaning |
 | --- | --- |
@@ -81,9 +83,16 @@ one per test process with `BOITE_E2E_PREBUILT_UI=1`, or falls back to Vite.
 Both modes expose the fixture workspace through `globalThis.__boiteTest`, so
 tests that only need the Store can use the prebuilt bundle. Close each scenario's
 browsers in `afterEach` to release their rendering resources before the next test.
+Give browser shutdown hooks an explicit 60-second budget: captured-process exit
+can take 30 seconds and profile removal retries for another 15 seconds. Close
+the fixture server in `finally` so a browser cleanup failure still releases it.
 Pages importing `/src/...` call `startDevUi` directly. That server warms their
 reachable modules before browser interactions. Fixture bundles enable the fake
 client separately from the production assets staged in installers.
+
+For native mouse selection, move to the text and await `document.hasFocus()`
+before pressing. A headless page can already have an active element while its
+window is unfocused; the first mouse move activates it asynchronously.
 
 Pairing, token and remote-core query parameters are removed from the address
 bar. The grant is exchanged once; only an authenticated endpoint and the
@@ -119,7 +128,9 @@ the phone's options sheet. This device preference preserves the draft's choice
 and the project's default.
 
 With `worktree: {}`, `threads.create` runs `git worktree add -b` before writing
-the thread. The temporary branch is `boite/wt-<id>`, unless explicitly named;
+the thread, with `-c checkout.workers=0` (one checkout worker per core) unless
+the repository's or the user's git config sets `checkout.workers`; the core
+reads that once per repository. The temporary branch is `boite/wt-<id>`, unless explicitly named;
 the directory is `<project>/.boite/worktrees/wt-<id>` by default. A missing Git
 executable, a non-repository project or an existing branch is refused by name
 without writing a thread. Git calls appear in the thread's trace. The header
@@ -133,7 +144,8 @@ Shared storage uses `<project-name>-<project-id>/wt-<id>` to separate repositori
 with matching names. A changed setting affects new worktrees only. Existing
 threads and prepared workspaces retain their recorded path. Nested directories
 are excluded through Git's local `info/exclude`, without changing `.gitignore`.
-Archiving retains the worktree and branch; `worktrees.remove` owns removal.
+Archiving retains the worktree and branch; `worktrees.remove` and the
+[settled worktree cleanup](#settled-worktree-cleanup) own removal.
 
 The title operation can rename a temporary branch to `boite/<slug>`, adding
 `-2`, `-3` when needed. It preserves the directory, commits and session.
@@ -159,13 +171,75 @@ thread, even with `force`. Without `force`, it also refuses dirty or unmerged
 worktrees. Removal uses `git worktree remove`, branch deletion and
 `git worktree prune --expire 1.hour.ago`. A missing directory loses its
 registration only; `branchDeleted: false` records when Git keeps the branch.
-Both RPCs trace Git under `worktrees:<projectId>`.
+Both RPCs trace Git under `worktrees:<projectId>`. The list describes four
+worktrees at once and keeps git's order. Its reads go through the Changes
+panel's reader (deadline, shared read slots, no index lock, no fsmonitor hook).
+A thread counts as a holder only when it belongs to the project or its folder,
+as written, lies in the project, its worktree folder or a listed worktree.
 
 Settings > Worktrees and Manage project offer the same controls. Removing clean
 worktrees requires no force; ignored dependencies and build output leave with
 the directory. Dirty or unmerged removal asks first. Archive alone never removes
 a branch or worktree. Restoring a thread whose worktree was removed retains its
 `cwd`; sending or compacting refuses the missing folder instead of recreating it.
+
+### Settled worktree cleanup
+
+The core removes a worktree it created once its work is settled
+(`worktree-cleanup.ts`). The first pass runs five minutes after startup, then
+every ten minutes, with at most eight removals, eight merge proofs and two
+minutes per pass. A worktree qualifies when all of these hold:
+
+- It lies under the project's `.boite/worktrees` or the project's folder in the
+  current shared storage. Manual worktrees elsewhere are never touched.
+- Every thread whose `cwd` is that folder or below it was archived, marked done
+  or deleted at least an hour ago, and none has a live process or terminal. An
+  archive written by an older core counts from `updatedAt`.
+- With no thread standing there, the branch starts with `boite/` (or HEAD is
+  detached), no draft reservation names the folder, and git created it at least
+  an hour ago (the `.git` file's date).
+- `git status` lists nothing, untracked files included. Ignored files such as
+  dependencies and build output leave with the folder.
+- HEAD is on another local branch or remote-tracking ref, or a merged, non-fork
+  GitHub pull request has that exact commit as its head. The proof is the one
+  [merged pull request archives](#merged-pull-request-archives) use, so a squash
+  or rebase merge counts. A worktree no thread stands in is asked for by branch
+  name only.
+
+`WorktreeSweep.removeSettled` reads the worktree again and applies the refusals
+of `worktrees.remove` without force, except that a proved merged head passes.
+It runs `git worktree remove` without `--force`, so git itself refuses a change
+that appeared meanwhile. The branch then goes with `git branch -d`, or after a
+merge proof with `git update-ref -d refs/heads/<branch> <sha>`, which deletes it
+only while it still points at the merged commit and no other worktree has it
+checked out. Remote branches are left to the forge's own "delete head branch"
+setting. A worktree kept for a reason is looked at again an hour later, or as
+soon as its HEAD moves.
+
+Each thread that stood there gets `worktreeRemoved` on its summary: the path,
+branch, whether the branch went, the reason (`pr-merged` or `clean`) and the
+pull request. The done notice and, after Move to Recent, the composer show it:
+the thread can be read but a turn is refused because the folder is gone. The
+field disappears once the thread moves to another folder.
+
+Owners turn this off per project through `projects.setAutoRemoveWorktrees`
+(owner only), shown as Remove settled worktrees beside Hide merged PR
+conversations in the grouping menu and in Manage project. `Project.autoRemoveWorktrees`
+is true unless turned off; a core older than this feature does not send it and
+the clients hide the switch. Turning it off stops later removals only.
+
+### Git on Windows
+
+Every git process the core starts goes through `procs.spawn`, which on Windows
+adds `core.longpaths=true` through `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_<n>` and
+`GIT_CONFIG_VALUE_<n>`, after any entries the environment already carries.
+Without it git cannot create or delete a path over 260 characters, and a
+worktree adds about 30 characters to every path in the repository. The user's
+git config is not written. The same launcher replaces Git for Windows'
+`cmd\git.exe` or `bin\git.exe` with the real binary under `ucrt64`,
+`clangarm64`, `mingw64` or `mingw32`, which saves one process per git call. It
+keeps the launcher when `MSYSTEM` is set, when the layout is absent and when
+PATH finds a `git.cmd` wrapper (`git/command.ts`).
 
 ## Thread lifecycle
 
@@ -197,7 +271,10 @@ and manual archives in an Archived section after it. Done holds only
 conversations with a done date; a manual archive never lands there.
 Mark done uses the persistent archive and its undo action; `threads.archive`
 with `onlyIfIdle: true` refuses pending work or input in the conversation's
-family before changing it. Done reads archived summaries only on expansion,
+family before changing it, and its refusal names what is pending and in which
+child. Input counts when a device names it on a family member; a device that
+cannot read its drafts protects every thread from expiry and merged-PR archives,
+never from Mark done. Done reads archived summaries only on expansion,
 respecting the project and machine filters. A completed conversation opens for
 reading with a Move to Recent button in place of the composer. Reopening keeps
 history without restarting work. Mark done records its own date; automatic archives
@@ -294,11 +371,19 @@ Projects default to `autoArchiveMergedPr: true`; the owner changes it through
 root conversation only for a clean linked worktree and a uniquely identified,
 merged, non-fork PR from the same repository with the exact branch tip. The
 proof takes the checkout's current branch from `git status`, not the thread's
-recorded starting branch. It first asks `gh pr view` about up to five PRs the
-conversation linked, newest first: a linked PR needs the tip as its head commit
-but may have another head name, because agents often push `HEAD:fix/...`. A
-link that no longer resolves is skipped. Without a matching link it asks
-`gh pr list --head` for the checkout's branch, which needs that exact name.
+recorded starting branch. Cheapest evidence comes first: the repository's cached
+`git remote -v`, the branch in the worktree's `HEAD` file, then the repository's
+list of its newest 200 PRs, which the sidebar badges read too. `git status` runs
+only when a listed merged PR could match. Up to five PRs the conversation
+linked are tried first, newest first: a linked PR needs the tip as its head
+commit but may have another head name, because agents often push
+`HEAD:fix/...`. A link absent from a list that is not full does not exist and
+is skipped; one absent from a full list is asked with `gh pr view`. The
+checkout's branch then needs exactly one PR of that name in the list. When the
+list is full and holds a merged PR of that branch, or none, `gh pr list --head`
+confirms it. A thread whose proof finds nothing is not proved again for 5
+minutes, then 10, 20 and so on up to an hour, until the thread changes or
+links another PR.
 The grouping menu in both views exposes this project policy as Hide merged PR
 conversations and names the project it affects. In Recent it follows the project
 filter, or the current project when all projects are shown. Disabling reveals
@@ -321,7 +406,8 @@ grace and repeats at 60-second intervals after completion, admitting at most
 eight candidates within a 30-second budget for proof and validation.
 
 Automatic archive changes visibility and records its reason; it does not stop
-work or remove a worktree or branch. Restore dismisses the exact PR and protects
+work or remove a worktree or branch. An hour later the
+[settled worktree cleanup](#settled-worktree-cleanup) can remove both. Restore dismisses the exact PR and protects
 that restored checkout from another automatic archive, including after restart.
 Connected clients publish protected drafts and pending input through
 `threads.focus`. A focus caller that has never reported input protection blocks
@@ -456,6 +542,38 @@ uses contract `checkSettingsPatch`. Side-specific lifecycle and access cases
 live in `fake-client.parity.test.ts`. A fake path below a directory named
 `missing` represents an absent folder.
 
+### Adding an RPC method
+
+1. Add the method's `params` and `result` to `RpcMethods` in
+   `packages/contracts/src/index.ts`, beside its domain's entries.
+2. Register the core handler in the domain's `register*Methods` function.
+   For `threads.*`, use `registerThreadMethods` in
+   `packages/core/src/threads/rpc.ts`, called by `packages/core/src/modules.ts`.
+   `packages/core/src/router.ts` dispatches handlers; `drivers/*/rpc.ts` files
+   implement provider protocols.
+3. Add the fake handler in `packages/ui/src/lib/fake-client/<domain>.ts`.
+   `FakeMethods` in `fake-client/context.ts` types the complete handler map
+   assembled in `fake-client.ts`; agent, plugin and workflow classes handle
+   their own methods. A missing map entry fails `bun run check`.
+   `packages/ui/src/lib/client.ts` already has a generic `call` method.
+4. Keep owner-only methods out of `DEVICE_METHODS` in
+   `packages/contracts/src/access.ts` and `AGENT_METHODS` in
+   `packages/core/src/access.ts`. Document the reason beside any permission.
+5. Test the result and access boundary with a temporary core. Follow
+   `packages/core/test/thread-remove.test.ts` for a paired-device refusal.
+   The test client in `packages/core/src/client.ts` exposes `error.rpc.code`;
+   the UI client's `RpcFailure` exposes `error.code`. Match the caught error
+   with `{ rpc: { code: RpcErrorCode.Refused } }`. The core test records a
+   Windows crash in Bun's `rejects` matcher and uses `.catch(error => error)`.
+
+Run the affected core test, fake-client checks and type checks:
+
+```sh
+bun test packages/core/test/<name>.test.ts
+bun run --cwd packages/ui test src/lib/fake-client.contract.test.ts src/lib/fake-client.parity.test.ts
+bun run check
+```
+
 ## Rebuilding the shell executable
 
 ```sh
@@ -464,6 +582,11 @@ bun run build:shell
 bun run apps/shell/scripts/stage-sidecar.ts
 bun run e2e
 ```
+
+On Linux, `test:shell` and the shell builds need the WebKitGTK headers first;
+without them `glib-sys` stops at `pkg-config` and no test runs. CI installs the
+same list in `.github/workflows/desktop.yml`:
+`sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf`.
 
 Use Tauri to build the executable, including a no-bundle development build:
 `bun run --cwd apps/shell tauri build --no-bundle`. A plain Cargo build is useful
@@ -522,6 +645,11 @@ diagnostics get at most 250 ms. A wait after `page.close()` fails immediately.
 
 `page.close()` requests CDP shutdown; POSIX also sends SIGTERM. A stalled browser
 falls back to its captured PID, waits for exit and retries profile removal.
+Removal and the core harness's tree kill are asynchronous: a synchronous delete
+of a Windows profile held the test process, its Vite server and in-process core
+for 2 to 3 s. Closing a browser there took up to 7 s, so every E2E `afterAll`
+names a deadline of at least 30 s instead of Bun's 5 s default
+(`scripts/ci/e2e-harness.test.ts`).
 Cleanup reports retained directories and the test preload removes interrupted
 `boite-e2e-*` directories older than an hour. `cleanup.test.ts` checks teardown.
 Never terminate processes by executable name or a path pattern.
@@ -547,8 +675,18 @@ Rust updater unit tests use a local HTTP fixture and a signed inert payload;
 they launch no installer. Windows test executables include the Common Controls
 v6 manifest needed by the native dialog dependency.
 `tests/e2e/app-updates.test.ts` checks update states and phone restrictions.
-Development queries `?fake=1&appUpdate=ready`, `downloading` or `error`, with
-`appUpdateChannel` and `appUpdateCurrentChannel`, preview those states.
+Development queries `?fake=1&appUpdate=available`, `ready`, `downloading` or
+`error`, with `appUpdateChannel` and `appUpdateCurrentChannel`, preview those
+states. `tests/e2e/update-everything.test.ts` opens the foot's update card with
+`updates=1&machines=1&appUpdate=available&serverUpdate=available`, checks that
+nothing downloads before the click, Remind me later, Update the app alone, the
+one request per machine, rows landing one at a time, and the card ending on
+Restart or Everything is up to date, and captures desktop and phone. Its fake
+core finishes a server update started that way (waiting, restarting, current)
+in about three seconds; a plain install stays waiting for the cancel test.
+`packages/core/test/updates.test.ts` holds the core side: a registry read after
+an agent's updater, when none of its processes runs, keeps Boite's own
+installation waiting.
 
 `packages/core/test/server-update.test.ts` checks signatures, archive paths,
 wait/cancel, installation and rollback of SQLite and pairing state using an
@@ -578,7 +716,7 @@ Real-provider tests use CLI logins and spend tokens. Run selected cases from
 | `BOITE_E2E_PI=1` | `test/pi.live.test.ts`: turn and resume |
 | `BOITE_E2E_AGY=1` | `test/agy.live.test.ts`: model discovery and one cold default-account turn |
 | `BOITE_E2E_INSTALLS=1` | `test/shipped-installs.live.test.ts`: pinned Codex/OpenCode downloads and versions |
-| `BOITE_E2E_KEBACC_INSTALL=1` | `test/plugins.install.live.test.ts`: native plugin install/version/uninstall |
+| `BOITE_E2E_PLUGIN_INSTALL=1` | `test/plugins.install.live.test.ts`: native plugin install/version/uninstall |
 | `BOITE_E2E_ANTIGRAVITY_INSTALL=1` | `test/antigravity.install.live.test.ts`: managed archive integrity and ACP initialization, without login |
 | `BOITE_E2E_ANTIGRAVITY=1` | `test/antigravity.live.test.ts`: interactive sign-in and turn; requires a person |
 | `BOITE_BENCH_CLAUDE=1` | Real Claude turn in `bun run bench` |
@@ -609,9 +747,14 @@ the trusted HTTPS origin described in [phone](phone.md).
 ```sh
 bun run bench               # comparison report in bench/results/<date>.md
 bun run bench/idle-rss.ts    # bare Bun and core idle readings at 4.5 s and 75 s
+bun run bench/agent-startup.ts --offline --runs 7 --delay-ms 150 --output /tmp/agent-startup.json
 ```
 
-Both use fresh data. `--fresh-only` selects the first idle reading. Rerun before
+All use fresh data. The agent-startup benchmark requires `--offline`, uses a
+scripted native process and checks cleanup and attachment preservation. Its
+directory and sparse-worktree samples measure synthetic startup, not provider
+inference. See [performance](performance.md#preparing-the-first-prompt).
+`--fresh-only` selects the first idle reading. Rerun before
 quoting a performance figure and include its command and date.
 
 ## Architecture checks
@@ -740,8 +883,18 @@ minute while visible and exposes the exact date and time on hover.
 
 Calls and reasoning with no answer text between them fold into one line,
 "Ran 6 commands" with the run's duration, that opens on its steps in order.
-While a step runs the line names it ("Running git", "Thinking") and its clock
-ticks. Reasoning with no words that took under a second is not drawn. The core
+When every call of the run carries the agent's own `summary` (Claude's
+`tool_use_summary`), the line reads those instead: "Read rules.md and data.txt
+· Found N=2 with a prime search". While a step runs the line names it and its
+clock ticks: a command reads as what the agent said it is for (the first line
+of the call's `description`, Claude's Bash), else as its program and up to two
+subcommand words ("Running gh repo create", `commandOf`), never the program
+alone; a thought reads as the thought being written. A reasoning step reads
+as its last bold heading (Codex) or the first sentence of its last paragraph
+(Claude's summary, a raw chain of thought), and as "Thinking" while it has no
+words (`thoughtTitle` in `lib/tool-groups.ts`; a live step keeps a
+`ThoughtTitleScan` that reads only the lines each delta adds). Reasoning with no words that
+took under a second is not drawn. The core
 records each block's first appearance and the next part or message completion
 for every driver, so durations survive a reload. Older and imported blocks
 without timing metadata show no guessed duration.
@@ -762,7 +915,9 @@ palette notices ship in `packages/ui/public/theme-licenses.txt`.
 Text and code faces are device preferences. Bundled variable fonts carry OFL
 licences under `public/fonts`; only selected Unicode ranges load, and the
 service worker precaches default faces. `lib/fonts.ts` and the boot script apply
-and preload preferences before the first paint. System choices use installed
+and preload preferences before the first paint; the code face is preloaded only
+on a window of 1200 px or more, where an untouched conversation's panel opens
+on its launcher and draws mono key hints. System choices use installed
 fonts. In the shell, `Ctrl+=`, `Ctrl+-` and `Ctrl+0` control WebView zoom from
 50% to 200%, restored before the window appears. The panel browser has separate
 zoom; plain browsers keep their native shortcut behavior.
@@ -779,23 +934,38 @@ files, including PDFs and archives, use `kind: 'file'` and host paths in the
 prompt. Provider tools decide which formats they can read. Boite neither
 extracts archives nor executes uploads.
 
-Before those caps, the client brings an image to 2048 px on its long edge
-(`lib/image-prepare.ts`): JPEG at 0.85, or PNG when that is lighter or the
-picture uses transparency. An image already within 2048 px and 512 KB goes as
-it is, and a GIF or an SVG is never redrawn. HEIC and HEIF become JPEG where the
+Before those caps, the client brings an image to 2000 px on its long edge
+(`IMAGE_MAX_EDGE`, `lib/image-prepare.ts`): JPEG at 0.85, or PNG when that is
+lighter or the picture uses transparency. Claude's API refuses an image over
+2000 px on either side once a request carries more than 20 images, which a
+long thread of screenshots reaches. An image already within 2000 px and 512 KB
+goes as it is, and a GIF or an SVG is never redrawn. HEIC and HEIF become JPEG where the
 browser decodes them (Safari does); elsewhere they travel as a plain file. A
 source over 50 MB is refused before decoding, since a phone's canvas would not
 hold it. So twenty iPhone screenshots, 2 to 4 MB each as PNG, fit one turn at
 around 400 KB each.
+
+The Claude driver fits every prompt image to the same edge again before it
+goes in (`drivers/claude/images.ts`, Bun's image codec, same format), because
+an image can reach a prompt without passing the composer: a client that sends
+it unreduced, a browser that could not decode it, or a message written under
+the earlier 2048 px cap and replayed by a retry or a carried-over history.
+The CLI forwards a prompt's images unchanged, while the images its own tools
+read are fitted by the CLI to the model's limit. A GIF, or anything Bun cannot
+decode, goes as it is. Tool images shown in the timeline
+(`drivers/documents.ts`) never go back to the agent.
 
 An answer to a question with a free field takes the composer's files the same
 way (`questions.answer` `attachments`); see [Providers](providers.md).
 
 The core validates bytes and writes sanitized, content-addressed copies under
 `<dataDir>/attachments/`. Copies survive resume and are currently not removed
-by archive or project removal. Timeline cards download those copies. Composer
+by archive or project removal. A copy the core wrote or compared is not read
+again while its size, mtime and inode stay the same; an agent's edit changes
+them, and the next reference gets a fresh copy. Timeline cards download those copies. Composer
 `[Image N]` references follow attachment order, preview inline and renumber after
-removal. Copying or cutting a reference carries its picture
+removal. A tile opens its picture large above the box; a second click on the
+tile, or a click on the large picture, puts it away. Copying or cutting a reference carries its picture
 (`lib/composer-clipboard.ts`): pasted where those numbers name other pictures, on
 any machine, the pictures join that prompt and the references take their numbers
 there; pasted where every number still names the same picture, only the text goes in. A new image accepted during send
@@ -816,6 +986,13 @@ The shell resolves symlinks, checks thread containment and rejects browsed-webvi
 callers. Remote cores, browsers and phones retain preview/download behavior.
 Published snapshots from `boite attach` use the separate safe download/open rules
 in [CLI](cli.md); they do not authorize executing an uploaded file.
+
+Inline text previews use the conversation's vertical scroll, including when
+the pointer is over the file contents. Long lines scroll horizontally inside
+the preview; Preview folds it again. `bun test tests/e2e/artifacts.test.ts`
+checks wheel scrolling in both directions at desktop and phone widths and
+writes `text-preview-scroll-desktop.png` and `text-preview-scroll-phone.png`
+under `tests/e2e/.artifacts/`.
 
 ### File mentions
 

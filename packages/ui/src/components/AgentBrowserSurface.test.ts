@@ -4,6 +4,8 @@ import { FakeClient } from '../lib/fake-client';
 import { liveViews } from '../lib/live-view.svelte';
 import { Store } from '../lib/store.svelte';
 import AgentBrowserSurface from './AgentBrowserSurface.svelte';
+import { agentHost } from '../lib/agent-browser-host.svelte';
+import { REMOTE_WATCH_EVERY_MS } from '@boite/contracts';
 
 let app: ReturnType<typeof mount> | undefined, client: FakeClient, store: Store;
 const settle = async () => { for (let i = 0; i < 20; i++) { await Promise.resolve(); flushSync(); } };
@@ -133,4 +135,42 @@ test('a machine with no browser to run says so and why', async () => {
   app = mount(AgentBrowserSurface, { target: document.body, props: { store, threadId: thread } }); await settle();
   expect(query('agent-browser-unavailable')!.textContent).toMatch(/^\s*No agent browser on .+/);
   expect(query('agent-browser-reason')!.textContent).toBe('no Chromium-based browser was found');
+});
+
+// A tab this app hosts shows its own webview and asks for no frames, so the
+// core would not know anyone looks at it and would freeze it under the
+// user's eyes: the surface tells it while the window is visible.
+test('a hosted tab shown natively keeps telling the core it is watched, while the window is visible', async () => {
+  vi.useFakeTimers();
+  const tab = await open('https://example.com/docs');
+  const call = client.call.bind(client);
+  const calls = vi.spyOn(client, 'call').mockImplementation((async (method: string, params: unknown) => {
+    const reply = await call(method as never, params as never);
+    return method === 'browser.remoteStatus' ? { ...(reply as object), tabs: (reply as { tabs: object[] }).tabs.map(one => ({ ...one, view: 'agent-1' })) } : reply;
+  }) as never);
+  const watches = () => calls.mock.calls.filter(([method]) => method === 'browser.remoteWatch');
+  store.localCore = true; agentHost.active = true;
+  try {
+    app = mount(AgentBrowserSurface, { target: document.body, props: { store, threadId: thread } }); await settle();
+    expect(query('agent-browser-native')).not.toBeNull();
+    expect(watches().at(-1)![1]).toEqual({ threadId: thread, tabId: tab.tabId });
+    const shown = watches().length;
+    await vi.advanceTimersByTimeAsync(REMOTE_WATCH_EVERY_MS * 2); await settle();
+    expect(watches().length).toBe(shown + 2);
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    await vi.advanceTimersByTimeAsync(REMOTE_WATCH_EVERY_MS * 2); await settle();
+    expect(watches().length).toBe(shown + 2);
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    // A new tab's draft covers the page: nobody sees it, so it may sleep.
+    query('agent-browser-new')!.click(); await settle();
+    expect(query('agent-browser-native')).toBeNull();
+    const drafted = watches().length;
+    await vi.advanceTimersByTimeAsync(REMOTE_WATCH_EVERY_MS * 2); await settle();
+    expect(watches().length).toBe(drafted);
+    query('agent-browser-draft-close')!.click(); await settle();
+    expect(watches().length).toBe(drafted + 1);
+    await unmount(app); app = undefined;
+    await vi.advanceTimersByTimeAsync(REMOTE_WATCH_EVERY_MS * 2); await settle();
+    expect(watches().length).toBe(drafted + 1);
+  } finally { store.localCore = false; agentHost.active = false; }
 });

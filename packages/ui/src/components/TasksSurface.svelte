@@ -1,6 +1,8 @@
 <script lang="ts">
-  import { ChevronRight, Circle, CircleCheck, CircleDot, Plus, Repeat, Target, X } from '@lucide/svelte';
+  import { ChevronRight, Circle, CircleCheck, CircleDot, GitPullRequest, Plus, Repeat, Target, X } from '@lucide/svelte';
   import type { Todo } from '@boite/contracts';
+  import { watchStatus } from '../lib/pull-request-watch';
+  import InfoTip from './InfoTip.svelte';
   import { time } from '../lib/format';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
@@ -9,11 +11,12 @@
   const sectionId = $props.id();
 
   let draft = $state('');
-  let open = $state({ activity: true, tasks: true, todos: true });
+  let open = $state({ activity: true, watches: true, tasks: true, todos: true });
 
   let thread = $derived(store.openThread);
   let activity = $derived(thread?.activity ?? null);
   let tasks = $derived(activity?.tasks ?? []);
+  let watches = $derived(thread?.pullRequestWatches ?? []);
   let todos = $derived(thread?.projectId ? (store.todos[thread.projectId] ?? []) : []);
 
   // The project's list is the same for every thread of it, so it is read once
@@ -84,6 +87,47 @@
       </div></div>
     </div>
   </section>
+
+  {#if watches.length > 0}
+    <section>
+      <div class="head-row">
+        <button
+          type="button"
+          class="ghost head"
+          aria-expanded={open.watches}
+          aria-controls="{sectionId}-watches"
+          data-testid="tasks-section-watches"
+          title={open.watches ? strings.tasks.collapse : strings.tasks.expand}
+          onclick={() => (open.watches = !open.watches)}
+        >
+          <ChevronRight size={13} strokeWidth={1.75} class={open.watches ? 'fold-caret open' : 'fold-caret'} />
+          <span class="section-label ui-label">{strings.tasks.watchSection}</span>
+        </button>
+        <InfoTip text={strings.tasks.watchHint} topic={strings.tasks.watchSection} testid="watch-info" />
+      </div>
+      <div class="disclosure-fold" id="{sectionId}-watches" class:open={open.watches} inert={!open.watches}>
+        <div><div class="body">
+          {#each watches as watch (watch.url)}
+            <div class="line watch" data-testid="pr-watch" data-paused={watch.paused?.reason ?? null}>
+              <GitPullRequest size={13} strokeWidth={1.75} />
+              <a class="number ui-label" href={watch.url} target="_blank" rel="noopener noreferrer" title={watch.url}>#{watch.number}</a>
+              <span class="text meta-text ui-label" class:paused={watch.paused !== null} title={watch.paused?.message ?? watch.repository}>{watchStatus(watch)}</span>
+              <button
+                type="button"
+                class="ghost small icon"
+                title={strings.tasks.stopWatch}
+                aria-label={`${strings.tasks.stopWatch} #${watch.number}`}
+                data-testid="pr-watch-stop"
+                onclick={() => thread && void store.unwatchPullRequest(thread.id, watch.url)}
+              >
+                <X size={13} strokeWidth={1.75} />
+              </button>
+            </div>
+          {/each}
+        </div></div>
+      </div>
+    </section>
+  {/if}
 
   <section>
     <button
@@ -263,6 +307,39 @@
     border-radius: 0;
     justify-content: flex-start;
   }
+
+  .head-row {
+    display: flex;
+    align-items: center;
+    padding-right: 12px;
+  }
+
+  .head-row .head {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .number {
+    flex: none;
+    color: var(--color-foreground);
+    font-variant-numeric: tabular-nums;
+    text-decoration: none;
+  }
+
+  .number:hover {
+    text-decoration: underline;
+  }
+
+  .meta-text {
+    font-size: var(--text-xs);
+    color: var(--color-muted-foreground);
+  }
+
+  .meta-text.paused {
+    color: var(--color-live);
+  }
+
+  .watch + .watch { border-top: 1px solid var(--color-border); }
 
   .head :global(.fold-caret) {
     color: inherit;

@@ -3,23 +3,28 @@
   import { Bot, Brain, ChevronRight, FilePen, FileText, Globe, Search, SquareTerminal, TriangleAlert, Wrench } from '@lucide/svelte';
   import { fill, strings } from '../lib/strings';
   import { elapsed } from '../lib/format';
-  import { familyOf, liveLabel, runSpan, runSummary, thinkingShown, type ActivityPart, type ToolPart } from '../lib/tool-groups';
+  import { agentSummary, familyOf, liveLabel, runSpan, runSummary, thinkingShown, ThoughtTitleScan, type ActivityPart, type ThinkingStep, type ToolPart } from '../lib/tool-groups';
   import ThinkingPart from './ThinkingPart.svelte';
   import ToolCard from './ToolCard.svelte';
+  import type { Store } from '../lib/store.svelte';
 
   /*
    * A run of activity with no answer between it: calls and the reasoning around
    * them. One visible step is drawn as itself; more fold under one line, "Ran 3
-   * commands and read 2 files" with the time the run took once it is done, the
-   * running step's own words ("Running git", "Thinking") while one runs. The
-   * fold opens on the steps, each one the same line it would be alone. Reasoning
-   * with no words that took under a second is not drawn at all.
+   * commands and read 2 files" with the time the run took once it is done, or
+   * the agent's own summary of those calls when it wrote one ("Read rules.md and
+   * data.txt"); the running step's own words ("Running git", the thought it is
+   * on) while one runs. The fold opens on the steps, each one the same line it
+   * would be alone. Reasoning with no words that took under a second is not
+   * drawn at all.
    */
   let {
     parts,
     thinkingLive = false,
     isBackground,
-    loadOutput
+    loadOutput,
+    store,
+    threadId
   }: {
     parts: ActivityPart[];
     /** The run's last step is reasoning that is still being written. */
@@ -27,6 +32,9 @@
     /** Whether the work a call started still runs in the background. */
     isBackground: (toolId: string) => boolean;
     loadOutput?: (toolId: string) => Promise<void>;
+    /** The machine and thread the run belongs to, where a thread link in it starts from. */
+    store?: Store;
+    threadId?: string;
   } = $props();
 
   const ICONS = { command: SquareTerminal, read: FileText, edit: FilePen, write: FilePen, search: Search, fetch: Globe, web: Globe, agent: Bot, other: Wrench };
@@ -41,7 +49,11 @@
   let live = $derived(running !== undefined || thinking);
   let issues = $derived(tools.filter(part => part.status === 'error' || part.status === 'denied').length);
   let issueLabel = $derived(fill(issues === 1 ? strings.chat.toolIssueOne : strings.chat.toolIssueMany, { count: String(issues) }));
-  let label = $derived(running ? liveLabel(running) : thinking || tools.length === 0 ? strings.chat.thinking : runSummary(tools));
+  // Live, the thought being written; otherwise the last one that has words.
+  let thought = $derived(thinking ? parts.at(-1) as ThinkingStep : parts.findLast((part): part is ThinkingStep => part.type === 'thinking' && part.text.trim() !== ''));
+  // A text that does not extend the last one starts the scan over: another thought needs no reset.
+  const titles = new ThoughtTitleScan();
+  let label = $derived(running ? liveLabel(running) : thinking || tools.length === 0 ? titles.title(thought?.text ?? '') ?? strings.chat.thinking : agentSummary(tools) ?? runSummary(tools));
   let Glyph = $derived(running ? ICONS[familyOf(running)] : thinking || tools.length === 0 ? Brain : ICONS[familyOf(tools.at(-1)!)]);
   let busy = $derived(tools.some((part) => isBackground(part.toolId)));
 
@@ -64,7 +76,7 @@
 
 {#snippet step(part: ActivityPart, index: number, nested = false)}
   {#if part.type === 'thinking'}
-    <ThinkingPart text={part.text} live={isLive(index)} startedAt={part.startedAt ?? null} finishedAt={part.finishedAt ?? null} />
+    <ThinkingPart text={part.text} live={isLive(index)} startedAt={part.startedAt ?? null} finishedAt={part.finishedAt ?? null} {store} {threadId} />
   {:else}
     <ToolCard
       name={part.name}
@@ -82,6 +94,8 @@
       finishedAt={part.finishedAt ?? null}
       background={isBackground(part.toolId)}
       {nested}
+      {store}
+      {threadId}
     />
   {/if}
 {/snippet}
@@ -100,7 +114,7 @@
       onclick={() => (open = !open)}
     >
       <span class="glyph"><Glyph size={15} strokeWidth={1.75} /></span>
-      <span class="label ui-label" class:shimmer={live} data-testid="tool-group-label">{label}</span>
+      <span class="label ui-label" class:shimmer={live} data-testid="tool-group-label" title={label}>{label}</span>
       {#if took}<span class="took ui-label" data-testid="tool-group-elapsed">{took}</span>{/if}
       {#if busy}
         <span class="pulse" aria-hidden="true"></span>
@@ -184,13 +198,15 @@
     text-align: left;
   }
 
-  /* A light passing over the words while a call runs. */
+  /* A light passing over the words while a call runs. It moves in 33 steps a
+     sweep, one every fourth tick of the loops' 60 Hz grid (app.css): the text
+     clipped gradient repaints on each step, not on every frame. */
   .label.shimmer {
     background: linear-gradient(90deg, var(--color-muted-foreground) 35%, var(--color-foreground) 50%, var(--color-muted-foreground) 65%) 0 0 / 300% 100%;
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
-    animation: shimmer 2.2s linear infinite;
+    animation: shimmer 2.2s steps(33) infinite var(--loops);
   }
 
   @keyframes shimmer {
@@ -211,7 +227,7 @@
     height: 6px;
     border-radius: 50%;
     background: var(--color-accent);
-    animation: pulse 1.6s var(--ease-out-quint) infinite;
+    animation: pulse 1.6s var(--loop-ease-out-quint-48) infinite var(--loops);
   }
 
   .spinner {
@@ -221,7 +237,7 @@
     border-radius: 50%;
     border: 1.5px solid var(--color-edge);
     border-top-color: var(--color-live);
-    animation: spin 0.9s linear infinite;
+    animation: spin 0.9s steps(54) infinite var(--loops);
   }
 
   /* The calls hang off a hairline under the summary's glyph. */

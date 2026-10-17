@@ -82,10 +82,12 @@ beforeAll(async () => {
   await page.send('Page.addScriptToEvaluateOnNewDocument', { source: MOUSE });
   await page.navigate(`http://127.0.0.1:${port}/?fake=1&open=recent&long=1`);
   await page.waitFor(`document.querySelector('${timeline}') && document.querySelector('${timeline}').scrollHeight > document.querySelector('${timeline}').clientHeight`);
+  // An untouched conversation opens its panel on the launcher at this width: the bubbles are measured once it is in.
+  await page.waitFor(`document.querySelector('[data-testid=panel-launcher]')`);
   await settled();
 }, 60_000);
 
-afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
+afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
 test('edge scrollbars take no room, fade in near the edge, drag, and turn off cleanly', async () => {
   // The experiment's gate, answered by the driver when headless has no mouse.

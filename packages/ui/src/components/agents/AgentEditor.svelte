@@ -67,7 +67,6 @@
   let dressing = $state(false);
   let status = $state(profile?.status ?? 'active');
   let saving = $state(false);
-  let accountIntegration = $state(profile?.accountIntegration ?? 'provider');
   let memberIds = $state(group?.memberIds ?? team?.members.map(m => m.agentId) ?? mission?.agentIds ?? initial.preset?.memberIds ?? []);
   let responsibilities = $state<Record<string, string>>(Object.fromEntries(team?.members.map(m => [m.agentId, m.responsibility]) ?? []));
   let mode = $state(group?.mode ?? 'mentions');
@@ -77,7 +76,12 @@
   let groupId = $state(team?.groupId ?? null);
   let teamId = $state(mission?.teamId ?? initial.preset?.teamId ?? null);
   let projectId = $state(mission?.projectId ?? null);
-  let projectIds = $state(team?.projectIds ?? []);
+  /** A team's projects, or the projects the owner entrusts to an agent. */
+  let projectIds = $state(team?.projectIds ?? profile?.projectIds ?? []);
+  const projectKey = (ids: readonly string[] | undefined) => JSON.stringify([...(ids ?? [])].sort());
+  /** The agent's projects this form last read: what tells an edit here from a change made elsewhere. */
+  let projectsRead = projectKey(profile?.projectIds);
+  let revisionRead = profile?.revision ?? 0;
   let objective = $state(mission?.objective ?? '');
   let expectedResult = $state(mission?.expectedResult ?? '');
   let minutes = $state((mission?.maxDurationMs ?? 600000) / 60000);
@@ -98,14 +102,16 @@
     return { id: m.id, label: m.label, active: m.store === host, disabled: !usable, ...(usable ? {} : { hint: offline ? labels.machineOffline : labels.machineNotOwner }) };
   }));
   const busy = $derived(view.pending || moving || saving);
+  /** The projects an agent may be entrusted: those of the machine it lives on, the drafts aside. */
+  const entrustable = $derived(host.projects.filter(p => p.id !== host.draftsProject?.id));
 
   function pickHost(id: string) {
     const next = workspace.machines.find(m => m.id === id)?.store;
     if (!next || next === host) return;
     host = next;
     selection = defaultSelection(next, selection.permissionMode);
-    // The kebacc experiment is a setting of each core, read from this page's snapshot only.
-    accountIntegration = 'provider';
+    // Projects are a machine's own: another core knows none of this one's.
+    projectIds = [];
   }
 
   /** Creates the agent on another machine's core, then shows it there. */
@@ -125,6 +131,25 @@
     await workspace.select(target);
     target.showAgents(created.id);
   }
+
+  /**
+   * An agent's projects change outside this form too: a card in a thread
+   * applied, or the snapshot this page drew first was older. The form follows
+   * while its own projects are untouched, and keeps an edit in progress.
+   */
+  $effect(() => {
+    if (kind !== 'profile') return;
+    const latest = stored() as AgentProfile | undefined;
+    if (!latest) return;
+    const next = projectKey(latest.projectIds);
+    untrack(() => {
+      if (latest.revision <= revisionRead) return;
+      revisionRead = latest.revision;
+      if (next === projectsRead) return;
+      if (projectKey(projectIds) === projectsRead) projectIds = [...(latest.projectIds ?? [])];
+      projectsRead = next;
+    });
+  });
 
   function toggle(values: string[], id: string): string[] { return values.includes(id) ? values.filter(v => v !== id) : [...values, id]; }
 
@@ -154,12 +179,15 @@
       // field this form edits is unchanged. Anything else keeps the revision it read, so a stale
       // form is refused rather than written over newer values.
       const latest = stored();
-      const edited = (r: AgentProfile) => JSON.stringify([r.name, r.domain, r.instructions, r.avatar, r.status, r.tools, r.accountIntegration]);
-      const rebase = kind === 'profile' && latest && profile && edited(latest as AgentProfile) === edited(profile);
+      const edited = (r: AgentProfile) => JSON.stringify([r.name, r.domain, r.instructions, r.avatar, r.status, r.tools]);
+      // Projects this form followed from elsewhere count as read, not as a stale copy.
+      const rebase = kind === 'profile' && latest && profile && edited(latest as AgentProfile) === edited(profile) && projectKey((latest as AgentProfile).projectIds) === projectsRead;
       const version = initial.record ? { id: initial.record.id, expectedRevision: (rebase ? latest : initial.record).revision } : {};
       let result: AgentEntities[AgentEntryKind] | null = null;
       if (kind === 'profile') {
-        const value = { name, domain, instructions, avatar: robotTouched ? encodeRobot(robot) : profile?.avatar ?? '', selection: creating || !rebase ? selection : (latest as AgentProfile).selection, status, tools, accountIntegration };
+        // Cores from before 2026-10-16 refuse a profile without `accountIntegration`; newer ones ignore it.
+        const legacy = { accountIntegration: (profile as { accountIntegration?: string } | undefined)?.accountIntegration ?? 'provider' };
+        const value = { ...legacy, name, domain, instructions, avatar: robotTouched ? encodeRobot(robot) : profile?.avatar ?? '', selection: creating || !rebase ? selection : (latest as AgentProfile).selection, status, tools, projectIds };
         if (creating && host !== view.store) return await createOn(host, value);
         result = await view.call('agents.profile.save', { ...version, value });
       }
@@ -176,10 +204,6 @@
     <button class="primary" type="submit" disabled={busy || !name.trim() || kind === 'profile' && creating && (!selection.accountId || !selection.model)} data-testid="agent-save"><span class="ui-label">{creating ? labels.createAction : strings.common.save}</span></button>
     {#if creating}<button type="button" class="ghost" onclick={oncancel}><span class="ui-label">{strings.common.cancel}</span></button>{/if}
   </div>
-{/snippet}
-
-{#snippet kebacc()}
-  <label class="switch-row"><span class="text">{labels.kebacc}<span class="hint">{view.snapshot?.limits.kebaccExperiment ? labels.kebaccHint : labels.experimentOff}</span></span><input type="checkbox" role="switch" disabled={!view.snapshot?.limits.kebaccExperiment} checked={accountIntegration === 'kebacc-experiment'} onchange={e => { accountIntegration = e.currentTarget.checked ? 'kebacc-experiment' : 'provider'; }} /></label>
 {/snippet}
 
 {#snippet members()}
@@ -223,6 +247,18 @@
     {#if kind === 'profile'}
       {#if embedded}<label class="agent-field">{labels.domain}<input bind:value={domain} maxlength="500" placeholder={labels.rolePlaceholder} /></label>{/if}
       <label class="agent-field"><span>{creating ? labels.whatItDoes : labels.instructions}{#if creating}<span class="hint">{labels.whatItDoesHint}</span>{/if}</span><textarea bind:value={instructions} rows="4" maxlength="32000" placeholder={labels.instructionsPlaceholder} data-testid="agent-instructions"></textarea></label>
+      <!-- The projects it looks after: it follows their threads, starts new ones and answers for them. -->
+      <fieldset class="agent-field" data-testid="agent-projects">
+        <legend>{labels.projects}</legend>
+        {#if entrustable.length}
+          <div class="agent-checks">
+            {#each entrustable as project (project.id)}
+              <label class="agent-chip-check"><input type="checkbox" checked={projectIds.includes(project.id)} onchange={() => { projectIds = toggle(projectIds, project.id); }} data-testid="agent-project-{project.id}" /><span class="ui-label">{project.name}</span></label>
+            {/each}
+          </div>
+          <p class="hint agent-projects-hint">{labels.projectsHint}</p>
+        {:else}<p class="hint">{labels.noProjects}</p>{/if}
+      </fieldset>
       {#if embedded}
         <div class="agent-field"><span>{labels.status}</span>
           <Menu placement="bottom" label={labels.status} items={(['active', 'paused', 'archived'] as const).map(id => ({ id, label: labels[id], active: status === id }))} onpick={id => { status = id as AgentProfile['status']; }}><span class="ui-label">{labels[status]}</span></Menu>
@@ -252,7 +288,6 @@
       <fieldset class="agent-field"><legend>{labels.tools}</legend>
         <div class="agent-checks">{#each TOOLS as tool (tool)}<label class="agent-chip-check"><input type="checkbox" checked={tools.includes(tool)} onchange={() => { tools = toggle(tools, tool); }} /><span class="ui-label">{labels[tool]}</span></label>{/each}</div>
       </fieldset>
-      {#if provider?.protocol === 'agy'}{@render kebacc()}{/if}
     {/if}
     {#if embedded && kind === 'profile'}{@render actions()}{/if}
   </section>
@@ -280,7 +315,7 @@
             <div class="agent-row-value">
               <div class="agent-inline">
                 {#key host}<ModelPicker store={host} choice={selection} onpick={patch => { selection = { ...selection, effort: null, ...patch }; }} />{/key}
-                {#if effort?.levels.length}<EffortSlider levels={effort.levels} active={selection.effort ?? effort.default} onpick={id => { selection.effort = id; }} />{/if}
+                {#if effort?.levels.length}<EffortSlider levels={effort.levels} active={selection.effort ?? effort.default ?? null} onpick={id => { selection.effort = id; }} />{/if}
               </div>
               <span class="hint">{labels.identityHint}</span>
             </div>
@@ -305,7 +340,6 @@
       <fieldset class="agent-field"><legend>{labels.tools}</legend>
         <div class="agent-checks">{#each TOOLS as tool (tool)}<label class="agent-chip-check"><input type="checkbox" checked={tools.includes(tool)} onchange={() => { tools = toggle(tools, tool); }} /><span class="ui-label">{labels[tool]}</span></label>{/each}</div>
       </fieldset>
-      {#if provider?.protocol === 'agy' && host === view.store}{@render kebacc()}{/if}
     {:else if kind === 'group'}
       <div class="agent-columns"><label class="agent-field">{labels.maxTurns}<input type="number" min="1" max="100" required bind:value={maxTurns} /></label><label class="agent-field">{labels.perAgent}<input type="number" min="1" max="20" required bind:value={perAgent} /></label></div>
     {:else if kind === 'team'}

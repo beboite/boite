@@ -70,3 +70,31 @@ test('a kept block is the same markup, kept apart for plain and rich rendering',
   expect(renderBlock(block, true)).toBe(rich);
   expect(renderBlock(block, false)).toBe(plain);
 });
+
+test('links are found in linear time: a line of 32,000 brackets renders at once', () => {
+  // Retrying a link regex from every `[` read to the end of the line each time: seconds per render.
+  const lines = ['['.repeat(32_000), '[a'.repeat(16_000), '[a](<'.repeat(6_000), '[a](http://'.repeat(3_000)];
+  const started = performance.now();
+  for (const line of lines) for (const rich of [false, true]) renderMarkdown(line, rich);
+  expect(performance.now() - started).toBeLessThan(500);
+  expect(renderMarkdown('['.repeat(32_000))).toBe(`<p>${'['.repeat(32_000)}</p>`);
+  // The leftmost `[` still opens the label, and an image's `!` stays with its link.
+  expect(renderMarkdown(`${'['.repeat(100)}docs](https://a.b/c)`)).toBe(`<p><a href="https://a.b/c" target="_blank" rel="noopener noreferrer">${'['.repeat(99)}docs</a></p>`);
+  expect(renderMarkdown('see ![a](<https://a.b/c d>) and [(x)](y(z)) now', true)).toBe('<p>see <a href="https://a.b/c%20d" target="_blank" rel="noopener noreferrer">a</a> and <a href="#file" data-file-path="y(z)">(x)</a> now</p>');
+});
+
+test('a thread address links to the thread, not to a file', () => {
+  const thread = (address: string) => `<a href="#thread" data-thread-address="${address}">${address}</a>`;
+  // `machine/thr_x` reads as a relative path, and its `/thr_x` as an absolute one.
+  expect(renderMarkdown('ask boite/thr_tkw9n9qt4100rvq2jmg1 or `thr_tkw9n9qt4100rvq2jmg1`.', true))
+    .toBe(`<p>ask ${thread('boite/thr_tkw9n9qt4100rvq2jmg1')} or <code>${thread('thr_tkw9n9qt4100rvq2jmg1')}</code>.</p>`);
+  // Opening a thread reads no file, so a code span links it without rich links.
+  expect(renderMarkdown('`boite/thr_tkw9n9qt4100rvq2jmg1`')).toBe(`<p><code>${thread('boite/thr_tkw9n9qt4100rvq2jmg1')}</code></p>`);
+  expect(renderMarkdown('src/thr_tkw9n9qt4100rvq2jmg1.ts', true)).toBe('<p><a href="#file" data-file-path="src/thr_tkw9n9qt4100rvq2jmg1.ts">src/thr_tkw9n9qt4100rvq2jmg1.ts</a></p>');
+  // A path that goes on around the id is no thread; a link whose destination is one is.
+  for (const path of ['thr_tkw9n9qt4100rvq2jmg1.ts', 'src\\thr_tkw9n9qt4100rvq2jmg1', 'thr_tkw9n9qt4100rvq2jmg1-old']) {
+    expect(renderMarkdown(path, true)).not.toContain('data-thread-address');
+  }
+  expect(renderMarkdown('[open it](boite/thr_tkw9n9qt4100rvq2jmg1)', true))
+    .toBe('<p><a href="#thread" data-thread-address="boite/thr_tkw9n9qt4100rvq2jmg1">open it</a></p>');
+});

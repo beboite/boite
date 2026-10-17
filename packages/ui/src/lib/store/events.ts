@@ -1,13 +1,16 @@
-import { lastAgentText, requestExcerpt, type ProviderInstallState, type RpcEventName, type ThreadId, type TurnId } from '@boite/contracts';
+import { TRACE_LIMIT, lastAgentText, requestExcerpt, type ProviderInstallState, type RpcEventName, type ThreadId, type TurnId } from '@boite/contracts';
 import type { Client, EventHandler } from '../client';
 import { noteThisComputer } from '../device';
+import { noteQuestionAsked } from '../question-reply.svelte';
 import { finishNotifies } from '../notify';
 import { resetPullRequestSupport } from '../pull-request';
 import { revealRequested } from '../reveal';
+import { appUpdateRequested } from '../desktop-update.svelte';
 import { rightPanel } from '../right-panel.svelte';
 import { undo } from '../undo.svelte';
-import { lastIndexById } from '../thread-rows';
+import { lastIndexById, patchFields, patchLoad } from '../thread-rows';
 import { strings } from '../strings';
+import { needsUser } from '../thread-state';
 import { installStatesOf } from './accounts.svelte';
 import { observable } from './connection.svelte';
 import { lightPage } from './reading-pages.svelte';
@@ -33,7 +36,11 @@ export function listen(ctx: StoreContext, client: Client): void {
     ctx.off.push(
       client.onState((state) => {
         if (!current()) return;
-        if (state !== 'ready') ctx.connection.invalidateReads();
+        if (state !== 'ready') {
+          ctx.connection.invalidateReads();
+          ctx.draftStartup.reset();
+          models.probeRequests.clear();
+        }
         s.connection = state;
         ctx.connection.watchLocalCore(client, state);
         if (state === 'ready') {
@@ -53,7 +60,7 @@ export function listen(ctx: StoreContext, client: Client): void {
           // first load, and what refreshes it after a reconnect.
           s.principal = client.principal;
           ctx.serverUpdater.reset();
-          if (s.owner && !s.localCore) void ctx.serverUpdater.load();
+          if (s.owner && !s.localCore) { void ctx.serverUpdater.load(); void ctx.serverUpdater.loadDesktop(); }
           void s.reload();
           ctx.terminals.reconnected(client);
         }
@@ -62,6 +69,8 @@ export function listen(ctx: StoreContext, client: Client): void {
   }
 
   on('core.updateChanged', snapshot => ctx.serverUpdater.apply(snapshot));
+  on('core.desktopUpdateChanged', ({ status }) => { if (!s.localCore) ctx.serverUpdater.applyDesktop(status); });
+  on('ui.appUpdate', ({ version }) => appUpdateRequested(s, version));
 
   // Rows are patched in place: a load tick on one running thread must not
   // hand the sidebar a new array and re-render every other row.
@@ -69,13 +78,28 @@ export function listen(ctx: StoreContext, client: Client): void {
   on('terminal.exited', ({ id }) => ctx.terminals.shellEnded(id));
   on('thread.created', (summary) => threads.upsertThread(summary));
   on('thread.updated', (summary) => {
+    const held = threads.threads.find(t => t.id === summary.id);
+    const turnedToUser = needsUser(summary) && !(held && needsUser(held));
     threads.upsertThread(summary);
     ctx.delegation.patchThread(summary);
     const open = s.openThread;
-    if (open && open.id === summary.id) Object.assign(open, summary);
+    if (open && open.id === summary.id) patchFields(open, summary);
     // Archived from another client: nothing here can show it again.
     else if (summary.archived) threads.forgetThread(summary.id, summary.archiveReason?.type === 'pr-merged');
-    if (s.delegationThread?.id === summary.id) Object.assign(s.delegationThread, summary);
+    if (s.delegationThread?.id === summary.id) patchFields(s.delegationThread, summary);
+    // A sub-agent of the open thread now asks: its parent's dock reads what it asks.
+    if (turnedToUser && open && summary.parentThreadId === open.id) requests.readChildren(client, open.id, summary.id);
+  });
+  // A load sample alone: every copy of the row this client holds takes the new load and nothing else.
+  on('thread.load', ({ threadId, load }) => {
+    const row = threads.threads.find(t => t.id === threadId);
+    if (row) patchLoad(row, load);
+    // A read in flight would land an older load over this one. It keeps the
+    // load alone: the rest of its fresh row is newer than the row held here.
+    ctx.threadReads.patch(threadId, { load });
+    ctx.delegation.patchLoad(threadId, load);
+    if (s.openThread?.id === threadId) patchLoad(s.openThread, load);
+    if (s.delegationThread?.id === threadId) patchLoad(s.delegationThread, load);
   });
   // The agent's `/name` list is the whole list each time, and it lives on the
   // open thread only: a summary in the sidebar carries none.
@@ -106,10 +130,6 @@ export function listen(ctx: StoreContext, client: Client): void {
   });
   on('collaboration.changed', ({ threadId }) => {
     if (s.openThread?.id === threadId) void s.loadCoordination(threadId, false);
-  });
-  // Invalidation only: grants already read are read again, an unread list stays unread.
-  on('stewards.changed', () => {
-    if (s.stewards !== null) void s.loadStewards();
   });
   on('workflows.changed', ({ threadId }) => {
     const open = s.openThread;
@@ -226,6 +246,7 @@ export function listen(ctx: StoreContext, client: Client): void {
   });
 
   on('question.asked', (request) => {
+    noteQuestionAsked(s, request);
     requests.mergeQuestions([request], 'one');
     layout.notify('needs-you', request.threadId, requestExcerpt(request) || null);
   });
@@ -233,12 +254,15 @@ export function listen(ctx: StoreContext, client: Client): void {
     requests.resolveQuestion(questionId);
   });
 
+  // An agent's shell loop starts and ends dozens of processes a second. Only
+  // the trace surface draws them, and it reads `trace.get` whenever it shows,
+  // so the rows wait for it; it keeps what that call returns at most.
   on('process.started', (record) => {
-    if (s.openThread?.id !== record.threadId) return;
-    s.trace = [record, ...s.trace.filter((p) => !sameProcess(p, record))];
+    if (s.openThread?.id !== record.threadId || !s.traceWatched) return;
+    s.trace = [record, ...s.trace.filter((p) => !sameProcess(p, record))].slice(0, TRACE_LIMIT);
   });
   on('process.exited', (record) => {
-    if (s.openThread?.id !== record.threadId) return;
+    if (s.openThread?.id !== record.threadId || !s.traceWatched) return;
     s.trace = s.trace.map((p) => (sameProcess(p, record) ? record : p));
   });
 

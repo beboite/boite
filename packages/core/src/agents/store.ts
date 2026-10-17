@@ -5,7 +5,7 @@ import type {
   AgentDraft, AgentEntities, AgentEntityKind, AgentProfile, AgentGroup, AgentTeam,
   AgentMission, AgentMissionTask, AgentSave, AgentScope, AgentMemory, AgentResource,
   AgentWork, AgentSession, AgentsSnapshot, RpcParams, AgentHistoryCursor, AgentHistoryKind,
-  AgentsHistoryPage, AgentRun, AgentRunSummary, AgentConversationMessage, AgentRecord,
+  AgentsHistoryPage, AgentRun, AgentRunSummary, AgentConversationMessage, AgentRecord, AgentMessageFile,
 } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { refused } from '../errors.ts';
@@ -16,10 +16,13 @@ import { AgentsRepository, OPEN_WORK, type RecentFilter } from './repository.ts'
 import { AgentEntrustments } from './entrust.ts';
 import { ResidentAgents } from './resident.ts';
 import { AgentRoutines } from './routines.ts';
+import { AgentProjects } from './projects.ts';
+import { AgentSettingCards, registerAgentSettingMethods } from './setting-cards.ts';
+import { MemoryKeeper } from './memory.ts';
 import { boolean, ids, integer, object, oneOf, sameScope, scope, text } from './validation.ts';
 import { invalidParams } from '../errors.ts';
 
-const DEFAULT_LIMITS: AgentsSnapshot['limits'] = { backgroundConcurrency: 2, paused: false, kebaccExperiment: false };
+const DEFAULT_LIMITS: AgentsSnapshot['limits'] = { backgroundConcurrency: 2, paused: false };
 const TOOLS = ['messages', 'missions', 'memory', 'artifacts', 'decisions', 'routines'] as const;
 
 const newestFirst = (a: AgentRecord, b: AgentRecord) => b.updatedAt - a.updatedAt || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0);
@@ -34,18 +37,30 @@ export class AgentStore {
   readonly routines: AgentRoutines;
   readonly records: AgentsRepository;
   readonly entrusted: AgentEntrustments;
-  constructor(readonly core: Core) { this.records = new AgentsRepository(core.journal); this.resident = new ResidentAgents(core); this.routines = new AgentRoutines(core); this.entrusted = new AgentEntrustments(core, this); }
+  readonly projects: AgentProjects;
+  readonly memory: MemoryKeeper;
+  readonly settingCards: AgentSettingCards;
+  constructor(readonly core: Core) {
+    this.records = new AgentsRepository(core.journal); this.resident = new ResidentAgents(core); this.routines = new AgentRoutines(core); this.entrusted = new AgentEntrustments(core, this);
+    this.projects = new AgentProjects(core, this); this.memory = new MemoryKeeper(core, this); this.settingCards = new AgentSettingCards(core, this);
+    // Stewards became agents with projects; their grants have nothing left to grant.
+    core.journal.db.query("DELETE FROM settings WHERE key LIKE 'steward:%'").run();
+  }
+  close(): void { this.projects.close(); this.memory.close(); this.settingCards.close(); }
 
   changed(): void { this.core.bus.emit('agents.changed', { revision: this.records.revision() }); }
   /** Read on every scheduler pass; `setLimits` is its only writer, so it is read from disk once. */
   private held: Readonly<AgentsSnapshot['limits']> | null = null;
   limits(): AgentsSnapshot['limits'] {
-    this.held ??= Object.freeze((this.core.journal.getSetting('agents:limits') as AgentsSnapshot['limits'] | undefined) ?? { ...DEFAULT_LIMITS });
+    if (this.held) return this.held;
+    // Only the known keys: limits stored by older cores also carry retired flags.
+    const stored = (this.core.journal.getSetting('agents:limits') as Partial<AgentsSnapshot['limits']> | undefined) ?? DEFAULT_LIMITS;
+    this.held = Object.freeze({ backgroundConcurrency: stored.backgroundConcurrency ?? DEFAULT_LIMITS.backgroundConcurrency, paused: stored.paused ?? DEFAULT_LIMITS.paused });
     return this.held;
   }
   setLimits(value: AgentsSnapshot['limits']): AgentsSnapshot['limits'] {
     object(value, 'limits');
-    const next = { backgroundConcurrency: integer(value.backgroundConcurrency, 'backgroundConcurrency', 1, 8), paused: boolean(value.paused, 'paused'), kebaccExperiment: boolean(value.kebaccExperiment, 'kebaccExperiment') };
+    const next = { backgroundConcurrency: integer(value.backgroundConcurrency, 'backgroundConcurrency', 1, 8), paused: boolean(value.paused, 'paused') };
     this.core.journal.append({ type: 'agents.limits', threadId: null, version: 1, payload: next }, () => this.core.journal.setSetting('agents:limits', next));
     this.held = Object.freeze({ ...next });
     this.changed();
@@ -69,16 +84,22 @@ export class AgentStore {
     const previous = params.id ? this.records.get('profile', params.id) : null;
     if (previous && this.core.journal.getSetting(`agents:runtime:${previous.id}`) && JSON.stringify(previous.selection) !== JSON.stringify({ ...v.selection, model }) && !this.resident.allowed(previous.id, { ...v.selection, model })) throw refused('selection.model: default model must be allowed by this agent policy');
     const effort = checkEffort(provider, account.id, model, v.selection.effort);
-    const accountIntegration = oneOf(v.accountIntegration, 'accountIntegration', ['provider', 'kebacc-experiment']);
-    if (accountIntegration === 'kebacc-experiment' && (provider.protocol !== 'agy' || !this.limits().kebaccExperiment)) throw refused('accountIntegration: enable the kebacc experiment for an Antigravity CLI agent first');
     const tools = ids(v.tools, 'tools', TOOLS.length);
     for (const tool of tools) oneOf(tool, 'tools', TOOLS);
+    const projectIds = ids(v.projectIds ?? [], 'projectIds', 50);
+    for (const id of projectIds) {
+      const project = this.core.projects.require(id);
+      if (project.kind === 'drafts') throw refused('projectIds: drafts are the user\'s scratch space and cannot be entrusted to an agent');
+    }
     const saved = this.save('profile', params, {
       name: text(v.name, 'name', 100), domain: text(v.domain, 'domain', 500, true), instructions: text(v.instructions, 'instructions', 32000, true),
-      avatar: text(v.avatar, 'avatar', 40, true), status: oneOf(v.status, 'status', ['active', 'paused', 'archived']), tools, accountIntegration,
+      avatar: text(v.avatar, 'avatar', 40, true), status: oneOf(v.status, 'status', ['active', 'paused', 'archived']), tools, projectIds,
       selection: { providerId: provider.id, accountId: account.id, model, effort, permissionMode: oneOf(v.selection.permissionMode, 'permissionMode', ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'yolo', 'dontAsk']) },
     });
     if (previous && saved.status !== 'active') this.resident.enforce();
+    // Letters it wrote to threads it no longer looks after go nowhere.
+    if (previous) for (const session of this.records.list('session').filter(s => s.agentId === saved.id)) this.core.coordination.residentRevoked(session.threadId);
+    if (previous && (previous.projectIds ?? []).some(id => !projectIds.includes(id))) this.projects.forget(saved);
     return saved;
   }
 
@@ -274,12 +295,17 @@ export class AgentStore {
     }
   }
 
-  publishReply(work: AgentWork, runId: string, result: string): void {
+  /**
+   * The agent's answer in its conversation, with the files it attached. A
+   * notice it had nothing to say about (`[quiet]`, or no answer) posts nothing.
+   */
+  publishReply(work: AgentWork, runId: string, result: string, files: AgentMessageFile[] = []): void {
     if (this.records.find('message', 'sourceRunId', [runId]).length) return;
+    if (work.purpose === 'notice' && !files.length && (!result.trim() || /^\[quiet\]\.?$/i.test(result.trim()))) return;
     const group = work.scope.kind === 'group' ? this.records.get('group', work.scope.id) : null;
     const members = group?.memberIds.filter(id => this.records.get('profile', id).status !== 'archived') ?? [];
     const next = members.length > 1 ? members[(members.indexOf(work.agentId) + 1) % members.length] : undefined;
-    const message = this.records.create('message', { scope: work.scope, senderId: work.agentId, text: result || 'Execution completed without a text response.', recipientIds: group?.mode === 'autonomous' && next ? [next] : [], replyTo: work.messageId, episodeId: work.episodeId, sourceRunId: runId });
+    const message = this.records.create('message', { scope: work.scope, senderId: work.agentId, text: result || (files.length ? '' : 'Execution completed without a text response.'), recipientIds: group?.mode === 'autonomous' && next ? [next] : [], replyTo: work.messageId, episodeId: work.episodeId, sourceRunId: runId, ...(files.length ? { files } : {}) });
     this.deliver(message);
   }
 
@@ -489,6 +515,7 @@ export class AgentStore {
       artifacts: r.list('artifact').filter(a => missions.some(m => m.id === a.missionId)),
       more: { message: messages.more, work: recentWork.more, memory: memories.more },
       entrusted: this.entrusted.list().filter(e => !session || e.agentId === session.agentId),
+      brainRoot: this.resident.brainRoot(),
     };
   }
 
@@ -527,6 +554,7 @@ export function registerPersistentAgents(core: Core): void {
   core.router.register('agents.accounts.set', p => store.resident.setGrants(p.grants));
   core.router.register('agents.brain.get', p => store.resident.brain(p.agentId));
   core.router.register('agents.brain.save', p => store.resident.saveBrain(p));
+  core.router.register('agents.brain.root', p => store.resident.setBrainRoot(p.path));
   core.router.register('agents.routine.save', p => store.routines.save(p));
   core.router.register('agents.routine.run', p => store.routines.run(p));
   core.router.register('agents.context.compact', p => store.resident.compact(p.sessionId, p.requestId));
@@ -548,4 +576,5 @@ export function registerPersistentAgents(core: Core): void {
   core.router.register('agents.decision.answer', p => store.answerDecision(p));
   core.router.register('agents.work.control', p => store.control(p));
   core.router.register('agents.entrust', p => store.entrusted.entrust(p));
+  registerAgentSettingMethods(core, store.settingCards);
 }

@@ -27,10 +27,15 @@
  * threads.archive lets a paired phone mark an idle conversation done under the
  * owner's retention policy. Direct removal and policy changes stay owner-only;
  * restoring an archive cancels its expiry before recoverable cleanup.
+ * quotas.list and subscriptionProxy.quotas let a phone draw the same limit bars
+ * as the owner without a dashboard embed; a forced refresh reaches the
+ * providers and stays the owner's, as do monitoring switches and resets.
  */
 
 import { AGENT_EVENTS, DEVICE_EVENTS, DEVICE_METHODS, type RpcEventName, type RpcMethodName } from '@boite/contracts';
 import { refused } from './errors.ts';
+// Paired devices may prepare their own drafts and upload their own attachments: these are
+// connection-owned subsets of threads.create and turns.start, with identical path and byte checks.
 import type { Connection } from './router.ts';
 
 export { AGENT_EVENTS, DEVICE_EVENTS, DEVICE_METHODS };
@@ -68,6 +73,8 @@ export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMeth
   ['threads.pullRequests', 'read the pull requests attached to its own conversation'],
   ['threads.linkPullRequest', 'attach a verified GitHub PR to its own conversation; does not publish or modify the PR'],
   ['threads.unlinkPullRequest', 'remove a conversation link without changing the GitHub PR'],
+  ['threads.watchPullRequest', 'have Boite read one of its own PRs on GitHub and wake its own conversation when it changes; reads only, never writes to GitHub'],
+  ['threads.unwatchPullRequest', 'stop its own conversation\'s watches; changes nothing on GitHub'],
   ['agents.routine.save', 'bounded durable scheduling for its own identity from its direct conversation, when the owner enabled routines'],
   ['agents.snapshot', 'only the persistent identity, context and resources of this execution'],
   ['agents.history', 'older messages, work and memory of this execution context, under the snapshot rules'],
@@ -84,12 +91,13 @@ export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMeth
   ['delegation.models', 'the installed models and reasoning levels a child may run on, without credentials'],
   ['delegation.send', 'messages only between this parent and its direct children'],
   ['delegation.stop', 'stop its own children or itself, never unrelated work'],
+  ['delegation.resume', "continue its own stopped children and lift its team's pause when it set it or a restart did, or after a Stop once the owner wrote again; never the owner's Settings pause"],
   ['workflows.list', 'the runs of its own thread, or of its parent for a step'],
   ['workflows.get', 'one run of its own thread, or of its parent for a step'],
   ['workflows.check', 'validating a plan against its own profiles, without starting anything'],
   ['workflows.start', 'a graph of child threads on its own model or its owner-approved profiles, with concurrency set in its plan'],
   ['workflows.extend', 'more steps on a run it started, under the same checks'],
-  ['workflows.control', 'pause, stop or retry runs it started; resuming a paused team stays with the owner'],
+  ['workflows.control', 'pause, stop, resume or retry runs it started; a pause the owner set lifts only once the owner wrote again, and the Settings pause of the team never'],
   ['workflows.output', 'the structured result of the step this thread is, checked against its declared shape'],
   ['workflows.templates.list', 'the plans kept for its own project'],
   ['workflows.templates.save', 'keeping a new plan for its own project, never replacing a saved one; a template runs only through workflows.start'],
@@ -100,15 +108,14 @@ export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMeth
   ['collaboration.search', 'contacts it may already reach, found by their title, project, branch, model, resources or chat'],
   ['collaboration.read', 'the conversation of a contact it may already reach, text and tool names only; the user wants agents to help with each other'],
   ['collaboration.wait', 'blocks on its own inbox until a reply arrives'],
-  // Steward methods name the steward's own thread like every agent method; the
-  // grant the owner gave that thread is checked in stewards.ts against the
-  // project of the thread each call names. Without a grant every one is refused.
-  ['steward.get', 'its own steward grant and the projects it covers, so it knows what it may touch'],
-  ['steward.threads', 'the state of the threads in the projects the owner made it steward of, nothing outside them'],
-  ['steward.thread', 'one of those threads with its pending questions, permissions and last answer'],
-  ['steward.act', 'archiving, moving, stopping, renaming or deleting one of those threads, each only with the capability the owner granted, and a line in its timeline saying so'],
-  ['steward.answer', 'answering a question one of those threads asked, with the answer capability, marked as the steward\'s in that timeline'],
-  ['steward.permission', 'deciding a tool permission in one of those threads, only with the permissions capability the owner must grant explicitly'],
+  // Resident methods name the persistent agent's own direct conversation like
+  // every agent method; agents/projects.ts holds each call to the projects the
+  // owner entrusted to that agent's profile. Any other thread is refused.
+  ['resident.view', 'the projects the owner entrusted to it, so it knows what it may touch'],
+  ['resident.threads', 'the state of the threads in those projects, nothing outside them'],
+  ['resident.thread', 'one of those threads with its pending questions, permissions and last answer'],
+  ['resident.act', 'archiving, moving between its projects, stopping or renaming one of those threads, with a line in its timeline saying so; deleting stays the owner\'s'],
+  ['resident.answer', 'answering a question one of those threads asked, marked as the agent\'s in that timeline; tool permissions stay the owner\'s'],
   ['agent.where', 'the thread, its project, its working directory and its branch: what the CLI prints first'],
   ['agent.projects', 'the names and folders of the projects the owner added, so it can name one to delegation.spawn or agent.move; reading them opens nothing'],
   ['agent.addProject', 'registering an existing folder as a project, which the owner sees appear and can remove; it opens no file access the agent\'s process lacks, and it stays within the communication settings and one agent generation, like agent.spawn'],
@@ -125,6 +132,8 @@ export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMeth
   ['questions.ask','a question card on its own thread that it does not wait on; the answer comes back as a message'],
   ['agent.settings', 'the settings it may ask the user about, with their values and pages; credentials, accounts and browser profiles are not among them'],
   ['settings.request', 'a settings card on its own thread proposing a change or pointing at a page; only the owner applies it, through settings.set'],
+  ['agents.settings.read', 'the settings of one of the owner\'s agents a card may propose to change (projects, model, effort, memory pass, subagents, time per task), so it reads before it proposes; never their brains or conversations'],
+  ['agents.settings.request', 'a card on its own thread proposing a change to one agent setting; only the owner applies it, through agents.settings.apply'],
   ['artifacts.publish', 'explicitly sharing a bounded snapshot from its own working directory in its own conversation'],
   ['artifacts.read', 'reading back only a published snapshot belonging to its own conversation'],
   ['artifacts.view', 'showing one HTML page of its own working directory in its own conversation, embedded whole, on an opaque origin that loads and calls nothing'],
@@ -172,6 +181,9 @@ export function assertAllowed(method: RpcMethodName, connection: Connection, par
   if (method === 'agents.message.send' && (params as { threadId?: unknown } | null | undefined)?.threadId !== undefined) throw refused('agents.message.send: paired devices must omit threadId and speak as the user');
   if (method === 'git.diff' && !deviceDiffRef((params as { ref?: unknown } | null | undefined)?.ref)) {
     throw refused('git.diff: paired devices compare the working tree with HEAD only', { method, principal: identity.principal });
+  }
+  if ((method === 'quotas.list' || method === 'subscriptionProxy.quotas') && (params as { refresh?: unknown } | null | undefined)?.refresh === true) {
+    throw refused(`${method}: paired devices read the last reading; refresh must be false or absent`, { method, principal: identity.principal });
   }
   if (isDeviceMethod(method)) return;
   throw refused(`${method} is for the owner only`, { method, principal: identity.principal });

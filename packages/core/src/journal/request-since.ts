@@ -13,7 +13,7 @@ export function requestSince(db: Database, threadId: string): number | null {
     .query(`SELECT started_at AS since FROM turns
       WHERE thread_id = ? AND started_at IS NOT NULL
         AND (execution IS NULL OR (
-          COALESCE(json_extract(execution, '$.operation'), '') NOT IN ('background', 'delegation', 'coordination', 'resume')
+          COALESCE(json_extract(execution, '$.operation'), '') NOT IN ('background', 'delegation', 'coordination', 'resume', 'pull-request')
           AND json_extract(execution, '$.automatic') IS NOT 1))
       ORDER BY queued_at DESC, id DESC LIMIT 1`)
     .get(threadId) as { since: number } | null;

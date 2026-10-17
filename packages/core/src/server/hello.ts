@@ -1,6 +1,6 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { hostname } from 'node:os';
-import { CLIENT_DEVICE_MAX, PROTOCOL_VERSION, RpcCloseCode, RpcErrorCode, type SentFrom } from '@boite/contracts';
+import { CLIENT_DEVICE_MAX, HELLO_ACCEPTED, PROTOCOL_VERSION, RpcCloseCode, RpcErrorCode, type SentFrom } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { messageOf, RpcFailure } from '../errors.ts';
 import { NONCE_MAX, NONCE_MIN, nonceProblem, principalOf, type Identity } from '../sessions.ts';
@@ -33,7 +33,7 @@ async function greet(core: Core, connection: ServerConnection, id: number | stri
     return;
   }
   const params = rawParams as
-    | { token?: unknown; grant?: unknown; ticket?: unknown; nonce?: unknown; device?: unknown; protocolVersion?: unknown; client?: { name?: unknown; version?: unknown; device?: unknown } }
+    | { token?: unknown; grant?: unknown; ticket?: unknown; nonce?: unknown; device?: unknown; protocolVersion?: unknown; client?: { name?: unknown; version?: unknown; device?: unknown }; accepts?: unknown }
     | undefined;
   const clientName = clientField(params?.client?.name);
   const refuse = (message: string, reason: string): void => {
@@ -136,6 +136,9 @@ async function greet(core: Core, connection: ServerConnection, id: number | stri
   connection.sentFrom = sentFromOf(identity, client.name, params?.client?.device, connection.remote);
   connection.authenticated = true;
   connection.clientName = clientName;
+  // An unknown name is a newer client's: it gets the older form, as from an older core.
+  connection.accepts = new Set(Array.isArray(params?.accepts)
+    ? HELLO_ACCEPTED.filter(name => (params.accepts as unknown[]).includes(name)) : []);
   logHelloAccepted(core, connection, clientField(client.version, 40, ''));
   connection.sendResponse({
     jsonrpc: '2.0',

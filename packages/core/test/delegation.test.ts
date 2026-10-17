@@ -201,6 +201,12 @@ test('native results survive message pagination and restart without using delega
   const id = run.ctx.emit.startMessage('assistant');
   run.ctx.emit.part(id, 0, { type: 'tool', toolId: 'native-review', name: 'Agent', input: { prompt: 'Review parsing', model: 'reviewer' }, output: null, status: 'running' });
   const rawParts = (messageId: string) => (h.core.journal.db.query('SELECT parts FROM messages WHERE id = ?').get(messageId) as { parts: string }).parts;
+  // What a restart reads: a streaming message's timed writes land in streaming_parts beside its row.
+  const diskParts = (messageId: string) => {
+    const parts = JSON.parse(rawParts(messageId)) as unknown[];
+    for (const row of h.core.journal.db.query('SELECT part_index AS i, json FROM streaming_parts WHERE message_id = ?').all(messageId) as { i: number; json: string }[]) parts[row.i] = JSON.parse(row.json);
+    return parts;
+  };
   // A Team read must show live tools without persisting this or other streams.
   expect(h.core.delegation.get(threadId).nativeAgents[0]).toMatchObject({ task: 'Review parsing', status: 'running' });
   expect(rawParts(id)).toBe('[]');
@@ -210,15 +216,15 @@ test('native results survive message pagination and restart without using delega
   expect(rawParts(id)).toBe('[]');
   expect(rawParts(unrelatedId)).toBe('[]');
   h.core.journal.persistMessages();
-  expect(JSON.parse(rawParts(id))[0]).toMatchObject({ output: 'Checked', status: 'done' });
-  expect(JSON.parse(rawParts(unrelatedId))).toEqual([{ type: 'text', text: 'Unrelated streamed text' }]);
+  expect(diskParts(id)[0]).toMatchObject({ output: 'Checked', status: 'done' });
+  expect(diskParts(unrelatedId)).toEqual([{ type: 'text', text: 'Unrelated streamed text' }]);
   // A stale persisted tool cannot override its newer live update in the merge.
   run.ctx.emit.part(id, 0, { type: 'tool', toolId: 'native-review', name: 'Agent', input: { prompt: 'Review parsing', model: 'reviewer' }, output: null, status: 'running' });
   const live = h.core.delegation.get(threadId).nativeAgents;
   expect(live).toHaveLength(1);
   expect(live[0]).toMatchObject({ status: 'running' });
   expect(live[0]?.result).toBeUndefined();
-  expect(JSON.parse(rawParts(id))[0]).toMatchObject({ output: 'Checked', status: 'done' });
+  expect(diskParts(id)[0]).toMatchObject({ output: 'Checked', status: 'done' });
   run.ctx.emit.part(id, 0, { type: 'tool', toolId: 'native-review', name: 'Agent', input: { prompt: 'Review parsing', model: 'reviewer' }, output: 'Checked', status: 'done' });
   run.ctx.emit.complete(id, 'complete');
   await changed;
@@ -296,14 +302,21 @@ test('the parent learns dynamic workflows and coordination within a compact prom
   await owner.call('turns.start', { threadId, prompt: 'Review the parser' });
   const prompt = runs.get(threadId)!.ctx.prompt;
   for (const command of ['boite agents list', 'boite agents send', 'boite agents reply', 'boite delegate spawn', 'boite delegate send', 'boite workflow help', 'boite workflow check', 'boite workflow run', 'boite workflow extend', 'forEach', 'when']) expect(prompt).toContain(command);
-  expect(prompt).toContain('boite delegate spawn "<brief>" [--model <provider/model>] [--effort <level>] [--speed <tier>] [--context light|neutral]:');
+  expect(prompt).toContain('boite delegate spawn "<brief>" [--model <provider/model>] [--effort <level>] [--speed <tier>] [--context light|neutral] [--worktree]:');
   // 2600 before the line that names `boite view`, about 220 bytes, then 80 for `[--speed <tier>]` and its default,
   // then about 100 for the `boite settings` line.
   expect(prompt).toContain('standard speed without --speed (tiers: boite delegate models)');
   // Then about 130 for the line naming `boite logs problems` and the built-in skill's path. The
   // path starts with the data directory, whose length is the runner's, so it counts as `<data>`.
   // Then 26 for `[--context light|neutral]`; `boite help` holds the rest of the context flags.
-  expect(Buffer.byteLength(prompt.replaceAll(h.dataDir, '<data>'))).toBeLessThan(3162);
+  // Then 36 for `[agent]` and "or a persistent agent's": a thread can ask to change an agent's settings.
+  // Then about 110 for "Markdown" and "not in a terminal", and the line on clickable `path:line` references.
+  // Then about 440 for the two other built-in skills, boite-prove-it and boite-visual: a header,
+  // then each name, description and path, once a session.
+  // Then 81 for `[--worktree]` and what it gives: a child on a branch of its own (3869 measured 2026-10-15).
+  // Then 75 for `boite pr watch`: a watched PR wakes the agent, so it stops polling CI (3941 measured with both lines, 2026-10-15).
+  // Then 7 for `stop|resume`: the parent continues what a stop or a restart cut (3958 measured 2026-10-17, 3951 before).
+  expect(Buffer.byteLength(prompt.replaceAll(h.dataDir, '<data>'))).toBeLessThan(3960);
   runs.get(threadId)!.finish();
   await waitFor(() => h.core.threads.require(threadId).status === 'idle');
   await owner.call('turns.start', { threadId, prompt: 'Continue' });
@@ -493,10 +506,143 @@ test('CLI exposes approved profiles, launches one agent and sends/stops under th
   const free = await call(['delegate', 'spawn', 'Read', 'the', 'parser', '--model', 'echo/echo', '--effort', 'low', '--title', 'Parser read']);
   expect(free).toMatch(/^agent: thr_\S+\nmodel: echo\/echo effort=low\nstatus: \w+\n/);
   const list = await call(['delegate', 'list']);
-  expect(list.split('\n')[0]).toBe('subagents: on; 2 running, 0 done, 0 failed, 0 stopped');
+  expect(list.split('\n')[0]).toBe('subagents: on; 2 running, 0 waiting, 0 done, 0 failed, 0 stopped');
   expect(list).toMatch(/thr_\S+ running \d+s echo\/echo effort=low "Parser read"/);
   expect(list).toContain('Results arrive as messages');
   expect(await call(['delegate', 'stop'])).toContain('stopped: 2');
+});
+
+/** The parent's `boite delegate …`, as its agent runs it. */
+function parentCli(h: TestCore, threadId: string) {
+  return async (args: string[]) => {
+    let out = '', err = '';
+    const code = await runCli(args, { out: s => { out += s; }, err: s => { err += s; }, env: { BOITE_THREAD_ID: threadId, BOITE_CORE_URL: h.url, BOITE_AGENT_TOKEN: h.core.agents.tokenFor(threadId) }, cwd: h.dataDir });
+    expect(err).toBe(''); expect(code).toBe(0); return out;
+  };
+}
+const shellTask = (id: string, description: string) => ({ id, kind: 'shell' as const, description, toolId: null, startedAt: Date.now() });
+const agentOf = (h: TestCore, threadId: string, childId: string) => h.core.delegation.get(threadId).agents.find(agent => agent.thread.id === childId)!;
+const lettersFrom = (h: TestCore, threadId: string, childId: string) => h.core.delegation.get(threadId).messages.filter(letter => letter.from.threadId === childId);
+
+test('a child that ends its turn on background work waits, wakes on it, then finishes with its real result', async () => {
+  const runs = scripted(); const { h, owner, threadId, spawn } = await setup();
+  const cli = parentCli(h, threadId);
+  const child = await spawn(); const childId = child.thread.id;
+  const first = runs.get(childId)!;
+  first.ctx.background!([shellTask('bg-1', 'test_emotes')]);
+  first.finish('Started test_emotes in the background.');
+  await waitFor(() => h.core.threads.require(childId).status === 'idle');
+  // At rest, but not done: the views say what it waits for, and its message is a checkpoint.
+  expect(agentOf(h, threadId, childId).thread.backgroundWait).toMatchObject({ state: 'waiting', for: 'test_emotes', until: null });
+  expect(agentOf(h, threadId, childId).settlement).toBeUndefined();
+  const [checkpoint] = lettersFrom(h, threadId, childId);
+  expect(checkpoint).toMatchObject({ origin: 'result', checkpoint: true });
+  expect(checkpoint!.text).toContain('Checkpoint, not its final result');
+  const list = await cli(['delegate', 'list']);
+  expect(list.split('\n')[0]).toBe('subagents: on; 0 running, 1 waiting, 0 done, 0 failed, 0 stopped');
+  expect(list).toContain(`${childId} waiting `);
+  expect(list).toMatch(/waiting for: test_emotes \(\d+s\)/);
+  expect(list).toContain('checkpoint: Started test_emotes in the background.');
+  // A wait for the result never returns the checkpoint as the answer.
+  expect(await owner.call('delegation.wait', { threadId, agentId: childId, timeoutMs: 150 })).toMatchObject({ state: 'waiting_for_children', timedOut: true });
+  // The parent reads the checkpoint on its own turn; let that turn end.
+  await waitFor(() => runs.has(threadId), 5000);
+  runs.get(threadId)!.finish('Noted.');
+  await waitFor(() => h.core.threads.require(threadId).status === 'idle');
+
+  // The task ends and wakes it: waiting, then running, then done.
+  first.ctx.backgroundFinished!('bg-1', 'completed');
+  expect(agentOf(h, threadId, childId).thread.backgroundWait).toMatchObject({ state: 'waiting', for: 'test_emotes' });
+  const waited = owner.call('delegation.wait', { threadId, agentId: childId, timeoutMs: 5000 });
+  first.ctx.wake!('test_emotes finished: 12 passed.');
+  await waitFor(() => runs.get(childId) !== first, 5000);
+  expect(h.core.threads.require(childId).status).toBe('running');
+  expect(agentOf(h, threadId, childId).thread.backgroundWait ?? null).toBeNull();
+  expect(await cli(['delegate', 'list'])).toContain(`${childId} running `);
+  runs.get(childId)!.finish('All 12 emote tests passed.');
+  const result = await waited;
+  expect(result.state).toBe('result_available');
+  expect(result.agents[0]!.settlement).toBe('result_available');
+  expect(agentOf(h, threadId, childId).thread.backgroundWait ?? null).toBeNull();
+  const final = lettersFrom(h, threadId, childId).at(-1)!;
+  expect(final.text).toContain('All 12 emote tests passed.');
+  expect(final.checkpoint).toBeUndefined();
+  const after = await cli(['delegate', 'list']);
+  expect(after.split('\n')[0]).toBe('subagents: on; 0 running, 0 waiting, 1 done, 0 failed, 0 stopped');
+  expect(after).toContain('result: All 12 emote tests passed.');
+});
+
+test('a child whose background work dies without waking it is interrupted, tells its parent once, and resumes on a send', async () => {
+  const runs = scripted(); const { h, owner, threadId, spawn } = await setup();
+  const cli = parentCli(h, threadId);
+  const child = await spawn(); const childId = child.thread.id;
+  const first = runs.get(childId)!;
+  first.ctx.background!([shellTask('bg-1', 'release build')]);
+  first.finish('Started the release build.');
+  await waitFor(() => h.core.threads.require(childId).status === 'idle');
+  expect(agentOf(h, threadId, childId).thread.backgroundWait?.state).toBe('waiting');
+  // Its agent process goes away with the task: nothing is left to wake it.
+  h.core.threads.agentState.cancelBackground(childId);
+  await waitFor(() => lettersFrom(h, threadId, childId).some(letter => letter.text.includes(': interrupted')), 5000);
+  const agent = agentOf(h, threadId, childId);
+  expect(agent.thread.backgroundWait).toMatchObject({ state: 'interrupted', for: 'release build', reason: 'session-ended' });
+  expect(agent.settlement).toBe('settled');
+  const note = lettersFrom(h, threadId, childId).find(letter => letter.text.includes(': interrupted'))!;
+  expect(note.text).toContain('ended without waking it: its agent process was ended');
+  expect(note.text).toContain(`boite delegate send ${childId}`);
+  expect(await owner.call('delegation.wait', { threadId, agentId: childId, timeoutMs: 1000 })).toMatchObject({ state: 'settled', timedOut: false });
+  const list = await cli(['delegate', 'list']);
+  expect(list.split('\n')[0]).toBe('subagents: on; 0 running, 0 waiting, 0 done, 0 failed, 0 stopped, 1 interrupted');
+  expect(list).toContain(`${childId} interrupted `);
+  expect(list).toContain('interrupted: release build ended without waking it (its agent process was ended)');
+  // Another change on the thread does not repeat the news.
+  h.core.threads.agentState.noteBackground(childId, []);
+  await new Promise(resolve => setTimeout(resolve, 50));
+  expect(lettersFrom(h, threadId, childId).filter(letter => letter.text.includes(': interrupted'))).toHaveLength(1);
+
+  // `boite delegate send` resumes it, and its next turn ends like any other.
+  expect(await cli(['delegate', 'send', childId, 'Check how the build ended, then finish.'])).toContain('received');
+  await waitFor(() => runs.get(childId) !== first, 5000);
+  expect(runs.get(childId)!.ctx.prompt).toContain('Check how the build ended');
+  expect(agentOf(h, threadId, childId).thread.backgroundWait ?? null).toBeNull();
+  runs.get(childId)!.finish('The build had died; rebuilt it, all green.');
+  await waitFor(() => h.core.threads.require(childId).status === 'idle');
+  expect(agentOf(h, threadId, childId).thread.backgroundWait ?? null).toBeNull();
+  expect(agentOf(h, threadId, childId).settlement).toBe('result_available');
+});
+
+test('a task that ends without a wake leaves the child waiting for a moment, then the tick marks it interrupted', async () => {
+  const runs = scripted(); const { h, threadId, spawn } = await setup();
+  const child = await spawn(); const childId = child.thread.id;
+  const first = runs.get(childId)!;
+  first.ctx.background!([shellTask('bg-1', 'test_emotes')]);
+  first.finish('Started test_emotes.');
+  await waitFor(() => h.core.threads.require(childId).status === 'idle');
+  // The agent stops listing it with no report of how it ended.
+  first.ctx.background!([]);
+  const wait = agentOf(h, threadId, childId).thread.backgroundWait;
+  expect(wait).toMatchObject({ state: 'waiting', for: 'test_emotes' });
+  expect(wait?.state === 'waiting' ? wait.until : null).toBeGreaterThan(Date.now());
+  const later = Date.now() + 31_000;
+  const clock = spyOn(Date, 'now').mockImplementation(() => later);
+  restores.push(() => clock.mockRestore());
+  await waitFor(() => lettersFrom(h, threadId, childId).some(letter => letter.text.includes(': interrupted')), 4000);
+  expect(h.core.delegation.get(threadId).agents.find(agent => agent.thread.id === childId)!.thread.backgroundWait)
+    .toMatchObject({ state: 'interrupted', reason: 'no-longer-reported' });
+  clock.mockRestore();
+});
+
+test('a child that leaves nothing running goes straight to done', async () => {
+  const runs = scripted(); const { h, owner, threadId, spawn } = await setup();
+  const child = await spawn(); const childId = child.thread.id;
+  runs.get(childId)!.finish();
+  await waitFor(() => h.core.threads.require(childId).status === 'idle');
+  const agent = agentOf(h, threadId, childId);
+  expect(agent.thread.backgroundWait ?? null).toBeNull();
+  expect(agent.settlement).toBe('result_available');
+  expect(lettersFrom(h, threadId, childId)[0]!.checkpoint).toBeUndefined();
+  expect(await owner.call('delegation.wait', { threadId, agentId: childId, timeoutMs: 1000 })).toMatchObject({ state: 'result_available', timedOut: false });
+  expect((await parentCli(h, threadId)(['delegate', 'list'])).split('\n')[0]).toBe('subagents: on; 0 running, 0 waiting, 1 done, 0 failed, 0 stopped');
 });
 
 test('a parent failure leaves its team working, and the result reaches the next prompt', async () => {
@@ -721,6 +867,24 @@ test('a finished child wakes an idle parent at once, without waiting for the tic
   expect(runs.get(threadId)?.ctx.prompt).toContain('Checked src/example.ts');
 });
 
+test('a paused team keeps its results until the owner resumes it, then they wake the parent at once', async () => {
+  const runs = scripted(); const { h, owner, threadId, spawn, config } = await setup();
+  const child = await spawn();
+  runs.get(child.thread.id)!.finish();
+  await waitFor(() => runs.has(threadId));
+  runs.get(threadId)!.finish();
+  await waitFor(() => h.core.threads.require(threadId).status === 'idle');
+  // What a restart leaves: the result still to deliver, and the team paused until its owner resumes it.
+  h.core.journal.db.query("UPDATE delegation_messages SET status = 'received', data = json_set(data, '$.status', 'received') WHERE root_id = ?").run(threadId);
+  h.core.journal.setSetting(`delegation:${threadId}`, { ...config, paused: true });
+  runs.delete(threadId);
+  await owner.call('delegation.configure', { threadId, config });
+  // The tick runs every second: 100 ms leaves it a 10 % chance to be the one that delivered.
+  await new Promise(resolve => setTimeout(resolve, 100));
+  expect(h.core.journal.listTurns(threadId).map(turn => turn.execution?.operation)).toEqual(['delegation', 'delegation']);
+  expect(runs.get(threadId)?.ctx.prompt).toContain('Checked src/example.ts');
+});
+
 test('an agent picks any installed model and reasoning level for a child, never a fast tier, unless the owner holds it to the profiles', async () => {
   const running = scripted();
   const { h, owner, threadId } = await setup();
@@ -918,4 +1082,50 @@ test('a spawn reads no agent: a speed on a model or profile whose tiers are not 
     // Read and empty is a model without tiers, not an unread one.
     await expect(agent.call('delegation.spawn', { threadId, model: 'twin/plain', speed: 'fast', task: 'No tier', requestId: 'read-plain' })).rejects.toThrow('speed: twin/plain offers no speed tier; leave speed out');
   } finally { agent.close(); }
+});
+
+test('the parent agent resumes its own stop and a Stop once the owner wrote again, never the Settings pause', async () => {
+  const running = scripted(); const { h, owner, threadId, config } = await setup();
+  const cli = parentCli(h, threadId);
+  // A refusal: the agent reads why on stderr, with a failing exit code.
+  const refused = async (args: string[]) => {
+    let err = '';
+    const code = await runCli(args, { out: () => {}, err: s => { err += s; }, env: { BOITE_THREAD_ID: threadId, BOITE_CORE_URL: h.url, BOITE_AGENT_TOKEN: h.core.agents.tokenFor(threadId) }, cwd: h.dataDir });
+    expect(code).not.toBe(0); return err;
+  };
+  const child = JSON.parse(await cli(['delegate', 'spawn', 'worker', 'Write the parser', '--json'])) as DelegatedAgent;
+  await waitFor(() => running.has(child.thread.id));
+  // Its own stop: before, only the owner's Settings lifted the pause it left.
+  expect(await cli(['delegate', 'stop'])).toContain('boite delegate resume continues it');
+  expect(h.core.delegation.config(threadId)).toMatchObject({ paused: true, pausedBy: 'agent' });
+  expect((await cli(['delegate', 'list'])).split('\n')[0]).toStartWith('subagents: paused by you (boite delegate resume)');
+  running.delete(child.thread.id);
+  const resumed = await cli(['delegate', 'resume']);
+  expect(resumed).toContain('The team is no longer paused.');
+  expect(resumed).toContain(`continued: ${child.thread.id}`);
+  await waitFor(() => running.has(child.thread.id));
+  expect(running.get(child.thread.id)!.ctx.prompt).toContain('Continue your task from where your last turn stopped (it ended stopped');
+  // Twice is once: the continuation of that stop already went.
+  expect(await cli(['delegate', 'resume'])).toContain('No stopped subagent to continue.');
+
+  // The owner's Stop holds until the owner writes again.
+  await owner.call('turns.stop', { threadId });
+  await waitFor(() => h.core.threads.require(child.thread.id).status === 'idle');
+  expect(h.core.delegation.config(threadId)).toMatchObject({ paused: true, pausedBy: 'stop' });
+  expect(await refused(['delegate', 'resume'])).toContain('once they write to it again');
+  running.delete(child.thread.id);
+  await owner.call('turns.start', { threadId, prompt: 'Go on with the parser' });
+  expect(await cli(['delegate', 'resume', child.thread.id])).toContain(`continued: ${child.thread.id}`);
+  await waitFor(() => running.has(child.thread.id));
+  running.get(threadId)!.finish();
+  await waitFor(() => h.core.threads.require(threadId).status === 'idle');
+
+  // The Settings switch is the owner's alone, whatever the owner writes after it.
+  await owner.call('delegation.configure', { threadId, config: { ...config, paused: true } });
+  expect(h.core.delegation.config(threadId)).toMatchObject({ paused: true, pausedBy: 'owner' });
+  await owner.call('turns.start', { threadId, prompt: 'Still there?' });
+  expect(await refused(['delegate', 'resume'])).toContain('Subagents > Settings');
+  expect(await refused(['delegate', 'spawn', 'worker', 'More'])).toContain('only they resume them');
+  expect((await owner.call('delegation.resume', { threadId })).unpaused).toBe(true);
+  expect(h.core.delegation.config(threadId).pausedBy).toBeUndefined();
 });

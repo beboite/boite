@@ -95,12 +95,28 @@ async function missionJourney() {
   await page.waitFor(`!document.querySelector('[data-testid="agent-decision"]')`);
   expect(await page.evaluate(`(async () => { const { workspace } = window.__boiteTest; return (await workspace.active.client.call('agents.snapshot', {})).decisions.at(-1).answer; })()`)).toBe('Puzzle');
 }
-afterAll(async () => { await page?.close(); await server?.close(); }, 15000);
+afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
 async function settled() {
-  await page.evaluate(`Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])`);
+  await page.settleAnimations();
 }
 async function capture(name: string) { await settled(); await page.screenshot(join(import.meta.dir, '.artifacts', name)); }
+/**
+ * Clicks `target`, then reads where the list and the card beside it stand on
+ * every frame, for 400 ms from the first frame that draws `rail` (longer than
+ * the fold's slide), so a motion that settles back in place still shows.
+ */
+async function framesAfter(target: string, rail: string) {
+  return page.evaluate<{ rail: number; card: number }[]>(`new Promise((resolve) => {
+    const rows = []; let start; const t0 = performance.now();
+    const read = () => {
+      const now = performance.now(); const list = document.querySelector('${rail}'); const card = document.querySelector('.body main');
+      if (list && card) { start ??= now; rows.push({ rail: Math.round(list.getBoundingClientRect().left), card: Math.round(card.getBoundingClientRect().left) }); }
+      if (now - t0 < 5000 && (start === undefined || now - start < 400)) requestAnimationFrame(read); else resolve(rows);
+    };
+    document.querySelector('${target}').click(); requestAnimationFrame(read);
+  })`);
+}
 
 test('create, converse, configure the resident engine and follow background work on desktop and phone', async () => {
   // The Agents list is the thread list's column: same place, same width, same
@@ -112,8 +128,11 @@ test('create, converse, configure the resident engine and follow background work
   await settled();
   const threads = await page.evaluate<{ rail?: number[]; card?: number[]; fold: boolean }>(layout);
   expect(threads.rail?.[2]).toBeGreaterThan(0);
-  await page.click('[data-testid="view-agents"]');
-  await page.waitFor(`document.querySelector('[data-testid="agents-page"]')`);
+  // The switch changes the rows and the card's content, nothing else: the new
+  // list does not slide in from the window's edge with the card in tow.
+  const switching = await framesAfter('[data-testid="view-agents"]', '.agents-rail');
+  expect(switching.length).toBeGreaterThan(2);
+  expect([...new Set(switching.map(f => `${f.rail} ${f.card}`))]).toEqual([`${threads.rail![0]} ${threads.card![0]}`]);
   await settled();
   expect(await page.evaluate(layout)).toEqual(threads);
   // Folding from the title bar hides the Agents list as it hides the thread list.
@@ -121,7 +140,9 @@ test('create, converse, configure the resident engine and follow background work
   await page.waitFor(`getComputedStyle(document.querySelector('.agents-rail')).display === 'none'`);
   // One fold for both lists: the thread list comes back folded too.
   expect(await page.evaluate(`window.__boiteTest.workspace.active.sidebarCollapsed`)).toBe(true);
-  await page.click('[data-testid="sidebar-toggle"]');
+  // Unfolding still slides the list in from the window's edge.
+  const unfolding = await framesAfter('[data-testid="sidebar-toggle"]', '.agents-rail');
+  expect(Math.min(...unfolding.map(f => f.rail))).toBeLessThan(threads.rail![0]!);
   await page.waitFor(`getComputedStyle(document.querySelector('.agents-rail')).display !== 'none'`);
   await settled();
   expect(await page.evaluate(layout)).toEqual(threads);
@@ -341,4 +362,102 @@ test('a new agent runs on the machine picked in its form, and opens there', asyn
   expect(byMachine['Builder']).toContain('Scout');
   expect(Object.entries(byMachine).filter(([label]) => label !== 'Builder').flatMap(([, list]) => list)).not.toContain('Scout');
   await capture('agents-created-on-builder-desktop.png');
+
+  // The list holds every machine's agents, the way the thread list holds every machine's threads.
+  const scout = await page.evaluate<string>(`(async () => (await window.__boiteTest.workspace.active.client.call('agents.snapshot', {})).profiles.find(a => a.name === 'Scout').id)()`);
+  const local = await page.evaluate<string>(`(async () => {
+    const [builder, primary] = ['http://builder.test', null].map(id => window.__boiteTest.workspace.machines.find(m => id ? m.id === id : m.id !== 'http://builder.test').store);
+    const { id, revision, createdAt, updatedAt, ...value } = (await builder.client.call('agents.snapshot', {})).profiles.find(a => a.name === 'Scout');
+    const saved = await primary.client.call('agents.profile.save', { value: { ...value, name: 'Keeper', projectIds: [] } });
+    await window.__boiteTest.workspace.select(primary);
+    primary.showAgents();
+    return saved.id;
+  })()`);
+  const onBuilder = `[data-machine-id="http://builder.test"] [data-testid="agent-entry-${scout}"]`;
+  const onLocal = `[data-machine-id]:not([data-machine-id="http://builder.test"]) [data-testid="agent-entry-${local}"]`;
+  await page.waitFor(`window.__boiteTest.workspace.active.machineId !== 'http://builder.test' && document.querySelector('${onLocal}') && document.querySelector('${onBuilder}')`);
+  expect(await page.evaluate(`document.querySelector('[data-machine-id="http://builder.test"] .machine')?.getAttribute('aria-label')`)).toBe('Builder');
+  await capture('agents-all-machines-desktop.png');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await capture('agents-all-machines-phone.png');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  // A row of another machine opens its conversation there.
+  await page.click(onBuilder);
+  await page.waitFor(`window.__boiteTest.workspace.active.machineId === 'http://builder.test' && document.querySelector('${onBuilder}')?.getAttribute('aria-current') === 'page'`);
+  // The machine button narrows the list to one machine, and "All machines" brings the others back.
+  await page.click('[data-testid="agents-machine"]');
+  await page.click('[data-testid="agents-machine-menu"] [data-value="http://builder.test"]');
+  await page.waitFor(`!document.querySelector('${onLocal}') && document.querySelector('[data-testid="agent-entry-${scout}"]')`);
+  await page.click('[data-testid="agents-machine"]');
+  await page.click('[data-testid="agents-machine-menu"] [data-value="all"]');
+  await page.waitFor(`document.querySelector('${onLocal}')`);
+}, 60000);
+
+test('an agent answers with pictures, keeps its memory, looks after projects, and its work opens from the menu', async () => {
+  await page.navigate(`${base}/?fake=1&agents=1`);
+  await page.waitFor(`window.__boiteTest?.workspace.active.connection === 'ready' && document.querySelector('[data-testid="view-agents"]')`);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+  await page.click('[data-testid="view-agents"]');
+  const mira = `(async () => (await window.__boiteTest.workspace.active.client.call('agents.snapshot', {})).profiles.find(a => a.name === 'Mira'))()`;
+  const agent = await page.evaluate<{ id: string; projectIds: string[] }>(mira);
+  expect(agent.projectIds).toHaveLength(1);
+  await page.waitFor(`document.querySelector('[data-testid="agent-entry-${agent.id}"]')`);
+  await page.click(`[data-testid="agent-entry-${agent.id}"]`);
+  // The reply carries its picture, drawn inline, and the quiet memory chip under it; the notice wears its own label.
+  await page.waitFor(`document.querySelector('[data-testid="agent-files"] img')?.complete && document.querySelector('[data-testid="agent-files"] img').naturalWidth > 0`);
+  await page.waitFor(`document.querySelector('[data-testid="agent-memory"]')?.dataset.status === 'done'`);
+  expect(await page.evaluate(`document.querySelector('[data-testid="agent-notice"]').textContent`)).toContain('About your projects');
+  expect(await page.evaluate(`!!document.querySelector('[data-testid="agent-planned-result"]')`)).toBe(false);
+  expect(await page.evaluate(`document.querySelector('.agents-identity small').textContent`)).toContain('Looks after');
+  await page.click('[data-testid="agent-memory"] button');
+  await page.waitFor(`document.querySelector('[data-testid="agent-memory-summary"]')?.textContent.includes('three lines')`);
+  await page.evaluate(`document.querySelector('[data-testid="agent-memory"]').scrollIntoView({ block: 'center' })`);
+  await capture('agents-files-memory-desktop.png');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await page.evaluate(`document.querySelector('[data-testid="agent-files"]').scrollIntoView({ block: 'center' })`);
+  await capture('agents-files-memory-phone.png');
+  expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+  // The picture opens in the zoom viewer, on a phone too.
+  await page.click('[data-testid="agent-files"] [data-testid="artifact-enlarge"]');
+  await page.waitFor(`document.querySelector('[data-testid="image-viewer"]')`);
+  await page.evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+  await page.waitFor(`!document.querySelector('[data-testid="image-viewer"]')`);
+
+  // Its settings: the projects it looks after, among the main options.
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+  await openPane('settings');
+  await page.waitFor(`document.querySelector('[data-testid="agent-projects"]')`);
+  expect(await page.evaluate(`document.querySelector('[data-testid="agent-project-${agent.projectIds[0]}"]').checked`)).toBe(true);
+  expect(await page.evaluate(`!!document.querySelector('[data-testid="agent-projects"]').closest('details')`)).toBe(false);
+  await page.evaluate(`document.querySelector('[data-testid="agent-projects"]').scrollIntoView({ block: 'center' })`);
+  await capture('agents-editor-projects-desktop.png');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await page.evaluate(`document.querySelector('[data-testid="agent-projects"]').scrollIntoView({ block: 'center' })`);
+  await capture('agents-editor-projects-phone.png');
+  expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+
+  // The brain folder: a relative path is refused with the core's sentence, an absolute one takes every brain.
+  await page.click('[data-testid="agents-engine"]');
+  await page.waitFor(`document.querySelector('[data-testid="agents-brain-root-path"]')`);
+  await page.click('[data-testid="agents-brain-root-change"]');
+  await page.type('[data-testid="agents-brain-root-input"]', 'agent-brains');
+  await page.click('[data-testid="agents-brain-root-save"]');
+  await page.waitFor(`document.querySelector('[data-testid="agents-brain-root-error"]')?.textContent.includes('expected an absolute folder')`);
+  await page.evaluate(`document.querySelector('[data-testid="agents-brain-root"]').scrollIntoView({ block: 'center' })`);
+  await capture('agents-brain-root-desktop.png');
+  await page.evaluate(`(() => { const input = document.querySelector('[data-testid="agents-brain-root-input"]'); input.value = ''; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await page.type('[data-testid="agents-brain-root-input"]', '/srv/agent-brains');
+  await page.click('[data-testid="agents-brain-root-save"]');
+  await page.waitFor(`document.querySelector('[data-testid="agents-brain-root-path"]').textContent === '/srv/agent-brains' && document.querySelector('[data-testid="agents-brain-root-default"]')`);
+  expect(await page.evaluate(`(async () => (await window.__boiteTest.workspace.active.client.call('agents.brain.get', { agentId: '${agent.id}' })).path)()`)).toBe('/srv/agent-brains/mira');
+
+  // Its work opens from the header's menu: the thread it works in, code and all.
+  await page.click(`[data-testid="agent-entry-${agent.id}"]`);
+  await page.waitFor(`document.querySelector('[data-testid="agent-panes"]')`);
+  await page.click('[data-testid="agent-panes"]');
+  await page.click('[data-value="see-work"]');
+  const session = `(async () => (await window.__boiteTest.workspace.active.client.call('agents.snapshot', {})).sessions.find(s => s.agentId === '${agent.id}' && s.scope.kind === 'agent').threadId)()`;
+  const threadId = await page.evaluate<string>(session);
+  await page.waitFor(`window.__boiteTest.workspace.active.page === 'chat' && window.__boiteTest.workspace.active.openThread?.id === '${threadId}'`);
 }, 60000);

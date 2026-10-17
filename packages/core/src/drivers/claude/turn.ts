@@ -1,14 +1,18 @@
 import type { SDKAssistantMessage, SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { MessageId, MessagePart, ToolDocument, ToolStatus, Usage } from '@boite/contracts';
-import type { PromptCacheLife, TurnContext, TurnResult } from '../types.ts';
+import type { PromptCacheLife, ToolPatch, TurnContext, TurnRefusal, TurnResult } from '../types.ts';
+import { isoTime } from './diagnostics.ts';
 import {
   apiErrorReason,
+  apiErrorStatusOf,
   cacheLifeOf,
   commandsOf,
   contentBlocks,
   contextWindowOf,
   editDocuments,
   errorSentence,
+  FORBIDDEN,
+  forbiddenReason,
   mapUsage,
   requestTokens,
   resultText,
@@ -32,9 +36,36 @@ interface ToolEntry {
   output: string | null;
   status: ToolStatus;
   documents: ToolDocument[];
+  /** What the CLI's `tool_use_summary` said of the batch this call ran in. */
+  summary: string | null;
+  /**
+   * The call finished and its card was written: `input`, `output` and
+   * `documents` live in the stored part only, and a later change patches it.
+   */
+  released: boolean;
 }
 
 type UserMessage = Extract<SDKMessage, { type: 'user' }>;
+
+/** One block of the API message being read: what tells a progress update from reasoning. */
+interface BlockEntry {
+  kind: 'thinking' | 'other';
+  /** The part a thinking block writes into. */
+  index: number | null;
+  text: string;
+}
+
+/**
+ * Claude 5.1 and later write the short line they put ahead of a tool call
+ * ("Now I'll check the tests.") as a thinking block, at most one per call,
+ * instead of a text block. Older models write it as text.
+ */
+export function writesProgressAsThinking(model: string | null): boolean {
+  const match = model === null ? null : /claude-[a-z]+-(\d+)(?:-(\d{1,2}))?(?!\d)/.exec(model);
+  if (match === null) return false;
+  const major = Number(match[1]);
+  return major > 5 || (major === 5 && Number(match[2] ?? 0) >= 1);
+}
 
 /** One turn: what it wrote, what it cost, and the promise the scheduler waits on. */
 export class ClaudeTurn {
@@ -48,8 +79,23 @@ export class ClaudeTurn {
   private readonly thinkingBlocks = new Map<number, number>();
   /** Block index to tool id, so an `input_json_delta` reaches the part its block opened. */
   private readonly toolBlocks = new Map<number, string>();
-  private readonly streamedText = new Map<string, string>();
-  private readonly streamedThinking = new Map<string, string>();
+  /**
+   * The text and thinking the deltas carried for the current API message, so
+   * its `assistant` frame is not written twice. The CLI yields that frame before
+   * the next `message_start`, which clears them.
+   */
+  private streamedText = '';
+  private streamedThinking = '';
+  /** The API message `streamedText` and `streamedThinking` belong to. */
+  private streamedFor = '';
+  /** The blocks of the API message `blocksOf` names, in order, and the streamed ones by block index. */
+  private blocks: BlockEntry[] = [];
+  private blocksOf = '';
+  /** API messages the stream opened blocks of: their snapshots log nothing again. */
+  private readonly streamedIds = new Set<string>();
+  private readonly streamedBlocks = new Map<number, BlockEntry>();
+  /** The model the API message being read came from, as its `message_start` said. */
+  private apiModel: string | null = null;
 
   private sessionId: string | null;
   /**
@@ -64,8 +110,14 @@ export class ClaudeTurn {
   private contextTokens: number | null = null;
   /** The lifetime of the last cache write the main loop made in this turn. */
   private cacheLife: PromptCacheLife | null = null;
+  /** An `authentication_failed` frame waiting for the result that says whether it was a 401 or a 403. */
+  private authFrame: { content: unknown } | null = null;
   private status: TurnResult['status'] = 'done';
   private error: string | null = null;
+  /** Availability refusal the API error named: `overloaded` or a spent subscription window. */
+  private refusal: TurnRefusal | undefined;
+  /** When the window the CLI reported rejected resets (`rate_limit_event`), in milliseconds. */
+  private rejectedUntil: number | null = null;
   private resolve: (result: TurnResult) => void = () => undefined;
   private wake: () => void = () => undefined;
 
@@ -121,6 +173,7 @@ export class ClaudeTurn {
       error: this.error ?? undefined,
       promptCache: this.cacheLife,
       ...(this.sessionLost ? { sessionLost: true } : {}),
+      ...(this.status === 'error' && this.refusal ? { refusal: this.refusal } : {}),
       ...(this.sessionId !== null && this.lastEntry !== null ? { checkpoint: { sessionId: this.sessionId, entry: this.lastEntry } } : {}),
     });
   }
@@ -155,6 +208,12 @@ export class ClaudeTurn {
         break;
       case 'system':
         this.handleSystem(message);
+        break;
+      case 'tool_use_summary':
+        this.summarizeTools(message.preceding_tool_use_ids, message.summary);
+        break;
+      case 'rate_limit_event':
+        this.noteRateLimit(message.rate_limit_info as { status?: unknown; resetsAt?: unknown } | null | undefined);
         break;
       default:
         break;
@@ -194,17 +253,30 @@ export class ClaudeTurn {
     switch (event.type) {
       case 'message_start':
         this.apiMessageId = event.message?.id ?? '';
+        this.streamedText = '';
+        this.streamedThinking = '';
+        this.streamedFor = this.apiMessageId;
+        this.apiModel = event.message?.model ?? null;
         this.textBlocks.clear();
         this.thinkingBlocks.clear();
         this.toolBlocks.clear();
+        this.streamedBlocks.clear();
+        this.startBlocks(this.apiMessageId);
         break;
       case 'content_block_start': {
         const block = event.content_block;
         if (block === undefined) break;
+        this.streamedIds.add(this.apiMessageId);
+        if (block.type === 'thinking' && event.index !== undefined) {
+          const index = this.openThinkingBlock();
+          this.thinkingBlocks.set(event.index, index);
+          this.streamedBlocks.set(event.index, this.logBlock('thinking', index, ''));
+          break;
+        }
+        if (block.type === 'tool_use') this.progressBeforeTool();
+        this.logBlock('other', null, '');
         if (block.type === 'text' && event.index !== undefined) this.textBlocks.set(event.index, this.openText());
-        else if (block.type === 'thinking' && event.index !== undefined) {
-          this.thinkingBlocks.set(event.index, this.openThinking());
-        } else if (block.type === 'tool_use' && typeof block.id === 'string') {
+        else if (block.type === 'tool_use' && typeof block.id === 'string') {
           // The input arrives as `input_json_delta` after this: an empty object now,
           // and an empty `inputText` the deltas grow until the parsed input lands.
           if (event.index !== undefined) this.toolBlocks.set(event.index, block.id);
@@ -216,6 +288,8 @@ export class ClaudeTurn {
       case 'content_block_delta': {
         // `signature_delta` signs the thinking block; it is not text.
         if (event.delta?.type === 'thinking_delta') {
+          const entry = event.index === undefined ? undefined : this.streamedBlocks.get(event.index);
+          if (entry !== undefined) entry.text += event.delta.thinking ?? '';
           this.streamContent('thinking', event.index, event.delta.thinking ?? '');
           break;
         }
@@ -241,12 +315,18 @@ export class ClaudeTurn {
   private streamContent(kind: 'text' | 'thinking', blockIndex: number | undefined, text: string): void {
     if (!text.length) return;
     const blocks = kind === 'text' ? this.textBlocks : this.thinkingBlocks;
-    const accumulated = kind === 'text' ? this.streamedText : this.streamedThinking;
     const known = blockIndex === undefined ? undefined : blocks.get(blockIndex);
     const index = known ?? (kind === 'text' ? this.openText() : this.openThinking());
     if (blockIndex !== undefined) blocks.set(blockIndex, index);
     this.write(index, text);
-    accumulated.set(this.apiMessageId, (accumulated.get(this.apiMessageId) ?? '') + text);
+    if (kind === 'text') this.streamedText += text;
+    else this.streamedThinking += text;
+  }
+
+  /** What the deltas carried for API message `apiId`: nothing once another message started. */
+  private streamed(kind: 'text' | 'thinking', apiId: string): string {
+    if (apiId !== this.streamedFor) return '';
+    return kind === 'text' ? this.streamedText : this.streamedThinking;
   }
 
   /**
@@ -262,13 +342,36 @@ export class ClaudeTurn {
     this.ctx.log('warn', `claude: the subagent of ${parentToolId} hit an error: ${errorSentence(message.error)}`);
   }
 
+  /** A rejected window's reset, kept for a usage limit failure that follows; an allowed one clears it. */
+  private noteRateLimit(info: { status?: unknown; resetsAt?: unknown } | null | undefined): void {
+    if (info === null || info === undefined) return;
+    if (info.status === 'allowed') { this.rejectedUntil = null; return; }
+    if (info.status !== 'rejected') return;
+    const at = isoTime(info.resetsAt);
+    if (at !== null) this.rejectedUntil = Date.parse(at);
+  }
+
   private handleAssistant(message: SDKAssistantMessage): void {
     if (message.error !== undefined) {
-      this.fail(apiErrorReason(message.error, (message.message as { content?: unknown } | undefined)?.content));
+      const content = (message.message as { content?: unknown } | undefined)?.content;
+      // The CLI says `authentication_failed` for a 403 too: the result names the status.
+      if (message.error === 'authentication_failed') {
+        if (apiErrorStatusOf(message) === FORBIDDEN) this.fail(forbiddenReason(apiErrorReason('unknown', content)));
+        else this.authFrame = { content };
+        return;
+      }
+      if (this.status !== 'error') this.refusal = message.error === 'overloaded' ? { kind: 'capacity' } : message.error === 'rate_limit' ? { kind: 'usage-limit', resetsAt: this.rejectedUntil } : undefined;
+      this.fail(apiErrorReason(message.error, content));
       return;
     }
-    const body = message.message as { id?: string; content?: unknown; usage?: unknown } | undefined;
+    const body = message.message as { id?: string; model?: string; content?: unknown; usage?: unknown } | undefined;
     const apiId = body?.id ?? '';
+    // A streamed message logged its blocks as they opened; a snapshot alone logs them here.
+    const logs = !this.streamedIds.has(apiId);
+    if (logs && apiId !== this.blocksOf) {
+      this.startBlocks(apiId);
+      this.apiModel = body?.model ?? null;
+    }
     const carried = requestTokens(body?.usage);
     if (carried !== null) this.contextTokens = carried;
     this.cacheLife = cacheLifeOf(body?.usage) ?? this.cacheLife;
@@ -276,18 +379,25 @@ export class ClaudeTurn {
       if (block.type === 'text') {
         const text = block.text ?? '';
         // With includePartialMessages the deltas already carried this block.
-        if (text.length === 0 || (this.streamedText.get(apiId) ?? '').includes(text)) continue;
+        if (text.length === 0 || this.streamed('text', apiId).includes(text)) continue;
+        if (logs) this.logBlock('other', null, text);
         this.write(this.openText(), text);
         continue;
       }
       if (block.type === 'thinking') {
         const thinking = block.thinking ?? '';
         // Same dedupe as text: the deltas already carried this block.
-        if (thinking.length === 0 || (this.streamedThinking.get(apiId) ?? '').includes(thinking)) continue;
-        this.write(this.openThinking(), thinking);
+        if (thinking.length === 0 || this.streamed('thinking', apiId).includes(thinking)) continue;
+        const index = this.openThinkingBlock();
+        if (logs) this.logBlock('thinking', index, thinking);
+        this.write(index, thinking);
         continue;
       }
       if (block.type === 'tool_use' && typeof block.id === 'string') {
+        if (logs && !this.tools.has(block.id)) {
+          this.progressBeforeTool();
+          this.logBlock('other', null, '');
+        }
         this.upsertTool(block.id, block.name ?? 'tool', block.input ?? {});
       }
     }
@@ -319,6 +429,13 @@ export class ClaudeTurn {
     // `[ede_diagnostic] ...`): that is the stop the user asked for, not a failure.
     // An aborted result Boite did not ask for still fails below.
     if (this.isStopped) return;
+    const auth = this.authFrame;
+    this.authFrame = null;
+    if (auth !== null) {
+      this.fail(apiErrorStatusOf(message) === FORBIDDEN
+        ? forbiddenReason(message.subtype === 'success' && message.result.length > 0 ? message.result : apiErrorReason('unknown', auth.content))
+        : apiErrorReason('authentication_failed', auth.content));
+    }
     if (message.subtype !== 'success') {
       this.fail(message.errors.length > 0 ? message.errors.join('; ') : message.subtype);
     } else if (message.is_error) {
@@ -373,6 +490,46 @@ export class ClaudeTurn {
     return index;
   }
 
+  private startBlocks(apiId: string): void {
+    this.blocks = [];
+    this.blocksOf = apiId;
+  }
+
+  private logBlock(kind: BlockEntry['kind'], index: number | null, text: string): BlockEntry {
+    const entry = { kind, index, text };
+    this.blocks.push(entry);
+    return entry;
+  }
+
+  /**
+   * A thinking block's part. A model that writes its progress updates as
+   * thinking gets one part per block, so the update can turn into text without
+   * taking the reasoning before it along; other models keep consecutive blocks
+   * in one part.
+   */
+  private openThinkingBlock(): number {
+    if (writesProgressAsThinking(this.apiModel ?? this.ctx.thread.model)) this.thinkingIndex = null;
+    return this.openThinking();
+  }
+
+  /**
+   * A tool call opens: when the two blocks before it in the same API message
+   * are non-empty thinking, on a model that writes its progress updates that
+   * way, the second is that update, not reasoning. Its part becomes text in
+   * place, so it reads as the agent's narration between tool calls. One
+   * thinking block alone before a call is real reasoning and stays folded.
+   */
+  private progressBeforeTool(): void {
+    const [before, last] = this.blocks.slice(-2);
+    if (before?.kind !== 'thinking' || last?.kind !== 'thinking' || last.index === null) return;
+    if (before.text.trim().length === 0 || last.text.trim().length === 0) return;
+    if (!writesProgressAsThinking(this.apiModel ?? this.ctx.thread.model)) return;
+    this.part(last.index, { type: 'text', text: last.text });
+    // The text the next block writes must not land in this part.
+    this.textIndex = null;
+    this.thinkingIndex = null;
+  }
+
   /** The reasoning of one block, folded in the UI. Text after it opens its own part. */
   private openThinking(): number {
     if (this.thinkingIndex !== null) return this.thinkingIndex;
@@ -396,13 +553,22 @@ export class ClaudeTurn {
    */
   upsertTool(toolId: string, name: string, input: unknown, inputText: string | null = null): void {
     const entry = this.tools.get(toolId) ?? this.newTool(name);
-    entry.name = name;
-    entry.input = input;
-    entry.inputText = inputText;
     // A streamed input is half-typed JSON: there is nothing to read a diff out
     // of until the parsed object lands, and then it lands whole.
-    if (inputText === null) entry.documents = editDocuments(name, input);
+    const documents = inputText === null ? editDocuments(name, input) : null;
+    entry.name = name;
+    entry.inputText = inputText;
     this.tools.set(toolId, entry);
+    if (entry.released) {
+      // The result came first (a replayed or adopted call): the card keeps its output.
+      this.patchTool(entry, {
+        name, input, inputText,
+        ...(documents === null ? {} : { documents: documents.length > 0 ? documents : undefined }),
+      });
+      return;
+    }
+    entry.input = input;
+    if (documents !== null) entry.documents = documents;
     this.emitTool(toolId, entry);
   }
 
@@ -414,10 +580,27 @@ export class ClaudeTurn {
 
   finishTool(toolId: string, output: string, status: ToolStatus): void {
     const entry = this.tools.get(toolId) ?? this.newTool(toolId);
-    entry.output = output;
     entry.status = status;
     this.tools.set(toolId, entry);
+    if (entry.released) {
+      this.patchTool(entry, { output, status });
+      return;
+    }
+    entry.output = output;
     this.emitTool(toolId, entry);
+    // The stored part holds the call now; a screenshot's base64 or a written
+    // file is not kept a second time for the rest of the turn.
+    if (status !== 'running') {
+      entry.released = true;
+      entry.input = null;
+      entry.output = null;
+      entry.documents = [];
+    }
+  }
+
+  private patchTool(entry: ToolEntry, fields: ToolPatch): void {
+    if (this.settled || this.messageId === null) return;
+    this.ctx.emit.patchTool(this.messageId, entry.index, fields);
   }
 
   private newTool(name: string): ToolEntry {
@@ -429,6 +612,8 @@ export class ClaudeTurn {
       output: null,
       status: 'running',
       documents: [],
+      summary: null,
+      released: false,
     };
   }
 
@@ -442,11 +627,34 @@ export class ClaudeTurn {
       output: entry.output,
       status: entry.status,
       ...(entry.documents.length > 0 ? { documents: entry.documents } : {}),
+      ...(entry.summary === null ? {} : { summary: entry.summary }),
     });
+  }
+
+  /**
+   * `tool_use_summary`: a line the CLI writes once a batch of calls finished
+   * (`CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES`), naming the calls it covers. Each
+   * card it names carries it; the timeline reads it as the batch's label. A call
+   * of an earlier turn on the same warm query is not this turn's to redraw.
+   */
+  private summarizeTools(toolIds: readonly string[], summary: string): void {
+    const text = summary.trim();
+    if (text.length === 0) return;
+    for (const toolId of toolIds) {
+      const entry = this.tools.get(toolId);
+      if (entry === undefined || entry.summary === text) continue;
+      entry.summary = text;
+      if (entry.released) this.patchTool(entry, { summary: text });
+      else this.emitTool(toolId, entry);
+    }
   }
 
   fail(reason: string): void {
     if (this.status === 'error') return;
+    // A CLI gone before the result of its `authentication_failed` frame: that frame is the cause.
+    const auth = this.authFrame;
+    this.authFrame = null;
+    if (auth !== null) reason = apiErrorReason('authentication_failed', auth.content);
     this.status = 'error';
     this.error = reason;
     this.part(this.takeIndex(), { type: 'error', message: reason });

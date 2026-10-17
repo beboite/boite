@@ -1,4 +1,4 @@
-import { lstatSync, readdirSync, realpathSync, rmSync, statfsSync } from 'node:fs';
+import { lstatSync, readdirSync, realpathSync, rmSync, statfsSync, statSync } from 'node:fs';
 import { isAbsolute, join, relative } from 'node:path';
 import type { ProviderId, ProviderInstall, ProviderInstallState } from '@boite/contracts';
 import { newId } from '../ids.ts';
@@ -14,7 +14,7 @@ import {
   RETRY_DELAYS_MS,
   resumableBytes,
 } from './install-download.ts';
-import { pointCurrent, readReleaseRecord, removeCurrent, writeReleaseRecord, type ReleaseRecord } from './install-release.ts';
+import { pointCurrent, readReleaseRecord, RELEASE_RECORD, removeCurrent, writeReleaseRecord, type ReleaseRecord } from './install-release.ts';
 import { checkSizes, extractRelease, markExecutable, reachesThroughLink } from './install-unpack.ts';
 import { upToDate } from './install-latest.ts';
 
@@ -83,6 +83,8 @@ export class InstallManager {
   /** How many live processes are running out of this provider's managed files. */
   #leases = new Map<ProviderId, number>();
   #waiters = new Map<ProviderId, ((outcome: InstallOutcome) => void)[]>();
+  /** The record `current` held when last read, with the file's identity then: every provider list reads it. */
+  #records = new Map<ProviderId, { stamp: string; record: ReleaseRecord }>();
   #settledListeners: ((outcome: InstallOutcome) => void)[] = [];
   /** Test seams: how long a silent download waits, and the pauses between attempts. */
   idleTimeoutMs = IDLE_TIMEOUT_MS;
@@ -154,8 +156,27 @@ export class InstallManager {
     catch { return null; }
   }
 
+  /**
+   * One stat instead of a read and a parse while the record file is the same
+   * one: `current` repointed at another release reaches another file, and a
+   * rewrite changes its time or size.
+   */
   #readRecord(providerId: ProviderId): ReleaseRecord | null {
-    return readReleaseRecord(this.currentDir(providerId));
+    const currentDir = this.currentDir(providerId);
+    let stamp: string;
+    try {
+      const stat = statSync(join(currentDir, RELEASE_RECORD));
+      stamp = `${stat.dev}:${stat.ino}:${stat.mtimeMs}:${stat.size}`;
+    } catch {
+      this.#records.delete(providerId);
+      return readReleaseRecord(currentDir);
+    }
+    const kept = this.#records.get(providerId);
+    if (kept !== undefined && kept.stamp === stamp) return kept.record;
+    this.#records.delete(providerId);
+    const record = readReleaseRecord(currentDir);
+    if (record !== null) this.#records.set(providerId, { stamp, record });
+    return record;
   }
 
   // -- leases ---------------------------------------------------------------
@@ -356,6 +377,7 @@ export class InstallManager {
     removeCurrent(this.currentDir(providerId));
     rmSync(dir, { recursive: true, force: true });
     forgetWhich();
+    this.#records.delete(providerId);
     this.#failed.delete(providerId);
     await Promise.resolve();
     const state: ProviderInstallState = {
@@ -400,6 +422,7 @@ export class InstallManager {
       checkSizes(install, releaseDir);
       markExecutable(install, releaseDir);
       writeReleaseRecord(releaseDir, install);
+      this.#records.delete(providerId);
       pointCurrent(providerId, this.currentDir(providerId), releaseDir, (level, message) => this.#log(level, message));
       forgetWhich();
       dropPart(part);

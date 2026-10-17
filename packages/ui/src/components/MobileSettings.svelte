@@ -182,7 +182,7 @@
           <ArchivedThreads {store} eager />
         </div>
       {:else}
-        <MachinesPage mobile />
+        <MachinesPage mobile {onopenthread} />
       {/if}
     </div>
   {/if}

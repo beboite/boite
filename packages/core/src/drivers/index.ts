@@ -3,6 +3,7 @@ import type {
   AccountId,
   ModelInfo,
   Protocol,
+  ProviderDescriptor,
   ProviderId,
   ProviderSummary,
   ThreadId,
@@ -24,14 +25,14 @@ const DRIVERS = new Map<Protocol, Driver>([
     'acp',
     lazyDriver('acp', () => import('./acp.ts').then(module => module.createAcpDriver({
       loadSdk: () => import('@agentclientprotocol/sdk'),
-    }))),
+    })), { prepare: true }),
   ],
   [
     'codex-appserver',
     lazyDriver('codex-appserver', () => import('./codex.ts').then((module) => module.createCodexDriver()), { titles: true, prepare: true, forkSession: true }),
   ],
-  ['muse', lazyDriver('muse', () => import('./muse.ts').then((module) => module.createMuseDriver()))],
-  ['pi', lazyDriver('pi', () => import('./pi.ts').then((module) => module.createPiDriver()))],
+  ['muse', lazyDriver('muse', () => import('./muse.ts').then((module) => module.createMuseDriver()), { prepare: true })],
+  ['pi', lazyDriver('pi', () => import('./pi.ts').then((module) => module.createPiDriver()), { prepare: true })],
   ['agy', lazyDriver('agy', () => import('./agy.ts').then((module) => module.createAgyDriver()))],
 ]);
 
@@ -41,6 +42,17 @@ export function getDriver(protocol: Protocol): Driver {
   const driver = DRIVERS.get(protocol);
   if (driver === undefined) throw unavailable(`no driver for protocol ${protocol}`, { protocol });
   return driver;
+}
+
+/**
+ * Protocols whose agent takes Boite's guide in its system prompt
+ * (`TurnContext.systemGuide`) instead of in the first message. Claude's preset
+ * prompt keeps it through compaction and in the cached prefix.
+ */
+const SYSTEM_GUIDE = new Set<Protocol>(['claude-sdk']);
+
+export function takesSystemGuide(protocol: Protocol): boolean {
+  return SYSTEM_GUIDE.has(protocol);
 }
 
 /** Whether this protocol's agent writes thread titles (`Driver.title`). */
@@ -123,6 +135,15 @@ export function probedModelsOf(
     ?? null;
 }
 
+/**
+ * A `session/new` answer the account's sign-in read becomes its probe, so the
+ * models are listed without a second agent process. Null for a protocol that
+ * cannot take one.
+ */
+export function rememberSessionModels(provider: ProviderDescriptor, accountId: AccountId, created: unknown): Promise<ModelInfo[] | null> | null {
+  return DRIVERS.get(provider.protocol)?.rememberSession?.(provider, accountId, created) ?? null;
+}
+
 /** A reload, a changed account or a removed one: what a probe cached is stale. */
 export function forgetProbes(filter: ProbeFilter = {}): void {
   for (const [key, entry] of externalModels) {
@@ -144,7 +165,7 @@ export function forgetProbes(filter: ProbeFilter = {}): void {
 export function refreshProbes(protocol: Protocol, providerId: ProviderId, accountId: AccountId): void {
   const current = probedModelsOf(protocol, providerId, accountId);
   externalModels.delete(JSON.stringify([protocol, providerId, accountId]));
-  for (const driver of DRIVERS.values()) driver.forgetProbes?.({ providerId, accountId });
+  for (const driver of DRIVERS.values()) driver.forgetProbes?.({ providerId, accountId, refresh: true });
   if (current !== null) refreshing.set(refreshKey(providerId, accountId), { providerId, accountId, models: current });
 }
 
@@ -187,6 +208,7 @@ export type {
   TurnHandle,
   TurnResult,
   EmitSink,
+  ToolPatch,
   PermissionTicket,
   ProbeContext,
   ProbeFilter,

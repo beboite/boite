@@ -70,7 +70,11 @@ The screen is polled as JPEG frames (`devices.frame`), sized to the panel at
 the screen's density and slowed down when the round trip is slow, as the
 phone's remote browser view does. One capture serves every viewer within
 200 ms, so a desktop and a phone watching the same device cost one
-`screencap`.
+`screencap`. A frame keeps its id while the screen's PNG bytes stay the same
+at that size and quality. The panel sends the id it shows as `previous`, and
+the core answers `unchanged` with no picture and makes no JPEG. The panel
+slows to a poll every 800 ms after three unchanged answers and every 1.5 s
+after ten, until the screen moves or the user acts.
 
 On Android, a tap or a drag on the screen becomes `adb shell input tap` or
 `swipe`. The footer has back, home, recents, rotate, power, enter and

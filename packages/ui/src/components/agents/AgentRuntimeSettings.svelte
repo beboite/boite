@@ -69,7 +69,7 @@
       <p class="hint">{labels.identityHint}</p>
       <div class="agent-inline">
         <ModelPicker store={view.store} choice={config.defaultRoute} onpick={patch => { if (config) config.defaultRoute = { ...config.defaultRoute, effort: null, ...patch }; }} />
-        {#if effort?.levels.length}<EffortSlider levels={effort.levels} active={config.defaultRoute.effort ?? effort.default} onpick={id => { if (config) config.defaultRoute.effort = id; }} />{/if}
+        {#if effort?.levels.length}<EffortSlider levels={effort.levels} active={config.defaultRoute.effort ?? effort.default ?? null} onpick={id => { if (config) config.defaultRoute.effort = id; }} />{/if}
         <Menu placement="bottom" label={labels.permissions} items={PERMISSIONS.map(id => ({ id, label: permissionLabels[id], active: config?.defaultRoute.permissionMode === id }))} onpick={id => { if (config) config.defaultRoute.permissionMode = id as AgentSelection['permissionMode']; }}><span class="ui-label">{permissionLabels[config.defaultRoute.permissionMode]}</span></Menu>
       </div>
       {#if view.store.providerOf(config.defaultRoute.providerId)?.capabilities.approvals === false}<p class="hint">{labels.noApprovals}</p>{/if}
@@ -92,6 +92,8 @@
 
     <fieldset class="card" disabled={locked}>
       <h2>{labels.engine}</h2>
+      <!-- Missing on configurations saved before it existed: on. -->
+      <label class="switch-row"><span class="text">{labels.autoMemory}<span class="hint">{labels.autoMemoryHint}</span></span><input type="checkbox" role="switch" checked={config.autoMemory !== false} onchange={event => { if (config) config.autoMemory = event.currentTarget.checked; }} data-testid="agent-auto-memory" /></label>
       <div class="agent-columns">
         <label class="agent-field">{labels.compactEvery}<input type="number" min="2" max="100" bind:value={config.compactAfterTurns} required /></label>
         <label class="agent-field">{labels.runMinutes}<input type="number" min="1" max="120" bind:value={config.maxRunMinutes} required /></label>

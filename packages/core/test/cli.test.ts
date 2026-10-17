@@ -148,7 +148,7 @@ test('a send retried with the same --request-id is the same letter, and without 
 test('persistent agent CLI uses its own context, durable memory and idempotent decision requests', async () => {
   const client = await harness.connect();
   const account = harness.core.accounts.list().find(a => a.providerId === 'echo')!;
-  const agent = await client.call('agents.profile.save', { value: { name: 'CLI worker', domain: '', instructions: '', avatar: '', status: 'active', tools: ['memory', 'decisions', 'messages'], accountIntegration: 'provider', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' } } });
+  const agent = await client.call('agents.profile.save', { value: { name: 'CLI worker', domain: '', instructions: '', avatar: '', status: 'active', tools: ['memory', 'decisions', 'messages'], selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' } } });
   await client.call('agents.message.send', { scope: { kind: 'agent', id: agent.id }, text: '[sleep:60000]', recipientIds: [], requestId: 'cli_agent_start_001' });
   await waitFor(() => harness.core.workforce.records.list('run').some(r => r.status === 'running'));
   threadId = harness.core.workforce.records.list('run')[0]!.threadId;
@@ -207,6 +207,12 @@ describe('usage', () => {
     expect(help.code).toBe(0);
     expect(help.err).toContain('usage: boite');
     expect(help.out).toBe('');
+    // A lone help after a command is the same request, never a question titled "help".
+    const ask = await boite(['ask', 'help']);
+    expect(ask.code).toBe(0);
+    expect(ask.out).toContain('usage: boite');
+    const client = await harness.connect();
+    expect(await client.call('questions.list', { threadId })).toEqual([]);
   });
 
   test('outside a thread it says which variable is missing', async () => {
