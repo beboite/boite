@@ -107,7 +107,10 @@ and link-local IPv4 addresses use HTTP when no scheme is given; public hosts
 use HTTPS. Loading and navigation failures appear in the toolbar. A page zoom
 other than 100% has a reset button.
 `lib/browser-bounds.ts` observes layout changes and follows finite layout
-animations, rather than measuring the page slot on every idle frame.
+animations, rather than measuring the page slot on every idle frame. A native
+page paints above every menu, so while an open menu or dialog overlaps the
+slot the page is parked and a still capture shows in its place. A layer marked
+`aria-hidden`, such as the edge scrollbars' full-window popover, does not count.
 
 ### Browser profiles
 
