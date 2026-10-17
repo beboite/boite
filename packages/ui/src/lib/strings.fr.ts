@@ -1481,6 +1481,10 @@ export const fr: Translation = {
     about: 'Travaille sur',
     replyTo: 'En réponse à',
     more: '+{count} autres',
+    sentOne: 'Envoyé à', sentMany: '{count} messages envoyés à',
+    receivedOne: 'Reçu de', receivedMany: '{count} messages reçus de',
+    exchanged: 'Échange avec',
+    threadMissing: "Aucune machine connectée n'a cette conversation.",
     relation: {
       starter: 'A lancé cette conversation', started: 'Lancée d\'ici', parent: 'Parent', child: 'Sous-agent', resident: 'Veille sur le projet'
     }

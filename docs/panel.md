@@ -169,8 +169,11 @@ Google" and most sign-in buttons do, gets a real popup window
 profile, or in the private session, and keeps `window.opener`: the sign-in
 answers the page through it and closes itself. Its title starts with the
 host it shows, since it has no address bar. Closing the tab closes its
-popups. A popup from the tab on screen comes to the front; one from a tab
-off screen opens behind without the focus. A `target="_blank"` link, or `window.open` without a size, opens a tab
+popups. A popup from the tab on screen comes to the front; one from a user's
+tab off screen opens behind without the focus. One from a tab an agent drives
+out of sight opens hidden, its page still running, and shows only while that
+tab is on screen, so an agent's `window.open` never puts a window over the
+user's work. A `target="_blank"` link, or `window.open` without a size, opens a tab
 in the same panel and profile instead, and that tab has no opener. So does a
 sized `window.open` while the tab already holds three popups: WebView2 has no
 popup blocker. Popups are

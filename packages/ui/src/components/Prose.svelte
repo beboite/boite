@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { renderBlock } from '../lib/markdown';
+  import { workspace } from '../lib/workspace.svelte';
   import { ParagraphScan, answerText } from '../lib/message-display';
   import { strings } from '../lib/strings';
   import { experimentOn } from '../lib/experiments.svelte';
@@ -29,7 +30,7 @@
   let opening = false;
   function follow(event: MouseEvent): void {
     const anchor = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>('a[href]') : null;
-    if (!anchor) return;
+    if (!anchor || workspace.followThreadLink(event, store, threadId)) return;
     if (!anchor.dataset.filePath) {
       const href = anchor.getAttribute('href');
       if (href?.startsWith('#')) {

@@ -19,7 +19,7 @@
 
 mod popups;
 
-use popups::{close_popups, new_window};
+use popups::{close_popups, follow_surface, new_window};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::{LazyLock, Mutex};
@@ -376,6 +376,9 @@ fn reconcile<R: Runtime>(app: &AppHandle<R>, labels: Vec<String>) {
             };
             if let Err(error) = outcome {
                 eprintln!("[shell] the webview {label} could not be placed as {placement:?}: {error}");
+            }
+            if let Some(id) = label.strip_prefix(LABEL_PREFIX).filter(|_| is_agent_label(&label)) {
+                follow_surface(&handle, id, matches!(placement, Placement::Show | Placement::At(_)));
             }
         }
     };

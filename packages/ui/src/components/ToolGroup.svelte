@@ -6,6 +6,7 @@
   import { agentSummary, familyOf, liveLabel, runSpan, runSummary, thinkingShown, ThoughtTitleScan, type ActivityPart, type ThinkingStep, type ToolPart } from '../lib/tool-groups';
   import ThinkingPart from './ThinkingPart.svelte';
   import ToolCard from './ToolCard.svelte';
+  import type { Store } from '../lib/store.svelte';
 
   /*
    * A run of activity with no answer between it: calls and the reasoning around
@@ -21,7 +22,9 @@
     parts,
     thinkingLive = false,
     isBackground,
-    loadOutput
+    loadOutput,
+    store,
+    threadId
   }: {
     parts: ActivityPart[];
     /** The run's last step is reasoning that is still being written. */
@@ -29,6 +32,9 @@
     /** Whether the work a call started still runs in the background. */
     isBackground: (toolId: string) => boolean;
     loadOutput?: (toolId: string) => Promise<void>;
+    /** The machine and thread the run belongs to, where a thread link in it starts from. */
+    store?: Store;
+    threadId?: string;
   } = $props();
 
   const ICONS = { command: SquareTerminal, read: FileText, edit: FilePen, write: FilePen, search: Search, fetch: Globe, web: Globe, agent: Bot, other: Wrench };
@@ -70,7 +76,7 @@
 
 {#snippet step(part: ActivityPart, index: number, nested = false)}
   {#if part.type === 'thinking'}
-    <ThinkingPart text={part.text} live={isLive(index)} startedAt={part.startedAt ?? null} finishedAt={part.finishedAt ?? null} />
+    <ThinkingPart text={part.text} live={isLive(index)} startedAt={part.startedAt ?? null} finishedAt={part.finishedAt ?? null} {store} {threadId} />
   {:else}
     <ToolCard
       name={part.name}
@@ -88,6 +94,8 @@
       finishedAt={part.finishedAt ?? null}
       background={isBackground(part.toolId)}
       {nested}
+      {store}
+      {threadId}
     />
   {/if}
 {/snippet}

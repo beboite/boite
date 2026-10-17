@@ -18,6 +18,7 @@ import {
   opens
 } from './endpoint';
 import { strings } from './strings';
+import { threadAddress } from './chat-links';
 import { onReveal, reveal } from './reveal';
 import { AutoSettingsSync } from './auto-settings-sync.svelte';
 import { GroupLinks } from './group-links.svelte';
@@ -638,6 +639,49 @@ export class Workspace {
   machineOf(coreId: string): Machine | null {
     const matches = this.machines.filter((machine) => machine.store.core?.coreId === coreId || GroupLinks.coreOf(machine) === coreId);
     return matches.find((machine) => machine.store.connection === 'ready') ?? matches[0] ?? null;
+  }
+
+  /**
+   * A thread an answer names the way `boite agents` prints it: `thr_x`,
+   * `<machine>/thr_x` or `<core-id>/thr_x`, read in `from` on `owner`.
+   * A connected machine that lists the thread opens it: the owner's when no
+   * machine is named, the one named, only the owner for `here`. Otherwise the
+   * owner's contacts say which core holds it, and last the one machine listing
+   * the id, which the agent may know by another name.
+   */
+  async openThreadLink(owner: Store, from: string | undefined, where: string | null, threadId: string): Promise<void> {
+    const core = where !== null && /^[0-9a-f]{64}$/.test(where) ? where : null;
+    const slug = (name: string) => name.trim().replace(/\s+/g, '-').toLowerCase();
+    const names = (name: string) => where === null || where === 'here' || slug(name) === where.toLowerCase() || (/^[0-9a-f]{6,}$/.test(where) && name.startsWith(where));
+    const holders = this.machines.filter(machine => machine.store.connection === 'ready' && machine.store.threads.some(thread => thread.id === threadId)
+      && (core === null || machine.store.core?.coreId === core));
+    const named = where === 'here' ? holders.filter(machine => machine.store === owner)
+      : holders.filter(machine => names(machine.label) || names(machine.store.core?.coreId ?? ''));
+    const pick = where === null ? holders.find(machine => machine.store === owner) ?? (holders.length === 1 ? holders[0] : undefined)
+      : named.length === 1 ? named[0] : undefined;
+    if (pick) { await this.select(pick.store, threadId); return; }
+    const client = owner.client;
+    if (client && from && owner.connection === 'ready') {
+      try {
+        const [{ self }, { agents }] = await Promise.all([client.call('collaboration.get', { threadId: from }), client.call('collaboration.directory', { threadId: from })]);
+        const found = agents.filter(agent => agent.threadId === threadId && (core !== null ? agent.coreId === core
+          : where === 'here' ? agent.coreId === self.coreId : names(agent.machine) || names(agent.coreId)));
+        if (found.length === 1) { await this.openAgentThread(owner, self, found[0]!); return; }
+      } catch { /* Coordination off on this thread: no contact names the core. */ }
+    }
+    const only = where !== null && where !== 'here' && holders.length === 1 ? holders[0]! : null;
+    if (only) { await this.select(only.store, threadId); return; }
+    owner.error = strings.agentMessages.threadMissing;
+  }
+
+  /** A click on a thread link `renderMarkdown` drew opens that thread; true when it was one. */
+  followThreadLink(event: MouseEvent, owner: Store | undefined, from: string | undefined): boolean {
+    const anchor = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>('a[data-thread-address]') : null;
+    if (!anchor) return false;
+    event.preventDefault();
+    const address = threadAddress(anchor.dataset.threadAddress!);
+    if (address && owner) void this.openThreadLink(owner, from, address.where, address.threadId);
+    return true;
   }
 
   /** Resolve the authenticated core identity before using a machine-scoped thread id. */
