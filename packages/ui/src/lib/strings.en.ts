@@ -1271,6 +1271,14 @@ export const strings = {
     defaultLong: 'Edits and runs commands in this folder without asking, asks to go beyond it'
   },
 
+  /** agy asks nothing in print mode: what its mode does not allow, it refuses by itself. */
+  permissionModeAgy: {
+    default: 'agy settings',
+    defaultLong: 'Follows agy\'s own permission setting and refuses what it would ask about',
+    acceptEditsLong: 'Edits files without asking, refuses commands that need approval',
+    draft: "with agy's own permission settings"
+  },
+
   thread: {
     recoveryTitle: 'Prompt saved before restart',
     recoveryBody: 'This prompt has not been sent to the agent. Resume it with its saved model and account, or remove it from the queue.',

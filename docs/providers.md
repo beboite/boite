@@ -1040,9 +1040,11 @@ The composer offers four of the six and names each by what the agent may do
 without asking (`lib/permission-modes.ts`): Ask, Edit freely, Auto and YOLO.
 The list follows the agent. Codex loses Edit freely, which is the same pair as
 its default, and its default reads "This folder", because workspace-write lets
-it edit and run commands there without a card. An agent whose
-`capabilities.approvals` is false gets no mode chip: every choice would describe
-something it does not do. No confirmation keeps the warning colour on its chip,
+it edit and run commands there without a card. agy asks nothing but takes the
+mode at launch, so it keeps a chip with Auto, Edit freely and its default, read
+as "agy settings"; YOLO is the same flag as Auto there and shows as Auto. Any
+other agent whose `capabilities.approvals` is false gets no mode chip: every
+choice would describe something it does not do. No confirmation keeps the warning colour on its chip,
 since it reaches the whole computer.
 
 A permission is not the only thing an agent asks. A protocol that carries a

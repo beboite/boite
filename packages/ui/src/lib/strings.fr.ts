@@ -1221,6 +1221,13 @@ export const fr: Translation = {
     defaultLong: 'Modifie et lance des commandes dans ce dossier sans demander, demande pour aller au-delà'
   },
 
+  permissionModeAgy: {
+    default: 'Réglages agy',
+    defaultLong: 'Suit le réglage de permissions d\'agy et refuse ce qu\'il demanderait',
+    acceptEditsLong: 'Modifie les fichiers sans demander, refuse les commandes qui demandent une autorisation',
+    draft: 'avec les réglages de permissions d\'agy'
+  },
+
   thread: {
     recoveryTitle: 'Message conservé avant le redémarrage',
     recoveryBody: "Ce message n'a pas été envoyé à l'agent. Reprenez-le avec son modèle et son compte enregistrés, ou retirez-le de la file.",

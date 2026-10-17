@@ -2,6 +2,7 @@
   import { untrack } from 'svelte';
   import { ChevronDown, FolderOpen, VenetianMask } from '@lucide/svelte';
   import { fill, strings } from '../lib/strings';
+  import { modePhrase } from '../lib/permission-modes';
   import { effortName, projectName } from '../lib/format';
   import type { Store } from '../lib/store.svelte';
   import { DRAFT_STASH_KEY } from '../lib/prefs';
@@ -109,7 +110,7 @@
           <h1>{strings.mobile.draftTitle}</h1>
           <p>{strings.mobile.draftHint}</p>
           <span class="project-choice"><ProjectChoice {store} testid="mobile-draft-project">{#if project}<ProjectTile {project} {store} />{:else}<FolderOpen size={15} />{/if}<span class="project-label ui-label">{project ? projectName(project) : strings.drafts.name}</span><ChevronDown size={14} /></ProjectChoice></span>
-          {#if draftChoice}<small>{strings.thread.draftMode[draftChoice.permissionMode]}</small>{/if}
+          {#if draftChoice}<small>{modePhrase(draftChoice.permissionMode, draftProvider)}</small>{/if}
           {#if store.draft?.worktree}<small>{strings.thread.inWorktree}</small>{/if}
         </div>
         <div class="draft-heading" data-testid="draft-sentence">
@@ -128,7 +129,7 @@
             <p class="draft-details">
               {#if store.draft?.worktree}<span>{strings.thread.inWorktree}</span>{/if}
               {#if draftChoice}
-                <span>{strings.thread.draftMode[draftChoice.permissionMode]}</span>
+                <span>{modePhrase(draftChoice.permissionMode, draftProvider)}</span>
                 <span>{strings.thread.using} {modelLabel}</span>
                 {#if effortLabel}<span>{fill(strings.thread.onEffort, { effort: effortLabel })}</span>{/if}
               {/if}
