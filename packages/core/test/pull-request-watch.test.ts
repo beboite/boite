@@ -157,9 +157,15 @@ const wakeText = (threadId: string, turnId: string) => [...harness!.core.journal
 
 test('a watch reads first without waking, wakes once per change with links, and reads in full only when the fingerprint moves', async () => {
   const { owner, threadId, github, drive } = await watchedThread();
+  // The user's request that opened the pull request.
+  await owner.call('turns.start', { threadId, prompt: 'open the pull request' });
+  await settled(threadId);
   const watch = await owner.call('threads.watchPullRequest', { threadId });
   expect(watch).toMatchObject({ url: URL, number: 7, paused: null, seen: { head: 'aaaaaaa', checks: { total: 1, running: 1, failed: 0 }, conflicting: false } });
   expect(harness!.core.threads.list({}).find(thread => thread.id === threadId)?.pullRequestWatches).toHaveLength(1);
+  // A check still runs: the idle row keeps counting from the user's request, like a monitor.
+  const summary = () => harness!.core.threads.list({}).find(thread => thread.id === threadId)!;
+  expect(summary().requestSince).toBeNumber();
   expect(github.calls).toEqual(['fingerprint', 'detail', 'issues/7/comments?per_page=100&page=1', 'pulls/7/reviews?per_page=100&page=1', 'pulls/7/comments?per_page=100&page=1']);
 
   // Nothing moved: one fingerprint per pass, no detail, no wake.
@@ -197,6 +203,8 @@ test('a watch reads first without waking, wakes once per change with links, and 
   await settled(threadId);
   expect(wakes(threadId)).toHaveLength(2);
   expect(wakeText(threadId, wakes(threadId)[1]!.id)).toContain('All 1 check passed on bbbbbbb.');
+  // Every check settled: the agent has its answer and the row stops counting.
+  expect(summary().requestSince).toBeNull();
   github.mergeable = 'CONFLICTING';
   await drive();
   await settled(threadId);
