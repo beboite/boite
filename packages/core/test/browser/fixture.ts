@@ -64,17 +64,26 @@ export function createBrowserFixture() {
   let harness: TestCore, owner: CoreClient, agent: CoreClient, threadId: string;
   let opened: { harness?: TestCore; owner?: CoreClient; agent?: CoreClient } = {};
   const hosts = new Set<() => Promise<void>>();
+  /** The causes of the calls that failed unexpectedly: a client only gets "Something went wrong". */
+  let failures: string[] = [];
   beforeEach(async () => {
     later.release();
     later = laterGate();
     opened = {};
+    failures = [];
     opened.harness = harness = await startTestCore();
+    const record = harness.core.logs.record.bind(harness.core.logs);
+    harness.core.logs.record = (level, message, context = {}, at) => {
+      if (context.event === 'rpc.failed') failures.push(message);
+      record(level, message, context, at);
+    };
     opened.owner = owner = await harness.connect();
     ({ threadId } = await echoThread(harness, owner));
     opened.agent = agent = await connect(harness.url, harness.core.agents.tokenFor(threadId), { client: { name: 'boite-cli', version: 'test' } });
   });
   afterEach(async () => {
     later.release();
+    for (const failure of failures) console.error(`core: ${failure}`);
     const errors: unknown[] = [];
     for (const close of hosts) {
       try { await close(); } catch (error) { errors.push(error); }
