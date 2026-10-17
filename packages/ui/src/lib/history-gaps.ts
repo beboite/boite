@@ -170,36 +170,63 @@ export function wantedRange(total: number[], gaps: readonly GapAt[], top: number
 }
 
 /**
+ * Screens of history read ahead of a reader off the bottom: at a fast wheel a
+ * page lands before its gap reaches the screen.
+ */
+export const READ_AHEAD = 3;
+
+/**
  * Asks for a range a frame after the view moved, with what the view is by
  * then: a scroll the list makes itself (a jump to the latest page, then its
  * glide down) has started before the frame, and asks for nothing on its way.
- * The same range from the same place is asked once. A page that landed
- * nothing, failed or dropped because the window changed under it, is asked
- * again after 1 s, then 2, 4, up to 30 s while it keeps landing nothing: a
- * reader standing still gets it in the end, a core that refuses is not asked
- * every frame. Answers the cancel, for the effect that asked.
+ * An ask already waiting for its frame keeps it and reads the newest view:
+ * a wheel or a finger moves the view on every frame, and an ask put off by
+ * each move was never sent while the reader kept scrolling, who then crossed
+ * the whole unread stretch on its estimate. The same range from the same
+ * place is asked once. A page that landed nothing, failed or dropped because
+ * the window changed under it, is asked again after 1 s, then 2, 4, up to
+ * 30 s while it keeps landing nothing: a reader standing still gets it in the
+ * end, a core that refuses is not asked every frame.
  */
 export class RangeAsk {
   #last = '';
   #misses = 0;
   #quietUntil = 0;
+  #timer: ReturnType<typeof setTimeout> | undefined;
+  #frame = 0;
+  #wanted: (() => { top: number; range: { from: number; limit: number } | null } | null) | undefined;
+  #load: ((from: number, limit: number) => Promise<number>) | undefined;
 
-  soon(wanted: () => { top: number; range: { from: number; limit: number } | null } | null, load: (from: number, limit: number) => Promise<number>): () => void {
-    let frame = 0;
-    const run = () => {
-      const next = wanted();
-      if (!next?.range) return;
-      const key = `${next.range.from}:${next.range.limit}:${Math.round(next.top)}`;
-      if (key === this.#last) return;
-      this.#last = key;
-      void load(next.range.from, next.range.limit).then((added) => {
-        if (added > 0) { this.#misses = 0; return; }
-        this.#quietUntil = performance.now() + Math.min(30_000, 1_000 * 2 ** this.#misses++);
-        this.#last = '';
-      });
-    };
+  soon(wanted: () => { top: number; range: { from: number; limit: number } | null } | null, load: (from: number, limit: number) => Promise<number>): void {
+    this.#wanted = wanted;
+    this.#load = load;
+    if (this.#timer !== undefined || this.#frame) return;
     const wait = this.#quietUntil - performance.now();
-    const timer = setTimeout(() => { frame = requestAnimationFrame(run); }, Math.max(0, wait));
-    return () => { clearTimeout(timer); cancelAnimationFrame(frame); };
+    this.#timer = setTimeout(() => {
+      this.#timer = undefined;
+      this.#frame = requestAnimationFrame(() => { this.#frame = 0; this.#run(); });
+    }, Math.max(0, wait));
+  }
+
+  /** Drops the ask waiting for its frame: the list is gone. */
+  stop(): void {
+    clearTimeout(this.#timer);
+    cancelAnimationFrame(this.#frame);
+    this.#timer = undefined;
+    this.#frame = 0;
+  }
+
+  #run(): void {
+    const next = this.#wanted?.();
+    const load = this.#load;
+    if (!next?.range || !load) return;
+    const key = `${next.range.from}:${next.range.limit}:${Math.round(next.top)}`;
+    if (key === this.#last) return;
+    this.#last = key;
+    void load(next.range.from, next.range.limit).then((added) => {
+      if (added > 0) { this.#misses = 0; return; }
+      this.#quietUntil = performance.now() + Math.min(30_000, 1_000 * 2 ** this.#misses++);
+      this.#last = '';
+    });
   }
 }

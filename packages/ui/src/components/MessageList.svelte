@@ -29,7 +29,7 @@
   import { TurnProgress } from '../lib/turn-progress.svelte';
   import { GAP, OVERSCAN, SlotTotals, WINDOW_FROM, atOrBefore, estimateSlot, gapChanged, measurable, reaches, sameView, slotGap, windowStats, type WindowView } from '../lib/message-window';
   import { TimelineRows, rowEstimate, rowIndexOf, seam, type TimelineRow } from '../lib/timeline-rows';
-  import { GapRows, NO_GAPS, RangeAsk, gapHeight, loadKeepingReader, wantedRange } from '../lib/history-gaps';
+  import { GapRows, NO_GAPS, READ_AHEAD, RangeAsk, gapHeight, loadKeepingReader, wantedRange } from '../lib/history-gaps';
   import TimelineGap from './TimelineGap.svelte';
   import WorkflowActivity from './WorkflowActivity.svelte';
   import { dockRoom } from '../lib/question-dock.svelte';
@@ -593,9 +593,9 @@
 
   /** The page above the window, its height put back into the scroll position (`pullOlder`), on a core that pages by cursor alone. */
   const loadAbove = (box: HTMLElement) => positional ? undefined : pullOlder(store, box, LOAD_AT, rows[0]?.id, head => totals(rows)[Math.max(0, head ? rows.findIndex(row => row.id === head) : rows.length)] ?? 0, () => { scrollTop = box.scrollTop; }, id => anchors.nodes.get(id));
-  // On a core that places pages, the gap within a screen of the view is read where it is looked at (lib/history-gaps.ts).
-  const asked = new RangeAsk();
-  $effect(() => { void [measured, store.loadingRange, rows, viewHeight, pinned, scrollTop]; return asked.soon(() => { if (!gapped.gaps.length || store.loadingRange || glide.active || lifting) return null; const total = totals(rows), reach = Math.max(LOAD_AT, viewHeight), top = pinned ? (total[rows.length] ?? 0) - viewHeight : scrollTop;
+  // On a core that places pages, the gap within a screen of the bottom, or `READ_AHEAD` screens of a reader above it, is read before it shows (lib/history-gaps.ts).
+  const asked = new RangeAsk(); onDestroy(() => asked.stop());
+  $effect(() => { void [measured, store.loadingRange, rows, viewHeight, pinned, scrollTop]; asked.soon(() => { if (!gapped.gaps.length || store.loadingRange || glide.active || lifting) return null; const total = totals(rows), reach = Math.max(LOAD_AT, viewHeight * (pinned ? 1 : READ_AHEAD)), top = pinned ? (total[rows.length] ?? 0) - viewHeight : scrollTop;
     return { top, range: wantedRange(total, gapped.gaps, top - reach, top + viewHeight + reach, MESSAGE_PAGE) }; }, (from, limit) =>
       // A page landing above the reader can weigh more than its gap: the row at the top of the view stays where it was.
       loadKeepingReader(landing => store.loadRange(from, limit, landing), () => pinned ? undefined : viewport, tick, top => { scrollTop = top; })); });
